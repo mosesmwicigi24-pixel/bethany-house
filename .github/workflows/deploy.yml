@@ -1,0 +1,118 @@
+# Deploy to the Hostinger VPS (hub.bethanyhouse.co.ke) on every push to main.
+#
+# Flow: build the three production images -> push to GHCR under this repo ->
+# SSH into the VPS -> sync docker-compose.yml -> pull images -> run Laravel
+# migrations -> recreate containers.
+#
+# Required repo secrets:
+#   VPS_HOST     - VPS IP or hostname
+#   VPS_SSH_KEY  - private key whose public half is in root's authorized_keys
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: bethany-laravel
+            context: ./backend
+            build-args: ""
+          - service: bethany-nextjs
+            context: ./frontend
+            build-args: |
+              NEXT_PUBLIC_API_URL=/api
+              NEXT_PUBLIC_APP_URL=https://hub.bethanyhouse.co.ke
+          - service: bethany-react-admin
+            context: ./react-admin
+            build-args: |
+              VITE_API_URL=https://hub.bethanyhouse.co.ke/api
+              VITE_BASE_PATH=/admin/
+              VITE_REVERB_APP_KEY=62102a9dad2a1f794d008d6e89ae2afd
+              VITE_REVERB_HOST=hub.bethanyhouse.co.ke
+              VITE_REVERB_PORT=443
+              VITE_REVERB_SCHEME=https
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          target: production
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/${{ matrix.service }}:latest
+            ghcr.io/${{ github.repository }}/${{ matrix.service }}:${{ github.sha }}
+          build-args: ${{ matrix.build-args }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  deploy:
+    name: Deploy to VPS
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Sync compose file
+        run: |
+          scp -i ~/.ssh/deploy_key docker-compose.yml \
+            "root@${{ secrets.VPS_HOST }}:/opt/bethany-house/docker-compose.yml"
+
+      - name: Pull images, migrate, restart
+        run: |
+          ssh -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" bash -s <<'DEPLOY'
+          set -euo pipefail
+          cd /opt/bethany-house
+
+          # Pin the compose image namespace to this repo (survives .env drift).
+          if grep -q '^GITHUB_REPOSITORY=' .env; then
+            sed -i 's|^GITHUB_REPOSITORY=.*|GITHUB_REPOSITORY=${{ github.repository }}|' .env
+          else
+            echo 'GITHUB_REPOSITORY=${{ github.repository }}' >> .env
+          fi
+
+          # Ephemeral login so private GHCR packages pull; logged out afterwards
+          # so other stacks on this box keep pulling anonymously.
+          echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+
+          docker compose pull laravel nextjs react-admin
+          docker compose run --rm --no-deps laravel php artisan migrate --force
+          docker compose up -d --remove-orphans
+
+          docker logout ghcr.io
+          docker image prune -f
+
+          docker compose ps
+          DEPLOY
