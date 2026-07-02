@@ -108,7 +108,9 @@ jobs:
           echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
 
           docker compose pull laravel nextjs react-admin
-          docker compose run --rm --no-deps laravel php artisan migrate --force
+          # -T + </dev/null: without them `compose run` eats the rest of this
+          # heredoc as container stdin and the script dies here "successfully".
+          docker compose run --rm --no-deps -T laravel php artisan migrate --force </dev/null
           docker compose up -d --remove-orphans
 
           docker logout ghcr.io
