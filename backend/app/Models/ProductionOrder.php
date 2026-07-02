@@ -1,0 +1,189 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+
+class ProductionOrder extends Model
+{
+    use HasFactory;
+
+    protected $fillable = [
+        'order_number',
+        'is_customer_order',
+        'customer_id',
+        'product_id',
+        'product_variant_id',
+        'customer_order_id',
+        'order_item_id',
+        'quantity',
+        'status',
+        'priority',
+        'due_date',
+        'estimated_completion_date',
+        'started_at',
+        'confirmed_at',
+        'confirmed_by',
+        'completed_at',
+        'outlet_id',
+        'target_outlet_id',
+        'specifications',
+        'measurements',
+        'customer_preferences',
+        'notes',
+        'created_by',
+    ];
+
+    protected $casts = [
+        'quantity'                  => 'integer',
+        'due_date'                  => 'date',
+        'estimated_completion_date' => 'date',
+        'started_at'                => 'datetime',
+        'confirmed_at'              => 'datetime',
+        'completed_at'              => 'datetime',
+        'specifications'            => 'array',
+        'measurements'              => 'array',
+        'customer_preferences'      => 'array',
+        'is_customer_order'         => 'boolean',
+    ];
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::creating(function ($order) {
+            if (empty($order->order_number)) {
+                $order->order_number = 'PRD-' . date('Ymd') . '-'
+                    . str_pad(static::whereDate('created_at', today())->count() + 1, 4, '0', STR_PAD_LEFT);
+            }
+            // New orders start as draft - they enter the queue only after payment/confirmation
+            if (empty($order->status)) {
+                $order->status = 'draft';
+            }
+        });
+    }
+
+    // ── Relationships ─────────────────────────────────────────────────────────
+
+    public function product()
+    {
+        return $this->belongsTo(Product::class);
+    }
+
+    public function variant()
+    {
+        return $this->belongsTo(ProductVariant::class, 'product_variant_id');
+    }
+
+    public function customer()
+    {
+        return $this->belongsTo(Customer::class);
+    }
+
+    public function customerOrder()
+    {
+        return $this->belongsTo(Order::class, 'customer_order_id');
+    }
+
+    public function orderItem()
+    {
+        return $this->belongsTo(OrderItem::class);
+    }
+
+    public function outlet()
+    {
+        return $this->belongsTo(Outlet::class);
+    }
+
+    public function targetOutlet()
+    {
+        return $this->belongsTo(Outlet::class, 'target_outlet_id');
+    }
+
+    public function tasks()
+    {
+        return $this->hasMany(ProductionTask::class);
+    }
+
+    public function materialAllocations()
+    {
+        return $this->hasMany(MaterialAllocation::class);
+    }
+
+    public function assignees()
+    {
+        return $this->hasMany(ProductionOrderAssignee::class);
+    }
+
+    public function approvals()
+    {
+        return $this->hasMany(ProductionOrderApproval::class);
+    }
+
+    public function createdBy()
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function confirmedBy()
+    {
+        return $this->belongsTo(User::class, 'confirmed_by');
+    }
+
+    // ── Scopes ────────────────────────────────────────────────────────────────
+
+    public function scopeDraft($query)
+    {
+        return $query->where('status', 'draft');
+    }
+
+    public function scopePending($query)
+    {
+        return $query->where('status', 'pending');
+    }
+
+    public function scopeInProgress($query)
+    {
+        return $query->where('status', 'in_progress');
+    }
+
+    public function scopeCompleted($query)
+    {
+        return $query->where('status', 'completed');
+    }
+
+    public function scopeActive($query)
+    {
+        return $query->whereNotIn('status', ['completed', 'cancelled', 'draft']);
+    }
+
+    public function scopeHighPriority($query)
+    {
+        return $query->where('priority', 'high');
+    }
+
+    public function scopeOverdue($query)
+    {
+        return $query->where('due_date', '<', now())->whereNull('completed_at');
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    public function isDraft(): bool
+    {
+        return $this->status === 'draft';
+    }
+
+    public function isOverdue(): bool
+    {
+        return $this->due_date && $this->due_date->isPast() && !$this->completed_at;
+    }
+
+    public function getCompletionPercentage(): int
+    {
+        $total     = $this->tasks()->count();
+        $completed = $this->tasks()->where('status', 'completed')->count();
+        return $total > 0 ? (int) round($completed / $total * 100) : 0;
+    }
+}

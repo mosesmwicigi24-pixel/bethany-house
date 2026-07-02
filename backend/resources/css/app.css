@@ -1,0 +1,126 @@
+@import 'tailwindcss';
+
+/* ============================================
+   FONTS - Import AFTER Tailwind
+   ============================================ */
+@import "@fontsource/dm-sans"; /* defaults to weight 400 */
+@import "@fontsource/dm-sans/700.css"; /* for bold */
+
+/* ============================================
+   ICON FONTS - Import AFTER Tailwind
+   ============================================ */
+@import "remixicon/fonts/remixicon.css";
+@import "bootstrap-icons/font/bootstrap-icons.css";
+@import "line-awesome/dist/line-awesome/css/line-awesome.css";
+@import "boxicons/css/boxicons.min.css";
+@import "@fortawesome/fontawesome-free/css/all.min.css";
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+@source '../**/*.blade.php';
+@source '../**/*.js';
+
+@theme {
+    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+        'Segoe UI Symbol', 'Noto Color Emoji';
+}
+
+
+@theme {
+  /* ============================================
+     PRIMARY COLOR - Your main brand color
+     ============================================ */
+  --color-primary: #101F3C;
+
+  --color-primary-50: #F3F4F5;
+  --color-primary-100: #E7E9EC;
+  --color-primary-200: #C3C7CE;
+  --color-primary-300: #9FA5B1;
+  --color-primary-400: #586277;
+  --color-primary-500: #101F3C;  /* Main primary color */
+  --color-primary-600: #0E1C36;
+  --color-primary-700: #0A1324;
+  --color-primary-800: #070E1B;
+  --color-primary-900: #050912;
+
+  /* ============================================
+     SECONDARY COLOR - Your accent color
+     ============================================ */
+  --color-secondary: #F7CA80;
+
+  --color-secondary-50: #FFFCF9;
+  --color-secondary-100: #FEFAF2;
+  --color-secondary-200: #FDF2DF;
+  --color-secondary-300: #FCEACC;
+  --color-secondary-400: #F9DAA6;
+  --color-secondary-500: #F7CA80;  /* Main secondary color */
+  --color-secondary-600: #DEB673;
+  --color-secondary-700: #94794D;
+  --color-secondary-800: #6F5B3A;
+  --color-secondary-900: #4A3D26;
+
+  /* ============================================
+     SEMANTIC COLORS
+     ============================================ */
+  
+  /* Success - Green */
+  --color-success-50: #f0fdf4;
+  --color-success-100: #dcfce7;
+  --color-success-200: #bbf7d0;
+  --color-success-300: #86efac;
+  --color-success-400: #4ade80;
+  --color-success-500: #22c55e;
+  --color-success-600: #16a34a;
+  --color-success-700: #15803d;
+  --color-success-800: #166534;
+  --color-success-900: #14532d;
+  --color-success-950: #052e16;
+
+  /* Danger - Red */
+  --color-danger-50: #fef2f2;
+  --color-danger-100: #fee2e2;
+  --color-danger-200: #fecaca;
+  --color-danger-300: #fca5a5;
+  --color-danger-400: #f87171;
+  --color-danger-500: #ef4444;
+  --color-danger-600: #dc2626;
+  --color-danger-700: #b91c1c;
+  --color-danger-800: #991b1b;
+  --color-danger-900: #7f1d1d;
+  --color-danger-950: #450a0a;
+
+  /* Warning - Yellow/Orange */
+  --color-warning-50: #fffbeb;
+  --color-warning-100: #fef3c7;
+  --color-warning-200: #fde68a;
+  --color-warning-300: #fcd34d;
+  --color-warning-400: #fbbf24;
+  --color-warning-500: #f59e0b;
+  --color-warning-600: #d97706;
+  --color-warning-700: #b45309;
+  --color-warning-800: #92400e;
+  --color-warning-900: #78350f;
+  --color-warning-950: #451a03;
+
+  /* Info - Blue */
+  --color-info-50: #f0f9ff;
+  --color-info-100: #e0f2fe;
+  --color-info-200: #bae6fd;
+  --color-info-300: #7dd3fc;
+  --color-info-400: #38bdf8;
+  --color-info-500: #0ea5e9;
+  --color-info-600: #0284c7;
+  --color-info-700: #0369a1;
+  --color-info-800: #075985;
+  --color-info-900: #0c4a6e;
+  --color-info-950: #082f49;
+
+  /* ============================================
+     CUSTOM FONT FAMILIES (Optional)
+     ============================================ */
+  --font-sans: ui-sans-serif, system-ui, sans-serif;
+  --font-serif: ui-serif, Georgia, serif;
+  --font-mono: ui-monospace, monospace;
+  --font-dm-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+}
+

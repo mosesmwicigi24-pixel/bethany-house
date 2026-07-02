@@ -1,0 +1,169 @@
+# Development overrides - never use in production
+#
+# Usage (one-off):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# Usage (permanent, add to ~/.bashrc or ~/.zshrc in your project dir):
+#   export COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml
+
+services:
+    # ── Postgres - always start in dev, expose to host for DB clients ─────────────
+    postgres:
+        ports:
+            - "127.0.0.1:${DB_PORT:-5433}:5432"
+
+    # ── Redis - expose to host for debugging ─────────────────────────────────────
+    redis:
+        ports:
+            - "127.0.0.1:${REDIS_PORT:-6380}:6379"
+
+    # ── Laravel - build locally, bind-mount source for instant reload ─────────────
+    laravel:
+        build:
+            context: ./backend
+            dockerfile: Dockerfile
+            target: development
+        ports:
+            - "127.0.0.1:${LARAVEL_PORT:-8000}:80"
+        volumes:
+            - ./backend:/var/www
+            - /var/www/vendor # keep container's vendor - don't overwrite with host
+        environment:
+            APP_ENV: local
+            APP_DEBUG: "true"
+            BROADCAST_CONNECTION: ${BROADCAST_CONNECTION:-reverb}
+            REVERB_APP_ID: ${REVERB_APP_ID:-}
+            REVERB_APP_KEY: ${REVERB_APP_KEY:-}
+            REVERB_APP_SECRET: ${REVERB_APP_SECRET:-}
+            REVERB_HOST: ${REVERB_HOST:-localhost}
+            REVERB_PORT: ${REVERB_PORT:-9000}
+            REVERB_SCHEME: ${REVERB_SCHEME:-http}
+            # Internal: Laravel → Reverb over Docker network (not localhost)
+            REVERB_SERVER_HOST: bethany_reverb
+            REVERB_SERVER_PORT: 8080
+
+    # ── Queue - same image as laravel, needs source mount for local code ──────────
+    queue:
+        build:
+            context: ./backend
+            dockerfile: Dockerfile
+            target: development
+        volumes:
+            - ./backend:/var/www
+            - /var/www/vendor
+
+    # ── Scheduler - same ─────────────────────────────────────────────────────────
+    scheduler:
+        build:
+            context: ./backend
+            dockerfile: Dockerfile
+            target: development
+        volumes:
+            - ./backend:/var/www
+            - /var/www/vendor
+
+    # ── Next.js - Vite/Next dev server with HMR ───────────────────────────────────
+    nextjs:
+        build:
+            context: ./frontend
+            dockerfile: Dockerfile
+            target: development
+        ports:
+            - !reset []
+            - "127.0.0.1:${NEXTJS_PORT:-3001}:3000"
+        volumes:
+            - ./frontend:/app
+            - /app/node_modules # keep container's node_modules
+            - /app/.next # keep Next.js build cache
+        environment:
+            NODE_ENV: development
+            CHOKIDAR_USEPOLLING: "true"
+            CHOKIDAR_INTERVAL: "300"
+
+    # ── React Admin - Vite dev server with HMR on port 5173 ──────────────────────
+    react-admin:
+        build:
+            context: ./react-admin
+            dockerfile: Dockerfile
+            target: development
+        ports:
+            - !reset []
+            - "127.0.0.1:${REACT_ADMIN_PORT:-3002}:5173"
+        volumes:
+            - ./react-admin:/app
+            - /app/node_modules
+        environment:
+            NODE_ENV: development
+            CHOKIDAR_USEPOLLING: "true"
+            CHOKIDAR_INTERVAL: "300"
+            WATCHPACK_POLLING: "true"
+
+    # ── Reverb - build locally, same image as laravel ───────────────────────────
+    reverb:
+        build:
+            context: ./backend
+            dockerfile: Dockerfile
+            target: development
+        volumes:
+            - ./backend:/var/www
+            - /var/www/vendor
+        ports:
+            - "127.0.0.1:${REVERB_PORT:-9000}:8080"
+        environment:
+            APP_ENV: local
+            APP_DEBUG: "true"
+            BROADCAST_CONNECTION: reverb
+            REVERB_APP_ID: ${REVERB_APP_ID:-bethany-dev}
+            REVERB_APP_KEY: ${REVERB_APP_KEY:-dev-key}
+            REVERB_APP_SECRET: ${REVERB_APP_SECRET:-dev-secret}
+            REVERB_HOST: 0.0.0.0
+            REVERB_PORT: 9000
+            REVERB_SCHEME: http
+
+    # ── Adminer - expose directly in dev ─────────────────────────────────────────
+    adminer:
+        ports:
+            - "127.0.0.1:${ADMINER_PORT:-8085}:8080"
+
+# ── Volume redefinitions ─────────────────────────────────────────────────────────
+#
+# The base docker-compose.yml declares laravel_storage and laravel_bootstrap
+# as Docker-managed named volumes (driver: local), mounted at
+# /var/www/storage and /var/www/bootstrap/cache on the laravel/queue/
+# scheduler services. In dev, those services also bind-mount the whole repo
+# at ./backend:/var/www (see above) — but a service-level bind mount does
+# NOT override a more specific named-volume mount declared for a subpath of
+# the same tree; Docker keeps both, and the named volume wins for its own
+# subpath. (The documented fix for this - !reset on the service's volumes
+# list - was tried here and found to be silently dropped by the merge engine
+# on at least Docker Compose v2.34.0-desktop.1, so it could not be relied on.)
+#
+# Redefining the NAMED VOLUME ITSELF, here at the top level, is a much older
+# and more reliably-supported merge behavior: when the same volume name
+# appears in multiple compose files, the later file's definition replaces
+# the earlier one entirely - not appended, not merged field-by-field.
+# Switching the driver from the implicit Docker-managed `local` volume to an
+# explicit bind mount of the corresponding folder on the host means
+# /var/www/storage and /var/www/bootstrap/cache now point at the SAME files
+# as ./backend:/var/www does, instead of a separate, disconnected Docker
+# volume - so anything placed in backend/storage/ (e.g. watermark.png) is
+# immediately visible inside the container with no rebuild needed.
+volumes:
+    laravel_storage:
+        driver: local
+        driver_opts:
+            type: none
+            o: bind
+            # device MUST be an absolute path - unlike service-level volume
+            # mounts, Compose does not resolve relative paths for driver_opts.
+            # ${PWD} expands to the directory `docker compose` is run FROM,
+            # so this only works correctly if you always run compose commands
+            # from the repo root (where this file lives) - which matches the
+            # existing usage shown in the header comment of this file.
+            device: ${PWD}/backend/storage
+    laravel_bootstrap:
+        driver: local
+        driver_opts:
+            type: none
+            o: bind
+            device: ${PWD}/backend/bootstrap/cache

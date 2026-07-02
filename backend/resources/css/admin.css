@@ -1,0 +1,221 @@
+/* ============================================
+   TAILWIND V4 - Import FIRST
+   ============================================ */
+@import "tailwindcss";
+
+/* ============================================
+   FONTS - Import AFTER Tailwind
+   ============================================ */
+@import "@fontsource/dm-sans"; /* defaults to weight 400 */
+@import "@fontsource/dm-sans/700.css"; /* for bold */
+
+/* ============================================
+   ICON FONTS - Import AFTER Tailwind
+   ============================================ */
+@import "remixicon/fonts/remixicon.css";
+@import "bootstrap-icons/font/bootstrap-icons.css";
+@import "line-awesome/dist/line-awesome/css/line-awesome.css";
+@import "boxicons/css/boxicons.min.css";
+@import "@fortawesome/fontawesome-free/css/all.min.css";
+
+/* ============================================
+   THEME CONFIGURATION
+   ============================================ */
+@theme {
+  /* PRIMARY COLOR */
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-200: #bfdbfe;
+  --color-primary-300: #93c5fd;
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+  --color-primary-800: #1e40af;
+  --color-primary-900: #1e3a8a;
+  --color-primary-950: #172554;
+
+  /* SECONDARY COLOR */
+  --color-secondary-50: #fdf4ff;
+  --color-secondary-100: #fae8ff;
+  --color-secondary-200: #f5d0fe;
+  --color-secondary-300: #f0abfc;
+  --color-secondary-400: #e879f9;
+  --color-secondary-500: #d946ef;
+  --color-secondary-600: #c026d3;
+  --color-secondary-700: #a21caf;
+  --color-secondary-800: #86198f;
+  --color-secondary-900: #701a75;
+  --color-secondary-950: #4a044e;
+
+  /* SUCCESS */
+  --color-success-50: #f0fdf4;
+  --color-success-100: #dcfce7;
+  --color-success-200: #bbf7d0;
+  --color-success-300: #86efac;
+  --color-success-400: #4ade80;
+  --color-success-500: #22c55e;
+  --color-success-600: #16a34a;
+  --color-success-700: #15803d;
+  --color-success-800: #166534;
+  --color-success-900: #14532d;
+  --color-success-950: #052e16;
+
+  /* DANGER */
+  --color-danger-50: #fef2f2;
+  --color-danger-100: #fee2e2;
+  --color-danger-200: #fecaca;
+  --color-danger-300: #fca5a5;
+  --color-danger-400: #f87171;
+  --color-danger-500: #ef4444;
+  --color-danger-600: #dc2626;
+  --color-danger-700: #b91c1c;
+  --color-danger-800: #991b1b;
+  --color-danger-900: #7f1d1d;
+  --color-danger-950: #450a0a;
+
+  /* WARNING */
+  --color-warning-50: #fffbeb;
+  --color-warning-100: #fef3c7;
+  --color-warning-200: #fde68a;
+  --color-warning-300: #fcd34d;
+  --color-warning-400: #fbbf24;
+  --color-warning-500: #f59e0b;
+  --color-warning-600: #d97706;
+  --color-warning-700: #b45309;
+  --color-warning-800: #92400e;
+  --color-warning-900: #78350f;
+  --color-warning-950: #451a03;
+
+  /* INFO */
+  --color-info-50: #f0f9ff;
+  --color-info-100: #e0f2fe;
+  --color-info-200: #bae6fd;
+  --color-info-300: #7dd3fc;
+  --color-info-400: #38bdf8;
+  --color-info-500: #0ea5e9;
+  --color-info-600: #0284c7;
+  --color-info-700: #0369a1;
+  --color-info-800: #075985;
+  --color-info-900: #0c4a6e;
+  --color-info-950: #082f49;
+}
+
+/* ============================================
+   COMPONENT CLASSES
+   ============================================ */
+
+/* Buttons */
+.btn {
+  @apply font-medium py-2 px-4 rounded-lg transition-colors duration-200 inline-flex items-center justify-center;
+}
+
+.btn-primary {
+  @apply bg-primary-600 hover:bg-primary-700 active:bg-primary-800 text-white shadow-sm;
+}
+
+.btn-secondary {
+  @apply bg-secondary-600 hover:bg-secondary-700 active:bg-secondary-800 text-white shadow-sm;
+}
+
+.btn-success {
+  @apply bg-success-600 hover:bg-success-700 active:bg-success-800 text-white shadow-sm;
+}
+
+.btn-danger {
+  @apply bg-danger-600 hover:bg-danger-700 active:bg-danger-800 text-white shadow-sm;
+}
+
+.btn-outline-primary {
+  @apply border-2 border-primary-600 text-primary-600 hover:bg-primary-600 hover:text-white;
+}
+
+.btn-outline-secondary {
+  @apply border-2 border-secondary-600 text-secondary-600 hover:bg-secondary-600 hover:text-white;
+}
+
+/* Button Sizes */
+.btn-sm {
+  @apply py-1.5 px-3 text-sm;
+}
+
+.btn-lg {
+  @apply py-3 px-6 text-lg;
+}
+
+/* Badges */
+.badge {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+}
+
+.badge-primary {
+  @apply bg-primary-100 text-primary-800;
+}
+
+.badge-secondary {
+  @apply bg-secondary-100 text-secondary-800;
+}
+
+.badge-success {
+  @apply bg-success-100 text-success-800;
+}
+
+.badge-danger {
+  @apply bg-danger-100 text-danger-800;
+}
+
+/* Cards */
+.card {
+  @apply bg-white rounded-lg shadow-md overflow-hidden;
+}
+
+.card-header {
+  @apply px-6 py-4 border-b border-gray-200 bg-gray-50;
+}
+
+.card-body {
+  @apply p-6;
+}
+
+/* Forms */
+.form-input {
+  @apply block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500;
+}
+
+.form-select {
+  @apply block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500;
+}
+
+/* Alerts */
+.alert {
+  @apply p-4 rounded-lg mb-4;
+}
+
+.alert-success {
+  @apply bg-success-50 border-l-4 border-success-500 text-success-800;
+}
+
+.alert-danger {
+  @apply bg-danger-50 border-l-4 border-danger-500 text-danger-800;
+}
+
+/* Tables */
+.table {
+  @apply min-w-full divide-y divide-gray-200;
+}
+
+.table thead {
+  @apply bg-gray-50;
+}
+
+.table th {
+  @apply px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider;
+}
+
+.table td {
+  @apply px-6 py-4 whitespace-nowrap text-sm text-gray-900;
+}
+
+.table tbody {
+  @apply bg-white divide-y divide-gray-200;
+}

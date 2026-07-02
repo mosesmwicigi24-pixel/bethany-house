@@ -1,0 +1,340 @@
+services:
+    # ── Database ──────────────────────────────────────────────────────────────────
+    postgres:
+        image: postgres:16-alpine
+        container_name: bethany_postgres
+        restart: unless-stopped
+        environment:
+            POSTGRES_DB: ${DB_DATABASE:-bethany_house}
+            POSTGRES_USER: ${DB_USERNAME:-bethany_user}
+            POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+            PGDATA: /var/lib/postgresql/data/pgdata
+        volumes:
+            - postgres_data:/var/lib/postgresql/data
+        networks:
+            - bethany_network
+        healthcheck:
+            test:
+                [
+                    "CMD-SHELL",
+                    "pg_isready -U ${DB_USERNAME:-bethany_user} -d ${DB_DATABASE:-bethany_house}",
+                ]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 20s
+
+    # ── Cache & Queue ─────────────────────────────────────────────────────────────
+    redis:
+        image: redis:7-alpine
+        container_name: bethany_redis
+        restart: unless-stopped
+        command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+        volumes:
+            - redis_data:/data
+        networks:
+            - bethany_network
+        healthcheck:
+            test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+    # ── Laravel API ───────────────────────────────────────────────────────────────
+    laravel:
+        image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-laravel:latest
+        container_name: bethany_laravel
+        restart: unless-stopped
+        working_dir: /var/www
+        environment:
+            TZ: Africa/Nairobi
+            APP_NAME: ${APP_NAME:-Bethany House}
+            APP_ENV: production
+            APP_KEY: ${APP_KEY:?APP_KEY is required}
+            APP_DEBUG: "false"
+            APP_URL: ${APP_URL:?APP_URL is required}
+            ASSET_URL: ${APP_URL}
+            FRONTEND_URL: ${APP_URL}
+            DB_CONNECTION: pgsql
+            DB_HOST: postgres
+            DB_PORT: 5432
+            DB_DATABASE: ${DB_DATABASE:-bethany_house}
+            DB_USERNAME: ${DB_USERNAME:-bethany_user}
+            DB_PASSWORD: ${DB_PASSWORD}
+            REDIS_HOST: redis
+            REDIS_PASSWORD: ${REDIS_PASSWORD}
+            REDIS_PORT: 6379
+            CACHE_DRIVER: redis
+            SESSION_DRIVER: redis
+            SESSION_DOMAIN: ${SESSION_DOMAIN:?SESSION_DOMAIN is required}
+            QUEUE_CONNECTION: redis
+            FILESYSTEM_DISK: local
+            SANCTUM_STATEFUL_DOMAINS: ${SANCTUM_STATEFUL_DOMAINS:?SANCTUM_STATEFUL_DOMAINS is required}
+            # Payment gateways
+            MPESA_CONSUMER_KEY: ${MPESA_CONSUMER_KEY:-}
+            MPESA_CONSUMER_SECRET: ${MPESA_CONSUMER_SECRET:-}
+            MPESA_SHORTCODE: ${MPESA_SHORTCODE:-}
+            MPESA_PASSKEY: ${MPESA_PASSKEY:-}
+            MPESA_ENVIRONMENT: ${MPESA_ENVIRONMENT:-sandbox}
+            PAYSTACK_PUBLIC_KEY: ${PAYSTACK_PUBLIC_KEY:-}
+            PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY:-}
+            FLUTTERWAVE_PUBLIC_KEY: ${FLUTTERWAVE_PUBLIC_KEY:-}
+            FLUTTERWAVE_SECRET_KEY: ${FLUTTERWAVE_SECRET_KEY:-}
+            # Broadcasting (Reverb)
+            # REVERB_HOST must be the internal Docker service name so Laravel
+            # can reach Reverb container-to-container without going via the
+            # public URL (which caused cURL timeout errors).
+            BROADCAST_CONNECTION: reverb
+            REVERB_APP_ID: ${REVERB_APP_ID:-}
+            REVERB_APP_KEY: ${REVERB_APP_KEY:-}
+            REVERB_APP_SECRET: ${REVERB_APP_SECRET:-}
+            REVERB_HOST: reverb
+            REVERB_PORT: 8080
+            REVERB_SCHEME: http
+            # Mail
+            MAIL_MAILER: ${MAIL_MAILER:-smtp}
+            MAIL_HOST: ${MAIL_HOST:-}
+            MAIL_PORT: ${MAIL_PORT:-587}
+            MAIL_USERNAME: ${MAIL_USERNAME:-}
+            MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+            MAIL_ENCRYPTION: ${MAIL_ENCRYPTION:-tls}
+            MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-}
+            MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Bethany House}
+            # Web Push Notifications
+            VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-BHrNgZ5D6HIPOWFTnh3W6TCPktn5SWmyWeBHl1CgXObJSnFpAbB6ps2n43jKrQIwUzlVZuG6dxKmdgwwINnhGUc}
+            VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-fw3ADyQTPU-TB5LwJ7zNg9RfKRu5sA36chl-f2976as}
+            VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:nyorojnr@gmail.com}
+            VITE_VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-BHrNgZ5D6HIPOWFTnh3W6TCPktn5SWmyWeBHl1CgXObJSnFpAbB6ps2n43jKrQIwUzlVZuG6dxKmdgwwINnhGUc}
+        ports:
+            - "127.0.0.1:${LARAVEL_PORT:-8010}:80"
+        volumes:
+            - laravel_storage:/var/www/storage
+            - laravel_bootstrap:/var/www/bootstrap/cache
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        networks:
+            - bethany_network
+        healthcheck:
+            test: ["CMD-SHELL", "curl -sf http://localhost/api/health || exit 1"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 40s
+
+    # ── Queue Worker ──────────────────────────────────────────────────────────────
+    queue:
+        image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-laravel:latest
+        container_name: bethany_queue
+        restart: unless-stopped
+        working_dir: /var/www
+        command: php artisan queue:work --sleep=3 --tries=3 --max-time=3600
+        environment:
+            APP_NAME: ${APP_NAME:-Bethany House}
+            APP_ENV: production
+            APP_KEY: ${APP_KEY}
+            APP_DEBUG: "false"
+            DB_CONNECTION: pgsql
+            DB_HOST: postgres
+            DB_PORT: 5432
+            DB_DATABASE: ${DB_DATABASE:-bethany_house}
+            DB_USERNAME: ${DB_USERNAME:-bethany_user}
+            DB_PASSWORD: ${DB_PASSWORD}
+            REDIS_HOST: redis
+            REDIS_PASSWORD: ${REDIS_PASSWORD}
+            REDIS_PORT: 6379
+            QUEUE_CONNECTION: redis
+            FILESYSTEM_DISK: local
+            MAIL_MAILER: ${MAIL_MAILER:-smtp}
+            MAIL_HOST: ${MAIL_HOST:-}
+            MAIL_PORT: ${MAIL_PORT:-587}
+            MAIL_USERNAME: ${MAIL_USERNAME:-}
+            MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+            MAIL_ENCRYPTION: ${MAIL_ENCRYPTION:-tls}
+            MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-}
+            MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Bethany House}
+            # Broadcasting — queue worker sends broadcast notifications
+            BROADCAST_CONNECTION: reverb
+            REVERB_APP_ID: ${REVERB_APP_ID:-}
+            REVERB_APP_KEY: ${REVERB_APP_KEY:-}
+            REVERB_APP_SECRET: ${REVERB_APP_SECRET:-}
+            REVERB_HOST: reverb
+            REVERB_PORT: 8080
+            REVERB_SCHEME: http
+            # Web Push — queue worker sends push notifications
+            VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+            VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+            VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:nyorojnr@gmail.com}
+        volumes:
+            - laravel_storage:/var/www/storage
+        depends_on:
+            laravel:
+                condition: service_healthy
+        networks:
+            - bethany_network
+
+    # ── Scheduler (Cron) ──────────────────────────────────────────────────────────
+    scheduler:
+        image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-laravel:latest
+        container_name: bethany_scheduler
+        restart: unless-stopped
+        working_dir: /var/www
+        command: /bin/sh -c "while true; do php artisan schedule:run --verbose --no-interaction & sleep 60; done"
+        environment:
+            APP_NAME: ${APP_NAME:-Bethany House}
+            APP_ENV: production
+            APP_KEY: ${APP_KEY}
+            DB_CONNECTION: pgsql
+            DB_HOST: postgres
+            DB_PORT: 5432
+            DB_DATABASE: ${DB_DATABASE:-bethany_house}
+            DB_USERNAME: ${DB_USERNAME:-bethany_user}
+            DB_PASSWORD: ${DB_PASSWORD}
+            REDIS_HOST: redis
+            REDIS_PASSWORD: ${REDIS_PASSWORD}
+            REDIS_PORT: 6379
+            FILESYSTEM_DISK: local
+        volumes:
+            - laravel_storage:/var/www/storage
+        depends_on:
+            laravel:
+                condition: service_healthy
+        networks:
+            - bethany_network
+
+    # ── Next.js Public Frontend ───────────────────────────────────────────────────
+    # NOTE: NEXT_PUBLIC_* vars are baked into the image at build time by CI.
+    # They are NOT read at container runtime - do not set them here.
+    nextjs:
+        image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-nextjs:latest
+        container_name: bethany_nextjs
+        restart: unless-stopped
+        environment:
+            NODE_ENV: production
+            # Runtime-only vars (not prefixed NEXT_PUBLIC_) can go here if needed
+            NEXT_PUBLIC_PAYSTACK_KEY: ${PAYSTACK_PUBLIC_KEY:-}
+            NEXT_PUBLIC_FLUTTERWAVE_KEY: ${FLUTTERWAVE_PUBLIC_KEY:-}
+        ports:
+            - "127.0.0.1:${NEXTJS_PORT:-3011}:3000"
+        depends_on:
+            laravel:
+                condition: service_healthy
+        networks:
+            - bethany_network
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "wget",
+                    "--no-verbose",
+                    "--tries=1",
+                    "--spider",
+                    "http://localhost:3000/",
+                ]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 30s
+
+    # ── React Admin Dashboard ─────────────────────────────────────────────────────
+    # NOTE: VITE_* vars are baked into the image at build time by CI.
+    # They are NOT read at container runtime - do not set them here.
+    react-admin:
+        image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-react-admin:latest
+        container_name: bethany_react_admin
+        restart: unless-stopped
+        ports:
+            - "127.0.0.1:${REACT_ADMIN_PORT:-3012}:80"
+        depends_on:
+            laravel:
+                condition: service_healthy
+        networks:
+            - bethany_network
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "wget",
+                    "--no-verbose",
+                    "--tries=1",
+                    "--spider",
+                    "http://localhost/",
+                ]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+
+    # ── Reverb WebSocket Server ───────────────────────────────────────────────────
+    reverb:
+        image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-laravel:latest
+        container_name: bethany_reverb
+        restart: unless-stopped
+        working_dir: /var/www
+        command: php artisan reverb:start --host=0.0.0.0 --port=8080
+        environment:
+            APP_NAME: ${APP_NAME:-Bethany House}
+            APP_ENV: production
+            APP_KEY: ${APP_KEY:?APP_KEY is required}
+            APP_DEBUG: "false"
+            DB_CONNECTION: pgsql
+            DB_HOST: postgres
+            DB_PORT: 5432
+            DB_DATABASE: ${DB_DATABASE:-bethany_house}
+            DB_USERNAME: ${DB_USERNAME:-bethany_user}
+            DB_PASSWORD: ${DB_PASSWORD}
+            REDIS_HOST: redis
+            REDIS_PASSWORD: ${REDIS_PASSWORD}
+            REDIS_PORT: 6379
+            BROADCAST_CONNECTION: reverb
+            REVERB_APP_ID: ${REVERB_APP_ID:?REVERB_APP_ID is required}
+            REVERB_APP_KEY: ${REVERB_APP_KEY:?REVERB_APP_KEY is required}
+            REVERB_APP_SECRET: ${REVERB_APP_SECRET:?REVERB_APP_SECRET is required}
+            REVERB_HOST: 0.0.0.0
+            REVERB_PORT: 9000
+            REVERB_SCHEME: ${REVERB_SCHEME:-http}
+        ports:
+            - "127.0.0.1:${REVERB_PORT:-9000}:8080"
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        networks:
+            - bethany_network
+        healthcheck:
+            test: ["CMD-SHELL", "nc -z localhost 8080 || exit 1"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 20s
+
+    # ── Adminer - restrict /db in bethany.conf to your IP before enabling ─────────
+    adminer:
+        image: adminer:4.8.1
+        container_name: bethany_adminer
+        restart: unless-stopped
+        ports:
+            - "127.0.0.1:${ADMINER_PORT:-8085}:8080"
+        environment:
+            ADMINER_DEFAULT_SERVER: postgres
+            ADMINER_DESIGN: dracula
+        depends_on:
+            - postgres
+        networks:
+            - bethany_network
+
+networks:
+    bethany_network:
+        driver: bridge
+
+volumes:
+    postgres_data:
+        driver: local
+    redis_data:
+        driver: local
+    laravel_storage:
+        driver: local
+    laravel_bootstrap:
+        driver: local

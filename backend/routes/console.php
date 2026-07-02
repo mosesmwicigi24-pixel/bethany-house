@@ -1,0 +1,22 @@
+<?php
+
+use Illuminate\Foundation\Inspiring;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schedule;
+
+Artisan::command('inspire', function () {
+    $this->comment(Inspiring::quote());
+})->purpose('Display an inspiring quote');
+
+// ── Intelligence checks — nightly at 07:00 ───────────────────────────────────
+// Runs: budget warnings, churn risk summary, material shortage summary.
+// Manual run: php artisan intelligence:run
+// Dry run:    php artisan intelligence:run --dry-run
+
+Schedule::command(\App\Console\Commands\RunIntelligenceChecks::class)
+    ->dailyAt('07:00')
+    ->withoutOverlapping()
+    ->runInBackground()
+    ->onFailure(function () {
+        \Illuminate\Support\Facades\Log::error('[Intelligence] Nightly checks failed.');
+    });

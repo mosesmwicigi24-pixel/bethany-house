@@ -1,0 +1,60 @@
+<?php
+
+namespace App\Providers;
+
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Foundation\Support\Providers\RouteServiceProvider as ServiceProvider;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
+
+class RouteServiceProvider extends ServiceProvider
+{
+    public function boot(): void
+    {
+        // Strict rate limit for authentication endpoints (prevent brute force)
+        RateLimiter::for('auth', function (Request $request) {
+            return Limit::perMinute(5)
+                ->by($request->ip())
+                ->response(function (Request $request, array $headers) {
+                    return response()->json([
+                        'message' => 'Too many login attempts. Please try again later.',
+                        'retry_after' => $headers['Retry-After'] ?? 60
+                    ], 429);
+                });
+        });
+
+        // Public API rate limit (generous but prevents abuse)
+        RateLimiter::for('public-api', function (Request $request) {
+            return Limit::perMinute(60)
+                ->by($request->ip())
+                ->response(function (Request $request, array $headers) {
+                    return response()->json([
+                        'message' => 'Too many requests. Please slow down.',
+                        'retry_after' => $headers['Retry-After'] ?? 60
+                    ], 429);
+                });
+        });
+
+        // Authenticated API rate limit (more generous for logged-in users)
+        RateLimiter::for('api', function (Request $request) {
+            return $request->user()
+                ? Limit::perMinute(120)->by($request->user()->id)
+                : Limit::perMinute(60)->by($request->ip());
+        });
+
+        // Admin API rate limit (very generous for internal operations)
+        RateLimiter::for('admin-api', function (Request $request) {
+            return Limit::perMinute(300)->by($request->user()?->id ?? $request->ip());
+        });
+
+        // Payment webhooks (strict, from specific IPs only)
+        RateLimiter::for('webhooks', function (Request $request) {
+            return Limit::perMinute(100)->by($request->ip());
+        });
+
+        // Search/expensive queries (very limited)
+        RateLimiter::for('search', function (Request $request) {
+            return Limit::perMinute(20)->by($request->ip());
+        });
+    }
+}
