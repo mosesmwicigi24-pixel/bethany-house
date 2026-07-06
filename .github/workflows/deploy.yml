@@ -13,10 +13,12 @@ name: Deploy
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-production
+  # Per-ref: main deploys serialize; each PR gets its own lane.
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -24,8 +26,40 @@ permissions:
   packages: write
 
 jobs:
+  test:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, pdo, pdo_pgsql, pgsql, gd, zip, intl, bcmath
+          coverage: none
+
+      - name: Seed test environment
+        working-directory: backend
+        run: cp .env.example .env
+
+      - name: Install Composer dependencies
+        working-directory: backend
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Generate app key
+        working-directory: backend
+        run: php artisan key:generate
+
+      - name: Run tests
+        working-directory: backend
+        run: php artisan test
+
   build:
     name: Build ${{ matrix.service }}
+    needs: test
+    # Only build/deploy on pushes to main (and manual dispatch); PRs run tests only.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -74,6 +108,7 @@ jobs:
   deploy:
     name: Deploy to VPS
     needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -9,6 +9,7 @@ use App\Models\ShipmentTracking;
 use App\Models\ShipmentAttachment;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
+use App\Support\SortResolver;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -101,8 +102,12 @@ class ShipmentController extends Controller
             });
         }
 
-        $sortBy    = $request->get('sort_by', 'shipped_at');
-        $sortOrder = $request->get('sort_order', 'desc');
+        [$sortBy, $sortOrder] = SortResolver::resolve(
+            $request->get('sort_by'),
+            $request->get('sort_order', 'desc'),
+            ['shipped_at', 'status', 'carrier', 'estimated_delivery_date', 'created_at', 'updated_at', 'tracking_number'],
+            'shipped_at'
+        );
         $query->orderBy("s.{$sortBy}", $sortOrder);
 
         return response()->json($query->paginate($request->get('per_page', 20)));
