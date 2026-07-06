@@ -109,7 +109,7 @@ class PaymentReconciliationCharacterizationTest extends TestCase
         $order = Order::factory()->create(['total_amount' => 1000, 'status' => 'completed', 'payment_status' => 'paid']);
         Payment::factory()->create(['order_id' => $order->id, 'amount' => 1000, 'status' => 'paid']);
 
-        $this->postJson("/api/admin/orders/{$order->id}/refund", [
+        $this->postJson("/api/v1/admin/orders/{$order->id}/refund", [
             'amount' => 1000,
             'reason' => 'customer returned goods',
         ])->assertOk();
@@ -130,7 +130,7 @@ class PaymentReconciliationCharacterizationTest extends TestCase
         ]);
         Payment::factory()->create(['order_id' => $order->id, 'amount' => 1000, 'status' => 'paid']);
 
-        $this->postJson("/api/admin/orders/{$order->id}/refund", [
+        $this->postJson("/api/v1/admin/orders/{$order->id}/refund", [
             'amount' => 400,
             'reason' => 'one item returned',
         ])->assertOk();
@@ -147,7 +147,7 @@ class PaymentReconciliationCharacterizationTest extends TestCase
         $order = Order::factory()->create(['total_amount' => 1000, 'status' => 'completed', 'payment_status' => 'paid']);
         Payment::factory()->create(['order_id' => $order->id, 'amount' => 1000, 'status' => 'paid']);
 
-        $this->postJson("/api/admin/orders/{$order->id}/refund", [
+        $this->postJson("/api/v1/admin/orders/{$order->id}/refund", [
             'amount' => 1500,
             'reason' => 'over refund attempt',
         ])->assertStatus(422);
@@ -168,7 +168,7 @@ class PaymentReconciliationCharacterizationTest extends TestCase
         $order = Order::factory()->create(['total_amount' => 1000, 'status' => 'confirmed', 'payment_status' => 'paid']);
         Payment::factory()->create(['order_id' => $order->id, 'amount' => 1000, 'status' => 'paid']);
 
-        $this->postJson("/api/admin/orders/{$order->id}/void", [
+        $this->postJson("/api/v1/admin/orders/{$order->id}/void", [
             'reason' => 'entered in error',
         ])->assertOk();
 
@@ -190,7 +190,7 @@ class PaymentReconciliationCharacterizationTest extends TestCase
         ]);
         Payment::factory()->create(['order_id' => $order->id, 'amount' => 1000, 'status' => 'paid']);
 
-        $this->postJson("/api/admin/pos/sales/{$order->id}/void", [
+        $this->postJson("/api/v1/admin/pos/sales/{$order->id}/void", [
             'reason' => 'cashier error',
         ])->assertOk();
 
