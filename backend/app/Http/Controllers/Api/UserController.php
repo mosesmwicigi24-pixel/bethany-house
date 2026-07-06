@@ -739,8 +739,35 @@ class UserController extends Controller
      * "The given role or permission should use guard `web` instead of `sanctum`"
      * when auth uses sanctum tokens but roles were created with guard=web.
      */
+    /**
+     * Privilege-escalation ceiling (audit SEC-1). Role assignment is only gated by
+     * `users.edit`, and every assignment path funnels through syncUserRoles(), so
+     * this is the single choke point. Only a super administrator may grant the
+     * super_admin role (which bypasses every gate via Gate::before) or change the
+     * roles of a user who already holds it. Server-side/console callers (no auth
+     * context, e.g. seeders) are trusted and skip the check.
+     */
+    private function assertMayAssignRoles(int $targetUserId, array $roleIds): void
+    {
+        $actor = auth()->user();
+        if (! $actor || $actor->hasRole('super_admin')) {
+            return;
+        }
+
+        $superAdminRoleId = DB::table('roles')->where('name', 'super_admin')->value('id');
+        $grantsSuperAdmin = $superAdminRoleId
+            && in_array((int) $superAdminRoleId, array_map('intval', $roleIds), true);
+        $targetIsSuperAdmin = User::find($targetUserId)?->hasRole('super_admin') ?? false;
+
+        if ($grantsSuperAdmin || $targetIsSuperAdmin) {
+            abort(403, 'Only a super administrator can assign or modify the super administrator role.');
+        }
+    }
+
     private function syncUserRoles(int $userId, array $roleIds): void
     {
+        $this->assertMayAssignRoles($userId, $roleIds);
+
         $modelType = (new \App\Models\User())->getMorphClass();
 
         // Delete ALL rows for this user by model_id only - no model_type filter.
