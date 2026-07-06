@@ -664,8 +664,6 @@ Route::prefix('v1')->group(function () {
 
                 Route::post('/adjust',               [InventoryController::class, 'adjust'])
                     ->middleware('permission:inventory.adjust,sanctum');
-                Route::post('/transfer',             [InventoryController::class, 'transfer'])
-                    ->middleware('permission:inventory.transfer,sanctum');
                 Route::put('/thresholds',            [InventoryController::class, 'setThreshold'])
                     ->middleware('permission:inventory.adjust,sanctum');
                 Route::put('/thresholds/bulk',       [InventoryController::class, 'bulkSetThreshold'])
