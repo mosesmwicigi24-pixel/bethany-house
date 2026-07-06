@@ -1087,6 +1087,14 @@ class PosController extends Controller
                 'customer_notes' => ($order->customer_notes ? $order->customer_notes . ' | ' : '') . "Void: {$validated['reason']}",
             ]);
 
+            // MON-1: POS void previously left payment rows as 'paid'. Void the
+            // settled payments and reconcile payment_status so voided sales stop
+            // counting as collected.
+            $order->payments()
+                ->whereNotIn('status', ['voided', 'refunded'])
+                ->update(['status' => 'voided', 'updated_at' => now()]);
+            $order->syncPaymentStatus();
+
             foreach ($order->items as $item) {
                 $inventory = InventoryItem::where('product_variant_id', $item->product_variant_id)
                     ->where('outlet_id', $order->outlet_id)

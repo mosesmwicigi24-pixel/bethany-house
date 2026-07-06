@@ -805,6 +805,9 @@ class OrderController extends Controller
                 }
             });
 
+            // MON-1: reconcile payment_status now that the payments are voided.
+            $order->syncPaymentStatus();
+
             // Restock inventory for each line item
             foreach ($order->items as $item) {
                 $inventoryItem = InventoryItem::where('product_variant_id', $item->product_variant_id)
@@ -911,7 +914,16 @@ class OrderController extends Controller
 
         if (!in_array($order->status, ['delivered', 'completed'])) {
             return response()->json([
-                'message' => 'Order must be completed or processing to process a refund.',
+                'message' => 'Order must be completed or delivered to process a refund.',
+            ], 422);
+        }
+
+        // MON-2: never refund more than is still collected on the order.
+        $refundable = $order->totalPaid();
+        if ((float) $validated['amount'] > $refundable + 0.01) {
+            return response()->json([
+                'message'    => 'Refund exceeds the amount collected on this order.',
+                'refundable' => round($refundable, 2),
             ], 422);
         }
 
@@ -922,14 +934,31 @@ class OrderController extends Controller
             $refundNote = "Refund of {$validated['amount']} {$order->currency_code}: {$validated['reason']}";
             $order->update(['notes' => ($order->notes ? $order->notes . "\n\n" : '') . $refundNote]);
 
-            Payment::where('order_id', $order->id)
-                ->where('status', 'paid')
-                ->latest()
-                ->first()
-                ?->update([
-                    'refund_amount' => $validated['amount'],
+            // Allocate the refund across settled payments (latest first),
+            // accumulating onto refund_amount rather than overwriting it so
+            // partial/repeat refunds are tracked correctly.
+            $remaining = (float) $validated['amount'];
+            foreach (
+                Payment::where('order_id', $order->id)->where('status', 'paid')->orderByDesc('id')->get()
+                as $payment
+            ) {
+                if ($remaining <= 0.01) {
+                    break;
+                }
+                $lineRefundable = (float) $payment->amount - (float) $payment->refund_amount;
+                if ($lineRefundable <= 0) {
+                    continue;
+                }
+                $take = min($lineRefundable, $remaining);
+                $payment->update([
+                    'refund_amount' => (float) $payment->refund_amount + $take,
                     'refunded_at'   => now(),
                 ]);
+                $remaining -= $take;
+            }
+
+            // MON-1: reconcile payment_status against the now-reduced net total.
+            $order->syncPaymentStatus();
 
             DB::commit();
 
@@ -938,7 +967,11 @@ class OrderController extends Controller
                 'reason' => $validated['reason'],
             ]);
 
-            return response()->json(['message' => 'Refund processed successfully']);
+            return response()->json([
+                'message'        => 'Refund processed successfully',
+                'refunded'       => round((float) $validated['amount'], 2),
+                'payment_status' => $order->fresh()->payment_status,
+            ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
