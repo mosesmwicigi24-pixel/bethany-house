@@ -205,6 +205,22 @@ class User extends Authenticatable
         return $this->hasRole('super_admin');
     }
 
+    /**
+     * Mint an API access token with a per-token expiry (audit SEC-5).
+     *
+     * Unlike the global `sanctum.expiration` (which retroactively expires ALL
+     * tokens by created_at, i.e. would log everyone out on rollout), this stamps
+     * only the newly-issued token's `expires_at`, leaving existing tokens intact.
+     * TTL of 0/null disables the per-token expiry.
+     */
+    public function createAuthToken(string $name): \Laravel\Sanctum\NewAccessToken
+    {
+        $ttl = (int) config('sanctum.access_ttl_minutes', 0);
+        $expiresAt = $ttl > 0 ? now()->addMinutes($ttl) : null;
+
+        return $this->createToken($name, ['*'], $expiresAt);
+    }
+
     public function isAdmin(): bool
     {
         return $this->hasAnyRole(['super_admin', 'admin']);
