@@ -7,7 +7,7 @@ use App\Models\Payment;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
-use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
@@ -20,14 +20,15 @@ class OrderVoidRefundReconciliationTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function actingAsStaffWith(array $permissions): User
+    /**
+     * Authenticate as a super_admin — the Gate::before bypass grants all
+     * permissions, so this cleanly clears the route's permission middleware.
+     * (These tests verify the void/refund business logic, not the RBAC gating.)
+     */
+    private function actingAsSuperAdmin(): User
     {
         $user = User::factory()->create();
-
-        foreach ($permissions as $name) {
-            Permission::findOrCreate($name, 'sanctum');
-        }
-        $user->givePermissionTo($permissions);
+        $user->assignRole(Role::findOrCreate('super_admin', 'sanctum'));
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 
         Sanctum::actingAs($user, ['*']);
@@ -37,7 +38,7 @@ class OrderVoidRefundReconciliationTest extends TestCase
 
     public function test_voiding_an_order_reconciles_payment_status(): void
     {
-        $this->actingAsStaffWith(['orders.cancel']);
+        $this->actingAsSuperAdmin();
 
         $order = Order::factory()->create(['status' => 'confirmed', 'total_amount' => 1000]);
         Payment::factory()->create(['order_id' => $order->id, 'amount' => 1000, 'status' => 'paid']);
@@ -56,7 +57,7 @@ class OrderVoidRefundReconciliationTest extends TestCase
 
     public function test_refund_cannot_exceed_amount_collected(): void
     {
-        $this->actingAsStaffWith(['orders.refund']);
+        $this->actingAsSuperAdmin();
 
         $order = Order::factory()->create(['status' => 'completed', 'total_amount' => 1000]);
         Payment::factory()->create(['order_id' => $order->id, 'amount' => 1000, 'status' => 'paid']);
