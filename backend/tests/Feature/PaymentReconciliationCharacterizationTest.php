@@ -74,44 +74,41 @@ class PaymentReconciliationCharacterizationTest extends TestCase
     }
 
     /**
-     * Root cause of MON-1's double-count: totalPaid() sums only status='paid'
-     * and IGNORES refund_amount entirely — a fully-refunded payment whose status
-     * is still 'paid' still counts as fully collected.
+     * P0.5: totalPaid() is now net of refunds — a fully-refunded payment no
+     * longer counts as collected, closing MON-1's double-count.
      */
-    public function test_total_paid_ignores_refund_amount(): void
+    public function test_total_paid_is_net_of_refunds(): void
     {
         $order = Order::factory()->create(['total_amount' => 1000]);
         Payment::factory()->create([
             'order_id'      => $order->id,
             'amount'        => 1000,
             'status'        => 'paid',
-            'refund_amount' => 1000,   // fully refunded on paper…
+            'refund_amount' => 1000,   // fully refunded…
         ]);
 
-        // …yet still counted as fully collected.
-        $this->assertSame(1000.0, $order->totalPaid());
+        // …so nothing remains collected.
+        $this->assertSame(0.0, $order->totalPaid());
     }
 
     /**
-     * DEFECT MON-1 (refund): OrderController::refund sets refund_amount/refunded_at
-     * on the latest paid payment, flips order.status to 'refunded', but never
-     * changes the payment's status nor calls syncPaymentStatus(). Result: the
-     * order still reports payment_status='paid' and totalPaid()=full amount, so
-     * payment-based reports double-count the refunded sale.
-     *
-     * When P0.5 lands, refund will reconcile and this test's assertions flip.
+     * P0.5 (MON-1 fixed): OrderController::refund now records refund_amount and
+     * calls syncPaymentStatus(), so a fully-refunded order nets to 0 collected
+     * and moves payment_status off 'paid'. (order.status='refunded' carries the
+     * refunded state; payment_status reflects net collected = pending.)
      */
-    public function test_refund_leaves_payment_status_stale_current_behavior(): void
+    public function test_refund_reconciles_payment_status(): void
     {
         $order = Order::factory()->create(['total_amount' => 1000, 'payment_status' => 'paid', 'status' => 'completed']);
         $payment = Payment::factory()->create(['order_id' => $order->id, 'amount' => 1000, 'status' => 'paid']);
 
-        // Replay exactly what OrderController::refund does to the money rows.
+        // Replay what OrderController::refund now does to the money rows.
         $order->update(['status' => 'refunded']);
         $payment->update(['refund_amount' => 1000, 'refunded_at' => now()]);
+        $order->syncPaymentStatus();
 
-        $this->assertSame('paid', $order->fresh()->payment_status, 'refund does not re-sync payment_status (MON-1)');
-        $this->assertSame(1000.0, $order->totalPaid(), 'refund does not reduce collected total (MON-1)');
+        $this->assertSame(0.0, $order->totalPaid(), 'refund reduces the collected total (MON-1)');
+        $this->assertSame('pending', $order->fresh()->payment_status, 'refund re-syncs payment_status (MON-1)');
     }
 
     /**

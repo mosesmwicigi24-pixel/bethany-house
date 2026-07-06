@@ -202,13 +202,18 @@ class Order extends Model
     }
 
     /**
-     * Total amount collected across all paid payment records.
+     * Net amount collected across all paid payment records — i.e. gross paid
+     * minus any refunds. A refunded amount is no longer "collected", so it must
+     * not keep counting toward payment_status/outstanding (audit MON-1). Blast
+     * radius is deliberately small: only outstandingBalance() and
+     * syncPaymentStatus() consume this.
      */
     public function totalPaid(): float
     {
         return (float) $this->payments()
             ->where('status', 'paid')
-            ->sum('amount');
+            ->selectRaw('COALESCE(SUM(amount - refund_amount), 0) AS net')
+            ->value('net');
     }
 
     /**

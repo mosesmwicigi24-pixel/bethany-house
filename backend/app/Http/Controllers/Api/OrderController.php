@@ -937,14 +937,33 @@ class OrderController extends Controller
             $refundNote = "Refund of {$validated['amount']} {$order->currency_code}: {$validated['reason']}";
             $order->update(['notes' => ($order->notes ? $order->notes . "\n\n" : '') . $refundNote]);
 
-            Payment::where('order_id', $order->id)
-                ->where('status', 'paid')
-                ->latest()
-                ->first()
-                ?->update([
-                    'refund_amount' => $validated['amount'],
+            // Allocate the refund across paid payments (partial- and
+            // repeat-refund safe), never exceeding each payment's own amount.
+            $remaining = (float) $validated['amount'];
+            foreach (
+                Payment::where('order_id', $order->id)->where('status', 'paid')->orderBy('id')->get()
+                as $payment
+            ) {
+                if ($remaining <= 0) {
+                    break;
+                }
+                $alreadyRefunded = (float) $payment->refund_amount;
+                $refundable      = (float) $payment->amount - $alreadyRefunded;
+                if ($refundable <= 0) {
+                    continue;
+                }
+                $apply = min($refundable, $remaining);
+                $payment->update([
+                    'refund_amount' => $alreadyRefunded + $apply,
                     'refunded_at'   => now(),
                 ]);
+                $remaining -= $apply;
+            }
+
+            // Reconcile now that totalPaid() is net of refunds (audit MON-1) —
+            // otherwise payment_status stays stale at 'paid' and reports
+            // double-count the refunded sale.
+            $order->syncPaymentStatus();
 
             DB::commit();
 
