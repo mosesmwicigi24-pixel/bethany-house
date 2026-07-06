@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Inventory;
+use App\Models\InventoryItem;
 use App\Models\ProductVariant;
 use App\Models\Outlet;
 use App\Services\NotificationService;
@@ -74,17 +75,19 @@ class InventoryController extends Controller
      */
     public function lowStock(Request $request)
     {
-        $query = Inventory::with(['variant.product', 'outlet'])
-            ->whereColumn('quantity', '<=', 'low_stock_threshold')
-            ->where('quantity', '>', 0);
+        // Reads the live inventory_items ledger (audit INV-1). The old query hit
+        // the stale, empty `inventories` table using columns that don't exist
+        // there (`quantity`, `low_stock_threshold`) and errored. Low stock =
+        // available (on_hand - reserved) at or below reorder_point, still > 0.
+        $query = InventoryItem::with(['variant.product', 'outlet'])
+            ->lowStock()
+            ->where('quantity_on_hand', '>', 0);
 
-        if ($request->has('outlet_id')) {
+        if ($request->filled('outlet_id')) {
             $query->where('outlet_id', $request->outlet_id);
         }
 
-        $items = $query->get();
-
-        return response()->json($items);
+        return response()->json($query->get());
     }
 
     /**
