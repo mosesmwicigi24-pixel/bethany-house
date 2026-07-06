@@ -105,7 +105,7 @@ class PaymentReconciliationCharacterizationTest extends TestCase
     /** MON-1: a full refund reconciles — order nets to 0 and drops out of 'paid'. */
     public function test_full_refund_reconciles_payment_status(): void
     {
-        $this->actingWithPermissions(['orders.refund']);
+        $this->actingWithPermissions(['orders.view', 'orders.refund']);
         $order = Order::factory()->create(['total_amount' => 1000, 'status' => 'completed', 'payment_status' => 'paid']);
         Payment::factory()->create(['order_id' => $order->id, 'amount' => 1000, 'status' => 'paid']);
 
@@ -124,7 +124,7 @@ class PaymentReconciliationCharacterizationTest extends TestCase
     /** A partial refund reduces the net collected and shows 'partial'. */
     public function test_partial_refund_reduces_collected(): void
     {
-        $this->actingWithPermissions(['orders.refund']);
+        $this->actingWithPermissions(['orders.view', 'orders.refund']);
         $order = Order::factory()->create([
             'total_amount' => 1000, 'status' => 'completed', 'payment_status' => 'paid', 'deposit_amount' => null,
         ]);
@@ -143,7 +143,7 @@ class PaymentReconciliationCharacterizationTest extends TestCase
     /** MON-2: refunding more than was collected is rejected and changes nothing. */
     public function test_over_refund_is_rejected(): void
     {
-        $this->actingWithPermissions(['orders.refund']);
+        $this->actingWithPermissions(['orders.view', 'orders.refund']);
         $order = Order::factory()->create(['total_amount' => 1000, 'status' => 'completed', 'payment_status' => 'paid']);
         Payment::factory()->create(['order_id' => $order->id, 'amount' => 1000, 'status' => 'paid']);
 
@@ -164,7 +164,7 @@ class PaymentReconciliationCharacterizationTest extends TestCase
     /** MON-1: admin void re-syncs payment_status to 'pending'. */
     public function test_void_order_reconciles_payment_status(): void
     {
-        $this->actingWithPermissions(['orders.cancel']);
+        $this->actingWithPermissions(['orders.view', 'orders.cancel']);
         $order = Order::factory()->create(['total_amount' => 1000, 'status' => 'confirmed', 'payment_status' => 'paid']);
         Payment::factory()->create(['order_id' => $order->id, 'amount' => 1000, 'status' => 'paid']);
 
