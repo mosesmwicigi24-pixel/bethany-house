@@ -23,8 +23,10 @@
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>
         <env name="CACHE_STORE" value="array"/>
-        <env name="DB_CONNECTION" value="sqlite"/>
-        <env name="DB_DATABASE" value=":memory:"/>
+        <!-- DB connection is provided by the environment (CI sets pgsql against a
+             Postgres service; see .github/workflows/deploy.yml). The schema uses
+             Postgres-specific features — generated columns, inet, JSON, CHECK
+             constraints — so sqlite :memory: cannot run the migrations. -->
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
