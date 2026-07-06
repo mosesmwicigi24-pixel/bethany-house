@@ -34,7 +34,11 @@ if [ "$APP_ENV" = "production" ]; then
     php artisan event:cache
 
     echo "==> Syncing roles & permissions..."
-    php artisan permissions:sync 2>/dev/null || true
+    # Command is `permission:sync` (singular). The old `permissions:sync` never
+    # existed, so this step silently no-op'd on every boot and logged an error.
+    # Kept non-fatal (|| echo) so a sync failure never blocks container start,
+    # but no longer swallowed to /dev/null — failures are now visible in logs.
+    php artisan permission:sync || echo "WARN: permission:sync failed (non-fatal) — verify the role/permission catalog"
 
     echo "==> Bootstrap complete."
 fi

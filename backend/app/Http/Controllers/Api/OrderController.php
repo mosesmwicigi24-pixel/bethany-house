@@ -14,12 +14,23 @@ use App\Services\TaxCalculationService;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
 use App\Services\IntelligenceService;
+use App\Support\SortResolver;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class OrderController extends Controller
 {
+    /**
+     * Columns a client may sort the order list/export by. Anything else
+     * collapses to the default in SortResolver — `sort_by` is interpolated
+     * into an ORDER BY identifier and cannot be parameter-bound.
+     */
+    private const SORTABLE_COLUMNS = [
+        'created_at', 'updated_at', 'order_number', 'total_amount',
+        'status', 'payment_status', 'order_type',
+    ];
+
     /**
      * Get all orders (Admin)
      */
@@ -58,8 +69,12 @@ class OrderController extends Controller
             });
         }
 
-        $sortBy    = $request->get('sort_by', 'created_at');
-        $sortOrder = $request->get('sort_order', 'desc');
+        [$sortBy, $sortOrder] = SortResolver::resolve(
+            $request->get('sort_by'),
+            $request->get('sort_order', 'desc'),
+            self::SORTABLE_COLUMNS,
+            'created_at'
+        );
         $query->orderBy($sortBy, $sortOrder);
 
         $perPage = $request->get('per_page', 20);
@@ -111,8 +126,12 @@ class OrderController extends Controller
             });
         }
 
-        $sortBy    = $request->get('sort_by', 'created_at');
-        $sortOrder = $request->get('sort_order', 'desc');
+        [$sortBy, $sortOrder] = SortResolver::resolve(
+            $request->get('sort_by'),
+            $request->get('sort_order', 'desc'),
+            self::SORTABLE_COLUMNS,
+            'created_at'
+        );
         $query->orderBy($sortBy, $sortOrder);
 
         $orders = $query->limit(10000)->get();
