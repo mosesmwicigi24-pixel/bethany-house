@@ -4,11 +4,8 @@ namespace Tests\Feature;
 
 use App\Models\Order;
 use App\Models\Payment;
-use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Laravel\Sanctum\Sanctum;
-use Spatie\Permission\Models\Role;
-use Spatie\Permission\PermissionRegistrar;
+use Tests\Concerns\CreatesAuthenticatedStaff;
 use Tests\TestCase;
 
 /**
@@ -19,22 +16,7 @@ use Tests\TestCase;
 class OrderVoidRefundReconciliationTest extends TestCase
 {
     use RefreshDatabase;
-
-    /**
-     * Authenticate as a super_admin — the Gate::before bypass grants all
-     * permissions, so this cleanly clears the route's permission middleware.
-     * (These tests verify the void/refund business logic, not the RBAC gating.)
-     */
-    private function actingAsSuperAdmin(): User
-    {
-        $user = User::factory()->create();
-        $user->assignRole(Role::findOrCreate('super_admin', 'sanctum'));
-        app(PermissionRegistrar::class)->forgetCachedPermissions();
-
-        Sanctum::actingAs($user, ['*']);
-
-        return $user;
-    }
+    use CreatesAuthenticatedStaff;
 
     public function test_voiding_an_order_reconciles_payment_status(): void
     {

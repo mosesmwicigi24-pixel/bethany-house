@@ -1087,6 +1087,14 @@ class PosController extends Controller
                 'customer_notes' => ($order->customer_notes ? $order->customer_notes . ' | ' : '') . "Void: {$validated['reason']}",
             ]);
 
+            // Reverse the sale's payments so payment_status reflects the void and
+            // payment-based reports stop counting it as paid (audit MON-1). POS
+            // void previously left the payment rows at 'paid'.
+            Payment::where('order_id', $order->id)
+                ->whereNotIn('status', ['refunded', 'voided'])
+                ->update(['status' => 'voided', 'updated_at' => now()]);
+            $order->syncPaymentStatus();
+
             foreach ($order->items as $item) {
                 $inventory = InventoryItem::where('product_variant_id', $item->product_variant_id)
                     ->where('outlet_id', $order->outlet_id)
