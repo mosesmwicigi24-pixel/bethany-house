@@ -15,9 +15,10 @@ class ProductFactory extends Factory
 
     public function definition(): array
     {
+        // NB: products has no `name` column — display names live in
+        // product_translations (the catalogue is multi-language).
         return [
             'uuid' => (string) Str::uuid(),
-            'name' => ucwords(fake()->words(2, true)),
             'sku' => fake()->unique()->bothify('SKU-#####'),
             'slug' => fake()->unique()->slug(),
         ];
