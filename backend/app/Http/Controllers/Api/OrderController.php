@@ -805,6 +805,12 @@ class OrderController extends Controller
                 }
             });
 
+            // Reconcile payment_status now that the payments are voided — otherwise
+            // it stays stale at 'paid' and payment-based reports double-count the
+            // voided sale (audit MON-1). Voided payments are already excluded from
+            // totalPaid(), so this just refreshes the derived field.
+            $order->syncPaymentStatus();
+
             // Restock inventory for each line item
             foreach ($order->items as $item) {
                 $inventoryItem = InventoryItem::where('product_variant_id', $item->product_variant_id)
@@ -912,6 +918,15 @@ class OrderController extends Controller
         if (!in_array($order->status, ['delivered', 'completed'])) {
             return response()->json([
                 'message' => 'Order must be completed or processing to process a refund.',
+            ], 422);
+        }
+
+        // Cannot refund more than was actually collected (audit MON-2). Without
+        // this bound the endpoint accepted any amount >= 0.
+        $collected = $order->totalPaid();
+        if ((float) $validated['amount'] > $collected) {
+            return response()->json([
+                'message' => "Refund amount exceeds the {$collected} {$order->currency_code} collected on this order.",
             ], 422);
         }
 
