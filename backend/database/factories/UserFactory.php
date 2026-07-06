@@ -19,16 +19,24 @@ class UserFactory extends Factory
     /**
      * Define the model's default state.
      *
+     * The users table has no `name` column (it splits first_name/last_name) and
+     * requires a non-null `uuid`; the old stock factory set the former and
+     * omitted the latter, so User::factory() could not produce a valid row.
+     *
      * @return array<string, mixed>
      */
     public function definition(): array
     {
         return [
-            'name' => fake()->name(),
+            'uuid' => (string) Str::uuid(),
+            'first_name' => fake()->firstName(),
+            'last_name' => fake()->lastName(),
             'email' => fake()->unique()->safeEmail(),
-            'email_verified_at' => now(),
+            'phone' => fake()->unique()->numerify('2547########'),
             'password' => static::$password ??= Hash::make('password'),
-            'remember_token' => Str::random(10),
+            'user_type' => 'staff',
+            'status' => 'active',
+            'email_verified_at' => now(),
         ];
     }
 
@@ -39,6 +47,16 @@ class UserFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'email_verified_at' => null,
+        ]);
+    }
+
+    /**
+     * A customer (storefront) account rather than staff.
+     */
+    public function customer(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'user_type' => 'customer',
         ]);
     }
 }
