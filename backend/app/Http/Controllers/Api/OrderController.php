@@ -14,6 +14,7 @@ use App\Services\TaxCalculationService;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
 use App\Services\IntelligenceService;
+use App\Support\OrderStatusMachine;
 use App\Support\SortResolver;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -553,6 +554,11 @@ class OrderController extends Controller
 
         $order     = Order::with(['payments', 'items'])->findOrFail($id);
         $newStatus = $validated['status'];
+
+        // ── Guard: only legal status transitions (audit ST-1) ────────────────
+        // Blocks backward moves and exits from terminal states (e.g. a delivered
+        // order back to pending, or a cancelled order shipped).
+        OrderStatusMachine::assertCanTransition($order->status, $newStatus);
 
         // ── Guard: cannot progress order while payments are awaiting approval ──
         // Any payment with requires_approval=true and approval_status=pending_review
