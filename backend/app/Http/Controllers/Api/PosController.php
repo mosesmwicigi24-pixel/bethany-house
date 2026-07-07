@@ -11,6 +11,7 @@ use App\Models\ProductVariant;
 use App\Models\InventoryItem;
 use App\Models\InventoryTransaction;
 use App\Models\CashRegister;
+use App\Models\CashRegisterTransaction;
 use App\Models\Outlet;
 use App\Models\TaxRate;
 use App\Models\Payment;
@@ -867,6 +868,18 @@ class PosController extends Controller
                     'expected_cash'     => DB::raw('expected_cash + ' . $totalCashForRegister),
                     'updated_at'        => now(),
                 ]);
+
+                // MON-3: per-movement cash-drawer ledger row (the aggregate columns
+                // above have no audit trail on their own; this table was never written).
+                $this->recordCashLedger(
+                    $register,
+                    'sale',
+                    'cash',
+                    $totalCashForRegister,
+                    (float) $register->expected_cash + $totalCashForRegister,
+                    $order->id,
+                    $user->id,
+                );
             }
 
             // -- 8. Production orders for Made-to-Order / backorder items -----
@@ -1125,6 +1138,18 @@ class PosController extends Controller
                         'expected_cash'    => DB::raw('GREATEST(0, expected_cash - ' . $order->total_amount . ')'),
                         'updated_at'       => now(),
                     ]);
+
+                    // MON-3: ledger the cash reversal.
+                    $this->recordCashLedger(
+                        $register,
+                        'refund',
+                        'cash',
+                        (float) $order->total_amount,
+                        max(0, (float) $register->expected_cash - (float) $order->total_amount),
+                        $order->id,
+                        $request->user()->id,
+                        'POS void',
+                    );
                 }
             }
 
@@ -1269,6 +1294,18 @@ class PosController extends Controller
                         'expected_cash' => DB::raw('GREATEST(0, expected_cash - ' . $refundTotal . ')'),
                         'updated_at'    => now(),
                     ]);
+
+                    // MON-3: ledger the cash refund.
+                    $this->recordCashLedger(
+                        $register,
+                        'refund',
+                        'cash',
+                        (float) $refundTotal,
+                        max(0, (float) $register->expected_cash - (float) $refundTotal),
+                        $order->id,
+                        $request->user()->id,
+                        'POS return',
+                    );
                 }
             }
 
@@ -2027,6 +2064,34 @@ class PosController extends Controller
         return $user->isSuperAdmin()
             || $user->hasRole('super_admin')
             || $user->hasRole('admin');
+    }
+
+    /**
+     * MON-3: append a per-movement row to the cash-register ledger
+     * (`cash_register_transactions`), which POS previously never wrote — the
+     * register only carried running aggregate totals with no auditable trail.
+     * `balance_after` is the drawer's expected_cash after this movement.
+     */
+    private function recordCashLedger(
+        CashRegister $register,
+        string $type,
+        ?string $method,
+        float $amount,
+        float $balanceAfter,
+        ?int $orderId,
+        int $userId,
+        ?string $notes = null,
+    ): void {
+        CashRegisterTransaction::create([
+            'cash_register_id' => $register->id,
+            'transaction_type' => $type,
+            'payment_method'   => $method,
+            'amount'           => round($amount, 2),
+            'balance_after'    => round($balanceAfter, 2),
+            'order_id'         => $orderId,
+            'notes'            => $notes,
+            'created_by'       => $userId,
+        ]);
     }
 
     private function authoriseOutletAccess($user, int $outletId): void
