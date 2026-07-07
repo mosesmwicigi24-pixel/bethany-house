@@ -22,15 +22,41 @@ class ShippingFeeAfterPaidTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function actAsShipper(): void
+    private function actAsShipper(bool $canReduce = false): void
     {
         $user = User::factory()->create();
         // Orders group requires orders.view; the endpoint requires
         // orders.set_shipping_fee. Grant both directly (no admin role).
         $user->givePermissionTo(Permission::findOrCreate('orders.view', 'sanctum'));
         $user->givePermissionTo(Permission::findOrCreate('orders.set_shipping_fee', 'sanctum'));
+        if ($canReduce) {
+            $user->givePermissionTo(Permission::findOrCreate('orders.reduce_shipping_fee', 'sanctum'));
+        }
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
+    }
+
+    private function paidOrderWithShipping(float $shipping): Order
+    {
+        $order = Order::factory()->create([
+            'order_type'     => 'pos',
+            'status'         => 'confirmed',
+            'payment_status' => 'paid',
+            'subtotal'       => 1000,
+            'tax_amount'     => 0,
+            'discount_amount' => 0,
+            'shipping_amount' => $shipping,
+            'total_amount'   => 1000 + $shipping,
+            'currency_code'  => 'KES',
+        ]);
+        Payment::factory()->create([
+            'order_id'       => $order->id,
+            'amount'         => 1000 + $shipping,
+            'status'         => 'paid',
+            'payment_method' => 'cash',
+        ]);
+
+        return $order;
     }
 
     public function test_adding_shipping_to_a_paid_receipt_reopens_a_balance_without_touching_payments(): void
@@ -98,5 +124,54 @@ class ShippingFeeAfterPaidTest extends TestCase
             ->assertStatus(422);
 
         $this->assertEquals(0.0, (float) $order->fresh()->shipping_amount);
+    }
+
+    public function test_a_non_admin_cannot_reduce_shipping_once_money_is_collected(): void
+    {
+        $this->actAsShipper();   // has set_shipping_fee, NOT reduce_shipping_fee
+        $order = $this->paidOrderWithShipping(50000);
+
+        // The fraud attempt: collect 50,000 shipping, then lower it to 20,000.
+        $this->patchJson("/api/v1/admin/orders/{$order->id}/shipping-fee", ['amount' => 20000])
+            ->assertStatus(403)
+            ->assertJsonPath('reason', 'reduce_shipping_forbidden');
+
+        // Nothing moved — the inflated charge and the collected money are intact.
+        $this->assertEquals(50000.0, (float) $order->fresh()->shipping_amount);
+    }
+
+    public function test_an_admin_can_reduce_shipping_on_a_paid_order(): void
+    {
+        $this->actAsShipper(canReduce: true);   // admin-equivalent
+        $order = $this->paidOrderWithShipping(50000);   // total 51,000, all paid
+
+        $res = $this->patchJson("/api/v1/admin/orders/{$order->id}/shipping-fee", ['amount' => 20000]);
+
+        $res->assertOk();
+        // Reducing below what was paid surfaces the overpayment for a refund,
+        // rather than silently leaving a credit on the receipt.
+        $this->assertEquals(30000.0, (float) $res->json('overpaid'));
+
+        $this->assertEquals(20000.0, (float) $order->fresh()->shipping_amount);
+    }
+
+    public function test_reducing_shipping_is_allowed_before_any_payment(): void
+    {
+        $this->actAsShipper();   // non-admin
+        $order = Order::factory()->create([
+            'order_type'     => 'pos',
+            'status'         => 'processing',
+            'payment_status' => 'pending',
+            'subtotal'       => 1000,
+            'shipping_amount' => 500,
+            'total_amount'   => 1500,
+            'currency_code'  => 'KES',
+        ]);
+        // No payments recorded — shipping is still just an estimate.
+
+        $this->patchJson("/api/v1/admin/orders/{$order->id}/shipping-fee", ['amount' => 200])
+            ->assertOk();
+
+        $this->assertEquals(200.0, (float) $order->fresh()->shipping_amount);
     }
 }

@@ -8,6 +8,7 @@ import type { Order, OrderStatus, OrderPayment } from "@/api/orders";
 import { shippingApi, paymentMethodsApi } from "@/api/setup";
 import type { ShippingMethod, PaymentMethodSetup } from "@/types/setup";
 import { useToastStore } from "@/store/toast.store";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
 import { Modal } from "@/components/ui/Modal";
 import type { ApiError } from "@/types";
@@ -497,6 +498,7 @@ function SetShippingFeeModal({ order, onClose, onDone }: {
     order: Order; onClose: () => void; onDone: () => void;
 }) {
     const toast = useToastStore();
+    const { can } = usePermissions();
     const [selectedMethodId, setSelectedMethodId] = useState<number | null>(null);
     const [amount, setAmount]  = useState(order.shipping_amount ?? 0);
     const [note, setNote]      = useState(order.shipping_fee_note ?? "");
@@ -524,6 +526,12 @@ function SetShippingFeeModal({ order, onClose, onDone }: {
     const newBalance  = Math.max(0, newTotal - paid);
     const isPaid      = order.payment_status === "paid";
     const addsBalance = newBalance > 0.01 && effectiveAmount > oldShipping;
+
+    // Anti-fraud: once money has been collected, only an admin may LOWER shipping
+    // (raising it is always fine — it just increases what's owed). Mirrors the
+    // backend orders.reduce_shipping_fee gate so the UI blocks it up front.
+    const isReduction   = effectiveAmount < oldShipping - 0.01;
+    const reduceBlocked = isReduction && paid > 0.01 && !can("orders.reduce_shipping_fee");
 
     const mutation = useMutation({
         mutationFn: () => ordersApi.setShippingFee(order.id, {
@@ -672,9 +680,20 @@ function SetShippingFeeModal({ order, onClose, onDone }: {
                         className="input" placeholder={selectedMethod?.name ?? "e.g. DHL express, 2-3 days"} />
                 </div>
 
+                {/* Admin-only guardrail: lowering shipping after money is collected. */}
+                {reduceBlocked && (
+                    <div className="rounded-xl border border-danger/30 bg-danger-light/40 px-3 py-2.5">
+                        <p className="text-2xs font-semibold text-danger-dark leading-snug">
+                            Only an administrator can reduce shipping on a receipt that has already
+                            been paid. You can raise the shipping charge, but lowering it must be done
+                            by an admin (it would create a refundable balance).
+                        </p>
+                    </div>
+                )}
+
                 <div className="flex gap-3">
                     <button onClick={onClose} className="btn-secondary flex-1">Cancel</button>
-                    <button onClick={() => mutation.mutate()} disabled={mutation.isPending}
+                    <button onClick={() => mutation.mutate()} disabled={mutation.isPending || reduceBlocked}
                         className="btn-primary flex-1">
                         {mutation.isPending ? "Saving…" : "Apply"}
                     </button>

@@ -1323,6 +1323,23 @@ class OrderController extends Controller
         $newShipping = (float) $validated['amount'];
         $diff        = $newShipping - $oldShipping;
 
+        // Anti-fraud guardrail. Raising shipping only ever increases what the
+        // customer owes — any cashier with orders.set_shipping_fee may do it. But
+        // REDUCING shipping once money has been collected creates a credit/refund,
+        // which is the "inflate it, collect, then quietly lower it and pocket the
+        // difference" loophole. So once any payment exists on the receipt, lowering
+        // shipping is an administrator-only action (orders.reduce_shipping_fee).
+        // Before any payment the figure is just an estimate and stays adjustable.
+        $isReduction = $newShipping < $oldShipping - 0.01;
+        if ($isReduction
+            && (float) $order->totalPaid() > 0.01
+            && ! $request->user()->can('orders.reduce_shipping_fee')) {
+            return response()->json([
+                'message' => 'Reducing shipping on a receipt that has already been paid requires an administrator.',
+                'reason'  => 'reduce_shipping_forbidden',
+            ], 403);
+        }
+
         $shippingMethodName = null;
         if (!empty($validated['shipping_method_id'])) {
             $method = DB::table('shipping_methods')->find($validated['shipping_method_id']);
