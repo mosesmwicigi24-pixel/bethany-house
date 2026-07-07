@@ -1005,8 +1005,17 @@ class OrderController extends Controller
             $request->merge(['method' => $aliases[$request->input('method')]]);
         }
 
+        // Accept the built-in methods PLUS any active configured method (e.g. the
+        // outlet's I&M Paybill till). The processing below keys off the method's
+        // DB `type`, so a custom method is handled the same as its built-in kind —
+        // only this whitelist was rejecting them ("The selected method is invalid").
+        $allowedMethods = array_values(array_unique(array_merge(
+            ['cash', 'mpesa', 'card', 'card_paystack', 'card_flutterwave', 'bank_transfer', 'other'],
+            DB::table('payment_methods')->where('is_active', true)->pluck('code')->all()
+        )));
+
         $validated = $request->validate([
-            'method'             => 'required|in:cash,mpesa,card,card_paystack,card_flutterwave,bank_transfer,other',
+            'method'             => 'required|in:' . implode(',', $allowedMethods),
             'amount'             => 'required|numeric|min:0.01',
             'reference'         => 'nullable|string|max:255',
             'phone'             => 'nullable|string|max:30',
