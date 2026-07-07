@@ -81,6 +81,15 @@ return [
     'expiration' => env('SANCTUM_TOKEN_EXPIRY', null),
 
     /*
+    | Per-token access TTL in minutes, applied by User::createAuthToken() at mint
+    | time (audit SEC-5). Unlike `expiration` above — which retroactively expires
+    | ALL tokens by created_at and would log everyone out on rollout — this only
+    | stamps newly-issued tokens' expires_at, leaving existing tokens untouched.
+    | 0 disables the per-token expiry. Default: 7 days.
+    */
+    'access_ttl_minutes' => (int) env('SANCTUM_ACCESS_TTL_MINUTES', 10080),
+
+    /*
     |--------------------------------------------------------------------------
     | Token Prefix
     |--------------------------------------------------------------------------

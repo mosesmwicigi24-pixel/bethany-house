@@ -44,7 +44,7 @@ class StoreApiTokenOnLogin
         $user->tokens()->where('name', 'admin-session')->delete();
 
         // Create a fresh Sanctum token and store it in the web session
-        $token = $user->createToken('admin-session')->plainTextToken;
+        $token = $user->createAuthToken('admin-session')->plainTextToken;
 
         ApiClient::storeToken($token);
     }

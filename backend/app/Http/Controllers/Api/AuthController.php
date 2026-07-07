@@ -52,7 +52,7 @@ class AuthController extends Controller
             'preferred_currency' => $validated['currency'] ?? 'USD',
         ]);
 
-        $token = $user->createToken('auth_token')->plainTextToken;
+        $token = $user->createAuthToken('auth_token')->plainTextToken;
 
         // Phase 3 - welcome notification + audit log
         try {
@@ -102,7 +102,7 @@ class AuthController extends Controller
         }
 
         $tokenName = ($validated['remember_me'] ?? false) ? 'remember_token' : 'auth_token';
-        $token     = $user->createToken($tokenName)->plainTextToken;
+        $token     = $user->createAuthToken($tokenName)->plainTextToken;
 
         $user->load('customer');
 
@@ -431,7 +431,7 @@ class AuthController extends Controller
         }
 
         $tokenName = ($validated['remember_me'] ?? false) ? 'remember_token' : 'auth_token';
-        $token     = $user->createToken($tokenName)->plainTextToken;
+        $token     = $user->createAuthToken($tokenName)->plainTextToken;
 
         // Phase 3 - audit log
         try { ActivityLogService::auth('admin_login', $user); } catch (\Exception) {}
@@ -497,7 +497,7 @@ class AuthController extends Controller
             ]);
         }
 
-        $token = $user->createToken('auth_token')->plainTextToken;
+        $token = $user->createAuthToken('auth_token')->plainTextToken;
 
         // Phase 3 - audit log
         try { ActivityLogService::auth('admin_login_2fa', $user); } catch (\Exception) {}
