@@ -9,7 +9,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
-use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
@@ -19,7 +18,7 @@ use Tests\TestCase;
  * live contradiction where I&M Paybill (settles instantly) was shown as "awaiting
  * approval" while the backend recorded it paid.
  *
- * The acting user is granted ONLY the `payments.record` permission (not an admin
+ * The acting user is granted ONLY the `payments.record` permission directly (no
  * role), so NotificationService::usersWithRole('admin','super_admin','finance')
  * resolves to nobody and send() short-circuits before any notification write —
  * keeping the RefreshDatabase transaction clean so we can assert the saved row.
@@ -30,12 +29,12 @@ class PaymentApprovalClassificationTest extends TestCase
 
     private function actAsRecorder(): void
     {
-        $perm = Permission::findOrCreate('payments.record', 'sanctum');
-        $role = Role::findOrCreate('payment_recorder', 'sanctum');
-        $role->givePermissionTo($perm);
-
         $user = User::factory()->create();
-        $user->assignRole($role);
+        // The orders route group requires orders.view; the endpoint itself
+        // requires payments.record. Grant both directly (no role) so the user is
+        // never a notification recipient and the test transaction stays clean.
+        $user->givePermissionTo(Permission::findOrCreate('orders.view', 'sanctum'));
+        $user->givePermissionTo(Permission::findOrCreate('payments.record', 'sanctum'));
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
     }
