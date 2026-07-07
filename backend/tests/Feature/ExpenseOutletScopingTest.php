@@ -22,7 +22,7 @@ class ExpenseOutletScopingTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function actingAs(array $permissions, array $roles): User
+    private function signInAs(array $permissions, array $roles): User
     {
         $user = User::factory()->create();
         foreach ($permissions as $p) {
@@ -60,7 +60,7 @@ class ExpenseOutletScopingTest extends TestCase
         $outletA = Outlet::factory()->create();
         $outletB = Outlet::factory()->create();
 
-        $manager = $this->actingAs(['expenses.view'], ['outlet_manager']);
+        $manager = $this->signInAs(['expenses.view'], ['outlet_manager']);
         $manager->outlets()->attach($outletA->id);
 
         $cat = ExpenseCategory::create(['name' => 'Rent', 'code' => 'RENT']);
@@ -79,7 +79,7 @@ class ExpenseOutletScopingTest extends TestCase
         $outletA = Outlet::factory()->create();
         $outletB = Outlet::factory()->create();
 
-        $admin = $this->actingAs(['expenses.view'], ['admin']);
+        $admin = $this->signInAs(['expenses.view'], ['admin']);
 
         $cat = ExpenseCategory::create(['name' => 'Utilities', 'code' => 'UTIL']);
         $this->makeExpense('EXP-A', $cat->id, $outletA->id, $admin->id);
