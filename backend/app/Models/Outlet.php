@@ -13,6 +13,7 @@ class Outlet extends Model
         'code',
         'name',
         'outlet_type',
+        'sales_channel',
         'email',
         'phone',
         'address_line1',

@@ -440,6 +440,38 @@ export default function App() {
                                 </ProtectedRoute>
                             }
                         />
+                        {/* Channel-scoped order views (Sales nav). Distinct paths so
+                            they don't collide with /sales/orders/:id. */}
+                        <Route
+                            path="/sales/pos-orders"
+                            element={
+                                <ProtectedRoute permission="orders.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <OrdersPage channel="pos" />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/sales/online-orders"
+                            element={
+                                <ProtectedRoute permission="orders.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <OrdersPage channel="online" />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/sales/whatsapp-orders"
+                            element={
+                                <ProtectedRoute permission="orders.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <OrdersPage channel="whatsapp" />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
                         <Route
                             path="/sales/orders/:id"
                             element={
