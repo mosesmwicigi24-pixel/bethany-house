@@ -214,6 +214,72 @@ class CashRegister extends Model
         return $this;
     }
 
+    /**
+     * Post a sale to the drawer from its per-method breakdown (handles split
+     * payments). Rollups + transaction_count move for every method; only the
+     * cash portion moves the physical drawer (`expected_cash`). One journal row
+     * is written for the sale, its `amount` being the cash impact on the drawer
+     * so `balance_after` stays the running cash balance.
+     *
+     * Call with the register row already locked (lockForUpdate) so balance_after
+     * is serialized under concurrency.
+     */
+    public function postSale(float $cash, float $card, float $mpesa, float $totalSales, $orderId = null): self
+    {
+        if (!$this->isOpen()) {
+            throw new \Exception('Cash register is not open');
+        }
+
+        $this->increment('total_sales', $totalSales);
+        if ($cash > 0)  { $this->increment('total_cash_sales', $cash); }
+        if ($card > 0)  { $this->increment('total_card_sales', $card); }
+        if ($mpesa > 0) { $this->increment('total_mpesa_sales', $mpesa); }
+        if ($cash > 0)  { $this->increment('expected_cash', $cash); }
+        $this->increment('transaction_count');
+
+        $this->transactions()->create([
+            'transaction_type' => 'sale',
+            'payment_method'   => ($card > 0 || $mpesa > 0) && $cash > 0 ? 'mixed'
+                                    : ($cash > 0 ? 'cash' : ($card > 0 ? 'card' : 'mpesa')),
+            'amount'           => $cash,
+            'order_id'         => $orderId,
+            'balance_after'    => $this->expected_cash,
+        ]);
+
+        return $this;
+    }
+
+    /**
+     * Exact reversal of postSale — used when a sale is voided. Reverses the same
+     * per-method amounts the sale actually posted (NOT the order total), so a
+     * deposit/partial/split sale is undone correctly and the drawer never drifts.
+     * Call with the register row locked.
+     */
+    public function postVoid(float $cash, float $card, float $mpesa, float $totalSales, $orderId = null): self
+    {
+        if (!$this->isOpen()) {
+            throw new \Exception('Cash register is not open');
+        }
+
+        $this->decrement('total_sales', $totalSales);
+        if ($cash > 0)  { $this->decrement('total_cash_sales', $cash); }
+        if ($card > 0)  { $this->decrement('total_card_sales', $card); }
+        if ($mpesa > 0) { $this->decrement('total_mpesa_sales', $mpesa); }
+        if ($cash > 0)  { $this->decrement('expected_cash', $cash); }
+        $this->decrement('transaction_count');
+
+        $this->transactions()->create([
+            'transaction_type' => 'void',
+            'payment_method'   => ($card > 0 || $mpesa > 0) && $cash > 0 ? 'mixed'
+                                    : ($cash > 0 ? 'cash' : ($card > 0 ? 'card' : 'mpesa')),
+            'amount'           => -$cash,
+            'order_id'         => $orderId,
+            'balance_after'    => $this->expected_cash,
+        ]);
+
+        return $this;
+    }
+
     public function recordRefund($amount, $paymentMethod, $orderId = null)
     {
         if (!$this->isOpen()) {
