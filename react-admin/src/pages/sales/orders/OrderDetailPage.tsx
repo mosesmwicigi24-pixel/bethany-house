@@ -992,7 +992,7 @@ function AddPaymentModal({ order, onClose, onDone }: {
     const OTHER_CODE = "__other__";
     const allMethods = [
         ...configuredMethods,
-        { code: OTHER_CODE, name: "Other", type: "other", is_active: true, is_default: false } as any,
+        { code: OTHER_CODE, name: "Other", type: "other", is_active: true, is_default: false, requires_approval: true } as any,
     ];
 
     useEffect(() => {
@@ -1003,13 +1003,21 @@ function AddPaymentModal({ order, onClose, onDone }: {
 
     const cc              = order.currency_code;
     const effectiveMethod = method === OTHER_CODE ? "other" : method;
-    const isAutomated     = ["cash", "mpesa", "card", "card_paystack", "card_flutterwave", "paystack"].includes(effectiveMethod);
-    const isManualMethod  = !isAutomated;
+    // Approval policy comes from the backend's effective `requires_approval` flag
+    // on the selected method — the single source of truth shared with the server,
+    // so I&M (settles instantly) and manual rails (cheque/bank/WU/MoneyGram) are
+    // classified identically here and server-side. Fall back to the legacy list
+    // only if the flag is missing (older API).
+    const selectedMethodObj = allMethods.find((m: any) => m.code === method);
+    const methodRequiresApproval = selectedMethodObj?.requires_approval
+        ?? !["cash", "mpesa", "card", "card_paystack", "card_flutterwave", "paystack"].includes(effectiveMethod);
+    const isAutomated     = !methodRequiresApproval;
+    const isManualMethod  = methodRequiresApproval;
     const isOtherMethod   = method === OTHER_CODE;
     const isBankMethod    = effectiveMethod === "bank_transfer";
     const isMpesaMethod   = effectiveMethod === "mpesa";
     const isPaystackMethod = method === "paystack" || effectiveMethod === "card_paystack";
-    const needsApproval   = isManualMethod;
+    const needsApproval   = methodRequiresApproval;
     const showProofUpload = isManualMethod;
     const referenceRequired = isBankMethod || isOtherMethod;
     const canSubmit = amount > 0
@@ -1119,8 +1127,11 @@ function AddPaymentModal({ order, onClose, onDone }: {
             }
             return res;
         },
-        onSuccess: () => {
-            toast.success(needsApproval
+        onSuccess: (res: any) => {
+            // Trust the server's classification, not the local guess, so the
+            // message can never contradict how the payment was actually recorded.
+            const serverNeedsApproval = res?.requires_approval ?? needsApproval;
+            toast.success(serverNeedsApproval
                 ? "Payment submitted - awaiting admin approval before it takes effect"
                 : "Payment recorded"
             );
@@ -1255,8 +1266,9 @@ function AddPaymentModal({ order, onClose, onDone }: {
                                     : pm.type === "cash"                   ? "💵"
                                     : pm.type === "bank_transfer"          ? "🏦" : "💰";
                                 const isSelected = method === pm.code;
-                                const pmIsManual = !["cash","mpesa","card","card_paystack","card_flutterwave","paystack"]
-                                    .includes(pm.code === OTHER_CODE ? "other" : pm.code);
+                                const pmIsManual = pm.requires_approval
+                                    ?? !["cash","mpesa","card","card_paystack","card_flutterwave","paystack"]
+                                        .includes(pm.code === OTHER_CODE ? "other" : pm.code);
                                 return (
                                     <button key={pm.code} onClick={() => switchMethod(pm.code)}
                                         className={clsx(

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\PaymentMethod;
 use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -34,6 +35,10 @@ class PaymentMethodController extends Controller
             })
             ->map(function ($method) {
                 $method->supported_currencies = json_decode($method->supported_currencies ?? '[]', true);
+                // Effective approval policy so the client never has to guess.
+                $method->requires_approval = PaymentMethod::deriveRequiresApproval(
+                    $method->code, $method->type ?? null, $method->requires_approval ?? null
+                );
                 // Never expose gateway credentials publicly
                 unset($method->configuration);
                 return $method;
@@ -87,6 +92,7 @@ class PaymentMethodController extends Controller
             'supported_currencies.*' => 'string|max:10',
             'is_active'            => 'sometimes|boolean',
             'is_default'           => 'sometimes|boolean',
+            'requires_approval'    => 'sometimes|boolean',
             'sort_order'           => 'nullable|integer|min:0',
         ]);
 
@@ -108,6 +114,10 @@ class PaymentMethodController extends Controller
             'configuration'        => json_encode([]),      // DB column is 'configuration' not 'config'
             'is_active'            => $validated['is_active'] ?? true,
             'is_default'           => $validated['is_default'] ?? false,
+            // Default the approval policy from the method type when unset so a new
+            // bank_transfer is gated and a new cash/gateway method is instant.
+            'requires_approval'    => $validated['requires_approval']
+                ?? PaymentMethod::deriveRequiresApproval($validated['code'], $validated['type'], null),
             'sort_order'           => $validated['sort_order'] ?? ($maxOrder + 1),
             'display_order'        => $validated['sort_order'] ?? ($maxOrder + 1),
             'created_at'           => now(),
@@ -152,12 +162,13 @@ class PaymentMethodController extends Controller
             'supported_currencies.*' => 'string|max:10',
             'is_active'            => 'sometimes|boolean',
             'is_default'           => 'sometimes|boolean',
+            'requires_approval'    => 'sometimes|boolean',
             'sort_order'           => 'nullable|integer|min:0',
         ]);
 
         $update = ['updated_at' => now()];
 
-        foreach (['name', 'description', 'type', 'provider', 'icon', 'is_active', 'is_default'] as $col) {
+        foreach (['name', 'description', 'type', 'provider', 'icon', 'is_active', 'is_default', 'requires_approval'] as $col) {
             if (array_key_exists($col, $validated)) {
                 $update[$col] = $validated[$col];
             }
@@ -383,6 +394,11 @@ class PaymentMethodController extends Controller
             'provider'             => $method->provider,
             'icon'                 => $method->icon ?? null,
             'is_active'            => (bool) $method->is_active,
+            // Effective per-method approval policy (authoritative flag, or the
+            // legacy type derivation when the flag is un-configured/NULL).
+            'requires_approval'    => PaymentMethod::deriveRequiresApproval(
+                $method->code, $method->type ?? null, $method->requires_approval ?? null
+            ),
             'is_default'           => (bool) ($method->is_default ?? false),
             'sort_order'           => $method->sort_order ?? $method->display_order ?? 0,
             'display_order'        => $method->display_order ?? $method->sort_order ?? 0,

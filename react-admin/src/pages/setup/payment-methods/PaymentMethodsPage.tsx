@@ -31,6 +31,7 @@ const schema = z.object({
     description: z.string(),
     is_active: z.boolean(),
     is_default: z.boolean(),
+    requires_approval: z.boolean(),
     sort_order: z.coerce.number().min(0),
     supported_currencies: z.array(z.string()),
 });
@@ -45,6 +46,7 @@ const DEFAULTS: FormValues = {
     description: "",
     is_active: true,
     is_default: false,
+    requires_approval: false,
     sort_order: 0,
     supported_currencies: ["KES"],
 };
@@ -250,6 +252,7 @@ export default function PaymentMethodsPage() {
             description: m.description ?? "",
             is_active: m.is_active,
             is_default: m.is_default,
+            requires_approval: m.requires_approval ?? false,
             sort_order: m.sort_order,
             supported_currencies: m.supported_currencies,
         });
@@ -378,6 +381,11 @@ export default function PaymentMethodsPage() {
                                             </span>
                                             {method.is_default && (
                                                 <DefaultBadge />
+                                            )}
+                                            {method.requires_approval && (
+                                                <span className="badge text-2xs bg-amber-100 text-amber-700">
+                                                    Needs approval
+                                                </span>
                                             )}
                                             <StatusBadge
                                                 active={method.is_active}
@@ -593,6 +601,18 @@ export default function PaymentMethodsPage() {
                             onChange={(v) => setValue("is_default", v)}
                             label="Set as default payment method"
                         />
+                        <div>
+                            <Toggle
+                                checked={watch("requires_approval")}
+                                onChange={(v) => setValue("requires_approval", v)}
+                                label="Requires admin approval"
+                            />
+                            <p className="text-2xs text-surface-400 mt-1">
+                                On → payments are held pending until an admin approves them
+                                (cheque, bank transfer, Western Union, MoneyGram). Off → they
+                                settle immediately with a notification (cash, I&M, M-Pesa, card).
+                            </p>
+                        </div>
                     </div>
                 </div>
             </Modal>

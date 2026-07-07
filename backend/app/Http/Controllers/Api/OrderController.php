@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\PaymentMethod;
 use App\Models\OrderItem;
 use App\Models\Cart;
 use App\Models\CartItem;
@@ -1064,19 +1065,19 @@ class OrderController extends Controller
             ], 422);
         }
 
-        // ANY non-automated method requires admin approval before the payment is
-        // considered effective - regardless of whether the order is international.
-        // Cash is automated (immediate verified transaction). Card/M-Pesa are
-        // verified by the payment gateway. Everything else needs human review.
-        // We also check the method's DB type so that any method configured with
-        // type='cash' is treated identically to the built-in 'cash' code.
-        $methodDbType      = DB::table('payment_methods')
+        // Whether this payment must be held for admin approval is decided by the
+        // method's per-method policy (PaymentMethod::deriveRequiresApproval) —
+        // the single source of truth shared with the POS paths and the frontend.
+        // The authoritative `requires_approval` flag wins; when un-configured it
+        // falls back to the legacy type derivation (cash/gateway = instant).
+        $methodRow        = DB::table('payment_methods')
             ->where('code', $validated['method'])
-            ->value('type');
-        $isAutomatedMethod = $validated['method'] === 'cash'
-            || $methodDbType === 'cash'
-            || in_array($validated['method'], ['mpesa', 'card', 'card_paystack']);
-        $requiresApproval  = !$isAutomatedMethod;
+            ->first(['type', 'requires_approval']);
+        $requiresApproval = PaymentMethod::deriveRequiresApproval(
+            $validated['method'],
+            $methodRow?->type,
+            $methodRow?->requires_approval,
+        );
 
         // For "other" method, prepend the custom name to the reference so it is
         // traceable in the payment record, approval queue, and audit log.
