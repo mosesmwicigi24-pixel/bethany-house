@@ -57,7 +57,13 @@ class ProductController extends Controller
             default    => $query->orderBy('published_at', 'desc'),
         };
 
-        return response()->json($query->paginate($perPage));
+        $products = $query->paginate($perPage);
+        // Expose availability to storefront/API consumers (Neema WhatsApp agent)
+        // so an out-of-stock item is never quoted. `aliases` serialises via the
+        // model cast automatically.
+        $products->getCollection()->each->append(['in_stock', 'available_qty']);
+
+        return response()->json($products);
     }
 
     /**
