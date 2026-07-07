@@ -26,6 +26,7 @@ const schema = z.object({
     code: z.string().min(1, "Code is required"),
     name: z.string().min(1, "Name is required"),
     outlet_type: z.enum(["store", "warehouse", "outlet", "workshop"]),
+    sales_channel: z.enum(["pos", "whatsapp", "online"]),
     email: z.string().email("Invalid email").or(z.literal("")),
     phone: z.string(),
     address_line1: z.string(),
@@ -47,6 +48,7 @@ const DEFAULTS: FormValues = {
     code: "",
     name: "",
     outlet_type: "store",
+    sales_channel: "pos",
     email: "",
     phone: "",
     address_line1: "",
@@ -112,6 +114,7 @@ export default function OutletsPage() {
             code: o.code,
             name: o.name,
             outlet_type: o.outlet_type,
+            sales_channel: o.sales_channel ?? "pos",
             email: o.email ?? "",
             phone: o.phone ?? "",
             address_line1: o.address_line1 ?? "",
@@ -304,6 +307,16 @@ export default function OutletsPage() {
                                 <option value="warehouse">Warehouse</option>
                                 <option value="outlet">Outlet</option>
                                 <option value="workshop">Workshop</option>
+                            </FieldSelect>
+                        </Field>
+                        <Field label="Sales channel" hint="Groups this outlet's orders under POS, WhatsApp, or Online Orders in the Sales nav.">
+                            <FieldSelect
+                                className="input"
+                                {...register("sales_channel")}
+                            >
+                                <option value="pos">POS (point of sale)</option>
+                                <option value="whatsapp">WhatsApp</option>
+                                <option value="online">Online</option>
                             </FieldSelect>
                         </Field>
                         <Field

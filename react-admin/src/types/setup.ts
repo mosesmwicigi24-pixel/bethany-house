@@ -128,6 +128,8 @@ export interface OutletSetup {
     code: string;
     name: string;
     outlet_type: "store" | "warehouse" | "outlet" | "workshop";
+    /** Sales channel this outlet represents, for grouping orders in the nav. */
+    sales_channel?: "pos" | "whatsapp" | "online";
     email: string | null;
     phone: string | null;
     address_line1: string | null;
@@ -151,6 +153,7 @@ export interface OutletFormData {
     code: string;
     name: string;
     outlet_type: "store" | "warehouse" | "outlet" | "workshop";
+    sales_channel: "pos" | "whatsapp" | "online";
     email: string;
     phone: string;
     address_line1: string;
