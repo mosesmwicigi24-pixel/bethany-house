@@ -103,7 +103,7 @@ services:
             # Web Push Notifications
             VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-BHrNgZ5D6HIPOWFTnh3W6TCPktn5SWmyWeBHl1CgXObJSnFpAbB6ps2n43jKrQIwUzlVZuG6dxKmdgwwINnhGUc}
             VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-fw3ADyQTPU-TB5LwJ7zNg9RfKRu5sA36chl-f2976as}
-            VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:nyorojnr@gmail.com}
+            VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@bethanyhouse.co.ke}
             VITE_VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-BHrNgZ5D6HIPOWFTnh3W6TCPktn5SWmyWeBHl1CgXObJSnFpAbB6ps2n43jKrQIwUzlVZuG6dxKmdgwwINnhGUc}
         ports:
             - "127.0.0.1:${LARAVEL_PORT:-8010}:80"
@@ -166,7 +166,7 @@ services:
             # Web Push — queue worker sends push notifications
             VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
             VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
-            VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:nyorojnr@gmail.com}
+            VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@bethanyhouse.co.ke}
         volumes:
             - laravel_storage:/var/www/storage
         depends_on:

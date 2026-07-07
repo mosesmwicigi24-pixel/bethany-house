@@ -21,7 +21,7 @@
 
 return [
     'vapid' => [
-        'subject'     => env('VAPID_SUBJECT', 'mailto:nyorojnr@gmail.com'),
+        'subject'     => env('VAPID_SUBJECT', 'mailto:admin@bethanyhouse.co.ke'),
         'public_key'  => env('VAPID_PUBLIC_KEY', ''),
         'private_key' => env('VAPID_PRIVATE_KEY', ''),
     ],
