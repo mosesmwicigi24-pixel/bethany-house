@@ -521,17 +521,17 @@ class PosController extends Controller
             $code === 'cash' || ($pmMethodTypesSale->get($code) === 'cash');
 
         // If any payment is cash (by code or type), THIS USER's register must be open
+        // Look up THIS user's open register. A cash sale requires one; a non-cash
+        // sale still posts to it when open, so card/mpesa totals and the
+        // transaction count are captured (they were dropped when no cash present).
         $hasCash = collect($paymentsInput)->contains(fn ($p) => $isCashTypeSale($p['method'] ?? ''));
-        $register = null;
-        if ($hasCash) {
-            $register = CashRegister::where('outlet_id', $outletId)
-                ->where('opened_by', $user->id)
-                ->where('status', 'open')
-                ->latest('opened_at')
-                ->first();
-            if (!$register) {
-                return response()->json(['message' => 'Cash register is not open. Please open your register first.'], 422);
-            }
+        $register = CashRegister::where('outlet_id', $outletId)
+            ->where('opened_by', $user->id)
+            ->where('status', 'open')
+            ->latest('opened_at')
+            ->first();
+        if ($hasCash && !$register) {
+            return response()->json(['message' => 'Cash register is not open. Please open your register first.'], 422);
         }
 
         $outlet       = Outlet::findOrFail($outletId);
@@ -859,8 +859,10 @@ class PosController extends Controller
                 }
             }
 
-            // -- 7. Register update -------------------------------------------
-            if ($register && $totalCashForRegister > 0) {
+            // -- 7. Register update — every sale on an open register updates the
+            // aggregates + transaction count; only the cash portion moves
+            // expected_cash and the ledger. (Non-cash sales were dropped entirely.)
+            if ($register) {
                 DB::table('cash_registers')->where('id', $register->id)->update([
                     'total_sales'       => DB::raw('total_sales + ' . $totalSalesForRegister),
                     'total_cash_sales'  => DB::raw('total_cash_sales + ' . $totalCashForRegister),
@@ -871,17 +873,18 @@ class PosController extends Controller
                     'updated_at'        => now(),
                 ]);
 
-                // MON-3: per-movement cash-drawer ledger row (the aggregate columns
-                // above have no audit trail on their own; this table was never written).
-                $this->recordCashLedger(
-                    $register,
-                    'sale',
-                    'cash',
-                    $totalCashForRegister,
-                    (float) $register->expected_cash + $totalCashForRegister,
-                    $order->id,
-                    $user->id,
-                );
+                // MON-3: per-movement cash-drawer ledger row (cash only).
+                if ($totalCashForRegister > 0) {
+                    $this->recordCashLedger(
+                        $register,
+                        'sale',
+                        'cash',
+                        $totalCashForRegister,
+                        (float) $register->expected_cash + $totalCashForRegister,
+                        $order->id,
+                        $user->id,
+                    );
+                }
             }
 
             // -- 8. Production orders for Made-to-Order / backorder items -----
@@ -3257,13 +3260,14 @@ class PosController extends Controller
                 }
 
                 $totalSales += $pmtAmount;
-                if ($pmtMethod === 'cash')                         $totalCash  += $pmtAmount;
+                if ($pmtIsCash)                                    $totalCash  += $pmtAmount;
                 elseif (in_array($pmtMethod, ['card','card_paystack'])) $totalCard  += $pmtAmount;
                 elseif ($pmtMethod === 'mpesa')                    $totalMpesa += $pmtAmount;
             }
 
-            // Update THIS user's cash register
-            if ($totalCash > 0) {
+            // Post this balance payment to THIS user's register — recorded whether
+            // or not it included cash, so a non-cash balance payment isn't dropped.
+            if ($totalSales > 0) {
                 $register = CashRegister::where('outlet_id', $order->outlet_id)
                     ->where('opened_by', $request->user()->id)
                     ->where('status', 'open')
@@ -3279,6 +3283,19 @@ class PosController extends Controller
                         'expected_cash'     => DB::raw("expected_cash + {$totalCash}"),
                         'updated_at'        => now(),
                     ]);
+
+                    // MON-3: ledger the cash portion of this balance payment.
+                    if ($totalCash > 0) {
+                        $this->recordCashLedger(
+                            $register,
+                            'sale',
+                            'cash',
+                            (float) $totalCash,
+                            (float) $register->expected_cash + (float) $totalCash,
+                            $order->id,
+                            $request->user()->id,
+                        );
+                    }
                 }
             }
 
