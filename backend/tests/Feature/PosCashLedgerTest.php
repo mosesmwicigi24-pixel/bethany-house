@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\CashRegister;
 use App\Models\Order;
 use App\Models\Outlet;
+use App\Models\Payment;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -68,6 +69,12 @@ class PosCashLedgerTest extends TestCase
             'total_amount'   => 1000,
             'status'         => 'completed',
         ]);
+        Payment::factory()->create([
+            'order_id'       => $order->id,
+            'amount'         => 1000,
+            'status'         => 'paid',
+            'payment_method' => 'cash',
+        ]);
 
         $this->postJson("/api/v1/admin/pos/sales/{$order->id}/void", ['reason' => 'cashier error'])
             ->assertOk();
@@ -75,7 +82,7 @@ class PosCashLedgerTest extends TestCase
         // A per-movement ledger row is written, with balance_after = 5000 - 1000.
         $this->assertDatabaseHas('cash_register_transactions', [
             'cash_register_id' => $register->id,
-            'transaction_type' => 'refund',
+            'transaction_type' => 'void',
             'payment_method'   => 'cash',
             'order_id'         => $order->id,
             'amount'           => 1000,
@@ -94,6 +101,12 @@ class PosCashLedgerTest extends TestCase
             'payment_method' => 'mpesa',
             'total_amount'   => 1000,
             'status'         => 'completed',
+        ]);
+        Payment::factory()->create([
+            'order_id'       => $order->id,
+            'amount'         => 1000,
+            'status'         => 'paid',
+            'payment_method' => 'mpesa',
         ]);
 
         $this->postJson("/api/v1/admin/pos/sales/{$order->id}/void", ['reason' => 'wrong entry'])
