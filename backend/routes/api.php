@@ -656,20 +656,8 @@ Route::prefix('v1')->group(function () {
 
             // ── Inventory ────────────────────────────────────────────────────
             Route::middleware('permission:inventory.view,sanctum')->prefix('inventory')->group(function () {
-                Route::get('/',                      [InventoryController::class, 'index']);
                 Route::get('/low-stock',             [InventoryController::class, 'lowStock']);
-                Route::get('/valuation',             [InventoryController::class, 'valuation']);
-                Route::get('/{productId}/movements', [InventoryController::class, 'movements']);
                 Route::get('/low-stock-alerts',      [\App\Http\Controllers\Api\LowStockAlertsController::class, 'index']);
-
-                Route::post('/adjust',               [InventoryController::class, 'adjust'])
-                    ->middleware('permission:inventory.adjust,sanctum');
-                Route::post('/transfer',             [InventoryController::class, 'transfer'])
-                    ->middleware('permission:inventory.transfer,sanctum');
-                Route::put('/thresholds',            [InventoryController::class, 'setThreshold'])
-                    ->middleware('permission:inventory.adjust,sanctum');
-                Route::put('/thresholds/bulk',       [InventoryController::class, 'bulkSetThreshold'])
-                    ->middleware('permission:inventory.adjust,sanctum');
                 Route::put('/low-stock-alerts/{id}/threshold', [\App\Http\Controllers\Api\LowStockAlertsController::class, 'updateThreshold'])
                     ->middleware('permission:inventory.adjust,sanctum');
 
