@@ -37,6 +37,7 @@ class Product extends Model
         'low_stock_threshold',
         'sort_order',
         'measurements',
+        'aliases',
     ];
 
     /*
@@ -57,6 +58,7 @@ class Product extends Model
         'published_at' => 'datetime',
         'deleted_at' => 'datetime',
         'measurements' => 'array',
+        'aliases' => 'array',
     ];
 
     /*
@@ -239,5 +241,21 @@ class Product extends Model
     {
         return $this->inventoryItems()
             ->sum(DB::raw('quantity_on_hand - quantity_reserved'));
+    }
+
+    /**
+     * Serialised availability for API consumers (e.g. the Neema WhatsApp agent),
+     * so a sales bot never quotes an out-of-stock item. Append these on the
+     * public product endpoint only — each reads inventory, so avoid globally
+     * appending them to keep admin/POS listings fast.
+     */
+    public function getAvailableQtyAttribute(): int
+    {
+        return (int) $this->getAvailableStock();
+    }
+
+    public function getInStockAttribute(): bool
+    {
+        return $this->getAvailableQtyAttribute() > 0;
     }
 }
