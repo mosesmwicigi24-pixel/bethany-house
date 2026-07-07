@@ -50,10 +50,15 @@ class ExpenseController extends Controller
             'createdBy:id,first_name,last_name',
         ])->withCount('lineItems');
 
-        // Role-scoped access: outlet managers see only their outlet
+        // Role-scoped access: outlet managers see only expenses for the outlets
+        // they are assigned to (via the outlet_user pivot). Users have no
+        // `outlet_id` column — assignment is many-to-many — so the previous
+        // `$user->outlet_id` was always null and the scoping was broken.
         $user = $request->user();
-        if ($user->hasRole('outlet_manager') && !$user->hasAnyRole(['admin', 'super_admin'])) {
-            $query->where('outlet_id', $user->outlet_id);
+        $scopeToAssignedOutlets = $user->hasRole('outlet_manager') && !$user->hasAnyRole(['admin', 'super_admin']);
+        $assignedOutletIds = $scopeToAssignedOutlets ? $user->outlets()->pluck('outlets.id') : null;
+        if ($scopeToAssignedOutlets) {
+            $query->whereIn('outlet_id', $assignedOutletIds);
         }
 
         if (isset($validated['status']))      $query->where('status', $validated['status']);
@@ -83,8 +88,8 @@ class ExpenseController extends Controller
 
         // Summary stats for the filtered view
         $statsQuery = Expense::query();
-        if ($user->hasRole('outlet_manager') && !$user->hasAnyRole(['admin', 'super_admin'])) {
-            $statsQuery->where('outlet_id', $user->outlet_id);
+        if ($scopeToAssignedOutlets) {
+            $statsQuery->whereIn('outlet_id', $assignedOutletIds);
         }
         $stats = $statsQuery
             ->when(isset($validated['start_date']), fn($q) => $q->where('expense_date', '>=', $validated['start_date']))
