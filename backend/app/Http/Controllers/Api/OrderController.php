@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Models\Outlet;
 use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Models\OrderItem;
@@ -36,6 +37,38 @@ class OrderController extends Controller
     /**
      * Get all orders (Admin)
      */
+    /**
+     * Split orders by sales channel for the Sales navigation:
+     *   online   → storefront orders (order_type = 'online')
+     *   whatsapp → orders taken at a WhatsApp-channel outlet
+     *   pos      → physical POS orders (order_type = 'pos', excluding WhatsApp outlets)
+     *
+     * Falls back to the legacy `channel` (= order_type) filter when no
+     * `sales_channel` is supplied, so existing callers keep working.
+     */
+    private function applyChannelFilter($query, Request $request): void
+    {
+        if ($request->filled('sales_channel')) {
+            $channel           = $request->sales_channel;
+            $whatsappOutletIds = Outlet::where('sales_channel', 'whatsapp')->pluck('id');
+
+            if ($channel === 'online') {
+                $query->where('order_type', 'online');
+            } elseif ($channel === 'whatsapp') {
+                $query->whereIn('outlet_id', $whatsappOutletIds);
+            } elseif ($channel === 'pos') {
+                $query->where('order_type', 'pos')
+                      ->whereNotIn('outlet_id', $whatsappOutletIds);
+            }
+
+            return;
+        }
+
+        if ($request->has('channel')) {
+            $query->where('order_type', $request->channel);
+        }
+    }
+
     public function index(Request $request)
     {
         $query = Order::with(['user', 'items', 'outlet']);
@@ -44,9 +77,7 @@ class OrderController extends Controller
             $query->where('status', $request->status);
         }
 
-        if ($request->has('channel')) {
-            $query->where('order_type', $request->channel);
-        }
+        $this->applyChannelFilter($query, $request);
 
         if ($request->has('outlet_id')) {
             $query->where('outlet_id', $request->outlet_id);
@@ -101,9 +132,7 @@ class OrderController extends Controller
             $query->where('status', $request->status);
         }
 
-        if ($request->has('channel')) {
-            $query->where('order_type', $request->channel);
-        }
+        $this->applyChannelFilter($query, $request);
 
         if ($request->has('outlet_id')) {
             $query->where('outlet_id', $request->outlet_id);

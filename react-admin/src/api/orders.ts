@@ -179,6 +179,8 @@ export interface OrderFilters {
     search?: string;
     status?: string;
     channel?: string;
+    /** Sales channel split for the Sales nav: "pos" | "online" | "whatsapp". */
+    sales_channel?: string;
     outlet_id?: number | string;
     start_date?: string;
     end_date?: string;

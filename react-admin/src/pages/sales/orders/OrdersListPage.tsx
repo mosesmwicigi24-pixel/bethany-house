@@ -1,4 +1,4 @@
-import { useState, useCallback, Fragment } from "react";
+import { useState, useCallback, useEffect, Fragment } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { clsx } from "clsx";
@@ -122,9 +122,11 @@ interface FiltersBarProps {
     filters: OrderFilters;
     onChange: (key: keyof OrderFilters, value: string) => void;
     onClear: () => void;
+    /** Hide the channel dropdown when the whole page is already scoped to one. */
+    hideChannel?: boolean;
 }
 
-function FiltersBar({ filters, onChange, onClear }: FiltersBarProps) {
+function FiltersBar({ filters, onChange, onClear, hideChannel }: FiltersBarProps) {
     const hasFilters = Object.values(filters).some(
         (v) => v !== undefined && v !== "" && v !== "created_at" && v !== "desc",
     );
@@ -153,15 +155,17 @@ function FiltersBar({ filters, onChange, onClear }: FiltersBarProps) {
                     <option key={k} value={k}>{v.label}</option>
                 ))}
             </select>
-            <select
-                value={filters.channel ?? ""}
-                onChange={(e) => onChange("channel", e.target.value)}
-                className="input w-32"
-            >
-                <option value="">All channels</option>
-                <option value="online">Online</option>
-                <option value="pos">POS</option>
-            </select>
+            {!hideChannel && (
+                <select
+                    value={filters.channel ?? ""}
+                    onChange={(e) => onChange("channel", e.target.value)}
+                    className="input w-32"
+                >
+                    <option value="">All channels</option>
+                    <option value="online">Online</option>
+                    <option value="pos">POS</option>
+                </select>
+            )}
             <input
                 type="date"
                 value={filters.start_date ?? ""}
@@ -187,7 +191,15 @@ function FiltersBar({ filters, onChange, onClear }: FiltersBarProps) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-export default function OrdersPage() {
+type SalesChannel = "pos" | "online" | "whatsapp";
+
+const CHANNEL_TITLES: Record<SalesChannel, { title: string; subtitle: string }> = {
+    pos:      { title: "POS Orders",      subtitle: "orders taken at the point of sale" },
+    online:   { title: "Online Orders",   subtitle: "orders placed through the storefront" },
+    whatsapp: { title: "WhatsApp Orders", subtitle: "orders taken over WhatsApp" },
+};
+
+export default function OrdersPage({ channel }: { channel?: SalesChannel } = {}) {
     const navigate   = useNavigate();
     const toast      = useToastStore();
     const qc         = useQueryClient();
@@ -195,11 +207,18 @@ export default function OrdersPage() {
     const page = _ts.state.page;
     const setPage = _ts.setPage;
 
-    const [filters, setFilters] = useState<OrderFilters>({
+    // A channel-scoped view (POS / Online / WhatsApp Orders) locks sales_channel.
+    const baseFilters = useCallback((): OrderFilters => ({
         sort_by: "created_at",
         sort_order: "desc",
         per_page: 25,
-    });
+        ...(channel ? { sales_channel: channel } : {}),
+    }), [channel]);
+
+    const [filters, setFilters] = useState<OrderFilters>(baseFilters);
+
+    // Re-scope when navigating between channel views (component instance reused).
+    useEffect(() => { setFilters(baseFilters()); setPage(1); }, [channel, baseFilters, setPage]);
 
     const updateFilter = useCallback((key: keyof OrderFilters, value: string) => {
         setFilters((prev) => ({ ...prev, [key]: value || undefined }));
@@ -207,9 +226,9 @@ export default function OrdersPage() {
     }, [setPage]);
 
     const clearFilters = useCallback(() => {
-        setFilters({ sort_by: "created_at", sort_order: "desc", per_page: 25 });
+        setFilters(baseFilters());
         setPage(1);
-    }, [setPage]);
+    }, [setPage, baseFilters]);
 
     const { data, isLoading, isFetching } = useQuery({
         queryKey: ["orders", filters, page],
@@ -233,9 +252,9 @@ export default function OrdersPage() {
             {/* ── Header ──────────────────────────────────────────────────── */}
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h1 className="page-title">Orders</h1>
+                    <h1 className="page-title">{channel ? CHANNEL_TITLES[channel].title : "Orders"}</h1>
                     <p className="page-subtitle">
-                        {meta ? `${meta.total.toLocaleString()} orders` : ""}
+                        {meta ? `${meta.total.toLocaleString()} ${channel ? CHANNEL_TITLES[channel].subtitle : "orders"}` : ""}
                         {isFetching && !isLoading && (
                             <span className="ml-2 text-brand-500 text-xs">Refreshing…</span>
                         )}
@@ -267,7 +286,7 @@ export default function OrdersPage() {
 
             {/* ── Filters ─────────────────────────────────────────────────── */}
             <div className="card card-body">
-                <FiltersBar filters={filters} onChange={updateFilter} onClear={clearFilters} />
+                <FiltersBar filters={filters} onChange={updateFilter} onClear={clearFilters} hideChannel={!!channel} />
             </div>
 
             {/* ── Table ───────────────────────────────────────────────────── */}

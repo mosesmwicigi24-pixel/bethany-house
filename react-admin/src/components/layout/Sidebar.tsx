@@ -84,8 +84,20 @@ const NAV: NavGroup[] = [
                 permission: "pos.access",
             },
             {
-                label: "Orders",
-                href: "/sales/orders",
+                label: "POS Orders",
+                href: "/sales/pos-orders",
+                icon: "orders",
+                permission: "orders.view",
+            },
+            {
+                label: "Online Orders",
+                href: "/sales/online-orders",
+                icon: "orders",
+                permission: "orders.view",
+            },
+            {
+                label: "WhatsApp Orders",
+                href: "/sales/whatsapp-orders",
                 icon: "orders",
                 permission: "orders.view",
             },
