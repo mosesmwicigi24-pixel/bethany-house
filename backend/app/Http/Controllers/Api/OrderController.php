@@ -55,8 +55,15 @@ class OrderController extends Controller
             if ($channel === 'online') {
                 $query->where('order_type', 'online');
             } elseif ($channel === 'whatsapp') {
-                $query->whereIn('outlet_id', $whatsappOutletIds);
+                // A WhatsApp order is either taken at a WhatsApp-channel outlet OR
+                // tagged order_type='whatsapp' (placed at the fulfilling store but
+                // sold through WhatsApp — channel and outlet are orthogonal).
+                $query->where(function ($q) use ($whatsappOutletIds) {
+                    $q->whereIn('outlet_id', $whatsappOutletIds)
+                      ->orWhere('order_type', 'whatsapp');
+                });
             } elseif ($channel === 'pos') {
+                // Physical POS only: exclude WhatsApp both by outlet and by type.
                 $query->where('order_type', 'pos')
                       ->whereNotIn('outlet_id', $whatsappOutletIds);
             }
