@@ -179,8 +179,10 @@ below; the load-bearing ones are called out here with root cause.
 - **SEC-3 (HIGH): `sort_by` SQL injection** in `OrderController::index`/export (`:61,:114`) and
   `ShipmentController` (`orderBy("s.{$sortBy}")`). Identifiers aren't bound. Fix pattern already exists in
   `ProductionController:69` (whitelist).
-- **SEC-4 (HIGH): Seeded weak/known credentials.** `SuperAdminSeeder` ships `nyorojnr@gmail.com`/`Admin@123!`,
-  `staff@bethanyhouse.co.ke`/`password` (the latter is the most-used live login), sample customer/`password`.
+- **SEC-4 (HIGH): Seeded weak/known credentials.** _Partially remediated:_ the super_admin is now seeded from
+  `SUPER_ADMIN_EMAIL`/`SUPER_ADMIN_PASSWORD` (neutral default email, random password when unset) and the former
+  `nyorojnr@gmail.com` account has been purged from prod (migration `2026_07_07_100000`). Still weak:
+  `staff@bethanyhouse.co.ke`/`password` (the most-used live login) and sample customer/`password`.
 - **SEC-5 (HIGH): Non-expiring, full-scope tokens.** `SANCTUM_TOKEN_EXPIRY` null; every token minted with
   `['*']`. 74 live tokens, none can expire.
 - **SEC-6 (MED): Outlet scope hole.** `authoriseOutletAccess` passes for a user with zero outlet

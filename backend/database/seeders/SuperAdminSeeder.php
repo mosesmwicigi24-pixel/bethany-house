@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use Illuminate\Database\Seeder;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use App\Enums\UserType;
 
 class SuperAdminSeeder extends Seeder
@@ -23,14 +24,20 @@ class SuperAdminSeeder extends Seeder
             return;
         }
         
+        // Credentials come from the environment; defaults are neutral (never a
+        // real person's address) and the password is random when unset, so no
+        // known/weak credential is ever seeded.
+        $superAdminEmail    = env('SUPER_ADMIN_EMAIL', 'admin@bethanyhouse.co.ke');
+        $superAdminPassword = env('SUPER_ADMIN_PASSWORD') ?: Str::password(16);
+
         // Create super admin user
         $superAdmin = User::create([
             'first_name' => 'Super',
             'last_name' => 'Admin',
-            'email' => 'nyorojnr@gmail.com',
+            'email' => $superAdminEmail,
             'phone' => '+254700000000',
             'user_type' => UserType::SYSTEM,
-            'password' => Hash::make('Admin@123!'),
+            'password' => Hash::make($superAdminPassword),
             'email_verified_at' => now(),
             'status' => 'active',
             'two_factor_enabled' => false,
@@ -77,8 +84,8 @@ class SuperAdminSeeder extends Seeder
         
         $this->command->info('===================================');
         $this->command->info('✓ Super Admin (System User) created');
-        $this->command->info('  Email: nyorojnr@gmail.com');
-        $this->command->info('  Password: Admin@123!');
+        $this->command->info('  Email: ' . $superAdminEmail);
+        $this->command->info('  Password: ' . (env('SUPER_ADMIN_PASSWORD') ? '(from SUPER_ADMIN_PASSWORD)' : $superAdminPassword));
         $this->command->info('');
         $this->command->info('✓ Staff Admin created');
         $this->command->info('  Email: staff@bethanyhouse.co.ke');
