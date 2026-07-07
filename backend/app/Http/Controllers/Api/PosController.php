@@ -391,10 +391,12 @@ class PosController extends Controller
 
         $variance = $validated['closing_cash'] - ($register->expected_cash ?? $register->opening_balance ?? 0);
 
+        // `variance` is not a column (nor fillable) — it was silently dropped.
+        // The discrepancy is the `cash_difference` accessor (actual − expected),
+        // valid once actual_cash is set below. $variance is kept for response/log.
         $register->update([
             'closed_by'       => $user->id,
             'closing_balance' => $validated['closing_cash'],
-            'variance'        => $variance,
             'actual_cash'     => $validated['closing_cash'],
             'status'          => 'closed',
             'closing_notes'   => $validated['notes'] ?? null,
@@ -1100,6 +1102,22 @@ class PosController extends Controller
                 'customer_notes' => ($order->customer_notes ? $order->customer_notes . ' | ' : '') . "Void: {$validated['reason']}",
             ]);
 
+            // Capture what the sale ACTUALLY collected, by method, BEFORE voiding
+            // the payment rows — so the register is reversed by the real cash
+            // taken, not the order total (fixes the drift where a deposit/partial/
+            // split cash sale was over-debited on void).
+            $cashCodes = DB::table('payment_methods')->where('type', 'cash')
+                ->pluck('code')->push('cash')->map(fn ($c) => strtolower($c))->unique();
+            $vCash = $vCard = $vMpesa = $vTotal = 0.0;
+            foreach ($order->payments()->where('status', 'paid')->get() as $p) {
+                $amt = (float) $p->amount;
+                $vTotal += $amt;
+                $m = strtolower($p->payment_method);
+                if ($cashCodes->contains($m))                    { $vCash  += $amt; }
+                elseif (in_array($m, ['card', 'card_paystack']))  { $vCard  += $amt; }
+                elseif (in_array($m, ['mpesa', 'm-pesa']))        { $vMpesa += $amt; }
+            }
+
             // MON-1: POS void previously left payment rows as 'paid'. Void the
             // settled payments and reconcile payment_status so voided sales stop
             // counting as collected.
@@ -1123,33 +1141,40 @@ class PosController extends Controller
                 }
             }
 
-            // Deduct from register if cash sale — use the order creator's register
-            if ($order->payment_method === 'cash') {
+            // Reverse the register by what the sale ACTUALLY collected (drawer row
+            // locked), keyed on the real payments rather than the order's
+            // payment_method label, and ledger the true cash delta.
+            if ($vTotal > 0) {
                 $register = CashRegister::where('outlet_id', $order->outlet_id)
                     ->where('opened_by', $request->user()->id)
                     ->where('status', 'open')
-                    ->latest()
+                    ->latest('opened_at')
+                    ->lockForUpdate()
                     ->first();
                 if ($register) {
                     DB::table('cash_registers')->where('id', $register->id)->update([
-                        'total_sales'      => DB::raw('GREATEST(0, total_sales - ' . $order->total_amount . ')'),
-                        'total_cash_sales' => DB::raw('GREATEST(0, total_cash_sales - ' . $order->total_amount . ')'),
-                        'transaction_count'=> DB::raw('GREATEST(0, transaction_count - 1)'),
-                        'expected_cash'    => DB::raw('GREATEST(0, expected_cash - ' . $order->total_amount . ')'),
-                        'updated_at'       => now(),
+                        'total_sales'       => DB::raw('GREATEST(0, total_sales - ' . $vTotal . ')'),
+                        'total_cash_sales'  => DB::raw('GREATEST(0, total_cash_sales - ' . $vCash . ')'),
+                        'total_card_sales'  => DB::raw('GREATEST(0, total_card_sales - ' . $vCard . ')'),
+                        'total_mpesa_sales' => DB::raw('GREATEST(0, total_mpesa_sales - ' . $vMpesa . ')'),
+                        'transaction_count' => DB::raw('GREATEST(0, transaction_count - 1)'),
+                        'expected_cash'     => DB::raw('GREATEST(0, expected_cash - ' . $vCash . ')'),
+                        'updated_at'        => now(),
                     ]);
 
-                    // MON-3: ledger the cash reversal.
-                    $this->recordCashLedger(
-                        $register,
-                        'refund',
-                        'cash',
-                        (float) $order->total_amount,
-                        max(0, (float) $register->expected_cash - (float) $order->total_amount),
-                        $order->id,
-                        $request->user()->id,
-                        'POS void',
-                    );
+                    // MON-3: ledger the cash reversal (only the cash actually moved).
+                    if ($vCash > 0) {
+                        $this->recordCashLedger(
+                            $register,
+                            'void',
+                            'cash',
+                            $vCash,
+                            max(0, (float) $register->expected_cash - $vCash),
+                            $order->id,
+                            $request->user()->id,
+                            'POS void',
+                        );
+                    }
                 }
             }
 
@@ -1256,6 +1281,15 @@ class PosController extends Controller
                 );
             }
 
+            // Bound the refund to what was ACTUALLY collected on this order, net
+            // of prior refunds. The line total above is unit_price × qty, which
+            // ignores discounts and tax and could pay out more than the customer
+            // ever paid — this cap closes that cash leak.
+            $collected    = (float) $order->payments()->where('status', 'paid')->sum('amount');
+            $priorRefunds = (float) DB::table('order_returns')
+                ->where('order_id', $order->id)->where('status', 'completed')->sum('refund_amount');
+            $refundTotal  = min($refundTotal, max(0, $collected - $priorRefunds));
+
             // Create return record
             $orderReturn = OrderReturn::create([
                 'order_id'      => $order->id,
@@ -1281,14 +1315,20 @@ class PosController extends Controller
                 ]);
             }
 
-            // Deduct from THIS user's cash register if cash refund
-            if ($validated['refund_method'] === 'cash') {
+            // Deduct from THIS user's cash register if cash refund (drawer locked).
+            if ($validated['refund_method'] === 'cash' && $refundTotal > 0) {
                 $register = CashRegister::where('outlet_id', $order->outlet_id)
                     ->where('opened_by', $request->user()->id)
                     ->where('status', 'open')
-                    ->latest()
+                    ->latest('opened_at')
+                    ->lockForUpdate()
                     ->first();
                 if ($register) {
+                    // Reject rather than silently clamp if the drawer can't cover it.
+                    if ($refundTotal > (float) $register->expected_cash) {
+                        DB::rollBack();
+                        return response()->json(['message' => 'Insufficient cash in the register to make this refund.'], 422);
+                    }
                     DB::table('cash_registers')->where('id', $register->id)->update([
                         'total_refunds' => DB::raw('total_refunds + ' . $refundTotal),
                         'expected_cash' => DB::raw('GREATEST(0, expected_cash - ' . $refundTotal . ')'),
