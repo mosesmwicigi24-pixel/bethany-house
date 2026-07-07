@@ -202,13 +202,18 @@ class Order extends Model
     }
 
     /**
-     * Total amount collected across all paid payment records.
+     * Net amount collected across all settled payment records — gross paid minus
+     * anything refunded back. Voided payments (status != 'paid') don't count at
+     * all; refunded ones count only for the un-refunded remainder. This makes
+     * void/refund reconcile correctly (audit MON-1): a fully-refunded order nets
+     * to 0 and syncPaymentStatus() moves it back to 'pending'.
      */
     public function totalPaid(): float
     {
         return (float) $this->payments()
             ->where('status', 'paid')
-            ->sum('amount');
+            ->selectRaw('COALESCE(SUM(amount - refund_amount), 0) AS net')
+            ->value('net');
     }
 
     /**
