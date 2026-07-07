@@ -2023,6 +2023,55 @@ class PosController extends Controller
         return response()->json(['message' => 'Test delivery queued.']);
     }
 
+    /**
+     * GET /admin/pos/outstanding-balances
+     * POS orders that are part-paid (deposit/partial) with money still owed —
+     * the receivables list. Balance = total − net collected (net of refunds).
+     */
+    public function outstandingBalances(Request $request): JsonResponse
+    {
+        $query = Order::with(['outlet:id,name'])
+            ->where('order_type', 'pos')
+            ->whereIn('payment_status', ['partial', 'deposit']);
+
+        if ($request->filled('outlet_id')) {
+            $query->where('outlet_id', (int) $request->outlet_id);
+        }
+
+        if ($request->filled('search')) {
+            $s = $request->input('search');
+            $query->where(function ($q) use ($s) {
+                $q->where('order_number', 'ILIKE', "%{$s}%")
+                    ->orWhere('customer_first_name', 'ILIKE', "%{$s}%")
+                    ->orWhere('customer_last_name', 'ILIKE', "%{$s}%")
+                    ->orWhere('customer_phone', 'ILIKE', "%{$s}%");
+            });
+        }
+
+        $orders = $query->orderBy('created_at', 'desc')->paginate((int) $request->get('per_page', 20));
+
+        $orders->getCollection()->transform(function (Order $o) {
+            $paid = $o->totalPaid();
+
+            return [
+                'id'               => $o->id,
+                'order_number'     => $o->order_number,
+                'customer_name'    => trim(($o->customer_first_name ?? '') . ' ' . ($o->customer_last_name ?? '')) ?: null,
+                'customer_phone'   => $o->customer_phone,
+                'outlet_name'      => $o->outlet?->name,
+                'payment_status'   => $o->payment_status,
+                'currency_code'    => $o->currency_code,
+                'total_amount'     => (float) $o->total_amount,
+                'amount_paid'      => round($paid, 2),
+                'balance'          => round(max(0, (float) $o->total_amount - $paid), 2),
+                'balance_due_date' => $o->balance_due_date?->toDateString(),
+                'created_at'       => $o->created_at?->toIso8601String(),
+            ];
+        });
+
+        return response()->json($orders);
+    }
+
     public function dailySummary(Request $request): JsonResponse
     {
         $validated = $request->validate([

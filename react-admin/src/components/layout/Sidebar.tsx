@@ -102,6 +102,12 @@ const NAV: NavGroup[] = [
                 permission: "customers.view",
             },
             {
+                label: "Balances",
+                href: "/pos/outstanding-balances",
+                icon: "eod-reports",
+                permission: "pos.access",
+            },
+            {
                 label: "EoD Reports",
                 href: "/pos/eod-reports",
                 icon: "eod-reports",

@@ -602,6 +602,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('products',                  [PosController::class, 'products']);
                 Route::get('products/search',           [PosController::class, 'searchProducts']);
                 Route::get('sales',                     [PosController::class, 'sales']);
+                Route::get('outstanding-balances',      [PosController::class, 'outstandingBalances']);
                 Route::get('sales/{id}',                [PosController::class, 'saleDetail']);
                 Route::get('returns',                   [PosController::class, 'returns']);
                 Route::get('reports/daily',             [PosController::class, 'dailySummary']);
