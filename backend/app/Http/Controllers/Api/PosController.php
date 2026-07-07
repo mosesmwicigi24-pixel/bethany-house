@@ -1148,12 +1148,10 @@ class PosController extends Controller
             // locked), keyed on the real payments rather than the order's
             // payment_method label, and ledger the true cash delta.
             if ($vTotal > 0) {
-                $register = CashRegister::where('outlet_id', $order->outlet_id)
-                    ->where('opened_by', $request->user()->id)
-                    ->where('status', 'open')
-                    ->latest('opened_at')
-                    ->lockForUpdate()
-                    ->first();
+                // D8: reverse against the drawer that ACTUALLY took the sale
+                // (from the ledger); if that shift is closed, the acting cashier's
+                // current drawer — not blindly "my latest open register".
+                $register = $this->resolveDrawerForReversal($order->id, $request->user(), $order->outlet_id);
                 if ($register) {
                     DB::table('cash_registers')->where('id', $register->id)->update([
                         'total_sales'       => DB::raw('GREATEST(0, total_sales - ' . $vTotal . ')'),
@@ -1318,14 +1316,11 @@ class PosController extends Controller
                 ]);
             }
 
-            // Deduct from THIS user's cash register if cash refund (drawer locked).
+            // Deduct the cash refund from the drawer that took the sale (D8) — or,
+            // if that shift is closed, the acting cashier's current drawer (the
+            // cash is paid out of the till in front of them). Drawer locked.
             if ($validated['refund_method'] === 'cash' && $refundTotal > 0) {
-                $register = CashRegister::where('outlet_id', $order->outlet_id)
-                    ->where('opened_by', $request->user()->id)
-                    ->where('status', 'open')
-                    ->latest('opened_at')
-                    ->lockForUpdate()
-                    ->first();
+                $register = $this->resolveDrawerForReversal($order->id, $request->user(), $order->outlet_id);
                 if ($register) {
                     // Reject rather than silently clamp if the drawer can't cover it.
                     if ($refundTotal > (float) $register->expected_cash) {
@@ -2115,6 +2110,40 @@ class PosController extends Controller
      * register only carried running aggregate totals with no auditable trail.
      * `balance_after` is the drawer's expected_cash after this movement.
      */
+    /**
+     * D8: resolve which drawer a void/refund for this order should hit. Prefer
+     * the register that ACTUALLY recorded the sale (from the cash ledger), so a
+     * void/refund by a different cashier reverses the right till. If that shift
+     * is already closed, fall back to the acting cashier's current open drawer —
+     * the cash is paid out of the till in front of them. Returned register is
+     * locked for update; null when no suitable open drawer exists.
+     */
+    private function resolveDrawerForReversal(int $orderId, $user, int $outletId): ?CashRegister
+    {
+        $originId = DB::table('cash_register_transactions')
+            ->where('order_id', $orderId)
+            ->where('transaction_type', 'sale')
+            ->orderBy('id')
+            ->value('cash_register_id');
+
+        if ($originId) {
+            $origin = CashRegister::whereKey($originId)
+                ->where('status', 'open')
+                ->lockForUpdate()
+                ->first();
+            if ($origin) {
+                return $origin;
+            }
+        }
+
+        return CashRegister::where('outlet_id', $outletId)
+            ->where('opened_by', $user->id)
+            ->where('status', 'open')
+            ->latest('opened_at')
+            ->lockForUpdate()
+            ->first();
+    }
+
     private function recordCashLedger(
         CashRegister $register,
         string $type,
