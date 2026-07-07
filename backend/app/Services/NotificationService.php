@@ -17,6 +17,7 @@ use App\Notifications\UserWelcomeNotification;
 use App\Notifications\InAppNotification;
 use App\Services\WebPushService;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
@@ -154,6 +155,72 @@ class NotificationService
         return User::find($id);
     }
 
+    // ── Responsibility-based recipient groups ─────────────────────────────────
+    // Business-wide roles that oversee everything, regardless of outlet. Each
+    // notification goes to the group that actually acts on it (not "all admins
+    // for everything"), plus outlet_manager scoped to the relevant outlet.
+    private const OWNERS      = ['super_admin', 'admin'];
+    private const FINANCE     = ['super_admin', 'admin', 'finance_manager'];
+    private const PROCUREMENT = ['super_admin', 'admin', 'procurement_manager', 'procurement_officer'];
+
+    /** User ids (Collection) holding ANY of the given roles, on the sanctum guard. */
+    private static function userIdsForRoles(array $roles): Collection
+    {
+        $roleIds = DB::table('roles')->whereIn('name', $roles)->pluck('id');
+        if ($roleIds->isEmpty()) return collect();
+
+        return DB::table('model_has_roles')
+            ->whereIn('role_id', $roleIds)
+            ->where('model_type', (new User())->getMorphClass())
+            ->pluck('model_id')
+            ->unique();
+    }
+
+    /**
+     * Resolve the active recipients for a role-broadcast notification.
+     *
+     * - `$roles` are business-wide oversight roles that always receive.
+     * - `$outletId` additionally pulls in the outlet_manager(s) assigned to that
+     *    outlet (via the outlet_user pivot) — so branch managers get their own
+     *    branch's events without seeing every other branch.
+     * - `$extraUserIds` are explicit recipients (an assignee, the customer…).
+     * - The person performing the action (the authenticated user) is excluded by
+     *    default — nobody is notified about their own action. Pass a non-null
+     *    `$except` to override the actor, or false to disable exclusion entirely.
+     *
+     * Fully wrapped so a resolution error can never break the surrounding request.
+     */
+    private static function resolve(
+        array $roles,
+        ?int $outletId = null,
+        array $extraUserIds = [],
+        int|false|null $except = null,
+    ): Collection {
+        try {
+            $ids = self::userIdsForRoles($roles);
+
+            if ($outletId) {
+                $atOutlet = DB::table('outlet_user')->where('outlet_id', $outletId)->pluck('user_id');
+                $ids = $ids->merge(self::userIdsForRoles(['outlet_manager'])->intersect($atOutlet));
+            }
+
+            $ids = $ids->merge($extraUserIds)->filter()->unique();
+
+            // Exclude the actor (never ping someone about their own action).
+            $exceptId = $except === false ? null : ($except ?? Auth::id());
+            if ($exceptId) {
+                $ids = $ids->reject(fn ($id) => (int) $id === (int) $exceptId);
+            }
+
+            if ($ids->isEmpty()) return collect();
+
+            return User::whereIn('id', $ids)->where('status', 'active')->get();
+        } catch (\Throwable $e) {
+            Log::warning('NotificationService::resolve failed: ' . $e->getMessage());
+            return collect();
+        }
+    }
+
     // ── Order notifications ───────────────────────────────────────────────────
 
     /**
@@ -161,18 +228,10 @@ class NotificationService
      */
     public static function orderPlaced(int $orderId, string $orderNumber, ?int $outletId = null): void
     {
-        // Notify admins + the outlet manager of the relevant outlet
-        $recipients = self::usersWithRole('admin', 'super_admin');
-
-        if ($outletId) {
-            $outletManagers = User::where('outlet_id', $outletId)
-                ->whereHas('roles', fn ($q) => $q->whereIn('name', ['outlet_manager']))
-                ->get();
-            $recipients = $recipients->merge($outletManagers);
-        }
-
+        // Owners (all branches) + the manager(s) of the outlet the order was
+        // placed at. The cashier who created it isn't pinged about their own sale.
         self::send(
-            $recipients->unique('id'),
+            self::resolve(self::OWNERS, $outletId),
             new OrderPlacedNotification($orderId, $orderNumber)
         );
     }
@@ -187,15 +246,13 @@ class NotificationService
         string $newStatus,
         ?int $customerId = null
     ): void {
-        $recipients = collect();
-
-        // Notify admins
-        $recipients = $recipients->merge(self::usersWithRole('admin', 'super_admin'));
-
-        // Notify the customer if they have an account
+        // Owners + the customer (if they have an account). The customer must
+        // always be told even when they triggered it, so it's added explicitly
+        // rather than via the actor-excluded role set.
+        $recipients = self::resolve(self::OWNERS);
         if ($customerId) {
             $customer = self::user($customerId);
-            if ($customer) $recipients->push($customer);
+            if ($customer && $customer->status === 'active') $recipients->push($customer);
         }
 
         self::send(
@@ -219,7 +276,7 @@ class NotificationService
         string $method
     ): void {
         self::send(
-            self::usersWithRole('admin', 'super_admin', 'finance'),
+            self::resolve(self::FINANCE),
             new PaymentReceivedNotification(
                 $paymentId, $paymentNumber, $orderId, $orderNumber, $amount, $currency, $method
             )
@@ -239,7 +296,7 @@ class NotificationService
         string $countryCode
     ): void {
         self::send(
-            self::usersWithRole('admin', 'super_admin'),
+            self::resolve(self::FINANCE),
             new PaymentApprovalRequiredNotification(
                 $paymentId, $paymentNumber, $orderId, $orderNumber, $amount, $currency, $countryCode
             )
@@ -257,7 +314,7 @@ class NotificationService
         int $orderId
     ): void {
         self::send(
-            self::usersWithRole('admin', 'super_admin'),
+            self::resolve(self::FINANCE),
             new PaymentApprovalRequiredNotification(
                 $paymentId, $paymentNumber, $orderId, $orderNumber, 0, '', ''
             )
@@ -281,7 +338,7 @@ class NotificationService
         }
 
         if ($recipients->isEmpty()) {
-            $recipients = self::usersWithRole('admin', 'super_admin');
+            $recipients = self::resolve(self::FINANCE);
         }
 
         self::send(
@@ -310,7 +367,7 @@ class NotificationService
         }
 
         if ($recipients->isEmpty()) {
-            $recipients = self::usersWithRole('admin', 'super_admin');
+            $recipients = self::resolve(self::FINANCE);
         }
 
         self::send(
@@ -335,15 +392,10 @@ class NotificationService
         ?string $outletName = null,
         ?int $outletManagerId = null
     ): void {
-        $recipients = self::usersWithRole('admin', 'super_admin');
-
-        if ($outletManagerId) {
-            $manager = self::user($outletManagerId);
-            if ($manager) $recipients->push($manager);
-        }
-
+        // Low stock is a reorder trigger → procurement + owners, plus the manager
+        // of the affected outlet.
         self::send(
-            $recipients->unique('id'),
+            self::resolve(self::PROCUREMENT, null, [$outletManagerId]),
             new LowStockAlertNotification($variantId, $productName, $sku, $currentQty, $threshold, $outletName)
         );
     }
@@ -378,7 +430,7 @@ class NotificationService
         string $productName
     ): void {
         self::send(
-            self::usersWithRole('admin', 'super_admin', 'production_manager'),
+            self::resolve(self::OWNERS),
             new ProductionStageCompletedNotification(
                 $productionOrderId, $orderNumber, $stageName, $productName
             )
@@ -395,15 +447,8 @@ class NotificationService
         string $dueDate,
         array $assignedUserIds = []
     ): void {
-        $recipients = self::usersWithRole('admin', 'super_admin');
-
-        foreach ($assignedUserIds as $uid) {
-            $u = self::user($uid);
-            if ($u) $recipients->push($u);
-        }
-
         self::send(
-            $recipients->unique('id'),
+            self::resolve(self::OWNERS, null, $assignedUserIds),
             new ProductionOverdueNotification($productionOrderId, $orderNumber, $productName, $dueDate)
         );
     }
@@ -419,13 +464,10 @@ class NotificationService
         string $newStatus,
         ?int $customerId = null
     ): void {
-        $recipients = collect();
-
-        $recipients = $recipients->merge(self::usersWithRole('admin'));
-
+        $recipients = self::resolve(self::OWNERS);
         if ($customerId) {
             $customer = self::user($customerId);
-            if ($customer) $recipients->push($customer);
+            if ($customer && $customer->status === 'active') $recipients->push($customer);
         }
 
         self::send(
@@ -447,7 +489,7 @@ class NotificationService
         string $currency = 'KES'
     ): void {
         self::send(
-            self::usersWithRole('admin', 'super_admin'),
+            self::resolve(self::PROCUREMENT),
             new InAppNotification(
                 title:     "Purchase Order {$poNumber} created",
                 body:      "New PO to {$supplierName} for {$currency} " . number_format($totalAmount, 2),
@@ -468,12 +510,7 @@ class NotificationService
         string $newStatus,
         ?int $notifyUserId = null
     ): void {
-        $recipients = self::usersWithRole('admin', 'super_admin');
-
-        if ($notifyUserId) {
-            $u = self::user($notifyUserId);
-            if ($u) $recipients->push($u);
-        }
+        $recipients = self::resolve(self::PROCUREMENT, null, [$notifyUserId]);
 
         $labels = [
             'pending_approval'   => 'submitted for approval',
@@ -513,7 +550,7 @@ class NotificationService
             : "Partial goods received for PO {$poNumber}";
 
         self::send(
-            self::usersWithRole('admin', 'super_admin'),
+            self::resolve(self::PROCUREMENT),
             new InAppNotification(
                 title:     $title,
                 body:      "GRN {$grnNumber} created. Supplier: {$supplierName}.",
@@ -534,7 +571,7 @@ class NotificationService
         string $supplierName
     ): void {
         self::send(
-            self::usersWithRole('admin', 'super_admin'),
+            self::resolve(self::PROCUREMENT),
             new InAppNotification(
                 title:     "Purchase return {$returnNumber} created",
                 body:      "Return against PO {$poNumber} to supplier {$supplierName}.",
@@ -558,7 +595,7 @@ class NotificationService
         string $unit = ''
     ): void {
         self::send(
-            self::usersWithRole('admin', 'super_admin'),
+            self::resolve(self::PROCUREMENT),
             new InAppNotification(
                 title:     "Low stock: {$materialName}",
                 body:      "Only {$currentQty} {$unit} remaining (reorder point: {$reorderPoint} {$unit}).",
@@ -582,7 +619,7 @@ class NotificationService
     ): void {
         $sign = $quantityChange > 0 ? '+' : '';
         self::send(
-            self::usersWithRole('admin', 'super_admin'),
+            self::resolve(self::PROCUREMENT),
             new InAppNotification(
                 title:     "Stock adjustment requires approval",
                 body:      "{$requestedByName} requested {$sign}{$quantityChange} on {$productName} ({$sku}). Reason: {$reasonLabel}.",
@@ -604,7 +641,7 @@ class NotificationService
         int $itemsCount
     ): void {
         self::send(
-            self::usersWithRole('admin', 'super_admin'),
+            self::resolve(self::PROCUREMENT),
             new InAppNotification(
                 title:     "Stock transfer {$transferNumber} initiated",
                 body:      "{$itemsCount} item(s) from {$fromOutlet} → {$toOutlet}.",
@@ -625,7 +662,7 @@ class NotificationService
         string $toOutlet
     ): void {
         self::send(
-            self::usersWithRole('admin', 'super_admin'),
+            self::resolve(self::PROCUREMENT),
             new InAppNotification(
                 title:     "Stock transfer {$transferNumber} received",
                 body:      "Transfer from {$fromOutlet} received at {$toOutlet}.",
@@ -648,7 +685,7 @@ class NotificationService
         int $quantity
     ): void {
         self::send(
-            self::usersWithRole('admin', 'super_admin'),
+            self::resolve(self::OWNERS),
             new InAppNotification(
                 title:     "Production order {$orderNumber} created",
                 body:      "{$quantity}x {$productName} added to production queue.",
@@ -669,7 +706,7 @@ class NotificationService
         int $quantity
     ): void {
         self::send(
-            self::usersWithRole('admin', 'super_admin'),
+            self::resolve(self::OWNERS),
             new InAppNotification(
                 title:     "Production order {$orderNumber} completed",
                 body:      "{$quantity}x {$productName} completed and ready.",
@@ -690,7 +727,7 @@ class NotificationService
         int $passedQuantity
     ): void {
         self::send(
-            self::usersWithRole('admin', 'super_admin', 'production_manager'),
+            self::resolve(self::OWNERS),
             new InAppNotification(
                 title:     "QC passed for {$orderNumber}",
                 body:      "{$passedQuantity}x {$productName} passed quality control.",
@@ -712,7 +749,7 @@ class NotificationService
         string $notes = ''
     ): void {
         self::send(
-            self::usersWithRole('admin', 'super_admin', 'production_manager'),
+            self::resolve(self::OWNERS),
             new InAppNotification(
                 title:     "QC failed for {$orderNumber}",
                 body:      "{$failedQuantity}x {$productName} failed quality control." . ($notes ? " Notes: {$notes}" : ''),
