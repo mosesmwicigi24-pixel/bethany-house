@@ -514,13 +514,24 @@ function SetShippingFeeModal({ order, onClose, onDone }: {
         ? (selectedMethod.cost_type === "free" ? 0 : selectedMethod.flat_rate)
         : amount;
 
+    // Live impact preview. Only the shipping charge — and therefore the balance —
+    // moves; the amount already paid and the product prices never change.
+    const paid = (order.payments ?? [])
+        .filter((p: any) => p.status === "paid")
+        .reduce((s: number, p: any) => s + Number(p.amount), 0);
+    const oldShipping = order.shipping_amount ?? 0;
+    const newTotal    = Math.max(0, order.total_amount - oldShipping + effectiveAmount);
+    const newBalance  = Math.max(0, newTotal - paid);
+    const isPaid      = order.payment_status === "paid";
+    const addsBalance = newBalance > 0.01 && effectiveAmount > oldShipping;
+
     const mutation = useMutation({
         mutationFn: () => ordersApi.setShippingFee(order.id, {
             amount:            effectiveAmount,
             note:              note || selectedMethod?.name || undefined,
             shipping_method_id: mode === "pick" && selectedMethodId ? selectedMethodId : undefined,
         }),
-        onSuccess: () => { toast.success("Shipping fee updated"); onDone(); onClose(); },
+        onSuccess: (res) => { toast.success(res?.message ?? "Shipping fee updated"); onDone(); onClose(); },
         onError:   (e: ApiError) => toast.error(e.message),
     });
 
@@ -626,6 +637,31 @@ function SetShippingFeeModal({ order, onClose, onDone }: {
                         <span className="font-bold text-surface-900">
                             {effectiveAmount === 0 ? "Free" : `${order.currency_code} ${fmt2(effectiveAmount)}`}
                         </span>
+                    </div>
+                )}
+
+                {/* Balance impact — the product price and the amount already paid
+                    are never changed; only the shipping charge and the balance move. */}
+                {addsBalance && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 space-y-1.5">
+                        {isPaid && (
+                            <p className="text-2xs font-semibold text-amber-800">
+                                This receipt is paid. Adding shipping re-opens it with a balance to collect —
+                                the product price and the amount already paid stay exactly the same.
+                            </p>
+                        )}
+                        <div className="flex items-center justify-between text-xs text-surface-600">
+                            <span>Already paid</span>
+                            <span className="tabular-nums">{order.currency_code} {fmt2(paid)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-surface-600">
+                            <span>New order total</span>
+                            <span className="tabular-nums">{order.currency_code} {fmt2(newTotal)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs font-bold text-amber-900 border-t border-amber-200 pt-1.5">
+                            <span>Balance now due</span>
+                            <span className="tabular-nums">{order.currency_code} {fmt2(newBalance)}</span>
+                        </div>
                     </div>
                 )}
 
@@ -3542,7 +3578,10 @@ export default function OrderDetailPage() {
                                     )}
                                     <div className="flex justify-between text-surface-500 py-1.5 border-b border-surface-50">
                                         <span className="flex items-center gap-1.5">Shipping
-                                            {order.payment_status !== "paid" && (
+                                            {/* Shipping can be attached even after the receipt is paid —
+                                                made-to-order freight is only known after production. It
+                                                re-opens a balance without touching the goods or payments. */}
+                                            {!["cancelled", "voided", "refunded"].includes(order.status) && (
                                                 <button onClick={() => setShowShippingModal(true)} className="text-brand-500 hover:underline text-2xs">{order.shipping_amount > 0 ? "edit" : "+ add"}</button>
                                             )}
                                         </span>

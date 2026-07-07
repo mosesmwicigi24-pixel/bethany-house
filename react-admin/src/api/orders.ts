@@ -305,7 +305,16 @@ export const ordersApi = {
         id: number,
         data: { amount: number; note?: string; shipping_method_id?: number | null },
     ) =>
-        patch<{ message: string; shipping_amount: number; shipping_method: string | null; total_amount: number }>(
+        patch<{
+            message: string;
+            shipping_amount: number;
+            shipping_method: string | null;
+            total_amount: number;
+            amount_paid: number;
+            balance: number;
+            payment_status: string;
+            overpaid: number;
+        }>(
             `/v1/admin/orders/${id}/shipping-fee`,
             data,
         ),

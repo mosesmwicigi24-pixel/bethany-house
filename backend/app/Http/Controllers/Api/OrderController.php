@@ -1307,10 +1307,14 @@ class OrderController extends Controller
 
         $order = Order::findOrFail($id);
 
-        if ($order->payment_status === 'paid') {
-            return response()->json(['message' => 'Cannot change shipping fee on a paid order.'], 422);
-        }
-
+        // Shipping is the ONE charge that can legitimately be set/adjusted after a
+        // receipt is paid and "closed". For made-to-order work the freight isn't
+        // knowable until the item is produced, so the shipping cost is attached
+        // afterwards. Adjusting it only ever moves the order total — and therefore
+        // the outstanding balance. Line-item prices and recorded payments are
+        // never touched here, so the "a paid receipt cannot be edited" rule still
+        // holds for the goods and the money already collected. A voided/cancelled/
+        // refunded order is genuinely closed and stays locked.
         if (in_array($order->status, ['cancelled', 'voided', 'refunded'])) {
             return response()->json(['message' => 'Cannot change shipping fee on a cancelled/voided/refunded order.'], 422);
         }
@@ -1327,9 +1331,31 @@ class OrderController extends Controller
             }
         }
 
+        // Recompute the balance from what's ALREADY been paid vs the new total.
+        // The paid amount is read, never modified.
+        $newTotal   = max(0, (float) $order->total_amount + $diff);
+        $paid       = round((float) $order->totalPaid(), 2);
+        $newBalance = round($newTotal - $paid, 2);
+
+        // Derive the payment status. Adding shipping to a fully-paid receipt
+        // re-opens it to 'partial' so the new balance surfaces in receivables and
+        // can be collected later via recordPosPay. The fulfilment status is left
+        // untouched (the goods were already produced/handed over).
+        $wasDeposit = $order->payment_status === 'deposit';
+        if ($newBalance <= 0.01) {
+            $newPaymentStatus = 'paid';
+        } elseif ($paid <= 0.01) {
+            $newPaymentStatus = $order->payment_status;   // still unpaid — leave as-is
+        } elseif ($wasDeposit && $order->deposit_amount) {
+            $newPaymentStatus = 'deposit';
+        } else {
+            $newPaymentStatus = 'partial';
+        }
+
         $order->update([
             'shipping_amount'         => $newShipping,
-            'total_amount'            => max(0, (float) $order->total_amount + $diff),
+            'total_amount'            => $newTotal,
+            'payment_status'          => $newPaymentStatus,
             'shipping_fee_overridden' => true,
             'shipping_method'         => $shippingMethodName ?? $order->shipping_method,
             'shipping_fee_note'       => $validated['note'] ?? $shippingMethodName ?? null,
@@ -1338,18 +1364,32 @@ class OrderController extends Controller
         $fresh = $order->fresh();
 
         ActivityLogService::log('shipping_fee_updated', $order, [
-            'old_amount'          => $oldShipping,
-            'new_amount'          => $newShipping,
-            'shipping_method'     => $shippingMethodName,
-            'note'                => $validated['note'] ?? null,
-            'new_total'           => $fresh->total_amount,
+            'old_amount'      => $oldShipping,
+            'new_amount'      => $newShipping,
+            'shipping_method' => $shippingMethodName,
+            'note'            => $validated['note'] ?? null,
+            'new_total'       => $fresh->total_amount,
+            'amount_paid'     => $paid,
+            'new_balance'     => max(0, $newBalance),
+            'payment_status'  => $newPaymentStatus,
         ]);
 
+        // An overpayment can only arise if shipping was reduced below what's
+        // already been paid — surface it so the UI can offer a refund rather than
+        // silently leaving a credit on a closed receipt.
+        $overpaid = $paid > $newTotal + 0.01 ? round($paid - $newTotal, 2) : 0;
+
         return response()->json([
-            'message'         => 'Shipping fee updated.',
+            'message'         => $diff > 0 && $newBalance > 0.01
+                ? 'Shipping fee added. A balance of ' . number_format($newBalance, 2) . ' ' . $order->currency_code . ' is now due.'
+                : 'Shipping fee updated.',
             'shipping_amount' => $fresh->shipping_amount,
             'shipping_method' => $fresh->shipping_method,
             'total_amount'    => $fresh->total_amount,
+            'amount_paid'     => $paid,
+            'balance'         => max(0, $newBalance),
+            'payment_status'  => $fresh->payment_status,
+            'overpaid'        => $overpaid,
         ]);
     }
 
