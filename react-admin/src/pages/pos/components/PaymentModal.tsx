@@ -639,13 +639,17 @@ function PaystackPanel({
 
 // ── Cash panel ────────────────────────────────────────────────────────────────
 
-function CashPanel({ total, currency, onConfirm }: {
-    total: number; currency: string; onConfirm: (cashReceived: number) => void;
+function CashPanel({ total, currency, onConfirm, allowPartial = false }: {
+    total: number; currency: string; onConfirm: (cashReceived: number) => void; allowPartial?: boolean;
 }) {
     const [cashReceived, setCashReceived] = useState(Math.ceil(total / 100) * 100 || total);
 
     const change  = Math.max(0, cashReceived - total);
     const isShort = cashReceived < total && cashReceived > 0;
+    // With allowPartial, a short entry is accepted as a partial payment (the
+    // balance stays owed) instead of being blocked; the amount actually
+    // collected is then min(entered, total).
+    const collected = allowPartial ? Math.min(cashReceived, total) : total;
 
     return (
         <div className="space-y-3">
@@ -653,7 +657,7 @@ function CashPanel({ total, currency, onConfirm }: {
                 <label className="label">Cash Received</label>
                 <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-surface-400">{currency}</span>
-                    <input type="number" min={total} step={0.01} value={cashReceived}
+                    <input type="number" min={allowPartial ? 0.01 : total} step={0.01} value={cashReceived}
                         onChange={e => setCashReceived(parseFloat(e.target.value) || 0)}
                         className="input pl-12 text-xl font-bold" autoFocus />
                 </div>
@@ -669,21 +673,21 @@ function CashPanel({ total, currency, onConfirm }: {
             </div>
             {cashReceived > 0 && (
                 <div className={clsx("rounded-xl p-3 flex items-center justify-between",
-                    change > 0 ? "bg-success-light" : isShort ? "bg-danger-light" : "bg-surface-50")}>
-                    <span className={clsx("text-sm font-medium", change > 0 ? "text-success-dark" : isShort ? "text-danger" : "text-surface-600")}>
-                        {isShort ? "Short by" : "Change"}
+                    change > 0 ? "bg-success-light" : isShort ? (allowPartial ? "bg-warning-light" : "bg-danger-light") : "bg-surface-50")}>
+                    <span className={clsx("text-sm font-medium", change > 0 ? "text-success-dark" : isShort ? (allowPartial ? "text-warning-dark" : "text-danger") : "text-surface-600")}>
+                        {isShort ? (allowPartial ? "Balance due" : "Short by") : "Change"}
                     </span>
-                    <span className={clsx("text-xl font-bold", change > 0 ? "text-success-dark" : isShort ? "text-danger" : "text-surface-600")}>
+                    <span className={clsx("text-xl font-bold", change > 0 ? "text-success-dark" : isShort ? (allowPartial ? "text-warning-dark" : "text-danger") : "text-surface-600")}>
                         {currency} {Math.abs(cashReceived - total).toLocaleString("en-KE", { minimumFractionDigits: 2 })}
                     </span>
                 </div>
             )}
             <button
                 onClick={() => onConfirm(cashReceived)}
-                disabled={cashReceived < total}
+                disabled={allowPartial ? cashReceived <= 0 : cashReceived < total}
                 className="btn-primary w-full gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
-                Confirm - {currency} {fmtAmt(total)}
+                Confirm - {currency} {fmtAmt(collected)}
             </button>
         </div>
     );
@@ -1254,8 +1258,13 @@ aria-label="Close">
 
                             {/* Per-method detail panel */}
                             {selectedMethod && isCash(selectedMethod) && (
-                                <CashPanel total={total} currency={currency}
-                                    onConfirm={cashReceived => handleSingleConfirm({ cashReceived })} />
+                                <CashPanel total={total} currency={currency} allowPartial
+                                    onConfirm={cashReceived => handleSingleConfirm({
+                                        cashReceived,
+                                        // Short cash = a partial payment of what was tendered; the
+                                        // order keeps the balance owed (reuses the deposit path).
+                                        depositAmount: cashReceived < total ? cashReceived : undefined,
+                                    })} />
                             )}
                             {selectedMethod && isMpesa(selectedMethod) && (
                                 <MpesaPanel orderId={orderId} total={total} currency={currency}
