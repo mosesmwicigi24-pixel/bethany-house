@@ -182,6 +182,9 @@ export interface PaymentMethodSetup {
     icon: string | null;
     is_active: boolean;
     is_default: boolean;
+    // Effective approval policy from the backend: true → the payment is held for
+    // admin approval; false → it settles immediately (cash, I&M, M-Pesa, card).
+    requires_approval?: boolean;
     sort_order: number;
     display_order: number;
     configuration: Record<string, string> | null; // DB column name
@@ -199,6 +202,7 @@ export interface PaymentMethodFormData {
     description: string;
     is_active: boolean;
     is_default: boolean;
+    requires_approval: boolean;
     sort_order: number;
     supported_currencies: string[];
 }

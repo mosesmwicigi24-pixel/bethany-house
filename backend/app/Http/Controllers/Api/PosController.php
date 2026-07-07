@@ -15,6 +15,7 @@ use App\Models\CashRegisterTransaction;
 use App\Models\Outlet;
 use App\Models\TaxRate;
 use App\Models\Payment;
+use App\Models\PaymentMethod;
 use App\Services\ActivityLogService;
 use App\Services\TaxCalculationService;
 use App\Services\NotificationService;
@@ -526,15 +527,31 @@ class PosController extends Controller
         }
 
         // Load payment method types once so we can treat any method whose type is
-        // 'cash' identically to the built-in 'cash' code throughout this request.
+        // 'cash' identically to the built-in 'cash' code throughout this request,
+        // and so we can apply each method's per-method approval policy.
         $inputMethodCodes  = collect($paymentsInput)->pluck('method')->filter()->unique()->toArray();
-        $pmMethodTypesSale = DB::table('payment_methods')
+        $pmMethodRowsSale  = DB::table('payment_methods')
             ->whereIn('code', $inputMethodCodes)
-            ->pluck('type', 'code');   // ['cash' => 'cash', 'mpesa' => 'mobile_money', …]
+            ->get(['code', 'type', 'requires_approval'])
+            ->keyBy('code');
+        $pmMethodTypesSale = $pmMethodRowsSale->map(fn ($r) => $r->type);   // ['cash' => 'cash', …]
 
         // Helper: true for the built-in 'cash' code AND any custom method typed as 'cash'
         $isCashTypeSale = fn (string $code): bool =>
             $code === 'cash' || ($pmMethodTypesSale->get($code) === 'cash');
+
+        // Helper: whether a tender must be held for admin approval (cheque, bank
+        // transfer, Western Union, MoneyGram…). Cash / I&M / M-Pesa / card settle
+        // instantly. Same policy source as recordPosPay and addPayment.
+        $needsApprovalSale = function (string $code) use ($pmMethodRowsSale): bool {
+            $row = $pmMethodRowsSale->get($code);
+            return PaymentMethod::deriveRequiresApproval($code, $row?->type, $row?->requires_approval);
+        };
+        // A tender that requires approval is not settled money yet — it must not
+        // inflate the register or the order's paid total until an admin approves.
+        $settledPayments   = collect($paymentsInput)->reject(fn ($p) => $needsApprovalSale($p['method'] ?? ''));
+        $hasPendingTender  = collect($paymentsInput)->contains(fn ($p) => $needsApprovalSale($p['method'] ?? ''));
+        $settledTotal      = round((float) $settledPayments->sum(fn ($p) => (float) $p['amount']), 2);
 
         // If any payment is cash (by code or type), THIS USER's register must be open
         // Look up THIS user's open register. A cash sale requires one; a non-cash
@@ -768,10 +785,15 @@ class PosController extends Controller
             $isDeposit    = !empty($validated['is_deposit']);
             $depositAmt   = $isDeposit ? round((float) ($validated['deposit_amount'] ?? 0), 2) : null;
 
-            // In deposit mode the payment status is 'deposit' regardless of amount paid
+            // Only settled tenders count toward the paid status. A tender awaiting
+            // approval (cheque, bank transfer, Western Union, MoneyGram) is not
+            // money yet, so it leaves the order on hold until an admin approves it.
+            // In deposit mode the payment status is 'deposit' regardless of amount.
             $paymentStatus = $isDeposit
                 ? 'deposit'
-                : ($totalPayments >= $totalAmount + $shippingAmt - 0.01 ? 'paid' : 'partial');
+                : ($settledTotal >= $totalAmount + $shippingAmt - 0.01
+                    ? 'paid'
+                    : ($settledTotal > 0.01 ? 'partial' : 'pending_approval'));
 
             $order = Order::create([
                 'order_number'         => $orderNumber,
@@ -780,8 +802,9 @@ class PosController extends Controller
                 'order_type'           => 'pos',
                 // POS instant cash/card/mpesa: payment is confirmed but goods
                 // still need to be packed/handed over. Use 'confirmed' so staff
-                // can set 'completed' after handover. Deposit: 'processing'.
-                'status'               => $isDeposit ? 'processing' : 'confirmed',
+                // can set 'completed' after handover. Deposit or a tender pending
+                // approval keeps the order in 'processing' (on hold).
+                'status'               => ($isDeposit || $hasPendingTender) ? 'processing' : 'confirmed',
                 'payment_status'       => $paymentStatus,
                 'currency_code'        => $currencyCode,
                 'customer_country_code' => $customerCountryCode ?: null,
@@ -845,8 +868,9 @@ class PosController extends Controller
             $primaryChange          = 0;
 
             foreach ($paymentsInput as $pmt) {
-                $pmtAmount  = (float) $pmt['amount'];
-                $pmtIsCash  = $isCashTypeSale($pmt['method'] ?? '');
+                $pmtAmount       = (float) $pmt['amount'];
+                $pmtIsCash       = $isCashTypeSale($pmt['method'] ?? '');
+                $pmtNeedsApproval = $needsApprovalSale($pmt['method'] ?? '');
                 $pmtCashRec = $pmtIsCash ? (float) ($pmt['cash_received'] ?? $pmtAmount) : null;
                 $pmtChange  = $pmtIsCash ? max(0, ($pmtCashRec ?? $pmtAmount) - $pmtAmount) : null;
                 Payment::create([
@@ -854,16 +878,25 @@ class PosController extends Controller
                     'amount'             => $pmtAmount,
                     'currency_code'      => $currencyCode,
                     'payment_method'     => $pmt['method'],
-                    'status'             => 'paid',
+                    // A tender awaiting approval is held pending until an admin
+                    // reviews it; everything else settles instantly.
+                    'status'             => $pmtNeedsApproval ? 'pending' : 'paid',
+                    'requires_approval'  => $pmtNeedsApproval,
+                    'approval_status'    => $pmtNeedsApproval ? 'pending_review' : null,
                     'provider_reference' => $pmt['reference'] ?? null,
                     'phone_number'       => $pmt['method'] === 'mpesa'
                         ? ($validated['customer_phone'] ?? null) : null,
                     'cash_received'      => $pmtCashRec,
                     'change_given'       => $pmtChange,
-                    'paid_at'            => now(),
+                    'paid_at'            => $pmtNeedsApproval ? null : now(),
                 ]);
 
-                // Accumulate for register update
+                // Only settled tenders touch the register. A pending-approval
+                // payment must never inflate the drawer or the sales aggregates
+                // until it is approved.
+                if ($pmtNeedsApproval) {
+                    continue;
+                }
                 $totalSalesForRegister += $pmtAmount;
                 if ($pmtIsCash) {
                     $totalCashForRegister += $pmtAmount;
@@ -968,49 +1001,74 @@ class PosController extends Controller
             if ($request->hasFile('proof_of_payment')) {
                 $file = $request->file('proof_of_payment');
                 $path = $file->store("payment-proofs/{$order->id}", 'private');
-                // Find the first non-cash / non-mpesa payment to attach the proof to.
-                // Cash-type methods (by code or DB type) never carry a proof file.
-                $cashTypeCodes = collect($inputMethodCodes)
-                    ->filter(fn ($c) => $isCashTypeSale($c))
-                    ->push('cash', 'mpesa')
-                    ->unique()
-                    ->values()
-                    ->toArray();
+                // Attach the proof to a payment that is actually awaiting approval
+                // (those the loop already marked pending). Falling back to the
+                // first non-cash/non-gateway payment keeps legacy behaviour when
+                // no method was flagged. Order/payment status was already set
+                // correctly above, so we only attach the file here.
                 $targetPaymentId = DB::table('payments')
                     ->where('order_id', $order->id)
-                    ->whereNotIn('payment_method', $cashTypeCodes)
+                    ->where('requires_approval', true)
                     ->value('id');
+                if (!$targetPaymentId) {
+                    $cashTypeCodes = collect($inputMethodCodes)
+                        ->filter(fn ($c) => $isCashTypeSale($c))
+                        ->push('cash', 'mpesa', 'card')
+                        ->unique()
+                        ->values()
+                        ->toArray();
+                    $targetPaymentId = DB::table('payments')
+                        ->where('order_id', $order->id)
+                        ->whereNotIn('payment_method', $cashTypeCodes)
+                        ->value('id');
+                    if ($targetPaymentId) {
+                        DB::table('payments')->where('id', $targetPaymentId)->update([
+                            'requires_approval' => true,
+                            'approval_status'   => 'pending_review',
+                            'status'            => 'pending',
+                            'paid_at'           => null,
+                            'updated_at'        => now(),
+                        ]);
+                        $order->update(['payment_status' => 'pending_approval', 'status' => 'processing']);
+                    }
+                }
                 if ($targetPaymentId) {
                     DB::table('payments')->where('id', $targetPaymentId)->update([
                         'proof_of_payment_path' => $path,
-                        'requires_approval'     => true,
-                        'approval_status'       => 'pending_review',
-                        'status'                => 'pending',
                         'updated_at'            => now(),
                     ]);
-                    $order->update(['payment_status' => 'pending', 'status' => 'processing']);
                 }
             }
 
-            // Notify admin of every cash / cash-type payment so reconciliation is
-            // always immediate — same behaviour as the cash option.
+            // Notify admin per payment, keyed off the actual saved record so the
+            // notification always matches the row: cash / I&M settle instantly →
+            // paymentReceived (reconciliation); a tender awaiting approval →
+            // paymentApprovalRequired (goes to the approvals queue).
             try {
-                $salePayments = $order->fresh(['payments'])->payments->sortByDesc('id')->values();
-                collect($paymentsInput)->each(function ($pmt, $i) use ($salePayments, $order, $isCashTypeSale) {
-                    $pmtModel = $salePayments->get($i);
-                    if (!$pmtModel) return;
-                    if ($isCashTypeSale($pmt['method'] ?? '')) {
+                foreach ($order->fresh(['payments'])->payments as $pmtModel) {
+                    $code = $pmtModel->payment_method;
+                    if ($needsApprovalSale($code)) {
+                        NotificationService::paymentApprovalRequired(
+                            $pmtModel->id,
+                            $pmtModel->payment_number,
+                            $order->id,
+                            $order->order_number,
+                            (float) $pmtModel->amount,
+                            $order->currency_code,
+                            $order->customer_country_code ?? ''
+                        );
+                    } elseif ($isCashTypeSale($code)) {
                         NotificationService::paymentReceived(
                             $pmtModel->id,
                             $pmtModel->payment_number,
                             $order->id,
                             $order->order_number,
-                            (float) $pmt['amount'],
+                            (float) $pmtModel->amount,
                             $order->currency_code,
-                            $pmt['method']
+                            $code
                         );
                     }
-                });
+                }
             } catch (\Exception) {}
 
             $change = round($primaryChange, 2);
@@ -3284,9 +3342,11 @@ class PosController extends Controller
         // is treated identically to the built-in 'cash' code: no approval needed,
         // but admin is notified immediately via paymentReceived.
         $inputCodes    = collect($paymentsInput)->pluck('method')->filter()->unique()->toArray();
-        $pmMethodTypes = DB::table('payment_methods')
+        $pmMethodRows  = DB::table('payment_methods')
             ->whereIn('code', $inputCodes)
-            ->pluck('type', 'code');
+            ->get(['code', 'type', 'requires_approval'])
+            ->keyBy('code');
+        $pmMethodTypes = $pmMethodRows->map(fn ($r) => $r->type);
 
         $isCashType = fn (string $code): bool =>
             $code === 'cash' || ($pmMethodTypes->get($code) === 'cash');
@@ -3299,16 +3359,23 @@ class PosController extends Controller
             $totalMpesa       = 0;
             $totalSales       = 0;
             $proofPaymentId   = null;
+            $anyNeedsApproval = false;
+            $createdIds       = [];
 
             foreach ($paymentsInput as $pmt) {
                 $pmtAmount     = (float)$pmt['amount'];
                 $pmtMethod     = $pmt['method'] ?? 'other';
-                // Cash (by code or DB type) is an immediate verified transaction — no
-                // approval needed.  M-Pesa and card are gateway-verified.  Everything
-                // else (bank_transfer, other, cheque…) requires admin review.
+                // Approval policy is per-method (PaymentMethod::deriveRequiresApproval),
+                // the same source of truth used by addPayment and the frontend. Cash
+                // and I&M settle instantly (notification only); cheque / bank transfer
+                // / Western Union / MoneyGram are held for admin review.
                 $pmtIsCash     = $isCashType($pmtMethod);
-                $isAutomated   = $pmtIsCash || in_array($pmtMethod, ['mpesa', 'card', 'card_paystack']);
-                $needsApproval = !$isAutomated;
+                $pmtRow        = $pmMethodRows->get($pmtMethod);
+                $needsApproval = PaymentMethod::deriveRequiresApproval(
+                    $pmtMethod,
+                    $pmtRow?->type,
+                    $pmtRow?->requires_approval,
+                );
 
                 // Validate cash tendered (applies to all cash-type methods)
                 $pmtCashRec = null;
@@ -3349,10 +3416,18 @@ class PosController extends Controller
                     'approval_status'    => $needsApproval ? 'pending_review' : null,
                 ]);
 
+                $createdIds[] = $payment->id;
                 if (!$proofPaymentId && $pmtMethod !== 'cash') {
                     $proofPaymentId = $payment->id;
                 }
 
+                // A tender awaiting approval is not settled money — keep it out of
+                // the register aggregates until an admin approves it (mirrors
+                // createSale). Its approval also gates the order status below.
+                if ($needsApproval) {
+                    $anyNeedsApproval = true;
+                    continue;
+                }
                 $totalSales += $pmtAmount;
                 if ($pmtIsCash)                                    $totalCash  += $pmtAmount;
                 elseif (in_array($pmtMethod, ['card','card_paystack'])) $totalCard  += $pmtAmount;
@@ -3393,14 +3468,9 @@ class PosController extends Controller
                 }
             }
 
-            // Determine whether any payment in this batch requires approval.
-            // If so, the order CANNOT be marked as paid or completed regardless
-            // of how much money was submitted.
-            // Cash-type methods (by code or DB type) never require approval.
-            $anyNeedsApproval = collect($paymentsInput)->contains(
-                fn ($pmt) => !($isCashType($pmt['method'] ?? 'other')
-                    || in_array($pmt['method'] ?? 'other', ['mpesa', 'card', 'card_paystack']))
-            );
+            // $anyNeedsApproval was set per-payment in the loop above using the
+            // per-method policy. If any tender needs approval the order CANNOT be
+            // marked paid/completed regardless of how much money was submitted.
 
             // Also check any previously recorded pending approval payments on this order
             $existingPendingApproval = DB::table('payments')
@@ -3460,38 +3530,31 @@ class PosController extends Controller
             try { NotificationService::orderPlaced($order->id, $order->order_number, $order->outlet_id); } catch (\Exception) {}
 
             // ── Per-payment notifications ─────────────────────────────────────
-            // Cash / cash-type → notify admin immediately (for reconciliation).
-            // Non-automated (bank_transfer, other…) → notify admin approval queue.
-            $latestPayments = $order->fresh(['payments'])->payments->sortByDesc('id')->values();
-            $paymentsByMethod = collect($paymentsInput)->map(function ($pmt, $i) use ($latestPayments) {
-                return ['input' => $pmt, 'model' => $latestPayments->get($i)];
-            });
-            foreach ($paymentsByMethod as $entry) {
-                $pmtMethod = $entry['input']['method'] ?? 'other';
-                $pmtModel  = $entry['model'];
-                if (!$pmtModel) continue;
+            // Keyed off the saved record (so proof-attach flips are respected):
+            // a tender awaiting approval → approvals queue; cash / I&M → immediate
+            // reconciliation notice. Gateway rails (mpesa/card) notify elsewhere.
+            foreach (Payment::whereIn('id', $createdIds)->get() as $pmtModel) {
+                $code = $pmtModel->payment_method;
                 try {
-                    if ($isCashType($pmtMethod)) {
-                        // Cash and cash-type methods: payment is immediate — notify admin
-                        // for reconciliation purposes, same as the standard cash flow.
-                        NotificationService::paymentReceived(
-                            $pmtModel->id,
-                            $pmtModel->payment_number,
-                            $order->id,
-                            $order->order_number,
-                            (float) $entry['input']['amount'],
-                            $order->currency_code,
-                            $pmtMethod
-                        );
-                    } elseif ($hasPendingApproval && !in_array($pmtMethod, ['mpesa', 'card', 'card_paystack'])) {
+                    if ($pmtModel->requires_approval) {
                         NotificationService::paymentApprovalRequired(
                             $pmtModel->id,
                             $pmtModel->payment_number,
                             $order->id,
                             $order->order_number,
-                            (float) $entry['input']['amount'],
+                            (float) $pmtModel->amount,
                             $order->currency_code,
                             $order->customer_country_code ?? ''
+                        );
+                    } elseif ($isCashType($code)) {
+                        NotificationService::paymentReceived(
+                            $pmtModel->id,
+                            $pmtModel->payment_number,
+                            $order->id,
+                            $order->order_number,
+                            (float) $pmtModel->amount,
+                            $order->currency_code,
+                            $code
                         );
                     }
                 } catch (\Exception) {}
