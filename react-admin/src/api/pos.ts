@@ -233,7 +233,7 @@ export const posApi = {
     openRegister: (data: { outlet_id: number; opening_cash: number; notes?: string }) =>
         post<{ message: string; register: CashRegister }>("/v1/admin/pos/register/open", data),
 
-    closeRegister: (data: { outlet_id: number; closing_cash: number; notes?: string }) =>
+    closeRegister: (data: { outlet_id: number; closing_cash: number; notes?: string; denomination_count?: Record<number, number> }) =>
         post<{ message: string; register: CashRegister; variance: number }>(
             "/v1/admin/pos/register/close",
             data,

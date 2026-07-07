@@ -56,6 +56,8 @@ export default function RegisterModal({
         mode === "close" ? (register?.expected_cash ?? 0) : 0
     );
     const [notes, setNotes] = useState("");
+    // Optional physical denomination count (KES note/coin value → quantity).
+    const [denoms, setDenoms] = useState<Record<number, number>>({});
 
     const openMutation = useMutation({
         mutationFn: () =>
@@ -69,7 +71,12 @@ export default function RegisterModal({
 
     const closeMutation = useMutation({
         mutationFn: () =>
-            posApi.closeRegister({ outlet_id: outletId, closing_cash: amount, notes }),
+            posApi.closeRegister({
+                outlet_id: outletId,
+                closing_cash: amount,
+                notes,
+                denomination_count: anyDenoms ? denoms : undefined,
+            }),
         onSuccess: (res) => {
             const variance = res.variance;
             if (variance === 0) {
@@ -96,6 +103,14 @@ export default function RegisterModal({
     const isPending = openMutation.isPending || closeMutation.isPending;
     const expectedCash = register?.expected_cash ?? 0;
     const variance = mode === "close" ? amount - expectedCash : null;
+
+    const DENOMS = [1000, 500, 200, 100, 50, 40, 20, 10, 5, 1];
+    const anyDenoms = Object.values(denoms).some((q) => q > 0);
+    const setDenom = (d: number, qty: number) => {
+        const next = { ...denoms, [d]: Math.max(0, Math.floor(qty || 0)) };
+        setDenoms(next);
+        setAmount(DENOMS.reduce((sum, x) => sum + x * (next[x] || 0), 0));
+    };
 
     // In close mode, block if EoD not done
     const closeBlocked = mode === "close" && !eodSubmitted;
@@ -240,6 +255,43 @@ export default function RegisterModal({
                                     />
                                 </div>
                             </div>
+
+                            {/* Optional denomination count — close mode */}
+                            {mode === "close" && (
+                                <div className="rounded-xl border border-surface-100 p-3">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <label className="label mb-0">
+                                            Count by denomination <span className="text-surface-400 font-normal">(optional)</span>
+                                        </label>
+                                        {anyDenoms && (
+                                            <span className="text-xs text-surface-500">
+                                                Total: <strong>KES {amount.toLocaleString("en-KE")}</strong>
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                                        {DENOMS.map((d) => (
+                                            <div key={d} className="flex items-center gap-1.5">
+                                                <span className="text-2xs text-surface-500 w-10 text-right shrink-0">
+                                                    {d.toLocaleString("en-KE")}
+                                                </span>
+                                                <input
+                                                    type="number"
+                                                    min={0}
+                                                    step={1}
+                                                    value={denoms[d] || ""}
+                                                    onChange={(e) => setDenom(d, parseInt(e.target.value, 10))}
+                                                    placeholder="0"
+                                                    className="input py-1 text-sm w-full"
+                                                />
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <p className="text-2xs text-surface-400 mt-2">
+                                        Entering counts fills the cash total automatically.
+                                    </p>
+                                </div>
+                            )}
 
                             {/* Variance indicator */}
                             {mode === "close" && variance !== null && (

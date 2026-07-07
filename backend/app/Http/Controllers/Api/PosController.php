@@ -357,9 +357,13 @@ class PosController extends Controller
     public function closeRegister(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'outlet_id'    => 'required|exists:outlets,id',
-            'closing_cash' => 'required|numeric|min:0',
-            'notes'        => 'nullable|string|max:500',
+            'outlet_id'            => 'required|exists:outlets,id',
+            'closing_cash'         => 'required|numeric|min:0',
+            'notes'                => 'nullable|string|max:500',
+            // Optional physical denomination count: { "1000": 3, "500": 2, ... }
+            // (note value => quantity). When present it IS the counted cash.
+            'denomination_count'   => 'nullable|array',
+            'denomination_count.*' => 'integer|min:0',
         ]);
 
         $outletId = (int) $validated['outlet_id'];
@@ -389,18 +393,30 @@ class PosController extends Controller
             ], 422);
         }
 
-        $variance = $validated['closing_cash'] - ($register->expected_cash ?? $register->opening_balance ?? 0);
+        // If a denomination breakdown was supplied it IS the physical count —
+        // derive the counted cash from it so the two can't silently disagree.
+        $denominations = $validated['denomination_count'] ?? null;
+        $countedCash   = $denominations
+            ? (float) array_sum(array_map(
+                fn ($denom, $qty) => (float) $denom * (int) $qty,
+                array_keys($denominations),
+                array_values($denominations),
+            ))
+            : (float) $validated['closing_cash'];
+
+        $variance = $countedCash - ($register->expected_cash ?? $register->opening_balance ?? 0);
 
         // `variance` is not a column (nor fillable) — it was silently dropped.
         // The discrepancy is the `cash_difference` accessor (actual − expected),
         // valid once actual_cash is set below. $variance is kept for response/log.
         $register->update([
-            'closed_by'       => $user->id,
-            'closing_balance' => $validated['closing_cash'],
-            'actual_cash'     => $validated['closing_cash'],
-            'status'          => 'closed',
-            'closing_notes'   => $validated['notes'] ?? null,
-            'closed_at'       => now(),
+            'closed_by'          => $user->id,
+            'closing_balance'    => $countedCash,
+            'actual_cash'        => $countedCash,
+            'status'             => 'closed',
+            'closing_notes'      => $validated['notes'] ?? null,
+            'denomination_count' => $denominations,
+            'closed_at'          => now(),
         ]);
 
         try {
