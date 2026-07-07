@@ -1180,8 +1180,8 @@ aria-label="Delete">✕</button>
                                 if (e.key === "Enter" && mentionQ === null) {
                                     const isMobile = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
                                     if (!isMobile) {
-                                        if (enterToSend && !e.shiftKey) { e.preventDefault(); if (canSend) sendMutation.mutate(); }
-                                        else if (!enterToSend && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (canSend) sendMutation.mutate(); }
+                                        if (enterToSend && !e.shiftKey) { e.preventDefault(); if (canSend && !sendMutation.isPending) sendMutation.mutate(); }
+                                        else if (!enterToSend && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (canSend && !sendMutation.isPending) sendMutation.mutate(); }
                                     }
                                 }
                                 if (e.key === "Escape") { setMentionQ(null); setEntityQ(null); }
@@ -1911,7 +1911,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
 
     useEffect(() => {
         subscribeToChannel(channel.id, msg => {
-            setMessages(prev => { const m2 = msg as unknown as ChannelMessage; return prev.find(m => m.id === m2.id) ? prev : [...prev, m2]; });
+            setMessages(prev => { const m2 = msg as unknown as ChannelMessage; return prev.some(m => String(m.id) === String(m2.id)) ? prev : [...prev, m2]; });
         });
 
         // Reaction updates: patch only the reactions field of the affected message.
@@ -2123,7 +2123,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                     channelMemberIds={channelMemberIds}
                     replyTo={replyTo}
                     onClearReply={() => setReplyTo(null)}
-                    onSent={msg => { setMessages(prev => [...prev, msg]); setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 50); }}
+                    onSent={msg => { setMessages(prev => prev.some(m => String(m.id) === String(msg.id)) ? prev : [...prev, msg]); setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 50); }}
                     bottomRef={bottomRef} />
             </div>
 
