@@ -2921,6 +2921,11 @@ class PosController extends Controller
             'new_customer.email'                   => 'nullable|email|max:255',
             // Country drives currency for international POS orders
             'customer_country_code'                => 'nullable|string|size:2',
+            // Sales channel this order came through. Defaults to 'pos' so the POS
+            // UI is unchanged; the WhatsApp agent (Neema) passes 'whatsapp' so the
+            // order groups under "WhatsApp Orders". Fulfilment still draws stock
+            // from the order's outlet — channel and outlet are orthogonal.
+            'channel'                              => 'nullable|in:pos,whatsapp,online',
             // items[] contains regular (in-stock) lines only.
             // MTO lines travel exclusively via production_items[] and are
             // excluded from items[] by the frontend to avoid the stock check.
@@ -3181,14 +3186,20 @@ class PosController extends Controller
                 $validated['customer_email']      = $validated['customer_email']      ?? ($nc['email'] ?? null);
             }
 
-            $prefix      = 'POS-' . date('ymd') . '-';
+            $channel      = $validated['channel'] ?? 'pos';
+            $numberPrefix = match ($channel) {
+                'whatsapp' => 'WA-',
+                'online'   => 'ONL-',
+                default    => 'POS-',
+            };
+            $prefix      = $numberPrefix . date('ymd') . '-';
             $orderNumber = $this->generateUniqueOrderNumber($prefix);
 
             $order = Order::create([
                 'order_number'        => $orderNumber,
                 'outlet_id'           => $outletId,
                 'user_id'             => $linkedUserId,
-                'order_type'          => 'pos',
+                'order_type'          => $channel,
                 'status'              => 'pending',
                 'payment_status'      => 'pending',
                 'currency_code'       => $currencyCode,
