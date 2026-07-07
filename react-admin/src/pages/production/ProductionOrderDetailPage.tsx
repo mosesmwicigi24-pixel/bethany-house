@@ -1267,6 +1267,12 @@ export default function ProductionOrderDetailPage() {
     // Current user — to detect which stages they are assigned to
     const currentUserId = useAuthStore(s => s.user?.id ?? null);
 
+    // Permissions. MUST be read here (before any early return) so the hook is
+    // always called in the same order — reading it after the isLoading/!order
+    // guards changed the hook count between renders and crashed the page to a
+    // white screen the moment the order loaded.
+    const { can } = usePermissions();
+
     const { data, isLoading } = useQuery({
         queryKey: ["production-order", Number(id)],
         queryFn: () => get<{ order: ProductionOrder }>(`/v1/admin/production-orders/${id}`),
@@ -1325,7 +1331,6 @@ export default function ProductionOrderDetailPage() {
     const days        = daysUntil(order.due_date);
     const hasSpecs    = !!(order.measurements || order.specifications || order.customer_preferences);
 
-    const { can } = usePermissions();
     const canConfirmOrderPerm = can("production.confirm_order");
     const canManageAssignees = can("production.manage_assignees");
     const canSubmitQcPerm = can("production.submit_qc");
