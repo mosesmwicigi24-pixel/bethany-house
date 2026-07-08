@@ -47,6 +47,9 @@ export interface ConfiguredMethod {
     provider?: string | null;
     description?: string | null;
     is_default?: boolean;
+    /** Effective approval policy from the backend. true → hold for admin review
+     *  (proof required); false → settles instantly like cash (e.g. I&M Paybill). */
+    requires_approval?: boolean;
     /** Currency codes this method supports. Empty / undefined = all currencies. */
     supported_currencies?: string[] | null;
 }
@@ -122,8 +125,13 @@ const isCard      = (m: ConfiguredMethod) => m.type === "card" || m.code.include
 const isCash      = (m: ConfiguredMethod) => m.type === "cash" || m.code === "cash";
 const isBank      = (m: ConfiguredMethod) => m.type === "bank_transfer" || m.code === "bank_transfer";
 const isOther     = (m: ConfiguredMethod) => m.code === "__other__";
-// Always show proof upload for bank transfer and "other"; also available (optional) for card methods
-const needsProof  = (m: ConfiguredMethod) => isBank(m) || isOther(m) || (!isMpesa(m) && !isPaystack(m) && !isCash(m));
+// Proof of payment is required only for methods that must be held for admin
+// approval. The backend's effective `requires_approval` flag is the source of
+// truth (so I&M Paybill, which settles instantly, needs no proof and is NOT
+// held in "Processing"); fall back to the legacy type heuristic when the flag
+// isn't present.
+const needsProof  = (m: ConfiguredMethod) =>
+    m.requires_approval ?? (isBank(m) || isOther(m) || (!isMpesa(m) && !isPaystack(m) && !isCash(m)));
 
 /** Virtual "Other" method always appended after configured methods */
 const OTHER_METHOD: ConfiguredMethod = {
