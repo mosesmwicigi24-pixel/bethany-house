@@ -2432,6 +2432,7 @@ export default function PosPage() {
                         addDismissedPendingOrderId(idToSave);
                         clearCart();
                         qc.invalidateQueries({ queryKey: ["pos-sales"] });
+                        qc.invalidateQueries({ queryKey: ["orders"] });
                     },
                 },
             );
@@ -2450,6 +2451,7 @@ export default function PosPage() {
                 }
                 clearCart();
                 qc.invalidateQueries({ queryKey: ["pos-sales"] });
+                qc.invalidateQueries({ queryKey: ["orders"] });
             },
         });
     }, [selectedOutletId, cart, pendingOrderId, pendingOrderCartSig, pendingOrderData,
@@ -2487,6 +2489,11 @@ export default function PosPage() {
             clearCartDraft();
             qc.invalidateQueries({ queryKey: ["pos-register", selectedOutletId] });
             qc.invalidateQueries({ queryKey: ["pos-products", selectedOutletId] });
+            // Refresh the Orders lists (POS/Online/WhatsApp Orders) so the sale
+            // that was just completed appears immediately instead of after a
+            // manual reload — the list is keyed on ["orders"].
+            qc.invalidateQueries({ queryKey: ["orders"] });
+            qc.invalidateQueries({ queryKey: ["pos-sales"] });
         },
         onError: (err: { message: string }) => toast.error(err.message),
     });
