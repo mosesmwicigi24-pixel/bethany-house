@@ -21,12 +21,21 @@ import { clsx } from "clsx";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+interface ManualInstructions {
+    recipient_name?: string | null;
+    recipient_phone?: string | null;
+    steps?: string[] | null;
+    note?: string | null;
+}
+
 interface PaymentMethod {
     id: number;
-    code: string;  // "mpesa" | "card_paystack" | "bank_transfer"
+    code: string;  // "mpesa" | "card_paystack" | "bank_transfer" | "mukuru" | "wu_moneygram" | "mpesa_manual"
     name: string;
-    type: string;  // "mobile_money" | "card" | "bank_transfer"
+    type: string;  // "mobile_money" | "card" | "bank_transfer" | "manual"
     provider: string | null;
+    description?: string | null;
+    instructions?: ManualInstructions | null;  // manual/instructional methods only
 }
 
 interface OrderInfo {
@@ -68,6 +77,7 @@ type Stage =
     | "paystack_redirect" // redirecting to Paystack
     | "paystack_return"   // returned from Paystack, polling
     | "bank_transfer"     // instructions + file upload
+    | "manual"            // manual method: data-driven instructions + file upload
     | "bank_pending"      // proof submitted, awaiting admin approval
     | "paid";
 
@@ -100,6 +110,7 @@ const fmt = (n: number, cc = "KES") =>
 const isMpesa   = (m: PaymentMethod) => m.code === "mpesa"   || m.type === "mobile_money";
 const isPaystack = (m: PaymentMethod) => m.code === "card_paystack" || m.provider === "paystack" || m.code === "paystack";
 const isBank     = (m: PaymentMethod) => m.code === "bank_transfer" || m.type === "bank_transfer";
+const isManual   = (m: PaymentMethod) => m.type === "manual";
 
 // ── UI primitives ─────────────────────────────────────────────────────────────
 
@@ -257,6 +268,43 @@ const METHOD_META: Record<string, { label: string; sub: string; icon: React.Reac
             </div>
         ),
         accent: "hover:border-purple-200 hover:bg-purple-50/40",
+    },
+    mukuru: {
+        label: "Mukuru App",
+        sub:   "Send via Mukuru, then upload proof",
+        icon: (
+            <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33"/>
+                </svg>
+            </div>
+        ),
+        accent: "hover:border-orange-200 hover:bg-orange-50/40",
+    },
+    wu_moneygram: {
+        label: "Western Union / MoneyGram",
+        sub:   "Send via WU or MoneyGram, then upload receipt",
+        icon: (
+            <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9 9 0 100-18 9 9 0 000 18zm0 0c2.5-2.5 3.5-6 3.5-9S14.5 5.5 12 3m0 18c-2.5-2.5-3.5-6-3.5-9S9.5 5.5 12 3M3.5 12h17"/>
+                </svg>
+            </div>
+        ),
+        accent: "hover:border-amber-200 hover:bg-amber-50/40",
+    },
+    mpesa_manual: {
+        label: "M-Pesa (Send Money)",
+        sub:   "Send money on M-Pesa, then upload confirmation",
+        icon: (
+            <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-green-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <rect x="5" y="2" width="14" height="20" rx="2"/>
+                    <line x1="12" y1="18" x2="12.01" y2="18"/>
+                </svg>
+            </div>
+        ),
+        accent: "hover:border-green-200 hover:bg-green-50/40",
     },
 };
 
@@ -891,6 +939,158 @@ function BankTransferPanel({
     );
 }
 
+// ── Manual / instructional method panel ───────────────────────────────────────
+// Mukuru, Western Union/MoneyGram, M-Pesa-to-number: shows the method's own
+// pay-to instructions (data-driven from the DB), then records intent and takes a
+// proof upload — the same verify-by-staff flow as bank transfer.
+
+function ManualTransferPanel({
+    method, token, amountDue, currency, onDone, onBack,
+}: {
+    method: PaymentMethod; token: string; amountDue: number; currency: string;
+    onDone: () => void; onBack: () => void;
+}) {
+    const [step,        setStep]        = useState<"instructions" | "upload">("instructions");
+    const [paymentId,   setPaymentId]   = useState<number | null>(null);
+    const [file,        setFile]        = useState<File | null>(null);
+    const [origSize,    setOrigSize]    = useState<number>(0);
+    const [compressing, setCompressing] = useState(false);
+    const [loading,     setLoading]     = useState(false);
+    const [err,         setErr]         = useState("");
+
+    const ins = method.instructions ?? null;
+
+    const handleFileSelect = async (f: File) => {
+        setOrigSize(f.size);
+        if (f.type.startsWith("image/")) {
+            setCompressing(true);
+            try {
+                const { compressImage } = await import("@/utils/compressImage");
+                setFile(await compressImage(f).catch(() => f));
+            } finally {
+                setCompressing(false);
+            }
+        } else {
+            setFile(f);
+        }
+    };
+
+    const recordIntent = async () => {
+        setLoading(true); setErr("");
+        try {
+            const res = await api<{ payment_id: number }>(
+                `/v1/pay/${token}/initiate`,
+                { method: "POST", body: JSON.stringify({ method: method.code }) },
+            );
+            setPaymentId(res.payment_id);
+            setStep("upload");
+        } catch (e: any) {
+            setErr(e.message ?? "Could not record payment. Please try again.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const uploadProof = async () => {
+        if (!file || !paymentId) return;
+        setLoading(true); setErr("");
+        try {
+            const form = new FormData();
+            form.append("proof", file);
+            form.append("payment_id", String(paymentId));
+            await apiForm(`/v1/pay/${token}/upload-proof`, form);
+            onDone();
+        } catch (e: any) {
+            setErr(e.message ?? "Upload failed. Please try again.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (step === "instructions") {
+        return (
+            <div className="space-y-4">
+                <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 space-y-2 text-sm text-amber-900">
+                    <p className="font-semibold">{method.name} — payment instructions</p>
+                    <p>
+                        Send <strong>{fmt(amountDue, currency)}</strong>
+                        {ins?.recipient_name ? <> to <strong>{ins.recipient_name}</strong></> : null}
+                        {ins?.recipient_phone ? <> ({ins.recipient_phone})</> : null}.
+                    </p>
+                    {ins?.steps?.length ? (
+                        <ol className="list-decimal ml-4 space-y-1 text-xs text-amber-800">
+                            {ins.steps.map((s, i) => <li key={i}>{s}</li>)}
+                        </ol>
+                    ) : method.description ? (
+                        <p className="text-xs text-amber-800">{method.description}</p>
+                    ) : null}
+                    {ins?.note && <p className="text-xs italic text-amber-700">{ins.note}</p>}
+                    <p className="text-xs text-amber-700">
+                        Use your order number as the reference. Once you've paid, click below
+                        and upload your confirmation so our team can verify it.
+                    </p>
+                </div>
+                {err && <ErrMsg msg={err} />}
+                <div className="flex gap-3">
+                    <Btn variant="secondary" onClick={onBack} className="shrink-0 w-20">Back</Btn>
+                    <Btn onClick={recordIntent} disabled={loading} className="flex-1">
+                        {loading && <Spinner size="sm" />}
+                        {loading ? "Recording…" : "I've Made the Payment"}
+                    </Btn>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+                Upload a screenshot or PDF of your payment confirmation.
+            </p>
+            <label className="block cursor-pointer">
+                <div className={clsx(
+                    "border-2 border-dashed rounded-xl p-6 text-center transition-colors",
+                    file ? "border-amber-400 bg-amber-50" : "border-gray-200 hover:border-amber-300",
+                )}>
+                    <input
+                        type="file"
+                        className="hidden"
+                        accept="image/*,application/pdf"
+                        onChange={e => { const f = e.target.files?.[0]; if (f) handleFileSelect(f); }}
+                    />
+                    {compressing ? (
+                        <div className="flex items-center justify-center gap-2 py-1">
+                            <Spinner size="sm" />
+                            <span className="text-xs text-gray-400">Compressing…</span>
+                        </div>
+                    ) : file ? (
+                        <div className="space-y-0.5">
+                            <p className="text-sm text-amber-700 font-medium truncate">{file.name}</p>
+                            {origSize > file.size && (
+                                <p className="text-xs text-gray-400">
+                                    Compressed: {Math.round(origSize / 1024)}KB → {Math.round(file.size / 1024)}KB
+                                </p>
+                            )}
+                        </div>
+                    ) : (
+                        <>
+                            <svg className="w-8 h-8 text-gray-300 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+                            </svg>
+                            <p className="text-xs text-gray-400">Tap to choose image or PDF</p>
+                        </>
+                    )}
+                </div>
+            </label>
+            {err && <ErrMsg msg={err} />}
+            <Btn onClick={uploadProof} disabled={!file || loading || compressing} className="w-full">
+                {loading && <Spinner size="sm" />}
+                {compressing ? "Compressing…" : loading ? "Uploading…" : "Submit Proof of Payment"}
+            </Btn>
+        </div>
+    );
+}
+
 // ── Order summary card ────────────────────────────────────────────────────────
 
 function OrderCard({ order }: { order: OrderInfo }) {
@@ -963,6 +1163,8 @@ export default function PaymentLinkPage() {
     const [stage, setStage] = useState<Stage>("loading");
     const [order, setOrder] = useState<OrderInfo | null>(null);
     const [error, setError] = useState("");
+    // The manual/instructional method the customer picked (Mukuru, WU/MoneyGram, …)
+    const [manualMethod, setManualMethod] = useState<PaymentMethod | null>(null);
 
     // Track whether the initial stage decision has already been made.
     // The background poll must NEVER overwrite stage after this point -
@@ -1046,6 +1248,7 @@ export default function PaymentLinkPage() {
         if (isMpesa(m))    return updateStage("mpesa");
         if (isPaystack(m)) return updateStage("paystack_email");
         if (isBank(m))     return updateStage("bank_transfer");
+        if (isManual(m))   { setManualMethod(m); return updateStage("manual"); }
     };
 
     const isPanelStage = !["select_method", "bank_pending"].includes(stage);
@@ -1055,6 +1258,7 @@ export default function PaymentLinkPage() {
         paystack_redirect:"Redirecting…",
         paystack_return:  "Confirming Payment",
         bank_transfer:    "Bank Transfer",
+        manual:           manualMethod?.name ?? "Payment",
         bank_pending:     "",
         loading: "", error: "", expired: "", select_method: "", paid: "",
     };
@@ -1143,6 +1347,18 @@ export default function PaymentLinkPage() {
                                 amountDue={order.amount_due}
                                 currency={order.currency_code}
                                 businessName={order.business_name}
+                                onDone={() => updateStage("bank_pending")}
+                                onBack={() => updateStage("select_method")}
+                            />
+                        )}
+
+                        {/* Manual / instructional method (Mukuru, WU/MoneyGram, M-Pesa-to-number) */}
+                        {stage === "manual" && manualMethod && (
+                            <ManualTransferPanel
+                                method={manualMethod}
+                                token={token!}
+                                amountDue={order.amount_due}
+                                currency={order.currency_code}
                                 onDone={() => updateStage("bank_pending")}
                                 onBack={() => updateStage("select_method")}
                             />
