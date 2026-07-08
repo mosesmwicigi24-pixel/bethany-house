@@ -55,13 +55,21 @@ class PublicPaymentController extends Controller
                 return empty($supported) || in_array($order->currency_code, $supported);
             })
             ->values()
-            ->map(fn ($m) => [
-                'id'       => $m->id,
-                'code'     => $m->code,
-                'name'     => $m->name,
-                'type'     => $m->type,
-                'provider' => $m->provider,
-            ]);
+            ->map(function ($m) {
+                $config = json_decode($m->configuration ?? '{}', true) ?: [];
+                return [
+                    'id'          => $m->id,
+                    'code'        => $m->code,
+                    'name'        => $m->name,
+                    'type'        => $m->type,
+                    'provider'    => $m->provider,
+                    'description' => $m->description,
+                    // Manual/instructional methods (Mukuru, Western Union/MoneyGram,
+                    // M-Pesa-to-number) carry pay-to details the customer follows
+                    // before uploading proof. Null for gateway methods.
+                    'instructions'=> $config['instructions'] ?? null,
+                ];
+            });
 
         // Calculate remaining balance (customer may only owe a partial amount)
         $totalPaid      = Payment::where('order_id', $order->id)->where('status', 'paid')->sum('amount');
@@ -108,6 +116,14 @@ class PublicPaymentController extends Controller
         $method = $validated['method'];
         // Accept 'card_paystack' as an alias for 'paystack'
         if ($method === 'card_paystack') $method = 'paystack';
+
+        // Manual / instructional methods (Mukuru, Western Union/MoneyGram,
+        // M-Pesa-to-number): the customer pays out-of-band and uploads proof.
+        // Record a pending payment for staff to verify — no gateway call.
+        $methodRow = DB::table('payment_methods')->where('code', $method)->first();
+        if ($methodRow && $methodRow->type === 'manual') {
+            return $this->initiateManual($order, $method);
+        }
 
         if ($method === 'mpesa' && empty($validated['phone'])) {
             return response()->json(['message' => 'Phone number is required for M-Pesa.'], 422);
@@ -361,10 +377,18 @@ class PublicPaymentController extends Controller
 
     private function initiateBankTransfer(Order $order): \Illuminate\Http\JsonResponse
     {
+        return $this->initiateManual($order, 'bank_transfer');
+    }
+
+    // Shared "record intent → customer uploads proof → staff verifies" path for
+    // every manual method (bank transfer, Mukuru, Western Union/MoneyGram,
+    // M-Pesa-to-number). No gateway call; the payment awaits admin approval.
+    private function initiateManual(Order $order, string $methodCode): \Illuminate\Http\JsonResponse
+    {
         // Create a pending payment record that the customer will later attach proof to
         $payment = Payment::create([
             'order_id'        => $order->id,
-            'payment_method'  => 'bank_transfer',
+            'payment_method'  => $methodCode,
             'amount'          => $order->total_amount,
             'currency_code'   => $order->currency_code,
             'status'          => 'pending',
@@ -382,7 +406,7 @@ class PublicPaymentController extends Controller
         }
 
         return response()->json([
-            'message'    => 'Transfer recorded. Please upload your proof of payment.',
+            'message'    => 'Payment recorded. Please upload your proof of payment.',
             'payment_id' => $payment->id,
         ]);
     }

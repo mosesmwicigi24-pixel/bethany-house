@@ -48,8 +48,19 @@ methods (Mukuru, Western Union/MoneyGram) need.
 
 ## Plan (3 parts, escalating risk)
 
-### Part 1 — Manual / instructional methods  ← safest, biggest immediate unblock
+### Part 1 — Manual / instructional methods  ✅ BUILT (this branch, pending review/merge)
 Give customers a way to pay *now* with no gateway risk, reusing the proof-upload flow.
+
+**Shipped on this branch:** migration `2026_07_08_000001_seed_manual_payment_methods.php`
+seeds 3 idempotent `type='manual'` methods (Mukuru, Western Union/MoneyGram, M-Pesa Send
+Money → Moses Mwicigi / +254727891989, steps in `configuration.instructions`);
+`show()` returns `instructions`; `initiate()` routes manual methods via a shared
+`initiateManual()` (bank_transfer now delegates to it); frontend `ManualTransferPanel`
+renders per-method instructions + proof upload. PHP `-l` + react-admin `type-check` clean.
+**Editable data:** WU city/country defaults to "Nairobi, Kenya"; adjust recipient details
+in the DB / admin. Merging runs the migration on deploy (customer-facing).
+
+Original design notes:
 
 - **DB:** add customer-visible rows for **Mukuru**, **Western Union / MoneyGram**, and
   **M-Pesa-to-number/paybill**, each with pay-to details in `configuration`
