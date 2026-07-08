@@ -21,6 +21,7 @@ class SettleHeldInstantPaymentsTest extends TestCase
     {
         return DB::table('payments')->insertGetId([
             'order_id'          => $orderId,
+            'payment_number'    => 'PMT-' . $orderId . '-' . $method,
             'payment_method'    => $method,
             'amount'            => $amount,
             'currency_code'     => 'KES',
