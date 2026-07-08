@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\{
     OrderController,
     CartController,
     CustomerController,
+    CustomerIdentityController,
     InventoryController,
     OutletController,
     PosController,
@@ -553,6 +554,9 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{id}',          [CustomerController::class, 'show']);
                 Route::get('/{id}/orders',   [CustomerController::class, 'customerOrders']);
                 Route::get('/{id}/statistics', [CustomerController::class, 'statistics']);
+                // Channel identities (WhatsApp / Instagram / Messenger) linked to
+                // this customer — the Neema multichannel-identity view.
+                Route::get('/{id}/identities', [CustomerIdentityController::class, 'index']);
 
                 Route::post('/',                      [CustomerController::class, 'store'])
                     ->middleware('permission:customers.create,sanctum');
@@ -566,6 +570,15 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:customers.edit,sanctum');
                 Route::post('/{id}/invite-to-portal', [CustomerController::class, 'inviteToPortal'])
                     ->middleware('permission:customers.invite,sanctum');
+            });
+
+            // ── Neema (multichannel identity) ─────────────────────────────────
+            // The WhatsApp/Instagram/Messenger agent resolves an inbound contact
+            // to a customer here before placing a pending order. Resolving can
+            // create/link a customer, so it is gated by customers.create.
+            Route::prefix('neema')->group(function () {
+                Route::post('identities/resolve', [CustomerIdentityController::class, 'resolve'])
+                    ->middleware('permission:customers.create,sanctum');
             });
 
             // ── Users ────────────────────────────────────────────────────────
