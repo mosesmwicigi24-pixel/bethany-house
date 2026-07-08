@@ -88,6 +88,16 @@ class Customer extends Model
         return $this->hasMany(Order::class, 'customer_id');
     }
 
+    /**
+     * Channel identities this customer is reachable through (WhatsApp, Instagram,
+     * Messenger, ...). The Neema agent resolves an inbound Meta contact to one of
+     * these to find the customer behind it. See CustomerIdentityResolver.
+     */
+    public function identities()
+    {
+        return $this->hasMany(CustomerIdentity::class);
+    }
+
     public function carts()
     {
         return $this->hasMany(Cart::class);
