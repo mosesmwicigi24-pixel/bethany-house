@@ -18,6 +18,7 @@ use App\Models\Supplier;
 use App\Models\ProductVariant;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
+use App\Services\ProductSerialService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -1246,6 +1247,10 @@ class PurchaseOrderController extends Controller
         $outletId   = $validated['outlet_id'] ?? null;
         $qtyInt     = (int) round($qty);
 
+        // The finished-goods row the units land on + its outlet, for serializing.
+        $serialItem   = null;
+        $serialOutlet = null;
+
         if ($outletId) {
             // ── Outlet-specific receive ───────────────────────────────────────
             // Update the InventoryItem for this specific outlet.
@@ -1266,6 +1271,8 @@ class PurchaseOrderController extends Controller
             }
 
             $inventoryItem->adjustQuantity($qtyInt, 'purchase', \App\Models\PurchaseOrder::class, $purchaseOrder->id, $userId);
+            $serialItem   = $inventoryItem;
+            $serialOutlet = $outletId;
 
         } else {
             // ── Warehouse receive (no specific outlet) ────────────────────────
@@ -1288,6 +1295,10 @@ class PurchaseOrderController extends Controller
             }
 
             $warehouseItem->adjustQuantity($qtyInt, 'purchase', \App\Models\PurchaseOrder::class, $purchaseOrder->id, $userId);
+            // Mint serials once, at the warehouse (outlet_id = null). A null-outlet
+            // serial is sellable from any outlet, so we never duplicate per outlet.
+            $serialItem   = $warehouseItem;
+            $serialOutlet = null;
 
             // Also propagate to every existing outlet-specific row so that each
             // POS terminal immediately sees updated stock without requiring a
@@ -1306,6 +1317,22 @@ class PurchaseOrderController extends Controller
                 $outletItem->quantity_on_hand += $qtyInt;
                 $outletItem->save();
             }
+        }
+
+        // Serialize the received units: every bought-in unit gets its own unique
+        // code straight into stock, so purchased goods can be sold, dispatched,
+        // and reconciled for loss exactly like manufactured ones. Idempotent per
+        // GRN line — re-running the same receipt never duplicates serials.
+        if ($serialItem) {
+            ProductSerialService::receiveIntoStock(
+                $poItem->product_id,
+                $poItem->product_variant_id,
+                $serialOutlet,
+                $serialItem->id,
+                $qtyInt,
+                'grn:' . $grnNumber . ':item:' . $poItem->id,
+                $userId,
+            );
         }
 
         // Keep the legacy inventories table in sync if rows exist there.
