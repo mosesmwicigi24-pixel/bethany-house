@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\{
     OutletController,
     PosController,
     ProductionController,
+    ProductSerialController,
     PurchaseOrderController,
     SupplierController,
     PaymentController,
@@ -725,6 +726,12 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:inventory.adjust,sanctum');
                 Route::put('/{id}',                   [StockLevelsController::class, 'update'])
                     ->middleware('permission:inventory.adjust,sanctum');
+            });
+
+            // ── Product serials (per-item tracking) ────────────────────────────
+            Route::middleware('permission:inventory.view,sanctum')->prefix('product-serials')->group(function () {
+                Route::get('/',      [ProductSerialController::class, 'index']);
+                Route::get('/{id}',  [ProductSerialController::class, 'show']);
             });
 
             // ── Outlets ───────────────────────────────────────────────────────

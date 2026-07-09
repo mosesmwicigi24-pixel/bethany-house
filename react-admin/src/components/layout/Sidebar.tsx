@@ -193,6 +193,12 @@ const NAV: NavGroup[] = [
                 permission: "inventory.view",
             },
             {
+                label: "Product Serials",
+                href: "/inventory/serials",
+                icon: "stock",
+                permission: "inventory.view",
+            },
+            {
                 label: "Stock Adjustments",
                 href: "/inventory/adjustments",
                 icon: "adjustments",

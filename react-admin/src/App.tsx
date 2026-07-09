@@ -65,6 +65,7 @@ const ProductFormPage = lazy(
 
 // --- Inventory -────────────────────────────────────────────────────────
 const StockLevelsPage = lazy(() => import("@/pages/inventory/StockLevelsPage"));
+const ProductSerialsPage = lazy(() => import("@/pages/inventory/ProductSerialsPage"));
 const StockAdjustmentsPage = lazy(
     () => import("@/pages/inventory/StockAdjustmentsPage"),
 );
@@ -665,6 +666,16 @@ export default function App() {
                                 <ProtectedRoute permission="inventory.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <StockLevelsPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/inventory/serials"
+                            element={
+                                <ProtectedRoute permission="inventory.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <ProductSerialsPage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }
