@@ -117,6 +117,71 @@ class ProductSerialService
             ->update(['status' => ProductSerial::CANCELLED, 'updated_at' => now()]);
     }
 
+    // ── Received (non-manufactured) stock ─────────────────────────────────────
+
+    /**
+     * `RCV-<REF>-<productId>-<seq>` — a receipt-minted unit, distinct from
+     * `PRD-…`. The product id keeps it globally unique even when several products
+     * are received under one reference (e.g. one purchase order, many lines).
+     */
+    private static function receiptSerial(string $reference, int $productId, int $seq): string
+    {
+        // Keep the reference readable but scan-safe in the code.
+        $ref = strtoupper(preg_replace('/[^A-Za-z0-9]+/', '', $reference));
+        return 'RCV-' . $ref . '-' . $productId . '-' . str_pad((string) $seq, 3, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Mint $qty unique serials straight into stock for goods received WITHOUT a
+     * production run (bought in for resale, supplier receipt, restock, upward
+     * stock adjustment). These behave exactly like produced-then-stocked units
+     * from here on — sellable, dispatchable, and reconcilable.
+     *
+     * Idempotent per $sourceReference: receiving the same reference again only
+     * tops up to $qty (so re-runs and partial retries never duplicate serials).
+     *
+     * @return int number of serials newly created
+     */
+    public static function receiveIntoStock(
+        int $productId,
+        ?int $variantId,
+        ?int $outletId,
+        ?int $inventoryItemId,
+        int $qty,
+        string $sourceReference,
+        ?int $userId = null,
+    ): int {
+        if ($qty < 1 || $sourceReference === '') {
+            return 0;
+        }
+
+        // Already minted for this receipt? Only create the shortfall.
+        $existing = ProductSerial::where('source_reference', $sourceReference)
+            ->where('product_id', $productId)
+            ->count();
+        $toCreate = $qty - $existing;
+        if ($toCreate < 1) {
+            return 0;
+        }
+
+        for ($i = 1; $i <= $toCreate; $i++) {
+            ProductSerial::create([
+                'serial_number'      => self::receiptSerial($sourceReference, $productId, $existing + $i),
+                'product_id'         => $productId,
+                'product_variant_id' => $variantId,
+                'production_order_id' => null,
+                'source_reference'   => $sourceReference,
+                'inventory_item_id'  => $inventoryItemId,
+                'outlet_id'          => $outletId,
+                'status'             => ProductSerial::IN_STOCK,
+                'stocked_at'         => now(),
+                'created_by'         => $userId,
+            ]);
+        }
+
+        return $toCreate;
+    }
+
     // ── Sale linkage (Phase 2) ────────────────────────────────────────────────
 
     /**

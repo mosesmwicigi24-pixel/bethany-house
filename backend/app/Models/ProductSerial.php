@@ -26,6 +26,7 @@ class ProductSerial extends Model
         'product_id',
         'product_variant_id',
         'production_order_id',
+        'source_reference',
         'inventory_item_id',
         'outlet_id',
         'status',
