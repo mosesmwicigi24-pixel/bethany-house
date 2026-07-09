@@ -54,6 +54,8 @@ class Order extends Model
         'user_agent',
         'completed_at',
         'cancelled_at',
+        'dispatched_at',
+        'dispatched_by',
         'payment_token',
         'payment_token_expires_at',
         'is_international',
@@ -72,6 +74,7 @@ class Order extends Model
         'balance_due_date'       => 'date',
         'completed_at'           => 'datetime',
         'cancelled_at'           => 'datetime',
+        'dispatched_at'          => 'datetime',
         'payment_token_expires_at' => 'datetime',
     ];
 

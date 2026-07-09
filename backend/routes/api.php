@@ -651,6 +651,8 @@ Route::prefix('v1')->group(function () {
                 Route::post('pending-order/{id}/pay',   [PosController::class, 'recordPosPay']);
                 Route::post('sales/{id}/void',          [PosController::class, 'voidSale'])
                     ->middleware('permission:pos.void,sanctum');
+                Route::post('sales/{id}/dispatch',      [PosController::class, 'authorizeDispatch'])
+                    ->middleware('permission:orders.authorize_dispatch,sanctum');
                 Route::post('sales/{id}/email-receipt', [PosController::class, 'emailReceipt']);
                 Route::post('returns',                  [PosController::class, 'processReturn'])
                     ->middleware('permission:pos.returns,sanctum');

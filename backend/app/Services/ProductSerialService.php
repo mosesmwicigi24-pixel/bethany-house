@@ -179,6 +179,18 @@ class ProductSerialService
         }
     }
 
+    /** Mark an order's sold serials as dispatched (hand-over authorized). */
+    public static function dispatchForOrder(Order $order): int
+    {
+        return ProductSerial::where('order_id', $order->id)
+            ->where('status', ProductSerial::SOLD)
+            ->update([
+                'status'        => ProductSerial::DISPATCHED,
+                'dispatched_at' => now(),
+                'updated_at'    => now(),
+            ]);
+    }
+
     /** Return an order's sold serials to stock — on void / release. */
     public static function releaseForOrder(Order $order): void
     {

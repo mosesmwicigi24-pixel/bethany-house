@@ -3162,6 +3162,15 @@ export default function OrderDetailPage() {
 
     const refresh = () => qc.invalidateQueries({ queryKey: ["order", id] });
 
+    const { can: canDo } = usePermissions();
+
+    // ── Dispatch authorization (hand-over control) ────────────────────────────
+    const dispatchMutation = useMutation({
+        mutationFn: () => ordersApi.authorizeDispatch(order!.id),
+        onSuccess:  (res: any) => { toast.success(res?.message ?? "Dispatch authorized"); refresh(); },
+        onError:    (e: ApiError) => toast.error(e.message),
+    });
+
     // ── Price adjustment ──────────────────────────────────────────────────────
     const [adjustingItemId, setAdjustingItemId] = useState<number | null>(null);
     const [priceInput, setPriceInput] = useState<string>("");
@@ -3256,8 +3265,46 @@ export default function OrderDetailPage() {
     );
     const hasPendingApproval = pendingApprovalPayments.length > 0;
 
+    // Dispatch (hand-over) control — a paid POS sale must be released for
+    // hand-over by an authorized person before goods leave.
+    const isPosOrder     = order.order_type === "pos";
+    const isDispatched   = !!order.dispatched_at;
+    const awaitingDispatch = isPosOrder && order.payment_status === "paid" && !isDispatched
+        && !["cancelled", "voided", "refunded"].includes(order.status);
+    const canAuthorizeDispatch = canDo("orders.authorize_dispatch");
+
     return (
         <div className="animate-fade-in max-w-5xl mx-auto pb-12 space-y-4">
+
+            {/* ── Dispatch authorization ────────────────────────────────────── */}
+            {awaitingDispatch && (
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-2xl px-5 py-4">
+                    <div className="flex-1">
+                        <p className="font-semibold text-indigo-900 text-sm">Awaiting dispatch authorization</p>
+                        <p className="text-xs text-indigo-700 mt-0.5">
+                            An authorized person must check the goods against this receipt before hand-over.
+                            {!canAuthorizeDispatch && " You are not authorized to release goods — please get it confirmed."}
+                        </p>
+                    </div>
+                    {canAuthorizeDispatch && (
+                        <button
+                            onClick={() => dispatchMutation.mutate()}
+                            disabled={dispatchMutation.isPending}
+                            className="btn-primary shrink-0 disabled:opacity-50"
+                        >
+                            {dispatchMutation.isPending ? "Authorizing…" : "✓ Confirm Dispatch"}
+                        </button>
+                    )}
+                </div>
+            )}
+            {isDispatched && (
+                <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-2xl px-5 py-3">
+                    <span className="text-emerald-700 font-semibold text-sm">✓ Dispatched</span>
+                    <span className="text-xs text-emerald-600">
+                        Goods released for hand-over{order.dispatched_at ? ` on ${new Date(order.dispatched_at).toLocaleString("en-KE")}` : ""}.
+                    </span>
+                </div>
+            )}
 
             {/* ── Pending approval banner ───────────────────────────────────── */}
             {hasPendingApproval && (

@@ -1289,6 +1289,61 @@ class PosController extends Controller
         return response()->json(['message' => 'Receipt sent to ' . $validated['email']]);
     }
 
+    /**
+     * Authorize dispatch (hand-over) of a paid POS sale.
+     *
+     * The control that closes the "who confirms what leaves the shop matches
+     * what was paid?" gap: only a holder of orders.authorize_dispatch may release
+     * goods. Records who authorized it and when, marks the order handed-over
+     * (completed), and moves its serialized units sold → dispatched so the shelf
+     * and the paper trail agree on exactly what went out.
+     */
+    public function authorizeDispatch(Request $request, int $id): JsonResponse
+    {
+        $order = Order::with('items')->where('order_type', 'pos')->findOrFail($id);
+        $this->authoriseOutletAccess($request->user(), $order->outlet_id);
+
+        if (in_array($order->status, ['cancelled', 'voided', 'refunded'])) {
+            return response()->json(['message' => 'This order is cancelled and cannot be dispatched.'], 422);
+        }
+        if ($order->dispatched_at) {
+            return response()->json(['message' => 'This order has already been dispatched.'], 422);
+        }
+        if ($order->payment_status !== 'paid') {
+            return response()->json(['message' => 'The order must be fully paid before dispatch can be authorized.'], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            $order->update([
+                'dispatched_at' => now(),
+                'dispatched_by' => $request->user()->id,
+                'status'        => 'completed',
+                'completed_at'  => $order->completed_at ?? now(),
+            ]);
+
+            ProductSerialService::dispatchForOrder($order);
+
+            DB::commit();
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            Log::error('POS dispatch authorization failed', ['order_id' => $id, 'error' => $e->getMessage()]);
+            return response()->json(['message' => 'Failed to authorize dispatch. Please try again.'], 500);
+        }
+
+        try {
+            ActivityLogService::log('pos_dispatch_authorized', $order, [
+                'order_number'  => $order->order_number,
+                'authorized_by' => $request->user()->id,
+            ]);
+        } catch (\Exception) {}
+
+        return response()->json([
+            'message' => 'Dispatch authorized — goods released for hand-over.',
+            'order'   => $this->transformSaleOrder($order->fresh(['items', 'payments'])),
+        ]);
+    }
+
     // --- Returns --------------------------------------------------------------
 
     public function processReturn(Request $request): JsonResponse

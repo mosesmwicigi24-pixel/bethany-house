@@ -42,6 +42,7 @@ class SyncPermissions extends Command
         'orders.set_shipping_fee'  => ['Set Shipping Fee',         'Add or raise the shipping charge on an order (allowed after payment)', 'Orders'],
         'orders.reduce_shipping_fee' => ['Reduce Shipping Fee',    'Reduce or remove the shipping charge on a receipt that has been paid (admin only)', 'Orders'],
         'orders.set_deposit'       => ['Set Deposit Terms',        'Set deposit amount and due date',            'Orders'],
+        'orders.authorize_dispatch' => ['Authorize Dispatch',      'Confirm a paid order against the physical goods and release it for hand-over (the one or two people allowed to let goods leave)', 'Orders'],
         'orders.manage_returns'    => ['Manage Order Returns',      'Approve, reject and process customer return requests', 'Orders'],
 
         // ── Payments ────────────────────────────────────────────────────────

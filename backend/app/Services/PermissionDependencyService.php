@@ -58,6 +58,7 @@ class PermissionDependencyService
         // The shipping-fee modal loads GET /admin/shipping/methods, gated
         // by settings.view - without it the method picker 403s.
         'orders.set_shipping_fee' => ['orders.view', 'settings.view'],
+        'orders.authorize_dispatch' => ['orders.view'],
         // Reducing a paid receipt's shipping is a superset of setting it.
         'orders.reduce_shipping_fee' => ['orders.set_shipping_fee', 'orders.view', 'settings.view'],
         // Refunds are also reachable via the payment-transactions ledger
