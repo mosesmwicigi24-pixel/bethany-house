@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Order;
 use App\Models\ProductionOrder;
 use App\Models\ProductSerial;
 
@@ -112,5 +113,88 @@ class ProductSerialService
         ProductSerial::where('production_order_id', $order->id)
             ->where('status', ProductSerial::IN_PRODUCTION)
             ->update(['status' => ProductSerial::CANCELLED, 'updated_at' => now()]);
+    }
+
+    // ── Sale linkage (Phase 2) ────────────────────────────────────────────────
+
+    /**
+     * Reconcile an order's SOLD serials to match its current line items — called
+     * wherever POS pulls stock off the shelf (create / update pending order).
+     * For each serialized product it claims the right number of in-stock serials
+     * (FIFO, preferring the order's outlet) and releases any surplus back to
+     * stock, so the sold set always mirrors what's actually on the receipt.
+     * Made-to-order lines are skipped (no shelf stock / serial yet). Products
+     * with no serials at all are simply ignored (nothing to track).
+     */
+    public static function syncSoldForOrder(Order $order): void
+    {
+        $order->loadMissing('items');
+
+        // Desired sold quantity per serialized product (skip MTO lines).
+        $desired = [];
+        foreach ($order->items as $item) {
+            if (!$item->product_id || self::isMto($item)) {
+                continue;
+            }
+            $desired[$item->product_id] = ($desired[$item->product_id] ?? 0) + (int) $item->quantity;
+        }
+
+        // Currently sold-to-this-order, grouped by product.
+        $current = ProductSerial::where('order_id', $order->id)
+            ->where('status', ProductSerial::SOLD)
+            ->get()
+            ->groupBy('product_id');
+
+        $productIds = collect(array_keys($desired))->merge($current->keys())->unique();
+
+        foreach ($productIds as $productId) {
+            $want = $desired[$productId] ?? 0;
+            $have = $current->get($productId)?->count() ?? 0;
+
+            if ($have < $want) {
+                $take = ProductSerial::where('product_id', $productId)
+                    ->where('status', ProductSerial::IN_STOCK)
+                    ->when($order->outlet_id, fn ($q) => $q->where(
+                        fn ($qq) => $qq->where('outlet_id', $order->outlet_id)->orWhereNull('outlet_id'),
+                    ))
+                    ->orderBy('id')
+                    ->limit($want - $have)
+                    ->get();
+                foreach ($take as $serial) {
+                    $serial->update([
+                        'status'   => ProductSerial::SOLD,
+                        'order_id' => $order->id,
+                        'sold_at'  => now(),
+                    ]);
+                }
+            } elseif ($have > $want) {
+                foreach ($current->get($productId)->take($have - $want) as $serial) {
+                    $serial->update([
+                        'status'   => ProductSerial::IN_STOCK,
+                        'order_id' => null,
+                        'sold_at'  => null,
+                    ]);
+                }
+            }
+        }
+    }
+
+    /** Return an order's sold serials to stock — on void / release. */
+    public static function releaseForOrder(Order $order): void
+    {
+        ProductSerial::where('order_id', $order->id)
+            ->where('status', ProductSerial::SOLD)
+            ->update([
+                'status'     => ProductSerial::IN_STOCK,
+                'order_id'   => null,
+                'sold_at'    => null,
+                'updated_at' => now(),
+            ]);
+    }
+
+    /** POS persists made-to-order lines with a `__MTO__` note prefix. */
+    private static function isMto(object $item): bool
+    {
+        return str_starts_with((string) ($item->notes ?? ''), '__MTO__');
     }
 }

@@ -17,6 +17,7 @@ use App\Models\TaxRate;
 use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Services\ActivityLogService;
+use App\Services\ProductSerialService;
 use App\Services\TaxCalculationService;
 use App\Services\NotificationService;
 use Illuminate\Http\Request;
@@ -1217,6 +1218,9 @@ class PosController extends Controller
                     );
                 }
             }
+
+            // Return this sale's serialized units to the shelf.
+            ProductSerialService::releaseForOrder($order);
 
             // Reverse the register by what the sale ACTUALLY collected (drawer row
             // locked), keyed on the real payments rather than the order's
@@ -2885,6 +2889,9 @@ class PosController extends Controller
                 }
             }
 
+            // Re-reconcile serialized units to the edited cart (claims/releases as needed).
+            ProductSerialService::syncSoldForOrder($order);
+
             DB::commit();
 
             return response()->json([
@@ -3254,6 +3261,10 @@ class PosController extends Controller
                     $item['inventory']->adjustQuantity(-$item['quantity'], 'sale', Order::class, $order->id, $user->id);
                 }
             }
+
+            // Mark the specific serialized units as sold off the shelf.
+            ProductSerialService::syncSoldForOrder($order);
+
             $raisedProductionOrders = [];
             foreach ($validated['production_items'] ?? [] as $pi) {
                 $prodNum = 'PO-' . date('ymd') . '-' . strtoupper(Str::random(5));
