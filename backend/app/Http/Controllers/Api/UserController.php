@@ -233,6 +233,8 @@ class UserController extends Controller
     public function update(Request $request, $id)
     {
         $user = User::findOrFail($id);
+        // A non-super-admin must not edit a super_admin's password/email/status.
+        $this->assertMayModifyUser($user);
 
         $validated = $request->validate([
             'first_name'           => 'sometimes|string|max:255',
@@ -356,6 +358,8 @@ class UserController extends Controller
         ]);
 
         $user = User::findOrFail($id);
+        // A non-super-admin must not suspend/lock out a super_admin.
+        $this->assertMayModifyUser($user);
 
         if ($user->id === $request->user()->id) {
             return response()->json(['message' => 'Cannot change your own account status.'], 422);
@@ -400,6 +404,8 @@ class UserController extends Controller
     public function resetPassword(Request $request, $id)
     {
         $user = User::findOrFail($id);
+        // A non-super-admin must not force a password reset on a super_admin.
+        $this->assertMayModifyUser($user);
 
         // Send password reset link via Laravel's built-in broker
         $status = \Illuminate\Support\Facades\Password::sendResetLink(['email' => $user->email]);
@@ -747,6 +753,25 @@ class UserController extends Controller
      * roles of a user who already holds it. Server-side/console callers (no auth
      * context, e.g. seeders) are trusted and skip the check.
      */
+    /**
+     * A super administrator is the one account that bypasses every gate
+     * (Gate::before). Editing its password, email, or status is therefore a full
+     * takeover / lockout vector, so only another super administrator may modify a
+     * super_admin. This complements assertMayAssignRoles(), which guards the
+     * super_admin *role* — this guards the super_admin *account's scalar fields*.
+     * Console/seeder callers (no auth context) are trusted and skip the check.
+     */
+    private function assertMayModifyUser(User $target): void
+    {
+        $actor = auth()->user();
+        if (! $actor || $actor->hasRole('super_admin')) {
+            return;
+        }
+        if ($target->hasRole('super_admin')) {
+            abort(403, 'Only a super administrator can modify a super administrator account.');
+        }
+    }
+
     private function assertMayAssignRoles(int $targetUserId, array $roleIds): void
     {
         $actor = auth()->user();
