@@ -58,6 +58,7 @@ class AbandonedOrderReaperTest extends TestCase
             'product_id'     => $this->product->id,
             'product_variant_id' => null,
             'product_name'   => 'Test',
+            'sku'            => 'TEST-SKU',
             'quantity'       => $qty,
             'unit_price'     => 100,
             'total_price'    => 100 * $qty,
