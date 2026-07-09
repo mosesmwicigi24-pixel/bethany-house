@@ -381,6 +381,27 @@ class NotificationService
     // ── Stock notifications ───────────────────────────────────────────────────
 
     /**
+     * Fired when tracked units have sat unsold on the shelf too long — prompts a
+     * physical check that they're still there (aging = a loss-detection signal).
+     */
+    public static function stockAging(int $count, int $days): void
+    {
+        if ($count < 1) {
+            return;
+        }
+        self::send(
+            self::resolve(self::PROCUREMENT),
+            new InAppNotification(
+                title:     "{$count} unit(s) aging on the shelf",
+                body:      "{$count} unit(s) have been in stock over {$days} days without selling. Verify they're still on the shelf.",
+                actionUrl: "/inventory/serials?aged=1",
+                icon:      'stock',
+                data:      ['aged_count' => $count, 'days' => $days],
+            ),
+        );
+    }
+
+    /**
      * Fired when a product variant drops to or below its low-stock threshold.
      */
     public static function lowStockAlert(
