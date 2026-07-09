@@ -120,6 +120,9 @@ export interface Order {
     shipping_fee_note?: string | null;
     total_amount: number;
     total?: number;
+    /** When dispatch (hand-over) was authorized, and by whom. */
+    dispatched_at?: string | null;
+    dispatched_by?: number | null;
     /** Minimum deposit amount set by staff */
     deposit_amount?: number | null;
     /** Date by which the balance must be paid */
@@ -202,6 +205,10 @@ export const ordersApi = {
 
     get: (id: number) =>
         get<{ order: Order }>(`/v1/admin/orders/${id}`),
+
+    /** Authorize dispatch (hand-over) of a paid POS sale. */
+    authorizeDispatch: (id: number) =>
+        post<{ message: string; order: any }>(`/v1/admin/pos/sales/${id}/dispatch`, {}),
 
     updateStatus: (
         id: number,
