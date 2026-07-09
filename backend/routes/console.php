@@ -20,3 +20,14 @@ Schedule::command(\App\Console\Commands\RunIntelligenceChecks::class)
     ->onFailure(function () {
         \Illuminate\Support\Facades\Log::error('[Intelligence] Nightly checks failed.');
     });
+// ── Reap abandoned POS orders — hourly ───────────────────────────────────────
+// Cancels unpaid pending POS orders older than 24h and restores their reserved
+// stock, so abandoned carts never silently drain the shelf count.
+// Manual run: php artisan pos:reap-abandoned-orders
+Schedule::command(\App\Console\Commands\ReapAbandonedOrders::class)
+    ->hourly()
+    ->withoutOverlapping()
+    ->runInBackground()
+    ->onFailure(function () {
+        \Illuminate\Support\Facades\Log::error('[POS] Abandoned-order reap failed.');
+    });
