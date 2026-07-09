@@ -29,8 +29,11 @@ class PurchaseOrderReceiveSerialTest extends TestCase
     private function actAsReceiver(): void
     {
         $user = User::factory()->create();
-        // procurement.receive only (no role) so the goods-received notification
-        // resolves to nobody and the RefreshDatabase transaction stays clean.
+        // The purchase-orders route group requires procurement.view; the receive
+        // endpoint itself requires procurement.receive. Grant both directly (no
+        // role) so the goods-received notification resolves to nobody and the
+        // RefreshDatabase transaction stays clean.
+        $user->givePermissionTo(Permission::findOrCreate('procurement.view', 'sanctum'));
         $user->givePermissionTo(Permission::findOrCreate('procurement.receive', 'sanctum'));
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
