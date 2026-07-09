@@ -22,7 +22,7 @@ class SuperAdminProtectionTest extends TestCase
     private function superAdmin(): User
     {
         Role::findOrCreate('super_admin', 'sanctum');
-        $u = User::factory()->create(['email' => 'root@bethany.test']);
+        $u = User::factory()->create();   // factory emails are unique
         $u->assignRole('super_admin');
         return $u;
     }
@@ -77,7 +77,6 @@ class SuperAdminProtectionTest extends TestCase
     {
         $target = $this->superAdmin();
         $actor  = $this->superAdmin();
-        $actor->update(['email' => 'actor@bethany.test']);
         Sanctum::actingAs($actor);
 
         $this->putJson("/api/v1/admin/users/{$target->id}", [
