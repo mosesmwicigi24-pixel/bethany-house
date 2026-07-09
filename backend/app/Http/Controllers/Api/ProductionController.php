@@ -20,6 +20,7 @@ use App\Models\User;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
 use App\Services\IntelligenceService;
+use App\Services\ProductSerialService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -707,6 +708,15 @@ class ProductionController extends Controller
                 $request->user()->id
             );
 
+            // Move this order's serials from in_production → in_stock (linked to the
+            // finished-goods inventory item), reconciled to the produced quantity.
+            ProductSerialService::stockFromProductionOrder(
+                $order,
+                $inventoryItem->id,
+                $validated['outlet_id'] ?? null,
+                $qty,
+            );
+
             $order->update([
                 'status'       => 'completed',
                 'completed_at' => now(),
@@ -772,6 +782,9 @@ class ProductionController extends Controller
                 ? (($order->notes ? $order->notes . "\n\n" : '') . "Cancelled: {$reason}")
                 : $order->notes,
         ]);
+
+        // Void any serials that were reserved for this cancelled order.
+        ProductSerialService::cancelForProductionOrder($order);
 
         try {
             ActivityLogService::log('production_order_cancelled', $order, [
@@ -1351,6 +1364,10 @@ class ProductionController extends Controller
                 'confirmed_at' => now(),
                 'confirmed_by' => $request->user()->id,
             ]);
+
+            // Approved for production → assign a unique serial to every unit so it
+            // can be tracked from here through stock, sale and dispatch.
+            ProductSerialService::generateForProductionOrder($order);
 
             // Create production tasks from active stages
             $stages = ProductionStage::active()->ordered()->get();
