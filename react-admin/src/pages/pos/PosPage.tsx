@@ -42,6 +42,7 @@ import type {
 } from "@/api/pos";
 import type { SplitPayment as ModalSplitPayment, ConfiguredMethod } from "./components/PaymentModal";
 import { useToastStore } from "@/store/toast.store";
+import { useAuthStore } from "@/store/auth.store";
 import { Spinner } from "@/components/ui/Spinner";
 import RegisterModal from "./components/RegisterModal";
 import PaymentModal from "./components/PaymentModal";
@@ -192,9 +193,20 @@ const CART_DRAFT_KEY = "pos_cart_draft";
 // moment a second order is saved and overwrites it.
 const DISMISSED_PENDING_KEY = "pos_dismissed_pending_ids";
 
+// Scope every POS browser-cache key to the logged-in user. sessionStorage
+// survives a logout within the same tab, so a SHARED key would carry the
+// previous cashier's cart AND their attached pendingOrderId into the next
+// cashier's session — producing a total mismatch ("payment does not cover order
+// total") because the new cart's amount is paid against the old order. Keying by
+// user id gives each account an isolated cart so orders can never cross.
+function posUserScope(): string {
+    return String(useAuthStore.getState().user?.id ?? "anon");
+}
+const scopedKey = (base: string): string => `${base}:${posUserScope()}`;
+
 function getDismissedPendingOrderIds(): Set<number> {
     try {
-        const raw = sessionStorage.getItem(DISMISSED_PENDING_KEY);
+        const raw = sessionStorage.getItem(scopedKey(DISMISSED_PENDING_KEY));
         if (!raw) return new Set();
         const arr = JSON.parse(raw);
         return new Set(Array.isArray(arr) ? arr.map(Number) : []);
@@ -209,7 +221,7 @@ function addDismissedPendingOrderId(id: number): void {
     try {
         const ids = getDismissedPendingOrderIds();
         ids.add(id);
-        sessionStorage.setItem(DISMISSED_PENDING_KEY, JSON.stringify([...ids]));
+        sessionStorage.setItem(scopedKey(DISMISSED_PENDING_KEY), JSON.stringify([...ids]));
     } catch { /* ignore */ }
 }
 
@@ -217,7 +229,7 @@ function removeDismissedPendingOrderId(id: number): void {
     try {
         const ids = getDismissedPendingOrderIds();
         ids.delete(id);
-        sessionStorage.setItem(DISMISSED_PENDING_KEY, JSON.stringify([...ids]));
+        sessionStorage.setItem(scopedKey(DISMISSED_PENDING_KEY), JSON.stringify([...ids]));
     } catch { /* ignore */ }
 }
 
@@ -243,11 +255,11 @@ const CART_DRAFT_MAX_AGE_MS = 8 * 60 * 60 * 1000;
 
 function loadCartDraft(): CartDraft | null {
     try {
-        const raw = sessionStorage.getItem(CART_DRAFT_KEY);
+        const raw = sessionStorage.getItem(scopedKey(CART_DRAFT_KEY));
         if (!raw) return null;
         const draft: CartDraft = JSON.parse(raw);
         if (Date.now() - (draft.savedAt ?? 0) > CART_DRAFT_MAX_AGE_MS) {
-            sessionStorage.removeItem(CART_DRAFT_KEY);
+            sessionStorage.removeItem(scopedKey(CART_DRAFT_KEY));
             return null;
         }
         return draft;
@@ -259,7 +271,7 @@ function loadCartDraft(): CartDraft | null {
 function saveCartDraft(draft: Omit<CartDraft, "savedAt">): void {
     try {
         sessionStorage.setItem(
-            CART_DRAFT_KEY,
+            scopedKey(CART_DRAFT_KEY),
             JSON.stringify({ ...draft, savedAt: Date.now() }),
         );
     } catch {
@@ -269,6 +281,9 @@ function saveCartDraft(draft: Omit<CartDraft, "savedAt">): void {
 
 function clearCartDraft(): void {
     try {
+        sessionStorage.removeItem(scopedKey(CART_DRAFT_KEY));
+        // Also clear the legacy un-scoped key so a draft saved before this fix
+        // can't leak into any user's session.
         sessionStorage.removeItem(CART_DRAFT_KEY);
     } catch {
         // ignore
