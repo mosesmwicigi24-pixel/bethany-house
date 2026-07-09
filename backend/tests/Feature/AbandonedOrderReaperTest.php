@@ -79,9 +79,13 @@ class AbandonedOrderReaperTest extends TestCase
         $this->assertSame(10, (int) $this->inventory->fresh()->quantity_on_hand);
     }
 
-    public function test_reap_cancels_restores_and_releases_serials(): void
+    public function test_reap_releases_the_reservation_and_serials(): void
     {
         $order = $this->abandonedOrder(2);
+        // A real pending order holds a RESERVATION (physical count untouched).
+        $this->inventory->reserveUnits(2);   // reserved 2, on_hand still 8
+        $order->forceFill(['stock_reserved_at' => now()])->save();
+
         $serial = ProductSerial::create([
             'serial_number' => 'SN-REAP-1',
             'product_id'    => $this->product->id,
@@ -93,9 +97,11 @@ class AbandonedOrderReaperTest extends TestCase
         $result = AbandonedOrderReaper::reap(24);
 
         $this->assertSame(1, $result['cancelled']);
-        $this->assertSame(2, $result['restored']);
         $this->assertSame('cancelled', $order->fresh()->status);
-        $this->assertSame(10, (int) $this->inventory->fresh()->quantity_on_hand);
+        // Reservation released; physical count never moved.
+        $this->inventory->refresh();
+        $this->assertSame(8, (int) $this->inventory->quantity_on_hand);
+        $this->assertSame(0, (int) $this->inventory->quantity_reserved);
         $this->assertSame(ProductSerial::IN_STOCK, $serial->fresh()->status);
     }
 

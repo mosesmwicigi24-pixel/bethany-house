@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\InventoryItem;
 use App\Models\InventoryTransaction;
 use App\Models\Order;
+use App\Services\PosInventoryService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -112,12 +113,16 @@ class AbandonedOrderReaper
             }
 
             DB::transaction(function () use ($orderId, $userId, &$result) {
-                $result['restored'] += self::restoreInventoryForOrder($orderId, $userId);
-
                 $order = Order::find($orderId);
                 if (!$order) {
                     return;
                 }
+                // Return the stock the order was holding — a reservation for new
+                // orders, or the physical count for legacy (pre-model) ones.
+                $reservedUnits = (int) $order->items()->sum('quantity');
+                PosInventoryService::unwindForOrder($order, $userId);
+                $result['restored'] += $reservedUnits;
+
                 ProductSerialService::releaseForOrder($order);
 
                 $note = trim(($order->notes ?? '') . "\n[system] Auto-cancelled: abandoned unpaid POS order (stock restored).");
