@@ -56,6 +56,9 @@ class Order extends Model
         'cancelled_at',
         'dispatched_at',
         'dispatched_by',
+        'stock_reserved_at',
+        'stock_committed_at',
+        'stock_unwound_at',
         'payment_token',
         'payment_token_expires_at',
         'is_international',
@@ -75,6 +78,9 @@ class Order extends Model
         'completed_at'           => 'datetime',
         'cancelled_at'           => 'datetime',
         'dispatched_at'          => 'datetime',
+        'stock_reserved_at'      => 'datetime',
+        'stock_committed_at'     => 'datetime',
+        'stock_unwound_at'       => 'datetime',
         'payment_token_expires_at' => 'datetime',
     ];
 

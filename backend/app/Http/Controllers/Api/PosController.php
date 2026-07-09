@@ -18,6 +18,7 @@ use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Services\ActivityLogService;
 use App\Services\ProductSerialService;
+use App\Services\PosInventoryService;
 use App\Services\TaxCalculationService;
 use App\Services\NotificationService;
 use Illuminate\Http\Request;
@@ -861,6 +862,12 @@ class PosController extends Controller
                 );
             }
 
+            // Immediate paid sale — the goods leave the shelf now. Mark it
+            // committed (so a later void restores the physical count via the
+            // reservation model) and flag the serialized units sold.
+            $order->forceFill(['stock_committed_at' => now()])->save();
+            ProductSerialService::syncSoldForOrder($order);
+
             // -- 6. Payment records - one per split payment -------------------
             $totalCashForRegister   = 0;
             $totalCardForRegister   = 0;
@@ -1204,20 +1211,9 @@ class PosController extends Controller
                 ->update(['status' => 'voided', 'updated_at' => now()]);
             $order->syncPaymentStatus();
 
-            foreach ($order->items as $item) {
-                $inventory = InventoryItem::where('product_variant_id', $item->product_variant_id)
-                    ->where('outlet_id', $order->outlet_id)
-                    ->first();
-                if ($inventory) {
-                    $inventory->adjustQuantity(
-                        $item->quantity,
-                        'void_return',
-                        Order::class,
-                        $order->id,
-                        $request->user()->id
-                    );
-                }
-            }
+            // Return this sale's stock: restore the physical count if it had been
+            // committed (paid), otherwise just release the reservation. Idempotent.
+            PosInventoryService::unwindForOrder($order, $request->user()->id);
 
             // Return this sale's serialized units to the shelf.
             ProductSerialService::releaseForOrder($order);
@@ -2687,9 +2683,17 @@ class PosController extends Controller
 
         DB::beginTransaction();
         try {
-            // ── 1. Return stock for old items ─────────────────────────────────
-            // MTO items had no inventory deducted, so skip them gracefully.
+            // ── 1. Return the stock held by the old items ─────────────────────
+            // A new-model pending order only RESERVED its stock, so release the
+            // reservation (physical count untouched). A LEGACY order created
+            // before the reservation model had its on_hand deducted (marked
+            // committed by the migration, never reserved) — restore the physical
+            // count instead and clear the committed flag so the edited order
+            // re-enters the new model cleanly (reserve → commit on pay). MTO
+            // lines were never inventory-backed.
+            $legacyCommitted = $order->stock_committed_at && !$order->stock_reserved_at;
             foreach ($order->items as $oldItem) {
+                if (str_starts_with($oldItem->notes ?? '', '__MTO__')) continue;
                 if (!$oldItem->product_variant_id) continue;
 
                 $inv = InventoryItem::where('outlet_id', $outletId)
@@ -2700,11 +2704,15 @@ class PosController extends Controller
                         ->where('product_variant_id', $oldItem->product_variant_id)
                         ->lockForUpdate()->first();
                 }
-                if ($inv) {
-                    $inv->quantity_on_hand += $oldItem->quantity;
-                    $inv->save();
+                if (!$inv) continue;
+                if ($legacyCommitted) {
+                    $inv->adjustQuantity((int) $oldItem->quantity, 'void_return', Order::class, $order->id, $request->user()->id);
+                } else {
+                    $inv->release((int) $oldItem->quantity);
                 }
-                // If $inv is still null the line was MTO — nothing to return.
+            }
+            if ($legacyCommitted) {
+                $order->forceFill(['stock_committed_at' => null])->save();
             }
 
             // ── 2. Delete old order items ─────────────────────────────────────
@@ -2932,20 +2940,13 @@ class PosController extends Controller
                         ? json_encode($item['measurement_values'])
                         : null,
                 ]);
-                // MTO lines have no inventory row to deduct from
+                // MTO lines have no inventory row. Others RESERVE the new quantity
+                // (physical count unchanged until the sale is paid).
                 if (!($item['is_mto'] ?? false) && $item['inventory']) {
-                    $item['inventory']->adjustQuantity(
-                        -(int) round($item['quantity']),
-                        'sale',
-                        Order::class,
-                        $order->id,
-                        $request->user()->id
-                    );
+                    $item['inventory']->reserveUnits((int) round($item['quantity']));
                 }
             }
-
-            // Re-reconcile serialized units to the edited cart (claims/releases as needed).
-            ProductSerialService::syncSoldForOrder($order);
+            $order->forceFill(['stock_reserved_at' => now()])->save();
 
             DB::commit();
 
@@ -3311,14 +3312,13 @@ class PosController extends Controller
                         ? json_encode($item['measurement_values'])
                         : null,
                 ]);
-                // MTO lines have no inventory to deduct — the item is made to order.
+                // MTO lines have no inventory — the item is made to order. Others
+                // RESERVE stock (physical count stays put until the sale is paid).
                 if (!($item['is_mto'] ?? false) && $item['inventory']) {
-                    $item['inventory']->adjustQuantity(-$item['quantity'], 'sale', Order::class, $order->id, $user->id);
+                    $item['inventory']->reserveUnits((int) $item['quantity']);
                 }
             }
-
-            // Mark the specific serialized units as sold off the shelf.
-            ProductSerialService::syncSoldForOrder($order);
+            $order->forceFill(['stock_reserved_at' => now()])->save();
 
             $raisedProductionOrders = [];
             foreach ($validated['production_items'] ?? [] as $pi) {
@@ -3601,6 +3601,13 @@ class PosController extends Controller
                 'completed_at'   => null,  // set by staff at handover, not by payment
                 'deposit_amount' => $isDeposit ? $depositAmt : $order->deposit_amount,
             ]);
+
+            // Fully paid → the goods actually leave the shelf: commit the reservation
+            // (deduct the physical count) and mark the serialized units sold.
+            if ($newPayStatus === 'paid') {
+                PosInventoryService::commitForOrder($order, $request->user()->id);
+                ProductSerialService::syncSoldForOrder($order);
+            }
 
             DB::commit();
 

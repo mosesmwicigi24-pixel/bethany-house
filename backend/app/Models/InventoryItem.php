@@ -113,6 +113,41 @@ class InventoryItem extends Model
         return $this;
     }
 
+    // ── Reservation model (POS) ───────────────────────────────────────────────
+    // A pending sale RESERVES stock (lowers what's sellable via quantity_available
+    // without touching the physical quantity_on_hand); payment COMMITS it (goods
+    // physically leave); void/cancel RELEASES the reservation. This keeps
+    // quantity_on_hand honest even while a sale is open.
+
+    /** Reserve units for a pending sale — physical count unchanged. Non-throwing. */
+    public function reserveUnits(int $qty): void
+    {
+        if ($qty <= 0) return;
+        $this->quantity_reserved += $qty;
+        $this->save();
+    }
+
+    /** Commit a reservation: the goods physically leave (deduct on_hand + reserved). */
+    public function commitReservation(int $qty, $referenceType = null, $referenceId = null, $userId = null): void
+    {
+        if ($qty <= 0) return;
+        $oldQuantity = $this->quantity_on_hand;
+        $this->quantity_on_hand  = max(0, $this->quantity_on_hand - $qty);
+        $this->quantity_reserved = max(0, $this->quantity_reserved - $qty);
+        $this->save();
+
+        InventoryTransaction::create([
+            'inventory_item_id' => $this->id,
+            'transaction_type'  => 'sale',
+            'reference_type'    => $referenceType,
+            'reference_id'      => $referenceId,
+            'quantity_change'   => $this->quantity_on_hand - $oldQuantity,
+            'quantity_before'   => $oldQuantity,
+            'quantity_after'    => $this->quantity_on_hand,
+            'created_by'        => $userId ?? auth()->id(),
+        ]);
+    }
+
     public function reserve($quantity)
     {
         if ($quantity > $this->quantity_available) {
