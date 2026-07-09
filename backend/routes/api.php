@@ -732,8 +732,10 @@ Route::prefix('v1')->group(function () {
 
             // ── Product serials (per-item tracking) ────────────────────────────
             Route::middleware('permission:inventory.view,sanctum')->prefix('product-serials')->group(function () {
-                Route::get('/',      [ProductSerialController::class, 'index']);
-                Route::get('/{id}',  [ProductSerialController::class, 'show']);
+                Route::get('/',       [ProductSerialController::class, 'index']);
+                Route::post('/reconcile', [ProductSerialController::class, 'reconcile'])
+                    ->middleware('permission:inventory.adjust,sanctum');
+                Route::get('/{id}',   [ProductSerialController::class, 'show']);
             });
 
             // ── Outlets ───────────────────────────────────────────────────────

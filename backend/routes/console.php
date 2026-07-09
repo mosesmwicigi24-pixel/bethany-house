@@ -31,3 +31,11 @@ Schedule::command(\App\Console\Commands\ReapAbandonedOrders::class)
     ->onFailure(function () {
         \Illuminate\Support\Facades\Log::error('[POS] Abandoned-order reap failed.');
     });
+
+// ── Stock aging check — daily at 08:00 ───────────────────────────────────────
+// Notifies procurement/owners when tracked units have sat unsold too long.
+// Manual run: php artisan serials:check-aging
+Schedule::command(\App\Console\Commands\CheckStockAging::class)
+    ->dailyAt('08:00')
+    ->withoutOverlapping()
+    ->runInBackground();

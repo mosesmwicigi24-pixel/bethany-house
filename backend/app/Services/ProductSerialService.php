@@ -81,6 +81,7 @@ class ProductSerialService
                     'status'            => ProductSerial::IN_STOCK,
                     'inventory_item_id' => $inventoryItemId,
                     'outlet_id'         => $outletId ?? $serial->outlet_id,
+                    'stocked_at'        => now(),
                 ]);
             } else {
                 $serial->update([
@@ -102,6 +103,7 @@ class ProductSerialService
                 'inventory_item_id'  => $inventoryItemId,
                 'outlet_id'          => $outletId ?? $order->outlet_id,
                 'status'             => ProductSerial::IN_STOCK,
+                'stocked_at'         => now(),
                 'created_by'         => $order->created_by,
             ]);
         }
@@ -170,9 +172,10 @@ class ProductSerialService
             } elseif ($have > $want) {
                 foreach ($current->get($productId)->take($have - $want) as $serial) {
                     $serial->update([
-                        'status'   => ProductSerial::IN_STOCK,
-                        'order_id' => null,
-                        'sold_at'  => null,
+                        'status'     => ProductSerial::IN_STOCK,
+                        'order_id'   => null,
+                        'sold_at'    => null,
+                        'stocked_at' => now(),
                     ]);
                 }
             }
@@ -200,8 +203,56 @@ class ProductSerialService
                 'status'     => ProductSerial::IN_STOCK,
                 'order_id'   => null,
                 'sold_at'    => null,
+                'stocked_at' => now(),
                 'updated_at' => now(),
             ]);
+    }
+
+    /**
+     * Reconcile a product's system stock against a physical count.
+     *
+     * Given the serial numbers actually found on the shelf, compares them to the
+     * serials the system believes are in stock and returns the discrepancy:
+     *   - missing:    system says in-stock but wasn't found (possible loss/theft)
+     *   - unexpected: found on the shelf but not in-stock in the system
+     *   - matched:    present and accounted for
+     * When $flagMissing is true, the missing units are marked `missing` so the
+     * loss is recorded and stops counting as sellable stock.
+     *
+     * @param  string[]  $scannedSerials
+     * @return array{matched:array, missing:array, unexpected:array}
+     */
+    public static function reconcile(int $productId, ?int $outletId, array $scannedSerials, bool $flagMissing = false): array
+    {
+        $scanned = collect($scannedSerials)->map(fn ($s) => trim((string) $s))->filter()->unique();
+
+        $systemInStock = ProductSerial::where('product_id', $productId)
+            ->where('status', ProductSerial::IN_STOCK)
+            ->when($outletId, fn ($q) => $q->where('outlet_id', $outletId))
+            ->get();
+
+        $systemNumbers = $systemInStock->pluck('serial_number');
+
+        $matchedNumbers    = $scanned->intersect($systemNumbers)->values();
+        $missing           = $systemInStock->whereNotIn('serial_number', $scanned->all())->values();
+        $unexpectedNumbers = $scanned->diff($systemNumbers)->values();
+
+        if ($flagMissing && $missing->isNotEmpty()) {
+            ProductSerial::whereIn('id', $missing->pluck('id'))->update([
+                'status'     => ProductSerial::MISSING,
+                'notes'      => 'Flagged missing during reconciliation on ' . now()->toDateString(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        return [
+            'matched'    => $matchedNumbers->all(),
+            'missing'    => $missing->map(fn ($s) => [
+                'id'            => $s->id,
+                'serial_number' => $s->serial_number,
+            ])->all(),
+            'unexpected' => $unexpectedNumbers->all(),
+        ];
     }
 
     /** POS persists made-to-order lines with a `__MTO__` note prefix. */

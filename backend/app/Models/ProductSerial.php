@@ -18,6 +18,8 @@ class ProductSerial extends Model
     public const DISPATCHED    = 'dispatched';
     public const RETURNED      = 'returned';
     public const CANCELLED     = 'cancelled';
+    /** Expected on the shelf but not found during a physical reconciliation. */
+    public const MISSING       = 'missing';
 
     protected $fillable = [
         'serial_number',
@@ -27,6 +29,7 @@ class ProductSerial extends Model
         'inventory_item_id',
         'outlet_id',
         'status',
+        'stocked_at',
         'order_id',
         'sold_at',
         'dispatched_at',
@@ -35,6 +38,7 @@ class ProductSerial extends Model
     ];
 
     protected $casts = [
+        'stocked_at'    => 'datetime',
         'sold_at'       => 'datetime',
         'dispatched_at' => 'datetime',
     ];
