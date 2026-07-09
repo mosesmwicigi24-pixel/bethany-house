@@ -1975,6 +1975,16 @@ export default function PosPage() {
             return;
         }
 
+        // Never hijack a cart the cashier is already building. Attaching an
+        // unrelated leftover order (and its backend total) to the current items
+        // is what caused payments to be charged against the wrong order total —
+        // e.g. paying a 600 cart against a stale 17,500 order. They can resume
+        // the earlier order explicitly from History, which loads its own items.
+        if (cart.length > 0) {
+            autoResumedOrderRef.current = incomingId;
+            return;
+        }
+
         // All guards passed — attach the order and notify exactly once.
         autoResumedOrderRef.current = incomingId;
         setPendingOrderId(incomingId);
@@ -2594,37 +2604,56 @@ export default function PosPage() {
         if (!selectedOutletId || cart.length === 0) return;
 
         const currentSig = cartSignature(cart);
-        const cartChanged = pendingOrderCartSig !== "" && currentSig !== pendingOrderCartSig;
+        const sigChanged  = pendingOrderCartSig !== "" && currentSig !== pendingOrderCartSig;
 
+        // Also compare against the ATTACHED order's real backend total. The
+        // signature is a client-side value and can wrongly report "in sync" when
+        // an order was attached to a different cart — in which case paying charges
+        // the cart amount against the wrong order total. Any divergence counts as
+        // a change so we never pay a stale order.
+        const attachedTotal = Number(
+            (pendingOrderData as any)?.total_amount ??
+            (pendingOrderData as any)?.order?.total_amount ?? NaN,
+        );
+        const totalsMismatch = pendingOrderId != null && Number.isFinite(attachedTotal)
+            && Math.abs(attachedTotal - totals.total) > 0.01;
+        const cartChanged = sigChanged || totalsMismatch;
+
+        // Case B — the attached order already matches the cart: pay it as-is.
         if (pendingOrderId && !cartChanged) {
-            // Case B - same cart items, reopen the payment modal against the same order
             setShowPaymentModal(true);
             return;
         }
 
+        // Case C-resumed — a restored order was edited: update it in place
+        // (preserving the order number), and open the payment modal ONLY once the
+        // backend order reflects the new cart, so the payment can't race ahead of
+        // the update and be charged against the old total.
         if (pendingOrderId && cartChanged && isResumedOrder) {
-            // Case C-resumed - cart changed on a restored order: UPDATE it in place,
-            // preserving the order number. No void, no duplicate order.
-            setShowPaymentModal(true);
-            updateOrderMutation.mutate({ id: pendingOrderId, payload: buildCartPayload() });
+            updateOrderMutation.mutate(
+                { id: pendingOrderId, payload: buildCartPayload() },
+                { onSuccess: () => setShowPaymentModal(true) },
+            );
             return;
         }
 
+        // Case C-fresh / stale attach — release the old order from this cart
+        // session (it stays in the system as a pending order; never auto-void).
         if (pendingOrderId && cartChanged && !isResumedOrder) {
-            // Case C-fresh - cart changed on a freshly-created order.
-            // Simply release the old order from this cart session - it stays
-            // in the system as a pending order. Never auto-void in POS.
             setPendingOrderId(null);
             setPendingOrderData(null);
             setPendingOrderCartSig("");
             setIsResumedOrder(false);
         }
 
-        // Case A or C-fresh - create a new order
-        setShowPaymentModal(true);
-        pendingOrderMutation.mutate(buildCartPayload());
-    }, [selectedOutletId, cart, pendingOrderId, pendingOrderCartSig, isResumedOrder,
-        buildCartPayload, pendingOrderMutation, updateOrderMutation]);
+        // Case A — create a fresh order for exactly the current cart, and open the
+        // payment modal only after it's saved so the payment always targets an
+        // order whose total equals what's on screen.
+        pendingOrderMutation.mutate(buildCartPayload(), {
+            onSuccess: () => setShowPaymentModal(true),
+        });
+    }, [selectedOutletId, cart, pendingOrderId, pendingOrderData, pendingOrderCartSig,
+        isResumedOrder, totals.total, buildCartPayload, pendingOrderMutation, updateOrderMutation]);
 
     const selectedOutlet = outlets.find((o) => o.id === selectedOutletId);
     // ── Effective currency / international flag ────────────────────────────────
