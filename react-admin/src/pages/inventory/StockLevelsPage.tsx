@@ -367,7 +367,12 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
         enabled: open,
     });
 
-    const products = productsData?.data ?? [];
+    // Sort the product picker alphabetically by the same label shown in the
+    // dropdown (name, falling back to SKU), case-insensitive.
+    const productLabel = (p: any) => p?.en_translation?.name ?? p?.sku ?? "";
+    const products = [...(productsData?.data ?? [])].sort((a, b) =>
+        productLabel(a).localeCompare(productLabel(b), undefined, { sensitivity: "base" }),
+    );
     const outlets = Array.isArray(outletsData)
         ? outletsData
         : (outletsData?.data ?? []);
