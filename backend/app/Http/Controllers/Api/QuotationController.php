@@ -195,12 +195,13 @@ class QuotationController extends Controller
         $calc = TaxCalculationService::calculateOrder($lines);
 
         foreach ($items as $idx => $item) {
-            $line = $calc['lines'][$idx];
+            $line      = $calc['lines'][$idx];
+            $productId = $item['product_id'] ?? null;
             QuotationItem::create([
                 'quotation_id'       => $quotation->id,
-                'product_id'         => $item['product_id'] ?? null,
+                'product_id'         => $productId,
                 'product_variant_id' => $item['product_variant_id'] ?? null,
-                'sku'                => $item['sku'] ?? ($item['product_id'] ? Product::find($item['product_id'])?->sku : null),
+                'sku'                => $item['sku'] ?? ($productId ? Product::find($productId)?->sku : null),
                 'product_name'       => $item['product_name'],
                 'variant_name'       => $item['variant_name'] ?? null,
                 'quantity'           => (int) $item['quantity'],
