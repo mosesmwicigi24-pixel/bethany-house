@@ -92,10 +92,12 @@ class QuotationService
                 'tax_amount'      => (float) $i->tax_amount,
                 'total_price'     => (float) $i->total_price,
             ])->all(),
+            'served_by' => $quotation->served_by,
             'totals' => [
                 'subtotal'        => (float) $quotation->subtotal,
                 'discount_amount' => (float) $quotation->discount_amount,
                 'tax_amount'      => (float) $quotation->tax_amount,
+                'shipping_amount' => (float) $quotation->shipping_amount,
                 'total_amount'    => (float) $quotation->total_amount,
             ],
             'notes' => $quotation->notes,
@@ -152,6 +154,7 @@ class QuotationService
                 'subtotal'                 => $quotation->subtotal,
                 'discount_amount'          => $quotation->discount_amount,
                 'tax_amount'               => $quotation->tax_amount,
+                'shipping_amount'          => $quotation->shipping_amount,
                 'total_amount'             => $quotation->total_amount,
                 'payment_token'            => $paymentToken,
                 'payment_token_expires_at' => now()->addDays(max($dueInDays, 30)),
@@ -240,6 +243,7 @@ class QuotationService
                 'subtotal'        => (float) $order->subtotal,
                 'discount_amount' => (float) $order->discount_amount,
                 'tax_amount'      => (float) $order->tax_amount,
+                'shipping_amount' => (float) $order->shipping_amount,
                 'total_amount'    => (float) $order->total_amount,
             ],
         ];

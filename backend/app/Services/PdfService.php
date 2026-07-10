@@ -608,6 +608,7 @@ HTML;
             'Quotation #' => $q['quote_number'] ?? 'DRAFT',
             'Date'        => self::date($q['issued_at'] ?? $q['created_at'] ?? null),
             'Valid Until' => self::date($q['valid_until'] ?? null),
+            'Served By'   => $q['served_by'] ?? '—',
             'Location'    => $q['outlet_name'] ?? '—',
         ];
 
@@ -637,8 +638,9 @@ HTML;
         $totals = [
             'subtotal' => $q['subtotal']        ?? 0,
             'discount' => $q['discount_amount'] ?? 0,
-            'tax'      => $q['tax_amount']      ?? 0,
-            'total'    => $q['total_amount']    ?? 0,
+            'tax'      => $q['tax_amount']       ?? 0,
+            'shipping' => $q['shipping_amount']  ?? 0,
+            'total'    => $q['total_amount']     ?? 0,
             'currency' => $currency,
         ];
 
