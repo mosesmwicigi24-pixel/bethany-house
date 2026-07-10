@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Services\ActivityLogService;
 use App\Services\NotificationService;
+use App\Services\ReceiptService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -260,6 +261,15 @@ class PaymentApprovalController extends Controller
                 // All approval-required payments are now approved - re-sync properly
                 $order->syncPaymentStatus();
                 $order->refresh();
+
+                // Quote-originated invoice? Issue a receipt for the approved
+                // payment and commit reserved stock once fully paid. No-op
+                // otherwise; best-effort so a receipt hiccup can't undo approval.
+                try {
+                    ReceiptService::onPaymentSettled($order, $payment, $request->user()->id);
+                } catch (\Throwable $e) {
+                    Log::warning('Receipt/commit after payment approval failed', ['order_id' => $order->id, 'error' => $e->getMessage()]);
+                }
 
                 // Advance order status now that the payment block is lifted.
                 // Payment approval means money is confirmed - NOT that fulfilment
