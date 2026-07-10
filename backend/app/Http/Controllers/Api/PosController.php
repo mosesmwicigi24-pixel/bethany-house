@@ -1411,6 +1411,16 @@ class PosController extends Controller
                     $order->id,
                     $request->user()->id
                 );
+
+                // Bring the returned units' serials back to stock too, so the
+                // per-unit ledger tracks the physical restock (previously a return
+                // restocked quantity_on_hand but left the serials sold/dispatched,
+                // widening the serial-vs-count gap on every return).
+                ProductSerialService::returnUnitsForOrder(
+                    $order,
+                    (int) $orderItem->product_id,
+                    (int) $req['quantity'],
+                );
             }
 
             // Bound the refund to what was ACTUALLY collected on this order, net

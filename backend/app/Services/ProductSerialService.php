@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\InventoryItem;
 use App\Models\Order;
 use App\Models\ProductionOrder;
 use App\Models\ProductSerial;
@@ -259,18 +260,59 @@ class ProductSerialService
             ]);
     }
 
-    /** Return an order's sold serials to stock — on void / release. */
+    /**
+     * Return an order's serials to stock — on void / release. Covers both sold
+     * and DISPATCHED units: an order can be voided after dispatch (voidSale only
+     * blocks already-voided), and unwindForOrder restores its quantity_on_hand,
+     * so the serials must come back to stock too or they'd be stranded
+     * `dispatched` while the physical count says they're on the shelf.
+     */
     public static function releaseForOrder(Order $order): void
     {
         ProductSerial::where('order_id', $order->id)
-            ->where('status', ProductSerial::SOLD)
+            ->whereIn('status', [ProductSerial::SOLD, ProductSerial::DISPATCHED])
             ->update([
-                'status'     => ProductSerial::IN_STOCK,
-                'order_id'   => null,
-                'sold_at'    => null,
-                'stocked_at' => now(),
-                'updated_at' => now(),
+                'status'        => ProductSerial::IN_STOCK,
+                'order_id'      => null,
+                'sold_at'       => null,
+                'dispatched_at' => null,
+                'stocked_at'    => now(),
+                'updated_at'    => now(),
             ]);
+    }
+
+    /**
+     * Return up to $qty of a product's units (sold or dispatched on this order)
+     * to stock — for a PARTIAL return, where only some line units come back and
+     * quantity_on_hand is restored by that amount. Mirrors that restock so the
+     * serial count tracks the physical count.
+     *
+     * @return int units returned to stock
+     */
+    public static function returnUnitsForOrder(Order $order, int $productId, int $qty): int
+    {
+        if ($qty < 1) {
+            return 0;
+        }
+
+        $serials = ProductSerial::where('order_id', $order->id)
+            ->where('product_id', $productId)
+            ->whereIn('status', [ProductSerial::SOLD, ProductSerial::DISPATCHED])
+            ->orderBy('id')
+            ->limit($qty)
+            ->get();
+
+        foreach ($serials as $serial) {
+            $serial->update([
+                'status'        => ProductSerial::IN_STOCK,
+                'order_id'      => null,
+                'sold_at'       => null,
+                'dispatched_at' => null,
+                'stocked_at'    => now(),
+            ]);
+        }
+
+        return $serials->count();
     }
 
     /**
@@ -308,6 +350,20 @@ class ProductSerialService
                 'notes'      => 'Flagged missing during reconciliation on ' . now()->toDateString(),
                 'updated_at' => now(),
             ]);
+
+            // A missing unit is a real stock loss: reduce sellable quantity_on_hand
+            // to match (ledgered as an `adjustment`), so the ghost unit stops being
+            // sellable — the whole point of flagging it. Group by the exact row each
+            // unit was stocked in; fall back to the product+outlet row for legacy
+            // serials with no pinned inventory_item_id.
+            foreach ($missing->groupBy('inventory_item_id') as $invId => $group) {
+                $inv = $invId
+                    ? InventoryItem::find($invId)
+                    : InventoryItem::where('product_id', $productId)
+                        ->when($outletId, fn ($q) => $q->where('outlet_id', $outletId))
+                        ->first();
+                $inv?->adjustQuantity(-1 * $group->count(), 'adjustment', null, null, null);
+            }
         }
 
         return [
