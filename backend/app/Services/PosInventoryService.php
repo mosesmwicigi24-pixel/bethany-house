@@ -26,15 +26,34 @@ class PosInventoryService
         return str_starts_with((string) ($item->notes ?? ''), '__MTO__');
     }
 
-    /** The finished-goods row a line draws from, matched by variant + outlet. */
+    /**
+     * The finished-goods row a line draws from.
+     *
+     * Authoritative source is the `inventory_item_id` pinned on the line when the
+     * sale reserved/deducted — commit / void / restore must act on exactly that
+     * row. Only when it's absent (legacy lines created before the column existed)
+     * do we resolve it, and then strictly scoped by product_id (+ variant),
+     * preferring the order's outlet then the warehouse row — never by variant
+     * alone, which for simple products matched an arbitrary other product.
+     */
     private static function inventoryFor(object $item, ?int $outletId): ?InventoryItem
     {
-        return InventoryItem::where('product_variant_id', $item->product_variant_id)
-            ->where('outlet_id', $outletId)
-            ->first()
-            ?? InventoryItem::whereNull('outlet_id')
-                ->where('product_variant_id', $item->product_variant_id)
-                ->first();
+        if (!empty($item->inventory_item_id)) {
+            $exact = InventoryItem::find($item->inventory_item_id);
+            if ($exact) {
+                return $exact;
+            }
+        }
+
+        $base = InventoryItem::where('product_id', $item->product_id)
+            ->when(
+                $item->product_variant_id,
+                fn ($q) => $q->where('product_variant_id', $item->product_variant_id),
+                fn ($q) => $q->whereNull('product_variant_id'),
+            );
+
+        return (clone $base)->where('outlet_id', $outletId)->first()
+            ?? (clone $base)->whereNull('outlet_id')->first();
     }
 
     /** Reserve stock for a just-created/updated pending order. */
