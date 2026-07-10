@@ -850,6 +850,8 @@ class PosController extends Controller
                     'discount_amount'    => $item['discount_amount'],
                     'tax_amount'         => $item['tax_amount'],   // Phase 2 — per-product tax
                     'total_price'        => $item['total_price'],
+                    // Pin the exact inventory row this line drew from (see reservation model).
+                    'inventory_item_id'  => $item['inventory']?->id,
                 ]);
 
                 // Deduct stock via the model's helper (logs transaction automatically)
@@ -2939,6 +2941,10 @@ class PosController extends Controller
                     'measurement_values' => !empty($item['measurement_values'])
                         ? json_encode($item['measurement_values'])
                         : null,
+                    // Pin the exact inventory row this line drew from (see createPendingOrder).
+                    'inventory_item_id'  => (!($item['is_mto'] ?? false) && $item['inventory'])
+                        ? $item['inventory']->id
+                        : null,
                 ]);
                 // MTO lines have no inventory row. Others RESERVE the new quantity
                 // (physical count unchanged until the sale is paid).
@@ -3310,6 +3316,11 @@ class PosController extends Controller
                     // FIX 4: persist structured measurement values as JSON
                     'measurement_values' => !empty($item['measurement_values'])
                         ? json_encode($item['measurement_values'])
+                        : null,
+                    // Pin the exact inventory row this line drew from, so commit /
+                    // void / restore act on precisely this row (not a re-resolved one).
+                    'inventory_item_id'  => (!($item['is_mto'] ?? false) && $item['inventory'])
+                        ? $item['inventory']->id
                         : null,
                 ]);
                 // MTO lines have no inventory — the item is made to order. Others

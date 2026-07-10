@@ -24,6 +24,7 @@ class OrderItem extends Model
         'tax_amount',
         'total_price',
         'production_order_id',
+        'inventory_item_id',   // the exact finished-goods row this line drew from
         'notes',
     ];
 
