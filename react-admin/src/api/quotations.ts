@@ -49,6 +49,7 @@ export interface Quotation {
     accepted_at: string | null;
     quote_token: string | null;
     items?: QuotationItem[];
+    invoice_document?: { id: number; number: string; documentable_id: number } | null;
     created_at: string;
     updated_at: string;
 }

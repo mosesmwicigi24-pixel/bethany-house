@@ -191,7 +191,10 @@ export default function QuotationsPage() {
                                                         Copy link
                                                     </button>
                                                 )}
-                                                {issued && <PdfDownloadButton type="quotations" id={q.id} label="PDF" />}
+                                                {issued && <PdfDownloadButton type="quotations" id={q.id} label="Quote PDF" />}
+                                                {q.status === "converted" && q.invoice_document && (
+                                                    <PdfDownloadButton type="orders" id={q.invoice_document.documentable_id} subtype="invoice" label="Invoice PDF" />
+                                                )}
                                                 {q.status === "draft" && can("quotations.delete") && (
                                                     <button
                                                         className="btn-ghost btn-sm text-danger"

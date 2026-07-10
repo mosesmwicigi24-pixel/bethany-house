@@ -93,6 +93,7 @@ const OutstandingBalancesPage = lazy(() => import("@/pages/pos/OutstandingBalanc
 
 const OrdersPage = lazy(() => import("@/pages/sales/orders/OrdersListPage"));
 const QuotationsPage = lazy(() => import("@/pages/sales/quotations/QuotationsPage"));
+const InvoicesPage = lazy(() => import("@/pages/sales/invoices/InvoicesPage"));
 const OrderDetailPage = lazy(
     () => import("@/pages/sales/orders/OrderDetailPage"),
 );
@@ -527,6 +528,16 @@ export default function App() {
                                 <ProtectedRoute permission="quotations.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <QuotationsPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/sales/invoices"
+                            element={
+                                <ProtectedRoute permission="orders.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <InvoicesPage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }
