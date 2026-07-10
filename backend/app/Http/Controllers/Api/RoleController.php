@@ -65,6 +65,13 @@ class RoleController extends Controller
             'permissions.*' => 'integer|exists:permissions,id',
         ]);
 
+        // Privilege ceiling: a new role can only be given permissions the actor
+        // holds (every permission is "added"). Before the transaction so the 403
+        // isn't swallowed by the catch below.
+        $this->assertMayGrantPermissions(
+            $this->expandWithDependencies(array_map('intval', $validated['permissions'] ?? []))
+        );
+
         DB::beginTransaction();
         try {
             $role = Role::create([
@@ -213,12 +220,19 @@ class RoleController extends Controller
 
         $role = Role::findOrFail($id);
 
+        $requestedIds = array_map('intval', $validated['permissions']);
+        $finalIds     = $this->expandWithDependencies($requestedIds);
+        $autoAddedIds = array_diff($finalIds, $requestedIds);
+
+        // Privilege ceiling — check only the permissions being ADDED (keeping a
+        // role's existing permissions is not escalation). Before the transaction
+        // so the 403 isn't swallowed by the catch below.
+        $currentIds = DB::table('role_has_permissions')->where('role_id', $role->id)
+            ->pluck('permission_id')->map(fn ($p) => (int) $p)->all();
+        $this->assertMayGrantPermissions(array_values(array_diff($finalIds, $currentIds)), $role->id);
+
         DB::beginTransaction();
         try {
-            $requestedIds = array_map('intval', $validated['permissions']);
-            $finalIds     = $this->expandWithDependencies($requestedIds);
-            $autoAddedIds = array_diff($finalIds, $requestedIds);
-
             $this->writePermissionIds($role->id, $finalIds);
             DB::commit();
 
@@ -254,6 +268,12 @@ class RoleController extends Controller
     public function duplicate($id)
     {
         $source = Role::with('permissions')->findOrFail($id);
+
+        // Privilege ceiling: you can't clone a role more powerful than yourself
+        // (the copy would carry permissions you don't hold, then be assignable).
+        $this->assertMayGrantPermissions(
+            $source->permissions->pluck('id')->map(fn ($i) => (int) $i)->all()
+        );
 
         DB::beginTransaction();
         try {
@@ -291,6 +311,45 @@ class RoleController extends Controller
     // =========================================================================
     // PRIVATE HELPERS
     // =========================================================================
+
+    /**
+     * Privilege ceiling for granting permissions to a role.
+     *
+     * Without this, a mere `roles.edit` holder could self-escalate to any
+     * permission (up to full super_admin reach) by adding permissions to their
+     * own role, editing the built-in `admin` role, or duplicating a powerful role.
+     * So a non-super-admin may NOT (a) modify the super_admin role's permissions,
+     * nor (b) grant a permission they do not themselves hold.
+     *
+     * Mirrors UserController::assertMayAssignRoles: console/seeder callers (no auth
+     * context → null actor) and super_admin are unrestricted. `$grantedIds` is the
+     * set of permission ids being ADDED (already dependency-expanded). Must be
+     * called BEFORE opening a DB transaction — abort(403) throws, and the callers'
+     * catch(\Exception) would otherwise convert it into a 500.
+     *
+     * Note: protection is derived from the role NAME `super_admin`, not the
+     * `is_system` flag, which does not exist on a fresh schema.
+     */
+    private function assertMayGrantPermissions(array $grantedIds, ?int $targetRoleId = null): void
+    {
+        $actor = auth()->user();
+        if (! $actor || $actor->hasRole('super_admin', 'sanctum')) {
+            return;
+        }
+
+        if ($targetRoleId) {
+            $superAdminRoleId = DB::table('roles')->where('name', 'super_admin')->value('id');
+            if ($superAdminRoleId && (int) $targetRoleId === (int) $superAdminRoleId) {
+                abort(403, 'Only a super administrator can modify the super administrator role.');
+            }
+        }
+
+        $heldIds   = $actor->getAllPermissions()->pluck('id')->map(fn ($i) => (int) $i)->all();
+        $exceeding = array_diff(array_map('intval', $grantedIds), $heldIds);
+        if (! empty($exceeding)) {
+            abort(403, 'You can only grant permissions you hold yourself.');
+        }
+    }
 
     /**
      * Write permissions directly to role_has_permissions pivot.
