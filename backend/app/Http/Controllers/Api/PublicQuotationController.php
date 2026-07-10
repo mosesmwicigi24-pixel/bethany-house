@@ -87,6 +87,7 @@ class PublicQuotationController extends Controller
             'valid_until'   => optional($quotation->valid_until)->toDateString(),
             'is_expired'    => $quotation->isExpired(),
             'is_accepted'   => $quotation->converted_order_id !== null,
+            'served_by'     => $quotation->served_by,
             'customer'      => [
                 'first_name' => $quotation->customer_first_name,
                 'last_name'  => $quotation->customer_last_name,
@@ -99,9 +100,10 @@ class PublicQuotationController extends Controller
                 'total_price'  => (float) $i->total_price,
             ])->values(),
             'totals' => [
-                'subtotal'     => (float) $quotation->subtotal,
-                'tax_amount'   => (float) $quotation->tax_amount,
-                'total_amount' => (float) $quotation->total_amount,
+                'subtotal'        => (float) $quotation->subtotal,
+                'tax_amount'      => (float) $quotation->tax_amount,
+                'shipping_amount' => (float) $quotation->shipping_amount,
+                'total_amount'    => (float) $quotation->total_amount,
             ],
             'notes'    => $quotation->notes,
             'terms'    => $quotation->terms,

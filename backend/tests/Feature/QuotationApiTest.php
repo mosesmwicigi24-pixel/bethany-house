@@ -51,6 +51,25 @@ class QuotationApiTest extends TestCase
         $this->assertGreaterThan(0, (float) Quotation::find($id)->total_amount);
     }
 
+    public function test_shipping_and_served_by_are_recorded_and_shipping_is_in_the_total(): void
+    {
+        $this->actor();
+
+        $id = $this->postJson('/api/v1/admin/quotations', [
+            'currency_code'   => 'USD',
+            'shipping_amount' => 500,
+            'served_by'       => 'Grace at the counter',
+            'items' => [['product_name' => 'Ad-hoc item', 'quantity' => 1, 'unit_price' => 1000]],
+        ])->assertCreated()->json('quotation.id');
+
+        $q = Quotation::find($id);
+        $this->assertSame('USD', $q->currency_code);
+        $this->assertSame('Grace at the counter', $q->served_by);
+        $this->assertSame(500.0, (float) $q->shipping_amount);
+        // No product → no tax; total = line 1000 + shipping 500.
+        $this->assertSame(1500.0, (float) $q->total_amount);
+    }
+
     public function test_issue_assigns_a_gapless_number_and_freezes_a_snapshot(): void
     {
         $this->actor();

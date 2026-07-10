@@ -63,6 +63,8 @@ class QuotationController extends Controller
                 'source'              => $validated['source'] ?? 'admin',
                 'status'              => Quotation::DRAFT,
                 'currency_code'       => $validated['currency_code'] ?? 'KES',
+                'shipping_amount'     => $validated['shipping_amount'] ?? 0,
+                'served_by'           => $validated['served_by'] ?? $request->user()?->name,
                 'customer_email'      => $validated['customer_email'] ?? null,
                 'customer_phone'      => $validated['customer_phone'] ?? null,
                 'customer_first_name' => $validated['customer_first_name'] ?? null,
@@ -99,6 +101,8 @@ class QuotationController extends Controller
                 'user_id'             => $validated['user_id'] ?? $quotation->user_id,
                 'outlet_id'           => $validated['outlet_id'] ?? $quotation->outlet_id,
                 'currency_code'       => $validated['currency_code'] ?? $quotation->currency_code,
+                'shipping_amount'     => $validated['shipping_amount'] ?? $quotation->shipping_amount,
+                'served_by'           => $validated['served_by'] ?? $quotation->served_by,
                 'customer_email'      => $validated['customer_email'] ?? null,
                 'customer_phone'      => $validated['customer_phone'] ?? null,
                 'customer_first_name' => $validated['customer_first_name'] ?? null,
@@ -207,6 +211,8 @@ class QuotationController extends Controller
             'outlet_id'           => 'nullable|integer|exists:outlets,id',
             'source'              => 'nullable|in:admin,storefront',
             'currency_code'       => 'nullable|string|size:3',
+            'shipping_amount'     => 'nullable|numeric|min:0',
+            'served_by'           => 'nullable|string|max:150',
             'customer_email'      => 'nullable|email|max:255',
             'customer_phone'      => 'nullable|string|max:20',
             'customer_first_name' => 'nullable|string|max:100',
@@ -263,7 +269,8 @@ class QuotationController extends Controller
             'subtotal'        => $calc['subtotal'],
             'discount_amount' => round(collect($items)->sum(fn ($i) => (float) ($i['discount_amount'] ?? 0)), 2),
             'tax_amount'      => $calc['total_tax'],
-            'total_amount'    => $calc['total_gross'],
+            // Grand total includes the shipping charge (already persisted on the row).
+            'total_amount'    => round($calc['total_gross'] + (float) $quotation->shipping_amount, 2),
         ]);
     }
 }
