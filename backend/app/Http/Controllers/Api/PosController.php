@@ -3418,13 +3418,8 @@ class PosController extends Controller
         $isDeposit   = !empty($validated['is_deposit']);
         $depositAmt  = $isDeposit ? (float)($validated['deposit_amount'] ?? 0) : null;
         $totalPaying = collect($paymentsInput)->sum('amount');
-        $required    = $isDeposit ? $depositAmt : $order->total_amount;
-
-        if ($totalPaying < $required - 0.01) {
-            return response()->json([
-                'message' => "Payment ({$totalPaying}) does not cover " . ($isDeposit ? "deposit ({$required})" : "order total ({$required})") . ".",
-            ], 422);
-        }
+        // The sufficiency check (against the OUTSTANDING balance, not the full
+        // total) is done inside the transaction under a row lock — see below.
 
         // Load payment method types once so any method configured with type='cash'
         // is treated identically to the built-in 'cash' code: no approval needed,
@@ -3441,6 +3436,29 @@ class PosController extends Controller
 
         DB::beginTransaction();
         try {
+            // Lock the order row so concurrent payments on the same order
+            // serialize (otherwise two in-flight/double-tapped payments both read
+            // the same balance and both post — overpaying). Size the requirement
+            // against the OUTSTANDING balance (net of prior deposits/part-payments
+            // and refunds), NOT the full total — otherwise paying the balance on a
+            // deposited order is wrongly rejected and forces a full re-tender.
+            $order = Order::with('items')->where('id', $order->id)->lockForUpdate()->firstOrFail();
+            $outstanding = $order->outstandingBalance();
+            $required    = $isDeposit ? (float) $depositAmt : $outstanding;
+
+            if ($totalPaying < $required - 0.01) {
+                DB::rollBack();
+                return response()->json([
+                    'message' => "Payment ({$totalPaying}) does not cover " . ($isDeposit ? "the deposit ({$required})" : "the outstanding balance ({$outstanding})") . ".",
+                ], 422);
+            }
+            if ($totalPaying > $outstanding + 0.01) {
+                DB::rollBack();
+                return response()->json([
+                    'message' => "Payment ({$totalPaying}) exceeds the outstanding balance ({$outstanding}).",
+                ], 422);
+            }
+
             $primaryChange    = 0;
             $totalCash        = 0;
             $totalCard        = 0;
@@ -3575,7 +3593,10 @@ class PosController extends Controller
                 $newPayStatus = 'pending_approval';
                 $newStatus    = 'processing';
             } else {
-                $newPayStatus = $isDeposit ? 'deposit' : ($totalPaying >= $order->total_amount - 0.01 ? 'paid' : 'partial');
+                // Net collected across ALL settled payments (the ones just posted
+                // are already inserted), so a balance payment on a prior deposit
+                // correctly reaches 'paid' rather than being seen as 'partial'.
+                $newPayStatus = $isDeposit ? 'deposit' : ($order->totalPaid() >= $order->total_amount - 0.01 ? 'paid' : 'partial');
                 // Payment confirmed → 'confirmed' (not 'completed').
                 // 'confirmed' means: payment received, order is real, fulfilment can begin.
                 // 'completed' is set manually by staff after goods are handed over / shipped.
