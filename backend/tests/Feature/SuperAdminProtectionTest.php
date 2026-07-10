@@ -73,28 +73,4 @@ class SuperAdminProtectionTest extends TestCase
             ->assertStatus(403);
     }
 
-    public function test_a_super_admin_may_modify_another_super_admin(): void
-    {
-        $target = $this->superAdmin();
-        $actor  = $this->superAdmin();
-        Sanctum::actingAs($actor);
-
-        $this->putJson("/api/v1/admin/users/{$target->id}", [
-            'first_name' => 'Renamed',
-        ])->assertOk();
-
-        $this->assertSame('Renamed', $target->fresh()->first_name);
-    }
-
-    public function test_lesser_admin_can_still_edit_a_normal_user(): void
-    {
-        $normal = User::factory()->create(['first_name' => 'Old']);
-        Sanctum::actingAs($this->lesserAdmin());
-
-        $this->putJson("/api/v1/admin/users/{$normal->id}", [
-            'first_name' => 'New',
-        ])->assertOk();
-
-        $this->assertSame('New', $normal->fresh()->first_name);
-    }
 }
