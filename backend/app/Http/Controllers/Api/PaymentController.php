@@ -843,17 +843,35 @@ class PaymentController extends Controller
             'reason' => 'required|string|max:500',
         ]);
 
-        $payment = Payment::findOrFail($id);
+        $payment = Payment::with('order')->findOrFail($id);
 
         if (!$payment->isPaid()) {
             return response()->json(['message' => 'Only paid transactions can be refunded.'], 422);
         }
 
-        // TODO: call gateway refund API based on payment_method
-        $payment->update([
-            'refund_amount' => $validated['amount'],
-            'refunded_at'   => now(),
-        ]);
+        // Never refund more than is still refundable on THIS payment. refund_amount
+        // must ACCUMULATE (not overwrite) — Order::totalPaid() = SUM(amount -
+        // refund_amount), so overwriting it lets repeat refunds under-count and an
+        // uncapped amount drives the order's net paid negative.
+        $lineRefundable = (float) $payment->amount - (float) $payment->refund_amount;
+        if ((float) $validated['amount'] > $lineRefundable + 0.01) {
+            return response()->json([
+                'message'    => 'Refund exceeds the amount still refundable on this payment.',
+                'refundable' => round(max(0, $lineRefundable), 2),
+            ], 422);
+        }
+
+        // TODO: call gateway refund API based on payment_method (and reverse the
+        // cash drawer for cash payments — tracked as a follow-up; needs the POS
+        // drawer-resolution helpers extracted into a shared service).
+        DB::transaction(function () use ($payment, $validated) {
+            $payment->update([
+                'refund_amount' => (float) $payment->refund_amount + (float) $validated['amount'],
+                'refunded_at'   => now(),
+            ]);
+            // Reconcile the order's payment_status against the now-reduced net.
+            $payment->order?->syncPaymentStatus();
+        });
 
         ActivityLogService::log('payment_refunded', $payment->order, [
             'payment_id' => $payment->id,
@@ -896,16 +914,18 @@ class PaymentController extends Controller
             'voided_by'  => auth()->id(),
         ]);
 
-        // Recompute the order's payment totals
+        // Recompute the order's payment state. syncPaymentStatus() is the
+        // authoritative source (it drives payment_status from the net of the
+        // remaining paid payments); the amount_paid/balance_due columns are kept
+        // in sync with the SAME net figure so the two don't diverge.
         if ($payment->order) {
             $order = $payment->order;
-            $totalPaid = \App\Models\Payment::where('order_id', $order->id)
-                ->where('status', 'paid')
-                ->sum('amount');
+            $netPaid = $order->totalPaid();   // SUM(amount - refund_amount) over paid
             $order->update([
-                'amount_paid' => $totalPaid,
-                'balance_due' => max(0, $order->total_amount - $totalPaid),
+                'amount_paid' => $netPaid,
+                'balance_due' => max(0, (float) $order->total_amount - $netPaid),
             ]);
+            $order->syncPaymentStatus();
         }
 
         ActivityLogService::log('payment_voided', $payment, [
