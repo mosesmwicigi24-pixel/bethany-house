@@ -100,6 +100,8 @@ export interface Order {
     order_number: string;
     order_type: OrderChannel;
     channel?: OrderChannel;
+    /** The INVOICE document this order bills, if it came from a quotation. */
+    invoice_document?: { id: number; number: string; documentable_id: number } | null;
     status: string;
     payment_status: PaymentStatus;
     payment_method: string;

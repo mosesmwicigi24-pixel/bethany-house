@@ -132,6 +132,13 @@ class Order extends Model
         return $this->hasMany(Payment::class);
     }
 
+    /** The INVOICE document this order bills (if it came from a quotation). */
+    public function invoiceDocument()
+    {
+        return $this->morphOne(SalesDocument::class, 'documentable')
+            ->where('type', SalesDocument::INVOICE);
+    }
+
     public function shipments()
     {
         return $this->hasMany(OrderShipment::class);

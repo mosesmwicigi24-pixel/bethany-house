@@ -259,6 +259,7 @@ class OrderController extends Controller
             'outlet:id,name',
             'payments',
             'statusHistory',
+            'invoiceDocument:id,number,documentable_id,documentable_type,type',
         ])->findOrFail($id);
 
         $data                  = $order->toArray();

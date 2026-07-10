@@ -3439,6 +3439,17 @@ export default function OrderDetailPage() {
                                         {order.production_orders.length} production order{order.production_orders.length !== 1 ? "s" : ""}
                                     </span>
                                 )}
+                                {order.invoice_document && (
+                                    <button
+                                        type="button"
+                                        onClick={() => downloadPdf("orders", order.id, "invoice")}
+                                        disabled={pdfLoading}
+                                        className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200 hover:bg-brand-100 disabled:opacity-60"
+                                        title="Download the invoice PDF"
+                                    >
+                                        Invoice {order.invoice_document.number}
+                                    </button>
+                                )}
                             </div>
                         </div>
                         <div className="sm:text-right shrink-0">
