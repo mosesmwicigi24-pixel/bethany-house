@@ -15,6 +15,8 @@ use App\Models\InventoryItem;
 use App\Services\TaxCalculationService;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
+use App\Services\ReceiptService;
+use Illuminate\Support\Facades\Log;
 use App\Services\IntelligenceService;
 use App\Support\OrderStatusMachine;
 use App\Support\SortResolver;
@@ -1167,6 +1169,14 @@ class OrderController extends Controller
                 $order->refresh();
                 $order->syncPaymentStatus();
                 $order->refresh();
+                // Quote-originated invoice? Issue a receipt for this payment and,
+                // when fully paid, commit the reserved stock. No-op otherwise.
+                // Best-effort: a receipt hiccup must never undo a real payment.
+                try {
+                    ReceiptService::onPaymentSettled($order, $payment, $request->user()?->id);
+                } catch (\Throwable $e) {
+                    Log::warning('Receipt/commit after addPayment failed', ['order_id' => $order->id, 'error' => $e->getMessage()]);
+                }
                 // Advance order status when payment is confirmed:
                 // pending → processing: first payment received
                 // processing stays processing until admin moves it forward

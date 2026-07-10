@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
+use App\Services\ReceiptService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -229,6 +230,15 @@ class PublicPaymentController extends Controller
 
                     if ($order->payment_status === 'paid' && in_array($order->status, ['pending', 'processing'])) {
                         $order->update(['status' => 'confirmed']);
+                    }
+
+                    // Quote-originated invoice? Issue the receipt + commit stock when
+                    // fully paid. No-op for plain online orders; best-effort so a
+                    // receipt hiccup can't undo the M-Pesa settlement.
+                    try {
+                        ReceiptService::onPaymentSettled($order, $payment, null);
+                    } catch (\Throwable $e) {
+                        Log::warning('Receipt/commit after M-Pesa callback failed', ['order_id' => $order->id, 'error' => $e->getMessage()]);
                     }
 
                     NotificationService::paymentReceived(
@@ -699,8 +709,19 @@ class PublicPaymentController extends Controller
                 }
             });
 
+            $freshPayment = $payment ? $payment->fresh() : Payment::where('order_id', $order->id)->where('provider_reference', $reference)->first();
+
+            // Quote-originated invoice? Issue the receipt + commit stock when fully
+            // paid. No-op otherwise; best-effort (payment already committed above).
+            if ($freshPayment) {
+                try {
+                    ReceiptService::onPaymentSettled($order->fresh(), $freshPayment, null);
+                } catch (\Throwable $e) {
+                    Log::warning('Receipt/commit after Paystack verify failed', ['order_id' => $order->id, 'error' => $e->getMessage()]);
+                }
+            }
+
             try {
-                $freshPayment = $payment ? $payment->fresh() : Payment::where('order_id', $order->id)->where('provider_reference', $reference)->first();
                 if ($freshPayment) {
                     NotificationService::paymentReceived(
                         $freshPayment->id,
