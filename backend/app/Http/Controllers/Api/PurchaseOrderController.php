@@ -1300,23 +1300,12 @@ class PurchaseOrderController extends Controller
             $serialItem   = $warehouseItem;
             $serialOutlet = null;
 
-            // Also propagate to every existing outlet-specific row so that each
-            // POS terminal immediately sees updated stock without requiring a
-            // separate stock transfer step.
-            $outletRows = InventoryItem::where('product_id', $poItem->product_id)
-                ->when($poItem->product_variant_id,
-                    fn ($q) => $q->where('product_variant_id', $poItem->product_variant_id),
-                    fn ($q) => $q->whereNull('product_variant_id')
-                )
-                ->whereNotNull('outlet_id')
-                ->get();
-
-            foreach ($outletRows as $outletItem) {
-                // Increment without logging a separate transaction (the warehouse
-                // transaction is the authoritative record).
-                $outletItem->quantity_on_hand += $qtyInt;
-                $outletItem->save();
-            }
+            // The received units live in ONE place — the warehouse row. POS already
+            // treats the warehouse (null-outlet) row as a sell-from candidate for
+            // every outlet, so the units are immediately sellable everywhere as a
+            // single shared pool. (A previous version also `+= qty` to every
+            // outlet row, which made the same physical units independently sellable
+            // at each location — a systemic N× over-count / oversell. Removed.)
         }
 
         // Serialize the received units: every bought-in unit gets its own unique
@@ -1343,7 +1332,7 @@ class PurchaseOrderController extends Controller
             )
             ->when($outletId,
                 fn ($q) => $q->where('outlet_id', $outletId),
-                fn ($q) => $q  // update all if no specific outlet
+                fn ($q) => $q->whereNull('outlet_id')  // warehouse row only — never fan out
             )
             ->increment('quantity_on_hand', $qtyInt);
 
