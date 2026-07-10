@@ -34,6 +34,18 @@ class QuotationService
             if (!$quotation->quote_number) {
                 $quotation->quote_number = DocumentNumberService::next('quotation');
             }
+            // Public, unguessable link token so the quote can be sent to the
+            // customer (/quote/{token}); mirrors orders.payment_token.
+            if (!$quotation->quote_token) {
+                $quotation->quote_token = hash_hmac(
+                    'sha256',
+                    $quotation->quote_number . now()->toISOString() . Str::random(8),
+                    config('app.key'),
+                );
+                $quotation->quote_token_expires_at = $quotation->valid_until
+                    ? $quotation->valid_until->copy()->endOfDay()
+                    : now()->addDays(30);
+            }
             $quotation->status    = Quotation::SENT;
             $quotation->issued_at = $quotation->issued_at ?? now();
             $quotation->save();

@@ -46,6 +46,8 @@ class Quotation extends Model
         'issued_at',
         'accepted_at',
         'created_by',
+        'quote_token',
+        'quote_token_expires_at',
     ];
 
     protected $casts = [
@@ -56,6 +58,7 @@ class Quotation extends Model
         'valid_until'     => 'date',
         'issued_at'       => 'datetime',
         'accepted_at'     => 'datetime',
+        'quote_token_expires_at' => 'datetime',
     ];
 
     public function items(): HasMany
