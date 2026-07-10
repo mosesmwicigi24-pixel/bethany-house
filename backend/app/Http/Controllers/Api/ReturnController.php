@@ -523,6 +523,20 @@ class ReturnController extends Controller
             ], 422);
         }
 
+        // Never refund more than was actually collected on the order. Without this
+        // a refund on an unpaid/part-paid order pays out money that never came in.
+        // (Store credit isn't a cash-out against payments, so it's exempt.)
+        $order = \App\Models\Order::find($return->order_id);
+        if ($validated['refund_method'] !== 'store_credit') {
+            $collected = $order ? $order->totalPaid() : 0.0;
+            if ((float) $validated['refund_amount'] > $collected + 0.01) {
+                return response()->json([
+                    'message'    => 'Refund exceeds the amount collected on this order.',
+                    'refundable' => round(max(0, $collected), 2),
+                ], 422);
+            }
+        }
+
         DB::beginTransaction();
         try {
             // Update return
@@ -570,6 +584,34 @@ class ReturnController extends Controller
                         'updated_at' => now(),
                     ]);
                 }
+            }
+
+            // For an original-payment refund, allocate the payout onto the settled
+            // payments (latest first, accumulating refund_amount) so the order's
+            // net collected (Order::totalPaid) actually drops, then reconcile its
+            // payment_status. Mirrors OrderController::refund. store_credit /
+            // bank_transfer don't reverse the card/mobile settlement here.
+            if ($order && $validated['refund_method'] === 'original_payment' && (float) $validated['refund_amount'] > 0) {
+                $remaining = (float) $validated['refund_amount'];
+                foreach (
+                    \App\Models\Payment::where('order_id', $order->id)->where('status', 'paid')->orderByDesc('id')->get()
+                    as $payment
+                ) {
+                    if ($remaining <= 0.01) {
+                        break;
+                    }
+                    $lineRefundable = (float) $payment->amount - (float) $payment->refund_amount;
+                    if ($lineRefundable <= 0) {
+                        continue;
+                    }
+                    $take = min($lineRefundable, $remaining);
+                    $payment->update([
+                        'refund_amount' => (float) $payment->refund_amount + $take,
+                        'refunded_at'   => now(),
+                    ]);
+                    $remaining -= $take;
+                }
+                $order->syncPaymentStatus();
             }
 
             // TODO: Process actual refund via payment gateway
