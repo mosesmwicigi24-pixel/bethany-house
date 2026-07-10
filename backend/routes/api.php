@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\{
     OrderController,
     CartController,
     CustomerController,
+    QuotationController,
     InventoryController,
     OutletController,
     PosController,
@@ -546,6 +547,22 @@ Route::prefix('v1')->group(function () {
                 Route::post('/{id}/approve',        [ReturnController::class, 'approve']);
                 Route::post('/{id}/reject',         [ReturnController::class, 'reject']);
                 Route::post('/{id}/process-refund', [ReturnController::class, 'processRefund']);
+            });
+
+            // ── Quotations ───────────────────────────────────────────────────
+            // Front of the quotation → invoice → receipt flow.
+            Route::middleware('permission:quotations.view,sanctum')->prefix('quotations')->group(function () {
+                Route::get('/',          [QuotationController::class, 'index']);
+                Route::get('/{id}',      [QuotationController::class, 'show']);
+
+                Route::post('/',         [QuotationController::class, 'store'])
+                    ->middleware('permission:quotations.create,sanctum');
+                Route::put('/{id}',      [QuotationController::class, 'update'])
+                    ->middleware('permission:quotations.create,sanctum');
+                Route::delete('/{id}',   [QuotationController::class, 'destroy'])
+                    ->middleware('permission:quotations.delete,sanctum');
+                Route::post('/{id}/issue', [QuotationController::class, 'issue'])
+                    ->middleware('permission:quotations.issue,sanctum');
             });
 
             // ── Customers ────────────────────────────────────────────────────
