@@ -1124,6 +1124,21 @@ class OrderController extends Controller
 
         DB::beginTransaction();
         try {
+            // The overpayment guard above reads payments OUTSIDE any lock, so two
+            // concurrent (or double-tapped) payments can both pass it and overpay.
+            // Take a row lock and re-verify against the DB before inserting.
+            DB::table('orders')->where('id', $order->id)->lockForUpdate()->first();
+            $committedNow = (float) Payment::where('order_id', $order->id)
+                ->whereIn('status', ['paid', 'pending'])->sum('amount');
+            if ($collectedAmount > (float) $order->total_amount - $committedNow + 0.01) {
+                DB::rollBack();
+                return response()->json([
+                    'message'   => 'This payment would exceed the order balance — another payment may have just been recorded.',
+                    'reason'    => 'overpayment',
+                    'remaining' => round(max(0, (float) $order->total_amount - $committedNow), 2),
+                ], 422);
+            }
+
             $payment = Payment::create([
                 'order_id'             => $order->id,
                 'payment_method'       => $validated['method'],
