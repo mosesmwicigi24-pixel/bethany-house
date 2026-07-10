@@ -77,7 +77,7 @@ class RolePermissionCeilingTest extends TestCase
     {
         $this->perm('roles.view');
         $harmless = $this->perm('roles.view');
-        $superRole = Role::create(['name' => 'super_admin', 'guard_name' => 'sanctum']);
+        $superRole = Role::findOrCreate('super_admin', 'sanctum');
 
         Sanctum::actingAs($this->actorWith(['roles.view', 'roles.edit']));
 
@@ -88,7 +88,7 @@ class RolePermissionCeilingTest extends TestCase
 
     public function test_super_admin_actor_may_grant_anything(): void
     {
-        $superRole = Role::create(['name' => 'super_admin', 'guard_name' => 'sanctum']);
+        $superRole = Role::findOrCreate('super_admin', 'sanctum');
         $powerful  = $this->perm('settings.manage_database');
         $role      = $this->targetRole();
 
