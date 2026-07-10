@@ -172,12 +172,6 @@ class QuotationController extends Controller
         if ($quotation->items->isEmpty()) {
             return response()->json(['message' => 'Cannot convert a quotation with no items.'], 422);
         }
-        // order_items.product_id is NOT NULL — ad-hoc lines must be product-linked first.
-        if ($quotation->items->contains(fn ($i) => $i->product_id === null)) {
-            return response()->json([
-                'message' => 'Every line must be linked to a product before converting to an invoice.',
-            ], 422);
-        }
 
         $validated = $request->validate([
             'due_in_days' => 'nullable|integer|min:0|max:365',
