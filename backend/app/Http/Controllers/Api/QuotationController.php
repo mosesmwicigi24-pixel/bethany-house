@@ -151,6 +151,53 @@ class QuotationController extends Controller
         ]);
     }
 
+    /**
+     * Accept an issued quotation and convert it into an invoice (an Order + INV
+     * document + reserved stock + pay-link).
+     */
+    public function accept(Request $request, int $id): JsonResponse
+    {
+        $quotation = Quotation::with('items')->findOrFail($id);
+
+        if ($quotation->converted_order_id) {
+            return response()->json(['message' => 'This quotation has already been converted to an invoice.'], 422);
+        }
+        if (!in_array($quotation->status, [Quotation::SENT, Quotation::ACCEPTED])) {
+            return response()->json(['message' => 'Issue the quotation before accepting it.'], 422);
+        }
+        if ($quotation->items->isEmpty()) {
+            return response()->json(['message' => 'Cannot convert a quotation with no items.'], 422);
+        }
+        // order_items.product_id is NOT NULL — ad-hoc lines must be product-linked first.
+        if ($quotation->items->contains(fn ($i) => $i->product_id === null)) {
+            return response()->json([
+                'message' => 'Every line must be linked to a product before converting to an invoice.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'due_in_days' => 'nullable|integer|min:0|max:365',
+        ]);
+
+        $result = QuotationService::convertToInvoice(
+            $quotation,
+            $request->user()?->id,
+            $validated['due_in_days'] ?? 14,
+        );
+
+        ActivityLogService::log('converted', $quotation->fresh(), [
+            'order_id'       => $result['order']->id,
+            'invoice_number' => $result['invoice']->number,
+        ]);
+
+        return response()->json([
+            'message'  => 'Quotation accepted — invoice created.',
+            'order'    => $result['order'],
+            'invoice'  => $result['invoice'],
+            'pay_token' => $result['order']->payment_token,
+        ], 201);
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private function validatePayload(Request $request): array
