@@ -15,7 +15,8 @@ export type PdfDocumentType =
     | "production-orders"
     | "stock-transfers"
     | "stock-adjustments"
-    | "expenses";
+    | "expenses"
+    | "quotations";
 
 export type PdfDocumentSubtype = "invoice" | undefined;
 

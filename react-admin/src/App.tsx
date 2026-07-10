@@ -92,6 +92,7 @@ const EodReportSettingsPage = lazy(() => import("@/pages/pos/EodReportSettingsPa
 const OutstandingBalancesPage = lazy(() => import("@/pages/pos/OutstandingBalancesPage"));
 
 const OrdersPage = lazy(() => import("@/pages/sales/orders/OrdersListPage"));
+const QuotationsPage = lazy(() => import("@/pages/sales/quotations/QuotationsPage"));
 const OrderDetailPage = lazy(
     () => import("@/pages/sales/orders/OrderDetailPage"),
 );
@@ -499,6 +500,16 @@ export default function App() {
                                 <ProtectedRoute permission="customers.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <CustomerDetailPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/sales/quotations"
+                            element={
+                                <ProtectedRoute permission="quotations.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <QuotationsPage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }

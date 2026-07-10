@@ -102,6 +102,12 @@ const NAV: NavGroup[] = [
                 permission: "orders.view",
             },
             {
+                label: "Quotations",
+                href: "/sales/quotations",
+                icon: "orders",
+                permission: "quotations.view",
+            },
+            {
                 label: "Shipments",
                 href: "/sales/shipments",
                 icon: "shipments",
