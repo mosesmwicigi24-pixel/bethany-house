@@ -133,4 +133,42 @@ class PurchaseOrderReceiveSerialTest extends TestCase
         $this->assertSame(5, $serials->count());
         $this->assertSame(5, $serials->pluck('serial_number')->unique()->count());
     }
+
+    public function test_warehouse_receive_does_not_fan_out_into_outlet_rows(): void
+    {
+        Notification::fake();
+        $this->actAsReceiver();
+
+        $outlet  = Outlet::factory()->create();
+        $product = Product::factory()->create();
+
+        // An outlet already carries its own stock for this product.
+        $outletRow = InventoryItem::create([
+            'product_id' => $product->id, 'product_variant_id' => null,
+            'outlet_id' => $outlet->id, 'quantity_on_hand' => 5,
+            'quantity_reserved' => 0, 'reorder_point' => 0,
+        ]);
+
+        $po     = $this->approvedPoWithProduct(10, $outlet->id, $product->id);
+        $poItem = $po->items->first();
+
+        // Receive 10 to the WAREHOUSE (no outlet).
+        $this->postJson("/api/v1/admin/purchase-orders/{$po->id}/receive", [
+            'location_type' => 'warehouse',
+            'items'         => [['po_item_id' => $poItem->id, 'quantity_received' => 10]],
+        ])->assertOk();
+
+        // Warehouse row holds the 10; the outlet row is UNCHANGED (no fan-out).
+        $warehouse = InventoryItem::where('product_id', $product->id)->whereNull('outlet_id')->first();
+        $this->assertNotNull($warehouse);
+        $this->assertSame(10, (int) $warehouse->quantity_on_hand);
+        $this->assertSame(5, (int) $outletRow->fresh()->quantity_on_hand);
+
+        // Total physical on hand across all rows = 10 received + 5 pre-existing = 15
+        // (not 10 + 10 + 5 = 25 the fan-out used to produce).
+        $this->assertSame(15, (int) InventoryItem::where('product_id', $product->id)->sum('quantity_on_hand'));
+
+        // And exactly 10 serials, at the warehouse.
+        $this->assertSame(10, ProductSerial::where('product_id', $product->id)->count());
+    }
 }
