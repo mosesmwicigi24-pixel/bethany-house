@@ -80,6 +80,17 @@ export default function QuotationsPage() {
         onError: (e: ApiError) => toast.error(e.message),
     });
 
+    const copyLink = async (q: Quotation) => {
+        if (!q.quote_token) { toast.error("Issue the quotation first to get a shareable link."); return; }
+        const url = `${window.location.origin}/quote/${q.quote_token}`;
+        try {
+            await navigator.clipboard.writeText(url);
+            toast.success("Customer link copied to clipboard.");
+        } catch {
+            window.prompt("Copy this customer link:", url);
+        }
+    };
+
     const rows = data?.data ?? [];
 
     return (
@@ -167,6 +178,11 @@ export default function QuotationsPage() {
                                                         }}
                                                     >
                                                         Accept → Invoice
+                                                    </button>
+                                                )}
+                                                {issued && q.quote_token && (
+                                                    <button className="btn-ghost btn-sm" onClick={() => copyLink(q)} title="Copy the customer's quote link">
+                                                        Copy link
                                                     </button>
                                                 )}
                                                 {issued && <PdfDownloadButton type="quotations" id={q.id} label="PDF" />}
