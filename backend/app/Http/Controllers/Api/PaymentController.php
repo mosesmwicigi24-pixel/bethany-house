@@ -8,6 +8,7 @@ use App\Models\Payment;
 use App\Services\MpesaService;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
+use App\Services\ReceiptService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -63,6 +64,21 @@ class PaymentController extends Controller
     //      Transaction Status API.
     //   3. On confirmed success, mark payment paid + sync order payment_status.
     // =========================================================================
+
+    /**
+     * Issue a receipt + commit reserved stock for a settled payment, when the
+     * order is a quote-originated invoice. No-op for POS / plain online orders.
+     * Best-effort (its own savepoint + catch) so a receipt hiccup can never roll
+     * back a real gateway settlement.
+     */
+    private function settleReceipt(\App\Models\Order $order, \App\Models\Payment $payment): void
+    {
+        try {
+            ReceiptService::onPaymentSettled($order, $payment);
+        } catch (\Throwable $e) {
+            Log::warning('Receipt/commit after gateway settlement failed', ['order_id' => $order->id, 'error' => $e->getMessage()]);
+        }
+    }
 
     public function verifyMpesa(Request $request, int $orderId, int $paymentId)
     {
@@ -139,6 +155,9 @@ class PaymentController extends Controller
                 $order->refresh();
                 $order->syncPaymentStatus();
                 $order->refresh();
+
+                // Quote-originated invoice → issue receipt + commit stock (no-op otherwise).
+                $this->settleReceipt($order, $payment);
 
                 if ($order->payment_status === 'paid' && $order->status === 'pending') {
                     $order->update(['status' => 'processing']);
@@ -237,6 +256,9 @@ class PaymentController extends Controller
                 $order->refresh();
                 $order->syncPaymentStatus();
                 $order->refresh();
+
+                // Quote-originated invoice → issue receipt + commit stock (no-op otherwise).
+                $this->settleReceipt($order, $payment);
 
                 if ($order->payment_status === 'paid' && $order->status === 'pending') {
                     $order->update(['status' => 'processing']);
@@ -511,6 +533,9 @@ class PaymentController extends Controller
                     $order->syncPaymentStatus();
                     $order->refresh();
 
+                    // Quote-originated invoice → issue receipt + commit stock (no-op otherwise).
+                    $this->settleReceipt($order, $payment);
+
                     if ($order->payment_status === 'paid' && $order->status === 'pending') {
                         $order->update(['status' => 'processing']);
                     }
@@ -602,6 +627,9 @@ class PaymentController extends Controller
                     $order->syncPaymentStatus();
                     $order->refresh();
 
+                    // Quote-originated invoice → issue receipt + commit stock (no-op otherwise).
+                    $this->settleReceipt($order, $payment);
+
                     if ($order->payment_status === 'paid' && $order->status === 'pending') {
                         $order->update(['status' => 'processing']);
                     }
@@ -675,6 +703,9 @@ class PaymentController extends Controller
                     $order->refresh();
                     $order->syncPaymentStatus();
                     $order->refresh();
+
+                    // Quote-originated invoice → issue receipt + commit stock (no-op otherwise).
+                    $this->settleReceipt($order, $payment);
 
                     if ($order->payment_status === 'paid' && $order->status === 'pending') {
                         $order->update(['status' => 'processing']);
