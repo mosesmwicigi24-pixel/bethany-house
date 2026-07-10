@@ -146,6 +146,7 @@ const TailorWorkspacePage = lazy(
 );
 const TrackingPage = lazy(() => import("@/pages/tracking/TrackingPage"));
 const PaymentLinkPage = lazy(() => import("@/pages/PaymentLinkPage"));
+const PublicQuotationPage = lazy(() => import("@/pages/PublicQuotationPage"));
 const NotificationsPage = lazy(
     () => import("@/pages/notifications/NotificationsPage"),
 );
@@ -288,6 +289,14 @@ export default function App() {
                             }
                         />
                         <Route
+                            path="/quote/:token"
+                            element={
+                                <Suspense fallback={<PageLoader />}>
+                                    <PublicQuotationPage />
+                                </Suspense>
+                            }
+                        />
+                        <Route
                             path="/track/:token"
                             element={
                                 <Suspense fallback={<PageLoader />}>
@@ -301,6 +310,14 @@ export default function App() {
                             element={
                                 <Suspense fallback={<PageLoader />}>
                                     <PaymentLinkPage />
+                                </Suspense>
+                            }
+                        />
+                        <Route
+                            path="/admin/quote/:token"
+                            element={
+                                <Suspense fallback={<PageLoader />}>
+                                    <PublicQuotationPage />
                                 </Suspense>
                             }
                         />
