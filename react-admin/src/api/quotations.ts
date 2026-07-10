@@ -34,11 +34,13 @@ export interface Quotation {
     subtotal: number;
     discount_amount: number;
     tax_amount: number;
+    shipping_amount: number;
     total_amount: number;
     customer_email: string | null;
     customer_phone: string | null;
     customer_first_name: string | null;
     customer_last_name: string | null;
+    served_by: string | null;
     valid_until: string | null;
     notes: string | null;
     terms: string | null;
@@ -74,6 +76,9 @@ export interface QuotationItemInput {
 
 export interface QuotationInput {
     outlet_id?: number | null;
+    currency_code?: string;
+    shipping_amount?: number;
+    served_by?: string | null;
     customer_first_name?: string | null;
     customer_last_name?: string | null;
     customer_email?: string | null;

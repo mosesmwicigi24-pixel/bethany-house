@@ -7,13 +7,16 @@ import {
     type QuotationStatus,
     type QuotationItemInput,
 } from "@/api/quotations";
-import { Field, FieldInput, FieldTextarea } from "@/components/setup/FormComponents";
+import { Field, FieldInput, FieldSelect, FieldTextarea } from "@/components/setup/FormComponents";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { PdfDownloadButton } from "@/hooks/usePdfDownload";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToastStore } from "@/store/toast.store";
+import { useAuthStore } from "@/store/auth.store";
 import type { ApiError } from "@/types";
+
+interface CurrencyOption { code: string; name: string; symbol: string }
 
 const num = (v: unknown): number => Number(v ?? 0) || 0;
 const money = (v: unknown, currency = "KES"): string =>
@@ -239,18 +242,30 @@ interface LineRow {
     unit_price: string;
 }
 
-interface ProductHit { id: number; name: string; sku: string }
+interface ProductHit { id: number; name: string; sku: string; price: number }
 
 function newKey() { return Math.random().toString(36).slice(2); }
 
 function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | null; onClose: () => void; onSaved: () => void }) {
     const toast = useToastStore();
+    const currentUserName = useAuthStore((s) => s.user?.name ?? "");
     const [firstName, setFirstName] = useState(editing?.customer_first_name ?? "");
     const [lastName, setLastName] = useState(editing?.customer_last_name ?? "");
     const [email, setEmail] = useState(editing?.customer_email ?? "");
     const [phone, setPhone] = useState(editing?.customer_phone ?? "");
     const [validUntil, setValidUntil] = useState(editing?.valid_until ?? "");
+    const [currency, setCurrency] = useState(editing?.currency_code ?? "KES");
+    const [shipping, setShipping] = useState(String(editing?.shipping_amount ?? 0));
+    const [servedBy, setServedBy] = useState(editing?.served_by ?? currentUserName);
     const [notes, setNotes] = useState(editing?.notes ?? "");
+
+    // Active currencies for the dropdown (public endpoint). Falls back to KES.
+    const { data: currencyData } = useQuery({
+        queryKey: ["currencies"],
+        queryFn: () => get<{ data: CurrencyOption[] }>("/v1/currencies"),
+        staleTime: 5 * 60 * 1000,
+    });
+    const currencies = currencyData?.data ?? [{ code: "KES", name: "Kenyan Shilling", symbol: "KES" }];
     const [rows, setRows] = useState<LineRow[]>(
         (editing?.items ?? []).map((i) => ({
             key: newKey(),
@@ -274,14 +289,19 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
         try {
             const res = await get<{ data?: unknown[] }>("/v1/admin/products", { params: { search: q, per_page: 15 } });
             const list = (res.data ?? []) as Array<Record<string, unknown>>;
-            setHits(list.map((p) => ({
-                id: Number(p.id),
-                name: String(
-                    (p.en_translation as { name?: string } | undefined)?.name
-                    ?? p.name ?? p.product_name ?? `Product #${p.id}`,
-                ),
-                sku: String(p.sku ?? ""),
-            })));
+            setHits(list.map((p) => {
+                const bp = p.base_price as { regular_price?: number | string; sale_price?: number | string } | undefined;
+                return {
+                    id: Number(p.id),
+                    name: String(
+                        (p.en_translation as { name?: string } | undefined)?.name
+                        ?? p.name ?? p.product_name ?? `Product #${p.id}`,
+                    ),
+                    sku: String(p.sku ?? ""),
+                    // Prefer an active sale price, else the list price.
+                    price: num(bp?.sale_price ?? bp?.regular_price ?? 0),
+                };
+            }));
         } catch {
             setHits([]);
         } finally {
@@ -290,7 +310,7 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
     }
 
     function addProduct(hit: ProductHit) {
-        setRows((r) => [...r, { key: newKey(), product_id: hit.id, product_name: hit.name, sku: hit.sku, quantity: "1", unit_price: "0" }]);
+        setRows((r) => [...r, { key: newKey(), product_id: hit.id, product_name: hit.name, sku: hit.sku, quantity: "1", unit_price: String(hit.price || 0) }]);
         setProductQuery(""); setHits([]);
     }
     function addAdHoc() {
@@ -315,6 +335,9 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
                 unit_price: num(r.unit_price),
             }));
             const payload = {
+                currency_code: currency,
+                shipping_amount: num(shipping),
+                served_by: servedBy || null,
                 customer_first_name: firstName || null,
                 customer_last_name: lastName || null,
                 customer_email: email || null,
@@ -362,6 +385,16 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
                     </Field>
                     <Field label="Valid until" error={errors.valid_until?.[0]}>
                         <FieldInput type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
+                    </Field>
+                    <Field label="Currency" error={errors.currency_code?.[0]}>
+                        <FieldSelect value={currency} onChange={(e) => setCurrency(e.target.value)}>
+                            {currencies.map((c) => (
+                                <option key={c.code} value={c.code}>{c.code} — {c.name}</option>
+                            ))}
+                        </FieldSelect>
+                    </Field>
+                    <Field label="Served by" error={errors.served_by?.[0]}>
+                        <FieldInput value={servedBy} onChange={(e) => setServedBy(e.target.value)} placeholder="Staff member" />
                     </Field>
                 </div>
 
@@ -424,7 +457,7 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
                                         <input className="input text-right" type="number" min="0" step="0.01" value={r.unit_price}
                                             onChange={(e) => updateRow(r.key, "unit_price", e.target.value)} />
                                     </td>
-                                    <td className="text-right tabular-nums">{money(num(r.quantity) * num(r.unit_price))}</td>
+                                    <td className="text-right tabular-nums">{money(num(r.quantity) * num(r.unit_price), currency)}</td>
                                     <td>
                                         <button type="button" className="btn-ghost btn-sm text-danger" onClick={() => removeRow(r.key)}>✕</button>
                                     </td>
@@ -432,11 +465,26 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
                             ))}
                         </tbody>
                     </table>
-                    <div className="flex items-center justify-between border-t px-4 py-2">
-                        <button type="button" className="btn-ghost btn-sm" onClick={addAdHoc}>+ Add ad-hoc line</button>
-                        <div className="text-sm">
-                            <span className="text-muted">Subtotal (excl. tax): </span>
-                            <span className="font-semibold tabular-nums">{money(subtotal)}</span>
+                    <div className="space-y-2 border-t px-4 py-3">
+                        <div className="flex items-center justify-between">
+                            <button type="button" className="btn-ghost btn-sm" onClick={addAdHoc}>+ Add ad-hoc line</button>
+                            <div className="text-sm">
+                                <span className="text-muted">Subtotal (excl. tax): </span>
+                                <span className="font-semibold tabular-nums">{money(subtotal, currency)}</span>
+                            </div>
+                        </div>
+                        <div className="flex items-center justify-end gap-3 text-sm">
+                            <label className="text-muted">Shipping</label>
+                            <input
+                                className="input w-32 text-right"
+                                type="number" min="0" step="0.01"
+                                value={shipping}
+                                onChange={(e) => setShipping(e.target.value)}
+                            />
+                        </div>
+                        <div className="flex items-center justify-end gap-2 border-t pt-2 text-base font-bold">
+                            <span>Total (excl. tax)</span>
+                            <span className="tabular-nums">{money(subtotal + num(shipping), currency)}</span>
                         </div>
                     </div>
                 </div>
