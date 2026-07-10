@@ -22,7 +22,7 @@ class QuotationController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $query = Quotation::query()->with('items')->latest('id');
+        $query = Quotation::query()->with(['items', 'invoiceDocument:id,number,documentable_id'])->latest('id');
 
         if ($request->filled('status')) {
             $query->where('status', $request->string('status'));

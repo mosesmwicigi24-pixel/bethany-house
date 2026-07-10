@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\{
     CartController,
     CustomerController,
     QuotationController,
+    InvoiceController,
     InventoryController,
     OutletController,
     PosController,
@@ -573,6 +574,14 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:quotations.issue,sanctum');
                 Route::post('/{id}/accept', [QuotationController::class, 'accept'])
                     ->middleware('permission:quotations.issue,sanctum');
+            });
+
+            // ── Invoices ─────────────────────────────────────────────────────
+            // The invoice stage of quotation → invoice → receipt (read views;
+            // creation happens via quotation accept, payment via the order).
+            Route::middleware('permission:orders.view,sanctum')->prefix('invoices')->group(function () {
+                Route::get('/',      [InvoiceController::class, 'index']);
+                Route::get('/{id}',  [InvoiceController::class, 'show']);
             });
 
             // ── Customers ────────────────────────────────────────────────────
