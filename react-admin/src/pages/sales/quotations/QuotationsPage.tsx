@@ -71,16 +71,23 @@ export default function QuotationsPage() {
         onError: (e: ApiError) => toast.error(e.message),
     });
 
+    // In-app confirmations (native confirm() is unreliable — browsers suppress it
+    // after "prevent additional dialogs", which makes the button look dead).
+    const [confirmAccept, setConfirmAccept] = useState<Quotation | null>(null);
+    const [confirmDelete, setConfirmDelete] = useState<Quotation | null>(null);
+
     const acceptMutation = useMutation({
         mutationFn: (id: number) => quotationApi.accept(id),
-        onSuccess: (res) => { invalidate(); toast.success(`Invoice ${res.invoice.number} created from quotation.`); },
+        onSuccess: (res) => { invalidate(); toast.success(`Invoice ${res.invoice?.number ?? ""} created from quotation.`); },
         onError: (e: ApiError) => toast.error(e.message),
+        onSettled: () => setConfirmAccept(null),
     });
 
     const deleteMutation = useMutation({
         mutationFn: (id: number) => quotationApi.delete(id),
         onSuccess: () => { invalidate(); toast.success("Quotation deleted."); },
         onError: (e: ApiError) => toast.error(e.message),
+        onSettled: () => setConfirmDelete(null),
     });
 
     const copyLink = async (q: Quotation) => {
@@ -174,11 +181,7 @@ export default function QuotationsPage() {
                                                     <button
                                                         className="btn-primary btn-sm"
                                                         disabled={acceptMutation.isPending}
-                                                        onClick={() => {
-                                                            if (confirm("Accept this quotation and create an invoice? This reserves stock.")) {
-                                                                acceptMutation.mutate(q.id);
-                                                            }
-                                                        }}
+                                                        onClick={() => setConfirmAccept(q)}
                                                     >
                                                         Accept → Invoice
                                                     </button>
@@ -193,7 +196,7 @@ export default function QuotationsPage() {
                                                     <button
                                                         className="btn-ghost btn-sm text-danger"
                                                         disabled={deleteMutation.isPending}
-                                                        onClick={() => { if (confirm("Delete this draft quotation?")) deleteMutation.mutate(q.id); }}
+                                                        onClick={() => setConfirmDelete(q)}
                                                     >
                                                         Delete
                                                     </button>
@@ -226,6 +229,47 @@ export default function QuotationsPage() {
                     onClose={() => setBuilder({ open: false, editing: null })}
                     onSaved={() => { invalidate(); setBuilder({ open: false, editing: null }); }}
                 />
+            )}
+
+            {confirmAccept && (
+                <Modal
+                    open
+                    onClose={() => setConfirmAccept(null)}
+                    size="sm"
+                    title="Accept quotation"
+                    footer={
+                        <div className="flex justify-end gap-2">
+                            <button className="btn-secondary" onClick={() => setConfirmAccept(null)}>Cancel</button>
+                            <button className="btn-primary" disabled={acceptMutation.isPending} onClick={() => acceptMutation.mutate(confirmAccept.id)}>
+                                {acceptMutation.isPending ? <Spinner size="sm" /> : "Accept & create invoice"}
+                            </button>
+                        </div>
+                    }
+                >
+                    <p className="text-sm text-muted">
+                        Accept <span className="font-medium">{confirmAccept.quote_number}</span> and create an invoice?
+                        This confirms the order and reserves stock.
+                    </p>
+                </Modal>
+            )}
+
+            {confirmDelete && (
+                <Modal
+                    open
+                    onClose={() => setConfirmDelete(null)}
+                    size="sm"
+                    title="Delete quotation"
+                    footer={
+                        <div className="flex justify-end gap-2">
+                            <button className="btn-secondary" onClick={() => setConfirmDelete(null)}>Cancel</button>
+                            <button className="btn-primary" disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate(confirmDelete.id)}>
+                                {deleteMutation.isPending ? <Spinner size="sm" /> : "Delete"}
+                            </button>
+                        </div>
+                    }
+                >
+                    <p className="text-sm text-muted">Delete this draft quotation? This can't be undone.</p>
+                </Modal>
             )}
         </div>
     );
