@@ -47,6 +47,7 @@ use App\Http\Controllers\Api\{
     PaymentApprovalController,
     NotificationController,
     PublicPaymentController,
+    PublicQuotationController,
     ExpenseController,
     EnhancedReportController,
     PushController,
@@ -121,6 +122,13 @@ Route::prefix('v1')->group(function () {
         Route::post('/{token}/upload-proof',   [PublicPaymentController::class, 'uploadProof']);
         Route::post('/{token}/mpesa-confirm',  [PublicPaymentController::class, 'confirmMpesa']);
         Route::post('/{token}/paystack-verify', [PublicPaymentController::class, 'verifyPaystack']);
+    });
+
+    // ═══ PUBLIC QUOTATION LINK (no auth) ═════════════════════════════════════
+    // Customer-facing quote page served at /quote/{token}.
+    Route::prefix('quote')->middleware('throttle:60,1')->group(function () {
+        Route::get('/{token}',         [PublicQuotationController::class, 'show']);
+        Route::post('/{token}/accept', [PublicQuotationController::class, 'accept']);
     });
 
     // ═══ PUBLIC APIS ══════════════════════════════════════════════════════════
