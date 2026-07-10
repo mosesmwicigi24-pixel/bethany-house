@@ -287,32 +287,50 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
     const [productQuery, setProductQuery] = useState("");
     const [hits, setHits] = useState<ProductHit[]>([]);
     const [searching, setSearching] = useState(false);
+    // Per-row product search — each line's description doubles as a catalogue picker.
+    const [activeRow, setActiveRow] = useState<string | null>(null);
+    const [rowHits, setRowHits] = useState<ProductHit[]>([]);
+    const [rowSearching, setRowSearching] = useState(false);
+
+    async function fetchProducts(q: string): Promise<ProductHit[]> {
+        const res = await get<{ data?: unknown[] }>("/v1/admin/products", { params: { search: q, per_page: 15 } });
+        const list = (res.data ?? []) as Array<Record<string, unknown>>;
+        return list.map((p) => {
+            const bp = p.base_price as { regular_price?: number | string; sale_price?: number | string } | undefined;
+            return {
+                id: Number(p.id),
+                name: String(
+                    (p.en_translation as { name?: string } | undefined)?.name
+                    ?? p.name ?? p.product_name ?? `Product #${p.id}`,
+                ),
+                sku: String(p.sku ?? ""),
+                // Prefer an active sale price, else the list price.
+                price: num(bp?.sale_price ?? bp?.regular_price ?? 0),
+            };
+        });
+    }
 
     async function searchProducts(q: string) {
         setProductQuery(q);
         if (q.trim().length < 2) { setHits([]); return; }
         setSearching(true);
-        try {
-            const res = await get<{ data?: unknown[] }>("/v1/admin/products", { params: { search: q, per_page: 15 } });
-            const list = (res.data ?? []) as Array<Record<string, unknown>>;
-            setHits(list.map((p) => {
-                const bp = p.base_price as { regular_price?: number | string; sale_price?: number | string } | undefined;
-                return {
-                    id: Number(p.id),
-                    name: String(
-                        (p.en_translation as { name?: string } | undefined)?.name
-                        ?? p.name ?? p.product_name ?? `Product #${p.id}`,
-                    ),
-                    sku: String(p.sku ?? ""),
-                    // Prefer an active sale price, else the list price.
-                    price: num(bp?.sale_price ?? bp?.regular_price ?? 0),
-                };
-            }));
-        } catch {
-            setHits([]);
-        } finally {
-            setSearching(false);
-        }
+        try { setHits(await fetchProducts(q)); } catch { setHits([]); } finally { setSearching(false); }
+    }
+
+    // Search the catalogue from a specific line's description field.
+    async function searchRow(key: string, q: string) {
+        setActiveRow(key);
+        if (q.trim().length < 2) { setRowHits([]); return; }
+        setRowSearching(true);
+        try { setRowHits(await fetchProducts(q)); } catch { setRowHits([]); } finally { setRowSearching(false); }
+    }
+
+    // Pick a catalogue product into a line — fills product, sku, and price.
+    function pickForRow(key: string, hit: ProductHit) {
+        setRows((r) => r.map((row) => row.key === key
+            ? { ...row, product_id: hit.id, product_name: hit.name, sku: hit.sku, unit_price: String(hit.price || num(row.unit_price) || 0) }
+            : row));
+        setActiveRow(null); setRowHits([]);
     }
 
     function addProduct(hit: ProductHit) {
@@ -444,16 +462,34 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
                         </thead>
                         <tbody>
                             {rows.length === 0 ? (
-                                <tr><td colSpan={5} className="py-6 text-center text-sm text-muted">Add a product or an ad-hoc line.</td></tr>
+                                <tr><td colSpan={5} className="py-6 text-center text-sm text-muted">Add a line, then search a product or type a description.</td></tr>
                             ) : rows.map((r) => (
                                 <tr key={r.key}>
-                                    <td>
+                                    <td className="relative">
                                         <input
                                             className="input"
                                             value={r.product_name}
-                                            placeholder="Description"
-                                            onChange={(e) => updateRow(r.key, "product_name", e.target.value)}
+                                            placeholder="Search a product, or type a description"
+                                            onChange={(e) => { updateRow(r.key, "product_name", e.target.value); void searchRow(r.key, e.target.value); }}
+                                            onFocus={() => { if (r.product_name.trim().length >= 2) void searchRow(r.key, r.product_name); }}
+                                            onBlur={() => setTimeout(() => setActiveRow((k) => (k === r.key ? null : k)), 150)}
                                         />
+                                        {activeRow === r.key && (rowSearching || rowHits.length > 0) && (
+                                            <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border bg-surface shadow-lg">
+                                                {rowSearching && <div className="px-3 py-2 text-xs text-muted">Searching…</div>}
+                                                {rowHits.map((h) => (
+                                                    <button
+                                                        key={h.id}
+                                                        type="button"
+                                                        className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted/40"
+                                                        onMouseDown={(e) => { e.preventDefault(); pickForRow(r.key, h); }}
+                                                    >
+                                                        <span>{h.name}</span>
+                                                        <span className="text-xs text-muted">{h.sku}</span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
                                     </td>
                                     <td>
                                         <input className="input text-right" type="number" min="1" value={r.quantity}
@@ -473,7 +509,7 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
                     </table>
                     <div className="space-y-2 border-t px-4 py-3">
                         <div className="flex items-center justify-between">
-                            <button type="button" className="btn-ghost btn-sm" onClick={addAdHoc}>+ Add ad-hoc line</button>
+                            <button type="button" className="btn-ghost btn-sm" onClick={addAdHoc}>+ Add line</button>
                             <div className="text-sm">
                                 <span className="text-muted">Subtotal (excl. tax): </span>
                                 <span className="font-semibold tabular-nums">{money(subtotal, currency)}</span>
