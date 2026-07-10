@@ -31,9 +31,10 @@ interface QuoteView {
     valid_until: string | null;
     is_expired: boolean;
     is_accepted: boolean;
+    served_by: string | null;
     customer: { first_name: string | null; last_name: string | null };
     items: QItem[];
-    totals: { subtotal: number; tax_amount: number; total_amount: number };
+    totals: { subtotal: number; tax_amount: number; shipping_amount: number; total_amount: number };
     notes: string | null;
     terms: string | null;
     business: { name: string; email: string | null; phone: string | null; address: string | null };
@@ -112,7 +113,10 @@ export default function PublicQuotationPage() {
                         </div>
                     </div>
 
-                    <div className="py-3 text-sm text-gray-600">Prepared for <span className="font-medium text-gray-900">{custName}</span></div>
+                    <div className="flex items-center justify-between py-3 text-sm text-gray-600">
+                        <span>Prepared for <span className="font-medium text-gray-900">{custName}</span></span>
+                        {quote.served_by && <span className="text-xs text-gray-500">Served by {quote.served_by}</span>}
+                    </div>
 
                     {/* Items */}
                     <table className="w-full text-sm">
@@ -143,6 +147,9 @@ export default function PublicQuotationPage() {
                     <div className="mt-4 ml-auto w-64 space-y-1 text-sm">
                         <div className="flex justify-between text-gray-600"><span>Subtotal</span><span className="tabular-nums">{fmt(quote.totals.subtotal, cc)}</span></div>
                         <div className="flex justify-between text-gray-600"><span>Tax</span><span className="tabular-nums">{fmt(quote.totals.tax_amount, cc)}</span></div>
+                        {quote.totals.shipping_amount > 0 && (
+                            <div className="flex justify-between text-gray-600"><span>Shipping</span><span className="tabular-nums">{fmt(quote.totals.shipping_amount, cc)}</span></div>
+                        )}
                         <div className="flex justify-between border-t pt-1 text-base font-bold text-gray-900"><span>Total</span><span className="tabular-nums">{fmt(quote.totals.total_amount, cc)}</span></div>
                     </div>
 
