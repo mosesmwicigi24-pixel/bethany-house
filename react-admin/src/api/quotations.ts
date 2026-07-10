@@ -45,6 +45,7 @@ export interface Quotation {
     converted_order_id: number | null;
     issued_at: string | null;
     accepted_at: string | null;
+    quote_token: string | null;
     items?: QuotationItem[];
     created_at: string;
     updated_at: string;
