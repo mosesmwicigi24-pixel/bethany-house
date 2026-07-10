@@ -259,13 +259,19 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
     const [servedBy, setServedBy] = useState(editing?.served_by ?? currentUserName);
     const [notes, setNotes] = useState(editing?.notes ?? "");
 
-    // Active currencies for the dropdown (public endpoint). Falls back to KES.
+    // Active currencies configured in the DB (public endpoint — the currencies
+    // table, same source the admin Currencies page manages). Distinct query key
+    // so it never collides with the admin page's ["currencies"] cache. Falls back
+    // to the current/KES only if the fetch fails.
     const { data: currencyData } = useQuery({
-        queryKey: ["currencies"],
-        queryFn: () => get<{ data: CurrencyOption[] }>("/v1/currencies"),
+        queryKey: ["public-currencies"],
+        queryFn: () => get<{ data: CurrencyOption[] }>("/v1/settings/currencies"),
         staleTime: 5 * 60 * 1000,
     });
-    const currencies = currencyData?.data ?? [{ code: "KES", name: "Kenyan Shilling", symbol: "KES" }];
+    const fetched = currencyData?.data ?? [];
+    const currencies: CurrencyOption[] = fetched.length
+        ? fetched
+        : [{ code: currency, name: currency, symbol: currency }];
     const [rows, setRows] = useState<LineRow[]>(
         (editing?.items ?? []).map((i) => ({
             key: newKey(),
