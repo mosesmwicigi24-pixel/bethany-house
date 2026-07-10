@@ -12,6 +12,8 @@ use App\Models\PurchaseOrder;
 use App\Models\PurchaseReturn;
 use App\Models\OrderShipment;
 use App\Models\InventoryTransfer;
+use App\Models\Quotation;
+use App\Models\SalesDocument;
 use App\Services\PdfService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -187,6 +189,30 @@ class DocumentPdfController extends Controller
     public function invoice(int $id): Response
     {
         return $this->order($id, true);
+    }
+
+    // ─── Quotation ────────────────────────────────────────────────────────────
+
+    public function quotation(int $id): Response
+    {
+        $quotation = Quotation::with(['items', 'outlet:id,name'])->findOrFail($id);
+
+        $data = $quotation->toArray();
+        $data['outlet_name'] = $quotation->outlet?->name;
+
+        $html = PdfService::quotation($data);
+        return $this->makePdf($html, 'Quotation-' . ($quotation->quote_number ?? $quotation->id));
+    }
+
+    // ─── Receipt ──────────────────────────────────────────────────────────────
+
+    /** Renders a receipt from its immutable sales_documents snapshot. */
+    public function receipt(int $id): Response
+    {
+        $document = SalesDocument::where('type', SalesDocument::RECEIPT)->findOrFail($id);
+
+        $html = PdfService::receipt($document->snapshot ?? []);
+        return $this->makePdf($html, 'Receipt-' . $document->number);
     }
 
     // ─── Shipment ─────────────────────────────────────────────────────────────

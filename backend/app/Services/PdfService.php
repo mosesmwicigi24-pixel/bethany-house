@@ -596,6 +596,116 @@ HTML;
     }
 
     // =========================================================================
+    // QUOTATION
+    // =========================================================================
+
+    public static function quotation(array $q): string
+    {
+        $currency = $q['currency_code'] ?? 'KES';
+        $custName = trim(($q['customer_first_name'] ?? '') . ' ' . ($q['customer_last_name'] ?? '')) ?: 'Customer';
+
+        $meta = [
+            'Quotation #' => $q['quote_number'] ?? 'DRAFT',
+            'Date'        => self::date($q['issued_at'] ?? $q['created_at'] ?? null),
+            'Valid Until' => self::date($q['valid_until'] ?? null),
+            'Location'    => $q['outlet_name'] ?? '—',
+        ];
+
+        $parties = self::partyRow(
+            'Prepared For', $custName,
+            array_filter([$q['customer_email'] ?? '', $q['customer_phone'] ?? ''])
+        );
+
+        $columns = [
+            ['key' => 'qty',        'label' => 'Qty',                 'align' => 'right', 'width' => '7%'],
+            ['key' => 'desc',       'label' => 'Product / Description'],
+            ['key' => 'unit_price', 'label' => 'Unit Price', 'align' => 'right', 'width' => '15%', 'mono' => true],
+            ['key' => 'amount',     'label' => 'Amount',     'align' => 'right', 'width' => '15%', 'mono' => true],
+        ];
+        $rows = array_map(function ($item) use ($currency) {
+            $sku = $item['sku'] ?? '';
+            $var = $item['variant_name'] ?? '';
+            return [
+                'qty'        => number_format((float)($item['quantity'] ?? 0)),
+                'desc'       => $item['product_name'] ?? '—',
+                'desc_sub'   => trim(($var ? "Variant: {$var}" : '') . ($sku ? " | SKU: {$sku}" : '')),
+                'unit_price' => self::money((float)($item['unit_price'] ?? 0), $currency),
+                'amount'     => self::money((float)($item['total_price'] ?? 0), $currency),
+            ];
+        }, $q['items'] ?? []);
+
+        $totals = [
+            'subtotal' => $q['subtotal']        ?? 0,
+            'discount' => $q['discount_amount'] ?? 0,
+            'tax'      => $q['tax_amount']      ?? 0,
+            'total'    => $q['total_amount']    ?? 0,
+            'currency' => $currency,
+        ];
+
+        $extra = '';
+        if (!empty($q['notes'])) {
+            $extra .= '<div class="notes-label" style="margin-top:8px">Notes</div><div class="notes-box">'
+                . htmlspecialchars($q['notes']) . '</div>';
+        }
+        if (!empty($q['terms'])) {
+            $extra .= '<div class="notes-label" style="margin-top:8px">Terms</div><div class="notes-box">'
+                . htmlspecialchars($q['terms']) . '</div>';
+        }
+        $extra .= '<div class="notes-box" style="margin-top:10px;color:#666">This is a quotation, not a demand for '
+            . 'payment. Prices are valid until the date shown above.</div>';
+
+        return self::page('Quotation', $q['quote_number'] ?? 'DRAFT', $q['status'] ?? 'draft',
+            $meta, $parties, self::itemsTable($columns, $rows), $totals, $extra);
+    }
+
+    // =========================================================================
+    // RECEIPT
+    // =========================================================================
+
+    /**
+     * Renders from a receipt sales_document's frozen snapshot (see ReceiptService),
+     * so it always reflects exactly what was issued at payment time.
+     */
+    public static function receipt(array $snap): string
+    {
+        $currency = $snap['currency_code'] ?? 'KES';
+        $cust     = $snap['customer'] ?? [];
+        $custName = trim(($cust['first_name'] ?? '') . ' ' . ($cust['last_name'] ?? '')) ?: 'Customer';
+        $pay      = $snap['payment'] ?? [];
+
+        $meta = [
+            'Receipt #'   => $snap['receipt_number'] ?? '—',
+            'Order #'     => $snap['order_number'] ?? '—',
+            'Date'        => self::date($snap['issued_at'] ?? null),
+            'Paid Via'    => ucfirst(str_replace('_', ' ', $pay['method'] ?? '—')),
+        ];
+
+        $parties = self::partyRow(
+            'Received From', $custName,
+            array_filter([$cust['email'] ?? '', $cust['phone'] ?? ''])
+        );
+
+        $columns = [
+            ['key' => 'label',  'label' => 'Description'],
+            ['key' => 'amount', 'label' => 'Amount', 'align' => 'right', 'width' => '25%', 'mono' => true],
+        ];
+        $rows = [
+            ['label' => 'Payment received' . (!empty($pay['reference']) ? ' (Ref: ' . $pay['reference'] . ')' : ''),
+             'amount' => self::money((float)($pay['amount'] ?? 0), $currency)],
+        ];
+
+        $status = !empty($snap['fully_paid']) ? 'paid' : 'partial';
+        $extra  = '<table class="totals-table" style="margin-top:8px">'
+            . '<tr><td class="tl">Invoice Total</td><td class="tv">' . self::money((float)($snap['invoice_total'] ?? 0), $currency) . '</td></tr>'
+            . '<tr><td class="tl">Paid To Date</td><td class="tv">' . self::money((float)($snap['paid_to_date'] ?? 0), $currency) . '</td></tr>'
+            . '<tr class="total-line"><td class="tl">Balance Due</td><td class="tv">' . self::money((float)($snap['balance_due'] ?? 0), $currency) . '</td></tr>'
+            . '</table>';
+
+        return self::page('Receipt', $snap['receipt_number'] ?? '—', $status,
+            $meta, $parties, self::itemsTable($columns, $rows), [], $extra);
+    }
+
+    // =========================================================================
     // SHIPMENT
     // =========================================================================
 
