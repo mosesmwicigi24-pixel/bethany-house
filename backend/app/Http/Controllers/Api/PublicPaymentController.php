@@ -191,10 +191,31 @@ class PublicPaymentController extends Controller
                 return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Accepted']);
             }
 
+            // Idempotency: Daraja can re-deliver a callback — never settle twice.
+            if ($payment->status === 'paid') {
+                return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Accepted']);
+            }
+
             DB::transaction(function () use ($payment, $order, $resultCode, $data) {
                 if ($resultCode === 0) {
                     $meta = $data['Body']['stkCallback']['CallbackMetadata']['Item'] ?? [];
                     $receipt = collect($meta)->firstWhere('Name', 'MpesaReceiptNumber')['Value'] ?? null;
+                    $paidAmount = (float) (collect($meta)->firstWhere('Name', 'Amount')['Value'] ?? 0);
+
+                    // The callback carries the real settled amount — it must cover the
+                    // recorded payment. An underpayment is held for staff review, not
+                    // auto-settled, so a partial STK can't close a full order.
+                    if ($paidAmount + 0.001 < (float) $payment->amount) {
+                        $payment->update([
+                            'status'             => 'pending',
+                            'provider_reference' => $receipt ?? $payment->provider_reference,
+                            'requires_approval'  => true,
+                            'approval_status'    => 'pending_review',
+                            'notes'              => trim(($payment->notes ?? '') . " [system] STK amount {$paidAmount} < expected {$payment->amount}; held for review."),
+                        ]);
+                        $order->update(['payment_status' => 'pending_approval']);
+                        return;
+                    }
 
                     $payment->update([
                         'status'             => 'paid',
@@ -501,82 +522,33 @@ class PublicPaymentController extends Controller
         }
 
         try {
-            $mpesa     = new MpesaService();
-            $confirmed = false;
-            $resultUrl  = url('/api/v1/webhooks/mpesa/transaction-result');
-            $queueUrl   = url('/api/v1/webhooks/mpesa/transaction-timeout');
-
-            try {
-                $result    = $mpesa->transactionStatus($code, $resultUrl, $queueUrl);
-                $confirmed = ($result['ResponseCode'] ?? '') === '0';
-            } catch (\Exception $e) {
-                Log::warning('PublicPayment: Daraja transaction status failed', [
-                    'order_id' => $order->id,
-                    'code'     => $code,
-                    'error'    => $e->getMessage(),
-                ]);
-                // Daraja unavailable — still record as requires_approval so admin can verify
-                $confirmed = false;
-            }
-
-            DB::transaction(function () use ($order, $code, $confirmed) {
-                $payment = Payment::create([
+            // A customer-submitted M-Pesa transaction code is an UNVERIFIED CLAIM,
+            // not proof of payment. (The Daraja TransactionStatusQuery only returns
+            // a "query accepted" code synchronously — the real result arrives async
+            // — so trusting it settled orders for free.) We therefore always record
+            // the code as pending / requires-approval and let staff (or the async
+            // STK callback with real settlement metadata) confirm it. Never paid here.
+            DB::transaction(function () use ($order, $code) {
+                Payment::create([
                     'order_id'           => $order->id,
                     'payment_method'     => 'mpesa',
                     'amount'             => $order->total_amount,
                     'currency_code'      => $order->currency_code,
-                    'status'             => $confirmed ? 'paid' : 'pending',
+                    'status'             => 'pending',
                     'provider_reference' => $code,
-                    'requires_approval'  => !$confirmed,
-                    'approval_status'    => $confirmed ? 'approved' : 'pending_review',
+                    'requires_approval'  => true,
+                    'approval_status'    => 'pending_review',
                     'tax_inclusive'      => $order->prices_include_tax ?? true,
-                    'paid_at'            => $confirmed ? now() : null,
+                    'paid_at'            => null,
                 ]);
 
-                if ($confirmed) {
-                    $order->refresh();
-                    $order->syncPaymentStatus();
-                    $order->refresh();
-
-                    if (in_array($order->status, ['pending', 'processing'])) {
-                        $order->update(['status' => 'confirmed']);
-                    }
-                } else {
-                    $order->update(['payment_status' => 'pending_approval']);
-                }
+                $order->update(['payment_status' => 'pending_approval']);
             });
 
             $payment = Payment::where('order_id', $order->id)
                 ->where('provider_reference', $code)
                 ->latest()->first();
 
-            if ($confirmed) {
-                try {
-                    NotificationService::paymentReceived(
-                        $payment->id,
-                        $payment->payment_number ?? (string) $payment->id,
-                        $order->id,
-                        $order->order_number,
-                        (float) $payment->amount,
-                        $order->currency_code,
-                        'mpesa'
-                    );
-                    ActivityLogService::log('mpesa_payment_confirmed', $order, [
-                        'payment_id'       => $payment->id,
-                        'transaction_code' => $code,
-                        'amount'           => $payment->amount,
-                        'source'           => 'customer_payment_link',
-                    ]);
-                } catch (\Exception) {}
-
-                return response()->json([
-                    'message'        => 'M-Pesa payment confirmed!',
-                    'payment_status' => 'paid',
-                    'confirmed'      => true,
-                ]);
-            }
-
-            // Daraja unreachable — recorded for admin review
             try {
                 NotificationService::paymentApprovalRequired(
                     $payment->id,
@@ -663,6 +635,37 @@ class PublicPaymentController extends Controller
 
             if ($status !== 'success') {
                 return response()->json(['confirmed' => false, 'message' => 'Payment not yet successful on Paystack.'], 422);
+            }
+
+            // ── Verify the transaction actually belongs to THIS order for the
+            // right amount — a "success" status alone is not enough. Without this
+            // a customer could replay one cheap reference across expensive orders.
+
+            // Anti-replay: a reference can settle at most one order.
+            $alreadyUsed = Payment::where('provider_reference', $reference)
+                ->where('status', 'paid')
+                ->where('order_id', '!=', $order->id)
+                ->exists();
+            if ($alreadyUsed) {
+                return response()->json(['confirmed' => false, 'message' => 'This payment reference has already been used.'], 422);
+            }
+
+            // Reference must not be bound (via Paystack metadata) to a different order.
+            $metaOrderId = $data['metadata']['order_id'] ?? null;
+            if ($metaOrderId !== null && (int) $metaOrderId !== (int) $order->id) {
+                return response()->json(['confirmed' => false, 'message' => 'This payment does not belong to this order.'], 422);
+            }
+
+            // Amount + currency must match the order. Paystack reports amount in the
+            // minor unit (kobo/cents); our order total is in the major unit.
+            $paidMinor     = (int) round((float) ($data['amount'] ?? 0));
+            $expectedMinor = (int) round(((float) $order->total_amount) * 100);
+            $currencyOk    = strtoupper((string) ($data['currency'] ?? '')) === strtoupper((string) $order->currency_code);
+            if (!$currencyOk || $paidMinor < $expectedMinor) {
+                return response()->json([
+                    'confirmed' => false,
+                    'message'   => 'Payment amount or currency does not match this order.',
+                ], 422);
             }
 
             // Mark payment paid
