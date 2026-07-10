@@ -114,14 +114,22 @@ class QuotationConvertTest extends TestCase
         $this->postJson("/api/v1/admin/quotations/{$id}/accept")->assertStatus(422);
     }
 
-    public function test_a_quotation_with_an_adhoc_line_cannot_be_accepted(): void
+    public function test_a_quotation_with_an_adhoc_line_converts_without_reserving_stock(): void
     {
         $id = $this->postJson('/api/v1/admin/quotations', [
-            'items' => [['product_name' => 'Consulting (no product)', 'quantity' => 1, 'unit_price' => 5000]],
+            'items' => [['product_name' => 'Custom tailoring (no product)', 'quantity' => 1, 'unit_price' => 5000]],
         ])->json('quotation.id');
         $this->postJson("/api/v1/admin/quotations/{$id}/issue")->assertOk();
 
-        $this->postJson("/api/v1/admin/quotations/{$id}/accept")->assertStatus(422);
+        $res = $this->postJson("/api/v1/admin/quotations/{$id}/accept")->assertCreated();
+        $orderId = $res->json('order.id');
+
+        // The ad-hoc line became an order line with no product and no stock reserved.
+        $order = Order::with('items')->find($orderId);
+        $this->assertSame(1, $order->items->count());
+        $this->assertNull($order->items->first()->product_id);
+        $this->inv->refresh();
+        $this->assertSame(0, (int) $this->inv->quantity_reserved);
     }
 
     public function test_accepting_twice_is_rejected(): void

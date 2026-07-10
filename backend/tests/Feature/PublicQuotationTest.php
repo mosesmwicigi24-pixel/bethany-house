@@ -91,10 +91,12 @@ class PublicQuotationTest extends TestCase
         $this->assertSame($payToken, Order::find($q->converted_order_id)->payment_token);
     }
 
-    public function test_accepting_a_quote_with_an_adhoc_line_is_rejected(): void
+    public function test_accepting_a_quote_with_an_adhoc_line_converts(): void
     {
         $q = $this->issuedQuote(adHoc: true);
 
-        $this->postJson("/api/v1/quote/{$q->quote_token}/accept")->assertStatus(422);
+        $res = $this->postJson("/api/v1/quote/{$q->quote_token}/accept")->assertOk();
+        $this->assertNotEmpty($res->json('pay_token'));
+        $this->assertSame('converted', $q->fresh()->status);
     }
 }

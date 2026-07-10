@@ -46,9 +46,8 @@ class PublicQuotationController extends Controller
         if ($quotation->status !== Quotation::SENT) {
             return response()->json(['message' => 'This quotation can no longer be accepted.'], 422);
         }
-        if ($quotation->items->isEmpty() || $quotation->items->contains(fn ($i) => $i->product_id === null)) {
-            // Ad-hoc lines can't become order lines — the business must finalise it.
-            return response()->json(['message' => 'This quotation needs to be finalised by our team before it can be accepted online.'], 422);
+        if ($quotation->items->isEmpty()) {
+            return response()->json(['message' => 'This quotation has no items to accept.'], 422);
         }
 
         $result = QuotationService::convertToInvoice($quotation);
