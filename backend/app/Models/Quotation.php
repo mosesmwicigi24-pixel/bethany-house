@@ -85,6 +85,14 @@ class Quotation extends Model
         return $this->morphMany(SalesDocument::class, 'documentable');
     }
 
+    /** The INVOICE this quotation became, once accepted/converted (else null). */
+    public function invoiceDocument()
+    {
+        return $this->hasOne(SalesDocument::class, 'documentable_id', 'converted_order_id')
+            ->where('documentable_type', Order::class)
+            ->where('type', SalesDocument::INVOICE);
+    }
+
     public function isExpired(): bool
     {
         return $this->valid_until !== null && $this->valid_until->isPast();
