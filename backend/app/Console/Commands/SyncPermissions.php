@@ -45,6 +45,12 @@ class SyncPermissions extends Command
         'orders.authorize_dispatch' => ['Authorize Dispatch',      'Confirm a paid order against the physical goods and release it for hand-over (the one or two people allowed to let goods leave)', 'Orders'],
         'orders.manage_returns'    => ['Manage Order Returns',      'Approve, reject and process customer return requests', 'Orders'],
 
+        // ── Quotations (sales-documents flow) ───────────────────────────────
+        'quotations.view'          => ['View Quotations',          'List and view customer quotations',          'Quotations'],
+        'quotations.create'        => ['Create Quotations',        'Build and edit draft quotations',            'Quotations'],
+        'quotations.issue'         => ['Issue Quotations',         'Issue a quotation and convert an accepted one to an invoice', 'Quotations'],
+        'quotations.delete'        => ['Delete Quotations',        'Delete a draft quotation',                   'Quotations'],
+
         // ── Payments ────────────────────────────────────────────────────────
         'payments.view'                    => ['View Payments',                 'View payment records',                              'Payments'],
         'payments.record'                  => ['Record Payments',               'Record cash/manual payments',                       'Payments'],
@@ -173,7 +179,7 @@ class SyncPermissions extends Command
         'admin' => [
             // Full access to everything except super_admin-only operations
             'dashboard.view',
-            'orders.*', 'payments.*',
+            'orders.*', 'quotations.*', 'payments.*',
             'production.*',
             'shipment.*',
             'customers.*',
@@ -236,8 +242,10 @@ class SyncPermissions extends Command
             // a manager-delegates-to-everyone action.
             'pos.access', 'pos.discount', 'pos.returns', 'pos.void',
             'pos.open_register', 'pos.close_register',
-            // Orders - create and view own orders
+            // Orders - create and view own orders (also gates the Invoices view)
             'orders.view', 'orders.create',
+            // Quotations - see the quotation list (front of the sales-docs flow)
+            'quotations.view',
             // Payments - record, upload proof, and view transaction history
             'payments.view', 'payments.record', 'payments.upload_proof',
             // Customers - create walk-in and view
