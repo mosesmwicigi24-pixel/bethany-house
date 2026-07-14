@@ -755,12 +755,37 @@ class ProductController extends Controller
 
     // ── Variants ───────────────────────────────────────────────────────────────
 
+    /**
+     * Return $base if free, else the next available `$base-2`, `$base-3`, …
+     * variant SKU. Lets bulk "Generate Variants" resolve colliding auto-generated
+     * SKUs (e.g. two attribute values sharing a 3-letter abbreviation, or a combo
+     * already stocked) instead of failing the whole save.
+     */
+    private function resolveUniqueVariantSku(string $base): string
+    {
+        $base = substr($base, 0, 100);
+        if (!ProductVariant::where('sku', $base)->exists()) {
+            return $base;
+        }
+        for ($i = 2; $i < 10000; $i++) {
+            $candidate = substr($base, 0, 100 - strlen("-{$i}")) . "-{$i}";
+            if (!ProductVariant::where('sku', $candidate)->exists()) {
+                return $candidate;
+            }
+        }
+        // Unreachable in practice; keep a deterministic fallback.
+        return substr($base, 0, 90) . '-' . uniqid();
+    }
+
     public function addVariant(Request $request, $productId)
     {
         $product = Product::findOrFail($productId);
 
         $validated = $request->validate([
-            'sku'          => "required|string|max:100|unique:product_variants,sku",
+            // Not `unique:` — a colliding SKU is auto-resolved to the next free
+            // one below (…-GRE-MIN → …-GRE-MIN-2 → -3) rather than hard-rejected,
+            // so bulk "Generate Variants" never fails on a duplicate abbreviation.
+            'sku'          => "required|string|max:100",
             'variant_name' => 'required|string|max:255',
             'attributes'   => 'nullable|array',
             'weight'       => 'nullable|numeric|min:0',
@@ -779,8 +804,13 @@ class ProductController extends Controller
                 $product->variants()->update(['is_default' => false]);
             }
 
+            // Resolve a globally-unique SKU: if the requested one is taken, append
+            // the next free numeric suffix (-2, -3, …). SKUs are stored uppercased,
+            // so uniqueness is checked against the uppercased value.
+            $sku = $this->resolveUniqueVariantSku(strtoupper($validated['sku']));
+
             $variant = $product->variants()->create([
-                'sku'          => strtoupper($validated['sku']),
+                'sku'          => $sku,
                 'variant_name' => $validated['variant_name'],
                 'attributes'   => $validated['attributes'] ?? [],
                 'weight'       => $validated['weight'] ?? null,
