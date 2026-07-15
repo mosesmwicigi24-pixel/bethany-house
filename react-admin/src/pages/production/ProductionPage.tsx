@@ -232,6 +232,90 @@ function productLabel(p: any): string {
     return p?.en_translation?.name ? `${p.en_translation.name} — ${p.sku}` : (p?.sku ?? "—");
 }
 
+/**
+ * Searchable product picker that keeps the root-category grouping (headings).
+ * Filters the already-loaded product groups client-side by name or SKU. Shows the
+ * selected product's label when unfocused; clears to a search box on focus.
+ */
+function ProductPicker({
+    groups,
+    value,
+    onChange,
+}: {
+    groups: { name: string; items: any[] }[];
+    value: string;
+    onChange: (id: string) => void;
+}) {
+    const [query, setQuery] = useState("");
+    const [open, setOpen] = useState(false);
+    const [focused, setFocused] = useState(false);
+
+    const selected = useMemo(() => {
+        for (const g of groups) {
+            const p = g.items.find((x: any) => String(x.id) === value);
+            if (p) return p;
+        }
+        return null;
+    }, [groups, value]);
+
+    const q = query.trim().toLowerCase();
+    const filtered = useMemo(() => {
+        if (!q) return groups;
+        return groups
+            .map(g => ({ name: g.name, items: g.items.filter((p: any) => productLabel(p).toLowerCase().includes(q)) }))
+            .filter(g => g.items.length > 0);
+    }, [groups, q]);
+
+    return (
+        <div className="relative">
+            <div className={clsx("flex items-center gap-2 input py-0", focused && "ring-2 ring-brand-300 border-brand-400")}>
+                <svg className="w-4 h-4 text-surface-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <input
+                    className="flex-1 py-2 bg-transparent outline-none text-sm placeholder:text-surface-400"
+                    placeholder={selected ? productLabel(selected) : "Search product by name or SKU…"}
+                    value={focused ? query : (selected ? productLabel(selected) : "")}
+                    onFocus={() => { setFocused(true); setOpen(true); }}
+                    onBlur={() => { setFocused(false); setTimeout(() => setOpen(false), 150); }}
+                    onChange={e => { setQuery(e.target.value); setOpen(true); }}
+                />
+                {selected && !focused && (
+                    <button type="button" onMouseDown={() => { onChange(""); setQuery(""); }}
+                        className="text-surface-400 hover:text-danger text-sm shrink-0" title="Clear">✕</button>
+                )}
+            </div>
+
+            {open && (
+                <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-surface-200 rounded-xl shadow-lg overflow-hidden max-h-72 overflow-y-auto">
+                    {filtered.length === 0 ? (
+                        <p className="text-sm text-surface-400 text-center py-4">No products found.</p>
+                    ) : (
+                        filtered.map(g => (
+                            <div key={g.name}>
+                                <p className="px-3 pt-2 pb-1 text-2xs font-semibold uppercase tracking-wide text-surface-400 bg-surface-50 sticky top-0">{g.name}</p>
+                                {g.items.map((p: any) => (
+                                    <button
+                                        key={p.id}
+                                        type="button"
+                                        onMouseDown={() => { onChange(String(p.id)); setQuery(""); setOpen(false); }}
+                                        className={clsx(
+                                            "w-full text-left px-3 py-2 text-sm hover:bg-surface-50 transition-colors border-b border-surface-50 last:border-0",
+                                            String(p.id) === value && "bg-brand-50 text-brand-700",
+                                        )}
+                                    >
+                                        {productLabel(p)}
+                                    </button>
+                                ))}
+                            </div>
+                        ))
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SHARED UI ATOMS
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -486,16 +570,11 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
                 <div className="grid grid-cols-2 gap-4">
                     <div className="col-span-2">
                         <label className="label">Product <span className="text-danger">*</span></label>
-                        <select value={form.product_id} onChange={e => set("product_id", e.target.value)} className="input">
-                            <option value="">Select product…</option>
-                            {productGroups.map(g => (
-                                <optgroup key={g.name} label={g.name}>
-                                    {g.items.map((p: any) => (
-                                        <option key={p.id} value={p.id}>{productLabel(p)}</option>
-                                    ))}
-                                </optgroup>
-                            ))}
-                        </select>
+                        <ProductPicker
+                            groups={productGroups}
+                            value={form.product_id}
+                            onChange={v => set("product_id", v)}
+                        />
                     </div>
                     <div>
                         <label className="label">Quantity <span className="text-danger">*</span></label>
