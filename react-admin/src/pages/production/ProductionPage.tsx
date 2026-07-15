@@ -227,6 +227,11 @@ function parseMeasurements(raw: string): Record<string, string> | undefined {
     return Object.keys(result).length > 0 ? result : undefined;
 }
 
+/** Product picker label: "Cassock — CLE-WSN-001" (name preferred, SKU fallback). */
+function productLabel(p: any): string {
+    return p?.en_translation?.name ? `${p.en_translation.name} — ${p.sku}` : (p?.sku ?? "—");
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SHARED UI ATOMS
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -297,8 +302,14 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
 
     const { data: productsData } = useQuery({
         queryKey: ["production-products-list"],
-        queryFn: () => get<any>("/v1/admin/products", { params: { per_page: "200", is_producible: "1" } }),
+        queryFn: () => get<any>("/v1/admin/products", { params: { per_page: "500", is_producible: "1" } }),
         staleTime: 60_000,
+    });
+    // Category tree — used to group the product picker under its ROOT category.
+    const { data: categoryTree } = useQuery({
+        queryKey: ["category-tree"],
+        queryFn: () => get<any>("/v1/admin/categories", { params: { tree: "true" } }),
+        staleTime: 300_000,
     });
     const { data: ordersData } = useQuery({
         queryKey: ["open-orders-list"],
@@ -316,6 +327,33 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
     const products = productsData?.data ?? [];
     const orders   = (ordersData?.data ?? []) as any[];
     const outlets  = outletsData?.data ?? [];
+
+    // Map every category id → its ROOT category, by walking the tree.
+    const rootByCategoryId = useMemo(() => {
+        const map = new Map<number, string>();
+        const walk = (node: any, rootName: string) => {
+            map.set(node.id, rootName);
+            (node.children ?? []).forEach((c: any) => walk(c, rootName));
+        };
+        (categoryTree?.data ?? []).forEach((root: any) => walk(root, root.name_en));
+        return map;
+    }, [categoryTree]);
+
+    // Products bucketed under their root category, groups + items alphabetised.
+    const productGroups = useMemo(() => {
+        const groups = new Map<string, any[]>();
+        for (const p of products) {
+            const key = (p.category?.id && rootByCategoryId.get(p.category.id)) || "Uncategorised";
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key)!.push(p);
+        }
+        return [...groups.entries()]
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([name, items]) => ({
+                name,
+                items: items.sort((a, b) => productLabel(a).localeCompare(productLabel(b))),
+            }));
+    }, [products, rootByCategoryId]);
 
     // When a customer order is selected, auto-fill product/qty from its first item
     const handleOrderSelect = (orderId: string) => {
@@ -450,8 +488,12 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
                         <label className="label">Product <span className="text-danger">*</span></label>
                         <select value={form.product_id} onChange={e => set("product_id", e.target.value)} className="input">
                             <option value="">Select product…</option>
-                            {products.map((p: any) => (
-                                <option key={p.id} value={p.id}>{p.name ?? p.sku}</option>
+                            {productGroups.map(g => (
+                                <optgroup key={g.name} label={g.name}>
+                                    {g.items.map((p: any) => (
+                                        <option key={p.id} value={p.id}>{productLabel(p)}</option>
+                                    ))}
+                                </optgroup>
                             ))}
                         </select>
                     </div>
@@ -482,8 +524,8 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
                     </div>
                 </div>
 
-                {/* Measurements (customer orders) */}
-                {orderType === "customer" && (
+                {/* Measurements — captured for any order type (stock or customer) */}
+                {(
                     <div>
                         <label className="label">
                             Measurements
@@ -496,8 +538,8 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
                     </div>
                 )}
 
-                {/* Customer preferences */}
-                {orderType === "customer" && (
+                {/* Customer preferences — captured for any order type */}
+                {(
                     <div>
                         <label className="label">
                             Customer Preferences
