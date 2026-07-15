@@ -2169,10 +2169,14 @@ export default function ProductFormPage() {
             }
             setUploading(true);
             try {
-                const res = await productsApi.uploadImages(
-                    Number(id),
-                    Array.from(files),
+                // Optimise in the browser first: shrinks large photos to a fast,
+                // high-quality WebP so the upload succeeds (and is quick) instead
+                // of being rejected for size. Per-file fallback to the original.
+                const { smartCompressImage } = await import("@/utils/compressImage");
+                const optimized = await Promise.all(
+                    Array.from(files).map((f) => smartCompressImage(f).catch(() => f)),
                 );
+                const res = await productsApi.uploadImages(Number(id), optimized);
                 setImages((prev) => [...prev, ...res.images]);
                 toast.success(`${res.images.length} image(s) uploaded.`);
             } catch (e: any) {
@@ -2721,7 +2725,7 @@ export default function ProductFormPage() {
                                             Click to upload images
                                         </p>
                                         <p className="text-xs text-surface-300 mt-1">
-                                            PNG, JPG, WebP · Max 5MB each
+                                            PNG, JPG, WebP · optimised automatically for fast, high-quality upload
                                         </p>
                                     </div>
                                 ) : (
