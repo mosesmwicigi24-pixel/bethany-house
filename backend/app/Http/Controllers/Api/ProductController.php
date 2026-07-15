@@ -132,7 +132,9 @@ class ProductController extends Controller
      */
     public function adminIndex(Request $request)
     {
-        $perPage = min((int) $request->get('per_page', 20), 100);
+        // Cap at 500 (was 100) so selector UIs — e.g. the production-order product
+        // picker — can load the full producible catalogue in one call.
+        $perPage = min((int) $request->get('per_page', 20), 500);
 
         $query = Product::with([
             'category:id,name_en',
