@@ -1402,6 +1402,21 @@ function MeasurementsTab({
         (c) => !measurements.some((m) => m.name.toLowerCase() === c.name.toLowerCase()),
     );
 
+    // Standard clergy tailoring sheets — add the whole set for a gender at once.
+    const GENDER_SHEETS: Record<"Men" | "Ladies", string[]> = {
+        Men: ["Neck", "Shoulders", "Sleeves", "Wrist", "Arm Hole", "Upper Arm",
+            "Chest", "Stomach", "Shirt Length", "Full Length"],
+        Ladies: ["Neck", "Shoulders", "Sleeves", "Wrist", "Arm Hole", "Upper Arm",
+            "Bodice", "Waist", "Hips", "Blouse Length", "Full Length"],
+    };
+    const addGenderSheet = (g: "Men" | "Ladies") => {
+        const existing = new Set(measurements.map((m) => m.name.toLowerCase()));
+        const toAdd = GENDER_SHEETS[g]
+            .filter((n) => !existing.has(n.toLowerCase()))
+            .map((n) => ({ name: n, unit: "cm", required: true }));
+        if (toAdd.length) onChange([...measurements, ...toAdd]);
+    };
+
     return (
         <div className="space-y-3">
             {/* Header */}
@@ -1417,11 +1432,33 @@ function MeasurementsTab({
                     </p>
                 </div>
 
+                {/* Gender sheet — adds the full standard set for Men or Ladies */}
+                <div className="px-4 pt-3 pb-3 border-b border-surface-100">
+                    <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-2">
+                        Quick add — gender sheet
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                        {(["Men", "Ladies"] as const).map((g) => (
+                            <button
+                                key={g}
+                                type="button"
+                                onClick={() => addGenderSheet(g)}
+                                className="text-xs px-3 py-1 rounded-full border border-brand-300 text-brand-700 bg-brand-50 hover:bg-brand-100 transition-colors font-medium"
+                            >
+                                + {g} set
+                            </button>
+                        ))}
+                        <span className="text-2xs text-surface-400 self-center ml-1">
+                            adds the full {GENDER_SHEETS.Men.length}/{GENDER_SHEETS.Ladies.length}-field sheet (skips fields already added)
+                        </span>
+                    </div>
+                </div>
+
                 {/* Quick-add common */}
                 {unaddedCommon.length > 0 && (
                     <div className="px-4 pb-3 border-b border-surface-100">
                         <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-2">
-                            Quick add
+                            Quick add — individual field
                         </p>
                         <div className="flex flex-wrap gap-1.5">
                             {unaddedCommon.map((c) => (
