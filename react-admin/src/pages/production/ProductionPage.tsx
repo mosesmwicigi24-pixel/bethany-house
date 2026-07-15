@@ -382,7 +382,11 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
         measurements: "", customer_preferences: "",
     });
     const [materialWarnings, setMaterialWarnings] = useState<MaterialReq[]>([]);
+    // Structured measurement values keyed by field name (the MTO-style form).
+    const [measurementValues, setMeasurementValues] = useState<Record<string, string>>({});
     const set = (k: string, v: string) => setForm(p => ({ ...p, [k]: v }));
+    const setMeasure = (field: string, value: string) =>
+        setMeasurementValues(p => ({ ...p, [field]: value }));
 
     const { data: productsData } = useQuery({
         queryKey: ["production-products-list"],
@@ -439,6 +443,28 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
             }));
     }, [products, rootByCategoryId]);
 
+    // The selected product's measurement fields ({name, unit, required}) drive the
+    // structured MTO-style measurement form. Reset the entered values on change.
+    const selectedProduct = useMemo(
+        () => products.find((p: any) => String(p.id) === form.product_id) ?? null,
+        [products, form.product_id],
+    );
+    const measurementFields: { name: string; unit?: string; required?: boolean }[] =
+        selectedProduct?.measurements ?? [];
+    useEffect(() => { setMeasurementValues({}); }, [form.product_id]);
+
+    // Measurements payload: structured values (non-empty) when the product defines
+    // fields, else the free-text key:value fallback.
+    const buildMeasurements = (): Record<string, string> | undefined => {
+        if (measurementFields.length > 0) {
+            const filled = Object.fromEntries(
+                Object.entries(measurementValues).filter(([, v]) => (v ?? "").trim() !== ""),
+            );
+            return Object.keys(filled).length ? filled : undefined;
+        }
+        return parseMeasurements(form.measurements);
+    };
+
     // When a customer order is selected, auto-fill product/qty from its first item
     const handleOrderSelect = (orderId: string) => {
         set("customer_order_id", orderId);
@@ -464,8 +490,8 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
             // customer order linkage
             is_customer_order:    orderType === "customer",
             customer_order_id:    orderType === "customer" && form.customer_order_id ? Number(form.customer_order_id) : null,
-            // measurements as key-value pairs (entered as "waist:32,length:28")
-            measurements:         parseMeasurements(form.measurements),
+            // measurements: structured per-product fields (MTO-style) or free-text fallback
+            measurements:         buildMeasurements(),
             customer_preferences: parseMeasurements(form.customer_preferences),
         }),
         onSuccess: (res: any) => {
@@ -603,19 +629,44 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
                     </div>
                 </div>
 
-                {/* Measurements — captured for any order type (stock or customer) */}
-                {(
+                {/* Measurements — structured per-product fields (same as the POS
+                    Made-to-Order form) when the product defines them, else a
+                    free-text fallback. Captured for any order type. */}
+                {measurementFields.length > 0 ? (
+                    <div>
+                        <label className="label">Measurements</label>
+                        <div className="grid grid-cols-2 gap-3">
+                            {measurementFields.map(field => (
+                                <div key={field.name}>
+                                    <label className="block text-xs font-medium text-surface-700 mb-1">
+                                        {field.name}
+                                        {field.unit && <span className="text-surface-400 font-normal ml-1">({field.unit})</span>}
+                                        {field.required && <span className="text-danger ml-0.5">*</span>}
+                                    </label>
+                                    <input
+                                        type="text"
+                                        className="input text-sm"
+                                        placeholder={field.unit ? `e.g. 32 ${field.unit}` : "Enter value"}
+                                        value={measurementValues[field.name] ?? ""}
+                                        onChange={e => setMeasure(field.name, e.target.value)}
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ) : form.product_id ? (
                     <div>
                         <label className="label">
                             Measurements
-                            <span className="ml-2 text-surface-400 font-normal text-2xs">key:value pairs, comma separated - e.g. waist:32, length:28, chest:40</span>
+                            <span className="ml-2 text-surface-400 font-normal text-2xs">key:value pairs, comma separated — e.g. waist:32, length:28</span>
                         </label>
                         <input type="text" value={form.measurements}
                             onChange={e => set("measurements", e.target.value)}
                             className="input font-mono text-xs"
                             placeholder="waist:32, length:28, chest:40, hips:38" />
+                        <p className="text-2xs text-surface-400 mt-1">Tip: add measurement fields on this product to get the structured form here.</p>
                     </div>
-                )}
+                ) : null}
 
                 {/* Customer preferences — captured for any order type */}
                 {(

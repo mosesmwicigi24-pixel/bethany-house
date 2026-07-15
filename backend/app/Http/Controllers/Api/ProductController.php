@@ -1168,6 +1168,9 @@ class ProductController extends Controller
             'published_at'        => $product->published_at,
             'created_at'          => $product->created_at,
             'category'            => $product->category ? ['id' => $product->category->id, 'name_en' => $product->category->name_en] : null,
+            // Per-product measurement fields ({name, unit, required}) so pickers can
+            // render the structured MTO-style measurement form on selection.
+            'measurements'        => $product->measurements ?? [],
             'en_translation'      => $enTrans ? ['name' => $enTrans->name, 'short_description' => $enTrans->short_description] : null,
             'primary_image'       => $primary ? ['id' => $primary->id, 'image_url' => $primary->image_url, 'alt_text' => $primary->alt_text] : null,
             'base_price'          => $basePrice ? ['regular_price' => $basePrice->regular_price, 'sale_price' => $basePrice->sale_price, 'currency_code' => 'KES'] : null,
