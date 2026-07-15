@@ -232,6 +232,18 @@ function productLabel(p: any): string {
     return p?.en_translation?.name ? `${p.en_translation.name} — ${p.sku}` : (p?.sku ?? "—");
 }
 
+/** Standard clergy tailoring measurement sheets, by gender (all in inches). */
+const MEASUREMENT_SETS: Record<"men" | "ladies", { name: string; unit: string }[]> = {
+    men: [
+        "Neck", "Shoulders", "Sleeves", "Wrist", "Arm Hole", "Upper Arm",
+        "Chest", "Stomach", "Shirt Length", "Full Length",
+    ].map(name => ({ name, unit: "Inches" })),
+    ladies: [
+        "Neck", "Shoulders", "Sleeves", "Wrist", "Arm Hole", "Upper Arm",
+        "Bodice", "Waist", "Hips", "Blouse Length", "Full Length",
+    ].map(name => ({ name, unit: "Inches" })),
+};
+
 /**
  * Searchable product picker that keeps the root-category grouping (headings).
  * Filters the already-loaded product groups client-side by name or SKU. Shows the
@@ -384,6 +396,8 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
     const [materialWarnings, setMaterialWarnings] = useState<MaterialReq[]>([]);
     // Structured measurement values keyed by field name (the MTO-style form).
     const [measurementValues, setMeasurementValues] = useState<Record<string, string>>({});
+    // Gender switches the standard clergy measurement sheet (Men vs Ladies).
+    const [gender, setGender] = useState<"" | "men" | "ladies">("");
     const set = (k: string, v: string) => setForm(p => ({ ...p, [k]: v }));
     const setMeasure = (field: string, value: string) =>
         setMeasurementValues(p => ({ ...p, [field]: value }));
@@ -449,18 +463,26 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
         () => products.find((p: any) => String(p.id) === form.product_id) ?? null,
         [products, form.product_id],
     );
-    const measurementFields: { name: string; unit?: string; required?: boolean }[] =
+    const productMeasurementFields: { name: string; unit?: string; required?: boolean }[] =
         selectedProduct?.measurements ?? [];
-    useEffect(() => { setMeasurementValues({}); }, [form.product_id]);
+    // Gender-based clergy sheet takes priority; otherwise the product's own fields.
+    const measurementFields = gender ? MEASUREMENT_SETS[gender] : productMeasurementFields;
+    useEffect(() => { setMeasurementValues({}); setGender(""); }, [form.product_id]);
 
-    // Measurements payload: structured values (non-empty) when the product defines
-    // fields, else the free-text key:value fallback.
+    // Measurements payload: the active field set's non-empty values (+ the chosen
+    // gender), else the free-text key:value fallback.
     const buildMeasurements = (): Record<string, string> | undefined => {
         if (measurementFields.length > 0) {
             const filled = Object.fromEntries(
-                Object.entries(measurementValues).filter(([, v]) => (v ?? "").trim() !== ""),
+                measurementFields
+                    .map(f => [f.name, measurementValues[f.name]] as const)
+                    .filter(([, v]) => (v ?? "").trim() !== ""),
             );
-            return Object.keys(filled).length ? filled : undefined;
+            const out: Record<string, string> = {
+                ...(gender ? { Gender: gender === "men" ? "Men" : "Ladies" } : {}),
+                ...filled,
+            };
+            return Object.keys(out).length ? out : undefined;
         }
         return parseMeasurements(form.measurements);
     };
@@ -629,44 +651,65 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
                     </div>
                 </div>
 
-                {/* Measurements — structured per-product fields (same as the POS
-                    Made-to-Order form) when the product defines them, else a
-                    free-text fallback. Captured for any order type. */}
-                {measurementFields.length > 0 ? (
+                {/* Measurements — pick a gender for the standard clergy sheet (Men /
+                    Ladies); the fields switch to match. Falls back to the product's
+                    own fields, then free-text. Captured for any order type. */}
+                {form.product_id && (
                     <div>
                         <label className="label">Measurements</label>
-                        <div className="grid grid-cols-2 gap-3">
-                            {measurementFields.map(field => (
-                                <div key={field.name}>
-                                    <label className="block text-xs font-medium text-surface-700 mb-1">
-                                        {field.name}
-                                        {field.unit && <span className="text-surface-400 font-normal ml-1">({field.unit})</span>}
-                                        {field.required && <span className="text-danger ml-0.5">*</span>}
-                                    </label>
-                                    <input
-                                        type="text"
-                                        className="input text-sm"
-                                        placeholder={field.unit ? `e.g. 32 ${field.unit}` : "Enter value"}
-                                        value={measurementValues[field.name] ?? ""}
-                                        onChange={e => setMeasure(field.name, e.target.value)}
-                                    />
-                                </div>
+                        {/* Gender selector */}
+                        <div className="flex items-center gap-2 mb-3">
+                            {(["men", "ladies"] as const).map(g => (
+                                <button
+                                    key={g}
+                                    type="button"
+                                    onClick={() => setGender(gender === g ? "" : g)}
+                                    className={clsx(
+                                        "px-4 py-1.5 rounded-lg text-sm border transition-colors",
+                                        gender === g
+                                            ? "border-brand-400 bg-brand-50 text-brand-700 font-medium"
+                                            : "border-surface-200 text-surface-600 hover:bg-surface-50",
+                                    )}
+                                >
+                                    {g === "men" ? "Men" : "Ladies"}
+                                </button>
                             ))}
+                            {gender && (
+                                <button type="button" onClick={() => setGender("")}
+                                    className="text-2xs text-surface-400 hover:text-danger ml-1">clear</button>
+                            )}
                         </div>
+
+                        {measurementFields.length > 0 ? (
+                            <div className="grid grid-cols-2 gap-3">
+                                {measurementFields.map(field => (
+                                    <div key={field.name}>
+                                        <label className="block text-xs font-medium text-surface-700 mb-1">
+                                            {field.name}
+                                            {field.unit && <span className="text-surface-400 font-normal ml-1">({field.unit})</span>}
+                                            {(field as any).required && <span className="text-danger ml-0.5">*</span>}
+                                        </label>
+                                        <input
+                                            type="text"
+                                            className="input text-sm"
+                                            placeholder={field.unit ? `e.g. 32 ${field.unit}` : "Enter value"}
+                                            value={measurementValues[field.name] ?? ""}
+                                            onChange={e => setMeasure(field.name, e.target.value)}
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div>
+                                <p className="text-2xs text-surface-400 mb-1">Select a gender above for the standard sheet, or enter free-text measurements.</p>
+                                <input type="text" value={form.measurements}
+                                    onChange={e => set("measurements", e.target.value)}
+                                    className="input font-mono text-xs"
+                                    placeholder="waist:32, length:28, chest:40, hips:38" />
+                            </div>
+                        )}
                     </div>
-                ) : form.product_id ? (
-                    <div>
-                        <label className="label">
-                            Measurements
-                            <span className="ml-2 text-surface-400 font-normal text-2xs">key:value pairs, comma separated — e.g. waist:32, length:28</span>
-                        </label>
-                        <input type="text" value={form.measurements}
-                            onChange={e => set("measurements", e.target.value)}
-                            className="input font-mono text-xs"
-                            placeholder="waist:32, length:28, chest:40, hips:38" />
-                        <p className="text-2xs text-surface-400 mt-1">Tip: add measurement fields on this product to get the structured form here.</p>
-                    </div>
-                ) : null}
+                )}
 
                 {/* Customer preferences — captured for any order type */}
                 {(
