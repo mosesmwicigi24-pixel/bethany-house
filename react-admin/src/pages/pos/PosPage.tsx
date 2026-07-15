@@ -1845,6 +1845,17 @@ export default function PosPage() {
     const [mobilePanel, setMobilePanel] = useState<"products" | "cart">(
         "products",
     );
+    // Phone layout: items are search-first and the cart stacks BELOW them.
+    const [isMobile, setIsMobile] = useState(
+        () => typeof window !== "undefined" && window.innerWidth < 640,
+    );
+    useEffect(() => {
+        const mq = window.matchMedia("(max-width: 639px)");
+        const onChange = () => setIsMobile(mq.matches);
+        onChange();
+        mq.addEventListener("change", onChange);
+        return () => mq.removeEventListener("change", onChange);
+    }, []);
 
     // Modals
     const [variantPicker, setVariantPicker] = useState<PosProduct | null>(null);
@@ -2845,49 +2856,11 @@ export default function PosPage() {
                 </div>
             </div>
 
-            {/* ── Mobile tab switcher ──────────────────────────────────────────── */}
-            <div className="flex sm:hidden gap-0 bg-surface-100 rounded-xl p-1 mb-3 shrink-0">
-                <button
-                    onClick={() => setMobilePanel("products")}
-                    className={clsx(
-                        "flex-1 py-2 rounded-lg text-xs font-semibold transition-all",
-                        mobilePanel === "products"
-                            ? "bg-white text-surface-900 shadow-sm"
-                            : "text-surface-500",
-                    )}
-                >
-                    Products
-                </button>
-                <button
-                    onClick={() => setMobilePanel("cart")}
-                    className={clsx(
-                        "flex-1 py-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5",
-                        mobilePanel === "cart"
-                            ? "bg-white text-surface-900 shadow-sm"
-                            : "text-surface-500",
-                    )}
-                >
-                    Cart
-                    {cartQty > 0 && (
-                        <span
-                            key={cartQty}
-                            className="bg-brand-500 text-white text-2xs rounded-full w-4 h-4 flex items-center justify-center font-bold animate-[bounce_0.3s_ease]"
-                        >
-                            {cartQty > 9 ? "9+" : cartQty}
-                        </span>
-                    )}
-                </button>
-            </div>
-
-            {/* ── Main two-panel layout ─────────────────────────────────────────── */}
-            <div className="flex gap-4 flex-1 min-h-0">
-                {/* LEFT: Products */}
-                <div
-                    className={clsx(
-                        "flex flex-col card overflow-hidden flex-1",
-                        mobilePanel === "cart" ? "hidden sm:flex" : "flex",
-                    )}
-                >
+            {/* ── Main layout: side-by-side on desktop, STACKED on phone
+                   (items on top → cart/receipt below, one scrolling column) ──── */}
+            <div className="flex flex-col sm:flex-row gap-4 flex-1 min-h-0 overflow-y-auto sm:overflow-hidden">
+                {/* TOP (phone) / LEFT (desktop): Products */}
+                <div className="flex flex-col card overflow-hidden shrink-0 sm:flex-1">
                     {/* Sale complete banner — shown after Paystack/STK auto-complete */}
                     {lastCompletedSale && (
                         <div className="mx-4 mt-3 flex items-center gap-3 bg-success-light border border-success/30 rounded-xl px-3 py-2.5 text-xs text-success-dark">
@@ -3001,11 +2974,20 @@ export default function PosPage() {
                         )}
                     </div>
 
-                    {/* Product grid */}
-                    <div className="flex-1 overflow-y-auto p-4">
+                    {/* Product grid — on phone this is search-first (see below) and
+                        capped so the cart below stays reachable; fills on desktop. */}
+                    <div className="overflow-y-auto p-4 max-h-[50vh] sm:max-h-none sm:flex-1">
                         {loadingProducts ? (
                             <div className="flex items-center justify-center h-48">
                                 <Spinner size="lg" />
+                            </div>
+                        ) : isMobile && !searchQuery && !categoryFilter ? (
+                            <div className="flex flex-col items-center justify-center py-10 gap-2 text-surface-400 text-center">
+                                <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                                </svg>
+                                <p className="text-sm font-medium text-surface-500">Search or scan to add items</p>
+                                <p className="text-xs">Type a name or SKU, scan a barcode, or pick a category above.</p>
                             </div>
                         ) : products.length === 0 ? (
                             <div className="flex flex-col items-center justify-center h-48 gap-3 text-surface-400">
@@ -3054,12 +3036,12 @@ export default function PosPage() {
                     </div>
                 </div>
 
-                {/* RIGHT: Cart - strict 3-zone layout: header, scroll-items, fixed-footer */}
+                {/* BELOW (phone) / RIGHT (desktop): Cart — 3-zone layout: header,
+                    scroll-items, fixed-footer. On phone it stacks under the items. */}
                 <div
                     className={clsx(
                         "flex flex-col overflow-hidden bg-white rounded-xl border border-surface-200 shadow-sm",
                         "w-full sm:w-[300px] xl:w-[320px] sm:shrink-0",
-                        mobilePanel === "products" ? "hidden sm:flex" : "flex",
                     )}
                 >
                     {/* ZONE 1 - Header: order title + customer search (fixed, never scrolls) */}
