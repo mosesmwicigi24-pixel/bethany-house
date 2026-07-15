@@ -980,6 +980,7 @@ function ProductCard({
     onAdd: (p: PosProduct, v: PosVariant) => void;
     currency?: string;
 }) {
+    const [imgError, setImgError] = useState(false);
     const defaultVariant =
         product.variants.find((v) => v.is_default) ?? product.variants[0];
     if (!defaultVariant) return null;
@@ -1006,10 +1007,12 @@ function ProductCard({
         >
             {/* Image */}
             <div className="relative aspect-square bg-gradient-to-br from-surface-50 to-surface-100 overflow-hidden">
-                {product.image_url ? (
+                {product.image_url && !imgError ? (
                     <img
                         src={product.image_url}
                         alt={product.name}
+                        loading="lazy"
+                        onError={() => setImgError(true)}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
                 ) : (
