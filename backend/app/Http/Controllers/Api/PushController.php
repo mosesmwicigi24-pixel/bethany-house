@@ -207,7 +207,7 @@ class PushController extends Controller
             $response = Http::withHeaders([
                 'Accept'       => 'application/json',
                 'Content-Type' => 'application/json',
-            ])->post('https://exp.host/--/api/v2/push/send', [
+            ])->timeout(5)->connectTimeout(3)->post('https://exp.host/--/api/v2/push/send', [
                 'to'        => $expoToken,
                 'title'     => $title,
                 'body'      => $body,

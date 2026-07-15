@@ -47,63 +47,61 @@ class NotificationService
      */
     private static function send($recipients, $notification): void
     {
-        try {
-            $targets = $recipients instanceof User
-                ? collect([$recipients])
-                : ($recipients instanceof Collection ? $recipients : collect($recipients));
+        $targets = $recipients instanceof User
+            ? collect([$recipients])
+            : ($recipients instanceof Collection ? $recipients : collect($recipients));
 
-            if ($targets->isEmpty()) return;
+        if ($targets->isEmpty()) return;
 
-            if ($recipients instanceof User) {
-                $recipients->notify($notification);
-            } else {
+        // Deliver AFTER the HTTP response is flushed. Delivery makes blocking
+        // EXTERNAL push calls (Expo, Web Push) + a synchronous broadcast per
+        // recipient; doing that in-request added seconds of latency to anything
+        // that notifies — most painfully a POS "pay". Money/stock are already
+        // committed before this is called, so deferring is correctness-safe.
+        dispatch(function () use ($targets, $notification) {
+            try {
                 Notification::send($targets, $notification);
-            }
 
-            // Phase 2 - real-time push via Reverb (bell badge) + Web Push (device notification)
-            if (method_exists($notification, 'toArray')) {
-                foreach ($targets as $user) {
-                    try {
-                        $payload = $notification->toArray($user);
+                // Real-time push via Reverb (bell badge) + Web Push (device).
+                if (method_exists($notification, 'toArray')) {
+                    foreach ($targets as $user) {
+                        try {
+                            $payload = $notification->toArray($user);
 
-                        // ── Reverb broadcast - updates bell in open tab ───────
-                        broadcast(new \App\Events\NotificationPushed(
-                            userId:    $user->id,
-                            title:     $payload['title'] ?? '',
-                            body:      $payload['body'] ?? '',
-                            actionUrl: $payload['action_url'] ?? null,
-                            icon:      $payload['icon'] ?? 'bell',
-                            data:      $payload['data'] ?? [],
-                        ));
+                            broadcast(new \App\Events\NotificationPushed(
+                                userId:    $user->id,
+                                title:     $payload['title'] ?? '',
+                                body:      $payload['body'] ?? '',
+                                actionUrl: $payload['action_url'] ?? null,
+                                icon:      $payload['icon'] ?? 'bell',
+                                data:      $payload['data'] ?? [],
+                            ));
 
-                        // ── Web Push - delivers to device when tab is closed ──
-                        // Only staff users have PWA push subscriptions.
-                        // Customers use the storefront, not the admin PWA.
-                        if ($user->canAccessAdmin()) {
-                            WebPushService::send(
-                                userId: $user->id,
-                                title:  $payload['title'] ?? 'Bethany House',
-                                body:   $payload['body']  ?? '',
-                                url:    $payload['action_url'] ?? '/',
-                                icon:   $payload['icon'] ?? 'bell',
-                                data:   $payload['data'] ?? [],
-                            );
+                            // Only staff users have PWA push subscriptions.
+                            if ($user->canAccessAdmin()) {
+                                WebPushService::send(
+                                    userId: $user->id,
+                                    title:  $payload['title'] ?? 'Bethany House',
+                                    body:   $payload['body']  ?? '',
+                                    url:    $payload['action_url'] ?? '/',
+                                    icon:   $payload['icon'] ?? 'bell',
+                                    data:   $payload['data'] ?? [],
+                                );
+                            }
+                        } catch (\Exception $e) {
+                            Log::warning('NotificationService push failed: ' . $e->getMessage(), [
+                                'user_id'      => $user->id,
+                                'notification' => get_class($notification),
+                            ]);
                         }
-
-                    } catch (\Exception $e) {
-                        Log::warning('NotificationService push failed: ' . $e->getMessage(), [
-                            'user_id'      => $user->id,
-                            'notification' => get_class($notification),
-                        ]);
                     }
                 }
+            } catch (\Exception $e) {
+                Log::warning('NotificationService dispatch failed: ' . $e->getMessage(), [
+                    'notification' => get_class($notification),
+                ]);
             }
-        } catch (\Exception $e) {
-            // Notifications are non-critical - log and continue
-            Log::warning('NotificationService dispatch failed: ' . $e->getMessage(), [
-                'notification' => get_class($notification),
-            ]);
-        }
+        })->afterResponse();
     }
 
     /**
