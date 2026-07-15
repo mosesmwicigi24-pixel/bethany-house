@@ -1386,16 +1386,16 @@ function MeasurementsTab({
     };
 
     const COMMON_MEASUREMENTS = [
-        { name: "Chest", unit: "cm" },
-        { name: "Waist", unit: "cm" },
-        { name: "Hips", unit: "cm" },
-        { name: "Shoulder Width", unit: "cm" },
-        { name: "Sleeve Length", unit: "cm" },
-        { name: "Back Length", unit: "cm" },
-        { name: "Inseam", unit: "cm" },
-        { name: "Neck", unit: "cm" },
-        { name: "Thigh", unit: "cm" },
-        { name: "Height", unit: "cm" },
+        { name: "Chest", unit: "Inches" },
+        { name: "Waist", unit: "Inches" },
+        { name: "Hips", unit: "Inches" },
+        { name: "Shoulder Width", unit: "Inches" },
+        { name: "Sleeve Length", unit: "Inches" },
+        { name: "Back Length", unit: "Inches" },
+        { name: "Inseam", unit: "Inches" },
+        { name: "Neck", unit: "Inches" },
+        { name: "Thigh", unit: "Inches" },
+        { name: "Height", unit: "Inches" },
     ];
 
     const unaddedCommon = COMMON_MEASUREMENTS.filter(
@@ -1413,7 +1413,7 @@ function MeasurementsTab({
         const existing = new Set(measurements.map((m) => m.name.toLowerCase()));
         const toAdd = GENDER_SHEETS[g]
             .filter((n) => !existing.has(n.toLowerCase()))
-            .map((n) => ({ name: n, unit: "cm", required: true }));
+            .map((n) => ({ name: n, unit: "Inches", required: true }));
         if (toAdd.length) onChange([...measurements, ...toAdd]);
     };
 
