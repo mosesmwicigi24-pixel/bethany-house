@@ -35,11 +35,46 @@ interface Props {
     isOwn:   boolean;
 }
 
+
+/**
+ * Per-type chip config.
+ *
+ * This was an `isOrder` ternary — order, or ELSE production orders — so any third
+ * entity type silently navigated to /production/orders/<id>, an unrelated record
+ * with the same id. Routing, colour, icon and tooltip are looked up by type, so a
+ * new type cannot land on the wrong page.
+ */
+export const ENTITY_CHIP: Record<string, {
+    href: (id: number) => string;
+    noun: string;
+    tone: string;
+    icon: string;
+}> = {
+    order: {
+        href: (id) => `/sales/orders/${id}`,
+        noun: "order",
+        tone: "bg-brand-50 border-brand-200 text-brand-700 hover:bg-brand-100",
+        icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2",
+    },
+    production_order: {
+        href: (id) => `/production/orders/${id}`,
+        noun: "production order",
+        tone: "bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100",
+        icon: "M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18",
+    },
+    eod_report: {
+        href: (id) => `/pos/eod-reports?report=${id}`,
+        noun: "end-of-day report",
+        tone: "bg-surface-100 border-surface-300 text-surface-700 hover:bg-surface-200",
+        icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
+    },
+};
+
 export function EntityChipWithPreview({ entity, isOwn }: Props) {
     const navigate     = useNavigate();
     const [hovering, setHovering] = useState(false);
     const hoverTimeout = useRef<ReturnType<typeof setTimeout>>();
-    const isOrder      = entity.type === "order";
+    const cfg          = ENTITY_CHIP[entity.type] ?? ENTITY_CHIP.order;
 
     // Only fetch when hovering — stale for 2 minutes
     const { data } = useQuery({
@@ -63,26 +98,17 @@ export function EntityChipWithPreview({ entity, isOwn }: Props) {
         <div className="relative inline-block" onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
             {/* Chip */}
             <button
-                onClick={() => navigate(isOrder ? `/sales/orders/${entity.id}` : `/production/orders/${entity.id}`)}
+                onClick={() => navigate(cfg.href(entity.id))}
+                title={`Open ${cfg.noun} ${entity.label}`}
                 className={[
                     "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs font-bold",
                     "border transition-colors cursor-pointer",
-                    isOwn
-                        ? "bg-white/15 border-white/30 text-white hover:bg-white/25"
-                        : isOrder
-                            ? "bg-brand-50 border-brand-200 text-brand-700 hover:bg-brand-100"
-                            : "bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100",
+                    isOwn ? "bg-white/15 border-white/30 text-white hover:bg-white/25" : cfg.tone,
                 ].join(" ")}
             >
-                {isOrder ? (
-                    <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-                    </svg>
-                ) : (
-                    <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/>
-                    </svg>
-                )}
+                <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d={cfg.icon}/>
+                </svg>
                 {entity.label}
                 <svg className="w-2.5 h-2.5 shrink-0 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
@@ -104,17 +130,10 @@ export function EntityChipWithPreview({ entity, isOwn }: Props) {
                     ) : (
                         <>
                             <div className="flex items-start gap-2 mb-2">
-                                <div className={clsx("w-6 h-6 rounded-md flex items-center justify-center shrink-0",
-                                    isOrder ? "bg-brand-50" : "bg-purple-50")}>
-                                    {isOrder ? (
-                                        <svg className="w-3.5 h-3.5 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-                                        </svg>
-                                    ) : (
-                                        <svg className="w-3.5 h-3.5 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/>
-                                        </svg>
-                                    )}
+                                <div className={clsx("w-6 h-6 rounded-md flex items-center justify-center shrink-0", cfg.tone)}>
+                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d={cfg.icon}/>
+                                    </svg>
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <p className="text-xs font-bold text-surface-900 font-mono">{preview.label}</p>
@@ -138,7 +157,7 @@ export function EntityChipWithPreview({ entity, isOwn }: Props) {
                                 onClick={() => navigate(preview.url)}
                                 className="mt-2 w-full text-xs text-brand-600 hover:text-brand-700 font-medium text-left transition-colors"
                             >
-                                Open {isOrder ? "order" : "production order"} →
+                                Open {cfg.noun} →
                             </button>
                         </>
                     )}
