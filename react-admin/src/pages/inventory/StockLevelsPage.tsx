@@ -650,36 +650,51 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
     );
 
     /**
-     * Tick a product → insert a row for it (reusing a blank row if there is one);
-     * untick → remove that product's row(s) and their entries. Same live model as
-     * the variant checklist, so several products can be added in one pass.
+     * Tick a product → add its rows. A product WITH variants expands into one
+     * complete row per variant (product + variant already filled in), so nothing
+     * else has to be picked; a simple product gets a single row. Untick → remove
+     * every row for that product and its entries. Individual variant rows can then
+     * be dropped with the row's ✕ (or unticked in the variant list).
      */
-    const toggleProductRow = (productId: number) => {
-        fetchVariants(productId);
-        const p = products.find((x: any) => x.id === productId);
-        setRows((prev) => {
-            const mine = prev.filter((r) => r.product_id === productId);
-            if (mine.length) {
+    const toggleProductRow = async (productId: number) => {
+        // Untick → drop all of this product's rows. Never leave the form empty.
+        if (rows.some((r) => r.product_id === productId)) {
+            setRows((prev) => {
                 const next = prev.filter((r) => r.product_id !== productId);
                 return next.length ? next : [{ ...newRow(), outlet_id: defaultOutletId }];
-            }
+            });
+            return;
+        }
+
+        const p = products.find((x: any) => x.id === productId);
+        const variants = await ensureVariants(productId);
+
+        setRows((prev) => {
+            // Re-use a blank row if the form has one, else append.
             const blankIdx = prev.findIndex((r) => r.product_id === "");
-            const filled: EntryRow = {
-                ...(blankIdx !== -1 ? prev[blankIdx] : newRow()),
-                _key: blankIdx !== -1 ? prev[blankIdx]._key : `row-${Date.now()}-${Math.random()}-${productId}`,
+            const base: EntryRow =
+                blankIdx !== -1 ? prev[blankIdx] : { ...newRow(), outlet_id: defaultOutletId };
+
+            const mk = (v: any | null, key?: string): EntryRow => ({
+                ...base,
+                _key: key ?? `row-${Date.now()}-${Math.random()}-${v?.id ?? productId}`,
                 product_id: productId,
-                product_variant_id: null,
-                variant_name: "",
+                product_variant_id: v?.id ?? null,
+                variant_name: v?.variant_name ?? "",
                 product_name: p?.en_translation?.name ?? p?.sku,
                 product_sku: p?.sku,
-                outlet_id: (blankIdx !== -1 ? prev[blankIdx].outlet_id : "") || defaultOutletId,
-            };
-            if (blankIdx !== -1) {
-                const next = [...prev];
-                next[blankIdx] = filled;
-                return next;
-            }
-            return [...prev, filled];
+                outlet_id: base.outlet_id || defaultOutletId,
+            });
+
+            // A row per variant, or one row for a simple product.
+            const created = variants.length
+                ? variants.map((v: any, i: number) => mk(v, i === 0 ? base._key : undefined))
+                : [mk(null, base._key)];
+
+            const next = [...prev];
+            if (blankIdx !== -1) next.splice(blankIdx, 1, ...created);
+            else next.push(...created);
+            return next;
         });
     };
 
@@ -752,14 +767,17 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
         });
     };
 
-    // Fetch variants for a product if it's variable and not cached
-    const fetchVariants = async (productId: number) => {
-        if (variantCache[productId] !== undefined) return;
+    /**
+     * Fetch a product's variants if not cached, and RETURN them — callers need the
+     * list in the same tick (state won't have updated yet) to build variant rows.
+     * Simple products resolve to [].
+     */
+    const ensureVariants = async (productId: number): Promise<any[]> => {
+        if (variantCache[productId] !== undefined) return variantCache[productId];
         const p = products.find((x: any) => x.id === productId);
-        // Only fetch if variable product with variants
         if (!p || p.product_type !== "variable" || !p.variants_count) {
             setVariantCache((prev) => ({ ...prev, [productId]: [] }));
-            return;
+            return [];
         }
         setLoadingVariants((prev) => ({ ...prev, [productId]: true }));
         try {
@@ -768,11 +786,18 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
             );
             const variants = res.product?.variants ?? [];
             setVariantCache((prev) => ({ ...prev, [productId]: variants }));
+            return variants;
         } catch {
             setVariantCache((prev) => ({ ...prev, [productId]: [] }));
+            return [];
         } finally {
             setLoadingVariants((prev) => ({ ...prev, [productId]: false }));
         }
+    };
+
+    /** Fire-and-forget variant warm-up (used when a product is picked on a row). */
+    const fetchVariants = (productId: number) => {
+        void ensureVariants(productId);
     };
 
     const updateRow = (key: string, field: keyof EntryRow, value: any) => {
