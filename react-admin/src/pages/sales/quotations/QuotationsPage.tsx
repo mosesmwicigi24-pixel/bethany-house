@@ -140,6 +140,7 @@ export default function QuotationsPage() {
                 ) : rows.length === 0 ? (
                     <div className="py-16 text-center text-sm text-muted">No quotations yet.</div>
                 ) : (
+                    <div className="table-wrapper rounded-none border-0">
                     <table className="table">
                         <thead>
                             <tr>
@@ -211,6 +212,7 @@ export default function QuotationsPage() {
                             })}
                         </tbody>
                     </table>
+                    </div>
                 )}
             </div>
 
@@ -497,6 +499,7 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
 
                 {/* Line items */}
                 <div className="card overflow-hidden">
+                    <div className="table-wrapper rounded-none border-0">
                     <table className="table">
                         <thead>
                             <tr>
@@ -554,6 +557,7 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
                             ))}
                         </tbody>
                     </table>
+                    </div>
                     <div className="space-y-2 border-t px-4 py-3">
                         <div className="flex items-center justify-between">
                             <button type="button" className="btn-ghost btn-sm" onClick={addAdHoc}>+ Add line</button>

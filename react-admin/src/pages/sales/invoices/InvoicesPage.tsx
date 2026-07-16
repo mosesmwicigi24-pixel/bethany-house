@@ -77,6 +77,7 @@ export default function InvoicesPage() {
                 ) : rows.length === 0 ? (
                     <div className="py-16 text-center text-sm text-muted">No invoices yet. Accept a quotation to create one.</div>
                 ) : (
+                    <div className="table-wrapper rounded-none border-0">
                     <table className="table">
                         <thead>
                             <tr>
@@ -115,6 +116,7 @@ export default function InvoicesPage() {
                             ))}
                         </tbody>
                     </table>
+                    </div>
                 )}
             </div>
 

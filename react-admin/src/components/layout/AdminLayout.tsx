@@ -143,7 +143,13 @@ export function AdminLayout() {
     const breadcrumbs = buildBreadcrumbs(location.pathname)
 
     return (
-        <div className="flex h-screen overflow-hidden bg-surface-50">
+        // h-screen-safe, not h-screen: the --vh machinery below has always been
+        // wired up, but the shell never consumed it. On iOS `100vh` is the LARGE
+        // viewport — it measures as though the Safari toolbars were hidden — so
+        // the shell ran ~110px taller than the visible area. Being overflow-hidden,
+        // that bottom strip could not be scrolled to: the last row of every page
+        // sat under the toolbar, untappable. That is the "unresponsive cards".
+        <div className="flex h-screen-safe overflow-hidden bg-surface-50">
 
             {/* ── PWA banners (install prompt, offline bar, update alert) ── */}
             <PWAInstallBanner />
