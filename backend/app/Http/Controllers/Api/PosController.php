@@ -30,6 +30,18 @@ use Illuminate\Support\Str;
 
 class PosController extends Controller
 {
+    /**
+     * How recently an identical payment (same order, method and amount) counts
+     * as a replay of the same submit rather than a second real payment.
+     *
+     * Sized off the real incident: order #53's triple-submit landed inside 2
+     * seconds. 30s is generous enough to absorb a slow network retry, and still
+     * far below any plausible human re-key of the same amount on the same order
+     * by the same method — that takes a good deal longer than half a minute,
+     * and the clerk would see the first payment already listed.
+     */
+    private const PAYMENT_REPLAY_WINDOW_SECONDS = 30;
+
     // --- Outlets --------------------------------------------------------------
 
     public function outlets(Request $request): JsonResponse
@@ -3453,6 +3465,51 @@ class PosController extends Controller
             // and refunds), NOT the full total — otherwise paying the balance on a
             // deposited order is wrongly rejected and forces a full re-tender.
             $order = Order::with('items')->where('id', $order->id)->lockForUpdate()->firstOrFail();
+
+            // ── Replay guard ─────────────────────────────────────────────────
+            // A double/triple-tapped Pay button — or any client retry — used to
+            // write one payment row per submit. Order #53 collected three
+            // identical KES 8,000 rows at 08:35:49, :50 and :51, and because
+            // there is no way to remove two payment lines, somebody voided the
+            // whole legitimate KES 15,000 sale to clean it up.
+            //
+            // The order row is locked above, so concurrent submits serialise
+            // here and this check sees the rows the earlier one wrote. Nobody
+            // can key the same method AND the same amount on the same order
+            // twice within seconds by hand, so an exact match that recent is
+            // THIS submit arriving again, not a second real payment. Treat it
+            // as a replay: write nothing, and report the order as it stands.
+            //
+            // Deliberately a no-op 200 and not a 4xx — a replay means the
+            // client never heard us the first time, and it should be able to
+            // retry safely and get the truth back.
+            $replayCutoff = now()->subSeconds(self::PAYMENT_REPLAY_WINDOW_SECONDS);
+            $isReplay = collect($paymentsInput)->every(
+                fn ($p) => Payment::where('order_id', $order->id)
+                    ->where('payment_method', $p['method'] ?? 'cash')
+                    ->where('amount', (float) ($p['amount'] ?? 0))
+                    ->whereIn('status', ['paid', 'pending'])
+                    ->where('created_at', '>=', $replayCutoff)
+                    ->exists()
+            );
+            if ($isReplay) {
+                DB::commit(); // nothing was written; just release the lock
+                Log::info('POS recordPosPay replay ignored', [
+                    'order_id' => $order->id,
+                    'user_id'  => $request->user()?->id,
+                    'payments' => $paymentsInput,
+                ]);
+                return response()->json([
+                    'message'        => 'Payment already recorded.',
+                    'order'          => $this->transformSaleOrder($order->fresh(['items', 'payments'])),
+                    'change'         => 0,
+                    'payment_status' => $order->payment_status,
+                    'needs_approval' => false,
+                    'proof_uploaded' => false,
+                    'replay'         => true,
+                ], 200);
+            }
+
             $outstanding = $order->outstandingBalance();
             $required    = $isDeposit ? (float) $depositAmt : $outstanding;
 
