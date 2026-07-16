@@ -53,12 +53,16 @@ class NotificationService
 
         if ($targets->isEmpty()) return;
 
-        // Deliver AFTER the HTTP response is flushed. Delivery makes blocking
-        // EXTERNAL push calls (Expo, Web Push) + a synchronous broadcast per
-        // recipient; doing that in-request added seconds of latency to anything
-        // that notifies — most painfully a POS "pay". Money/stock are already
-        // committed before this is called, so deferring is correctness-safe.
-        dispatch(function () use ($targets, $notification) {
+        // Delivery makes blocking EXTERNAL push calls (Expo, Web Push) + a
+        // synchronous broadcast per recipient. In an HTTP request that latency
+        // was added to the caller's wait — most painfully a POS "pay" — so we
+        // run it AFTER the response is flushed. Money/stock are already committed
+        // before this is called, so deferring is correctness-safe.
+        //
+        // Outside a request (console commands, queue workers, tests) there is no
+        // response to wait on and no terminating callback to rely on, so deliver
+        // inline — otherwise the notification would silently never be sent.
+        $deliver = function () use ($targets, $notification) {
             try {
                 Notification::send($targets, $notification);
 
@@ -101,7 +105,13 @@ class NotificationService
                     'notification' => get_class($notification),
                 ]);
             }
-        })->afterResponse();
+        };
+
+        if (app()->runningInConsole()) {
+            $deliver();
+        } else {
+            dispatch($deliver)->afterResponse();
+        }
     }
 
     /**
