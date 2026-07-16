@@ -61,6 +61,9 @@ export interface EodSummary {
         sentiments: string;
         order_notes: Record<string, string>;
         submitted_at: string;
+        /** Set once an owner has read the report — the clerk's half of the loop. */
+        acknowledged_at?: string | null;
+        comments?: { id: number; body: string; user_id: number; user_name: string; created_at: string }[];
     } | null;
 }
 
@@ -193,7 +196,7 @@ export default function UserEodModal({
     const [submitted, setSubmitted] = useState(false);
 
     // ── Fetch user's EoD summary ──────────────────────────────────────────────
-    const { data, isLoading, isError } = useQuery({
+    const { data, isLoading, isError, refetch } = useQuery({
         queryKey: ["user-eod", outletId, date],
         queryFn: () =>
             get<{ summary: EodSummary }>("/v1/admin/pos/reports/user-eod", {
@@ -202,6 +205,19 @@ export default function UserEodModal({
     });
 
     const summary: EodSummary | undefined = data?.summary;
+
+    // Reply to management on our own report. Posts to the same thread the owner
+    // uses; the endpoint authorises the report's author explicitly, precisely so
+    // the person who was asked can answer.
+    const [replyBody, setReplyBody] = useState("");
+    const replyMutation = useMutation({
+        mutationFn: (body: string) =>
+            post(`/v1/admin/pos/reports/eod/${summary?.existing_report?.id}/comments`, { body }),
+        onSuccess: () => {
+            setReplyBody("");
+            void refetch();
+        },
+    });
 
     // Reset and re-populate whenever the fetched summary changes (i.e. date changed or
     // data first arrives). If there's an existing report populate from it; otherwise clear.
@@ -317,6 +333,54 @@ export default function UserEodModal({
                                     ? "EoD report submitted — you can now close the register."
                                     : "Report already submitted for this date."}
                             </span>
+                        </div>
+                    )}
+
+                    {/* ── The clerk's half of the loop ─────────────────────────────
+                        Submitting used to be the end of it: no way to tell whether
+                        anyone read the report, and no way to answer a question about
+                        it. Owners now acknowledge and comment; both surface here, and
+                        replies go back on the same thread. */}
+                    {submitted && summary?.existing_report && (
+                        <div className="mt-3 space-y-2">
+                            {summary.existing_report.acknowledged_at ? (
+                                <p className="text-2xs text-success font-semibold">
+                                    ✓ Read by management on {new Date(summary.existing_report.acknowledged_at).toLocaleString("en-KE", { dateStyle: "medium", timeStyle: "short" })}
+                                </p>
+                            ) : (
+                                <p className="text-2xs text-surface-400">Not yet read by management.</p>
+                            )}
+
+                            {(summary.existing_report.comments?.length ?? 0) > 0 && (
+                                <div className="space-y-2">
+                                    {summary.existing_report.comments!.map((c) => (
+                                        <div key={c.id} className="bg-white border border-surface-200 rounded-xl px-3 py-2">
+                                            <div className="flex items-baseline justify-between gap-2 mb-0.5">
+                                                <span className="text-2xs font-bold text-surface-700">{c.user_name}</span>
+                                                <span className="text-2xs text-surface-400 tabular-nums">
+                                                    {new Date(c.created_at).toLocaleString("en-KE", { dateStyle: "short", timeStyle: "short" })}
+                                                </span>
+                                            </div>
+                                            <p className="text-xs text-surface-700 whitespace-pre-wrap break-words">{c.body}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            <div className="flex items-end gap-2">
+                                <textarea
+                                    value={replyBody}
+                                    onChange={(e) => setReplyBody(e.target.value)}
+                                    rows={2}
+                                    placeholder="Reply to management…"
+                                    className="input flex-1 resize-none text-xs" />
+                                <button
+                                    onClick={() => replyBody.trim() && replyMutation.mutate(replyBody.trim())}
+                                    disabled={!replyBody.trim() || replyMutation.isPending}
+                                    className="shrink-0 px-3 py-2 rounded-xl bg-brand-600 text-white text-xs font-bold hover:bg-brand-700 disabled:opacity-40 transition-colors">
+                                    {replyMutation.isPending ? "…" : "Reply"}
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>
