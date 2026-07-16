@@ -45,14 +45,18 @@ class PosPaymentReplayGuardTest extends TestCase
         return $user;
     }
 
-    private function pendingPosOrder(Outlet $outlet): Order
+    /**
+     * @param float $total recordPosPay demands a payment cover the outstanding
+     *   balance exactly, so each test sizes the order to make its amount valid.
+     */
+    private function pendingPosOrder(Outlet $outlet, float $total = 15000): Order
     {
         return Order::factory()->create([
             'order_type'     => 'pos',
             'outlet_id'      => $outlet->id,
             'payment_status' => 'pending',
             'status'         => 'pending',
-            'total_amount'   => 15000,
+            'total_amount'   => $total,
             'currency_code'  => 'KES',
         ]);
     }
@@ -91,7 +95,7 @@ class PosPaymentReplayGuardTest extends TestCase
     {
         $this->actingWithPermissions(['pos.access']);
         $outlet = Outlet::factory()->create();
-        $order  = $this->pendingPosOrder($outlet);
+        $order  = $this->pendingPosOrder($outlet, 15500); // 15,500 - 8,000 = 7,500 outstanding
 
         Payment::factory()->create([
             'order_id'       => $order->id,
@@ -120,7 +124,7 @@ class PosPaymentReplayGuardTest extends TestCase
     {
         $this->actingWithPermissions(['pos.access']);
         $outlet = Outlet::factory()->create();
-        $order  = $this->pendingPosOrder($outlet);
+        $order  = $this->pendingPosOrder($outlet, 16000); // 16,000 - 8,000 = 8,000 outstanding
 
         Payment::factory()->create([
             'order_id'       => $order->id,
