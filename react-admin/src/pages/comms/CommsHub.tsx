@@ -91,34 +91,35 @@ function isContinuation(msg: ChannelMessage, prev?: ChannelMessage) {
 }
 
 /**
- * Avatar tints are derived from the name, so each person keeps the same colour
- * everywhere and in every session — the colour becomes a recognisable handle when
- * you're scanning a busy channel, which a single brand tint can never be.
+ * Solid tile colours seeded by the name, so one person keeps one colour in every
+ * session — colour is a faster handle than initials when scanning a busy channel.
+ * Every entry is a token from this app's own theme (tailwind.config.js): the brand
+ * amber leads, backed by the slate neutrals and the semantic hues. Nothing here is
+ * an off-palette Tailwind default.
  */
-const AVATAR_TINTS = [
-    "bg-brand-500/15 text-brand-700",
-    "bg-emerald-500/15 text-emerald-700",
-    "bg-amber-500/20 text-amber-700",
-    "bg-violet-500/15 text-violet-700",
-    "bg-rose-500/15 text-rose-700",
-    "bg-cyan-500/15 text-cyan-700",
-    "bg-indigo-500/15 text-indigo-700",
-    "bg-teal-500/15 text-teal-700",
+const AVATAR_COLORS = [
+    "bg-brand-500",   // #d98a2a — the brand amber, first so it dominates
+    "bg-surface-700", // #364152 — slate
+    "bg-info",        // #2563eb
+    "bg-success",     // #16a34a
+    "bg-brand-700",   // #9f561c — deep rust
+    "bg-surface-500", // #697586
 ];
 
-function tintFor(name?: string) {
-    if (!name) return AVATAR_TINTS[0];
+function avatarColor(name?: string) {
+    if (!name) return AVATAR_COLORS[0];
     let hash = 0;
-    for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
-    return AVATAR_TINTS[hash % AVATAR_TINTS.length];
+    for (let i = 0; i < name.length; i++) hash = (Math.imul(hash, 31) + name.charCodeAt(i)) >>> 0;
+    return AVATAR_COLORS[hash % AVATAR_COLORS.length];
 }
 
 function Avatar({ name, initials, size = "sm" }: { name?: string; initials: string; size?: "xs" | "sm" | "md" }) {
     const sz = size === "xs" ? "w-5 h-5 text-2xs" : size === "md" ? "w-9 h-9 text-sm" : "w-7 h-7 text-2xs";
     return (
         <div className={clsx(
-            "rounded-full flex items-center justify-center shrink-0 font-bold tracking-tight select-none ring-1 ring-inset ring-black/5",
-            tintFor(name), sz,
+            // Solid fill + white text — a 15% tint reads as washed-out at this size.
+            "rounded-full flex items-center justify-center shrink-0 font-bold tracking-tight select-none text-white",
+            avatarColor(name), sz,
         )} title={name}>
             {initials}
         </div>
@@ -1232,7 +1233,7 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
     return (
         <>
         <div
-            className="px-2 sm:px-4 py-3 border-t border-surface-100 shrink-0 bg-white"
+            className="px-2 sm:px-4 py-3 border-t border-surface-200 shrink-0 bg-white"
             style={{
                 // Lift composer above keyboard on mobile.
                 // On iOS we use env(safe-area-inset-bottom) for the home indicator.
@@ -1471,13 +1472,13 @@ function EntityChip({ entity, isOwn }: { entity: LinkedEntity; isOwn: boolean })
 
 // ─── Message content - splits text bubble from bare attachments ───────────────
 
-function MessageContent({ body, isOwn, linkedEntities, entityPreviews, continued = false }: {
+function MessageContent({ body, isOwn, linkedEntities, entityPreviews, timeLabel }: {
     body: string;
     isOwn: boolean;
     linkedEntities?: LinkedEntity[];
     entityPreviews?: Record<string, EntityPreview>;
-    /** Follow-up in a same-author run: no tail corner, so the run reads as one column. */
-    continued?: boolean;
+    /** Clock time rendered bottom-right inside the bubble, as Nuru does it. */
+    timeLabel?: string;
 }) {
     const { textContent, images, files } = parseBody(body);
     const hasText        = textContent.length > 0;
@@ -1489,16 +1490,16 @@ function MessageContent({ body, isOwn, linkedEntities, entityPreviews, continued
             {/* Coloured bubble - only rendered when there is text */}
             {hasText && (
                 <div className={clsx(
-                    // max-w-prose-ish: long lines are the enemy of scanability, and
-                    // the old md cap let a paragraph run wider than comfortable.
-                    "max-w-[82vw] sm:max-w-[26rem] rounded-2xl px-3.5 py-2 text-sm leading-relaxed break-words",
+                    "rounded-2xl px-3.5 py-2 text-sm leading-relaxed break-words",
+                    // Nuru's card colours: own = the dark neutral (their navy → our
+                    // surface-900), everyone else = a white card on the tinted canvas.
+                    // The brand amber stays an ACCENT (send, chips, reply rule) and is
+                    // never a bubble fill — a page of amber blocks is what went wrong.
                     isOwn
-                        // A subtle vertical gradient reads as lit rather than flat-filled,
-                        // and the brand-tinted shadow lifts the bubble off the canvas.
-                        ? "bg-gradient-to-b from-brand-500 to-brand-600 text-white shadow-sm shadow-brand-600/20"
-                        : "bg-white border border-surface-100 text-surface-800 shadow-sm shadow-surface-900/5",
-                    // Tail on the opening bubble only.
-                    !continued && (isOwn ? "rounded-tr-md" : "rounded-tl-md"),
+                        ? "bg-surface-900 text-white"
+                        : "bg-white border border-surface-200 text-surface-800",
+                    // Tail on the BOTTOM corner, pointing at the speaker's side.
+                    isOwn ? "rounded-br-[5px]" : "rounded-bl-[5px]",
                 )}>
                     <RenderTextOnly body={textContent} isOwn={isOwn} />
                     {/* Entity chips inside the bubble */}
@@ -1506,6 +1507,12 @@ function MessageContent({ body, isOwn, linkedEntities, entityPreviews, continued
                         <div className="flex flex-wrap gap-1 mt-1.5 overflow-x-auto">
                             {chips.map((e, i) => <EntityChipWithPreview key={i} entity={e} isOwn={isOwn} />)}
                         </div>
+                    )}
+                    {timeLabel && (
+                        <div className={clsx(
+                            "flex items-center justify-end mt-1 text-2xs tabular-nums",
+                            isOwn ? "text-white/60" : "text-surface-400",
+                        )}>{timeLabel}</div>
                     )}
                 </div>
             )}
@@ -1616,50 +1623,46 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
     if (isSystem) {
         return (
             <div className="flex justify-center py-2">
-                <span className="text-2xs text-surface-500 bg-surface-50/80 px-3 py-1 rounded-full border border-surface-200/60">{message.body}</span>
+                <span className="text-2xs text-surface-500 bg-white px-3 py-1 rounded-full border border-surface-200">{message.body}</span>
             </div>
         );
     }
 
     return (
         <div className={clsx(
-                "group relative flex gap-2 sm:gap-2.5 px-2 sm:px-4 hover:bg-surface-50/60 transition-colors",
-                // A new speaker gets air above; their own follow-ups stay tight to
-                // them, so a burst reads as one block rather than three strangers.
-                continued ? "py-0.5" : "pt-4 pb-0.5",
-                isOwn && "flex-row-reverse",
+                // Nuru's outline: the row is an end-aligned flex, and the side is
+                // chosen by justify — not by reversing the row. Your own messages
+                // carry no avatar at all; the position already says they're yours.
+                "group relative flex items-end gap-2 px-3 sm:px-4",
+                continued ? "py-0.5" : "pt-3 pb-0.5",
+                isOwn ? "justify-end" : "justify-start",
             )}
             onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}>
-            {continued ? (
-                // Keeps the bubbles in the same column as the header above, and
-                // reuses the freed gutter for the timestamp — on hover only, so
-                // repeated times don't clutter the read.
-                <div className="w-7 shrink-0 flex items-start justify-center pt-1" aria-hidden>
-                    <span className={clsx(
-                        "text-2xs text-surface-400 tabular-nums transition-opacity",
-                        hovering ? "opacity-100" : "opacity-0",
-                    )}>{fmtClock(message.created_at)}</span>
-                </div>
-            ) : (
-                <Avatar initials={message.user?.initials ?? "?"} name={message.user?.name} />
+            {!isOwn && (
+                continued
+                    // Spacer keeps a run's bubbles in one column under the avatar.
+                    ? <div className="w-7 shrink-0" aria-hidden />
+                    : <Avatar initials={message.user?.initials ?? "?"} name={message.user?.name} />
             )}
-            <div className={clsx("relative flex-1 min-w-0", isOwn && "items-end flex flex-col")}>
-                {!continued && (
-                    <div className={clsx("flex items-baseline gap-2 mb-1", isOwn && "flex-row-reverse")}>
-                        <span className="text-xs font-semibold text-surface-800 tracking-tight">{message.user?.name ?? "Unknown"}</span>
+            <div className={clsx("relative min-w-0 max-w-[78%]", isOwn && "flex flex-col items-end")}>
+                {!isOwn && !continued && (
+                    <div className="flex items-baseline gap-2 mb-1 ml-0.5">
+                        <span className="text-xs font-bold text-surface-800 tracking-tight">{message.user?.name ?? "Unknown"}</span>
                         <span className="text-2xs text-surface-400 tabular-nums">{fmtTime(message.created_at)}</span>
                         {message.edited_at && <span className="text-2xs text-surface-400 italic">(edited)</span>}
                     </div>
                 )}
-                {continued && message.edited_at && (
+                {(isOwn || continued) && message.edited_at && (
                     <span className={clsx("text-2xs text-surface-400 italic mb-0.5", isOwn && "self-end")}>(edited)</span>
                 )}
                 {message.reply_to && (
                     <div className={clsx(
-                        "mb-1 pl-2.5 pr-3 py-1 rounded-lg bg-surface-50 border-l-2 border-brand-400/70 text-xs text-surface-500 max-w-xs",
+                        // Gold left rule is Nuru's marker for a quote; the brand amber
+                        // earns its place as an accent here rather than as a fill.
+                        "mb-1 pl-2.5 pr-3 py-1 rounded-lg bg-white border border-surface-200 border-l-2 border-l-brand-500 text-xs text-surface-500 max-w-xs",
                         isOwn && "self-end",
                     )}>
-                        <span className="font-semibold text-surface-600">{message.reply_to.user_name}</span>
+                        <span className="font-bold text-surface-700">{message.reply_to.user_name}</span>
                         {/* One line only: the quote is a pointer back, not a re-read. */}
                         <span className="block truncate">{stripMarkdown(message.reply_to.body)}</span>
                     </div>
@@ -1692,7 +1695,8 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                             </button>
                         </div>
                     )}
-                    <MessageContent body={message.body} isOwn={isOwn} continued={continued} linkedEntities={message.linked_entities} entityPreviews={message.entity_previews} />
+                    <MessageContent body={message.body} isOwn={isOwn} timeLabel={fmtClock(message.created_at)}
+                        linkedEntities={message.linked_entities} entityPreviews={message.entity_previews} />
                     {/* Toolbar for other people's messages - placed after content */}
                     {!isOwn && (
                         <div className={clsx(
@@ -2177,7 +2181,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
         <div className="flex h-full overflow-hidden">
             <div className="flex flex-col flex-1 min-w-0">
                 {/* Header */}
-                <div className="flex items-center gap-2 px-3 sm:px-5 py-3.5 border-b border-surface-100 bg-white shrink-0">
+                <div className="flex items-center gap-2 px-3 sm:px-5 py-3.5 border-b border-surface-200 bg-white shrink-0">
                     {/* Back button - mobile only */}
                     <button onClick={onOpenSidebar}
                         className="sm:hidden w-8 h-8 flex items-center justify-center rounded-lg text-surface-400 hover:text-surface-700 hover:bg-surface-100 transition-colors shrink-0 -ml-1">
@@ -2297,7 +2301,11 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                 </div>
 
                 {/* Messages */}
-                <div className="flex-1 overflow-y-auto py-4 scroll-touch overscroll-contain">
+                {/* Tinted canvas, as Nuru does it (their --background #f6f4ee). White
+                    bubbles were previously invisible against a white thread — this is
+                    what made the page read flat. brand-50 (#fdf8f0) is this app's own
+                    warm cream, so the bubbles now sit ON something. */}
+                <div className="flex-1 overflow-y-auto py-4 scroll-touch overscroll-contain bg-brand-50/60">
                     {hasMore && (
                         <div className="flex justify-center pb-2">
                             <button onClick={async () => {
@@ -2314,7 +2322,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                         <div className="flex items-center justify-center h-full text-sm text-surface-400">Loading…</div>
                     ) : grouped.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-full gap-3 px-6 text-center">
-                            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-brand-50 to-brand-100 border border-brand-200/60 flex items-center justify-center text-brand-500 shadow-sm">
+                            <div className="w-14 h-14 rounded-2xl bg-white border border-surface-200 flex items-center justify-center text-brand-500 shadow-sm">
                                 <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
                                 </svg>
@@ -2331,7 +2339,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                             {/* Sticky pill: scroll back through a long day and you never
                                 lose track of which day you're reading. */}
                             <div className="sticky top-0 z-10 flex justify-center py-2 pointer-events-none">
-                                <span className="text-2xs font-semibold text-surface-500 bg-white/85 backdrop-blur-sm px-3 py-1 rounded-full border border-surface-200/70 shadow-sm">
+                                <span className="text-2xs font-bold text-surface-500 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full border border-surface-200 shadow-sm">
                                     {date}
                                 </span>
                             </div>
