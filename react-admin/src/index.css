@@ -323,4 +323,21 @@
   textarea {
     font-size: 16px !important;
   }
+
+  /* The chat/notes composers are a TRANSPARENT textarea layered over a mirror
+   * div that draws the text (that is how tags get highlighted). The browser
+   * positions the caret from the textarea, but you read the mirror — so the two
+   * must have byte-identical metrics or the caret drifts away from the glyphs.
+   *
+   * The rule above forces those textareas to 16px on touch, which silently broke
+   * that contract: the textarea rendered 16px while its mirror stayed 14px (chat)
+   * or 12px (order/production notes), so the caret sat ~14%/~33% right of the
+   * text, and iOS drew its autocorrect underline out there too. Any mirror must
+   * therefore follow its textarea to 16px here.
+   *
+   * If you add another mirror composer, give it .composer-mirror or it will drift.
+   */
+  .composer-mirror {
+    font-size: 16px !important;
+  }
 }
