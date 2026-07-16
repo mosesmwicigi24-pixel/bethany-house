@@ -1036,7 +1036,14 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
     // This maps a token's label back to its entity so we can expand to the wire
     // format (`#[Label](entity:order:12)`) on send. Nothing else changes.
     const [tokenMap, setTokenMap] = useState<Record<string, TokenTarget>>({});
-    const [enterToSend, setEnterToSend] = useState(true);
+    // Enter sends on a physical keyboard; on touch the Return key makes a newline
+    // and Send is an explicit tap. That is the platform convention everywhere else
+    // on a phone, it stops Return firing off half-typed messages, and it retires
+    // the ↵ toggle on touch — handing its width back to the text, which is the
+    // narrowest thing in the row.
+    const isCoarsePointer = typeof window !== "undefined"
+        && window.matchMedia?.("(pointer: coarse)").matches === true;
+    const [enterToSend, setEnterToSend] = useState(!isCoarsePointer);
     // Pending non-member mention — shows the add-member prompt before inserting
     const [pendingMention, setPendingMention] = useState<MentionUser | null>(null);
     const [attachments, setAttachments] = useState<ChannelAttachment[]>([]);
@@ -1049,7 +1056,10 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
     // ── Phase 5: keyboard handling ────────────────────────────────────────────
     // visualViewport tracks the true visible area - shrinks when keyboard opens.
     // We use it to pad the composer so it sits above the keyboard on iOS/Android.
-    const { keyboardHeight, keyboardOpen } = useVisualViewport();
+    // keyboardHeight is deliberately not consumed any more — the shell is sized to
+    // visualViewport.height, so it already ends at the keyboard. keyboardOpen is
+    // still used, to scroll the thread down once the keyboard has settled.
+    const { keyboardOpen } = useVisualViewport();
 
     // Auto-scroll to bottom when keyboard opens so the latest message is visible
     const scrollRef = useRef<HTMLElement | null>(null);
@@ -1235,12 +1245,14 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
         <div
             className="px-2 sm:px-4 py-3 border-t border-surface-200 shrink-0 bg-white"
             style={{
-                // Lift composer above keyboard on mobile.
-                // On iOS we use env(safe-area-inset-bottom) for the home indicator.
-                // On Android keyboardHeight covers it.
-                paddingBottom: keyboardHeight > 0
-                    ? `${keyboardHeight}px`
-                    : "env(safe-area-inset-bottom, 0px)",
+                // Only the home-indicator inset. This used to add keyboardHeight to
+                // lift the composer over the keyboard, which was right while the app
+                // shell ran the full window height and therefore extended UNDER the
+                // keyboard. The shell is now sized to visualViewport.height, so it
+                // already stops at the top of the keyboard — adding keyboardHeight on
+                // top of that double-compensates, padding the composer by ~330px
+                // inside a ~420px shell and swallowing the thread.
+                paddingBottom: "env(safe-area-inset-bottom, 0px)",
             }}
         >
             {/* Reply context */}
@@ -1300,7 +1312,10 @@ aria-label="Delete">✕</button>
             <div className="relative">
                 {mentionQ !== null && <MentionPopup query={mentionQ} onSelect={insertMention} />}
                 {entityQ  !== null && <EntityPickerPopup query={entityQ} onSelect={insertEntity} onDismiss={() => setEntityQ(null)} />}
-                <div className="flex items-center gap-1.5 bg-white rounded-xl border border-surface-200 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200 px-3 py-2">
+                {/* Tighter gutters on phone: the text is the narrowest thing here and
+                    every px of chrome comes straight out of it. Desktop keeps its
+                    roomier px-3/gap-1.5. */}
+                <div className="flex items-center gap-1 sm:gap-1.5 bg-white rounded-xl border border-surface-200 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200 px-1.5 sm:px-3 py-2">
                     {/* Attach */}
                     <button onClick={() => fileInputRef.current?.click()} title="Attach file or image"
                         disabled={uploading}
@@ -1378,15 +1393,18 @@ aria-label="Delete">✕</button>
                         />
                     </div>
 
-                    {/* Enter mode toggle */}
-                    <button onClick={() => setEnterToSend(v => !v)}
-                        title={enterToSend ? "Enter sends - click to switch" : "Enter = newline - click to switch"}
-                        className={clsx(
-                            "shrink-0 w-7 h-7 flex items-center justify-center rounded-lg transition-colors text-xs font-bold",
-                            enterToSend ? "bg-brand-50 text-brand-600" : "bg-surface-100 text-surface-500"
-                        )}>
-                        ↵
-                    </button>
+                    {/* Enter mode toggle — physical keyboards only. On touch there is
+                        nothing to toggle: Return makes a newline, Send sends. */}
+                    {!isCoarsePointer && (
+                        <button onClick={() => setEnterToSend(v => !v)}
+                            title={enterToSend ? "Enter sends - click to switch" : "Enter = newline - click to switch"}
+                            className={clsx(
+                                "shrink-0 w-7 h-7 flex items-center justify-center rounded-lg transition-colors text-xs font-bold",
+                                enterToSend ? "bg-brand-50 text-brand-600" : "bg-surface-100 text-surface-500"
+                            )}>
+                            ↵
+                        </button>
+                    )}
 
                     {/* Send */}
                     <button onClick={() => { if (canSend) sendMutation.mutate(); }}
