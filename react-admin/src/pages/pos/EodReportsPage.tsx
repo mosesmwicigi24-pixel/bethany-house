@@ -9,8 +9,9 @@
  * Permission: pos.access (admin / outlet_manager)
  */
 
-import { useState, Fragment } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { clsx } from "clsx";
 import { get, post } from "@/api/client";
 import { Spinner } from "@/components/ui/Spinner";
@@ -163,6 +164,15 @@ export default function EodReportsPage() {
     });
 
     const detail = detailData?.report;
+
+    // Deep link. A chip in a channel and the "you were replied to" notification
+    // both point at /pos/eod-reports?report=<id>; without this they would land on
+    // the list and do nothing, which is the same dead end the page already was.
+    const [searchParams, setSearchParams] = useSearchParams();
+    useEffect(() => {
+        const wanted = Number(searchParams.get("report"));
+        if (wanted && wanted !== selectedId) setSelectedId(wanted);
+    }, [searchParams]);
 
     // ── Closing the loop ──────────────────────────────────────────────────────
     // Reports used to be write-only: the clerk submitted into a void and had no
@@ -469,7 +479,15 @@ export default function EodReportsPage() {
                             )}
                         </div>
                         <button
-                            onClick={() => setSelectedId(null)}
+                            onClick={() => {
+                                setSelectedId(null);
+                                // Drop ?report= too, or the deep-link effect above
+                                // immediately re-opens what was just closed.
+                                if (searchParams.has("report")) {
+                                    searchParams.delete("report");
+                                    setSearchParams(searchParams, { replace: true });
+                                }
+                            }}
                             className="btn-ghost btn-icon btn-sm shrink-0"
                         >
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
