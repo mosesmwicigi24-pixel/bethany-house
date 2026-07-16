@@ -619,6 +619,86 @@ function MentionPopup({ query, onSelect }: { query: string; onSelect: (u: Mentio
 // styled inline pill spans. Used by both the transparent-overlay composer
 // in CommsHub and the inline thread composers on detail pages.
 
+// ─── Short composer tokens ───────────────────────────────────────────────────
+//
+// The wire format is `#[Label](entity:order:12)` / `@[Name](user:3)`. Putting
+// that in the textarea is what caused the caret to drift: the mirror can only
+// keep the caret honest if it occupies EXACTLY the textarea's width, so a long
+// raw token forced either a displaced caret or a stretch of dead space.
+//
+// So the textarea holds only what you actually want to see — `#POS-260715-IDQLG`
+// — and we expand to the wire format at send. The mirror then styles those same
+// characters with colour alone: identical metrics, tight highlight, no gap.
+
+export type TokenTarget =
+    | { kind: "user"; id: number }
+    | { kind: "entity"; type: string; id: number };
+
+/** `#POS-1` → `#[POS-1](entity:order:9)` for every label we inserted. */
+export function expandTokens(text: string, map: Record<string, TokenTarget>): string {
+    // Longest labels first so "POS-1" can't clobber the start of "POS-12".
+    const labels = Object.keys(map).sort((a, b) => b.length - a.length);
+    let out = text;
+    for (const label of labels) {
+        const t = map[label];
+        const needle = (t.kind === "user" ? "@" : "#") + label;
+        const token =
+            t.kind === "user"
+                ? `@[${label}](user:${t.id})`
+                : `#[${label}](entity:${t.type}:${t.id})`;
+        out = out.split(needle).join(token);
+    }
+    return out;
+}
+
+/**
+ * Mirror nodes for the SHORT-token composer. Highlights the labels we inserted
+ * using colour only — no padding, margin, font-size or weight, since any of
+ * those change the metrics and would drift the caret again.
+ */
+export function parseComposerNodes(
+    body: string,
+    map: Record<string, TokenTarget>,
+): React.ReactNode[] {
+    const labels = Object.keys(map).sort((a, b) => b.length - a.length);
+    if (!labels.length) return [<span key="t0">{body}</span>];
+
+    const nodes: React.ReactNode[] = [];
+    let i = 0;
+    let buf = "";
+    const flush = () => {
+        if (buf) { nodes.push(<span key={"t" + i}>{buf}</span>); buf = ""; }
+    };
+
+    outer: while (i < body.length) {
+        const ch = body[i];
+        if (ch === "#" || ch === "@") {
+            for (const label of labels) {
+                const t = map[label];
+                if ((t.kind === "user") !== (ch === "@")) continue;
+                const needle = ch + label;
+                if (body.startsWith(needle, i)) {
+                    flush();
+                    nodes.push(
+                        <span key={"k" + i}
+                            className={"rounded " + (t.kind === "user"
+                                ? "bg-brand-100 text-brand-700"
+                                : "bg-brand-50 text-brand-700")}>
+                            {needle}
+                        </span>,
+                    );
+                    i += needle.length;
+                    continue outer;
+                }
+            }
+        }
+        buf += ch;
+        i++;
+    }
+    flush();
+    return nodes;
+}
+
 export function parseBodyToNodes(body: string): React.ReactNode[] {
     const nodes: React.ReactNode[] = [];
     const re = /(@\[([^\]]+)\]\(user:\d+\)|#\[([^\]]+)\]\(entity:[^)]+\))/g;
@@ -892,6 +972,12 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
     const [mentionStart, setStart]      = useState(0);
     const [entityQ, setEntityQ]         = useState<string | null>(null);
     const [entityStart, setEntityStart] = useState(0);
+    // The composer holds SHORT, human tokens (`#POS-260715-IDQLG`, `@Jane Doe`)
+    // — never the long wire form — so the mirror can draw them at exactly the
+    // textarea's width: caret stays aligned, no dead space, tight highlight.
+    // This maps a token's label back to its entity so we can expand to the wire
+    // format (`#[Label](entity:order:12)`) on send. Nothing else changes.
+    const [tokenMap, setTokenMap] = useState<Record<string, TokenTarget>>({});
     const [enterToSend, setEnterToSend] = useState(true);
     // Pending non-member mention — shows the add-member prompt before inserting
     const [pendingMention, setPendingMention] = useState<MentionUser | null>(null);
@@ -938,7 +1024,11 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
                     ? `![${a.name}](${a.url})`
                     : `[📎 ${a.name}](${a.url})`
             ).join("\n");
-            const fullBody = [body.trim(), attachmentMarkdown].filter(Boolean).join("\n") || " ";
+            // Expand the short composer tokens to the wire format the backend
+            // parses into linked_entities. A label the user has since edited
+            // simply won't match and goes out as plain text.
+            const wireBody = expandTokens(body.trim(), tokenMap);
+            const fullBody = [wireBody, attachmentMarkdown].filter(Boolean).join("\n") || " ";
             return channelApi.send(channelId, {
                 body: fullBody,
                 reply_to_id: replyTo?.id ?? null,
@@ -946,6 +1036,7 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
         },
         onSuccess: data => {
             setBody("");
+            setTokenMap({});
             setAttachments([]);
             setPreviews([]);
             if (textareaRef.current) {
@@ -1005,10 +1096,15 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
         if (at) { setMentionQ(at[1]); setStart(cursor - at[0].length); setEntityQ(null); }
         else setMentionQ(null);
 
-        // # entity tag detection - only when @ popup is not open
+        // # entity tag detection - only when @ popup is not open.
+        // Must be a FRESH tag being typed: a `#` at the start or after
+        // whitespace, with no spaces since (order codes never contain one).
+        // The old /#([^#\n]*)$/ matched everything after the last `#`, so once a
+        // tag was in the box every further keystroke re-opened the picker and
+        // searched "#POS-260715-IDQLG Have you seen the Code?" → "No results found".
         if (!at) {
-            const hash = before.match(/#([^#\n]*)$/);
-            if (hash) { setEntityQ(hash[1]); setEntityStart(cursor - hash[0].length); }
+            const hash = before.match(/(?:^|\s)#([^\s#]*)$/);
+            if (hash) { setEntityQ(hash[1]); setEntityStart(cursor - hash[1].length - 1); }
             else setEntityQ(null);
         }
 
@@ -1016,10 +1112,14 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
     };
 
     const doInsertMention = (u: MentionUser) => {
-        const token  = `@[${u.name}](user:${u.id})`;
+        // Short token in the box; expanded to the wire format on send.
+        const token  = `@${u.name}`;
+        setTokenMap(m => ({ ...m, [u.name]: { kind: "user", id: u.id } }));
         const before = body.slice(0, mentionStart);
         const after  = body.slice(textareaRef.current?.selectionStart ?? mentionStart);
-        const pad    = after && !after.startsWith(" ") ? " " : "";
+        // Always leave a trailing space — it separates the tag from whatever is
+        // typed next, which also stops the picker re-triggering on the tag.
+        const pad    = after.startsWith(" ") ? "" : " ";
         setBody(before + token + pad + after);
         setMentionQ(null);
         // Put the caret right after what we inserted — otherwise it jumps to the
@@ -1047,10 +1147,17 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
     };
 
     const insertEntity = (entity: EntitySearchResult) => {
-        const token  = `#[${entity.label}](entity:${entity.type}:${entity.id})`;
+        // Short token in the box; expanded to the wire format on send.
+        const token  = `#${entity.label}`;
+        setTokenMap(m => ({
+            ...m,
+            [entity.label]: { kind: "entity", type: entity.type, id: entity.id },
+        }));
         const before = body.slice(0, entityStart);
         const after  = body.slice(textareaRef.current?.selectionStart ?? entityStart);
-        const pad    = after && !after.startsWith(" ") ? " " : "";
+        // Always leave a trailing space — it separates the tag from whatever is
+        // typed next, which also stops the picker re-triggering on the tag.
+        const pad    = after.startsWith(" ") ? "" : " ";
         setBody(before + token + pad + after);
         setEntityQ(null);
         // Put the caret right after the inserted tag (see doInsertMention).
@@ -1158,7 +1265,7 @@ aria-label="Delete">✕</button>
                             className="pointer-events-none text-sm leading-5 whitespace-pre-wrap break-words select-none w-full"
                             style={{ wordBreak: "break-word", minHeight: "20px" }}>
                             {body
-                                ? parseBodyToNodes(body)
+                                ? parseComposerNodes(body, tokenMap)
                                 : <span className="text-surface-400">
                                     {window.innerWidth < 640
                                         ? "Message… (@ mention · # tag order)"
