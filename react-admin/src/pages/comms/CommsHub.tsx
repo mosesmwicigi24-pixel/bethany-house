@@ -624,42 +624,56 @@ export function parseBodyToNodes(body: string): React.ReactNode[] {
     const re = /(@\[([^\]]+)\]\(user:\d+\)|#\[([^\]]+)\]\(entity:[^)]+\))/g;
     let last = 0;
     let m: RegExpExecArray | null;
+
+    // CARET ALIGNMENT — read before changing anything here.
+    //
+    // This mirror sits under a transparent <textarea> that owns the caret. The
+    // browser positions that caret from the textarea's RAW value, so every token
+    // we draw must occupy EXACTLY the raw text's width. Previously the raw
+    // `#[POS-260626-V7YAR](entity:order:123)` (~37 chars) was drawn as a short
+    // pill (icon + 16-char label at text-xs), so the caret sat ~160px right of
+    // what you saw.
+    //
+    // Fix: render every raw character — the markup around the label is made
+    // transparent, not removed — and style with COLOUR ONLY. Padding, margin,
+    // font-size, weight and letter-spacing all change the metrics and would
+    // reintroduce the drift, so none are used. Wrapping also stays identical
+    // because the character run is unchanged.
+    const hidden = (s: string, key: string) => (
+        <span key={key} className="opacity-0">{s}</span>
+    );
+
     while ((m = re.exec(body)) !== null) {
         if (m.index > last) nodes.push(<span key={"t" + last}>{body.slice(last, m.index)}</span>);
         const raw = m[0];
+        const i   = m.index;
+
         if (raw.startsWith("@")) {
-            const name = m[2];
+            const name  = m[2];
+            const close = raw.slice(raw.indexOf("]("));   // "](user:12)"
             nodes.push(
-                <span key={"m" + m.index}
-                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-brand-100 text-brand-700 text-xs font-semibold whitespace-nowrap align-baseline leading-tight mx-0.5">
-                    <svg className="w-2.5 h-2.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd"/>
-                    </svg>
+                <span key={"m" + i} className="rounded bg-brand-100 text-brand-700">
+                    {hidden("@[", "mo" + i)}
                     {name}
+                    {hidden(close, "mc" + i)}
                 </span>
             );
         } else {
-            const label = m[3];
+            const label   = m[3];
+            const close   = raw.slice(raw.indexOf("]("));  // "](entity:order:12)"
             const isOrder = raw.includes("entity:order:");
             nodes.push(
-                <span key={"e" + m.index}
-                    className={
-                        "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap align-baseline leading-tight mx-0.5 " +
-                        (isOrder
-                            ? "bg-brand-50 text-brand-700 border border-brand-200"
-                            : "bg-purple-50 text-purple-700 border border-purple-200")
-                    }>
-                    <svg className="w-2.5 h-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        {isOrder
-                            ? <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-                            : <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/>
-                        }
-                    </svg>
+                <span key={"e" + i}
+                    className={"rounded " + (isOrder
+                        ? "bg-brand-50 text-brand-700"
+                        : "bg-purple-50 text-purple-700")}>
+                    {hidden("#[", "eo" + i)}
                     {label}
+                    {hidden(close, "ec" + i)}
                 </span>
             );
         }
-        last = m.index + raw.length;
+        last = i + raw.length;
     }
     if (last < body.length) nodes.push(<span key={"t" + last}>{body.slice(last)}</span>);
     return nodes;
@@ -1002,16 +1016,22 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
     };
 
     const doInsertMention = (u: MentionUser) => {
+        const token  = `@[${u.name}](user:${u.id})`;
         const before = body.slice(0, mentionStart);
         const after  = body.slice(textareaRef.current?.selectionStart ?? mentionStart);
-        setBody(before + `@[${u.name}](user:${u.id})` + (after && !after.startsWith(" ") ? " " : "") + after);
+        const pad    = after && !after.startsWith(" ") ? " " : "";
+        setBody(before + token + pad + after);
         setMentionQ(null);
+        // Put the caret right after what we inserted — otherwise it jumps to the
+        // end of the message and typing continues in the wrong place.
+        const caret = before.length + token.length + pad.length;
         setTimeout(() => {
-            textareaRef.current?.focus();
-            if (textareaRef.current) {
-                textareaRef.current.style.height = "auto";
-                textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
-            }
+            const ta = textareaRef.current;
+            if (!ta) return;
+            ta.focus();
+            ta.setSelectionRange(caret, caret);
+            ta.style.height = "auto";
+            ta.style.height = ta.scrollHeight + "px";
         }, 0);
     };
 
@@ -1030,14 +1050,18 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
         const token  = `#[${entity.label}](entity:${entity.type}:${entity.id})`;
         const before = body.slice(0, entityStart);
         const after  = body.slice(textareaRef.current?.selectionStart ?? entityStart);
-        setBody(before + token + (after && !after.startsWith(" ") ? " " : "") + after);
+        const pad    = after && !after.startsWith(" ") ? " " : "";
+        setBody(before + token + pad + after);
         setEntityQ(null);
+        // Put the caret right after the inserted tag (see doInsertMention).
+        const caret = before.length + token.length + pad.length;
         setTimeout(() => {
-            textareaRef.current?.focus();
-            if (textareaRef.current) {
-                textareaRef.current.style.height = "auto";
-                textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
-            }
+            const ta = textareaRef.current;
+            if (!ta) return;
+            ta.focus();
+            ta.setSelectionRange(caret, caret);
+            ta.style.height = "auto";
+            ta.style.height = ta.scrollHeight + "px";
         }, 0);
     };
 
