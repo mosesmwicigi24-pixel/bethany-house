@@ -2266,6 +2266,11 @@ export default function PosPage() {
     ]);
 
     const clearCart = useCallback(() => {
+        // New cart = new sale. Drop the idempotency key so the next customer is
+        // never mistaken for a replay of this one, even if they buy exactly the
+        // same item for exactly the same amount moments later.
+        saleKeyRef.current = null;
+
         // Release the pending order from this cart session - the order stays
         // intact in the system. The cashier can find it in the sales history
         // drawer if needed. We never auto-void orders in the POS.
@@ -2350,6 +2355,29 @@ export default function PosPage() {
     // The old single-shot createSale is kept for cash-only fast-path below.
 
     // Build the cart-only portion of the payload (no payment fields)
+    // ── Idempotency key: one per SALE ATTEMPT, not per click ─────────────────
+    // This is the whole trick, and it is easy to get backwards. A key minted per
+    // submit would give a double-tap two different keys and dedupe nothing. It is
+    // minted lazily on the first submit for a cart and reused by every later
+    // submit of that same cart — so a double-tap, or a retry after a timeout,
+    // carries the SAME key and the server collapses it onto one sale.
+    //
+    // It is cleared when the cart is cleared (see clearCart), which is what makes
+    // the next customer a genuinely new sale even if they buy exactly the same
+    // thing for exactly the same money seconds later.
+    //
+    // randomUUID needs a secure context; POS is always HTTPS, but fall back
+    // rather than throw, since no key just means the old behaviour.
+    const saleKeyRef = useRef<string | null>(null);
+    const saleAttemptKey = useCallback(() => {
+        if (!saleKeyRef.current) {
+            saleKeyRef.current = crypto.randomUUID
+                ? crypto.randomUUID()
+                : `k-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        }
+        return saleKeyRef.current;
+    }, []);
+
     const buildCartPayload = useCallback(() => {
         const productionItems = cart
             .filter((i) => i.is_production)
@@ -2377,6 +2405,7 @@ export default function PosPage() {
 
         return {
             outlet_id:            selectedOutletId!,
+            client_request_id:    saleAttemptKey(),
             customer_first_name:  attachedCustomer?.first_name ?? undefined,
             customer_last_name:   attachedCustomer?.last_name  ?? undefined,
             customer_phone:       attachedCustomer?.phone      ?? undefined,
