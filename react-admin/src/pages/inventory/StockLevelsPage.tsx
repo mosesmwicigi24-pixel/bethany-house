@@ -1,4 +1,5 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { stockApi } from "@/api/stock";
 import type {
@@ -323,6 +324,144 @@ interface OpeningStockModalProps {
     open: boolean;
     onClose: () => void;
     onSaved: () => void;
+}
+
+/**
+ * Product picker for the opening-stock rows.
+ *
+ * A native <select> can't be styled (option rows are OS-rendered), so this is a
+ * custom listbox: sticky category header bars, zebra-striped item rows, product
+ * name vs SKU typographically separated, and a search box. Rendered through a
+ * PORTAL with fixed coords because the rows live in a scrolling, clipping
+ * container (max-h-96 overflow-y-auto) that would otherwise cut the menu off.
+ */
+function ProductSelectField({
+    value,
+    groups,
+    onChange,
+}: {
+    value: number | "";
+    groups: { name: string; items: any[] }[];
+    onChange: (id: number | "") => void;
+}) {
+    const [open, setOpen] = useState(false);
+    const [query, setQuery] = useState("");
+    const btnRef = useRef<HTMLButtonElement>(null);
+    const [coords, setCoords] = useState({ top: 0, left: 0, width: 320 });
+
+    const nameOf = (p: any) => p?.en_translation?.name ?? p?.sku ?? "—";
+    const selected = useMemo(
+        () => groups.flatMap((g) => g.items).find((p: any) => p.id === value) ?? null,
+        [groups, value],
+    );
+
+    const openMenu = () => {
+        const r = btnRef.current?.getBoundingClientRect();
+        if (r) {
+            const width = Math.max(r.width, 340);
+            setCoords({
+                top: Math.min(r.bottom + 4, window.innerHeight - 340),
+                left: Math.min(r.left, window.innerWidth - width - 8),
+                width,
+            });
+        }
+        setQuery("");
+        setOpen(true);
+    };
+
+    const q = query.trim().toLowerCase();
+    const filtered = useMemo(() => {
+        if (!q) return groups;
+        return groups
+            .map((g) => ({
+                name: g.name,
+                items: g.items.filter(
+                    (p: any) =>
+                        nameOf(p).toLowerCase().includes(q) ||
+                        String(p.sku ?? "").toLowerCase().includes(q),
+                ),
+            }))
+            .filter((g) => g.items.length > 0);
+    }, [groups, q]);
+
+    return (
+        <>
+            <button
+                ref={btnRef}
+                type="button"
+                onClick={openMenu}
+                className="input text-sm py-1.5 w-full text-left truncate"
+            >
+                {selected ? (
+                    <span className="font-medium text-surface-900">{nameOf(selected)}</span>
+                ) : (
+                    <span className="text-surface-400">- Product -</span>
+                )}
+            </button>
+
+            {open &&
+                createPortal(
+                    <>
+                        <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
+                        <div
+                            className="fixed z-[61] bg-white rounded-xl border border-surface-200 shadow-2xl overflow-hidden flex flex-col"
+                            style={{ top: coords.top, left: coords.left, width: coords.width, maxHeight: "20rem" }}
+                        >
+                            {/* Search */}
+                            <div className="p-2 border-b border-surface-100 shrink-0">
+                                <input
+                                    autoFocus
+                                    value={query}
+                                    onChange={(e) => setQuery(e.target.value)}
+                                    placeholder="Search product or SKU…"
+                                    className="w-full px-2.5 py-1.5 text-sm rounded-lg bg-surface-50 border border-surface-200 outline-none focus:border-brand-400 focus:bg-white placeholder:text-surface-400"
+                                />
+                            </div>
+
+                            {/* Grouped, striped list */}
+                            <div className="overflow-y-auto">
+                                {filtered.length === 0 ? (
+                                    <p className="text-sm text-surface-400 text-center py-6">No products found.</p>
+                                ) : (
+                                    filtered.map((g) => (
+                                        <div key={g.name}>
+                                            <div className="sticky top-0 z-10 px-3 py-1.5 bg-brand-50 border-y border-brand-100 text-[11px] font-bold uppercase tracking-[0.08em] text-brand-700">
+                                                {g.name}
+                                            </div>
+                                            {g.items.map((p: any, i: number) => (
+                                                <button
+                                                    key={p.id}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        onChange(p.id);
+                                                        setOpen(false);
+                                                    }}
+                                                    className={clsx(
+                                                        "w-full text-left px-3 py-2 flex items-baseline justify-between gap-3 transition-colors border-b border-surface-50 last:border-0",
+                                                        i % 2 === 1 ? "bg-surface-50/60" : "bg-white",
+                                                        p.id === value
+                                                            ? "!bg-brand-100 text-brand-800"
+                                                            : "hover:bg-brand-50/70",
+                                                    )}
+                                                >
+                                                    <span className="text-sm font-medium text-surface-800 truncate">
+                                                        {nameOf(p)}
+                                                    </span>
+                                                    <span className="text-[11px] font-mono text-surface-400 shrink-0">
+                                                        {p.sku}
+                                                    </span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    </>,
+                    document.body,
+                )}
+        </>
+    );
 }
 
 interface EntryRow {
@@ -660,32 +799,11 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
                                 >
                                     {/* Product */}
                                     <div className="col-span-3">
-                                        <select
-                                            className="input text-sm py-1.5"
+                                        <ProductSelectField
                                             value={row.product_id}
-                                            onChange={(e) =>
-                                                updateRow(
-                                                    row._key,
-                                                    "product_id",
-                                                    e.target.value
-                                                        ? Number(e.target.value)
-                                                        : "",
-                                                )
-                                            }
-                                        >
-                                            <option value="">
-                                                - Product -
-                                            </option>
-                                            {productGroups.map((g: { name: string; items: any[] }) => (
-                                                <optgroup key={g.name} label={g.name}>
-                                                    {g.items.map((p: any) => (
-                                                        <option key={p.id} value={p.id}>
-                                                            {p.en_translation?.name ?? p.sku} ({p.sku})
-                                                        </option>
-                                                    ))}
-                                                </optgroup>
-                                            ))}
-                                        </select>
+                                            groups={productGroups}
+                                            onChange={(id) => updateRow(row._key, "product_id", id)}
+                                        />
                                     </div>
 
                                     {/* Variant */}
