@@ -651,6 +651,14 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:settings.view,sanctum');
                 Route::get('reports/eod-admin/{id}',    [PosController::class, 'adminGetEodReport'])
                     ->middleware('permission:settings.view,sanctum');
+                // Acknowledging is an owner act, so it keeps the settings.view gate.
+                Route::post('reports/eod-admin/{id}/acknowledge', [PosController::class, 'acknowledgeEodReport'])
+                    ->middleware('permission:settings.view,sanctum');
+                // Commenting is deliberately NOT settings.view-gated: the clerk who
+                // wrote the report must be able to answer the question asked of it.
+                // Authorisation is per-report in canDiscussEodReport() — author or
+                // anyone who can read reports.
+                Route::post('reports/eod/{id}/comments', [PosController::class, 'addEodReportComment']);
                 Route::get('reports/eod-settings',      [PosController::class, 'getEodDeliverySettings'])
                     ->middleware('permission:settings.view,sanctum');
                 Route::post('reports/eod-settings',     [PosController::class, 'saveEodDeliverySettings'])

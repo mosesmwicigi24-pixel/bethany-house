@@ -1789,6 +1789,12 @@ class PosController extends Controller
                     'sentiments'   => $report->sentiments ?? '',
                     'order_notes'  => $orderNotes,
                     'submitted_at' => $report->submitted_at,
+                    // The clerk's side of the loop. Without these she is still
+                    // submitting into a void — an acknowledgement she cannot see
+                    // is worth nothing, and a question she cannot see cannot be
+                    // answered.
+                    'acknowledged_at' => $report->acknowledged_at,
+                    'comments'        => $this->eodComments((int) $report->id),
                 ];
             }
         }
@@ -2035,6 +2041,145 @@ class PosController extends Controller
      * Full detail for a single submitted EoD report, including the HTML
      * sentiments, per-order notes, and order-level reconciliation data.
      */
+    /**
+     * The thread on a report, oldest first.
+     *
+     * Returned to BOTH sides. A reply the clerk cannot see is not a reply, and
+     * an acknowledgement she cannot see is exactly the void the reports page
+     * already was.
+     */
+    private function eodComments(int $reportId): array
+    {
+        return DB::table('eod_report_comments as c')
+            ->join('users as u', 'u.id', '=', 'c.user_id')
+            ->where('c.eod_report_id', $reportId)
+            ->orderBy('c.id')
+            ->select([
+                'c.id',
+                'c.body',
+                'c.user_id',
+                'c.created_at',
+                DB::raw("TRIM(CONCAT(COALESCE(u.first_name,''), ' ', COALESCE(u.last_name,''))) as user_name"),
+            ])
+            ->get()
+            ->map(fn ($c) => (array) $c)
+            ->toArray();
+    }
+
+    /**
+     * May this user take part in this report's thread?
+     *
+     * Either side: whoever wrote the report (so she can answer the question that
+     * was asked of her) or anyone who can read reports at all. Deliberately not
+     * settings.view alone — that would let the owner ask and leave the clerk
+     * unable to answer, which is the current situation with extra steps.
+     */
+    private function canDiscussEodReport(?\App\Models\User $user, object $report): bool
+    {
+        if (!$user) {
+            return false;
+        }
+
+        return (int) $report->user_id === (int) $user->id
+            || $user->can('settings.view');
+    }
+
+    /**
+     * Acknowledge a report — the countersignature, and nothing more.
+     *
+     * Idempotent: acknowledging twice keeps the FIRST reader and time, because
+     * "who read it first" is the audit fact worth keeping, and a double-tap
+     * should not quietly rewrite it.
+     */
+    public function acknowledgeEodReport(Request $request, int $id): JsonResponse
+    {
+        $report = DB::table('cash_register_eod_reports')->where('id', $id)->first();
+        if (!$report) {
+            return response()->json(['message' => 'Report not found.'], 404);
+        }
+
+        $user = $request->user();
+
+        // The author acknowledging their own report would be a meaningless tick.
+        if ((int) $report->user_id === (int) $user->id) {
+            return response()->json(['message' => 'You cannot acknowledge your own report.'], 422);
+        }
+
+        if ($report->acknowledged_at) {
+            return response()->json([
+                'message'         => 'Already acknowledged.',
+                'acknowledged_at' => $report->acknowledged_at,
+                'acknowledged_by' => $report->acknowledged_by,
+            ], 200);
+        }
+
+        DB::table('cash_register_eod_reports')->where('id', $id)->update([
+            'acknowledged_at' => now(),
+            'acknowledged_by' => $user->id,
+        ]);
+
+        $name = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: 'An owner';
+        NotificationService::eodReportReplied(
+            (int) $report->user_id,
+            $id,
+            $name,
+            (string) $report->report_date,
+            '',
+            true
+        );
+
+        return response()->json(['message' => 'Report acknowledged.'], 200);
+    }
+
+    /**
+     * Post a comment on a report and tell the other side.
+     */
+    public function addEodReportComment(Request $request, int $id): JsonResponse
+    {
+        $report = DB::table('cash_register_eod_reports')->where('id', $id)->first();
+        if (!$report) {
+            return response()->json(['message' => 'Report not found.'], 404);
+        }
+
+        $user = $request->user();
+        if (!$this->canDiscussEodReport($user, $report)) {
+            return response()->json(['message' => 'You cannot comment on this report.'], 403);
+        }
+
+        $validated = $request->validate([
+            'body' => 'required|string|max:5000',
+        ]);
+
+        $commentId = DB::table('eod_report_comments')->insertGetId([
+            'eod_report_id' => $id,
+            'user_id'       => $user->id,
+            'body'          => $validated['body'],
+            'created_at'    => now(),
+            'updated_at'    => now(),
+        ]);
+
+        $name    = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: 'Someone';
+        $excerpt = \Illuminate\Support\Str::limit($validated['body'], 120);
+
+        // Tell the OTHER side. When an owner comments, the clerk hears about it;
+        // when the clerk answers, the owners do. Nobody is notified of their own
+        // comment.
+        NotificationService::eodReportReplied(
+            (int) $report->user_id === (int) $user->id ? null : (int) $report->user_id,
+            $id,
+            $name,
+            (string) $report->report_date,
+            $excerpt,
+            false
+        );
+
+        return response()->json([
+            'message'  => 'Comment added.',
+            'comments' => $this->eodComments($id),
+            'id'       => $commentId,
+        ], 201);
+    }
+
     public function adminGetEodReport(Request $request, int $id): JsonResponse
     {
         $row = DB::table('cash_register_eod_reports as r')
@@ -2053,6 +2198,7 @@ class PosController extends Controller
         }
 
         $orderNotes = json_decode($row->order_notes ?? '{}', true) ?: [];
+        $comments   = $this->eodComments($id);
 
         // Fetch orders with items and payments
         $orders = Order::with(['items', 'payments'])
@@ -2105,6 +2251,9 @@ class PosController extends Controller
                 'user_name'      => trim($row->user_name) ?: 'Unknown',
                 'sentiments'     => $row->sentiments ?? '',
                 'order_notes'    => $orderNotes,
+                'acknowledged_at' => $row->acknowledged_at,
+                'acknowledged_by' => $row->acknowledged_by,
+                'comments'        => $comments,
                 'order_count'    => $ordersData->count(),
                 'total_sales'    => round($totalSales, 2),
                 'total_paid'     => round($totalPaid, 2),
