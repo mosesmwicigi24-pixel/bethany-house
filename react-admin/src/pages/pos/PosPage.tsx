@@ -1860,6 +1860,19 @@ export default function PosPage() {
         return () => mq.removeEventListener("change", onChange);
     }, []);
 
+    // ── Phone: browse mode ⇄ receipt mode ────────────────────────────────────
+    // A phone can't show a product grid AND a working receipt at once. Tapping
+    // the receipt collapses the picker to just its search row and hands the rest
+    // of the screen to the order; touching search brings the grid back. Desktop
+    // is side-by-side and never uses this.
+    const [receiptFocused, setReceiptFocused] = useState(false);
+    const receiptMode = isMobile && receiptFocused;
+
+    // Leaving the phone (rotate / resize to desktop) must not strand the flag.
+    useEffect(() => {
+        if (!isMobile) setReceiptFocused(false);
+    }, [isMobile]);
+
     // Modals
     const [variantPicker, setVariantPicker] = useState<PosProduct | null>(null);
     const [showRegisterModal, setShowRegisterModal] = useState(false);
@@ -2861,7 +2874,12 @@ export default function PosPage() {
 
             {/* ── Main layout: side-by-side on desktop, STACKED on phone
                    (items on top → cart/receipt below, one scrolling column) ──── */}
-            <div className="flex flex-col sm:flex-row gap-4 flex-1 min-h-0 overflow-y-auto sm:overflow-hidden">
+            <div className={clsx(
+                "flex flex-col sm:flex-row gap-4 flex-1 min-h-0 sm:overflow-hidden",
+                // Receipt mode owns the height and scrolls inside itself, so the
+                // page must not also scroll — otherwise the two fight.
+                receiptMode ? "overflow-hidden" : "overflow-y-auto",
+            )}>
                 {/* TOP (phone) / LEFT (desktop): Products */}
                 <div className="flex flex-col card overflow-hidden shrink-0 sm:flex-1">
                     {/* Sale complete banner — shown after Paystack/STK auto-complete */}
@@ -2911,6 +2929,9 @@ export default function PosPage() {
                                 placeholder="Search by name, SKU or scan barcode…"
                                 value={searchInput}
                                 onChange={(e) => handleSearch(e.target.value)}
+                                // Reaching for search means you want to add items —
+                                // bring the grid back without a separate control.
+                                onFocus={() => setReceiptFocused(false)}
                                 className="input pl-10 pr-10 bg-white border-surface-300 focus:border-brand-400 shadow-sm"
                                 autoFocus={window.innerWidth >= 640}
                             />
@@ -2940,7 +2961,7 @@ export default function PosPage() {
                             )}
                         </div>
 
-                        {!searchQuery && categories.length > 0 && (
+                        {!searchQuery && categories.length > 0 && !receiptMode && (
                             <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
                                 <button
                                     onClick={() => setCategoryFilter(null)}
@@ -2979,7 +3000,13 @@ export default function PosPage() {
 
                     {/* Product grid — on phone this is search-first (see below) and
                         capped so the cart below stays reachable; fills on desktop. */}
-                    <div className="overflow-y-auto p-4 max-h-[50vh] sm:max-h-none sm:flex-1">
+                    {/* Grid — collapsed away in receipt mode so the order gets the screen.
+                        Kept mounted on desktop; on phone it is unmounted rather than
+                        hidden, so its images stop competing for layout height. */}
+                    <div className={clsx(
+                        "overflow-y-auto p-4 max-h-[50vh] sm:max-h-none sm:flex-1",
+                        receiptMode && "hidden sm:block",
+                    )}>
                         {loadingProducts ? (
                             <div className="flex items-center justify-center h-48">
                                 <Spinner size="lg" />
@@ -3042,9 +3069,19 @@ export default function PosPage() {
                 {/* BELOW (phone) / RIGHT (desktop): Cart — 3-zone layout: header,
                     scroll-items, fixed-footer. On phone it stacks under the items. */}
                 <div
+                    onClick={() => { if (isMobile && !receiptFocused) setReceiptFocused(true); }}
                     className={clsx(
                         "flex flex-col overflow-hidden bg-white rounded-xl border border-surface-200 shadow-sm",
                         "w-full sm:w-[300px] xl:w-[320px] sm:shrink-0",
+                        // THE TRUNCATION FIX. In the phone's column this panel used to
+                        // keep flex-shrink:1 while the picker above was shrink-0 — so it
+                        // was squeezed into whatever was left and, being overflow-hidden,
+                        // silently CUT everything past the subtotal. Line items, totals
+                        // and Pay weren't below the fold; they were gone.
+                        //   browse mode  → shrink-0: take natural height, page scrolls to it.
+                        //   receipt mode → flex-1 + min-h-0: own the screen, scroll inside.
+                        receiptMode ? "flex-1 min-h-0 sm:flex-none" : "shrink-0",
+                        isMobile && !receiptFocused && cartQty > 0 && "cursor-pointer",
                     )}
                 >
                     {/* ZONE 1 - Header: order title + customer search (fixed, never scrolls) */}
@@ -3066,8 +3103,25 @@ export default function PosPage() {
                                     <span className="text-2xs text-success font-semibold">✓ Orders raised</span>
                                 )}
                             </div>
+                            {/* Phone mode switch. In browse mode it says the receipt is
+                                tappable; in receipt mode it's the way back to the grid
+                                (search focus also works, but a visible control beats a
+                                hidden gesture). Hidden on desktop — both panels are up. */}
+                            {isMobile && cartQty > 0 && (
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); setReceiptFocused(v => !v); }}
+                                    className="flex items-center gap-1 text-2xs font-bold text-brand-600 bg-brand-50 border border-brand-200 rounded-full pl-2 pr-1.5 py-1 ml-auto mr-2 tap-target"
+                                    aria-expanded={receiptFocused}
+                                >
+                                    {receiptFocused ? "Add items" : "Open receipt"}
+                                    <svg className={clsx("w-3 h-3 transition-transform", receiptFocused && "rotate-180")}
+                                        fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7"/>
+                                    </svg>
+                                </button>
+                            )}
                             {cart.length > 0 && (
-                                <button onClick={clearCart} className="text-2xs text-surface-400 hover:text-danger transition-colors">Clear</button>
+                                <button onClick={(e) => { e.stopPropagation(); clearCart(); }} className="text-2xs text-surface-400 hover:text-danger transition-colors shrink-0">Clear</button>
                             )}
                         </div>
                         {/* Customer search - compact */}
@@ -3100,8 +3154,17 @@ export default function PosPage() {
                         </div>
                     </div>
 
-                    {/* ZONE 2 - Items scroll area (flex-1, all overflow here) */}
-                    <div className="flex-1 min-h-0 overflow-y-auto">
+                    {/* ZONE 2 - Items scroll area (all overflow lands here) */}
+                    <div className={clsx(
+                        "overflow-y-auto",
+                        // Must track the panel's sizing. Where the panel has a definite
+                        // height (desktop, or phone receipt mode) this takes the leftover
+                        // and scrolls inside. In phone browse mode the panel is shrink-0
+                        // and therefore content-height — and `flex-1` means flex-basis:0,
+                        // whose hypothetical size is 0, so the list would collapse to
+                        // nothing. Natural height there; the page does the scrolling.
+                        receiptMode ? "flex-1 min-h-0" : "sm:flex-1 sm:min-h-0",
+                    )}>
                         {cart.length === 0 ? (
                             <div className="flex flex-col items-center justify-center h-full gap-3 text-surface-300 p-6">
                                 <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={0.75}>
