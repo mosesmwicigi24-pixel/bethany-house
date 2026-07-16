@@ -401,7 +401,8 @@ export default function ProductCostingReportPage() {
                                 <p className="text-xs text-slate-300 mt-1">Use "Adjust Values" to add labour, packaging, and other costs.</p>
                             </div>
                         ) : (
-                            <table className="w-full">
+                            <div className="overflow-x-auto">
+                            <table className="w-full min-w-[640px]">
                                 <thead>
                                     <tr className="border-b border-slate-50">
                                         <th className="px-5 py-2.5 text-left text-xs font-bold text-slate-400 uppercase tracking-widest">Item</th>
@@ -458,6 +459,7 @@ export default function ProductCostingReportPage() {
                                     </tr>
                                 </tfoot>
                             </table>
+                            </div>
                         )}
                     </section>
 

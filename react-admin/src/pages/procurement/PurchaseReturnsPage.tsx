@@ -155,6 +155,7 @@ function ReturnDetailModal({
                         </p>
                         {detail.items && detail.items.length > 0 ? (
                             <div className="border border-surface-100 rounded-lg overflow-hidden">
+                                <div className="table-wrapper rounded-none border-0">
                                 <table className="table">
                                     <thead>
                                         <tr>
@@ -222,6 +223,7 @@ function ReturnDetailModal({
                                         })}
                                     </tbody>
                                 </table>
+                                </div>
                             </div>
                         ) : (
                             <p className="text-sm text-surface-400 py-4 text-center">
