@@ -10,9 +10,9 @@
  */
 
 import { useState, Fragment } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
-import { get } from "@/api/client";
+import { get, post } from "@/api/client";
 import { Spinner } from "@/components/ui/Spinner";
 import { groupRowsByDate, DateGroupHeaderRow } from "@/lib/dateGrouping";
 
@@ -34,9 +34,20 @@ interface EodReportRow {
     note_count: number;
 }
 
+interface EodComment {
+    id: number;
+    body: string;
+    user_id: number;
+    user_name: string;
+    created_at: string;
+}
+
 interface EodReportDetail extends EodReportRow {
     sentiments: string;           // HTML from WYSIWYG
     order_notes: Record<string, string>;
+    acknowledged_at: string | null;
+    acknowledged_by: number | null;
+    comments: EodComment[];
     orders: {
         id: number;
         order_number: string;
@@ -152,6 +163,30 @@ export default function EodReportsPage() {
     });
 
     const detail = detailData?.report;
+
+    // ── Closing the loop ──────────────────────────────────────────────────────
+    // Reports used to be write-only: the clerk submitted into a void and had no
+    // way to know she had been read, let alone answered. Acknowledging is the
+    // countersignature; the thread is the conversation, and it lives ON the
+    // report so that in six months it still explains itself.
+    const qc = useQueryClient();
+    const [commentBody, setCommentBody] = useState("");
+
+    const ackMutation = useMutation({
+        mutationFn: () => post(`/v1/admin/pos/reports/eod-admin/${selectedId}/acknowledge`, {}),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ["eod-report-detail", selectedId] });
+            qc.invalidateQueries({ queryKey: ["eod-reports"] });
+        },
+    });
+
+    const commentMutation = useMutation({
+        mutationFn: (body: string) => post(`/v1/admin/pos/reports/eod/${selectedId}/comments`, { body }),
+        onSuccess: () => {
+            setCommentBody("");
+            qc.invalidateQueries({ queryKey: ["eod-report-detail", selectedId] });
+        },
+    });
 
     return (
         <div className="flex h-full">
@@ -512,6 +547,63 @@ export default function EodReportsPage() {
                                         />
                                     </div>
                                 )}
+
+                                {/* ── Acknowledge + thread ─────────────────────────────
+                                    Sits directly under the notes, because that is where
+                                    the questions come from: this report asks for three
+                                    receipts to be adjusted and one voided. */}
+                                <div className="pt-3 border-t border-surface-100 space-y-3">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <h3 className="text-xs font-semibold text-surface-700">Discussion</h3>
+                                        {detail.acknowledged_at ? (
+                                            <span className="flex items-center gap-1 text-2xs font-bold text-success bg-success-light border border-success/30 rounded-full px-2 py-1">
+                                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5"/>
+                                                </svg>
+                                                Read {fmtDatetime(detail.acknowledged_at)}
+                                            </span>
+                                        ) : (
+                                            <button
+                                                onClick={() => ackMutation.mutate()}
+                                                disabled={ackMutation.isPending}
+                                                className="text-2xs font-bold text-brand-700 bg-brand-50 border border-brand-200 rounded-full px-2.5 py-1 hover:bg-brand-100 disabled:opacity-40 transition-colors">
+                                                {ackMutation.isPending ? "Marking…" : "Mark as read"}
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    {detail.comments?.length > 0 && (
+                                        <div className="space-y-2">
+                                            {detail.comments.map((c) => (
+                                                <div key={c.id} className="bg-white border border-surface-200 rounded-xl px-3 py-2">
+                                                    <div className="flex items-baseline justify-between gap-2 mb-0.5">
+                                                        <span className="text-2xs font-bold text-surface-700">{c.user_name}</span>
+                                                        <span className="text-2xs text-surface-400 tabular-nums">{fmtDatetime(c.created_at)}</span>
+                                                    </div>
+                                                    <p className="text-xs text-surface-700 whitespace-pre-wrap break-words">{c.body}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    <div className="flex items-end gap-2">
+                                        <textarea
+                                            value={commentBody}
+                                            onChange={(e) => setCommentBody(e.target.value)}
+                                            rows={2}
+                                            placeholder={`Ask ${detail.user_name.split(" ")[0] || "them"} a question…`}
+                                            className="input flex-1 resize-none text-xs" />
+                                        <button
+                                            onClick={() => commentBody.trim() && commentMutation.mutate(commentBody.trim())}
+                                            disabled={!commentBody.trim() || commentMutation.isPending}
+                                            className="shrink-0 px-3 py-2 rounded-xl bg-brand-600 text-white text-xs font-bold hover:bg-brand-700 disabled:opacity-40 transition-colors">
+                                            {commentMutation.isPending ? "…" : "Send"}
+                                        </button>
+                                    </div>
+                                    <p className="text-2xs text-surface-400">
+                                        {detail.user_name.split(" ")[0] || "The author"} is notified, and can reply from their own report.
+                                    </p>
+                                </div>
 
                                 {/* Meta */}
                                 <div className="text-2xs text-surface-400 space-y-1 pt-2 border-t border-surface-100">

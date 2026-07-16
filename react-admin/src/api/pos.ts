@@ -374,6 +374,8 @@ export const posApi = {
                     order_notes: Record<string, string>;
                     sentiments: string;
                     submitted_at: string | null;
+                    acknowledged_at: string | null;
+                    comments: { id: number; body: string; user_id: number; user_name: string; created_at: string }[];
                 } | null;
             };
         }>(

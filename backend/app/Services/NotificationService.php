@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\User;
+use App\Notifications\EodReportRepliedNotification;
 use App\Notifications\OrderPlacedNotification;
 use App\Notifications\OrderStatusChangedNotification;
 use App\Notifications\PaymentReceivedNotification;
@@ -234,6 +235,41 @@ class NotificationService
     /**
      * Fired when any order is created (any channel).
      */
+    /**
+     * Someone replied to, or acknowledged, an EoD report.
+     *
+     * $authorUserId is the clerk who wrote the report, or null when SHE is the
+     * one commenting — in which case the owners are the ones who need to hear it.
+     * Routing to "the other side" is the whole point: nobody is notified of their
+     * own comment, and neither side has to go looking at a reports page to find
+     * out they were answered.
+     */
+    public static function eodReportReplied(
+        ?int $authorUserId,
+        int $reportId,
+        string $actorName,
+        string $reportDate,
+        string $excerpt,
+        bool $acknowledgedOnly = false
+    ): void {
+        $notification = new EodReportRepliedNotification(
+            $reportId,
+            $actorName,
+            $reportDate,
+            $excerpt,
+            $acknowledgedOnly
+        );
+
+        if ($authorUserId) {
+            $recipients = \App\Models\User::where('id', $authorUserId)->get();
+        } else {
+            // The clerk answered — owners are the audience.
+            $recipients = self::resolve(self::OWNERS, null);
+        }
+
+        self::send($recipients, $notification);
+    }
+
     public static function orderPlaced(int $orderId, string $orderNumber, ?int $outletId = null): void
     {
         // Owners (all branches) + the manager(s) of the outlet the order was
