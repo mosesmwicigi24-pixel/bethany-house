@@ -43,14 +43,14 @@ export interface Channel {
 
 // Entity tag embedded in a message via the # trigger
 export interface LinkedEntity {
-    type:     "order" | "production_order";
+    type:     "order" | "production_order" | "eod_report";
     id:       number;
     label:    string;    // e.g. "#ORD-1234"
 }
 
 // Entity search result from GET /channels/entity-search
 export interface EntitySearchResult {
-    type:     "order" | "production_order";
+    type:     "order" | "production_order" | "eod_report";
     id:       number;
     label:    string;    // e.g. "#ORD-1234"
     subtitle: string;    // customer name or product name

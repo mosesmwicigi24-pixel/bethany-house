@@ -676,7 +676,7 @@ class ChannelController extends Controller
     public function entitySearch(Request $request)
     {
         $q     = trim($request->get('q', ''));
-        $types = $request->get('types', ['order', 'production_order']);
+        $types = $request->get('types', ['order', 'production_order', 'eod_report']);
         if (is_string($types)) $types = explode(',', $types);
 
         $user    = $request->user();
@@ -746,6 +746,47 @@ class ChannelController extends Controller
                     'status'   => $po->status,
                     'meta'     => "Qty {$po->quantity} · {$po->priority}",
                     'url'      => '/production/orders/' . $po->id,
+                ];
+            }
+        }
+
+        // ── EoD reports ───────────────────────────────────────────────────────
+        // So a day's report can be quoted into a channel and discussed where
+        // people already are, instead of only on a page nobody visits. Gated on
+        // settings.view, matching the report endpoints themselves — you can only
+        // tag what you could already open.
+        if (in_array('eod_report', $types) && $user->can('settings.view')) {
+            $query = \Illuminate\Support\Facades\DB::table('cash_register_eod_reports as r')
+                ->join('users as u',   'u.id', '=', 'r.user_id')
+                ->join('outlets as o', 'o.id', '=', 'r.outlet_id')
+                ->select([
+                    'r.id', 'r.report_date', 'r.acknowledged_at', 'o.name as outlet_name',
+                    \Illuminate\Support\Facades\DB::raw("TRIM(CONCAT(COALESCE(u.first_name,''), ' ', COALESCE(u.last_name,''))) as user_name"),
+                ])
+                ->limit(8);
+
+            if ($q !== '') {
+                $query->where(function ($w) use ($q) {
+                    $w->where('u.first_name', 'ILIKE', "%{$q}%")
+                      ->orWhere('u.last_name', 'ILIKE', "%{$q}%")
+                      ->orWhere('o.name', 'ILIKE', "%{$q}%")
+                      // Typing a date fragment is the natural way to reach for a
+                      // day's report ("15 Jul" / "2026-07-15").
+                      ->orWhere(\Illuminate\Support\Facades\DB::raw('r.report_date::text'), 'ILIKE', "%{$q}%");
+                });
+            }
+            $query->orderByDesc('r.report_date');
+
+            foreach ($query->get() as $r) {
+                $first = explode(' ', trim($r->user_name))[0] ?: 'report';
+                $results[] = [
+                    'type'     => 'eod_report',
+                    'id'       => $r->id,
+                    'label'    => '#EOD-' . date('dMy', strtotime($r->report_date)) . '-' . $first,
+                    'subtitle' => trim($r->user_name) . ' · ' . $r->outlet_name,
+                    'status'   => $r->acknowledged_at ? 'read' : 'unread',
+                    'meta'     => date('D, d M Y', strtotime($r->report_date)),
+                    'url'      => '/pos/eod-reports?report=' . $r->id,
                 ];
             }
         }

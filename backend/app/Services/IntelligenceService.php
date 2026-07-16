@@ -626,6 +626,36 @@ class IntelligenceService
                     'payment_status' => $order->payment_status,
                 ];
 
+            } elseif ($entity['type'] === 'eod_report') {
+                // A quoted report's chip carries the day's headline numbers, so the
+                // channel can see what is being discussed without opening it.
+                $r = DB::table('cash_register_eod_reports as r')
+                    ->join('users as u',   'u.id', '=', 'r.user_id')
+                    ->join('outlets as o', 'o.id', '=', 'r.outlet_id')
+                    ->where('r.id', $entity['id'])
+                    ->select([
+                        'r.id', 'r.report_date', 'r.submitted_at', 'r.acknowledged_at',
+                        'o.name as outlet_name',
+                        DB::raw("TRIM(CONCAT(COALESCE(u.first_name,''), ' ', COALESCE(u.last_name,''))) as user_name"),
+                    ])
+                    ->first();
+
+                if (!$r) continue;
+
+                $first = explode(' ', trim($r->user_name))[0] ?: 'report';
+
+                $previews[$key] = [
+                    'type'       => 'eod_report',
+                    'id'         => $r->id,
+                    'label'      => '#EOD-' . date('dMy', strtotime($r->report_date)) . '-' . $first,
+                    'status'     => $r->acknowledged_at ? 'read' : 'unread',
+                    'badge'      => $r->acknowledged_at ? 'success' : 'warning',
+                    'meta'       => date('D, d M Y', strtotime($r->report_date)),
+                    'subtitle'   => trim($r->user_name) . ' · ' . $r->outlet_name,
+                    'created_at' => $r->submitted_at,
+                    'url'        => "/pos/eod-reports?report={$r->id}",
+                ];
+
             } elseif ($entity['type'] === 'production_order') {
                 $po = ProductionOrder::with([
                     'product.translations' => fn ($q) => $q->where('language_code', 'en')->select('product_id', 'name'),
