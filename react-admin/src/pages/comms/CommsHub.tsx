@@ -1686,11 +1686,23 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                     </div>
                 )}
                 {/* Bubble + hover toolbar */}
-                <div className="flex items-end gap-1.5">
-                    {/* Toolbar - shown on hover, placed before content for own messages (reversed row) */}
+                <div className="flex items-end gap-1.5 relative">
+                    {/* Toolbar. ABSOLUTE, deliberately: it used to be an in-flow sibling
+                        of the bubble in this row, and at ~197px wide with shrink-0 it ate
+                        most of the 78% the bubble was allowed — leaving ~120px, so long
+                        messages wrapped one word per line. opacity-0 hides a thing; it
+                        does not un-reserve its space. Out of flow, the bubble gets the
+                        full width and still hugs short text.
+                        Also sm:-gated: it is hover-only, and a touch screen has no hover,
+                        so on a phone it was stealing that width for something that could
+                        never be shown. */}
                     {isOwn && (
                         <div className={clsx(
-                            "flex items-center gap-0.5 bg-white border border-surface-200 rounded-xl shadow-lg px-1.5 py-1 transition-opacity duration-100 shrink-0 self-center",
+                            // Anchored ABOVE the bubble, not beside it: beside would run
+                            // ~197px past the row and re-open horizontal scroll on a phone.
+                            // right-0 grows leftwards into empty canvas, so it can't overflow.
+                            "absolute bottom-full mb-1 right-0 z-10",
+                            "flex items-center gap-0.5 bg-white border border-surface-200 rounded-xl shadow-lg px-1.5 py-1 transition-opacity duration-100",
                             hovering ? "opacity-100" : "opacity-0 pointer-events-none"
                         )}>
                             {["👍","❤️","😄","🎉"].map(e => (
@@ -1715,10 +1727,13 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                     )}
                     <MessageContent body={message.body} isOwn={isOwn} timeLabel={fmtClock(message.created_at)}
                         linkedEntities={message.linked_entities} entityPreviews={message.entity_previews} />
-                    {/* Toolbar for other people's messages - placed after content */}
+                    {/* Same as above, mirrored to the right of the bubble. */}
                     {!isOwn && (
                         <div className={clsx(
-                            "flex items-center gap-0.5 bg-white border border-surface-200 rounded-xl shadow-lg px-1.5 py-1 transition-opacity duration-100 shrink-0 self-center",
+                            // Mirrored: grows rightwards from the row's left edge, which
+                            // starts after the avatar — so it also stays on-screen.
+                            "absolute bottom-full mb-1 left-0 z-10",
+                            "flex items-center gap-0.5 bg-white border border-surface-200 rounded-xl shadow-lg px-1.5 py-1 transition-opacity duration-100",
                             hovering ? "opacity-100" : "opacity-0 pointer-events-none"
                         )}>
                             {["👍","❤️","😄","🎉"].map(e => (
