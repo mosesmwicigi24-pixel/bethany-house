@@ -91,6 +91,38 @@ function BackButton({ onClick, label = "Back to sign in" }: { onClick: () => voi
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
+/**
+ * Eye toggle for a password field. Sits inside a `relative` wrapper; the input
+ * needs `pr-10` so the text never runs under it.
+ */
+function PasswordToggle({ shown, onToggle }: { shown: boolean; onToggle: () => void }) {
+    const label = shown ? "Hide password" : "Show password";
+    return (
+        <button
+            type="button"
+            onClick={onToggle}
+            aria-label={label}
+            aria-pressed={shown}
+            title={label}
+            tabIndex={-1}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-700 transition-colors"
+        >
+            {shown ? (
+                // Eye with a slash — password is visible, click to hide
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+                </svg>
+            ) : (
+                // Eye — password is hidden, click to show
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.964-7.178z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+            )}
+        </button>
+    );
+}
+
 export default function LoginPage() {
     const navigate = useNavigate();
     const location = useLocation();
@@ -103,6 +135,9 @@ export default function LoginPage() {
     const [resetEmail,    setResetEmail]    = useState("");
     const [forgotLoading, setForgotLoading] = useState(false);
     const [resetLoading,  setResetLoading]  = useState(false);
+    const [showPassword,  setShowPassword]  = useState(false);
+    const [showNewPw,     setShowNewPw]     = useState(false);
+    const [showConfirmPw, setShowConfirmPw] = useState(false);
 
     // ── All hooks unconditional ───────────────────────────────────────────────
     const credForm = useForm<LoginForm>({
@@ -256,12 +291,17 @@ export default function LoginPage() {
 
                                     <div>
                                         <label className="label" htmlFor="password">Password</label>
-                                        <input
-                                            id="password" type="password" autoComplete="current-password"
-                                            className={clsx("input", credForm.formState.errors.password && "input-error")}
-                                            placeholder="••••••••"
-                                            {...credForm.register("password")}
-                                        />
+                                        <div className="relative">
+                                            <input
+                                                id="password"
+                                                type={showPassword ? "text" : "password"}
+                                                autoComplete="current-password"
+                                                className={clsx("input pr-10", credForm.formState.errors.password && "input-error")}
+                                                placeholder="••••••••"
+                                                {...credForm.register("password")}
+                                            />
+                                            <PasswordToggle shown={showPassword} onToggle={() => setShowPassword((s) => !s)} />
+                                        </div>
                                         {credForm.formState.errors.password && (
                                             <p className="field-error">{credForm.formState.errors.password.message}</p>
                                         )}
@@ -423,12 +463,17 @@ export default function LoginPage() {
                                 <form onSubmit={resetForm.handleSubmit(onResetSubmit)} noValidate className="space-y-5">
                                     <div>
                                         <label className="label" htmlFor="new-password">New password</label>
-                                        <input
-                                            id="new-password" type="password" autoComplete="new-password" autoFocus
-                                            className={clsx("input", resetForm.formState.errors.password && "input-error")}
-                                            placeholder="Min. 8 characters"
-                                            {...resetForm.register("password")}
-                                        />
+                                        <div className="relative">
+                                            <input
+                                                id="new-password"
+                                                type={showNewPw ? "text" : "password"}
+                                                autoComplete="new-password" autoFocus
+                                                className={clsx("input pr-10", resetForm.formState.errors.password && "input-error")}
+                                                placeholder="Min. 8 characters"
+                                                {...resetForm.register("password")}
+                                            />
+                                            <PasswordToggle shown={showNewPw} onToggle={() => setShowNewPw((s) => !s)} />
+                                        </div>
                                         {resetForm.formState.errors.password && (
                                             <p className="field-error">{resetForm.formState.errors.password.message}</p>
                                         )}
@@ -436,12 +481,17 @@ export default function LoginPage() {
 
                                     <div>
                                         <label className="label" htmlFor="confirm-password">Confirm new password</label>
-                                        <input
-                                            id="confirm-password" type="password" autoComplete="new-password"
-                                            className={clsx("input", resetForm.formState.errors.password_confirmation && "input-error")}
-                                            placeholder="Re-enter password"
-                                            {...resetForm.register("password_confirmation")}
-                                        />
+                                        <div className="relative">
+                                            <input
+                                                id="confirm-password"
+                                                type={showConfirmPw ? "text" : "password"}
+                                                autoComplete="new-password"
+                                                className={clsx("input pr-10", resetForm.formState.errors.password_confirmation && "input-error")}
+                                                placeholder="Re-enter password"
+                                                {...resetForm.register("password_confirmation")}
+                                            />
+                                            <PasswordToggle shown={showConfirmPw} onToggle={() => setShowConfirmPw((s) => !s)} />
+                                        </div>
                                         {resetForm.formState.errors.password_confirmation && (
                                             <p className="field-error">{resetForm.formState.errors.password_confirmation.message}</p>
                                         )}
