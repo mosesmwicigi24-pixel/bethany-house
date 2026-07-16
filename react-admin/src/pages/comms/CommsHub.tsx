@@ -47,22 +47,79 @@ function fmtTime(iso: string) {
     return d.toLocaleDateString("en-KE", { day: "2-digit", month: "short" });
 }
 
+/** Exact wall-clock time — used where `fmtTime`'s relative wording ("5m") would be ambiguous. */
+function fmtClock(iso: string) {
+    return new Date(iso).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" });
+}
+
+/** "Today" / "Yesterday" beat a date every time for the two days people actually read. */
+function dateLabel(iso: string) {
+    const d     = new Date(iso);
+    const today = new Date();
+    const start = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const days  = Math.round((start(today) - start(d)) / 86_400_000);
+    if (days === 0) return "Today";
+    if (days === 1) return "Yesterday";
+    if (days < 7)   return d.toLocaleDateString("en-KE", { weekday: "long" });
+    return d.toLocaleDateString("en-KE", { weekday: "long", day: "2-digit", month: "long" });
+}
+
 function groupByDate(messages: ChannelMessage[]) {
     const groups: Record<string, ChannelMessage[]> = {};
     for (const m of messages) {
-        const date = new Date(m.created_at).toLocaleDateString("en-KE", {
-            weekday: "long", day: "2-digit", month: "long",
-        });
+        const date = dateLabel(m.created_at);
         if (!groups[date]) groups[date] = [];
         groups[date].push(m);
     }
     return Object.entries(groups).map(([date, messages]) => ({ date, messages }));
 }
 
+/**
+ * Consecutive messages from one author within this window collapse into a single
+ * avatar + name header. Five minutes is the usual chat convention: long enough to
+ * absorb a burst of typing, short enough that a genuine pause re-introduces the
+ * header and re-anchors who is speaking.
+ */
+const GROUP_WINDOW_MS = 5 * 60_000;
+
+function isContinuation(msg: ChannelMessage, prev?: ChannelMessage) {
+    if (!prev) return false;
+    if (msg.type === "system" || prev.type === "system") return false;
+    if (!msg.user || !prev.user || msg.user.id !== prev.user.id) return false;
+    if (msg.reply_to) return false; // a reply opens a new thought — always show its header
+    return new Date(msg.created_at).getTime() - new Date(prev.created_at).getTime() < GROUP_WINDOW_MS;
+}
+
+/**
+ * Avatar tints are derived from the name, so each person keeps the same colour
+ * everywhere and in every session — the colour becomes a recognisable handle when
+ * you're scanning a busy channel, which a single brand tint can never be.
+ */
+const AVATAR_TINTS = [
+    "bg-brand-500/15 text-brand-700",
+    "bg-emerald-500/15 text-emerald-700",
+    "bg-amber-500/20 text-amber-700",
+    "bg-violet-500/15 text-violet-700",
+    "bg-rose-500/15 text-rose-700",
+    "bg-cyan-500/15 text-cyan-700",
+    "bg-indigo-500/15 text-indigo-700",
+    "bg-teal-500/15 text-teal-700",
+];
+
+function tintFor(name?: string) {
+    if (!name) return AVATAR_TINTS[0];
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+    return AVATAR_TINTS[hash % AVATAR_TINTS.length];
+}
+
 function Avatar({ name, initials, size = "sm" }: { name?: string; initials: string; size?: "xs" | "sm" | "md" }) {
     const sz = size === "xs" ? "w-5 h-5 text-2xs" : size === "md" ? "w-9 h-9 text-sm" : "w-7 h-7 text-2xs";
     return (
-        <div className={clsx("rounded-full bg-brand-500/15 flex items-center justify-center shrink-0 font-bold text-brand-600", sz)} title={name}>
+        <div className={clsx(
+            "rounded-full flex items-center justify-center shrink-0 font-bold tracking-tight select-none ring-1 ring-inset ring-black/5",
+            tintFor(name), sz,
+        )} title={name}>
             {initials}
         </div>
     );
@@ -1414,11 +1471,13 @@ function EntityChip({ entity, isOwn }: { entity: LinkedEntity; isOwn: boolean })
 
 // ─── Message content - splits text bubble from bare attachments ───────────────
 
-function MessageContent({ body, isOwn, linkedEntities, entityPreviews }: {
+function MessageContent({ body, isOwn, linkedEntities, entityPreviews, continued = false }: {
     body: string;
     isOwn: boolean;
     linkedEntities?: LinkedEntity[];
     entityPreviews?: Record<string, EntityPreview>;
+    /** Follow-up in a same-author run: no tail corner, so the run reads as one column. */
+    continued?: boolean;
 }) {
     const { textContent, images, files } = parseBody(body);
     const hasText        = textContent.length > 0;
@@ -1430,10 +1489,16 @@ function MessageContent({ body, isOwn, linkedEntities, entityPreviews }: {
             {/* Coloured bubble - only rendered when there is text */}
             {hasText && (
                 <div className={clsx(
-                    "max-w-[82vw] sm:max-w-md rounded-2xl px-3.5 py-2 text-sm leading-relaxed break-words",
+                    // max-w-prose-ish: long lines are the enemy of scanability, and
+                    // the old md cap let a paragraph run wider than comfortable.
+                    "max-w-[82vw] sm:max-w-[26rem] rounded-2xl px-3.5 py-2 text-sm leading-relaxed break-words",
                     isOwn
-                        ? "bg-brand-600 text-white rounded-tr-sm"
-                        : "bg-white border border-surface-100 text-surface-800 rounded-tl-sm shadow-sm"
+                        // A subtle vertical gradient reads as lit rather than flat-filled,
+                        // and the brand-tinted shadow lifts the bubble off the canvas.
+                        ? "bg-gradient-to-b from-brand-500 to-brand-600 text-white shadow-sm shadow-brand-600/20"
+                        : "bg-white border border-surface-100 text-surface-800 shadow-sm shadow-surface-900/5",
+                    // Tail on the opening bubble only.
+                    !continued && (isOwn ? "rounded-tr-md" : "rounded-tl-md"),
                 )}>
                     <RenderTextOnly body={textContent} isOwn={isOwn} />
                     {/* Entity chips inside the bubble */}
@@ -1491,11 +1556,13 @@ function RenderTextOnly({ body, isOwn }: { body: string; isOwn: boolean }) {
 
 // ─── Message bubble ───────────────────────────────────────────────────────────
 
-function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, onReaction }: {
+function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, onReaction, continued = false }: {
     message: ChannelMessage; channelId: number; currentUserId?: number;
     onReply: (m: ChannelMessage) => void; onDeleted: (id: number) => void;
     /** Called with the server-confirmed reactions map after a successful toggle. */
     onReaction: (messageId: number, reactions: Record<string, number[]>) => void;
+    /** Same author, moments after the previous message: drop the avatar and header. */
+    continued?: boolean;
 }) {
     const [hovering, setHovering]           = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1548,25 +1615,53 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
 
     if (isSystem) {
         return (
-            <div className="flex justify-center py-1">
-                <span className="text-2xs text-surface-400 bg-surface-50 px-3 py-1 rounded-full border border-surface-100">{message.body}</span>
+            <div className="flex justify-center py-2">
+                <span className="text-2xs text-surface-500 bg-surface-50/80 px-3 py-1 rounded-full border border-surface-200/60">{message.body}</span>
             </div>
         );
     }
 
     return (
-        <div className={clsx("group relative flex gap-2 sm:gap-2.5 px-2 sm:px-4 py-3 hover:bg-surface-50/50 transition-colors", isOwn && "flex-row-reverse")}
+        <div className={clsx(
+                "group relative flex gap-2 sm:gap-2.5 px-2 sm:px-4 hover:bg-surface-50/60 transition-colors",
+                // A new speaker gets air above; their own follow-ups stay tight to
+                // them, so a burst reads as one block rather than three strangers.
+                continued ? "py-0.5" : "pt-4 pb-0.5",
+                isOwn && "flex-row-reverse",
+            )}
             onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}>
-            <Avatar initials={message.user?.initials ?? "?"} name={message.user?.name} />
-            <div className={clsx("relative flex-1 min-w-0", isOwn && "items-end flex flex-col")}>
-                <div className={clsx("flex items-baseline gap-2 mb-0.5", isOwn && "flex-row-reverse")}>
-                    <span className="text-xs font-semibold text-surface-800">{message.user?.name ?? "Unknown"}</span>
-                    <span className="text-2xs text-surface-400">{fmtTime(message.created_at)}</span>
-                    {message.edited_at && <span className="text-2xs text-surface-400 italic">(edited)</span>}
+            {continued ? (
+                // Keeps the bubbles in the same column as the header above, and
+                // reuses the freed gutter for the timestamp — on hover only, so
+                // repeated times don't clutter the read.
+                <div className="w-7 shrink-0 flex items-start justify-center pt-1" aria-hidden>
+                    <span className={clsx(
+                        "text-2xs text-surface-400 tabular-nums transition-opacity",
+                        hovering ? "opacity-100" : "opacity-0",
+                    )}>{fmtClock(message.created_at)}</span>
                 </div>
+            ) : (
+                <Avatar initials={message.user?.initials ?? "?"} name={message.user?.name} />
+            )}
+            <div className={clsx("relative flex-1 min-w-0", isOwn && "items-end flex flex-col")}>
+                {!continued && (
+                    <div className={clsx("flex items-baseline gap-2 mb-1", isOwn && "flex-row-reverse")}>
+                        <span className="text-xs font-semibold text-surface-800 tracking-tight">{message.user?.name ?? "Unknown"}</span>
+                        <span className="text-2xs text-surface-400 tabular-nums">{fmtTime(message.created_at)}</span>
+                        {message.edited_at && <span className="text-2xs text-surface-400 italic">(edited)</span>}
+                    </div>
+                )}
+                {continued && message.edited_at && (
+                    <span className={clsx("text-2xs text-surface-400 italic mb-0.5", isOwn && "self-end")}>(edited)</span>
+                )}
                 {message.reply_to && (
-                    <div className="mb-1 px-2 py-1 rounded-lg bg-surface-100 border-l-2 border-brand-400 text-xs text-surface-500 max-w-xs">
-                        <span className="font-semibold">{message.reply_to.user_name}</span>: {stripMarkdown(message.reply_to.body)}
+                    <div className={clsx(
+                        "mb-1 pl-2.5 pr-3 py-1 rounded-lg bg-surface-50 border-l-2 border-brand-400/70 text-xs text-surface-500 max-w-xs",
+                        isOwn && "self-end",
+                    )}>
+                        <span className="font-semibold text-surface-600">{message.reply_to.user_name}</span>
+                        {/* One line only: the quote is a pointer back, not a re-read. */}
+                        <span className="block truncate">{stripMarkdown(message.reply_to.body)}</span>
                     </div>
                 )}
                 {/* Bubble + hover toolbar */}
@@ -1597,7 +1692,7 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                             </button>
                         </div>
                     )}
-                    <MessageContent body={message.body} isOwn={isOwn} linkedEntities={message.linked_entities} entityPreviews={message.entity_previews} />
+                    <MessageContent body={message.body} isOwn={isOwn} continued={continued} linkedEntities={message.linked_entities} entityPreviews={message.entity_previews} />
                     {/* Toolbar for other people's messages - placed after content */}
                     {!isOwn && (
                         <div className={clsx(
@@ -1631,9 +1726,11 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                     <div className="flex flex-wrap gap-1 mt-1">
                         {Object.entries(message.reactions).map(([emoji, users]) => (
                             <button key={emoji} onClick={() => reactMutation.mutate(emoji)}
-                                className={clsx("flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs border transition-colors",
-                                    users.includes(currentUserId ?? -1) ? "bg-brand-50 border-brand-300 text-brand-700" : "bg-surface-50 border-surface-200 text-surface-600 hover:border-brand-300")}>
-                                {emoji} <span className="font-semibold">{users.length}</span>
+                                className={clsx("flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border shadow-sm transition-all active:scale-95",
+                                    users.includes(currentUserId ?? -1)
+                                        ? "bg-brand-50 border-brand-300 text-brand-700 ring-1 ring-brand-200"
+                                        : "bg-white border-surface-200 text-surface-600 hover:border-brand-300 hover:bg-brand-50/40")}>
+                                {emoji} <span className="font-semibold tabular-nums">{users.length}</span>
                             </button>
                         ))}
                     </div>
@@ -2216,21 +2313,31 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                     {isLoading ? (
                         <div className="flex items-center justify-center h-full text-sm text-surface-400">Loading…</div>
                     ) : grouped.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full gap-2 text-surface-400">
-                            <svg className="w-10 h-10 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
-                            </svg>
-                            <p className="text-sm">No messages yet. Start the conversation!</p>
+                        <div className="flex flex-col items-center justify-center h-full gap-3 px-6 text-center">
+                            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-brand-50 to-brand-100 border border-brand-200/60 flex items-center justify-center text-brand-500 shadow-sm">
+                                <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+                                </svg>
+                            </div>
+                            <div>
+                                <p className="text-sm font-semibold text-surface-700">No messages yet</p>
+                                <p className="text-xs text-surface-400 mt-0.5">
+                                    Say hello — or type <span className="font-mono text-2xs bg-surface-100 text-surface-600 px-1 py-0.5 rounded">#</span> to link an order.
+                                </p>
+                            </div>
                         </div>
                     ) : grouped.map(({ date, messages: msgs }) => (
                         <div key={date}>
-                            <div className="flex items-center gap-3 px-4 py-2">
-                                <div className="h-px flex-1 bg-surface-100" />
-                                <span className="text-2xs text-surface-400 font-medium shrink-0">{date}</span>
-                                <div className="h-px flex-1 bg-surface-100" />
+                            {/* Sticky pill: scroll back through a long day and you never
+                                lose track of which day you're reading. */}
+                            <div className="sticky top-0 z-10 flex justify-center py-2 pointer-events-none">
+                                <span className="text-2xs font-semibold text-surface-500 bg-white/85 backdrop-blur-sm px-3 py-1 rounded-full border border-surface-200/70 shadow-sm">
+                                    {date}
+                                </span>
                             </div>
-                            {msgs.map(msg => (
+                            {msgs.map((msg, i) => (
                                 <MessageBubble key={msg.id} message={msg} channelId={channel.id}
+                                    continued={isContinuation(msg, msgs[i - 1])}
                                     currentUserId={user?.id} onReply={setReplyTo}
                                     onDeleted={id => setMessages(prev => prev.filter(m => m.id !== id))}
                                     onReaction={(msgId, reactions) =>
@@ -2240,8 +2347,18 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                         </div>
                     ))}
                     {typing.filter(n => n !== (user?.first_name ?? "")).length > 0 && (
-                        <div className="px-4 py-1 text-xs text-surface-400 italic">
-                            {typing.join(", ")} {typing.length === 1 ? "is" : "are"} typing…
+                        <div className="flex items-center gap-2 px-4 py-2">
+                            {/* Three breathing dots read as "someone is there" far faster
+                                than the word "typing" ever does. */}
+                            <span className="flex items-center gap-1 bg-white border border-surface-100 rounded-full px-2.5 py-1.5 shadow-sm">
+                                {[0, 150, 300].map(delay => (
+                                    <span key={delay} className="w-1.5 h-1.5 rounded-full bg-surface-300 animate-bounce"
+                                        style={{ animationDelay: `${delay}ms`, animationDuration: "1s" }} />
+                                ))}
+                            </span>
+                            <span className="text-xs text-surface-400">
+                                {typing.join(", ")} {typing.length === 1 ? "is" : "are"} typing…
+                            </span>
                         </div>
                     )}
                     <div ref={bottomRef} />
