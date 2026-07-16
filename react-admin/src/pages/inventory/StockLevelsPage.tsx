@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { stockApi } from "@/api/stock";
 import type {
@@ -351,19 +351,31 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
     const [loadingVariants, setLoadingVariants] = useState<
         Record<number, boolean>
     >({});
+    // Multi-variant picker: tick several variants of a product and get a row for
+    // each, instead of re-picking the product for every single variant.
+    const [variantPicker, setVariantPicker] = useState<
+        { rowKey: string; selected: Set<number> } | null
+    >(null);
 
     // Data for selectors
     const { data: productsData } = useQuery({
         queryKey: ["products-simple"],
         queryFn: () =>
             get<{ data: any[] }>("/v1/admin/products", {
-                params: { per_page: "200" },
+                params: { per_page: "500" },
             }),
         enabled: open,
     });
     const { data: outletsData } = useQuery({
         queryKey: ["outlets"],
         queryFn: () => get<any>("/v1/admin/outlets"),
+        enabled: open,
+    });
+    // Category tree — groups the product picker under its ROOT category.
+    const { data: categoryTree } = useQuery({
+        queryKey: ["category-tree"],
+        queryFn: () => get<any>("/v1/admin/categories", { params: { tree: "true" } }),
+        staleTime: 300_000,
         enabled: open,
     });
 
@@ -377,6 +389,54 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
         ? outletsData
         : (outletsData?.data ?? []);
 
+    // Every category id → its ROOT category name.
+    const rootByCategoryId = useMemo(() => {
+        const map = new Map<number, string>();
+        const walk = (node: any, rootName: string) => {
+            map.set(node.id, rootName);
+            (node.children ?? []).forEach((c: any) => walk(c, rootName));
+        };
+        (categoryTree?.data ?? []).forEach((root: any) => walk(root, root.name_en));
+        return map;
+    }, [categoryTree]);
+
+    // Products bucketed under their root category for <optgroup> headings.
+    const productGroups = useMemo(() => {
+        const groups = new Map<string, any[]>();
+        for (const p of products) {
+            const key = (p.category?.id && rootByCategoryId.get(p.category.id)) || "Uncategorised";
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key)!.push(p);
+        }
+        return [...groups.entries()]
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([name, items]) => ({ name, items }));
+    }, [products, rootByCategoryId]);
+
+    // Default outlet: the Sonalux house outlet (still changeable per row).
+    const defaultOutletId = useMemo<number | "">(() => {
+        if (!outlets.length) return "";
+        const sonalux = outlets.find((o: any) => /sonalux/i.test(o.name ?? ""));
+        return (sonalux ?? outlets[0]).id as number;
+    }, [outlets]);
+
+    // Backfill rows created before the outlets finished loading.
+    useEffect(() => {
+        if (!defaultOutletId) return;
+        setRows((prev) =>
+            prev.map((r) =>
+                r.outlet_id === ""
+                    ? {
+                          ...r,
+                          outlet_id: defaultOutletId,
+                          outlet_name: outlets.find((o: any) => o.id === defaultOutletId)?.name,
+                      }
+                    : r,
+            ),
+        );
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [defaultOutletId]);
+
     function newRow(): EntryRow {
         return {
             _key: `row-${Date.now()}-${Math.random()}`,
@@ -389,9 +449,40 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
         };
     }
 
-    const addRow = () => setRows((prev) => [...prev, newRow()]);
+    const addRow = () =>
+        setRows((prev) => [...prev, { ...newRow(), outlet_id: defaultOutletId }]);
     const removeRow = (key: string) =>
         setRows((prev) => prev.filter((r) => r._key !== key));
+
+    /**
+     * Expand one row into a row per selected variant: the first fills the current
+     * row, the rest are inserted right after it (same product/outlet/qty), so the
+     * product + outlet only have to be chosen once.
+     */
+    const addVariantsToRows = (rowKey: string, variantIds: number[]) => {
+        if (!variantIds.length) return;
+        setRows((prev) => {
+            const idx = prev.findIndex((r) => r._key === rowKey);
+            if (idx === -1) return prev;
+            const base = prev[idx];
+            const variants = getVariants(base.product_id);
+            const mk = (vid: number, key?: string): EntryRow => ({
+                ...base,
+                _key: key ?? `row-${Date.now()}-${Math.random()}-${vid}`,
+                product_variant_id: vid,
+                variant_name:
+                    variants.find((x: any) => x.id === vid)?.variant_name ?? "",
+            });
+            const next = [...prev];
+            next.splice(
+                idx,
+                1,
+                mk(variantIds[0], base._key),
+                ...variantIds.slice(1).map((vid) => mk(vid)),
+            );
+            return next;
+        });
+    };
 
     // Fetch variants for a product if it's variable and not cached
     const fetchVariants = async (productId: number) => {
@@ -585,19 +676,22 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
                                             <option value="">
                                                 - Product -
                                             </option>
-                                            {products.map((p: any) => (
-                                                <option key={p.id} value={p.id}>
-                                                    {p.en_translation?.name ??
-                                                        p.sku}{" "}
-                                                    ({p.sku})
-                                                </option>
+                                            {productGroups.map((g: { name: string; items: any[] }) => (
+                                                <optgroup key={g.name} label={g.name}>
+                                                    {g.items.map((p: any) => (
+                                                        <option key={p.id} value={p.id}>
+                                                            {p.en_translation?.name ?? p.sku} ({p.sku})
+                                                        </option>
+                                                    ))}
+                                                </optgroup>
                                             ))}
                                         </select>
                                     </div>
 
                                     {/* Variant */}
-                                    <div className="col-span-2">
+                                    <div className="col-span-2 relative">
                                         {isVariableProduct(row.product_id) ? (
+                                          <>
                                             <select
                                                 className="input text-sm py-1.5"
                                                 value={
@@ -640,6 +734,95 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
                                                     </option>
                                                 ))}
                                             </select>
+
+                                            {getVariants(row.product_id).length > 1 && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        setVariantPicker(
+                                                            variantPicker?.rowKey === row._key
+                                                                ? null
+                                                                : { rowKey: row._key, selected: new Set() },
+                                                        )
+                                                    }
+                                                    className="mt-1 text-2xs font-medium text-brand-600 hover:text-brand-700"
+                                                >
+                                                    + Select several…
+                                                </button>
+                                            )}
+
+                                            {variantPicker?.rowKey === row._key && (
+                                                <div className="absolute z-50 top-full left-0 mt-1 w-64 bg-white border border-surface-200 rounded-xl shadow-lg p-2 max-h-64 overflow-y-auto">
+                                                    <div className="flex items-center justify-between px-1 pb-1 mb-1 border-b border-surface-100">
+                                                        <span className="text-2xs font-semibold text-surface-500 uppercase tracking-wide">
+                                                            Select variants
+                                                        </span>
+                                                        <button
+                                                            type="button"
+                                                            className="text-2xs text-brand-600 hover:text-brand-700"
+                                                            onClick={() => {
+                                                                const all = getVariants(row.product_id).map((v: any) => v.id);
+                                                                setVariantPicker((p) =>
+                                                                    p
+                                                                        ? {
+                                                                              ...p,
+                                                                              selected: new Set(
+                                                                                  p.selected.size === all.length ? [] : all,
+                                                                              ),
+                                                                          }
+                                                                        : p,
+                                                                );
+                                                            }}
+                                                        >
+                                                            {variantPicker.selected.size === getVariants(row.product_id).length
+                                                                ? "Clear all"
+                                                                : "Select all"}
+                                                        </button>
+                                                    </div>
+                                                    {getVariants(row.product_id).map((v: any) => (
+                                                        <label
+                                                            key={v.id}
+                                                            className="flex items-center gap-2 px-1 py-1 text-xs hover:bg-surface-50 rounded cursor-pointer"
+                                                        >
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={variantPicker.selected.has(v.id)}
+                                                                onChange={() =>
+                                                                    setVariantPicker((p) => {
+                                                                        if (!p) return p;
+                                                                        const s = new Set(p.selected);
+                                                                        if (s.has(v.id)) s.delete(v.id);
+                                                                        else s.add(v.id);
+                                                                        return { ...p, selected: s };
+                                                                    })
+                                                                }
+                                                            />
+                                                            <span className="truncate">{v.variant_name}</span>
+                                                        </label>
+                                                    ))}
+                                                    <div className="flex gap-2 pt-2 mt-1 border-t border-surface-100">
+                                                        <button
+                                                            type="button"
+                                                            className="flex-1 py-1 text-2xs rounded-lg border border-surface-200 text-surface-600 hover:bg-surface-50"
+                                                            onClick={() => setVariantPicker(null)}
+                                                        >
+                                                            Cancel
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            disabled={variantPicker.selected.size === 0}
+                                                            className="flex-1 py-1 text-2xs rounded-lg bg-brand-500 text-white font-semibold disabled:opacity-40"
+                                                            onClick={() => {
+                                                                addVariantsToRows(row._key, [...variantPicker.selected]);
+                                                                setVariantPicker(null);
+                                                            }}
+                                                        >
+                                                            Add {variantPicker.selected.size || ""}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                          </>
                                         ) : (
                                             <select
                                                 className="input text-sm py-1.5"
