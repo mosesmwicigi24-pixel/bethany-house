@@ -37,16 +37,39 @@ class ChannelMessageSent implements ShouldBroadcastNow
         return 'message.sent';
     }
 
+    /**
+     * Must mirror ChannelController::formatMessage() — the client renders a
+     * broadcast message with the same component as a fetched one.
+     *
+     * `linked_entities` + `entity_previews` were previously omitted here, so any
+     * client receiving the live socket event (including the SENDER, since this is
+     * broadcast without ->toOthers()) rendered the message with its order/entity
+     * chip missing — the token is stripped at render and the chips come solely
+     * from these fields. The sender's broadcast also beat the HTTP response, and
+     * the client's first-write-wins de-dupe then discarded the complete payload,
+     * so the chip never appeared until a reload.
+     */
     public function broadcastWith(): array
     {
-        $user = $this->message->user;
+        $user  = $this->message->user;
+        $reply = $this->message->replyTo;
+
         return [
             'id'           => $this->message->id,
             'channel_id'   => $this->message->channel_id,
             'reply_to_id'  => $this->message->reply_to_id,
+            'reply_to'     => $reply ? [
+                'id'        => $reply->id,
+                'body'      => mb_substr($reply->body, 0, 80),
+                'user_name' => $reply->user ? trim("{$reply->user->first_name} {$reply->user->last_name}") : null,
+            ] : null,
             'type'         => $this->message->type,
             'body'         => $this->message->body,
             'mentions'     => $this->message->mentions,
+            'linked_entities' => $this->message->linked_entities ?? [],
+            'entity_previews' => !empty($this->message->linked_entities)
+                ? \App\Services\IntelligenceService::entityChipPreviews($this->message->linked_entities)
+                : [],
             'attachments'  => $this->message->attachments,
             'reactions'    => $this->message->reactions,
             'edited_at'    => $this->message->edited_at?->toIso8601String(),
