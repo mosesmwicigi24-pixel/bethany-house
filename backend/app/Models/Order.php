@@ -11,6 +11,9 @@ class Order extends Model
 
     protected $fillable = [
         'order_number',
+        // Idempotency key for POS sale creation — without this in $fillable, mass
+        // assignment silently drops it and every submit looks like a new sale.
+        'client_request_id',
         'user_id',
         'outlet_id',
         'order_type',

@@ -472,9 +472,39 @@ class PosController extends Controller
 
     // --- Sales ----------------------------------------------------------------
 
+    /**
+     * Has this exact submit already created an order?
+     *
+     * Sales dedupe on an EXACT client key, never on content. recordPosPay can use
+     * a short same-order/method/amount window because a second identical payment
+     * on one order within seconds cannot be real. Creating a SALE is the opposite:
+     * two identical sales are routine — it is a queue, the next customer buying
+     * the same item at the same till moments later. Any content-based guess would
+     * eventually swallow a real sale, and the risks are not symmetric: a duplicate
+     * order is visible and fixable, a swallowed one is lost revenue and a customer
+     * who paid for nothing. So: same key = same attempt; a real second sale brings
+     * a new key and is never touched.
+     *
+     * The payoff is bigger than blocking double-taps. Today a network timeout
+     * leaves the cashier guessing whether the sale landed, so they tap again and
+     * manufacture the duplicate. With a key, retrying is safe by construction and
+     * returns the original receipt.
+     */
+    private function findReplayedOrder(?string $clientRequestId): ?Order
+    {
+        if (!$clientRequestId) {
+            return null;
+        }
+
+        return Order::where('client_request_id', $clientRequestId)->first();
+    }
+
     public function createSale(Request $request): JsonResponse
     {
         $validated = $request->validate([
+            // Idempotency key: same key = this attempt arriving again. See
+            // findReplayedOrder() for why sales cannot use a content heuristic.
+            'client_request_id'      => 'nullable|string|max:64',
             'outlet_id'              => 'required|exists:outlets,id',
             'customer_id'            => 'nullable|exists:customers,id',
             'customer_first_name'    => 'nullable|string|max:255',
@@ -526,6 +556,21 @@ class PosController extends Controller
         $outletId = (int) $validated['outlet_id'];
 
         $this->authoriseOutletAccess($user, $outletId);
+
+        // Fast path for the ordinary double-tap, where the first submit has already
+        // finished: hand back the sale it made instead of ringing the cart up twice.
+        // Placed after the outlet check so a replay is still access-controlled, and
+        // before any work so it costs one indexed read. The harder case — both
+        // submits still in flight — is caught by the unique index at the bottom.
+        if ($replay = $this->findReplayedOrder($validated['client_request_id'] ?? null)) {
+            return response()->json([
+                'message'           => 'Sale already completed.',
+                'order'             => $this->transformSaleOrder($replay->load('items')),
+                'change'            => 0,
+                'production_orders' => [],
+                'replay'            => true,
+            ], 200);
+        }
 
         // Resolve payment list - normalise single-method and split-payments array
         $paymentsInput = $validated['payments'] ?? null;
@@ -811,6 +856,7 @@ class PosController extends Controller
 
             $order = Order::create([
                 'order_number'         => $orderNumber,
+                'client_request_id'    => $validated['client_request_id'] ?? null,
                 'outlet_id'            => $outletId,
                 'user_id'              => $linkedUserId,
                 'order_type'           => 'pos',
@@ -1102,6 +1148,25 @@ class PosController extends Controller
                 'production_orders' => $raisedProductionOrders,
             ], 201);
 
+        } catch (\Illuminate\Database\UniqueConstraintViolationException $e) {
+            // Two submits of the same attempt raced: both missed the read-check
+            // above, both inserted, and the unique index rejected this one. The
+            // other has already created the sale — hand back its order rather
+            // than an error. This is the case the index exists for; without it
+            // the read-check alone would be a race, not a guard.
+            DB::rollBack();
+            $replay = $this->findReplayedOrder($validated['client_request_id'] ?? null);
+            if ($replay) {
+                return response()->json([
+                    'message'           => 'Sale already completed.',
+                    'order'             => $this->transformSaleOrder($replay->load('items')),
+                    'change'            => 0,
+                    'production_orders' => [],
+                    'replay'            => true,
+                ], 200);
+            }
+            Log::error('POS sale failed', ['error' => $e->getMessage()]);
+            return response()->json(['message' => 'Failed to complete sale. Please try again.'], 500);
         } catch (\Throwable $e) {
             DB::rollBack();
             Log::error('POS sale failed', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
@@ -2999,6 +3064,7 @@ class PosController extends Controller
     public function createPendingOrder(Request $request): JsonResponse
     {
         $validated = $request->validate([
+            'client_request_id'                    => 'nullable|string|max:64',
             'outlet_id'                            => 'required|exists:outlets,id',
             'customer_id'                          => 'nullable|exists:customers,id',
             'customer_first_name'                  => 'nullable|string|max:255',
@@ -3053,6 +3119,25 @@ class PosController extends Controller
         $user     = $request->user();
         $outletId = (int) $validated['outlet_id'];
         $this->authoriseOutletAccess($user, $outletId);
+
+        // Same replay fast path as createSale — a double-tapped "create order" is
+        // worse here than a duplicate payment line, because a pending order also
+        // reserves stock and can raise production orders.
+        if ($replay = $this->findReplayedOrder($validated['client_request_id'] ?? null)) {
+            return response()->json([
+                'message'           => 'Order already created.',
+                'order_id'          => $replay->id,
+                'order_number'      => $replay->order_number,
+                'total_amount'      => $replay->total_amount,
+                'currency_code'     => $replay->currency_code,
+                'is_international'  => false,
+                'is_deposit'        => $replay->payment_status === 'deposit',
+                'deposit_amount'    => null,
+                'order'             => $this->transformSaleOrder($replay->load(['items', 'payments'])),
+                'production_orders' => [],
+                'replay'            => true,
+            ], 200);
+        }
 
         $outlet       = Outlet::findOrFail($outletId);
         $taxInclusive = TaxCalculationService::isTaxInclusive();
@@ -3288,6 +3373,7 @@ class PosController extends Controller
 
             $order = Order::create([
                 'order_number'        => $orderNumber,
+                'client_request_id'   => $validated['client_request_id'] ?? null,
                 'outlet_id'           => $outletId,
                 'user_id'             => $linkedUserId,
                 'order_type'          => $channel,
@@ -3393,6 +3479,28 @@ class PosController extends Controller
                 'production_orders' => $raisedProductionOrders,
             ], 201);
 
+        } catch (\Illuminate\Database\UniqueConstraintViolationException $e) {
+            // Concurrent submits of the same attempt: the index rejected this one,
+            // the other already created the order. Return the winner's.
+            DB::rollBack();
+            $replay = $this->findReplayedOrder($validated['client_request_id'] ?? null);
+            if ($replay) {
+                return response()->json([
+                    'message'           => 'Order already created.',
+                    'order_id'          => $replay->id,
+                    'order_number'      => $replay->order_number,
+                    'total_amount'      => $replay->total_amount,
+                    'currency_code'     => $replay->currency_code,
+                    'is_international'  => false,
+                    'is_deposit'        => $replay->payment_status === 'deposit',
+                    'deposit_amount'    => null,
+                    'order'             => $this->transformSaleOrder($replay->load(['items', 'payments'])),
+                    'production_orders' => [],
+                    'replay'            => true,
+                ], 200);
+            }
+            Log::error('POS createPendingOrder failed', ['error' => $e->getMessage()]);
+            return response()->json(['message' => 'Failed to create order. Please try again.'], 500);
         } catch (\Throwable $e) {
             DB::rollBack();
             Log::error('POS pending order failed', ['error' => $e->getMessage()]);
