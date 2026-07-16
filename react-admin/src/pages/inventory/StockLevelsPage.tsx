@@ -1267,7 +1267,8 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
                         stock records or create new ones.
                     </p>
                     <div className="border border-surface-100 rounded-xl overflow-hidden">
-                        <table className="w-full text-sm">
+                        <div className="overflow-x-auto">
+                        <table className="w-full text-sm min-w-[560px]">
                             <thead>
                                 <tr className="border-b border-surface-100 bg-surface-50 text-xs text-surface-500 uppercase">
                                     <th className="px-4 py-2.5 text-left font-semibold">
@@ -1311,6 +1312,7 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
                                 ))}
                             </tbody>
                         </table>
+                        </div>
                     </div>
                     <button
                         onClick={() => setStep("form")}

@@ -119,7 +119,8 @@ export default function PublicQuotationPage() {
                     </div>
 
                     {/* Items */}
-                    <table className="w-full text-sm">
+                    <div className="overflow-x-auto">
+                    <table className="w-full text-sm min-w-[520px]">
                         <thead>
                             <tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500">
                                 <th className="py-2">Description</th>
@@ -142,6 +143,7 @@ export default function PublicQuotationPage() {
                             ))}
                         </tbody>
                     </table>
+                    </div>
 
                     {/* Totals */}
                     <div className="mt-4 ml-auto w-64 space-y-1 text-sm">

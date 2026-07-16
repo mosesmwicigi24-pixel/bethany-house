@@ -404,6 +404,7 @@ function POFormModal({ onClose }: { onClose: () => void }) {
                     {/* Items table */}
                     {items.length > 0 ? (
                         <div className="border border-surface-200 rounded-lg overflow-hidden">
+                            <div className="table-wrapper rounded-none border-0">
                             <table className="table">
                                 <thead>
                                     <tr>
@@ -487,6 +488,7 @@ function POFormModal({ onClose }: { onClose: () => void }) {
                                     })}
                                 </tbody>
                             </table>
+                            </div>
                         </div>
                     ) : (
                         <div className="border-2 border-dashed border-surface-200 rounded-lg py-8 text-center text-surface-400 text-sm">
@@ -765,6 +767,7 @@ function PODetailModal({
                             Line Items
                         </p>
                         <div className="border border-surface-100 rounded-lg overflow-hidden">
+                            <div className="table-wrapper rounded-none border-0">
                             <table className="table">
                                 <thead>
                                     <tr>
@@ -919,6 +922,7 @@ function PODetailModal({
                                     </tr>
                                 </tfoot>
                             </table>
+                            </div>
                         </div>
                     </div>
 

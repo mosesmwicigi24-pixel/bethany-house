@@ -282,7 +282,8 @@ function NewTransferModal({
                     <>
                         {items.length > 0 && (
                             <div className="border border-surface-100 rounded-xl overflow-hidden">
-                                <table className="w-full text-sm">
+                                <div className="overflow-x-auto">
+                                <table className="w-full text-sm min-w-[560px]">
                                     <thead>
                                         <tr className="bg-surface-50 border-b border-surface-100 text-xs text-surface-400 uppercase">
                                             <th className="px-3 py-2 text-left">
@@ -381,6 +382,7 @@ function NewTransferModal({
                                         ))}
                                     </tbody>
                                 </table>
+                                </div>
                             </div>
                         )}
                         <div className="relative">
@@ -690,7 +692,8 @@ function TransferDetailModal({
                 </div>
 
                 <div className="border border-surface-100 rounded-xl overflow-hidden">
-                    <table className="w-full text-sm">
+                    <div className="overflow-x-auto">
+                    <table className="w-full text-sm min-w-[560px]">
                         <thead>
                             <tr className="bg-surface-50 border-b border-surface-100 text-xs text-surface-500 uppercase">
                                 <th className="px-3 py-2.5 text-left font-semibold">
@@ -802,6 +805,7 @@ function TransferDetailModal({
                             ))}
                         </tbody>
                     </table>
+                    </div>
                 </div>
 
                 <div className="grid grid-cols-3 gap-3 text-xs text-surface-500">
