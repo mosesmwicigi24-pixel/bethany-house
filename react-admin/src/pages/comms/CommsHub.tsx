@@ -1320,7 +1320,7 @@ aria-label="Delete">✕</button>
                             The textarea is absolute on top, transparent, and handles input.
                             This avoids caret displacement: wrapper height = mirror height. */}
                         <div aria-hidden="true"
-                            className="pointer-events-none text-sm leading-5 whitespace-pre-wrap break-words select-none w-full"
+                            className="composer-mirror pointer-events-none text-sm leading-5 whitespace-pre-wrap break-words select-none w-full"
                             style={{ wordBreak: "break-word", minHeight: "20px" }}>
                             {body
                                 ? parseComposerNodes(body, tokenMap)

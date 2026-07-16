@@ -126,10 +126,22 @@ export function AdminLayout() {
     // the layout correct when the POS search or message composer is focused.
     useEffect(() => {
         const setVh = () => {
-            document.documentElement.style.setProperty(
-                '--vh',
-                `${window.innerHeight * 0.01}px`
-            )
+            // visualViewport.height is the area actually visible RIGHT NOW — it
+            // shrinks when the software keyboard opens. window.innerHeight does
+            // not: on iOS it stays at full height with the keyboard up. This
+            // effect always listened to visualViewport (below) but then read
+            // innerHeight, so the keyboard listener wrote back an identical
+            // value and did nothing. The shell stayed ~750px tall while only
+            // ~420px was visible, so Safari scrolled the document to reveal the
+            // focused field — which is why the message composer ended up
+            // stranded at the top of the screen with dead space beneath it.
+            //
+            // Trade-off: visualViewport.height also shrinks on pinch-zoom, so a
+            // pinch resizes the shell. That is the accepted cost of correct
+            // keyboard behaviour in an app-shell layout, and typing is far more
+            // common here than pinching.
+            const h = window.visualViewport?.height ?? window.innerHeight
+            document.documentElement.style.setProperty('--vh', `${h * 0.01}px`)
         }
         setVh()
         window.addEventListener('resize', setVh)

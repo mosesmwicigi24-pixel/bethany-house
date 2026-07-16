@@ -2689,7 +2689,7 @@ function ProductionOrderChannelThread({ poId }: { poId: number }) {
                         <div className="relative flex-1 self-center min-w-0 max-h-28 overflow-y-auto">
                             {/* Mirror drives wrapper height; textarea is absolute overlay */}
                             <div aria-hidden="true"
-                                className="pointer-events-none text-xs leading-5 whitespace-pre-wrap break-words select-none w-full"
+                                className="composer-mirror pointer-events-none text-xs leading-5 whitespace-pre-wrap break-words select-none w-full"
                                 style={{ wordBreak: "break-word", minHeight: "20px" }}>
                                 {body
                                     ? parseBodyToNodes(body)
