@@ -339,10 +339,16 @@ function ProductSelectField({
     value,
     groups,
     onChange,
+    rowedProductIds,
+    onToggleProduct,
 }: {
     value: number | "";
     groups: { name: string; items: any[] }[];
     onChange: (id: number | "") => void;
+    /** Products that already have a row — drives the tick boxes. */
+    rowedProductIds: Set<number>;
+    /** Tick → insert a row for the product; untick → remove its row(s). */
+    onToggleProduct: (id: number) => void;
 }) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState("");
@@ -428,33 +434,72 @@ function ProductSelectField({
                                             <div className="sticky top-0 z-10 px-3 py-1.5 bg-brand-50 border-y border-brand-100 text-[11px] font-bold uppercase tracking-[0.08em] text-brand-700">
                                                 {g.name}
                                             </div>
-                                            {g.items.map((p: any, i: number) => (
-                                                <button
-                                                    key={p.id}
-                                                    type="button"
-                                                    onClick={() => {
-                                                        onChange(p.id);
-                                                        setOpen(false);
-                                                    }}
-                                                    className={clsx(
-                                                        "w-full text-left px-3 py-2 flex items-baseline justify-between gap-3 transition-colors border-b border-surface-50 last:border-0",
-                                                        i % 2 === 1 ? "bg-surface-50/60" : "bg-white",
-                                                        p.id === value
-                                                            ? "!bg-brand-100 text-brand-800"
-                                                            : "hover:bg-brand-50/70",
-                                                    )}
-                                                >
-                                                    <span className="text-sm font-medium text-surface-800 truncate">
-                                                        {nameOf(p)}
-                                                    </span>
-                                                    <span className="text-[11px] font-mono text-surface-400 shrink-0">
-                                                        {p.sku}
-                                                    </span>
-                                                </button>
-                                            ))}
+                                            {g.items.map((p: any, i: number) => {
+                                                const added = rowedProductIds.has(p.id);
+                                                return (
+                                                    <div
+                                                        key={p.id}
+                                                        className={clsx(
+                                                            "flex items-center gap-2.5 px-3 py-2 transition-colors border-b border-surface-50 last:border-0",
+                                                            i % 2 === 1 ? "bg-surface-50/60" : "bg-white",
+                                                            p.id === value
+                                                                ? "!bg-brand-100"
+                                                                : added
+                                                                  ? "!bg-brand-50"
+                                                                  : "hover:bg-brand-50/70",
+                                                        )}
+                                                    >
+                                                        {/* Tick box — adds/removes a row for this product */}
+                                                        <input
+                                                            type="checkbox"
+                                                            className="accent-brand-500 w-4 h-4 shrink-0 cursor-pointer"
+                                                            checked={added}
+                                                            onChange={() => onToggleProduct(p.id)}
+                                                            onClick={(e) => e.stopPropagation()}
+                                                            aria-label={`Add ${nameOf(p)}`}
+                                                        />
+                                                        {/* Name/SKU — picks this product for the current row */}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                onChange(p.id);
+                                                                setOpen(false);
+                                                            }}
+                                                            className="flex-1 min-w-0 text-left flex items-baseline justify-between gap-3"
+                                                        >
+                                                            <span
+                                                                className={clsx(
+                                                                    "text-sm truncate",
+                                                                    added || p.id === value
+                                                                        ? "font-semibold text-brand-800"
+                                                                        : "font-medium text-surface-800",
+                                                                )}
+                                                            >
+                                                                {nameOf(p)}
+                                                            </span>
+                                                            <span className="text-[11px] font-mono text-surface-400 shrink-0">
+                                                                {p.sku}
+                                                            </span>
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
                                     ))
                                 )}
+                            </div>
+
+                            <div className="px-3 py-2 border-t border-surface-100 shrink-0 flex items-center justify-between gap-2">
+                                <span className="text-[11px] text-surface-400">
+                                    Tick to add a row · untick to remove
+                                </span>
+                                <button
+                                    type="button"
+                                    className="px-3 py-1 text-2xs rounded-lg bg-brand-500 text-white font-semibold"
+                                    onClick={() => setOpen(false)}
+                                >
+                                    Done
+                                </button>
                             </div>
                         </div>
                     </>,
@@ -597,6 +642,46 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
         setRows((prev) => [...prev, { ...newRow(), outlet_id: defaultOutletId }]);
     const removeRow = (key: string) =>
         setRows((prev) => prev.filter((r) => r._key !== key));
+
+    /** Products that currently have a row (drives the product tick boxes). */
+    const rowedProductIds = useMemo(
+        () => new Set(rows.filter((r) => r.product_id !== "").map((r) => r.product_id as number)),
+        [rows],
+    );
+
+    /**
+     * Tick a product → insert a row for it (reusing a blank row if there is one);
+     * untick → remove that product's row(s) and their entries. Same live model as
+     * the variant checklist, so several products can be added in one pass.
+     */
+    const toggleProductRow = (productId: number) => {
+        fetchVariants(productId);
+        const p = products.find((x: any) => x.id === productId);
+        setRows((prev) => {
+            const mine = prev.filter((r) => r.product_id === productId);
+            if (mine.length) {
+                const next = prev.filter((r) => r.product_id !== productId);
+                return next.length ? next : [{ ...newRow(), outlet_id: defaultOutletId }];
+            }
+            const blankIdx = prev.findIndex((r) => r.product_id === "");
+            const filled: EntryRow = {
+                ...(blankIdx !== -1 ? prev[blankIdx] : newRow()),
+                _key: blankIdx !== -1 ? prev[blankIdx]._key : `row-${Date.now()}-${Math.random()}-${productId}`,
+                product_id: productId,
+                product_variant_id: null,
+                variant_name: "",
+                product_name: p?.en_translation?.name ?? p?.sku,
+                product_sku: p?.sku,
+                outlet_id: (blankIdx !== -1 ? prev[blankIdx].outlet_id : "") || defaultOutletId,
+            };
+            if (blankIdx !== -1) {
+                const next = [...prev];
+                next[blankIdx] = filled;
+                return next;
+            }
+            return [...prev, filled];
+        });
+    };
 
     /** Variant ids of a product that currently have a row (drives the checkboxes). */
     const rowedVariantIds = (productId: number) =>
@@ -847,6 +932,8 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
                                             value={row.product_id}
                                             groups={productGroups}
                                             onChange={(id) => updateRow(row._key, "product_id", id)}
+                                            rowedProductIds={rowedProductIds}
+                                            onToggleProduct={toggleProductRow}
                                         />
                                     </div>
 
