@@ -139,16 +139,54 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+          # Host key. ssh-keyscan is a LIVE network call to the VPS with no
+          # timeout or retry — under `bash -e` a single hiccup killed the whole
+          # deploy (the builds had all passed). It is also trust-on-first-use
+          # every run, so it accepts whatever key the host presents.
+          #
+          # Preferred: pin the key once via the VPS_KNOWN_HOSTS secret — no
+          # network call, deterministic, and actually verifies the host.
+          # Fallback: keyscan, but with a timeout and retries.
+          if [ -n "${{ secrets.VPS_KNOWN_HOSTS }}" ]; then
+            printf '%s\n' "${{ secrets.VPS_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+            echo "Using pinned host key from VPS_KNOWN_HOSTS."
+          else
+            for i in 1 2 3 4 5; do
+              # keyscan can exit 0 having written nothing, so require content.
+              ssh-keyscan -T 15 -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+              if [ -s ~/.ssh/known_hosts ]; then
+                echo "Host key acquired on attempt $i."
+                break
+              fi
+              echo "ssh-keyscan attempt $i found no key; retrying in $((i * 5))s…"
+              sleep $((i * 5))
+            done
+            if [ ! -s ~/.ssh/known_hosts ]; then
+              echo "::error::Could not reach ${{ secrets.VPS_HOST }}:22 to read its host key after 5 attempts. The VPS may be down, or fail2ban/the firewall may be blocking GitHub runner IPs."
+              exit 1
+            fi
+          fi
+        # Don't let one bad network moment fail a deploy whose images all built.
+        timeout-minutes: 3
 
       - name: Sync compose file
         run: |
-          scp -i ~/.ssh/deploy_key docker-compose.yml \
-            "root@${{ secrets.VPS_HOST }}:/opt/bethany-house/docker-compose.yml"
+          # Retry: a transient SSH blip shouldn't fail a green build.
+          for i in 1 2 3; do
+            scp -o ConnectTimeout=15 -o ServerAliveInterval=15 \
+              -i ~/.ssh/deploy_key docker-compose.yml \
+              "root@${{ secrets.VPS_HOST }}:/opt/bethany-house/docker-compose.yml" && exit 0
+            echo "scp attempt $i failed; retrying in $((i * 5))s…"
+            sleep $((i * 5))
+          done
+          echo "::error::Could not copy docker-compose.yml to the VPS after 3 attempts."
+          exit 1
 
       - name: Pull images, migrate, restart
         run: |
-          ssh -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" bash -s <<'DEPLOY'
+          ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 \
+            -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" bash -s <<'DEPLOY'
           set -euo pipefail
           cd /opt/bethany-house
 
