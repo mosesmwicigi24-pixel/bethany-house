@@ -490,11 +490,16 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
     const [loadingVariants, setLoadingVariants] = useState<
         Record<number, boolean>
     >({});
-    // Multi-variant picker: tick several variants of a product and get a row for
-    // each, instead of re-picking the product for every single variant.
-    const [variantPicker, setVariantPicker] = useState<
-        { rowKey: string; selected: Set<number> } | null
-    >(null);
+    // Multi-variant picker. The checklist IS the rows: ticking a variant inserts
+    // its row immediately, unticking removes that row. Keyed by product (not row)
+    // so it survives the anchor row being removed; `template` carries the
+    // outlet/qty/reorder to clone onto newly inserted rows.
+    const [variantPicker, setVariantPicker] = useState<{
+        rowKey: string;
+        productId: number;
+        template: Pick<EntryRow, "outlet_id" | "outlet_name" | "quantity" | "reorder_point" | "notes">;
+        coords: { top: number; left: number; width: number };
+    } | null>(null);
 
     // Data for selectors
     const { data: productsData } = useQuery({
@@ -593,32 +598,71 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
     const removeRow = (key: string) =>
         setRows((prev) => prev.filter((r) => r._key !== key));
 
+    /** Variant ids of a product that currently have a row (drives the checkboxes). */
+    const rowedVariantIds = (productId: number) =>
+        new Set(
+            rows
+                .filter((r) => r.product_id === productId && r.product_variant_id != null)
+                .map((r) => r.product_variant_id as number),
+        );
+
     /**
-     * Expand one row into a row per selected variant: the first fills the current
-     * row, the rest are inserted right after it (same product/outlet/qty), so the
-     * product + outlet only have to be chosen once.
+     * Live two-way sync between the variant checklist and the rows: ticking a
+     * variant inserts its row (reusing an empty row for that product if there is
+     * one, else appending after the product's last row); unticking removes that
+     * variant's row along with its entry.
      */
-    const addVariantsToRows = (rowKey: string, variantIds: number[]) => {
-        if (!variantIds.length) return;
+    const toggleVariantRow = (productId: number, variantId: number) => {
+        const variants = getVariants(productId);
+        const vName = variants.find((x: any) => x.id === variantId)?.variant_name ?? "";
+        const template = variantPicker?.template;
+
         setRows((prev) => {
-            const idx = prev.findIndex((r) => r._key === rowKey);
-            if (idx === -1) return prev;
-            const base = prev[idx];
-            const variants = getVariants(base.product_id);
-            const mk = (vid: number, key?: string): EntryRow => ({
-                ...base,
-                _key: key ?? `row-${Date.now()}-${Math.random()}-${vid}`,
-                product_variant_id: vid,
-                variant_name:
-                    variants.find((x: any) => x.id === vid)?.variant_name ?? "",
-            });
-            const next = [...prev];
-            next.splice(
-                idx,
-                1,
-                mk(variantIds[0], base._key),
-                ...variantIds.slice(1).map((vid) => mk(vid)),
+            const existing = prev.find(
+                (r) => r.product_id === productId && r.product_variant_id === variantId,
             );
+
+            // Untick → drop that row (and its entry). Never leave the form empty.
+            if (existing) {
+                const next = prev.filter((r) => r._key !== existing._key);
+                return next.length ? next : [{ ...newRow(), outlet_id: defaultOutletId }];
+            }
+
+            // Tick → fill this product's empty row if it has one…
+            const emptyIdx = prev.findIndex(
+                (r) => r.product_id === productId && r.product_variant_id === null,
+            );
+            if (emptyIdx !== -1) {
+                const next = [...prev];
+                next[emptyIdx] = {
+                    ...next[emptyIdx],
+                    product_variant_id: variantId,
+                    variant_name: vName,
+                };
+                return next;
+            }
+
+            // …otherwise insert after the product's last row.
+            let lastIdx = -1;
+            prev.forEach((r, i) => {
+                if (r.product_id === productId) lastIdx = i;
+            });
+            const base = lastIdx !== -1 ? prev[lastIdx] : null;
+            const inserted: EntryRow = {
+                _key: `row-${Date.now()}-${Math.random()}-${variantId}`,
+                product_id: productId,
+                product_variant_id: variantId,
+                variant_name: vName,
+                product_name: base?.product_name,
+                product_sku: base?.product_sku,
+                outlet_id: base?.outlet_id ?? template?.outlet_id ?? defaultOutletId,
+                outlet_name: base?.outlet_name ?? template?.outlet_name,
+                quantity: base?.quantity ?? template?.quantity ?? 0,
+                reorder_point: base?.reorder_point ?? template?.reorder_point ?? 0,
+                notes: base?.notes ?? template?.notes ?? "",
+            };
+            const next = [...prev];
+            next.splice(lastIdx === -1 ? next.length : lastIdx + 1, 0, inserted);
             return next;
         });
     };
@@ -856,90 +900,124 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
                                             {getVariants(row.product_id).length > 1 && (
                                                 <button
                                                     type="button"
-                                                    onClick={() =>
-                                                        setVariantPicker(
-                                                            variantPicker?.rowKey === row._key
-                                                                ? null
-                                                                : { rowKey: row._key, selected: new Set() },
-                                                        )
-                                                    }
+                                                    onClick={(e) => {
+                                                        if (variantPicker?.rowKey === row._key) {
+                                                            setVariantPicker(null);
+                                                            return;
+                                                        }
+                                                        const r = (
+                                                            e.currentTarget as HTMLElement
+                                                        ).getBoundingClientRect();
+                                                        const width = 300;
+                                                        setVariantPicker({
+                                                            rowKey: row._key,
+                                                            productId: row.product_id as number,
+                                                            template: {
+                                                                outlet_id: row.outlet_id,
+                                                                outlet_name: row.outlet_name,
+                                                                quantity: row.quantity,
+                                                                reorder_point: row.reorder_point,
+                                                                notes: row.notes,
+                                                            },
+                                                            coords: {
+                                                                top: Math.min(r.bottom + 4, window.innerHeight - 320),
+                                                                left: Math.min(r.left, window.innerWidth - width - 8),
+                                                                width,
+                                                            },
+                                                        });
+                                                    }}
                                                     className="mt-1 text-2xs font-medium text-brand-600 hover:text-brand-700"
                                                 >
                                                     + Select several…
                                                 </button>
                                             )}
 
-                                            {variantPicker?.rowKey === row._key && (
-                                                <div className="absolute z-50 top-full left-0 mt-1 w-64 bg-white border border-surface-200 rounded-xl shadow-lg p-2 max-h-64 overflow-y-auto">
-                                                    <div className="flex items-center justify-between px-1 pb-1 mb-1 border-b border-surface-100">
-                                                        <span className="text-2xs font-semibold text-surface-500 uppercase tracking-wide">
-                                                            Select variants
-                                                        </span>
-                                                        <button
-                                                            type="button"
-                                                            className="text-2xs text-brand-600 hover:text-brand-700"
-                                                            onClick={() => {
-                                                                const all = getVariants(row.product_id).map((v: any) => v.id);
-                                                                setVariantPicker((p) =>
-                                                                    p
-                                                                        ? {
-                                                                              ...p,
-                                                                              selected: new Set(
-                                                                                  p.selected.size === all.length ? [] : all,
-                                                                              ),
-                                                                          }
-                                                                        : p,
-                                                                );
-                                                            }}
-                                                        >
-                                                            {variantPicker.selected.size === getVariants(row.product_id).length
-                                                                ? "Clear all"
-                                                                : "Select all"}
-                                                        </button>
-                                                    </div>
-                                                    {getVariants(row.product_id).map((v: any) => (
-                                                        <label
-                                                            key={v.id}
-                                                            className="flex items-center gap-2 px-1 py-1 text-xs hover:bg-surface-50 rounded cursor-pointer"
-                                                        >
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={variantPicker.selected.has(v.id)}
-                                                                onChange={() =>
-                                                                    setVariantPicker((p) => {
-                                                                        if (!p) return p;
-                                                                        const s = new Set(p.selected);
-                                                                        if (s.has(v.id)) s.delete(v.id);
-                                                                        else s.add(v.id);
-                                                                        return { ...p, selected: s };
-                                                                    })
-                                                                }
-                                                            />
-                                                            <span className="truncate">{v.variant_name}</span>
-                                                        </label>
-                                                    ))}
-                                                    <div className="flex gap-2 pt-2 mt-1 border-t border-surface-100">
-                                                        <button
-                                                            type="button"
-                                                            className="flex-1 py-1 text-2xs rounded-lg border border-surface-200 text-surface-600 hover:bg-surface-50"
+                                            {variantPicker?.rowKey === row._key &&
+                                                createPortal(
+                                                    <>
+                                                        <div
+                                                            className="fixed inset-0 z-[60]"
                                                             onClick={() => setVariantPicker(null)}
-                                                        >
-                                                            Cancel
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            disabled={variantPicker.selected.size === 0}
-                                                            className="flex-1 py-1 text-2xs rounded-lg bg-brand-500 text-white font-semibold disabled:opacity-40"
-                                                            onClick={() => {
-                                                                addVariantsToRows(row._key, [...variantPicker.selected]);
-                                                                setVariantPicker(null);
+                                                        />
+                                                        <div
+                                                            className="fixed z-[61] bg-white rounded-xl border border-surface-200 shadow-2xl overflow-hidden flex flex-col"
+                                                            style={{
+                                                                top: variantPicker.coords.top,
+                                                                left: variantPicker.coords.left,
+                                                                width: variantPicker.coords.width,
+                                                                maxHeight: "19rem",
                                                             }}
                                                         >
-                                                            Add {variantPicker.selected.size || ""}
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            )}
+                                                            <div className="flex items-center justify-between px-3 py-1.5 bg-brand-50 border-b border-brand-100 shrink-0">
+                                                                <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-brand-700">
+                                                                    Variants
+                                                                </span>
+                                                                <span className="text-[11px] text-brand-600 font-medium">
+                                                                    {rowedVariantIds(variantPicker.productId).size} added
+                                                                </span>
+                                                            </div>
+
+                                                            <div className="overflow-y-auto">
+                                                                {getVariants(variantPicker.productId).map(
+                                                                    (v: any, i: number) => {
+                                                                        const on = rowedVariantIds(
+                                                                            variantPicker.productId,
+                                                                        ).has(v.id);
+                                                                        return (
+                                                                            <label
+                                                                                key={v.id}
+                                                                                className={clsx(
+                                                                                    "flex items-center gap-2.5 px-3 py-2 cursor-pointer transition-colors border-b border-surface-50 last:border-0",
+                                                                                    i % 2 === 1 ? "bg-surface-50/60" : "bg-white",
+                                                                                    on ? "!bg-brand-100" : "hover:bg-brand-50/70",
+                                                                                )}
+                                                                            >
+                                                                                <input
+                                                                                    type="checkbox"
+                                                                                    className="accent-brand-500 shrink-0"
+                                                                                    checked={on}
+                                                                                    onChange={() =>
+                                                                                        toggleVariantRow(
+                                                                                            variantPicker.productId,
+                                                                                            v.id,
+                                                                                        )
+                                                                                    }
+                                                                                />
+                                                                                <span
+                                                                                    className={clsx(
+                                                                                        "text-sm truncate flex-1",
+                                                                                        on
+                                                                                            ? "font-semibold text-brand-800"
+                                                                                            : "font-medium text-surface-800",
+                                                                                    )}
+                                                                                >
+                                                                                    {v.variant_name}
+                                                                                </span>
+                                                                                <span className="text-[11px] font-mono text-surface-400 shrink-0">
+                                                                                    {v.sku}
+                                                                                </span>
+                                                                            </label>
+                                                                        );
+                                                                    },
+                                                                )}
+                                                            </div>
+
+                                                            <div className="px-3 py-2 border-t border-surface-100 shrink-0 flex items-center justify-between gap-2">
+                                                                <span className="text-[11px] text-surface-400">
+                                                                    Tick to add a row · untick to remove
+                                                                </span>
+                                                                <button
+                                                                    type="button"
+                                                                    className="px-3 py-1 text-2xs rounded-lg bg-brand-500 text-white font-semibold"
+                                                                    onClick={() => setVariantPicker(null)}
+                                                                >
+                                                                    Done
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </>,
+                                                    document.body,
+                                                )}
                                           </>
                                         ) : (
                                             <select
