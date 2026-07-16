@@ -292,3 +292,35 @@
   .overscroll-contain { overscroll-behavior: contain; }
   .overscroll-none    { overscroll-behavior: none; }
 }
+
+/* ─── iOS zoom-on-focus guard ─────────────────────────────────────────────
+ *
+ * Safari on iOS magnifies the page whenever it focuses a form control whose
+ * font-size is under 16px — and it never zooms back out. The app is left
+ * permanently magnified and wider than the screen, so it scrolls sideways and
+ * the chrome slides off. That is the "rows that are moving / columns that are
+ * horrible" report: tapping the POS search zooms the whole page.
+ *
+ * `.input` is text-sm (14px) and is used in ~66 files, so every field in the
+ * app triggers it.
+ *
+ * The other way to stop it is `maximum-scale=1` / `user-scalable=no` on the
+ * viewport meta. That kills pinch-zoom for everyone — a real accessibility
+ * regression — so it is deliberately NOT used here. 16px is the only fix that
+ * keeps zoom available to people who need it.
+ *
+ * Scoped to `pointer: coarse` so desktop keeps its 14px density; this only
+ * lands on touch devices, where 16px is the more legible, more tappable size
+ * anyway. Outside @layer and marked !important on purpose: a `text-xs` utility
+ * on an input would otherwise out-rank it and re-open the bug.
+ *
+ * Checkbox/radio/range have no text and are excluded — sizing them would
+ * change their rendered box.
+ */
+@media (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
