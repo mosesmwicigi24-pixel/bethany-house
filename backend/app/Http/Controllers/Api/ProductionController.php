@@ -285,12 +285,64 @@ class ProductionController extends Controller
             'target_outlet_id'          => 'nullable|exists:outlets,id',
         ]);
 
+        // Quantity is structural, not cosmetic. Confirmation mints one serial per
+        // unit and material allocations were sized from it — editing the number
+        // afterwards would leave an order that silently disagrees with its own
+        // serials and materials. Amend it while the order is a draft; after that,
+        // the honest paths are cancel-and-reraise or a second order for the
+        // difference.
+        $quantityChanged = array_key_exists('quantity', $validated)
+            && (int) $validated['quantity'] !== (int) $order->quantity;
+
+        if ($quantityChanged && $order->status !== 'draft') {
+            return response()->json([
+                'message' => 'Quantity can only be changed while the order is still a draft — '
+                    . 'serials and material requirements were generated from it at confirmation. '
+                    . 'Cancel and re-raise, or raise a second order for the difference.',
+            ], 422);
+        }
+
+        // Amendments need a real trail: field → {from, to}, not just a list of
+        // which keys were touched.
+        $before = [];
+        foreach (array_keys($validated) as $field) {
+            $before[$field] = $order->getAttribute($field);
+        }
+
         $order->update($validated);
 
+        // A draft's material requirements follow its quantity. Only untouched
+        // allocation rows are resized — anything already allocated or used is
+        // real material in motion and is not silently rewritten.
+        if ($quantityChanged) {
+            $bom = BillOfMaterial::with('items')
+                ->where('product_id', $order->product_id)
+                ->where('is_active', true)
+                ->first();
+            if ($bom) {
+                foreach ($bom->items as $bomItem) {
+                    MaterialAllocation::where('production_order_id', $order->id)
+                        ->where('material_id', $bomItem->material_id)
+                        ->where('quantity_allocated', 0)
+                        ->where('quantity_used', 0)
+                        ->update([
+                            'quantity_required' => round($bomItem->quantity * (int) $validated['quantity'], 4),
+                        ]);
+                }
+            }
+        }
+
         try {
+            $changes = [];
+            foreach ($before as $field => $was) {
+                $now = $order->getAttribute($field);
+                if ($was != $now) {
+                    $changes[$field] = ['from' => $was, 'to' => $now];
+                }
+            }
             ActivityLogService::log('production_order_updated', $order, [
                 'order_number' => $order->order_number,
-                'changes'      => array_keys($validated),
+                'changes'      => $changes,
             ]);
         } catch (\Exception) {}
 
