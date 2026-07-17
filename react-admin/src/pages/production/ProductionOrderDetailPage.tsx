@@ -173,6 +173,97 @@ const StageIcon = ({ slug, className = "w-4 h-4" }: { slug?: string; className?:
     return <svg {...s}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>;
 };
 
+// ── Edit Order Modal ──────────────────────────────────────────────────────────
+// Amendments, not rewrites. Quantity is structural — serials are minted per unit
+// and materials sized from it at confirmation — so it is editable only while the
+// order is still a draft; the backend enforces the same rule. Everything else
+// (priority, due date, notes) amends at any point before completion, and every
+// change lands in the order's audit trail as field → from → to.
+
+function EditOrderModal({ order, onClose, onSaved }: { order: ProductionOrder; onClose: () => void; onSaved: () => void }) {
+    const toast = useToastStore();
+    const qc = useQueryClient();
+    const isDraft = order.status === "draft";
+
+    const [quantity, setQuantity] = useState(String(order.quantity));
+    const [priority, setPriority] = useState(order.priority ?? "normal");
+    const [dueDate, setDueDate]   = useState((order.due_date ?? "").slice(0, 10));
+    const [notes, setNotes]       = useState((order as any).notes ?? "");
+
+    const mutation = useMutation({
+        mutationFn: () => {
+            const payload: Record<string, unknown> = {
+                priority,
+                notes: notes || null,
+            };
+            if (dueDate) payload.due_date = dueDate;
+            // Only send quantity when it may legally change — a draft-only field
+            // shouldn't even travel from a confirmed order's form.
+            if (isDraft && Number(quantity) > 0) payload.quantity = Number(quantity);
+            return put(`/v1/admin/production-orders/${order.id}`, payload);
+        },
+        onSuccess: () => {
+            toast.success("Order updated");
+            qc.invalidateQueries({ queryKey: ["production-order", order.id] });
+            onSaved(); onClose();
+        },
+        onError: (e: ApiError) => toast.error(e.message),
+    });
+
+    return (
+        <Modal open title={`Edit Order - ${order.order_number}`} onClose={onClose} size="md">
+            <div className="p-5 space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                    <div>
+                        <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Quantity</label>
+                        <input type="number" min={1} value={quantity}
+                            onChange={e => setQuantity(e.target.value)}
+                            disabled={!isDraft}
+                            className="input mt-1 w-full text-sm disabled:opacity-50" />
+                        {!isDraft && (
+                            <p className="text-2xs text-surface-400 mt-1 leading-snug">
+                                Locked after confirmation — serials and material requirements were
+                                generated from it. Cancel &amp; re-raise, or raise a second order for the difference.
+                            </p>
+                        )}
+                    </div>
+                    <div>
+                        <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Priority</label>
+                        <select value={priority} onChange={e => setPriority(e.target.value)}
+                            className="input mt-1 w-full text-sm">
+                            <option value="low">Low</option>
+                            <option value="normal">Normal</option>
+                            <option value="high">High</option>
+                            <option value="urgent">Urgent</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Due date</label>
+                    <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
+                        className="input mt-1 w-full text-sm" />
+                </div>
+                <div>
+                    <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Notes</label>
+                    <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
+                        placeholder="Amendment reason, customer request, spec change…"
+                        className="input mt-1 w-full text-sm resize-none" />
+                </div>
+                <p className="text-2xs text-surface-400">
+                    Changes are recorded on the order's audit trail (what changed, from and to).
+                </p>
+                <div className="flex gap-2 pt-1">
+                    <button onClick={onClose} className="btn-secondary flex-1 text-sm">Cancel</button>
+                    <button onClick={() => mutation.mutate()} disabled={mutation.isPending}
+                        className="flex-1 px-4 py-2 rounded-xl bg-brand-600 text-white text-sm font-bold hover:bg-brand-700 disabled:opacity-50 transition-colors">
+                        {mutation.isPending ? "Saving…" : "Save Changes"}
+                    </button>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
 // ── Assign Tasks Modal ────────────────────────────────────────────────────────
 
 function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onClose: () => void; onSaved: () => void }) {
@@ -1355,7 +1446,7 @@ export default function ProductionOrderDetailPage() {
     const toast = useToastStore();
     const qc = useQueryClient();
     const [tab, setTab] = useState<"stages" | "materials" | "specs" | "activity" | "audit">("stages");
-    const [modal, setModal] = useState<"assign" | "materials" | "qc" | "complete" | null>(null);
+    const [modal, setModal] = useState<"assign" | "materials" | "qc" | "complete" | "edit" | null>(null);
     const [showCancelConfirm, setShowCancelConfirm] = useState(false);
     const [cancelReason, setCancelReason] = useState("");
 
@@ -1449,6 +1540,9 @@ export default function ProductionOrderDetailPage() {
     const canQC       = order.status === "qc_pending" && canSubmitQcPerm;
     const canComplete = order.status === "qc_passed" && canApproveQcPerm;
     const canCancel   = ["draft", "pending"].includes(order.status) && canConfirmOrderPerm;
+    // Same permission that raises orders; the backend refuses completed/cancelled,
+    // and only drafts may change quantity (serials + materials were sized from it).
+    const canEdit     = !["completed", "cancelled"].includes(order.status) && can("production.raise_order");
     const canOpenWIP  = ["pending", "in_progress", "on_hold", "qc_pending", "qc_passed", "qc_failed"].includes(order.status);
 
     const tabs = [
@@ -1554,6 +1648,12 @@ export default function ProductionOrderDetailPage() {
                         <button onClick={() => navigate("/production/wip", { state: { openOrderId: order.id } })}
                             className="btn-sm bg-white border border-surface-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-surface-700 hover:border-brand-300 hover:text-brand-600 transition-colors">
                             Open in WIP Board ↗
+                        </button>
+                    )}
+                    {canEdit && (
+                        <button onClick={() => setModal("edit")}
+                            className="btn-sm bg-white border border-surface-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-surface-700 hover:border-brand-300 hover:text-brand-600 transition-colors">
+                            ✎ Edit Order
                         </button>
                     )}
                     <PdfDownloadButton type="production-orders" id={order.id} label="Download PDF" />
@@ -1759,6 +1859,7 @@ export default function ProductionOrderDetailPage() {
             </div>
 
             {/* Modals */}
+            {modal === "edit"      && <EditOrderModal order={order} onClose={() => setModal(null)} onSaved={refresh} />}
             {modal === "assign"    && <AssignModal order={order} onClose={() => setModal(null)} onSaved={refresh} />}
             {modal === "materials" && <IssueMaterialsModal order={order} onClose={() => setModal(null)} onSaved={refresh} />}
             {modal === "qc"        && <QCModal order={order} onClose={() => setModal(null)} onDone={refresh} />}

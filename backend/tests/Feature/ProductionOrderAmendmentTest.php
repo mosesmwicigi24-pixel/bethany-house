@@ -29,6 +29,9 @@ class ProductionOrderAmendmentTest extends TestCase
     private function actingAsRaiser(): User
     {
         $user = User::factory()->create();
+        // The production route GROUP is gated production.view on top of the
+        // per-route production.raise_order — both are needed to reach update().
+        $user->givePermissionTo(Permission::findOrCreate('production.view', 'sanctum'));
         $user->givePermissionTo(Permission::findOrCreate('production.raise_order', 'sanctum'));
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
