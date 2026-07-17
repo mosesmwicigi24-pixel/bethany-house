@@ -207,14 +207,9 @@ class ProductionController extends Controller
             // Tasks are created on confirm (draft -> pending). Don't pollute the production
             // floor board with unconfirmed/unpaid orders.
             if ($order->status !== 'draft') {
-                $stages = ProductionStage::active()->ordered()->get();
-                foreach ($stages as $stage) {
-                    ProductionTask::create([
-                        'production_order_id' => $order->id,
-                        'production_stage_id' => $stage->id,
-                        'status'              => 'pending',
-                    ]);
-                }
+                // Stages come from the product's template (all active stages when
+                // the product has none) — see ProductionOrder::seedTasks.
+                $order->seedTasks();
             }
 
             // Pre-allocate materials from BOM (guarded - BOM is optional)
@@ -889,6 +884,30 @@ class ProductionController extends Controller
 
         $tasks = $query->get();
 
+        // ── Lock visibility ──────────────────────────────────────────────────
+        // Stages are gated in sequence (see updateTaskStatus). The tailor should
+        // SEE "waiting on Stitching" on the card, not discover it as an error
+        // after tapping Start. One query for all unfinished predecessor tasks
+        // across every order on this list — not a per-task lookup.
+        $orderIds = $tasks->pluck('production_order_id')->unique()->values();
+        $openSiblings = ProductionTask::whereIn('production_order_id', $orderIds)
+            ->whereNotNull('sequence')
+            ->whereNotIn('status', ProductionTask::SATISFIED_STATUSES)
+            ->with('stage:id,name')
+            ->get(['id', 'production_order_id', 'production_stage_id', 'sequence', 'status'])
+            ->groupBy('production_order_id');
+
+        $tasks->each(function ($task) use ($openSiblings) {
+            $blocker = null;
+            if (!$task->concurrent_allowed && $task->sequence !== null && !$task->started_at) {
+                $blocker = ($openSiblings[$task->production_order_id] ?? collect())
+                    ->filter(fn ($s) => $s->sequence !== null && $s->sequence < $task->sequence)
+                    ->sortBy('sequence')
+                    ->first();
+            }
+            $task->setAttribute('blocked_by_stage', $blocker?->stage?->name);
+        });
+
         if ($includeCompleted) {
             // For the history view, keep the DB sort as-is (completed tasks are already at the bottom)
             return response()->json($tasks);
@@ -904,6 +923,57 @@ class ProductionController extends Controller
     // PUT /tailor/tasks/{id}/status
     // =========================================================================
 
+    /**
+     * Let one stage run in parallel with its predecessors.
+     *
+     * The default is strictly sequential. But embroidery can genuinely run while
+     * stitching is still going — on different pieces that merge later — and that
+     * call belongs to the manager running the floor, not to whichever tailor
+     * wants to start early. Route-gated by production.manage_assignees (the
+     * existing manager-of-production permission), and the grant is stamped onto
+     * the task: who unlocked it, and when. Re-lock by passing allow=false — only
+     * while the task has not started.
+     */
+    public function unlockTask(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'allow' => 'nullable|boolean',
+            'notes' => 'nullable|string|max:500',
+        ]);
+        $allow = $validated['allow'] ?? true;
+
+        $task = ProductionTask::with(['stage:id,name', 'productionOrder:id,order_number'])->findOrFail($id);
+
+        if (!$allow && $task->started_at) {
+            return response()->json(['message' => 'This stage has already started; it can no longer be re-locked.'], 422);
+        }
+
+        $task->update([
+            'concurrent_allowed' => $allow,
+            'unlocked_by'        => $allow ? $request->user()->id : null,
+            'unlocked_at'        => $allow ? now() : null,
+        ]);
+
+        try {
+            ActivityLogService::log(
+                $allow ? 'production_stage_unlocked' : 'production_stage_relocked',
+                $task->productionOrder,
+                [
+                    'task_id' => $task->id,
+                    'stage'   => $task->stage?->name,
+                    'notes'   => $validated['notes'] ?? null,
+                ]
+            );
+        } catch (\Exception) {}
+
+        return response()->json([
+            'message' => $allow
+                ? 'Stage unlocked - it may now run in parallel with earlier stages.'
+                : 'Stage re-locked to sequential order.',
+            'task' => $task->fresh(['stage']),
+        ]);
+    }
+
     public function updateTaskStatus(Request $request, $id)
     {
         $validated = $request->validate([
@@ -917,6 +987,28 @@ class ProductionController extends Controller
         if ($task->assigned_to !== $request->user()->id
             && !$request->user()->hasAnyRole(['admin', 'super_admin'])) {
             return response()->json(['message' => 'You are not assigned to this task.'], 403);
+        }
+
+        // ── Stage gate ───────────────────────────────────────────────────────
+        // Stages run in sequence: you cannot start (or complete a never-started)
+        // task while an earlier stage is unfinished. The escape hatch is explicit:
+        // a production manager marks the task concurrent_allowed (see unlockTask),
+        // and that grant is recorded. There is deliberately no silent admin
+        // bypass — the trail is the point.
+        if (in_array($validated['action'], ['start', 'complete']) && !$task->started_at) {
+            $blocker = $task->blockingTask();
+            if ($blocker) {
+                $blockerName = $blocker->stage?->name ?? 'an earlier stage';
+                return response()->json([
+                    'message' => "\"{$blockerName}\" must be completed before this stage can begin. "
+                        . 'A production manager can unlock this stage to run them in parallel.',
+                    'blocked_by' => [
+                        'task_id' => $blocker->id,
+                        'stage'   => $blockerName,
+                        'status'  => $blocker->status,
+                    ],
+                ], 422);
+            }
         }
 
         DB::beginTransaction();
@@ -1369,14 +1461,8 @@ class ProductionController extends Controller
             // can be tracked from here through stock, sale and dispatch.
             ProductSerialService::generateForProductionOrder($order);
 
-            // Create production tasks from active stages
-            $stages = ProductionStage::active()->ordered()->get();
-            foreach ($stages as $stage) {
-                ProductionTask::firstOrCreate([
-                    'production_order_id' => $order->id,
-                    'production_stage_id' => $stage->id,
-                ], ['status' => 'pending']);
-            }
+            // Create production tasks from the product's stage template
+            $order->seedTasks();
 
             // Apply auto-assignee rules
             $this->applyAutoAssignees($order);

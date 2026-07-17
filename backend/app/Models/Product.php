@@ -37,6 +37,7 @@ class Product extends Model
         'low_stock_threshold',
         'sort_order',
         'measurements',
+        'production_stage_ids',
         'aliases',
     ];
 
@@ -58,6 +59,7 @@ class Product extends Model
         'published_at' => 'datetime',
         'deleted_at' => 'datetime',
         'measurements' => 'array',
+        'production_stage_ids' => 'array',
         'aliases' => 'array',
     ];
 
