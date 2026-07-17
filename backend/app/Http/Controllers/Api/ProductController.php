@@ -328,6 +328,10 @@ class ProductController extends Controller
             'measurements.*.name'                   => 'required_with:measurements|string|max:100',
             'measurements.*.unit'                   => 'nullable|string|max:30',
             'measurements.*.required'               => 'boolean',
+            // Per-product production stage template - which stages this product's
+            // orders pass through, in this order. Empty/null = all active stages.
+            'production_stage_ids'                  => 'nullable|array',
+            'production_stage_ids.*'                => 'integer|exists:production_stages,id',
             // Phase 2 - tax rate IDs
             'tax_rate_ids'                          => 'nullable|array',
             'tax_rate_ids.*'                        => 'integer|exists:tax_rates,id',
@@ -356,6 +360,7 @@ class ProductController extends Controller
                 'height'              => $validated['height'] ?? null,
                 'published_at'        => $validated['status'] === 'active' ? now() : null,
                 'measurements'        => !empty($validated['measurements']) ? $validated['measurements'] : null,
+                'production_stage_ids' => !empty($validated['production_stage_ids']) ? array_values(array_unique(array_map('intval', $validated['production_stage_ids']))) : null,
             ]);
 
             // Translations
@@ -468,6 +473,8 @@ class ProductController extends Controller
             'measurements.*.name'              => 'required_with:measurements|string|max:100',
             'measurements.*.unit'              => 'nullable|string|max:30',
             'measurements.*.required'          => 'boolean',
+            'production_stage_ids'             => 'sometimes|nullable|array',
+            'production_stage_ids.*'           => 'integer|exists:production_stages,id',
             // Phase 2 - tax rate IDs
             'tax_rate_ids'                     => 'sometimes|nullable|array',
             'tax_rate_ids.*'                   => 'integer|exists:tax_rates,id',
@@ -486,6 +493,15 @@ class ProductController extends Controller
             if (array_key_exists('measurements', $validated)) {
                 $update['measurements'] = !empty($validated['measurements'])
                     ? $validated['measurements']
+                    : null;
+            }
+
+            if (array_key_exists('production_stage_ids', $validated)) {
+                // Empty selection is stored as NULL = "all active stages", the
+                // pre-template behaviour, so clearing the list is a safe reset
+                // rather than a product whose orders would carry zero stages.
+                $update['production_stage_ids'] = !empty($validated['production_stage_ids'])
+                    ? array_values(array_unique(array_map('intval', $validated['production_stage_ids'])))
                     : null;
             }
 

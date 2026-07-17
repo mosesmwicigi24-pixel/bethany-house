@@ -23,6 +23,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { productsApi } from "@/api/products";
+import { get } from "@/api/client";
 import type { ProductImage, ProductVariant } from "@/api/products";
 import { categoriesApi } from "@/api/categories";
 import { currenciesApi } from "@/api/setup";
@@ -114,10 +115,11 @@ const schema = z.object({
         )
         .optional(),
     tax_rate_ids: z.array(z.number()).optional().default([]),
+    production_stage_ids: z.array(z.number()).optional().default([]),
 });
 
 type FormValues = z.infer<typeof schema>;
-type Tab = "content" | "media" | "pricing" | "variants" | "seo" | "measurements" | "bom";
+type Tab = "content" | "media" | "pricing" | "variants" | "seo" | "measurements" | "stages" | "bom";
 
 const BASE_TABS: { id: Tab; label: string }[] = [
     { id: "content", label: "Content" },
@@ -129,6 +131,7 @@ const BASE_TABS: { id: Tab; label: string }[] = [
 
 const PRODUCTION_TABS: { id: Tab; label: string }[] = [
     { id: "measurements", label: "Measurements" },
+    { id: "stages", label: "Production Stages" },
     { id: "bom", label: "Bill of Materials" },
 ];
 
@@ -1356,6 +1359,94 @@ interface MeasurementField {
     required: boolean;
 }
 
+// ── Production Stages tab ─────────────────────────────────────────────────────
+// Which stages this product's orders pass through. A keyholder never visits
+// Embroidery; a chasuble does. No selection = every active stage (the default
+// every product had before templates existed).
+
+function ProductionStagesTab({
+    selected,
+    onChange,
+}: {
+    selected: number[];
+    onChange: (ids: number[]) => void;
+}) {
+    const { data: stages, isLoading } = useQuery<{ id: number; name: string; order: number; active?: boolean }[]>({
+        queryKey: ["production-stages"],
+        queryFn: () => get<any>("/v1/admin/product-stages"),
+        select: (d: any) => [...(Array.isArray(d) ? d : d?.data ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+        staleTime: 60_000,
+    });
+
+    const toggle = (id: number) =>
+        onChange(selected.includes(id) ? selected.filter((s) => s !== id) : [...selected, id]);
+
+    if (isLoading) return <div className="flex justify-center py-10"><Spinner /></div>;
+    const list = stages ?? [];
+
+    return (
+        <div className="space-y-4">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div>
+                    <h3 className="text-sm font-bold text-surface-900">Production Stages</h3>
+                    <p className="text-xs text-surface-500 mt-1 max-w-xl">
+                        Pick the stages this product actually needs — its production orders will carry
+                        only these, in this order, and tailors unlock them one after another.
+                    </p>
+                </div>
+                <div className="flex items-center gap-2">
+                    <button type="button" onClick={() => onChange(list.map((s) => s.id))}
+                        className="text-2xs font-bold text-brand-700 bg-brand-50 border border-brand-200 rounded-full px-2.5 py-1 hover:bg-brand-100 transition-colors">
+                        Select all
+                    </button>
+                    <button type="button" onClick={() => onChange([])}
+                        className="text-2xs font-bold text-surface-500 bg-surface-100 border border-surface-200 rounded-full px-2.5 py-1 hover:bg-surface-200 transition-colors">
+                        Clear
+                    </button>
+                </div>
+            </div>
+
+            {selected.length === 0 && (
+                <div className="text-xs text-surface-600 bg-brand-50 border border-brand-100 rounded-xl px-3 py-2">
+                    No stages selected — orders for this product will go through <b>all</b> active stages.
+                </div>
+            )}
+
+            <div className="space-y-1.5">
+                {list.map((stage) => {
+                    const on = selected.includes(stage.id);
+                    // Position among the SELECTED stages, in catalogue order — this is
+                    // the sequence the order's tasks will actually be stamped with.
+                    const seq = on
+                        ? list.filter((s) => selected.includes(s.id)).findIndex((s) => s.id === stage.id) + 1
+                        : null;
+                    return (
+                        <label key={stage.id}
+                            className={clsx(
+                                "flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-colors",
+                                on ? "bg-brand-50/60 border-brand-200" : "bg-white border-surface-200 hover:border-surface-300",
+                            )}>
+                            <input type="checkbox" checked={on} onChange={() => toggle(stage.id)}
+                                className="w-4 h-4 rounded border-surface-300 text-brand-600 focus:ring-brand-400" />
+                            <span className={clsx("w-6 h-6 rounded-full flex items-center justify-center text-2xs font-bold shrink-0",
+                                on ? "bg-brand-600 text-white" : "bg-surface-100 text-surface-400")}>
+                                {on ? seq : "·"}
+                            </span>
+                            <span className={clsx("text-sm", on ? "font-semibold text-surface-900" : "text-surface-500")}>
+                                {stage.name}
+                            </span>
+                        </label>
+                    );
+                })}
+            </div>
+            <p className="text-2xs text-surface-400">
+                The running order follows the stage catalogue (Setup → Production Stages). Changing the
+                catalogue later doesn't re-order production already on the floor.
+            </p>
+        </div>
+    );
+}
+
 function MeasurementsTab({
     measurements,
     onChange,
@@ -1908,6 +1999,7 @@ export default function ProductFormPage() {
                 },
             ],
             measurements: [],
+            production_stage_ids: [],
         },
     });
     const {
@@ -2026,6 +2118,7 @@ export default function ProductFormPage() {
                 measurements: Array.isArray(product.measurements)
                     ? product.measurements
                     : [],
+                production_stage_ids: Array.isArray((product as any).production_stage_ids) ? (product as any).production_stage_ids : [],
             });
             setImages(
                 product.images
@@ -2079,6 +2172,7 @@ export default function ProductFormPage() {
                     },
                 ],
                 measurements: [],
+            production_stage_ids: [],
             });
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2119,6 +2213,7 @@ export default function ProductFormPage() {
                 // getValues ensures we get the latest measurements even if setValue
                 // didn't trigger a re-render cycle before handleSubmit fired
                 measurements: getValues("measurements") ?? values.measurements ?? [],
+                production_stage_ids: getValues("production_stage_ids") ?? values.production_stage_ids ?? [],
             };
             const normalizedPayload = {
                 ...payload,
@@ -3234,6 +3329,13 @@ export default function ProductFormPage() {
                         <MeasurementsTab
                             measurements={watch("measurements") ?? []}
                             onChange={(m) => setValue("measurements", m, { shouldDirty: true })}
+                        />
+                    )}
+
+                    {activeTab === "stages" && (
+                        <ProductionStagesTab
+                            selected={watch("production_stage_ids") ?? []}
+                            onChange={(ids) => setValue("production_stage_ids", ids, { shouldDirty: true })}
                         />
                     )}
 

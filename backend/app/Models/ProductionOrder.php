@@ -106,6 +106,49 @@ class ProductionOrder extends Model
         return $this->hasMany(ProductionTask::class);
     }
 
+    /**
+     * Seed this order's tasks from its product's stage template.
+     *
+     * A keyholder does not pass through Embroidery; a chasuble does. The product
+     * decides which stages its orders carry (products.production_stage_ids, set
+     * on the product form beside Measurements). A product with no template —
+     * null or empty — gets every active stage, which is what all orders got
+     * before templates existed, so untouched products behave identically.
+     *
+     * `sequence` is stamped 1..N here, from the stage catalogue's sort order at
+     * THIS moment. Gating reads only the snapshot: re-ordering stages in Setup
+     * tomorrow must not re-gate a floor full of half-finished orders.
+     *
+     * Idempotent (firstOrCreate) — both the create path and the confirm path
+     * call it, whichever runs second finds the rows already there. This method
+     * is the ONLY task seeder; the two controller sites both delegate here.
+     */
+    public function seedTasks(): void
+    {
+        $templateIds = $this->product?->production_stage_ids ?? [];
+
+        $stages = ProductionStage::active()
+            ->when(
+                !empty($templateIds),
+                fn ($q) => $q->whereIn('id', $templateIds),
+            )
+            ->ordered()
+            ->get();
+
+        foreach ($stages->values() as $i => $stage) {
+            ProductionTask::firstOrCreate(
+                [
+                    'production_order_id' => $this->id,
+                    'production_stage_id' => $stage->id,
+                ],
+                [
+                    'status'   => 'pending',
+                    'sequence' => $i + 1,
+                ],
+            );
+        }
+    }
+
     public function materialAllocations()
     {
         return $this->hasMany(MaterialAllocation::class);
