@@ -58,6 +58,10 @@ interface Task {
     started_at?: string;
     completed_at?: string;
     notes?: string;
+    /** Snapshot of the order's stage sequence, stamped at seeding — gating runs on this. */
+    sequence?: number | null;
+    /** Manager has allowed this stage to run in parallel with its predecessors. */
+    concurrent_allowed?: boolean;
     stage: { id: number; name: string; slug: string; sort_order: number };
     // Kept for backwards-compat; prefer resolveAssignee() helper below
     assigned_to_user?: { first_name: string; last_name: string };
@@ -176,6 +180,11 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
     const qc = useQueryClient();
     const [assignments, setAssignments] = useState<Record<number, string>>({});
     const [hours, setHours] = useState<Record<number, string>>({});
+    // Multi-select: tick several stages, pick one person, assign in one go.
+    // Deliberately a pure UI-state operation — "assign selected" just fills the
+    // same per-row assignments map, so the single proven save path is untouched.
+    const [checked, setChecked] = useState<Record<number, boolean>>({});
+    const [bulkTailor, setBulkTailor] = useState("");
 
     const { data: freshData, isLoading: loadingOrder } = useQuery({
         queryKey: ["production-order-assign", order.id],
@@ -194,7 +203,7 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
     const rawTasks = freshOrder?.tasks ?? order.tasks ?? [];
     const activeTasks = [...rawTasks]
         .filter(t => !DONE_STATUSES.includes((t.status ?? "").toLowerCase()))
-        .sort((a, b) => (a.stage?.sort_order ?? 0) - (b.stage?.sort_order ?? 0));
+        .sort((a, b) => (a.sequence ?? a.stage?.sort_order ?? 0) - (b.sequence ?? b.stage?.sort_order ?? 0));
 
     const mutation = useMutation({
         mutationFn: () => {
@@ -227,6 +236,38 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                     </div>
                 ) : (
                     <div className="space-y-2 overflow-x-auto">
+                        {/* Bulk assign: applies one person to every ticked stage. */}
+                        <div className="flex items-center gap-2 flex-wrap p-3 rounded-xl bg-brand-50/60 border border-brand-100">
+                            <label className="flex items-center gap-2 text-xs font-semibold text-surface-700 shrink-0">
+                                <input type="checkbox"
+                                    checked={activeTasks.length > 0 && activeTasks.every(t => checked[t.id])}
+                                    onChange={e => {
+                                        const on = e.target.checked;
+                                        setChecked(Object.fromEntries(activeTasks.map(t => [t.id, on])));
+                                    }}
+                                    className="w-4 h-4 rounded border-surface-300 text-brand-600 focus:ring-brand-400" />
+                                Select all
+                            </label>
+                            <select value={bulkTailor} onChange={e => setBulkTailor(e.target.value)}
+                                className="input flex-1 min-w-[160px] text-sm">
+                                <option value="">Assign selected to…</option>
+                                {tailors.map((t: any) => <option key={t.id} value={t.id}>{t.first_name} {t.last_name}</option>)}
+                            </select>
+                            <button type="button"
+                                disabled={!bulkTailor || !activeTasks.some(t => checked[t.id])}
+                                onClick={() => {
+                                    setAssignments(prev => {
+                                        const next = { ...prev };
+                                        activeTasks.forEach(t => { if (checked[t.id]) next[t.id] = bulkTailor; });
+                                        return next;
+                                    });
+                                    setChecked({});
+                                    setBulkTailor("");
+                                }}
+                                className="shrink-0 px-3 py-2 rounded-xl bg-brand-600 text-white text-xs font-bold hover:bg-brand-700 disabled:opacity-40 transition-colors">
+                                Apply
+                            </button>
+                        </div>
                         <div className="grid grid-cols-12 gap-3 px-3 text-2xs font-bold text-surface-400 uppercase tracking-wide min-w-[480px]">
                             <span className="col-span-4">Stage</span>
                             <span className="col-span-5">Assign to</span>
@@ -236,7 +277,11 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                             const currentId = typeof task.assigned_to === "object" ? (task.assigned_to as any)?.id?.toString() ?? "" : task.assigned_to?.toString() ?? "";
                             return (
                                 <div key={task.id} className="grid grid-cols-12 gap-3 items-center p-3 rounded-xl bg-surface-50 border border-surface-100">
-                                    <div className="col-span-4">
+                                    <div className="col-span-4 flex items-center gap-2">
+                                        <input type="checkbox" checked={!!checked[task.id]}
+                                            onChange={e => setChecked(p => ({ ...p, [task.id]: e.target.checked }))}
+                                            className="w-4 h-4 rounded border-surface-300 text-brand-600 focus:ring-brand-400 shrink-0" />
+                                    <div className="min-w-0">
                                         <p className="text-sm font-semibold text-surface-900 flex items-center gap-1.5">
                                             <StageIcon slug={task.stage?.slug} className="w-3.5 h-3.5 text-surface-500" />
                                             {task.stage?.name ?? `Stage ${task.production_stage_id}`}
@@ -244,6 +289,7 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                                         <span className={clsx("text-2xs font-medium mt-0.5", task.status === "in_progress" ? "text-brand-600" : "text-surface-400")}>
                                             {task.status === "in_progress" ? "In progress" : "Pending"}
                                         </span>
+                                    </div>
                                     </div>
                                     <select value={assignments[task.id] ?? currentId}
                                         onChange={e => setAssignments(p => ({ ...p, [task.id]: e.target.value }))}
@@ -477,16 +523,25 @@ function CompleteModal({ order, onClose, onDone }: { order: ProductionOrder; onC
 
 // ── Stages Pipeline ───────────────────────────────────────────────────────────
 
+// Mirrors the backend's gate (ProductionTask::SATISFIED_STATUSES): only these
+// statuses release the stages behind them.
+const GATE_SATISFIED = ["completed", "skipped"];
+
 function StagesPipeline({
     tasks,
     currentUserId,
     onTaskAction,
     taskActionPending,
+    canUnlock,
+    onUnlock,
 }: {
     tasks: Task[];
     currentUserId: number | null;
     onTaskAction: (taskId: number, action: "start" | "complete" | "pause") => void;
     taskActionPending: boolean;
+    /** production.manage_assignees — the manager who may allow parallel stages */
+    canUnlock: boolean;
+    onUnlock: (taskId: number, allow: boolean) => void;
 }) {
     if (!tasks.length) return (
         <div className="text-center py-12 text-surface-400">
@@ -512,7 +567,17 @@ function StagesPipeline({
                     : task.assigned_to;
                 const isMyTask = currentUserId !== null && assignedId === currentUserId &&
                     !DONE_STATUSES.includes(task.status);
-                const canStart    = isMyTask && (task.status === "pending" || task.status === "paused");
+                // Client-side mirror of the server gate, so the lock is VISIBLE
+                // rather than discovered as an error after tapping Start. The
+                // server remains authoritative.
+                const blocker = (!task.concurrent_allowed && task.sequence != null && !task.started_at)
+                    ? tasks.find(t =>
+                        t.sequence != null && t.sequence < (task.sequence as number) &&
+                        !GATE_SATISFIED.includes((t.status ?? "").toLowerCase()))
+                    : undefined;
+                const isBlocked = !!blocker && !isDone && !isActive;
+
+                const canStart    = isMyTask && !isBlocked && (task.status === "pending" || task.status === "paused");
                 const canComplete = isMyTask && task.status === "in_progress";
                 const canPause    = isMyTask && task.status === "in_progress";
 
@@ -596,9 +661,39 @@ function StagesPipeline({
                                             My task
                                         </span>
                                     )}
+                                    {task.concurrent_allowed && !isDone && (
+                                        <span className="text-2xs font-semibold px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200"
+                                            title="A production manager allowed this stage to run in parallel">
+                                            ∥ Parallel
+                                        </span>
+                                    )}
+                                    {isBlocked && (
+                                        <span className="flex items-center gap-1 text-2xs font-semibold px-2 py-0.5 rounded-full bg-surface-100 text-surface-500 border border-surface-200"
+                                            title={`Locked until "${blocker?.stage?.name}" is completed`}>
+                                            <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                                            </svg>
+                                            Waiting on {blocker?.stage?.name}
+                                        </span>
+                                    )}
                                     <span className={clsx("text-2xs font-semibold px-2 py-0.5 rounded-full", badgeColor)}>
                                         {badgeLabel}
                                     </span>
+                                    {canUnlock && !isDone && !task.started_at && (
+                                        <button type="button"
+                                            onClick={() => onUnlock(task.id, !task.concurrent_allowed)}
+                                            className={clsx(
+                                                "text-2xs font-bold px-2 py-0.5 rounded-full border transition-colors",
+                                                task.concurrent_allowed
+                                                    ? "text-surface-500 bg-white border-surface-200 hover:bg-surface-100"
+                                                    : "text-brand-700 bg-brand-50 border-brand-200 hover:bg-brand-100",
+                                            )}
+                                            title={task.concurrent_allowed
+                                                ? "Re-lock this stage to sequential order"
+                                                : "Let this stage run in parallel with earlier stages"}>
+                                            {task.concurrent_allowed ? "Re-lock" : "Allow parallel"}
+                                        </button>
+                                    )}
                                 </div>
                             </div>
 
@@ -1299,6 +1394,16 @@ export default function ProductionOrderDetailPage() {
         onError: (e: ApiError) => toast.error(e.message ?? "Failed to update task"),
     });
 
+    const unlockMutation = useMutation({
+        mutationFn: ({ taskId, allow }: { taskId: number; allow: boolean }) =>
+            post(`/v1/tailor/tasks/${taskId}/unlock`, { allow }),
+        onSuccess: (_, vars) => {
+            toast.success(vars.allow ? "Stage unlocked — it can run in parallel" : "Stage re-locked");
+            refresh();
+        },
+        onError: (e: ApiError) => toast.error(e.message ?? "Failed to update stage lock"),
+    });
+
     const confirmMutation = useMutation({
         mutationFn: () => post(`/v1/admin/production-orders/${id}/confirm`, {}),
         onSuccess: () => { toast.success("Order confirmed - now in production queue"); refresh(); },
@@ -1325,7 +1430,10 @@ export default function ProductionOrderDetailPage() {
 
     const statusCfg   = STATUS_CFG[order.status]    ?? STATUS_CFG.draft;
     const priorityCfg = PRIORITY_CFG[order.priority] ?? PRIORITY_CFG.normal;
-    const sortedTasks = [...(order.tasks ?? [])].sort((a, b) => (a.stage?.sort_order ?? 0) - (b.stage?.sort_order ?? 0));
+    // Sequence is the order's own snapshot (stamped at seeding); stage sort_order
+    // is only the fallback for legacy tasks that predate it.
+    const sortedTasks = [...(order.tasks ?? [])].sort((a, b) =>
+        (a.sequence ?? a.stage?.sort_order ?? 0) - (b.sequence ?? b.stage?.sort_order ?? 0));
     const allocations = order.material_allocations ?? [];
     const isCustomer  = !!order.customer_order_id;
     const days        = daysUntil(order.due_date);
@@ -1514,6 +1622,8 @@ export default function ProductionOrderDetailPage() {
                             currentUserId={currentUserId}
                             onTaskAction={(taskId, action) => taskMutation.mutate({ taskId, action })}
                             taskActionPending={taskMutation.isPending}
+                            canUnlock={can("production.manage_assignees")}
+                            onUnlock={(taskId, allow) => unlockMutation.mutate({ taskId, allow })}
                         />}
                         {tab === "materials" && (
                             allocations.length === 0 ? (

@@ -37,6 +37,8 @@ interface MyTask {
     started_at?: string | null;
     completed_at?: string | null;
     notes?: string | null;
+    /** Name of the unfinished earlier stage gating this one (null = free to start). */
+    blocked_by_stage?: string | null;
     stage: { id: number; name: string; slug: string; description?: string };
     production_order: {
         id: number;
@@ -862,9 +864,11 @@ function FocusCard({
                         const isDone = task.status === "completed";
                         const isPaused = task.status === "paused";
                         const isInProgress = task.status === "in_progress";
+                        const isBlocked = !!task.blocked_by_stage && !task.started_at;
                         const canStart =
-                            task.status === "pending" ||
-                            task.status === "paused";
+                            !isBlocked &&
+                            (task.status === "pending" ||
+                             task.status === "paused");
                         const canComplete = task.status === "in_progress";
 
                         return (
@@ -909,6 +913,16 @@ function FocusCard({
                                 >
                                     {task.stage.name}
                                 </span>
+
+                                {/* Locked: say why, instead of silently hiding Start */}
+                                {isBlocked && !isDone && !isInProgress && (
+                                    <span className="flex items-center gap-1 text-2xs font-semibold text-surface-400 bg-surface-100 border border-surface-200 rounded-full px-2 py-1 shrink-0">
+                                        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                                        </svg>
+                                        Waiting on {task.blocked_by_stage}
+                                    </span>
+                                )}
 
                                 {/* Inline action for the active task */}
                                 {isActive && !isDone && (
@@ -1105,9 +1119,11 @@ function QueueOrderGroup({
                         const isDone = task.status === "completed";
                         const isInProgress = task.status === "in_progress";
                         const isPaused = task.status === "paused";
+                        const isBlocked = !!task.blocked_by_stage && !task.started_at;
                         const canStart =
-                            task.status === "pending" ||
-                            task.status === "paused";
+                            !isBlocked &&
+                            (task.status === "pending" ||
+                             task.status === "paused");
                         const canComplete = task.status === "in_progress";
 
                         return (

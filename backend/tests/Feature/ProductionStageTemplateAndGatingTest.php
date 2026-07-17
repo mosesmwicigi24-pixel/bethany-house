@@ -125,7 +125,7 @@ class ProductionStageTemplateAndGatingTest extends TestCase
         $user = $this->actingAsTailor();
         [, $second] = $this->seededPair($user);
 
-        $response = $this->putJson("/api/v1/admin/tailor/tasks/{$second->id}/status", ['action' => 'start']);
+        $response = $this->putJson("/api/v1/tailor/tasks/{$second->id}/status", ['action' => 'start']);
 
         $response->assertStatus(422);
         $response->assertJsonPath('blocked_by.stage', 'Cutting');
@@ -137,10 +137,10 @@ class ProductionStageTemplateAndGatingTest extends TestCase
         $user = $this->actingAsTailor();
         [$first, $second] = $this->seededPair($user);
 
-        $this->putJson("/api/v1/admin/tailor/tasks/{$first->id}/status", ['action' => 'start'])->assertOk();
-        $this->putJson("/api/v1/admin/tailor/tasks/{$first->id}/status", ['action' => 'complete'])->assertOk();
+        $this->putJson("/api/v1/tailor/tasks/{$first->id}/status", ['action' => 'start'])->assertOk();
+        $this->putJson("/api/v1/tailor/tasks/{$first->id}/status", ['action' => 'complete'])->assertOk();
 
-        $this->putJson("/api/v1/admin/tailor/tasks/{$second->id}/status", ['action' => 'start'])->assertOk();
+        $this->putJson("/api/v1/tailor/tasks/{$second->id}/status", ['action' => 'start'])->assertOk();
         $this->assertSame('in_progress', $second->fresh()->status);
     }
 
@@ -151,7 +151,7 @@ class ProductionStageTemplateAndGatingTest extends TestCase
 
         // 'complete' on a never-started task must hit the same wall as 'start' —
         // otherwise the gate is decorative.
-        $this->putJson("/api/v1/admin/tailor/tasks/{$second->id}/status", ['action' => 'complete'])
+        $this->putJson("/api/v1/tailor/tasks/{$second->id}/status", ['action' => 'complete'])
             ->assertStatus(422);
     }
 
@@ -162,12 +162,12 @@ class ProductionStageTemplateAndGatingTest extends TestCase
 
         // The tailor themselves cannot unlock — the route needs the manager
         // permission on top of the role.
-        $this->postJson("/api/v1/admin/tailor/tasks/{$second->id}/unlock", [])->assertStatus(403);
+        $this->postJson("/api/v1/tailor/tasks/{$second->id}/unlock", [])->assertStatus(403);
 
         $user->givePermissionTo(Permission::findOrCreate('production.manage_assignees', 'sanctum'));
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 
-        $this->postJson("/api/v1/admin/tailor/tasks/{$second->id}/unlock", ['notes' => 'embroidery on separate pieces'])
+        $this->postJson("/api/v1/tailor/tasks/{$second->id}/unlock", ['notes' => 'embroidery on separate pieces'])
             ->assertOk();
 
         $fresh = $second->fresh();
@@ -175,7 +175,7 @@ class ProductionStageTemplateAndGatingTest extends TestCase
         $this->assertSame($user->id, $fresh->unlocked_by);
 
         // And now it starts even though Cutting is untouched.
-        $this->putJson("/api/v1/admin/tailor/tasks/{$second->id}/status", ['action' => 'start'])->assertOk();
+        $this->putJson("/api/v1/tailor/tasks/{$second->id}/status", ['action' => 'start'])->assertOk();
     }
 
     public function test_legacy_tasks_without_a_sequence_are_never_blocked(): void
@@ -187,6 +187,6 @@ class ProductionStageTemplateAndGatingTest extends TestCase
         // fail OPEN — a gate bug should never freeze the production floor.
         $second->update(['sequence' => null]);
 
-        $this->putJson("/api/v1/admin/tailor/tasks/{$second->id}/status", ['action' => 'start'])->assertOk();
+        $this->putJson("/api/v1/tailor/tasks/{$second->id}/status", ['action' => 'start'])->assertOk();
     }
 }
