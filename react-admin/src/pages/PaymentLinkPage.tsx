@@ -50,6 +50,7 @@ interface OrderInfo {
     business_name:      string;
     business_logo:      string | null;
     business_tagline:   string | null;
+    continue_url?:      string | null;
     customer_first_name?: string | null;
     is_international:   boolean;
     expires_at?:        string | null;
@@ -209,7 +210,13 @@ function ErrorScreen({ message, onRetry }: { message: string; onRetry?: () => vo
     );
 }
 
-function PaidScreen({ orderNumber, businessName }: { orderNumber: string; businessName: string }) {
+function PaidScreen({ orderNumber, businessName, continueUrl }: { orderNumber: string; businessName: string; continueUrl?: string | null }) {
+    // Take the customer back to their order automatically once paid.
+    useEffect(() => {
+        if (!continueUrl) return;
+        const t = setTimeout(() => { window.location.href = continueUrl; }, 4000);
+        return () => clearTimeout(t);
+    }, [continueUrl]);
     return (
         <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
             <Card className="max-w-sm w-full p-8 text-center">
@@ -223,6 +230,15 @@ function PaidScreen({ orderNumber, businessName }: { orderNumber: string; busine
                     Order <span className="font-mono font-semibold text-gray-800">{orderNumber}</span> is paid.
                 </p>
                 <p className="text-xs text-gray-400">{businessName} will be in touch shortly. Thank you!</p>
+                {continueUrl && (
+                    <>
+                        <a href={continueUrl}
+                           className="mt-5 inline-block w-full rounded-full bg-gray-900 text-white text-sm font-semibold py-3 hover:bg-gray-700 transition-colors">
+                            View your order →
+                        </a>
+                        <p className="text-[11px] text-gray-400 mt-2">Taking you back to your order…</p>
+                    </>
+                )}
             </Card>
         </div>
     );
@@ -1241,7 +1257,7 @@ export default function PaymentLinkPage() {
     if (stage === "loading") return <LoadingScreen />;
     if (stage === "error")   return <ErrorScreen message={error} onRetry={initialLoad} />;
     if (stage === "expired") return <ErrorScreen message="This payment link has expired. Please contact the business for a new link." />;
-    if (stage === "paid")    return <PaidScreen orderNumber={order?.order_number ?? ""} businessName={order?.business_name ?? ""} />;
+    if (stage === "paid")    return <PaidScreen orderNumber={order?.order_number ?? ""} businessName={order?.business_name ?? ""} continueUrl={order?.continue_url} />;
     if (!order) return <LoadingScreen />;
 
     const handleMethodSelect = (m: PaymentMethod) => {
@@ -1282,6 +1298,16 @@ export default function PaymentLinkPage() {
 
                 {/* Order summary */}
                 <OrderCard order={order} />
+
+                {/* Persistent path back to the customer's order on the storefront */}
+                {order.continue_url && (
+                    <div className="text-center -mt-1">
+                        <a href={order.continue_url}
+                           className="text-xs font-semibold text-gray-500 hover:text-gray-800 transition-colors">
+                            ← Back to your order
+                        </a>
+                    </div>
+                )}
 
                 {/* Payment panel */}
                 <Card>
@@ -1377,6 +1403,12 @@ export default function PaymentLinkPage() {
                                     {order.business_name} will review your transfer receipt and confirm your order.
                                     You'll be notified once approved.
                                 </p>
+                                {order.continue_url && (
+                                    <a href={order.continue_url}
+                                       className="mt-4 inline-block rounded-full bg-gray-900 text-white text-sm font-semibold px-6 py-2.5 hover:bg-gray-700 transition-colors">
+                                        Back to your order →
+                                    </a>
+                                )}
                             </div>
                         )}
                     </div>

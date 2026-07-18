@@ -92,6 +92,11 @@ class PublicPaymentController extends Controller
             'is_international'  => (bool) ($order->is_international ?? false),
             'expires_at'        => $order->payment_token_expires_at?->toISOString(),
             'is_expired'        => $this->isExpired($order),
+            // "Back to your order" target on the storefront (null when no
+            // storefront is configured) — the customer's live receipt page.
+            'continue_url'      => ($sf = rtrim((string) config('app.storefront_url'), '/'))
+                ? $sf . '/order/' . rawurlencode($order->order_number)
+                : null,
         ]);
     }
 
