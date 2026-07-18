@@ -53,6 +53,7 @@ services:
             WABA_PHONE_NUMBER_ID: ${WABA_PHONE_NUMBER_ID:-}
             WABA_API_VERSION: ${WABA_API_VERSION:-v19.0}
             APP_ENV: production
+            STOREFRONT_URL: ${STOREFRONT_URL:-}
             APP_KEY: ${APP_KEY:?APP_KEY is required}
             APP_DEBUG: "false"
             APP_URL: ${APP_URL:?APP_URL is required}
@@ -140,6 +141,7 @@ services:
             WABA_PHONE_NUMBER_ID: ${WABA_PHONE_NUMBER_ID:-}
             WABA_API_VERSION: ${WABA_API_VERSION:-v19.0}
             APP_ENV: production
+            STOREFRONT_URL: ${STOREFRONT_URL:-}
             APP_KEY: ${APP_KEY}
             APP_DEBUG: "false"
             DB_CONNECTION: pgsql
@@ -194,6 +196,7 @@ services:
             WABA_PHONE_NUMBER_ID: ${WABA_PHONE_NUMBER_ID:-}
             WABA_API_VERSION: ${WABA_API_VERSION:-v19.0}
             APP_ENV: production
+            STOREFRONT_URL: ${STOREFRONT_URL:-}
             APP_KEY: ${APP_KEY}
             DB_CONNECTION: pgsql
             DB_HOST: postgres
@@ -288,6 +291,7 @@ services:
             WABA_PHONE_NUMBER_ID: ${WABA_PHONE_NUMBER_ID:-}
             WABA_API_VERSION: ${WABA_API_VERSION:-v19.0}
             APP_ENV: production
+            STOREFRONT_URL: ${STOREFRONT_URL:-}
             APP_KEY: ${APP_KEY:?APP_KEY is required}
             APP_DEBUG: "false"
             DB_CONNECTION: pgsql
