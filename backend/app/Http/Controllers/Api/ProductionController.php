@@ -951,16 +951,23 @@ class ProductionController extends Controller
             ->whereNotNull('sequence')
             ->whereNotIn('status', ProductionTask::SATISFIED_STATUSES)
             ->with('stage:id,name')
-            ->get(['id', 'production_order_id', 'production_stage_id', 'sequence', 'status'])
+            ->get(['id', 'production_order_id', 'production_stage_id', 'sequence', 'status', 'quantity_done'])
             ->groupBy('production_order_id');
 
         $tasks->each(function ($task) use ($openSiblings) {
             $blocker = null;
             if (!$task->concurrent_allowed && $task->sequence !== null && !$task->started_at) {
-                $blocker = ($openSiblings[$task->production_order_id] ?? collect())
-                    ->filter(fn ($s) => $s->sequence !== null && $s->sequence < $task->sequence)
-                    ->sortBy('sequence')
-                    ->first();
+                // Flow-aware, mirroring ProductionTask::blockingTask: an earlier
+                // stage only blocks while it has no surplus pieces for me.
+                $qty = max(1, (int) ($task->productionOrder->quantity ?? 1));
+                $earlier = ($openSiblings[$task->production_order_id] ?? collect())
+                    ->filter(fn ($s) => $s->sequence !== null && $s->sequence < $task->sequence);
+                $minPassed = $qty;
+                foreach ($earlier as $s) {
+                    $passed = min((int) $s->quantity_done, $qty);
+                    if ($passed < $minPassed) { $minPassed = $passed; $blocker = $s; }
+                }
+                if ($minPassed > (int) $task->quantity_done) $blocker = null;
             }
             $task->setAttribute('blocked_by_stage', $blocker?->stage?->name);
         });
@@ -979,6 +986,144 @@ class ProductionController extends Controller
     // =========================================================================
     // PUT /tailor/tasks/{id}/status
     // =========================================================================
+
+    /**
+     * Record piece progress on a stage: "how many have passed through me?"
+     *
+     * One cumulative number per stage; the distribution across the order is
+     * derived, never typed. Two invariants keep the numbers honest, and both
+     * name their collision when they refuse:
+     *
+     *   ceiling — you cannot pass more pieces than every earlier stage has
+     *   (you cannot button shirts that were never stitched);
+     *   floor   — you cannot correct BELOW what a later stage already consumed.
+     *
+     * Transitions are automatic: the first counted piece starts the task, the
+     * last completes it, and a correction back below the full quantity reopens
+     * it. When the final stage completes, the order moves to QC — same as the
+     * button-driven path.
+     */
+    public function updateTaskProgress(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'quantity_done' => 'required|integer|min:0',
+        ]);
+
+        $task = ProductionTask::with(['productionOrder', 'stage:id,name'])->findOrFail($id);
+
+        if ($task->assigned_to !== $request->user()->id
+            && !$request->user()->hasAnyRole(['admin', 'super_admin'])) {
+            return response()->json(['message' => 'You are not assigned to this task.'], 403);
+        }
+
+        $order = $task->productionOrder;
+        $qty   = max(1, (int) $order->quantity);
+        $newQd = (int) $validated['quantity_done'];
+
+        if ($newQd > $qty) {
+            return response()->json(['message' => "This order has {$qty} pieces - you cannot record more than that."], 422);
+        }
+
+        $siblings = ProductionTask::where('production_order_id', $order->id)
+            ->where('id', '!=', $task->id)
+            ->whereNotNull('sequence')
+            ->with('stage:id,name')
+            ->get();
+
+        if ($task->sequence !== null) {
+            // Ceiling: the pipeline can only hand me what every earlier stage
+            // has passed. (concurrent_allowed lifts the START gate, not the
+            // count — parallel work is counted when pieces genuinely pass.)
+            $ceilingTask = null;
+            $ceiling     = $qty;
+            foreach ($siblings->where('sequence', '<', $task->sequence) as $prev) {
+                $passed = $prev->effectivePassed($qty);
+                if ($passed < $ceiling) {
+                    $ceiling     = $passed;
+                    $ceilingTask = $prev;
+                }
+            }
+            if ($newQd > $ceiling) {
+                $name = $ceilingTask?->stage?->name ?? 'an earlier stage';
+                return response()->json([
+                    'message' => "Only {$ceiling} piece(s) have passed \"{$name}\" - you cannot record {$newQd} here yet.",
+                ], 422);
+            }
+
+            // Floor: later stages have already consumed these pieces.
+            $floorTask = null;
+            $floor     = 0;
+            foreach ($siblings->where('sequence', '>', $task->sequence) as $next) {
+                $consumed = in_array($next->status, ProductionTask::SATISFIED_STATUSES)
+                    ? $qty
+                    : (int) $next->quantity_done;
+                if ($consumed > $floor) {
+                    $floor     = $consumed;
+                    $floorTask = $next;
+                }
+            }
+            if ($newQd < $floor) {
+                $name = $floorTask?->stage?->name ?? 'a later stage';
+                return response()->json([
+                    'message' => "\"{$name}\" has already passed {$floor} piece(s) - this stage cannot drop below that.",
+                ], 422);
+            }
+        }
+
+        $before = (int) $task->quantity_done;
+
+        DB::beginTransaction();
+        try {
+            $update = ['quantity_done' => $newQd];
+
+            if ($newQd > 0 && in_array($task->status, ['pending', 'paused'])) {
+                $update['status']     = 'in_progress';
+                $update['started_at'] = $task->started_at ?? now();
+                if (!$order->started_at) {
+                    $order->update(['status' => 'in_progress', 'started_at' => now()]);
+                }
+            }
+            if ($newQd === $qty && $task->status !== 'completed') {
+                $update['status']       = 'completed';
+                $update['completed_at'] = now();
+            }
+            if ($newQd < $qty && $task->status === 'completed') {
+                // Correction reopens the stage - completed was arithmetic, so
+                // un-completing is too.
+                $update['status']       = 'in_progress';
+                $update['completed_at'] = null;
+            }
+
+            $task->update($update);
+
+            $allDone = ProductionTask::where('production_order_id', $order->id)
+                ->where('status', '!=', 'completed')
+                ->doesntExist();
+            if ($allDone && $order->status !== 'qc_pending') {
+                $order->update(['status' => 'qc_pending']);
+            }
+
+            DB::commit();
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Failed to record progress.', 'error' => $e->getMessage()], 500);
+        }
+
+        try {
+            ActivityLogService::log('production_task_progress', $order, [
+                'task_id' => $task->id,
+                'stage'   => $task->stage?->name,
+                'from'    => $before,
+                'to'      => $newQd,
+                'of'      => $qty,
+            ]);
+        } catch (\Exception) {}
+
+        return response()->json([
+            'message' => "Progress recorded - {$newQd} of {$qty}.",
+            'task'    => $task->fresh(['stage', 'productionOrder:id,order_number,status,quantity']),
+        ]);
+    }
 
     /**
      * Let one stage run in parallel with its predecessors.
