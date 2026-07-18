@@ -1217,6 +1217,55 @@ class ProductionController extends Controller
     }
 
     /**
+     * Attach a reference image to a batch — the fabric, the trim, the finished
+     * look. The first image is the batch's thumbnail; all of them are visual
+     * reference for the floor. Reuses the app's ImageService (compression +
+     * thumbnail), same as product and category images.
+     */
+    public function uploadBatchImage(Request $request, $id, $batchId)
+    {
+        $order = ProductionOrder::visibleTo($request->user())->findOrFail($id);
+        $batch = ProductionOrderBatch::where('production_order_id', $order->id)->findOrFail($batchId);
+
+        $request->validate([
+            'image' => 'required|file|mimes:jpg,jpeg,png,webp|max:10240',
+        ]);
+
+        $result = app(\App\Services\ImageService::class)
+            ->process($request->file('image'), 'production-batches', 'product');
+
+        $images   = $batch->images ?? [];
+        $images[] = $result['url'];
+        $batch->update(['images' => $images]);
+
+        try {
+            ActivityLogService::log('production_batch_image_added', $order, [
+                'batch' => $batch->label, 'url' => $result['url'],
+            ]);
+        } catch (\Exception) {}
+
+        return response()->json(['message' => 'Image added.', 'batch' => $batch->fresh()]);
+    }
+
+    /** Remove one reference image from a batch (by its URL). */
+    public function deleteBatchImage(Request $request, $id, $batchId)
+    {
+        $order = ProductionOrder::visibleTo($request->user())->findOrFail($id);
+        $batch = ProductionOrderBatch::where('production_order_id', $order->id)->findOrFail($batchId);
+
+        $validated = $request->validate(['url' => 'required|string']);
+
+        $images = array_values(array_filter($batch->images ?? [], fn ($u) => $u !== $validated['url']));
+        $batch->update(['images' => $images]);
+
+        try {
+            app(\App\Services\ImageService::class)->delete($validated['url'], 'public');
+        } catch (\Exception) {}
+
+        return response()->json(['message' => 'Image removed.', 'batch' => $batch->fresh()]);
+    }
+
+    /**
      * The batched twin of updateTaskProgress: one count, for one colourway.
      *
      * Same pipeline arithmetic, run WITHIN the batch: you cannot button more

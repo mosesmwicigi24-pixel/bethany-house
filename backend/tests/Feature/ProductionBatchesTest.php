@@ -180,4 +180,29 @@ class ProductionBatchesTest extends TestCase
         $this->assertSame('completed', $stitching->fresh()->status);
         $this->assertSame('qc_pending', $order->fresh()->status);
     }
+
+    public function test_reference_images_attach_to_and_detach_from_a_batch(): void
+    {
+        \Illuminate\Support\Facades\Storage::fake('public');
+        $user  = $this->actingAsCoordinator();
+        $order = $this->seededOrder($user);
+        $batches = $this->defineBatches($order);
+        $blue = $batches['Blue trim'];
+
+        $upload = $this->post(
+            "/api/v1/admin/production-orders/{$order->id}/batches/{$blue->id}/images",
+            ['image' => \Illuminate\Http\UploadedFile::fake()->image('fabric.jpg', 600, 400)],
+        );
+        $upload->assertOk();
+
+        $images = $blue->fresh()->images;
+        $this->assertCount(1, $images);
+
+        $this->deleteJson(
+            "/api/v1/admin/production-orders/{$order->id}/batches/{$blue->id}/images",
+            ['url' => $images[0]],
+        )->assertOk();
+
+        $this->assertSame([], $blue->fresh()->images ?? []);
+    }
 }

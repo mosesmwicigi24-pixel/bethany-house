@@ -10,12 +10,14 @@ class ProductionOrderBatch extends Model
         'production_order_id',
         'label',
         'attributes',
+        'images',
         'quantity',
         'sort_order',
     ];
 
     protected $casts = [
         'attributes' => 'array',
+        'images'     => 'array',
         'quantity'   => 'integer',
         'sort_order' => 'integer',
     ];
