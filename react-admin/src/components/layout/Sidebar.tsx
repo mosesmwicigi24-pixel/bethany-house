@@ -176,7 +176,10 @@ const NAV: NavGroup[] = [
                 label: "Quality Control",
                 href: "/production/qc",
                 icon: "qc",
-                permission: "production.view",
+                // QC is a separate responsibility: tailors complete work and
+                // SUBMIT it; only people who hold a QC permission review it.
+                // A plain tailor never sees this item.
+                anyOfPermissions: ["production.submit_qc", "production.approve_qc"],
             },
             {
                 label: "Calendar",
@@ -189,7 +192,9 @@ const NAV: NavGroup[] = [
                 label: "Bill of Materials",
                 href: "/production/bom",
                 icon: "bom",
-                permission: "production.view",
+                // Coordinators define BOMs; a worker sees the materials for
+                // THEIR job on the task itself.
+                anyOfPermissions: ["production.raise_order", "production.manage_assignees"],
             },
         ],
     },
@@ -1001,7 +1006,9 @@ export function Sidebar({ collapsed }: SidebarProps) {
 
     // All groups collapsed by default; the active group auto-expands on mount
     const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
-        Object.fromEntries(NAV.map((g) => [g.label, false]))
+        // Production stays open: for a worker it IS the app, and hiding their
+        // whole world behind a collapsed tray was a daily annoyance.
+        Object.fromEntries(NAV.map((g) => [g.label, g.label === "Production"]))
     );
 
     useEffect(() => {
