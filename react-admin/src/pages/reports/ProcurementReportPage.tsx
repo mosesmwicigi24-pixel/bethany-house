@@ -22,6 +22,7 @@ import {
     ResponsiveContainer,
 } from "recharts";
 import {
+    KPI_GRID,
     KpiCard,
     ReportPdfButton,
     SectionHeader,
@@ -101,7 +102,7 @@ export default function ProcurementReportPage() {
             />
 
             {/* KPIs */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className={KPI_GRID}>
                 <KpiCard label="Total POs" value={summary.total_orders ?? 0} />
                 <KpiCard
                     label="Total Spend"
@@ -118,7 +119,7 @@ export default function ProcurementReportPage() {
                     color="text-warning"
                 />
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className={KPI_GRID}>
                 <KpiCard
                     label="Avg PO Value"
                     value={fmtKes(summary.avg_po_value)}
@@ -470,7 +471,7 @@ function ProcurementIntelligence({ start, end }: { start: string; end: string })
 
     return (
         <div className="space-y-6">
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div className={KPI_GRID}>
                 <KpiCard label="Open POs" value={open_pos.count}
                     sub={open_pos.oldest_days != null ? `oldest ${open_pos.oldest_days}d` : "none in flight"} />
                 <KpiCard label="In-flight Value" value={fmtKes(open_pos.value)} />

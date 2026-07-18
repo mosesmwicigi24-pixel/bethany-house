@@ -21,6 +21,7 @@ import {
 import { clsx } from "clsx";
 import dayjs from "dayjs";
 import {
+    KPI_GRID,
     KpiCard,
     ReportPdfButton,
     SectionHeader,
@@ -116,7 +117,7 @@ export default function CustomersReportPage() {
             />
 
             {/* KPIs */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className={KPI_GRID}>
                 <KpiCard
                     label="Total Customers"
                     value={
@@ -143,7 +144,7 @@ export default function CustomersReportPage() {
                     color="text-brand-600"
                 />
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className={KPI_GRID}>
                 <KpiCard
                     label="New Buyers"
                     value={summary.new_buyers ?? 0}
@@ -597,7 +598,7 @@ function CustomerIntelligence({ start, end }: { start: string; end: string }) {
 
     return (
         <div className="space-y-6">
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div className={KPI_GRID}>
                 <KpiCard label="Returning Revenue" value={fmtKes(nvr.returning?.revenue ?? 0)}
                     sub={`${nvr.returning?.customers ?? 0} customers came back`} color="text-success" />
                 <KpiCard label="New-Customer Revenue" value={fmtKes(nvr.new?.revenue ?? 0)}
