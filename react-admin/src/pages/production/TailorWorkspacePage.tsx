@@ -59,7 +59,9 @@ interface MyTask {
         customer?: { first_name: string; last_name: string } | null;
         material_allocations?: {
             material: { name: string; unit_of_measure: string };
-            quantity_required: number;
+            quantity_required: number | string;
+            quantity_allocated?: number | string;
+            quantity_used?: number | string;
         }[];
     };
 }
@@ -171,6 +173,44 @@ function groupTasksByOrder(tasks: MyTask[]): OrderGroup[] {
 }
 
 // ── Offline queue helper ───────────────────────────────────────────────────────
+
+// ─── Workflow buckets ─────────────────────────────────────────────────────────
+// The queue reads as a production line, not a table: every job sits in exactly
+// one lane, and the lanes are ordered the way work actually flows. "What should
+// I work on next?" is answered by the first non-empty lane.
+
+type WorkflowState = "in_progress" | "ready" | "waiting" | "qc" | "done";
+
+const WORKFLOW_SECTIONS: { id: WorkflowState; label: string; tone: string; hint: string }[] = [
+    { id: "in_progress", label: "In progress",       tone: "text-brand-700 bg-brand-50 border-brand-200",     hint: "Pick up where you left off" },
+    { id: "ready",       label: "Ready to start",    tone: "text-emerald-700 bg-emerald-50 border-emerald-200", hint: "Nothing is blocking these" },
+    { id: "waiting",     label: "Waiting",           tone: "text-amber-700 bg-amber-50 border-amber-200",     hint: "Blocked by an earlier stage or missing materials" },
+    { id: "qc",          label: "Ready for QC",      tone: "text-purple-700 bg-purple-50 border-purple-200",  hint: "Your part is done — awaiting quality check" },
+    { id: "done",        label: "Completed",         tone: "text-surface-500 bg-surface-100 border-surface-200", hint: "" },
+];
+
+/** Materials this job is short of: required > allocated on any line. */
+function materialShortfalls(group: OrderGroup) {
+    const allocs = group.tasks[0]?.production_order?.material_allocations ?? [];
+    return allocs.filter(
+        (a) => Number(a.quantity_required ?? 0) > Number(a.quantity_allocated ?? 0),
+    );
+}
+
+function workflowStateOf(group: OrderGroup): WorkflowState {
+    const orderStatus = group.tasks[0]?.production_order?.status;
+    if (orderStatus === "qc_pending") return "qc";
+    if (group.completedCount === group.totalCount && group.totalCount > 0) return "done";
+    if (group.tasks.some((t) => t.status === "in_progress" || t.status === "paused")) return "in_progress";
+
+    // Next task locked behind an earlier stage, or the job is short of materials
+    // and nothing has started yet — either way it cannot begin right now.
+    const next = group.activeTask;
+    if (next?.blocked_by_stage) return "waiting";
+    if (materialShortfalls(group).length > 0 && !group.tasks.some((t) => t.started_at)) return "waiting";
+
+    return "ready";
+}
 
 async function queueOfflineTaskUpdate(
     taskId: number,
@@ -1006,6 +1046,64 @@ function FocusCard({
 // ── Queue order group ─────────────────────────────────────────────────────────
 // Collapsible group header + indented task rows for the Queue tab.
 
+// ─── Delivery week ────────────────────────────────────────────────────────────
+// Seven days of delivery commitments at a glance. A dot per job due that day;
+// red = overdue work still open. Tapping a day is unnecessary — the lanes below
+// already order the work; this strip exists so the tailor sees the WEEK the way
+// a floor supervisor does.
+
+function DeliveryWeekStrip({ groups }: { groups: OrderGroup[] }) {
+    const days = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() + i);
+        return d;
+    });
+    const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+    const open = groups.filter((g) => g.completedCount < g.totalCount);
+    const overdue = open.filter((g) => daysUntil(g.dueDate) < 0).length;
+
+    return (
+        <div className="card px-3 py-2.5">
+            <div className="flex items-center justify-between mb-2">
+                <p className="text-2xs font-bold uppercase tracking-wide text-surface-400">Delivery week</p>
+                {overdue > 0 && (
+                    <span className="text-2xs font-bold text-danger bg-danger-light rounded-full px-2 py-0.5">
+                        {overdue} overdue
+                    </span>
+                )}
+            </div>
+            <div className="grid grid-cols-7 gap-1">
+                {days.map((d, i) => {
+                    const due = open.filter((g) => g.dueDate && sameDay(new Date(g.dueDate), d));
+                    const isToday = i === 0;
+                    return (
+                        <div key={i} className={clsx(
+                            "rounded-lg py-1.5 text-center border",
+                            isToday ? "border-brand-300 bg-brand-50" : "border-surface-100 bg-surface-50",
+                        )}>
+                            <p className="text-2xs text-surface-400 leading-none">
+                                {d.toLocaleDateString("en-KE", { weekday: "short" })}
+                            </p>
+                            <p className={clsx("text-xs font-bold mt-0.5", isToday ? "text-brand-700" : "text-surface-700")}>
+                                {d.getDate()}
+                            </p>
+                            <div className="flex justify-center gap-0.5 mt-1 min-h-[6px]">
+                                {due.slice(0, 3).map((g) => (
+                                    <span key={g.orderId} className={clsx(
+                                        "w-1.5 h-1.5 rounded-full",
+                                        daysUntil(g.dueDate) < 0 ? "bg-danger" : "bg-brand-500",
+                                    )} />
+                                ))}
+                                {due.length > 3 && <span className="text-2xs leading-none text-surface-400">+</span>}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
 function QueueOrderGroup({
     group,
     focusedOrderId,
@@ -1073,6 +1171,12 @@ function QueueOrderGroup({
                                 Active
                             </span>
                         )}
+                        {materialShortfalls(group).length > 0 && !allDone && (
+                            <span className="text-2xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full"
+                                title="Some materials for this job are not yet allocated">
+                                ⏳ Waiting for materials
+                            </span>
+                        )}
                     </div>
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         <span className="font-mono text-2xs text-surface-400">
@@ -1111,6 +1215,21 @@ function QueueOrderGroup({
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                 </svg>
             </button>
+
+            {/* Materials this job is short of — named, with the missing amount,
+                so "waiting" is a fact the tailor can chase, not a mystery. */}
+            {open && materialShortfalls(group).length > 0 && !allDone && (
+                <div className="border-t border-amber-100 bg-amber-50/60 px-3 py-2 space-y-1">
+                    {materialShortfalls(group).map((a, i) => (
+                        <div key={i} className="flex items-center justify-between text-2xs">
+                            <span className="font-semibold text-amber-800">{a.material.name}</span>
+                            <span className="text-amber-700 tabular-nums">
+                                needs {Number(a.quantity_required).toLocaleString()} · allocated {Number(a.quantity_allocated ?? 0).toLocaleString()} {a.material.unit_of_measure}
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            )}
 
             {/* Task rows (collapsible) */}
             {open && (
@@ -1618,20 +1737,38 @@ export default function TailorWorkspacePage() {
                                 </p>
                             </div>
                         ) : (
-                            <div className="space-y-3 pb-safe">
-                                {queueGroups.map((group, i) => (
-                                    <QueueOrderGroup
-                                        key={group.orderId}
-                                        group={group}
-                                        focusedOrderId={
-                                            focusedGroup?.orderId ?? null
-                                        }
-                                        onFocusTask={focusTaskFromQueue}
-                                        onQuickAction={handleAction}
-                                        isActing={mutation.isPending}
-                                        defaultOpen={i < 3}
-                                    />
-                                ))}
+                            <div className="space-y-4 pb-safe">
+                                {/* Delivery week — the next 7 days of due dates.
+                                    A tailor plans around deliveries, not lists. */}
+                                <DeliveryWeekStrip groups={queueGroups} />
+
+                                {WORKFLOW_SECTIONS.map((section) => {
+                                    const inLane = queueGroups.filter((g) => workflowStateOf(g) === section.id);
+                                    if (!inLane.length) return null;
+                                    return (
+                                        <div key={section.id}>
+                                            <div className="flex items-baseline gap-2 mb-2 px-0.5">
+                                                <span className={clsx("text-2xs font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border", section.tone)}>
+                                                    {section.label} · {inLane.length}
+                                                </span>
+                                                {section.hint && <span className="text-2xs text-surface-400">{section.hint}</span>}
+                                            </div>
+                                            <div className="space-y-3">
+                                                {inLane.map((group, i) => (
+                                                    <QueueOrderGroup
+                                                        key={group.orderId}
+                                                        group={group}
+                                                        focusedOrderId={focusedGroup?.orderId ?? null}
+                                                        onFocusTask={focusTaskFromQueue}
+                                                        onQuickAction={handleAction}
+                                                        isActing={mutation.isPending}
+                                                        defaultOpen={section.id === "in_progress" || (section.id === "ready" && i === 0)}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         )}
                     </div>
