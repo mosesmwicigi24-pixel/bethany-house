@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { Component, useState, useEffect, type ReactNode } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
@@ -6,6 +6,42 @@ import { PWAInstallBanner } from '@/components/pwa/PWAInstallBanner'
 import { CommandPalette } from '@/components/ui/CommandPalette'
 
 const COLLAPSE_KEY = 'bh_sidebar_collapsed'
+
+// ─── Page error boundary ──────────────────────────────────────────────────────
+// A render crash in any page used to unmount the ENTIRE tree — sidebar included —
+// leaving a fully white screen with every network request green (the PO detail
+// page did exactly this via a hooks-order bug). The boundary contains the blast
+// to the page area, says what broke, and offers a reload. Keyed by pathname in
+// the layout below so navigating away resets it.
+
+class PageErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+    state = { error: null as Error | null }
+
+    static getDerivedStateFromError(error: Error) {
+        return { error }
+    }
+
+    render() {
+        if (this.state.error) {
+            return (
+                <div className="max-w-lg mx-auto mt-16 bg-white border border-surface-200 rounded-2xl shadow-sm p-6 text-center">
+                    <div className="w-12 h-12 mx-auto rounded-2xl bg-danger/10 text-danger flex items-center justify-center mb-3">
+                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                        </svg>
+                    </div>
+                    <p className="text-sm font-bold text-surface-900">This page hit an error</p>
+                    <p className="text-xs text-surface-500 mt-1 break-words">{this.state.error.message}</p>
+                    <button onClick={() => window.location.reload()}
+                        className="mt-4 px-4 py-2 rounded-xl bg-brand-600 text-white text-xs font-bold hover:bg-brand-700 transition-colors">
+                        Reload page
+                    </button>
+                </div>
+            )
+        }
+        return this.props.children
+    }
+}
 
 // ─── Route label overrides ────────────────────────────────────────────────────
 
@@ -215,7 +251,10 @@ export function AdminLayout() {
 
                 {/* Page content */}
                 <main className="flex-1 overflow-y-auto p-4 md:p-6">
-                    <Outlet />
+                    {/* key: a crash on one page must not follow you to the next */}
+                    <PageErrorBoundary key={location.pathname}>
+                        <Outlet />
+                    </PageErrorBoundary>
                 </main>
             </div>
         </div>

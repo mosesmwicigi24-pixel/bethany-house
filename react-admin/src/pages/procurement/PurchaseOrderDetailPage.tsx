@@ -319,6 +319,13 @@ export default function PurchaseOrderDetailPage() {
         onError: (e: any) => toast.error(e?.message ?? "Failed to update status"),
     });
 
+    // usePermissions reads the auth store — a React hook. It used to be
+    // called AFTER the early returns below, so the loading render recorded
+    // fewer hooks than the data render and React tore the whole tree down
+    // ("Rendered more hooks than during the previous render") — a blank
+    // white page on every direct/deep-link load of this page.
+    const { can } = usePermissions();
+
     if (isLoading) return (
         <div className="flex items-center justify-center h-64"><Spinner /></div>
     );
@@ -330,7 +337,6 @@ export default function PurchaseOrderDetailPage() {
     );
 
     const currency = po.currency_code ?? "KES";
-    const { can } = usePermissions();
     const canCreatePO = can("procurement.create");
     const canApprovePO = can("procurement.approve");
     const canReceivePO = can("procurement.receive");
