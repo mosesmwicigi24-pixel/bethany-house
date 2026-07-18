@@ -120,7 +120,7 @@ class CustomerFinancialIntelligenceTest extends TestCase
     public function test_earned_pnl_counts_revenue_when_the_final_payment_lands(): void
     {
         $outlet = Outlet::factory()->create();
-        $this->viewer(['reports.financial']);
+        $user = $this->viewer(['reports.financial']);
 
         $product = Product::factory()->create();
         DB::table('product_prices')->insert([
@@ -154,7 +154,7 @@ class CustomerFinancialIntelligenceTest extends TestCase
             'reference_number' => 'EXP-P5-1', 'title' => 'Rent', 'category_id' => $categoryId,
             'amount' => 1500, 'amount_kes' => 1500,
             'currency_code' => 'KES', 'expense_date' => now()->format('Y-m-d'), 'status' => 'completed',
-            'payment_method' => 'cash',
+            'payment_method' => 'cash', 'created_by' => $user->id,
             'outlet_id' => $outlet->id, 'created_at' => now(), 'updated_at' => now(),
         ]);
 
