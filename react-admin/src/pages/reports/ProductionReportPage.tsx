@@ -22,6 +22,7 @@ import {
     ResponsiveContainer,
 } from "recharts";
 import {
+    KPI_GRID,
     KpiCard,
     SectionHeader,
     TableWrapper,
@@ -120,7 +121,7 @@ export default function ProductionReportPage() {
             />
 
             {/* KPIs row 1 */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className={KPI_GRID}>
                 <KpiCard label="Total Orders" value={s.total_orders ?? 0} />
                 <KpiCard
                     label="Completed"
@@ -140,7 +141,7 @@ export default function ProductionReportPage() {
             </div>
 
             {/* KPIs row 2 */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className={KPI_GRID}>
                 <KpiCard
                     label="Units Planned"
                     value={s.total_units_planned ?? 0}
@@ -668,7 +669,7 @@ function CostingTab({ data, isLoading, params }: {
         <div className="space-y-6">
 
             {/* ── Summary KPIs ── */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className={KPI_GRID}>
                 <KpiCard
                     label="Total Revenue"
                     value={fmtKes(totals.total_revenue)}
@@ -922,7 +923,7 @@ function IntelligenceTab({ start, end }: { start: string; end: string }) {
             {/* Capacity: the one sentence that plans next week */}
             <div className={clsx("card card-body border", short ? "border-red-200 bg-red-50/40" : "border-emerald-200 bg-emerald-50/30")}>
                 <SectionHeader title="Capacity — next 7 days" />
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-1">
+                <div className={clsx(KPI_GRID, "mt-1")}>
                     <KpiCard label="Pieces Due" value={capacity.due_pieces} sub={`${capacity.due_orders} orders`} />
                     <KpiCard label="Floor Pace" value={`${capacity.daily_throughput}/day`} sub="last 14 days, actual" />
                     <KpiCard label="Week Capacity" value={capacity.week_capacity} sub="at current pace" />

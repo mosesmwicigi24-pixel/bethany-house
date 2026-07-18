@@ -22,6 +22,7 @@ import {
 import { clsx } from "clsx";
 import dayjs from "dayjs";
 import {
+    KPI_GRID,
     KpiCard,
     ReportPdfButton,
     SectionHeader,
@@ -127,7 +128,7 @@ export default function SalesReportPage() {
             />
 
             {/* KPIs row 1 */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className={KPI_GRID}>
                 <KpiCard
                     label="Total Revenue"
                     value={fmtKes(s.total_revenue)}
@@ -152,7 +153,7 @@ export default function SalesReportPage() {
             </div>
 
             {/* KPIs row 2 */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className={KPI_GRID}>
                 <KpiCard
                     label="Online Revenue"
                     value={fmtKes(s.online_revenue)}
@@ -381,7 +382,7 @@ export default function SalesReportPage() {
                                     params={dr.params}
                                 />
                             </SectionHeader>
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            <div className={KPI_GRID}>
                                 <KpiCard
                                     label="Total Returns"
                                     value={

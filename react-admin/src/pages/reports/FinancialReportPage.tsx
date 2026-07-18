@@ -22,6 +22,7 @@ import {
     ResponsiveContainer,
 } from "recharts";
 import {
+    KPI_GRID,
     KpiCard,
     ReportPdfButton,
     SectionHeader,
@@ -663,7 +664,7 @@ export default function FinancialReportPage() {
                         <>
                             {/* Tax KPIs */}
                             {(taxQuery.data?.totals) && (
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                <div className={KPI_GRID}>
                                     <KpiCard label="Total Tax Collected" value={fmtKes(taxQuery.data.totals.total_tax_collected)} color="text-brand-600" />
                                     <KpiCard label="Taxable Revenue" value={fmtKes(taxQuery.data.totals.total_taxable_amount)} />
                                     <KpiCard label="Effective Tax Rate" value={`${taxQuery.data.totals.effective_rate ?? 0}%`} />
@@ -828,7 +829,7 @@ function FinancialIntelligence({ start, end }: { start: string; end: string }) {
     return (
         <div className="space-y-6">
             {/* Earned P&L: the waterfall in four cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className={KPI_GRID}>
                 <KpiCard label="Earned Revenue" value={fmtKes(pnl.earned_revenue)}
                     sub={`${pnl.earned_orders} orders fully paid in period`} />
                 <KpiCard label="COGS (est.)" value={fmtKes(pnl.cogs_estimate)}

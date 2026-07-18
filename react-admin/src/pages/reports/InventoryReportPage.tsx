@@ -22,6 +22,7 @@ import {
     Legend,
 } from "recharts";
 import {
+    KPI_GRID,
     KpiCard,
     ReportPdfButton,
     SectionHeader,
@@ -203,7 +204,7 @@ export default function InventoryReportPage() {
             />
 
             {/* KPIs */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className={KPI_GRID}>
                 <KpiCard label="Total SKUs" value={t.total_items ?? 0} />
                 <KpiCard
                     label="In Stock"
@@ -1028,7 +1029,7 @@ function InventoryIntelligence({ start, end }: { start: string; end: string }) {
 
     return (
         <div className="space-y-6">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className={KPI_GRID}>
                 <KpiCard label="Stock at Cost" value={fmtKes(health.cost_value)} sub={`${health.units} units · ${health.skus} SKUs`} />
                 <KpiCard label="Stock at Retail" value={fmtKes(health.retail_value)} sub="if everything sold at list" />
                 <KpiCard label="Low / Out" value={`${health.low_stock} / ${health.out_of_stock}`} color={health.out_of_stock > 0 ? "text-danger" : "text-warning"} sub="low stock / out of stock" />

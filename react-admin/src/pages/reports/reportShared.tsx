@@ -21,6 +21,12 @@ import {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
+// Full-width KPI row (the owner's rule: always use the screen). 2-up on
+// phones, 4-up on laptops; on big displays auto-fit packs as many ~210px
+// cards as fit (8+ across) and stretches a short row to fill the width —
+// no ghost columns either way.
+export const KPI_GRID = "grid grid-cols-2 md:grid-cols-4 2xl:grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-3";
+
 export const CHART_COLORS = [
     "#6366F1",
     "#8B5CF6",
