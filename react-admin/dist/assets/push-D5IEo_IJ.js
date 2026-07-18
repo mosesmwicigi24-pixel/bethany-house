@@ -1,1 +1,0 @@
-import{g as i,j as p,i as u}from"./index-CoC5Eqj0.js";import"./query-DoMSCxf_.js";import"./vendor-D8ehbt3f.js";const r={getVapidPublicKey:()=>u("/v1/admin/push/vapid-public-key"),subscribe:s=>p("/v1/admin/push/subscribe",s),unsubscribe:s=>i("/v1/admin/push/unsubscribe",{data:{endpoint:s}})};export{r as pushApi};

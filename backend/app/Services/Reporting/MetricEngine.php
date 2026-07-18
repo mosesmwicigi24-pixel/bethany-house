@@ -16,8 +16,10 @@ use Illuminate\Support\Facades\DB;
  *    non-cancelled). Money truth reads settled payments net of refunds.
  *    Drawer truth stays in the registers module. Every metric here belongs
  *    to exactly one truth and says so in its name.
- *  - ONE CLOCK. All period boundaries are Africa/Nairobi days converted to
- *    UTC for querying; series bucket by the Nairobi day (fixed +3, no DST).
+ *  - ONE CLOCK. app.timezone is Africa/Nairobi, so every DB timestamp is
+ *    already stored in Nairobi wall-clock time. Period boundaries therefore
+ *    stay in Nairobi time end to end — converting to UTC here would shift
+ *    every window three hours early (a bug CI caught on day one).
  *  - SCOPE IN THE QUERY. A non-admin with assigned outlets has every query
  *    filtered to those outlets — this engine will not return a row the
  *    caller isn't allowed to aggregate.
@@ -121,9 +123,10 @@ class MetricEngine
             default => abort(422, "Unknown period '{$key}'."),
         };
 
+        // Timestamps are stored in Nairobi time (app.timezone) — no UTC shift.
         return [
-            $start->utc()->toMutable(), $end->utc()->toMutable(),
-            $prevStart->utc()->toMutable(), $prevEnd->utc()->toMutable(),
+            $start->toMutable(), $end->toMutable(),
+            $prevStart->toMutable(), $prevEnd->toMutable(),
         ];
     }
 
@@ -151,10 +154,10 @@ class MetricEngine
     /** The settle timestamp: paid_at when present, else the row's creation. */
     private const PAID_AT = 'COALESCE(p.paid_at, p.created_at)';
 
-    /** Nairobi-day bucket for a UTC timestamp column (EAT is fixed UTC+3). */
+    /** Day bucket — timestamps are already Nairobi wall-clock (app.timezone). */
     private static function eatDay(string $col): string
     {
-        return "DATE({$col} + INTERVAL '3 hours')";
+        return "DATE({$col})";
     }
 
     /**
@@ -206,14 +209,13 @@ class MetricEngine
         // expense_date is a plain date — no timezone shifting needed.
         $flow = function (Carbon $a, Carbon $b) use ($base) {
             return (float) $base()->whereBetween('expense_date', [
-                $a->copy()->addHours(3)->format('Y-m-d'),
-                $b->copy()->addHours(3)->format('Y-m-d'),
+                $a->format('Y-m-d'), $b->format('Y-m-d'),
             ])->sum('amount_kes');
         };
         return [
             'current'  => round($flow($s, $e), 2),
             'previous' => round($flow($ps, $pe), 2),
-            'series'   => $base()->whereBetween('expense_date', [$s->copy()->addHours(3)->format('Y-m-d'), $e->copy()->addHours(3)->format('Y-m-d')])
+            'series'   => $base()->whereBetween('expense_date', [$s->format('Y-m-d'), $e->format('Y-m-d')])
                 ->selectRaw('expense_date AS d, COALESCE(SUM(amount_kes),0) AS v')
                 ->groupBy('expense_date')->orderBy('d')->pluck('v', 'd'),
         ];
@@ -320,7 +322,7 @@ class MetricEngine
         // 2. Aging balances — money owed on orders older than 30 days.
         $aging = $this->salesBase()
             ->whereIn('payment_status', ['pending', 'partial', 'deposit'])
-            ->where('orders.created_at', '<', CarbonImmutable::now(self::TZ)->subDays(30)->utc())
+            ->where('orders.created_at', '<', CarbonImmutable::now(self::TZ)->subDays(30))
             ->leftJoinSub(
                 DB::table('payments')->where('status', 'paid')
                     ->selectRaw('order_id, SUM(amount - COALESCE(refund_amount,0)) AS paid')->groupBy('order_id'),
