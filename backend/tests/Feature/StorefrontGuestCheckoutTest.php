@@ -8,7 +8,9 @@ use App\Models\Product;
 use App\Models\ProductionOrder;
 use App\Models\ProductPrice;
 use App\Models\ProductTranslation;
+use App\Mail\StorefrontOrderReceiptMail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
 /**
@@ -205,6 +207,60 @@ class StorefrontGuestCheckoutTest extends TestCase
             $second->json('order.order_number'),
         );
         $this->assertSame(1, Order::count());
+    }
+
+    public function test_receipt_email_sent_when_email_provided(): void
+    {
+        Mail::fake();
+        $product = $this->makeProduct();
+
+        $this->postJson('/api/v1/storefront/orders', $this->payload($product, [
+            'customer' => ['email' => 'jane@example.com'],
+        ]))->assertStatus(201);
+
+        Mail::assertSent(StorefrontOrderReceiptMail::class, fn ($m) => $m->hasTo('jane@example.com'));
+    }
+
+    public function test_no_receipt_email_without_address(): void
+    {
+        Mail::fake();
+        $product = $this->makeProduct();
+
+        $this->postJson('/api/v1/storefront/orders', $this->payload($product))->assertStatus(201);
+
+        Mail::assertNothingSent();
+    }
+
+    public function test_status_endpoint_returns_live_order_state(): void
+    {
+        $product = $this->makeProduct();
+        $res = $this->postJson('/api/v1/storefront/orders', $this->payload($product));
+        $token = $res->json('order.payment_token');
+        $this->assertNotEmpty($token);
+
+        $status = $this->getJson("/api/v1/storefront/orders/{$token}");
+        $status->assertOk()
+            ->assertJsonPath('order_number', $res->json('order.order_number'))
+            ->assertJsonPath('payment_status', 'pending')
+            ->assertJsonPath('shipment', null);
+        $this->assertStringContainsString('/pay/', $status->json('payment_link'));
+
+        // Staff ship it -> tracking link appears
+        $order = Order::where('order_number', $res->json('order.order_number'))->firstOrFail();
+        \App\Models\OrderShipment::create([
+            'order_id'        => $order->id,
+            'shipment_number' => 'SHP-TEST-1',
+            'status'          => 'in_transit',
+            'carrier'         => 'Bethany Rider',
+            'tracking_number' => 'BR-001',
+            'tracking_token'  => 'testtoken123',
+        ]);
+
+        $status2 = $this->getJson("/api/v1/storefront/orders/{$token}");
+        $status2->assertOk()->assertJsonPath('shipment.status', 'in_transit');
+        $this->assertStringContainsString('/track/testtoken123', $status2->json('shipment.tracking_url'));
+
+        $this->getJson('/api/v1/storefront/orders/not-a-real-token')->assertNotFound();
     }
 
     public function test_unpublished_products_are_refused(): void

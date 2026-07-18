@@ -3,16 +3,19 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Mail\StorefrontOrderReceiptMail;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
+use App\Models\OrderShipment;
 use App\Models\ProductionOrder;
 use App\Services\ActivityLogService;
 use App\Services\NotificationService;
 use App\Services\TaxCalculationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 
 /**
@@ -279,6 +282,13 @@ class StorefrontCheckoutController extends Controller
         } catch (\Throwable $e) {
             // The order exists — a notification failure must not fail the request.
         }
+        if (!empty($cust['email'])) {
+            try {
+                Mail::to($cust['email'])->send(new StorefrontOrderReceiptMail($order, $this->paymentLink($paymentToken)));
+            } catch (\Throwable $e) {
+                // Receipt email is best-effort — never fail the order for it.
+            }
+        }
         ActivityLogService::log('created', $order, [
             'order_number'     => $order->order_number,
             'total'            => $order->total_amount,
@@ -353,7 +363,46 @@ class StorefrontCheckoutController extends Controller
             'payment_status' => $order->payment_status,
             'currency_code'  => $order->currency_code,
             'total_amount'   => $order->total_amount,
+            'payment_token'  => $order->payment_token,
         ];
+    }
+
+    /**
+     * Public order status for the storefront's live receipt page, keyed by
+     * the unguessable payment token. Returns payment status, the issued
+     * invoice number and — once staff ship — the public tracking link, so
+     * the customer's receipt turns into a live order tracker.
+     */
+    public function status(string $token)
+    {
+        $order = Order::where('payment_token', $token)->first();
+        if (!$order) {
+            return response()->json(['message' => 'Order not found'], 404);
+        }
+
+        $shipment = OrderShipment::where('order_id', $order->id)
+            ->orderByDesc('id')
+            ->first();
+
+        $invoice = $order->invoiceDocument()->first();
+
+        return response()->json([
+            'order_number'   => $order->order_number,
+            'status'         => $order->status,
+            'payment_status' => $order->payment_status,
+            'currency_code'  => $order->currency_code,
+            'total_amount'   => $order->total_amount,
+            'invoice_number' => $invoice?->number,
+            'payment_link'   => $order->payment_status !== 'paid' ? $this->paymentLink($order->payment_token) : null,
+            'shipment'       => $shipment ? [
+                'status'                  => $shipment->status,
+                'carrier'                 => $shipment->carrier,
+                'tracking_number'         => $shipment->tracking_number,
+                'tracking_url'            => $shipment->tracking_token ? $shipment->trackingPageUrl() : null,
+                'shipped_at'              => $shipment->shipped_at,
+                'estimated_delivery_date' => $shipment->estimated_delivery_date,
+            ] : null,
+        ]);
     }
 
     private function paymentLink(?string $token): ?string

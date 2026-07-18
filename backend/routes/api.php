@@ -178,6 +178,7 @@ Route::prefix('v1')->group(function () {
         // StorefrontCheckoutController for the full contract.
         Route::post('/storefront/orders', [\App\Http\Controllers\Api\StorefrontCheckoutController::class, 'store'])
             ->middleware('throttle:auth');
+        Route::get('/storefront/orders/{token}', [\App\Http\Controllers\Api\StorefrontCheckoutController::class, 'status']);
 
         Route::prefix('settings')->group(function () {
             Route::get('/languages', [SettingController::class, 'languages']);
