@@ -131,7 +131,7 @@ export default function SalesReportPage() {
                 <KpiCard
                     label="Total Revenue"
                     value={fmtKes(s.total_revenue)}
-                    sub={`${s.total_orders ?? 0} paid orders`}
+                    sub={`${s.total_orders ?? 0} orders (sales truth)`}
                     comparison={cmp?.revenue_change_pct}
                 />
                 <KpiCard
@@ -165,8 +165,9 @@ export default function SalesReportPage() {
                 />
                 <KpiCard label="Tax Collected" value={fmtKes(s.total_tax)} />
                 <KpiCard
-                    label="Min / Max Order"
-                    value={`${fmtKes(s.min_order_value)} / ${fmtKes(s.max_order_value)}`}
+                    label="Collected"
+                    value={fmtKes(s.total_collected)}
+                    sub="settled payments, net of refunds"
                 />
             </div>
 

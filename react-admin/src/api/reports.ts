@@ -24,6 +24,15 @@ export const reportsApi = {
     executive: (period: string, outletId?: number) =>
         get<any>(`${BASE}/executive`, { params: { period, ...(outletId ? { outlet_id: outletId } : {}) } }),
 
+    // Row-level drill-down: the same query as the KPI, aggregation removed.
+    drill: (metric: string, period: string, opts?: { page?: number; bucket?: string; outletId?: number }) =>
+        get<any>(`${BASE}/drill/${metric}`, { params: {
+            period,
+            ...(opts?.page ? { page: opts.page } : {}),
+            ...(opts?.bucket ? { bucket: opts.bucket } : {}),
+            ...(opts?.outletId ? { outlet_id: opts.outletId } : {}),
+        } }),
+
     // Sales
     salesSummary: (
         params: DateRangeParams & { channel?: string; compare?: 1 },

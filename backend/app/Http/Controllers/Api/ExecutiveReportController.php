@@ -65,6 +65,7 @@ class ExecutiveReportController extends Controller
                 'money' => [
                     'collected'   => $collected,
                     'outstanding' => $owed,
+                    'aging'       => $engine->outstandingAging(),
                 ],
                 'production' => [
                     'completed'   => $completed,
@@ -93,5 +94,35 @@ class ExecutiveReportController extends Controller
         }
 
         return response()->json($payload);
+    }
+
+    /**
+     * Row-level drill-down for a KPI — the same query as the aggregate with
+     * the aggregation removed (spec rule 3). Financial metrics stay behind
+     * reports.financial, exactly like the block they came from.
+     */
+    public function drill(Request $request, string $metric)
+    {
+        $validated = $request->validate([
+            'period' => 'nullable|string|in:today,yesterday,last_7,last_30,this_month,last_month,this_quarter,this_year,custom',
+            'from'   => 'nullable|date|required_if:period,custom',
+            'to'     => 'nullable|date|required_if:period,custom',
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+            'page'   => 'nullable|integer|min:1',
+            'bucket' => 'nullable|string|in:0_30,31_60,61_90,90_plus,deposits',
+        ]);
+
+        if ($metric === 'expenses') {
+            abort_unless($request->user()->can('reports.financial'), 403, 'Financial drill-downs require reports.financial.');
+        }
+
+        [$s, $e] = MetricEngine::resolvePeriod($validated['period'] ?? 'this_month', $validated['from'] ?? null, $validated['to'] ?? null);
+        $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+
+        return response()->json($engine->drill(
+            $metric, $s, $e,
+            (int) ($validated['page'] ?? 1),
+            $validated['bucket'] ?? null,
+        ));
     }
 }

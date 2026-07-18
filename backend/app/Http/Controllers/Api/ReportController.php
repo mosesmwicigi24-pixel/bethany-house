@@ -108,11 +108,25 @@ class ReportController extends Controller
         $outletId  = $request->filled('outlet_id')  ? (int) $request->outlet_id  : null;
         $orderType = $request->filled('order_type') ? $request->order_type : null;
 
+        // Sales truth (docs/REPORTS_SPEC.md): a sale is any non-voided,
+        // non-cancelled order. The old payment_status='paid' filter silently
+        // erased every part-paid and deposit order from "revenue".
         $base = fn () => Order::whereBetween('created_at', [$start, $end])
-            ->where('payment_status', 'paid')
+            ->whereNotIn('status', ['voided', 'cancelled'])
             ->whereRaw('UPPER(currency_code) = ?', [$currency])
             ->when($outletId,  fn ($q) => $q->where('outlet_id',  $outletId))
             ->when($orderType, fn ($q) => $q->where('order_type', $orderType));
+
+        // Money truth beside it: what actually settled in the same window.
+        $collected = (float) DB::table('payments as p')
+            ->join('orders as o', 'o.id', '=', 'p.order_id')
+            ->where('p.status', 'paid')
+            ->whereRaw('UPPER(p.currency_code) = ?', [$currency])
+            ->when($outletId,  fn ($q) => $q->where('o.outlet_id',  $outletId))
+            ->when($orderType, fn ($q) => $q->where('o.order_type', $orderType))
+            ->whereBetween(DB::raw('COALESCE(p.paid_at, p.created_at)'), [$start, $end])
+            ->selectRaw('COALESCE(SUM(p.amount - COALESCE(p.refund_amount,0)),0) AS v')
+            ->value('v');
 
         $summary = $base()->selectRaw("
             COUNT(*)                                                          AS total_orders,
@@ -187,7 +201,7 @@ class ReportController extends Controller
         if ($request->boolean('compare')) {
             [$ps, $pe] = $this->priorPeriod($start, $end);
             $prior = Order::whereBetween('created_at', [$ps, $pe])
-                ->where('payment_status', 'paid')
+                ->whereNotIn('status', ['voided', 'cancelled'])
                 ->whereRaw('UPPER(currency_code) = ?', [$currency])
                 ->when($outletId,  fn ($q) => $q->where('outlet_id',  $outletId))
                 ->when($orderType, fn ($q) => $q->where('order_type', $orderType))
@@ -220,7 +234,7 @@ class ReportController extends Controller
         return response()->json([
             'period'             => ['start' => $start, 'end' => $end],
             'currency'           => $currency,
-            'summary'            => $summary,
+            'summary'            => array_merge((array) $summary->toArray() ?: (array) $summary, ['total_collected' => round($collected, 2)]),
             'daily_breakdown'    => $daily,
             'weekly_breakdown'   => $weekly,
             'by_payment_method'  => $byPaymentMethod,
