@@ -32,6 +32,8 @@ import type { ApiError } from "@/types";
 interface MyTask {
     id: number;
     status: "pending" | "in_progress" | "completed" | "paused" | "failed";
+    /** Pieces that have passed this stage (cumulative). Batch orders only. */
+    quantity_done?: number;
     estimated_hours?: number;
     actual_hours?: number;
     started_at?: string | null;
@@ -740,12 +742,14 @@ function CompletionScreen({
 function FocusCard({
     group,
     onAction,
+    onProgress,
     isActing,
     onNoteOpen,
     onSpecsOpen,
 }: {
     group: OrderGroup;
     onAction: (task: MyTask, action: "start" | "complete" | "pause") => void;
+    onProgress: (task: MyTask, quantityDone: number) => void;
     isActing: boolean;
     onNoteOpen: () => void;
     onSpecsOpen: () => void;
@@ -984,7 +988,29 @@ function FocusCard({
                                                     : "Start"}
                                             </button>
                                         )}
-                                        {canComplete && (
+                                        {(order?.quantity ?? 1) > 1 && (task.status === "in_progress" || task.status === "pending" || task.status === "paused") && (
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="text-xs font-bold tabular-nums text-surface-700">
+                                                    {task.quantity_done ?? 0}<span className="text-surface-400 font-medium">/{order!.quantity}</span>
+                                                </span>
+                                                {[1, 5, 10].map((step) => (
+                                                    <button key={step}
+                                                        onClick={() => onProgress(task, Math.min(order!.quantity, (task.quantity_done ?? 0) + step))}
+                                                        disabled={isActing || (task.quantity_done ?? 0) >= order!.quantity}
+                                                        className="px-2 py-1.5 rounded-lg bg-brand-50 border border-brand-200 text-brand-700 text-xs font-bold active:bg-brand-100 transition-colors disabled:opacity-40">
+                                                        +{step}
+                                                    </button>
+                                                ))}
+                                                <button
+                                                    onClick={() => onProgress(task, Math.max(0, (task.quantity_done ?? 0) - 1))}
+                                                    disabled={isActing || (task.quantity_done ?? 0) <= 0}
+                                                    title="Correct the count down by one"
+                                                    className="px-2 py-1.5 rounded-lg bg-surface-100 border border-surface-200 text-surface-500 text-xs font-bold active:bg-surface-200 transition-colors disabled:opacity-40">
+                                                    −1
+                                                </button>
+                                            </div>
+                                        )}
+                                        {canComplete && (order?.quantity ?? 1) === 1 && (
                                             <button
                                                 onClick={() => {
                                                     navigator.vibrate?.([40, 30, 80]);
@@ -1449,6 +1475,26 @@ export default function TailorWorkspacePage() {
         },
     });
 
+    // Piece progress: absolute cumulative count, server-validated against the
+    // pipeline (ceiling: earlier stages; floor: later stages). The 422 message
+    // names the colliding stage, so surface it verbatim.
+    const progressMutation = useMutation({
+        mutationFn: ({ taskId, quantityDone }: { taskId: number; quantityDone: number }) =>
+            post(`/v1/tailor/tasks/${taskId}/progress`, { quantity_done: quantityDone }),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ["my-tasks"] });
+        },
+        onError: (e: any) => toast.error(e?.message ?? "Could not record progress"),
+    });
+
+    const handleProgress = useCallback(
+        (task: MyTask, quantityDone: number) => {
+            navigator.vibrate?.(30);
+            progressMutation.mutate({ taskId: task.id, quantityDone });
+        },
+        [progressMutation]
+    );
+
     const handleAction = useCallback(
         (task: MyTask, action: "start" | "complete" | "pause") => {
             mutation.mutate({ taskId: task.id, action });
@@ -1628,6 +1674,7 @@ export default function TailorWorkspacePage() {
                                 <FocusCard
                                     group={focusedGroup}
                                     onAction={handleAction}
+                                    onProgress={handleProgress}
                                     isActing={mutation.isPending}
                                     onNoteOpen={() => setNoteDrawerOpen(true)}
                                     onSpecsOpen={() =>

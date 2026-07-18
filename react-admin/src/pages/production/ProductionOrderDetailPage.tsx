@@ -60,6 +60,8 @@ interface Task {
     notes?: string;
     /** Snapshot of the order's stage sequence, stamped at seeding — gating runs on this. */
     sequence?: number | null;
+    /** Pieces that have passed this stage (cumulative) — batch orders. */
+    quantity_done?: number;
     /** Manager has allowed this stage to run in parallel with its predecessors. */
     concurrent_allowed?: boolean;
     stage: { id: number; name: string; slug: string; sort_order: number };
@@ -638,6 +640,7 @@ const GATE_SATISFIED = ["completed", "skipped"];
 
 function StagesPipeline({
     tasks,
+    orderQuantity = 1,
     currentUserId,
     onTaskAction,
     taskActionPending,
@@ -645,6 +648,7 @@ function StagesPipeline({
     onUnlock,
 }: {
     tasks: Task[];
+    orderQuantity?: number;
     currentUserId: number | null;
     onTaskAction: (taskId: number, action: "start" | "complete" | "pause") => void;
     taskActionPending: boolean;
@@ -662,8 +666,40 @@ function StagesPipeline({
         </div>
     );
 
+    // ── Derived distribution — nobody typed these numbers ────────────────────
+    // passed(k) effective = full quantity for satisfied stages, else counter.
+    // held at stage k = passed(k−1) − passed(k); not started = qty − passed(1);
+    // finished = passed(last). Only meaningful for batch orders.
+    const seq = [...tasks].filter(t => t.sequence != null).sort((a, b) => (a.sequence! - b.sequence!));
+    const eff = (t: Task) => GATE_SATISFIED.includes((t.status ?? "").toLowerCase()) ? orderQuantity : Math.min(t.quantity_done ?? 0, orderQuantity);
+    const distribution = orderQuantity > 1 && seq.length > 0 ? {
+        notStarted: orderQuantity - eff(seq[0]),
+        finished:   eff(seq[seq.length - 1]),
+        held: seq.map((t, i) => ({
+            name:  t.stage?.name ?? `Stage ${t.production_stage_id}`,
+            count: (i === 0 ? orderQuantity : eff(seq[i - 1])) - eff(t),
+        })).filter(h => h.count > 0),
+    } : null;
+
     return (
         <div className="space-y-2">
+            {distribution && (
+                <div className="flex flex-wrap items-center gap-1.5 px-1 pb-1">
+                    <span className="text-2xs font-bold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        ✓ {distribution.finished} finished
+                    </span>
+                    {distribution.held.map(h => (
+                        <span key={h.name} className="text-2xs font-semibold px-2 py-1 rounded-full bg-brand-50 text-brand-700 border border-brand-200">
+                            {h.count} at {h.name}
+                        </span>
+                    ))}
+                    {distribution.notStarted > 0 && (
+                        <span className="text-2xs font-semibold px-2 py-1 rounded-full bg-surface-100 text-surface-500 border border-surface-200">
+                            {distribution.notStarted} not started
+                        </span>
+                    )}
+                </div>
+            )}
             {tasks.map((task, idx) => {
                 const assignee = resolveAssignee(task);
                 const isDone    = DONE_STATUSES.includes(task.status);
@@ -763,6 +799,11 @@ function StagesPipeline({
                                     <p className="text-sm font-semibold text-surface-900">
                                         {task.stage?.name ?? `Stage ${task.production_stage_id}`}
                                     </p>
+                                    {orderQuantity > 1 && (
+                                        <span className="text-2xs font-bold tabular-nums text-surface-500 bg-surface-100 rounded-full px-1.5 py-0.5">
+                                            {eff(task)}/{orderQuantity}
+                                        </span>
+                                    )}
                                 </div>
                                 <div className="flex items-center gap-2 shrink-0">
                                     {isMyTask && (
@@ -1737,6 +1778,7 @@ export default function ProductionOrderDetailPage() {
 
                         {tab === "stages"    && <StagesPipeline
                             tasks={sortedTasks}
+                            orderQuantity={order.quantity}
                             currentUserId={currentUserId}
                             onTaskAction={(taskId, action) => taskMutation.mutate({ taskId, action })}
                             taskActionPending={taskMutation.isPending}
