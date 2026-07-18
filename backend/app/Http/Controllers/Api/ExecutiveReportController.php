@@ -172,6 +172,54 @@ class ExecutiveReportController extends Controller
         ]);
     }
 
+    /** Customer intelligence: segments, new vs returning, top + dormant. */
+    public function customerIntelligence(Request $request)
+    {
+        $validated = $request->validate([
+            'period'    => 'nullable|string|in:today,yesterday,last_7,last_30,this_month,last_month,this_quarter,this_year,custom',
+            'from'      => 'nullable|date|required_if:period,custom',
+            'to'        => 'nullable|date|required_if:period,custom',
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+        ]);
+
+        $periodKey = $validated['period'] ?? 'this_month';
+        [$s, $e] = MetricEngine::resolvePeriod($periodKey, $validated['from'] ?? null, $validated['to'] ?? null);
+        $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+
+        return response()->json([
+            'period'           => ['key' => $periodKey, 'start' => $s->toIso8601String(), 'end' => $e->toIso8601String()],
+            'segments'         => $engine->customerSegments($s, $e),
+            'new_vs_returning' => $engine->newVsReturning($s, $e),
+            'top_customers'    => $engine->topCustomers($s, $e),
+            'dormant'          => $engine->dormantTopCustomers(),
+        ]);
+    }
+
+    /** CFO block: earned P&L, budget-aware expenses, cash flow, rails. */
+    public function financialIntelligence(Request $request)
+    {
+        abort_unless($request->user()->can('reports.financial'), 403, 'Financial intelligence requires reports.financial.');
+
+        $validated = $request->validate([
+            'period'    => 'nullable|string|in:today,yesterday,last_7,last_30,this_month,last_month,this_quarter,this_year,custom',
+            'from'      => 'nullable|date|required_if:period,custom',
+            'to'        => 'nullable|date|required_if:period,custom',
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+        ]);
+
+        $periodKey = $validated['period'] ?? 'this_month';
+        [$s, $e] = MetricEngine::resolvePeriod($periodKey, $validated['from'] ?? null, $validated['to'] ?? null);
+        $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+
+        return response()->json([
+            'period'      => ['key' => $periodKey, 'start' => $s->toIso8601String(), 'end' => $e->toIso8601String()],
+            'pnl'         => $engine->earnedPnl($s, $e),
+            'expenses'    => $engine->expensesByCategory($s, $e),
+            'cash_flow'   => $engine->cashFlowWeekly($s, $e),
+            'rails'       => $engine->methodReconciliation($s, $e),
+        ]);
+    }
+
     /**
      * Row-level drill-down for a KPI — the same query as the aggregate with
      * the aggregation removed (spec rule 3). Financial metrics stay behind

@@ -39,9 +39,7 @@ import {
 
 export default function CustomersReportPage() {
     const dr = useDateRange("this_month");
-    const [activeTab, setActiveTab] = useState<
-        "overview" | "ltv" | "retention"
-    >("overview");
+    const [activeTab, setActiveTab] = useState<"overview" | "ltv" | "retention" | "intelligence">("overview");
 
     const periodDays = Math.max(
         1,
@@ -172,7 +170,7 @@ export default function CustomersReportPage() {
             {/* Tabs */}
             <div className="border-b border-surface-100 overflow-x-auto no-scrollbar">
                 <nav className="flex gap-1 -mb-px">
-                    {(["overview", "ltv", "retention"] as const).map((tab) => (
+                    {(["overview", "ltv", "retention", "intelligence"] as const).map((tab) => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
@@ -194,6 +192,10 @@ export default function CustomersReportPage() {
             </div>
 
             {/* ── OVERVIEW ── */}
+            {activeTab === "intelligence" && (
+                <CustomerIntelligence start={dr.start} end={dr.end} />
+            )}
+
             {activeTab === "overview" && (
                 <div className="space-y-6">
                     {/* Segments + spend brackets */}
@@ -574,6 +576,85 @@ export default function CustomersReportPage() {
                     </div>
                 </div>
             )}
+        </div>
+    );
+}
+
+// ─── Intelligence tab ─────────────────────────────────────────────────────────
+// Identity keyed on customer_id or FULL phone (live POS orders carry only the
+// snapshot): segments, new vs returning money, the top table, and the dormant
+// list — the customers worth a phone call this week.
+
+function CustomerIntelligence({ start, end }: { start: string; end: string }) {
+    const { data, isLoading } = useQuery({
+        queryKey: ["customer-intelligence", start, end],
+        queryFn: () => reportsApi.customerIntelligence(start, end),
+        enabled: !!start && !!end,
+        staleTime: 60_000,
+    });
+    if (isLoading || !data) return <div className="flex justify-center py-16"><Spinner /></div>;
+    const { segments, new_vs_returning: nvr, top_customers, dormant } = data;
+
+    return (
+        <div className="space-y-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <KpiCard label="Returning Revenue" value={fmtKes(nvr.returning?.revenue ?? 0)}
+                    sub={`${nvr.returning?.customers ?? 0} customers came back`} color="text-success" />
+                <KpiCard label="New-Customer Revenue" value={fmtKes(nvr.new?.revenue ?? 0)}
+                    sub={`${nvr.new?.customers ?? 0} first-time buyers`} />
+                <KpiCard label="Walk-in / Anonymous" value={fmtKes(nvr.anonymous?.revenue ?? 0)}
+                    sub={`${nvr.anonymous?.orders ?? 0} orders with no identity — capture phones!`} />
+            </div>
+
+            {dormant.length > 0 && (
+                <div className="card card-body border border-amber-200 bg-amber-50/40">
+                    <SectionHeader title="📞 Worth a call — top customers gone quiet (60+ days)" />
+                    <div className="space-y-1.5 mt-1">
+                        {dormant.map((d: any) => (
+                            <div key={d.phone ?? d.name} className="flex items-center gap-3 text-xs">
+                                <span className="font-medium text-surface-800 flex-1 truncate">{d.name}</span>
+                                {d.phone && <span className="text-surface-500 font-mono text-2xs">{d.phone}</span>}
+                                <span className="tabular-nums text-surface-600">{fmtKes(d.revenue_12m)} / yr</span>
+                                <span className="font-bold text-amber-700 tabular-nums">{d.days_quiet}d quiet</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="card card-body">
+                    <SectionHeader title="Segments (period revenue)" />
+                    <div className="space-y-1.5 mt-1">
+                        {segments.map((sg: any) => (
+                            <div key={sg.segment} className="flex items-center gap-3 text-xs">
+                                <span className="font-medium text-surface-800 capitalize flex-1">{String(sg.segment).replace(/_/g, " ")}</span>
+                                <span className="text-2xs text-surface-400">{sg.orders} orders{Number(sg.customers) > 0 ? ` · ${sg.customers} customers` : ""}</span>
+                                <span className="font-bold tabular-nums text-surface-800">{fmtKes(sg.revenue)}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+                <div className="card card-body">
+                    <SectionHeader title="Top customers (period vs lifetime)" />
+                    {top_customers.length === 0 ? (
+                        <p className="text-xs text-surface-400 py-4">No identified customers in this period.</p>
+                    ) : (
+                        <div className="space-y-1.5 mt-1">
+                            {top_customers.map((c: any, i: number) => (
+                                <div key={c.ckey} className="flex items-center gap-2.5 text-xs">
+                                    <span className="text-2xs font-bold text-surface-300 w-4">{i + 1}</span>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="font-medium text-surface-800 truncate">{c.name || c.phone}</p>
+                                        <p className="text-2xs text-surface-400">{c.lifetime_orders} orders lifetime · {fmtKes(c.lifetime_revenue)}</p>
+                                    </div>
+                                    <span className="font-bold tabular-nums text-surface-800">{fmtKes(c.period_revenue)}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }

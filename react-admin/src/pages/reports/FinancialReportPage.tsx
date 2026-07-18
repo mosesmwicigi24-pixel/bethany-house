@@ -44,7 +44,7 @@ import {
 export default function FinancialReportPage() {
     const dr = useDateRange("last_30_days");
     const [compare, setCompare] = useState(false);
-    const [activeTab, setActiveTab] = useState<"pl" | "expenses" | "trends" | "tax" | "cashflow">(
+    const [activeTab, setActiveTab] = useState<"pl" | "expenses" | "trends" | "tax" | "cashflow" | "intelligence">(
         "pl",
     );
     const [expStatus, setExpStatus] = useState("");
@@ -228,7 +228,7 @@ export default function FinancialReportPage() {
             {/* Tabs */}
             <div className="border-b border-surface-100 overflow-x-auto no-scrollbar">
                 <nav className="flex gap-1 -mb-px">
-                    {(["pl", "expenses", "trends", "tax", "cashflow"] as const).map((tab) => (
+                    {(["pl", "expenses", "trends", "tax", "cashflow", "intelligence"] as const).map((tab) => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
@@ -250,6 +250,10 @@ export default function FinancialReportPage() {
             </div>
 
             {/* ── P&L TAB ── */}
+            {activeTab === "intelligence" && (
+                <FinancialIntelligence start={dr.start} end={dr.end} />
+            )}
+
             {activeTab === "pl" && (
                 <div className="space-y-6">
                     <div className="card p-6">
@@ -801,6 +805,119 @@ export default function FinancialReportPage() {
                     })()}
                 </div>
             )}
+        </div>
+    );
+}
+
+// ─── Intelligence tab ─────────────────────────────────────────────────────────
+// The earned-revenue P&L (an order counts when its FINAL payment lands, per
+// docs/REPORTS_SPEC.md), expenses against category budgets, weekly cash flow,
+// and per-rail reconciliation net of refunds.
+
+function FinancialIntelligence({ start, end }: { start: string; end: string }) {
+    const { data, isLoading } = useQuery({
+        queryKey: ["financial-intelligence", start, end],
+        queryFn: () => reportsApi.financialIntelligence(start, end),
+        enabled: !!start && !!end,
+        staleTime: 60_000,
+    });
+    if (isLoading || !data) return <div className="flex justify-center py-16"><Spinner /></div>;
+    const { pnl, expenses, cash_flow, rails } = data;
+    const maxFlow = Math.max(...cash_flow.map((w: any) => Math.max(Number(w.in), Number(w.out))), 1);
+
+    return (
+        <div className="space-y-6">
+            {/* Earned P&L: the waterfall in four cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <KpiCard label="Earned Revenue" value={fmtKes(pnl.earned_revenue)}
+                    sub={`${pnl.earned_orders} orders fully paid in period`} />
+                <KpiCard label="COGS (est.)" value={fmtKes(pnl.cogs_estimate)}
+                    sub={pnl.unpriced_lines > 0 ? `${pnl.unpriced_lines} lines missing cost price` : "from the price book"} />
+                <KpiCard label="Gross Profit" value={fmtKes(pnl.gross_profit)}
+                    sub={pnl.gross_margin_pct != null ? `${pnl.gross_margin_pct}% margin` : ""}
+                    color={pnl.gross_profit >= 0 ? "text-success" : "text-danger"} />
+                <KpiCard label="Net After Expenses" value={fmtKes(pnl.net_profit)}
+                    sub={`${fmtKes(pnl.expenses)} expenses`}
+                    color={pnl.net_profit >= 0 ? "text-success" : "text-danger"} />
+            </div>
+            <p className="text-2xs text-surface-400 -mt-3">
+                Earned-revenue rule: an order counts on the day its final payment settles — a deposit is money held, not income.
+            </p>
+
+            {/* Weekly cash flow */}
+            <div className="card card-body">
+                <SectionHeader title="Cash flow by week — in vs out" />
+                {cash_flow.length === 0 ? (
+                    <p className="text-xs text-surface-400 py-4">No money movement in this period.</p>
+                ) : (
+                    <div className="space-y-2 mt-1">
+                        {cash_flow.map((w: any) => (
+                            <div key={w.week} className="flex items-center gap-2 text-2xs">
+                                <span className="text-surface-400 w-16 shrink-0 tabular-nums">
+                                    {new Date(w.week).toLocaleDateString("en-KE", { day: "2-digit", month: "short" })}
+                                </span>
+                                <div className="flex-1 space-y-0.5">
+                                    <div className="h-2 bg-surface-100 rounded-full overflow-hidden">
+                                        <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${(Number(w.in) / maxFlow) * 100}%` }} />
+                                    </div>
+                                    <div className="h-2 bg-surface-100 rounded-full overflow-hidden">
+                                        <div className="h-full bg-red-400 rounded-full" style={{ width: `${(Number(w.out) / maxFlow) * 100}%` }} />
+                                    </div>
+                                </div>
+                                <span className={clsx("w-24 text-right tabular-nums font-bold shrink-0",
+                                    Number(w.net) >= 0 ? "text-emerald-700" : "text-red-600")}>
+                                    {Number(w.net) >= 0 ? "+" : ""}{fmtKes(w.net)}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Expenses vs budget */}
+                <div className="card card-body">
+                    <SectionHeader title="Expenses by category (vs monthly budget)" />
+                    {expenses.length === 0 ? (
+                        <p className="text-xs text-surface-400 py-4">No completed expenses in this period.</p>
+                    ) : (
+                        <div className="space-y-1.5 mt-1">
+                            {expenses.map((x: any) => {
+                                const over = x.budget_monthly != null && Number(x.spent) > Number(x.budget_monthly);
+                                return (
+                                    <div key={x.category} className="flex items-center gap-3 text-xs">
+                                        <span className="font-medium text-surface-800 flex-1 truncate">{x.category}</span>
+                                        {x.budget_monthly != null && (
+                                            <span className={clsx("text-2xs", over ? "text-danger font-bold" : "text-surface-400")}>
+                                                {over ? "over budget " : "of "}{fmtKes(x.budget_monthly)}
+                                            </span>
+                                        )}
+                                        <span className={clsx("font-bold tabular-nums", over ? "text-danger" : "text-surface-800")}>{fmtKes(x.spent)}</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+
+                {/* Rails */}
+                <div className="card card-body">
+                    <SectionHeader title="Payment rails (net of refunds)" />
+                    {rails.length === 0 ? (
+                        <p className="text-xs text-surface-400 py-4">No settled payments in this period.</p>
+                    ) : (
+                        <div className="space-y-1.5 mt-1">
+                            {rails.map((r: any) => (
+                                <div key={r.method} className="flex items-center gap-3 text-xs">
+                                    <span className="font-medium text-surface-800 capitalize flex-1">{String(r.method).replace(/_/g, " ")}</span>
+                                    <span className="text-2xs text-surface-400">{r.payments}×{Number(r.refunds) > 0 ? ` · −${fmtKes(r.refunds)} refunded` : ""}</span>
+                                    <span className="font-bold tabular-nums text-surface-800">{fmtKes(r.net)}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }
