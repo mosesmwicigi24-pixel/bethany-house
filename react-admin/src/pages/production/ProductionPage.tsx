@@ -1804,7 +1804,10 @@ function ProductionOrdersTab() {
     return (
         <div className="flex flex-col gap-4 min-h-0 flex-1">
             {/* Stats */}
-            <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
+            {/* Always one row of six — on the phone the cards tighten into a
+                compact stat strip (centered, small label, bold number) instead
+                of stacking. Tapping a tile still filters by that status. */}
+            <div className="grid grid-cols-6 gap-1 sm:gap-2">
                 {[
                     { key: "draft",       label: "Draft",       color: "text-surface-400" },
                     { key: "pending",     label: "Pending",     color: "text-surface-700" },
@@ -1814,16 +1817,18 @@ function ProductionOrdersTab() {
                     { key: "overdue",     label: "Overdue",     color: "text-danger"      },
                 ].map(({ key, label, color }) => (
                     <button key={key} onClick={() => setF("status", filters.status === key ? "" : key)}
-                        className={clsx("card p-3 text-left hover:shadow-sm transition-all",
+                        className={clsx("card px-0.5 py-2 sm:p-3 hover:shadow-sm transition-all min-w-0 flex flex-col items-center sm:items-start justify-center",
                             filters.status === key && "ring-2 ring-brand-400 ring-offset-1")}>
-                        <p className="text-2xs text-surface-400">{label}</p>
-                        <p className={clsx("text-2xl font-bold mt-0.5", color)}>{stats[key] ?? 0}</p>
+                        <p className={clsx("text-base sm:text-2xl font-bold tabular-nums sm:mt-0.5", color)}>{stats[key] ?? 0}</p>
+                        <p className="text-2xs text-surface-400 truncate leading-tight sm:order-first">{label}</p>
                     </button>
                 ))}
             </div>
 
-            {/* Filters + create */}
-            <div className="flex flex-wrap gap-2 items-center">
+            {/* Filters + create — ONE row on the phone: search keeps a usable
+                width and the rest scroll horizontally past the edge, exactly
+                like the POS category chips. Desktop wraps as before. */}
+            <div className="flex gap-2 items-center overflow-x-auto no-scrollbar sm:flex-wrap sm:overflow-visible [&>*]:shrink-0">
                 <div className="relative flex-1 min-w-40">
                     <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
                     <input value={filters.search} onChange={e => setF("search", e.target.value)}
