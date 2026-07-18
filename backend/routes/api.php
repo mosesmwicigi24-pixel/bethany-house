@@ -173,6 +173,12 @@ Route::prefix('v1')->group(function () {
 
         Route::get('/payment-methods', [PaymentMethodController::class, 'available']);
 
+        // Storefront guest checkout bridge — one-shot online order with items,
+        // guest customer details and made-to-order measurements. See
+        // StorefrontCheckoutController for the full contract.
+        Route::post('/storefront/orders', [\App\Http\Controllers\Api\StorefrontCheckoutController::class, 'store'])
+            ->middleware('throttle:auth');
+
         Route::prefix('settings')->group(function () {
             Route::get('/languages', [SettingController::class, 'languages']);
             Route::get('/currencies', [SettingController::class, 'currencies']);
