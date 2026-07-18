@@ -68,6 +68,12 @@ class MetricEngine
         return new self($scope);
     }
 
+    /** Business-wide engine for scheduled jobs (no request user to scope by). */
+    public static function unscoped(): self
+    {
+        return new self(null);
+    }
+
     // ── Periods ───────────────────────────────────────────────────────────────
 
     /**
@@ -1158,6 +1164,113 @@ class MetricEngine
             ->get();
     }
 
+    // ── Insight detectors (Phase 6) ───────────────────────────────────────────
+    // Deterministic, data-cited, never fabricated: each detector reads real
+    // rows, does arithmetic a human could reproduce, and links to the page
+    // where the finding gets acted on.
+
+    /**
+     * Material runway: available stock ÷ the last 30 days' burn rate
+     * (quantity_used on allocations of orders raised in that window).
+     * Only materials that are actually burning can run out.
+     */
+    public function materialRunway(int $thresholdDays = 14)
+    {
+        $now = CarbonImmutable::now(self::TZ);
+        $scopeMi = $this->outletScopeSql('mi.outlet_id');
+        $scopePo = $this->outletScopeSql('po.outlet_id');
+
+        return collect(DB::select("
+            SELECT m.id, m.name, m.unit_of_measure AS unit,
+                   COALESCE(a.available, 0) AS available,
+                   ROUND((b.used_30d / 30.0)::numeric, 2) AS daily_burn,
+                   ROUND((COALESCE(a.available, 0) / (b.used_30d / 30.0))::numeric, 1) AS runway_days
+            FROM materials m
+            JOIN (
+                SELECT ma.material_id, SUM(ma.quantity_used) AS used_30d
+                FROM material_allocations ma
+                JOIN production_orders po ON po.id = ma.production_order_id
+                WHERE po.status <> 'cancelled' AND po.created_at >= ? {$scopePo}
+                GROUP BY ma.material_id
+                HAVING SUM(ma.quantity_used) > 0
+            ) b ON b.material_id = m.id
+            LEFT JOIN (
+                SELECT mi.material_id, SUM(mi.quantity_available) AS available
+                FROM material_inventory mi WHERE TRUE {$scopeMi} GROUP BY mi.material_id
+            ) a ON a.material_id = m.id
+            WHERE m.is_active = TRUE
+              AND COALESCE(a.available, 0) / (b.used_30d / 30.0) < ?
+            ORDER BY COALESCE(a.available, 0) / (b.used_30d / 30.0)
+            LIMIT 10
+        ", [$now->subDays(30), $thresholdDays]));
+    }
+
+    /**
+     * Revenue trend: the last three FULL months, strictly declining. A streak
+     * is a pattern worth a sentence; noise is not.
+     */
+    public function revenueTrend(): ?array
+    {
+        $now = CarbonImmutable::now(self::TZ);
+        $months = [];
+        for ($i = 3; $i >= 1; $i--) {
+            $start = $now->subMonthsNoOverflow($i)->startOfMonth();
+            $end   = $now->subMonthsNoOverflow($i)->endOfMonth();
+            $months[] = [
+                'month'   => $start->format('M Y'),
+                'revenue' => round((float) $this->salesBase()
+                    ->whereBetween('orders.created_at', [$start->toMutable(), $end->toMutable()])
+                    ->sum('total_amount'), 2),
+            ];
+        }
+
+        [$m3, $m2, $m1] = $months; // oldest → latest full month
+        $declining = $m3['revenue'] > $m2['revenue'] && $m2['revenue'] > $m1['revenue'] && $m3['revenue'] > 0;
+        if (!$declining) {
+            return null;
+        }
+
+        return [
+            'months'      => $months,
+            'decline_pct' => round(($m3['revenue'] - $m1['revenue']) / $m3['revenue'] * 100, 1),
+        ];
+    }
+
+    /**
+     * Supplier price drift: the latest price paid for a material vs the
+     * average of the PRIOR purchases in the trailing 90 days. A >10% jump is
+     * a negotiation (or a substitution) waiting to happen.
+     */
+    public function supplierPriceDrift(float $thresholdPct = 10.0)
+    {
+        $now = CarbonImmutable::now(self::TZ);
+        $scopePo = $this->outletScopeSql('po.outlet_id');
+
+        return collect(DB::select("
+            WITH buys AS (
+                SELECT poi.material_id, poi.unit_price, po.order_date, sup.name AS supplier,
+                       ROW_NUMBER() OVER (PARTITION BY poi.material_id ORDER BY po.order_date DESC, poi.id DESC) AS rn
+                FROM purchase_order_items poi
+                JOIN purchase_orders po ON po.id = poi.purchase_order_id AND po.status <> 'cancelled'
+                JOIN suppliers sup ON sup.id = po.supplier_id
+                WHERE poi.material_id IS NOT NULL AND po.order_date >= ? {$scopePo}
+            )
+            SELECT b.material_id, m.name, b.unit_price AS last_price, b.supplier, b.order_date,
+                   prior.avg_price AS avg_prior,
+                   ROUND(((b.unit_price - prior.avg_price) / prior.avg_price * 100)::numeric, 1) AS drift_pct
+            FROM buys b
+            JOIN materials m ON m.id = b.material_id
+            JOIN (
+                SELECT material_id, AVG(unit_price) AS avg_price
+                FROM buys WHERE rn > 1 GROUP BY material_id
+            ) prior ON prior.material_id = b.material_id
+            WHERE b.rn = 1 AND prior.avg_price > 0
+              AND b.unit_price > prior.avg_price * (1 + ? / 100.0)
+            ORDER BY (b.unit_price - prior.avg_price) / prior.avg_price DESC
+            LIMIT 10
+        ", [$now->subDays(90)->format('Y-m-d'), $thresholdPct]));
+    }
+
     // ── Attention feed ────────────────────────────────────────────────────────
 
     /**
@@ -1253,7 +1366,48 @@ class MetricEngine
             ];
         }
 
-        // 7. Low stock — items at or below their reorder point.
+        // 7. Material runway: fabric that runs out mid-batch stops the floor.
+        $runway = $this->materialRunway();
+        if ($runway->isNotEmpty()) {
+            $worst = $runway->first();
+            $items[] = [
+                'key' => 'material_runway', 'severity' => (float) $worst->runway_days < 7 ? 'high' : 'medium',
+                'title' => "{$worst->name} runs out in ~{$worst->runway_days} days at current use",
+                'detail' => number_format((float) $worst->available, 1) . " {$worst->unit} left, burning {$worst->daily_burn} {$worst->unit}/day"
+                    . ($runway->count() > 1 ? ' — ' . ($runway->count() - 1) . ' more material' . ($runway->count() > 2 ? 's' : '') . ' under 14 days.' : '.'),
+                'count' => $runway->count(), 'link' => '/reports/procurement',
+            ];
+        }
+
+        // 8. Revenue declining three full months running.
+        $trend = $this->revenueTrend();
+        if ($trend !== null) {
+            $mo = $trend['months'];
+            $items[] = [
+                'key' => 'revenue_trend', 'severity' => 'medium',
+                'title' => "Revenue has fallen 3 months straight (−{$trend['decline_pct']}%)",
+                'detail' => "{$mo[0]['month']}: KES " . number_format($mo[0]['revenue'])
+                    . " → {$mo[1]['month']}: KES " . number_format($mo[1]['revenue'])
+                    . " → {$mo[2]['month']}: KES " . number_format($mo[2]['revenue']) . '.',
+                'count' => 3, 'link' => '/reports/sales',
+            ];
+        }
+
+        // 9. Supplier price drift: quiet cost creep on materials.
+        $drift = $this->supplierPriceDrift();
+        if ($drift->isNotEmpty()) {
+            $worst = $drift->first();
+            $items[] = [
+                'key' => 'price_drift', 'severity' => 'medium',
+                'title' => "{$worst->name} price up {$worst->drift_pct}% on the last purchase",
+                'detail' => "Paid KES " . number_format((float) $worst->last_price, 2) . " to {$worst->supplier} vs a KES "
+                    . number_format((float) $worst->avg_prior, 2) . " 90-day average"
+                    . ($drift->count() > 1 ? ' — ' . ($drift->count() - 1) . ' more material' . ($drift->count() > 2 ? 's' : '') . ' drifting.' : '.'),
+                'count' => $drift->count(), 'link' => '/reports/procurement',
+            ];
+        }
+
+        // 10. Low stock — items at or below their reorder point.
         $low = $this->lowStock();
         if ($low > 0) {
             $items[] = [

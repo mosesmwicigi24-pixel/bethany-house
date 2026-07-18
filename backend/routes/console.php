@@ -13,6 +13,10 @@ Artisan::command('inspire', function () {
 // Manual run: php artisan intelligence:run
 // Dry run:    php artisan intelligence:run --dry-run
 
+Schedule::command(\App\Console\Commands\SendInsightsDigest::class)
+    ->dailyAt('07:30')
+    ->timezone('Africa/Nairobi');
+
 Schedule::command(\App\Console\Commands\RunIntelligenceChecks::class)
     ->dailyAt('07:00')
     ->withoutOverlapping()
