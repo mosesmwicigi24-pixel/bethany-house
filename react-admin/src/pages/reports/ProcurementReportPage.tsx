@@ -42,7 +42,7 @@ import {
 export default function ProcurementReportPage() {
     const dr = useDateRange("this_month");
     const [activeTab, setActiveTab] = useState<
-        "overview" | "suppliers" | "items"
+        "overview" | "suppliers" | "items" | "intelligence"
     >("overview");
 
     const { data, isLoading } = useQuery({
@@ -148,7 +148,7 @@ export default function ProcurementReportPage() {
             {/* Tabs */}
             <div className="border-b border-surface-100 overflow-x-auto no-scrollbar">
                 <nav className="flex gap-1 -mb-px">
-                    {(["overview", "suppliers", "items"] as const).map(
+                    {(["overview", "suppliers", "items", "intelligence"] as const).map(
                         (tab) => (
                             <button
                                 key={tab}
@@ -166,6 +166,10 @@ export default function ProcurementReportPage() {
                     )}
                 </nav>
             </div>
+
+            {activeTab === "intelligence" && (
+                <ProcurementIntelligence start={dr.start} end={dr.end} />
+            )}
 
             {/* ── OVERVIEW ── */}
             {activeTab === "overview" && (
@@ -444,6 +448,113 @@ export default function ProcurementReportPage() {
                     </TableWrapper>
                 </div>
             )}
+        </div>
+    );
+}
+
+// ─── Intelligence tab ─────────────────────────────────────────────────────────
+// Supplier scorecard from POs + goods-received notes (actual delivery days vs
+// the promise, rejections at the door) and a grounded buy list: reorder
+// buffer + open production demand − available, priced at the last real price.
+
+function ProcurementIntelligence({ start, end }: { start: string; end: string }) {
+    const { data, isLoading } = useQuery({
+        queryKey: ["procurement-intelligence", start, end],
+        queryFn: () => reportsApi.procurementIntelligence(start, end),
+        enabled: !!start && !!end,
+        staleTime: 60_000,
+    });
+    if (isLoading || !data) return <div className="flex justify-center py-16"><Spinner /></div>;
+    const { suppliers, suggestions, open_pos } = data;
+    const totalSuggested = suggestions.reduce((n: number, r: any) => n + Number(r.est_cost), 0);
+
+    return (
+        <div className="space-y-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <KpiCard label="Open POs" value={open_pos.count}
+                    sub={open_pos.oldest_days != null ? `oldest ${open_pos.oldest_days}d` : "none in flight"} />
+                <KpiCard label="In-flight Value" value={fmtKes(open_pos.value)} />
+                <KpiCard label="Suggested Buys" value={fmtKes(totalSuggested)}
+                    color={totalSuggested > 0 ? "text-warning" : "text-success"}
+                    sub={`${suggestions.length} materials`} />
+            </div>
+
+            <div className="card card-body">
+                <SectionHeader title="What to buy — buffer + committed demand − stock" />
+                {suggestions.length === 0 ? (
+                    <p className="text-xs text-surface-400 py-4">Nothing to buy: every material covers its reorder point and open production demand.</p>
+                ) : (
+                    <TableWrapper>
+                        <table className="w-full text-xs">
+                            <thead><tr>
+                                <th className={TH}>Material</th>
+                                <th className={TH_R}>Available</th>
+                                <th className={TH_R}>Buffer</th>
+                                <th className={TH_R}>Open Demand</th>
+                                <th className={TH_R}>Suggest</th>
+                                <th className={TH_R}>Est. Cost</th>
+                                <th className={TH}>Last Bought</th>
+                            </tr></thead>
+                            <tbody className="divide-y divide-surface-50">
+                                {suggestions.map((r: any) => (
+                                    <tr key={r.code}>
+                                        <td className="px-3 py-2">
+                                            <p className="font-medium text-surface-800">{r.material}</p>
+                                            <p className="text-2xs text-surface-400 font-mono">{r.code} · {r.unit}</p>
+                                        </td>
+                                        <td className="px-3 py-2 text-right tabular-nums">{Number(r.available).toLocaleString()}</td>
+                                        <td className="px-3 py-2 text-right tabular-nums text-surface-500">{Number(r.reorder_point).toLocaleString()}</td>
+                                        <td className="px-3 py-2 text-right tabular-nums text-surface-500">{Number(r.open_demand).toLocaleString()}</td>
+                                        <td className="px-3 py-2 text-right tabular-nums font-bold text-brand-700">{Number(r.suggested).toLocaleString()}</td>
+                                        <td className="px-3 py-2 text-right tabular-nums font-semibold">{fmtKes(r.est_cost)}</td>
+                                        <td className="px-3 py-2 text-2xs text-surface-500">
+                                            {r.last_supplier
+                                                ? <>{r.last_supplier}{r.last_price != null && <> · {fmtKes(r.last_price)}/{r.unit}</>}</>
+                                                : <span className="italic text-surface-300">no purchase history</span>}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </TableWrapper>
+                )}
+            </div>
+
+            <div className="card card-body">
+                <SectionHeader title="Supplier scorecard (period)" />
+                {suppliers.length === 0 ? (
+                    <p className="text-xs text-surface-400 py-4">No purchase orders in this period.</p>
+                ) : (
+                    <TableWrapper>
+                        <table className="w-full text-xs">
+                            <thead><tr>
+                                <th className={TH}>Supplier</th>
+                                <th className={TH_R}>Orders</th>
+                                <th className={TH_R}>Spend</th>
+                                <th className={TH_R}>Avg Delivery</th>
+                                <th className={TH_R}>Late</th>
+                                <th className={TH_R}>Rejected</th>
+                            </tr></thead>
+                            <tbody className="divide-y divide-surface-50">
+                                {suppliers.map((sup: any) => {
+                                    const rejPct = Number(sup.qty_received) > 0
+                                        ? Math.round((Number(sup.qty_rejected) / Number(sup.qty_received)) * 100) : null;
+                                    return (
+                                        <tr key={sup.supplier}>
+                                            <td className="px-3 py-2 font-medium text-surface-800">{sup.supplier}</td>
+                                            <td className="px-3 py-2 text-right tabular-nums">{sup.orders}</td>
+                                            <td className="px-3 py-2 text-right tabular-nums">{fmtKes(sup.spend)}</td>
+                                            <td className="px-3 py-2 text-right tabular-nums">{sup.avg_delivery_days != null ? `${sup.avg_delivery_days}d` : "—"}</td>
+                                            <td className={clsx("px-3 py-2 text-right tabular-nums font-semibold", Number(sup.late) > 0 ? "text-danger" : "text-surface-400")}>{sup.late}</td>
+                                            <td className={clsx("px-3 py-2 text-right tabular-nums", rejPct != null && rejPct > 0 ? "text-danger font-semibold" : "text-surface-400")}>{rejPct != null ? `${rejPct}%` : "—"}</td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </TableWrapper>
+                )}
+            </div>
         </div>
     );
 }

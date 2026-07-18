@@ -603,6 +603,298 @@ class MetricEngine
             ->get();
     }
 
+    // ── Inventory intelligence (Phase 4) ──────────────────────────────────────
+
+    /** Outlet-scope SQL fragment for raw lateral queries (ints only, safe). */
+    private function outletScopeSql(string $col): string
+    {
+        return $this->outletIds
+            ? "AND {$col} IN (" . implode(',', array_map('intval', $this->outletIds)) . ")"
+            : '';
+    }
+
+    /**
+     * Stock health + valuation. Each item is priced from product_prices in
+     * KES — the variant-specific row when one exists, else the product-level
+     * default — at cost and at retail. Items with no price row value at 0
+     * and are counted, not hidden.
+     */
+    public function inventoryHealth(): array
+    {
+        $scope = $this->outletScopeSql('ii.outlet_id');
+        $row = DB::selectOne("
+            SELECT COUNT(*)                                            AS skus,
+                   COALESCE(SUM(ii.quantity_on_hand), 0)               AS units,
+                   COALESCE(SUM(ii.quantity_reserved), 0)              AS reserved,
+                   COUNT(*) FILTER (WHERE (ii.quantity_on_hand - ii.quantity_reserved) <= 0) AS out_of_stock,
+                   COUNT(*) FILTER (WHERE ii.reorder_point > 0
+                       AND (ii.quantity_on_hand - ii.quantity_reserved) <= ii.reorder_point) AS low_stock,
+                   COUNT(*) FILTER (WHERE pr.cost_price IS NULL)       AS unpriced,
+                   COALESCE(SUM(GREATEST(ii.quantity_on_hand, 0) * COALESCE(pr.cost_price, 0)), 0)    AS cost_value,
+                   COALESCE(SUM(GREATEST(ii.quantity_on_hand, 0) * COALESCE(pr.regular_price, 0)), 0) AS retail_value
+            FROM inventory_items ii
+            LEFT JOIN LATERAL (
+                SELECT pp.cost_price, pp.regular_price
+                FROM product_prices pp
+                WHERE pp.product_id = ii.product_id
+                  AND UPPER(pp.currency_code) = 'KES'
+                  AND (pp.product_variant_id = ii.product_variant_id OR pp.product_variant_id IS NULL)
+                ORDER BY (pp.product_variant_id IS NOT NULL AND pp.product_variant_id = ii.product_variant_id) DESC
+                LIMIT 1
+            ) pr ON TRUE
+            WHERE TRUE {$scope}
+        ");
+
+        return [
+            'skus'         => (int) $row->skus,
+            'units'        => (int) $row->units,
+            'reserved'     => (int) $row->reserved,
+            'out_of_stock' => (int) $row->out_of_stock,
+            'low_stock'    => (int) $row->low_stock,
+            'unpriced'     => (int) $row->unpriced,
+            'cost_value'   => round((float) $row->cost_value, 2),
+            'retail_value' => round((float) $row->retail_value, 2),
+        ];
+    }
+
+    /** Revenue per product in the window (sales truth via order lines). */
+    private function productRevenue(Carbon $s, Carbon $e)
+    {
+        return DB::table('order_items as oi')
+            ->join('orders as o', 'o.id', '=', 'oi.order_id')
+            ->whereNotIn('o.status', self::SALE_EXCLUDED_STATUSES)
+            ->whereRaw("UPPER(o.currency_code) = 'KES'")
+            ->whereBetween('o.created_at', [$s, $e])
+            ->whereNotNull('oi.product_id')
+            ->when($this->outletIds, fn ($q) => $q->whereIn('o.outlet_id', $this->outletIds))
+            ->groupBy('oi.product_id')
+            ->selectRaw('oi.product_id, MAX(oi.product_name) AS product,
+                COALESCE(SUM(oi.total_price), 0) AS revenue, COALESCE(SUM(oi.quantity), 0) AS units')
+            ->orderByDesc(DB::raw('SUM(oi.total_price)'))
+            ->get();
+    }
+
+    /**
+     * ABC classification by revenue contribution (cumulative 80 / 95 / 100),
+     * with days-of-cover per item: on-hand divided by the window's daily
+     * sales rate. A-class items with thin cover are the stock that costs
+     * real money when it runs out.
+     */
+    public function abcClassification(Carbon $s, Carbon $e): array
+    {
+        $rows = $this->productRevenue($s, $e);
+        $total = max((float) $rows->sum('revenue'), 0.01);
+        $days  = max(1, (int) $s->diffInDays($e) + 1);
+
+        $onHand = DB::table('inventory_items')
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+            ->groupBy('product_id')
+            ->selectRaw('product_id, SUM(quantity_on_hand) AS units')
+            ->pluck('units', 'product_id');
+
+        $cum = 0.0;
+        $classes = ['A' => ['count' => 0, 'revenue' => 0.0], 'B' => ['count' => 0, 'revenue' => 0.0], 'C' => ['count' => 0, 'revenue' => 0.0]];
+        $items = [];
+        foreach ($rows as $r) {
+            // Class by the share BEFORE this item: the item that crosses the
+            // 80% line is still an A (a single dominant product is A, not C).
+            $class = $cum / $total < 0.80 ? 'A' : ($cum / $total < 0.95 ? 'B' : 'C');
+            $cum += (float) $r->revenue;
+            $classes[$class]['count']++;
+            $classes[$class]['revenue'] += (float) $r->revenue;
+            $dailyRate = (float) $r->units / $days;
+            $stock = (int) ($onHand[$r->product_id] ?? 0);
+            $items[] = [
+                'product_id' => $r->product_id,
+                'product'    => $r->product,
+                'class'      => $class,
+                'revenue'    => round((float) $r->revenue, 2),
+                'share_pct'  => round((float) $r->revenue / $total * 100, 1),
+                'units_sold' => (int) $r->units,
+                'on_hand'    => $stock,
+                'cover_days' => $dailyRate > 0 ? round($stock / $dailyRate, 1) : null,
+            ];
+        }
+
+        return ['classes' => $classes, 'items' => array_slice($items, 0, 15)];
+    }
+
+    /** A-class items whose stock covers under $thresholdDays of demand. */
+    public function stockoutRisks(int $thresholdDays = 7): array
+    {
+        [$s, $e] = self::resolvePeriod('last_30');
+        $abc = $this->abcClassification($s, $e);
+
+        return array_values(array_filter(
+            $abc['items'],
+            fn ($i) => $i['class'] === 'A' && $i['cover_days'] !== null && $i['cover_days'] < $thresholdDays,
+        ));
+    }
+
+    /** Stock sitting still: on hand > 0, nothing sold in $days (or ever). */
+    public function deadStock(int $days = 90)
+    {
+        $cutoff = CarbonImmutable::now(self::TZ)->subDays($days);
+        return DB::table('inventory_items as ii')
+            ->join('products as p', 'p.id', '=', 'ii.product_id')
+            ->leftJoin(DB::raw("(
+                    SELECT oi.product_id, MAX(o.created_at) AS last_sold, MAX(oi.product_name) AS sold_name
+                    FROM order_items oi JOIN orders o ON o.id = oi.order_id
+                    WHERE o.status NOT IN ('voided','cancelled')
+                    GROUP BY oi.product_id
+                ) ls"), 'ls.product_id', '=', 'ii.product_id')
+            ->where('ii.quantity_on_hand', '>', 0)
+            ->when($this->outletIds, fn ($q) => $q->whereIn('ii.outlet_id', $this->outletIds))
+            ->where(fn ($q) => $q->whereNull('ls.last_sold')->orWhere('ls.last_sold', '<', $cutoff))
+            ->groupBy('p.id', 'p.sku', 'p.slug')
+            ->selectRaw("p.id AS product_id,
+                COALESCE(MAX(ls.sold_name), p.slug, p.sku) AS product,
+                p.sku, SUM(ii.quantity_on_hand) AS units, MAX(ls.last_sold) AS last_sold")
+            ->orderByDesc(DB::raw('SUM(ii.quantity_on_hand)'))
+            ->limit(12)
+            ->get();
+    }
+
+    /** Raw-material stock: valuation at unit cost + everything below reorder. */
+    public function materialStockHealth(): array
+    {
+        $agg = DB::table('material_inventory as mi')
+            ->join('materials as m', 'm.id', '=', 'mi.material_id')
+            ->when($this->outletIds, fn ($q) => $q->whereIn('mi.outlet_id', $this->outletIds))
+            ->groupBy('m.id', 'm.name', 'm.unit_of_measure', 'm.reorder_point', 'm.unit_cost')
+            ->selectRaw('m.id, m.name, m.unit_of_measure AS unit, m.reorder_point, m.unit_cost,
+                COALESCE(SUM(mi.quantity_on_hand), 0) AS on_hand,
+                COALESCE(SUM(mi.quantity_available), 0) AS available')
+            ->get();
+
+        $below = $agg->filter(fn ($m) => $m->reorder_point > 0 && (float) $m->available <= (float) $m->reorder_point)
+            ->sortBy(fn ($m) => (float) $m->available - (float) $m->reorder_point)
+            ->values()
+            ->take(10);
+
+        return [
+            'materials'  => $agg->count(),
+            'cost_value' => round((float) $agg->sum(fn ($m) => (float) $m->on_hand * (float) $m->unit_cost), 2),
+            'below_reorder' => $below,
+        ];
+    }
+
+    // ── Procurement intelligence (Phase 4) ────────────────────────────────────
+
+    /**
+     * Supplier scorecard from POs + goods-received notes: volume, spend,
+     * actual delivery days (first GRN vs order date), late deliveries vs the
+     * promised date, and rejection rate at the door.
+     */
+    public function supplierPerformance(Carbon $s, Carbon $e)
+    {
+        return DB::table('purchase_orders as po')
+            ->join('suppliers as sup', 'sup.id', '=', 'po.supplier_id')
+            ->leftJoin(DB::raw('(
+                    SELECT purchase_order_id, MIN(received_date) AS received_date
+                    FROM goods_received_notes GROUP BY purchase_order_id
+                ) g'), 'g.purchase_order_id', '=', 'po.id')
+            ->leftJoin(DB::raw('(
+                    SELECT grn.purchase_order_id,
+                           SUM(gi.quantity_received) AS qty_received,
+                           SUM(gi.quantity_rejected) AS qty_rejected
+                    FROM grn_items gi JOIN goods_received_notes grn ON grn.id = gi.grn_id
+                    GROUP BY grn.purchase_order_id
+                ) gq'), 'gq.purchase_order_id', '=', 'po.id')
+            ->whereBetween('po.order_date', [$s->format('Y-m-d'), $e->format('Y-m-d')])
+            ->where('po.status', '!=', 'cancelled')
+            ->when($this->outletIds, fn ($q) => $q->whereIn('po.outlet_id', $this->outletIds))
+            ->groupBy('sup.id', 'sup.name', 'sup.rating')
+            ->selectRaw("sup.name AS supplier, sup.rating,
+                COUNT(*) AS orders,
+                COALESCE(SUM(po.total_amount), 0) AS spend,
+                ROUND(AVG(g.received_date - po.order_date) FILTER (WHERE g.received_date IS NOT NULL)::numeric, 1) AS avg_delivery_days,
+                COUNT(*) FILTER (WHERE g.received_date IS NOT NULL) AS delivered,
+                COUNT(*) FILTER (WHERE g.received_date > po.expected_delivery_date) AS late,
+                COALESCE(SUM(gq.qty_received), 0) AS qty_received,
+                COALESCE(SUM(gq.qty_rejected), 0) AS qty_rejected")
+            ->orderByDesc(DB::raw('COALESCE(SUM(po.total_amount), 0)'))
+            ->limit(10)
+            ->get();
+    }
+
+    /**
+     * What to buy, grounded in three real numbers per material: available
+     * stock, the reorder buffer, and the unmet demand of OPEN production
+     * orders (required − allocated). Suggested = (buffer + open demand) −
+     * available, with the last price and supplier actually paid for it.
+     */
+    public function purchaseSuggestions()
+    {
+        $scopeMi = $this->outletScopeSql('mi.outlet_id');
+        $scopePo = $this->outletScopeSql('po2.outlet_id');
+
+        return collect(DB::select("
+            SELECT m.id, m.code, m.name, m.unit_of_measure AS unit, m.unit_cost, m.reorder_point,
+                   COALESCE(a.available, 0)  AS available,
+                   COALESCE(d.shortfall, 0)  AS open_demand,
+                   GREATEST(m.reorder_point + COALESCE(d.shortfall, 0) - COALESCE(a.available, 0), 0) AS suggested,
+                   lb.unit_price  AS last_price,
+                   lb.supplier    AS last_supplier,
+                   lb.order_date  AS last_ordered
+            FROM materials m
+            LEFT JOIN (
+                SELECT mi.material_id, SUM(mi.quantity_available) AS available
+                FROM material_inventory mi WHERE TRUE {$scopeMi} GROUP BY mi.material_id
+            ) a ON a.material_id = m.id
+            LEFT JOIN (
+                SELECT ma.material_id, SUM(GREATEST(ma.quantity_required - ma.quantity_allocated, 0)) AS shortfall
+                FROM material_allocations ma
+                JOIN production_orders p ON p.id = ma.production_order_id
+                WHERE p.status NOT IN ('completed','cancelled','draft')
+                GROUP BY ma.material_id
+            ) d ON d.material_id = m.id
+            LEFT JOIN (
+                SELECT DISTINCT ON (poi.material_id)
+                       poi.material_id, poi.unit_price, sup.name AS supplier, po2.order_date
+                FROM purchase_order_items poi
+                JOIN purchase_orders po2 ON po2.id = poi.purchase_order_id
+                JOIN suppliers sup ON sup.id = po2.supplier_id
+                WHERE poi.material_id IS NOT NULL {$scopePo}
+                ORDER BY poi.material_id, po2.order_date DESC
+            ) lb ON lb.material_id = m.id
+            WHERE m.is_active = TRUE
+              AND GREATEST(m.reorder_point + COALESCE(d.shortfall, 0) - COALESCE(a.available, 0), 0) > 0
+            ORDER BY GREATEST(m.reorder_point + COALESCE(d.shortfall, 0) - COALESCE(a.available, 0), 0) * m.unit_cost DESC
+            LIMIT 12
+        "))->map(fn ($r) => [
+            'material'     => $r->name,
+            'code'         => $r->code,
+            'unit'         => $r->unit,
+            'available'    => round((float) $r->available, 2),
+            'reorder_point'=> round((float) $r->reorder_point, 2),
+            'open_demand'  => round((float) $r->open_demand, 2),
+            'suggested'    => round((float) $r->suggested, 2),
+            'est_cost'     => round((float) $r->suggested * (float) $r->unit_cost, 2),
+            'last_price'   => $r->last_price !== null ? (float) $r->last_price : null,
+            'last_supplier'=> $r->last_supplier,
+            'last_ordered' => $r->last_ordered,
+        ])->values();
+    }
+
+    /** Purchase orders still in flight: exposure and the oldest one waiting. */
+    public function openPurchaseOrders(): array
+    {
+        $row = DB::table('purchase_orders')
+            ->whereNotIn('status', ['received', 'completed', 'closed', 'cancelled'])
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+            ->selectRaw('COUNT(*) AS n, COALESCE(SUM(total_amount), 0) AS value, MIN(order_date) AS oldest')
+            ->first();
+
+        return [
+            'count'       => (int) $row->n,
+            'value'       => round((float) $row->value, 2),
+            'oldest_days' => $row->oldest
+                ? (int) CarbonImmutable::parse($row->oldest)->diffInDays(CarbonImmutable::now(self::TZ))
+                : null,
+        ];
+    }
+
     // ── Attention feed ────────────────────────────────────────────────────────
 
     /**
@@ -674,7 +966,19 @@ class MetricEngine
             ];
         }
 
-        // 5. Low stock — items at or below their reorder point.
+        // 5. A-class stockout risk: best sellers with thin cover.
+        $risks = $this->stockoutRisks();
+        if (count($risks) > 0) {
+            $worst = $risks[0];
+            $items[] = [
+                'key' => 'stockout_risk', 'severity' => 'high',
+                'title' => count($risks) . ' top-selling item' . (count($risks) > 1 ? 's' : '') . ' close to stockout',
+                'detail' => "\"{$worst['product']}\" has {$worst['on_hand']} left — about {$worst['cover_days']} days at its 30-day sales rate.",
+                'count' => count($risks), 'link' => '/reports/inventory',
+            ];
+        }
+
+        // 6. Low stock — items at or below their reorder point.
         $low = $this->lowStock();
         if ($low > 0) {
             $items[] = [

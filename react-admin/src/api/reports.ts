@@ -28,6 +28,14 @@ export const reportsApi = {
     productionIntelligence: (from: string, to: string) =>
         get<any>(`${BASE}/production-intelligence`, { params: { period: "custom", from, to } }),
 
+    // Inventory intelligence: valuation, ABC + cover days, dead stock, materials.
+    inventoryIntelligence: (from: string, to: string) =>
+        get<any>(`${BASE}/inventory-intelligence`, { params: { period: "custom", from, to } }),
+
+    // Procurement intelligence: supplier scorecard, purchase suggestions, open POs.
+    procurementIntelligence: (from: string, to: string) =>
+        get<any>(`${BASE}/procurement-intelligence`, { params: { period: "custom", from, to } }),
+
     // Row-level drill-down: the same query as the KPI, aggregation removed.
     drill: (metric: string, period: string, opts?: { page?: number; bucket?: string; outletId?: number }) =>
         get<any>(`${BASE}/drill/${metric}`, { params: {
