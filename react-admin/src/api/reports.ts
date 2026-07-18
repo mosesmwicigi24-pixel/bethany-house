@@ -20,6 +20,10 @@ export const reportsApi = {
     dashboardKpis: (days = 30) =>
         get<any>(`${BASE}/dashboard/kpis`, { params: { days } }),
 
+    // Executive dashboard — the MetricEngine-backed command centre.
+    executive: (period: string, outletId?: number) =>
+        get<any>(`${BASE}/executive`, { params: { period, ...(outletId ? { outlet_id: outletId } : {}) } }),
+
     // Sales
     salesSummary: (
         params: DateRangeParams & { channel?: string; compare?: 1 },

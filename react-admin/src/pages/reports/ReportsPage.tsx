@@ -10,68 +10,202 @@ import { fmtKes } from "@/api/expenses";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
 import { clsx } from "clsx";
-import { KpiCard } from "./reportShared";
+import { useState } from "react";
 
 // ─── KPI overview ──────────────────────────────────────────────────────────────
 
-function OverviewSection() {
-    const { data, isLoading } = useQuery({
-        queryKey: ["report-dashboard-kpis"],
-        queryFn: () => reportsApi.dashboardKpis(30),
-        staleTime: 5 * 60 * 1000,
-    });
+// The Executive Dashboard — MetricEngine-backed command centre. Every card is
+// {current, previous, series}: value, delta vs the equivalent prior period,
+// sparkline of the current window, and a click-through to the report that
+// explains it. The attention feed answers "what needs me today?"
 
-    if (isLoading)
-        return (
-            <div className="flex justify-center py-12">
-                <Spinner />
-            </div>
-        );
+const PERIODS = [
+    { key: "today",        label: "Today" },
+    { key: "last_7",       label: "7 Days" },
+    { key: "last_30",      label: "30 Days" },
+    { key: "this_month",   label: "This Month" },
+    { key: "last_month",   label: "Last Month" },
+    { key: "this_quarter", label: "Quarter" },
+    { key: "this_year",    label: "Year" },
+];
 
-    const kpis = data?.kpis ?? {};
-
+function Sparkline({ series }: { series?: Record<string, number> }) {
+    const values = Object.values(series ?? {}).map(Number);
+    if (values.length < 2) return null;
+    const max = Math.max(...values), min = Math.min(...values);
+    const range = max - min || 1;
+    const pts = values.map((v, i) =>
+        `${(i / (values.length - 1)) * 76 + 2},${20 - ((v - min) / range) * 16 + 2}`).join(" ");
     return (
-        <div className="space-y-3">
-            <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider">
-                Last 30 days
-            </p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <KpiCard
-                    label="Total Revenue"
-                    value={`KES ${Number(kpis.sales?.total ?? 0).toLocaleString()}`}
-                    sub={`${kpis.sales?.count ?? 0} paid orders`}
-                    color="text-brand-600"
-                />
-                <KpiCard
-                    label="Avg Order Value"
-                    value={`KES ${Number(kpis.sales?.average ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-                />
-                <KpiCard
-                    label="New Customers"
-                    value={kpis.customers?.new ?? 0}
-                    sub={`${kpis.customers?.total ?? 0} total`}
-                    color="text-success"
-                />
-                <KpiCard
-                    label="Active Productions"
-                    value={kpis.production?.active ?? 0}
-                    sub={`${kpis.production?.completed_this_period ?? 0} completed`}
-                    color="text-info"
-                />
+        <svg viewBox="0 0 80 24" className="w-20 h-6 text-brand-400" aria-hidden="true">
+            <polyline points={pts} fill="none" stroke="currentColor" strokeWidth="1.5"
+                strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+    );
+}
+
+function DeltaChip({ current, previous, downIsGood = false }: {
+    current: number; previous: number; downIsGood?: boolean;
+}) {
+    if (!previous) return <span className="text-2xs text-surface-300">— prev n/a</span>;
+    const pct = ((current - previous) / Math.abs(previous)) * 100;
+    if (Math.abs(pct) < 0.05) return <span className="text-2xs text-surface-400">± 0%</span>;
+    const up = pct > 0;
+    const good = downIsGood ? !up : up;
+    return (
+        <span className={clsx("text-2xs font-bold tabular-nums", good ? "text-emerald-600" : "text-red-600")}>
+            {up ? "▲" : "▼"} {Math.abs(pct).toFixed(1)}%
+        </span>
+    );
+}
+
+function MetricCard({ label, value, sub, metric, to, money = false, downIsGood = false }: {
+    label: string; value?: string; sub?: string;
+    metric?: { current: number; previous: number; series?: Record<string, number> };
+    to?: string; money?: boolean; downIsGood?: boolean;
+}) {
+    const navigate = useNavigate();
+    const display = value ?? (money
+        ? `KES ${Number(metric?.current ?? 0).toLocaleString()}`
+        : Number(metric?.current ?? 0).toLocaleString());
+    return (
+        <button onClick={() => to && navigate(to)} disabled={!to}
+            className={clsx("card card-body text-left transition-shadow", to && "hover:shadow-md cursor-pointer")}>
+            <div className="flex items-start justify-between gap-2">
+                <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest">{label}</p>
+                {metric && <DeltaChip current={metric.current} previous={metric.previous} downIsGood={downIsGood} />}
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                <KpiCard
-                    label="Active Products"
-                    value={kpis.products?.total ?? 0}
-                />
-                <KpiCard
-                    label="Low Stock Alerts"
-                    value={kpis.products?.low_stock ?? 0}
-                    color={kpis.products?.low_stock > 0 ? "text-warning" : ""}
-                />
+            <p className="text-lg sm:text-xl font-bold text-surface-900 tabular-nums mt-1 truncate">{display}</p>
+            <div className="flex items-end justify-between gap-2 mt-1 min-h-[24px]">
+                <p className="text-2xs text-surface-400 truncate">
+                    {sub ?? (metric?.previous
+                        ? `prev ${money ? "KES " : ""}${Number(metric.previous).toLocaleString()}`
+                        : "")}
+                </p>
+                <Sparkline series={metric?.series} />
+            </div>
+        </button>
+    );
+}
+
+function AttentionPanel({ items }: { items: any[] }) {
+    const navigate = useNavigate();
+    if (!items.length) return (
+        <div className="card card-body flex items-center gap-3 border-emerald-100 bg-emerald-50/40">
+            <span className="text-lg" aria-hidden="true">✅</span>
+            <p className="text-sm text-emerald-800 font-medium">Nothing needs your attention right now.</p>
+        </div>
+    );
+    return (
+        <div className="card overflow-hidden">
+            <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-100 flex items-center gap-2">
+                <span aria-hidden="true">⚠️</span>
+                <p className="text-xs font-bold text-amber-800 uppercase tracking-widest">Needs your attention</p>
+                <span className="ml-auto text-2xs font-bold text-amber-700">{items.length}</span>
+            </div>
+            <div className="divide-y divide-surface-50">
+                {items.map(it => (
+                    <button key={it.key} onClick={() => navigate(it.link)}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-50 transition-colors">
+                        <span className={clsx("w-2 h-2 rounded-full shrink-0",
+                            it.severity === "high" ? "bg-red-500" : "bg-amber-400")} />
+                        <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-surface-800">{it.title}</p>
+                            <p className="text-2xs text-surface-400 truncate">{it.detail}</p>
+                        </div>
+                        <svg className="w-3.5 h-3.5 text-surface-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                        </svg>
+                    </button>
+                ))}
             </div>
         </div>
     );
+}
+
+function ExecutiveOverview() {
+    const [period, setPeriod] = useState("this_month");
+    const { data, isLoading } = useQuery({
+        queryKey: ["executive-dashboard", period],
+        queryFn: () => reportsApi.executive(period),
+        staleTime: 60_000,
+    });
+
+    const k = data?.kpis;
+
+    return (
+        <div className="space-y-4">
+            {/* Period selector */}
+            <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1">
+                {PERIODS.map(pd => (
+                    <button key={pd.key} onClick={() => setPeriod(pd.key)}
+                        className={clsx("shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors",
+                            period === pd.key
+                                ? "bg-surface-900 text-white"
+                                : "bg-white border border-surface-200 text-surface-500 hover:border-brand-300 hover:text-brand-600")}>
+                        {pd.label}
+                    </button>
+                ))}
+            </div>
+
+            {isLoading || !k ? (
+                <div className="flex justify-center py-12"><Spinner /></div>
+            ) : (
+                <>
+                    <AttentionPanel items={data.attention ?? []} />
+
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                        <MetricCard label="Revenue" metric={k.sales.revenue} money to="/reports/sales" />
+                        <MetricCard label="Collected" metric={k.money.collected} money
+                            to={can_financial_path(k)} />
+                        <MetricCard label="Orders" metric={k.sales.orders} to="/reports/sales" />
+                        <MetricCard label="Avg Order Value" metric={k.sales.aov} money to="/reports/sales" />
+                    </div>
+
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                        <MetricCard label="Outstanding"
+                            value={`KES ${Number(k.money.outstanding.amount).toLocaleString()}`}
+                            sub={`${k.money.outstanding.orders} open orders`} to="/pos/balances" />
+                        <MetricCard label="Production Done" metric={k.production.completed} to="/reports/production" />
+                        <MetricCard label="On-time %"
+                            value={k.production.on_time_pct.current != null ? `${k.production.on_time_pct.current}%` : "—"}
+                            sub={k.production.on_time_pct.previous != null ? `prev ${k.production.on_time_pct.previous}%` : "no prior data"}
+                            to="/reports/production" />
+                        <MetricCard label="WIP / Overdue"
+                            value={`${k.production.wip}${k.production.overdue > 0 ? ` · ${k.production.overdue} late` : ""}`}
+                            sub={k.production.overdue > 0 ? "overdue orders on the floor" : "nothing overdue"}
+                            to="/production/wip" />
+                    </div>
+
+                    {k.financial && (
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                            <MetricCard label="Expenses" metric={k.financial.expenses} money downIsGood to="/expenses" />
+                            <MetricCard label="Net (Collected − Exp.)" metric={k.financial.net_collected} money to="/reports/financial" />
+                            <MetricCard label="New Customers" metric={k.sales.new_customers} to="/reports/customers" />
+                            <MetricCard label="Low Stock"
+                                value={String(k.inventory.low_stock)}
+                                sub={k.inventory.low_stock > 0 ? "items at reorder point" : "all healthy"}
+                                to="/reports/inventory" />
+                        </div>
+                    )}
+                    {!k.financial && (
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                            <MetricCard label="New Customers" metric={k.sales.new_customers} to="/reports/customers" />
+                            <MetricCard label="Low Stock"
+                                value={String(k.inventory.low_stock)}
+                                sub={k.inventory.low_stock > 0 ? "items at reorder point" : "all healthy"}
+                                to="/reports/inventory" />
+                        </div>
+                    )}
+                </>
+            )}
+        </div>
+    );
+}
+
+// Collected drills to financial for those who may enter; sales otherwise.
+function can_financial_path(k: any): string {
+    return k?.financial ? "/reports/financial" : "/reports/sales";
 }
 
 // ─── Scheduled reports summary ─────────────────────────────────────────────────
@@ -310,7 +444,7 @@ export default function ReportsPage() {
                 </p>
             </div>
 
-            <OverviewSection />
+            <ExecutiveOverview />
             <SchedulesSummary />
 
             <div>
