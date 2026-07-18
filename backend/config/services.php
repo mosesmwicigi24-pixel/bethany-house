@@ -35,4 +35,11 @@ return [
         ],
     ],
 
+
+    'whatsapp' => [
+        'token'           => env('WABA_TOKEN'),
+        'phone_number_id' => env('WABA_PHONE_NUMBER_ID'),
+        'api_version'     => env('WABA_API_VERSION', 'v19.0'),
+    ],
+
 ];

@@ -36,6 +36,8 @@ interface EodDeliverySettings {
     slack_webhook:    string;
     slack_frequency:  Frequency;
     slack_time:       string;       // "HH:MM"
+    whatsapp_enabled:    boolean;
+    whatsapp_recipients: string;    // comma-separated E.164 numbers
     outlet_ids:       number[];     // empty = all outlets
 }
 
@@ -129,6 +131,8 @@ export default function EodReportSettingsPage() {
         slack_webhook:    "",
         slack_frequency:  "daily",
         slack_time:       "21:00",
+        whatsapp_enabled:    false,
+        whatsapp_recipients: "",
         outlet_ids:       [],
     });
 
@@ -152,6 +156,8 @@ export default function EodReportSettingsPage() {
             slack_webhook:    s.slack_webhook    ?? "",
             slack_frequency:  s.slack_frequency  ?? "daily",
             slack_time:       s.slack_time       ?? "21:00",
+            whatsapp_enabled:    s.whatsapp_enabled    ?? false,
+            whatsapp_recipients: s.whatsapp_recipients ?? "",
             outlet_ids:       s.outlet_ids       ?? [],
         });
     }, [data]);
@@ -181,7 +187,7 @@ export default function EodReportSettingsPage() {
     // ── Test send ────────────────────────────────────────────────────────────
 
     const testMutation = useMutation({
-        mutationFn: (payload: { channel: "email" | "slack"; email_recipients?: string; slack_webhook?: string }) =>
+        mutationFn: (payload: { channel: "email" | "slack" | "whatsapp"; email_recipients?: string; slack_webhook?: string; whatsapp_recipients?: string }) =>
             post<{ message: string }>("/v1/admin/pos/reports/eod-settings/test", payload),
         onSuccess: (_, { channel }) => toast.success(`Test ${channel} sent!`),
         onError: (err: { message: string }) => toast.error(err.message || "Test send failed."),
@@ -312,6 +318,50 @@ export default function EodReportSettingsPage() {
                         </svg>
                     )}
                     Send test email
+                </button>
+            </ChannelCard>
+
+            {/* WhatsApp channel */}
+            <ChannelCard
+                icon={
+                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38a9.87 9.87 0 004.79 1.22c5.46 0 9.91-4.45 9.91-9.91C21.95 6.45 17.5 2 12.04 2zm0 18.03a8.1 8.1 0 01-4.13-1.13l-.3-.18-3.12.82.83-3.04-.2-.31a8.09 8.09 0 01-1.24-4.28c0-4.47 3.64-8.1 8.16-8.1 4.47 0 8.1 3.63 8.1 8.1s-3.63 8.12-8.1 8.12zm4.44-6.07c-.24-.12-1.44-.71-1.66-.79-.22-.08-.39-.12-.55.12-.16.24-.63.79-.77.95-.14.16-.28.18-.53.06-.24-.12-1.03-.38-1.96-1.21-.72-.65-1.21-1.44-1.35-1.69-.14-.24-.02-.37.1-.5.11-.11.24-.28.37-.42.12-.14.16-.24.24-.4.08-.16.04-.3-.02-.42-.06-.12-.55-1.32-.75-1.81-.2-.48-.4-.41-.55-.42h-.47c-.16 0-.42.06-.65.3-.22.24-.85.83-.85 2.03s.87 2.36.99 2.52c.12.16 1.72 2.62 4.16 3.67.58.25 1.03.4 1.39.51.58.19 1.11.16 1.53.1.47-.07 1.44-.59 1.64-1.16.2-.57.2-1.05.14-1.16-.06-.1-.22-.16-.46-.28z" />
+                    </svg>
+                }
+                title="WhatsApp"
+                description="Send the report and the 07:30 morning brief to WhatsApp numbers via the business line."
+                enabled={form.whatsapp_enabled}
+                onToggle={() => set("whatsapp_enabled", !form.whatsapp_enabled)}
+            >
+                <div>
+                    <label className="text-xs font-medium text-surface-600 mb-1 block">
+                        Numbers <span className="text-surface-400 font-normal">(comma-separated, with country code)</span>
+                    </label>
+                    <input
+                        type="text"
+                        value={form.whatsapp_recipients}
+                        onChange={(e) => set("whatsapp_recipients", e.target.value)}
+                        placeholder="+254712345678, +254733000000"
+                        className="input text-xs w-full"
+                    />
+                    <p className="text-2xs text-surface-400 mt-1">
+                        Each number should message the business line once so the 24-hour reply window stays open.
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    onClick={() => testMutation.mutate({ channel: "whatsapp", whatsapp_recipients: form.whatsapp_recipients })}
+                    disabled={testMutation.isPending || !form.whatsapp_recipients?.trim() || !canEdit}
+                    className="btn-secondary btn-sm text-xs gap-1.5"
+                >
+                    {testMutation.isPending ? (
+                        <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                        </svg>
+                    )}
+                    Send test WhatsApp
                 </button>
             </ChannelCard>
 

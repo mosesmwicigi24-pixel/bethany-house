@@ -32,10 +32,18 @@ class SendInsightsDigest extends Command
     {
         $raw = DB::table('system_settings')->where('key', 'eod_delivery')->value('value');
         $settings = $raw ? (json_decode($raw, true) ?: []) : [];
-        $recipients = !empty($settings['email_enabled']) ? ($settings['email_recipients'] ?? []) : [];
 
-        if (empty($recipients)) {
-            $this->info('No EoD email recipients configured — digest skipped.');
+        // The settings page stores recipients as comma-separated STRINGS;
+        // older test fixtures used arrays. Accept both.
+        $split = fn ($v) => is_array($v)
+            ? array_values(array_filter($v))
+            : array_values(array_filter(array_map('trim', preg_split('/[\s,;]+/', (string) $v))));
+
+        $recipients = !empty($settings['email_enabled']) ? $split($settings['email_recipients'] ?? '') : [];
+        $waNumbers  = !empty($settings['whatsapp_enabled']) ? $split($settings['whatsapp_recipients'] ?? '') : [];
+
+        if (empty($recipients) && empty($waNumbers)) {
+            $this->info('No EoD email or WhatsApp recipients configured — digest skipped.');
             return self::SUCCESS;
         }
 
@@ -82,6 +90,18 @@ class SendInsightsDigest extends Command
             } catch (\Exception $e) {
                 Log::error("Insights digest failed for {$address}: {$e->getMessage()}");
                 $this->error("Failed for {$address}");
+            }
+        }
+
+        // WhatsApp rail: same brief, *bold* headline per WhatsApp convention.
+        if (!empty($waNumbers)) {
+            $waBody = "*{$subject}*\n\n" . $body;
+            foreach ($waNumbers as $number) {
+                if (\App\Services\WhatsAppService::send($number, $waBody)) {
+                    $this->info("WhatsApp sent to {$number}");
+                } else {
+                    $this->error("WhatsApp failed for {$number}");
+                }
             }
         }
 
