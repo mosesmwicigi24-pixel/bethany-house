@@ -2307,6 +2307,8 @@ class PosController extends Controller
             'slack_webhook'    => 'nullable|url|max:500',
             'slack_frequency'  => 'in:daily,weekly,off',
             'slack_time'       => ['nullable', 'regex:/^\d{2}:\d{2}$/'],
+            'whatsapp_enabled'    => 'boolean',
+            'whatsapp_recipients' => 'nullable|string|max:500',
             'outlet_ids'       => 'nullable|array',
             'outlet_ids.*'     => 'integer|exists:outlets,id',
         ]);
@@ -2342,11 +2344,12 @@ class PosController extends Controller
     public function testEodDelivery(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'channel'          => 'required|in:email,slack',
+            'channel'          => 'required|in:email,slack,whatsapp',
             // Optional overrides from the live form — allows "Send test" to work
             // without requiring a prior "Save Settings" click.
             'email_recipients' => 'nullable|string|max:2000',
             'slack_webhook'    => 'nullable|url|max:500',
+            'whatsapp_recipients' => 'nullable|string|max:500',
         ]);
 
         $raw = DB::table('system_settings')
@@ -2374,6 +2377,25 @@ class PosController extends Controller
                 today()->toDateString(),
                 $settings['outlet_ids'] ?? []
             ))->onQueue('default');
+        } elseif ($validated['channel'] === 'whatsapp') {
+            if (!\App\Services\WhatsAppService::configured()) {
+                return response()->json(['message' => 'WhatsApp is not configured on the server (WABA_TOKEN / WABA_PHONE_NUMBER_ID).'], 422);
+            }
+            $rawNumbers = $validated['whatsapp_recipients']
+                ?? $settings['whatsapp_recipients']
+                ?? '';
+            $numbers = array_values(array_filter(array_map('trim', preg_split('/[\s,;]+/', $rawNumbers))));
+            if (empty($numbers)) {
+                return response()->json(['message' => 'No WhatsApp numbers configured.'], 422);
+            }
+            $sent = 0;
+            foreach ($numbers as $n) {
+                $sent += \App\Services\WhatsAppService::send($n, "*Sonalux test message* — WhatsApp delivery is working. The morning brief will arrive here at 07:30.") ? 1 : 0;
+            }
+            if ($sent === 0) {
+                return response()->json(['message' => 'WhatsApp send failed — check the server log (recipients may be outside the 24h window).'], 422);
+            }
+            return response()->json(['message' => "Test sent to {$sent} WhatsApp number" . ($sent > 1 ? 's' : '') . '.']);
         } else {
             // Live form value takes precedence; fall back to saved DB value
             $webhook = trim($validated['slack_webhook'] ?? $settings['slack_webhook'] ?? '');
