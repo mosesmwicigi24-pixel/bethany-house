@@ -895,6 +895,269 @@ class MetricEngine
         ];
     }
 
+    // ── Customer intelligence (Phase 5) ───────────────────────────────────────
+    //
+    // Live POS orders carry the customer as a snapshot (name + phone) with a
+    // NULL customer_id, so identity is keyed on customer_id when present and
+    // otherwise on the FULL phone string (docs: never last-N digits). Orders
+    // with neither are walk-ins and are reported as such, not guessed.
+
+    /** Per-order customer key expression (id wins, else full phone). */
+    private const CUSTOMER_KEY = "COALESCE(o.customer_id::text, NULLIF(o.customer_phone, ''))";
+
+    /** Sales-truth orders aliased o, with the customer key attached. */
+    private function customerOrders()
+    {
+        return DB::table('orders as o')
+            ->whereNotIn('o.status', self::SALE_EXCLUDED_STATUSES)
+            ->whereRaw("UPPER(o.currency_code) = 'KES'")
+            ->when($this->outletIds, fn ($q) => $q->whereIn('o.outlet_id', $this->outletIds));
+    }
+
+    /** Revenue and orders per segment (customers.customer_type, else walk-in). */
+    public function customerSegments(Carbon $s, Carbon $e)
+    {
+        return $this->customerOrders()
+            ->leftJoin(DB::raw("(
+                    SELECT DISTINCT ON (phone) id, phone, customer_type
+                    FROM customers WHERE phone IS NOT NULL AND phone <> ''
+                    ORDER BY phone, id
+                ) cp"), 'cp.phone', '=', 'o.customer_phone')
+            ->leftJoin('customers as cid', 'cid.id', '=', 'o.customer_id')
+            ->whereBetween('o.created_at', [$s, $e])
+            ->groupBy(DB::raw("COALESCE(cid.customer_type, cp.customer_type, 'walk_in')"))
+            ->selectRaw("COALESCE(cid.customer_type, cp.customer_type, 'walk_in') AS segment,
+                COUNT(*) AS orders, COALESCE(SUM(o.total_amount), 0) AS revenue,
+                COUNT(DISTINCT " . self::CUSTOMER_KEY . ") AS customers")
+            ->orderByDesc(DB::raw('COALESCE(SUM(o.total_amount), 0)'))
+            ->get();
+    }
+
+    /**
+     * New vs returning revenue in the window. An order is RETURNING when its
+     * customer key has an order before the window opened; keyless walk-ins
+     * are split out honestly instead of being counted either way.
+     */
+    public function newVsReturning(Carbon $s, Carbon $e): array
+    {
+        $key = self::CUSTOMER_KEY;
+        $rows = DB::select("
+            WITH keyed AS (
+                SELECT o.id, o.total_amount, o.created_at, {$key} AS ckey,
+                       MIN(o.created_at) OVER (PARTITION BY {$key}) AS first_order_at
+                FROM orders o
+                WHERE o.status NOT IN ('voided','cancelled')
+                  AND UPPER(o.currency_code) = 'KES'
+                  " . ($this->outletIds ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')' : '') . "
+            )
+            SELECT CASE WHEN ckey IS NULL THEN 'anonymous'
+                        WHEN first_order_at < ? THEN 'returning' ELSE 'new' END AS bucket,
+                   COUNT(*) AS orders, COALESCE(SUM(total_amount), 0) AS revenue,
+                   COUNT(DISTINCT ckey) AS customers
+            FROM keyed WHERE created_at BETWEEN ? AND ?
+            GROUP BY 1
+        ", [$s, $s, $e]);
+
+        $out = ['new' => null, 'returning' => null, 'anonymous' => null];
+        foreach ($rows as $r) {
+            $out[$r->bucket] = [
+                'orders' => (int) $r->orders,
+                'revenue' => round((float) $r->revenue, 2),
+                'customers' => (int) $r->customers,
+            ];
+        }
+        return $out;
+    }
+
+    /** Window's top customers with their all-time value beside the period. */
+    public function topCustomers(Carbon $s, Carbon $e)
+    {
+        $key = self::CUSTOMER_KEY;
+        return collect(DB::select("
+            WITH keyed AS (
+                SELECT {$key} AS ckey, o.total_amount, o.created_at,
+                       TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,''))) AS name,
+                       o.customer_phone AS phone
+                FROM orders o
+                WHERE o.status NOT IN ('voided','cancelled') AND UPPER(o.currency_code) = 'KES'
+                  AND {$key} IS NOT NULL
+                  " . ($this->outletIds ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')' : '') . "
+            )
+            SELECT ckey, MAX(name) AS name, MAX(phone) AS phone,
+                   COUNT(*) FILTER (WHERE created_at BETWEEN ? AND ?) AS period_orders,
+                   COALESCE(SUM(total_amount) FILTER (WHERE created_at BETWEEN ? AND ?), 0) AS period_revenue,
+                   COUNT(*) AS lifetime_orders,
+                   COALESCE(SUM(total_amount), 0) AS lifetime_revenue,
+                   MAX(created_at) AS last_order_at
+            FROM keyed
+            GROUP BY ckey
+            HAVING COUNT(*) FILTER (WHERE created_at BETWEEN ? AND ?) > 0
+            ORDER BY period_revenue DESC
+            LIMIT 10
+        ", [$s, $e, $s, $e, $s, $e]));
+    }
+
+    /**
+     * Top customers of the trailing year who have gone quiet for 60+ days —
+     * the list a shop actually calls. Every row cites its numbers.
+     */
+    public function dormantTopCustomers(int $quietDays = 60, int $topN = 20)
+    {
+        $key = self::CUSTOMER_KEY;
+        $now = CarbonImmutable::now(self::TZ);
+        return collect(DB::select("
+            WITH keyed AS (
+                SELECT {$key} AS ckey, o.total_amount, o.created_at,
+                       TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,''))) AS name,
+                       o.customer_phone AS phone
+                FROM orders o
+                WHERE o.status NOT IN ('voided','cancelled') AND UPPER(o.currency_code) = 'KES'
+                  AND {$key} IS NOT NULL AND o.created_at >= ?
+                  " . ($this->outletIds ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')' : '') . "
+            ), ranked AS (
+                SELECT ckey, MAX(name) AS name, MAX(phone) AS phone,
+                       SUM(total_amount) AS revenue_12m, MAX(created_at) AS last_order_at
+                FROM keyed GROUP BY ckey
+                ORDER BY SUM(total_amount) DESC LIMIT ?
+            )
+            SELECT * FROM ranked WHERE last_order_at < ?
+            ORDER BY revenue_12m DESC
+        ", [$now->subDays(365), $topN, $now->subDays($quietDays)]))
+            ->map(fn ($r) => [
+                'name' => $r->name !== '' ? $r->name : ($r->phone ?? 'Unknown'),
+                'phone' => $r->phone,
+                'revenue_12m' => round((float) $r->revenue_12m, 2),
+                'last_order_at' => $r->last_order_at,
+                'days_quiet' => (int) CarbonImmutable::parse($r->last_order_at)->diffInDays(CarbonImmutable::now(self::TZ)),
+            ])->values();
+    }
+
+    // ── Financial intelligence (Phase 5) ──────────────────────────────────────
+
+    /**
+     * P&L on the earned-revenue rule (docs glossary): revenue counts when an
+     * order becomes FULLY PAID, dated by its final settling payment. COGS is
+     * estimated from the price book's cost_price per line — lines without a
+     * cost row are counted and reported, never valued at zero silently.
+     */
+    public function earnedPnl(Carbon $s, Carbon $e): array
+    {
+        $scope = $this->outletScopeSql('o.outlet_id');
+        $earned = DB::selectOne("
+            WITH paid AS (
+                SELECT order_id, SUM(amount - COALESCE(refund_amount,0)) AS net,
+                       MAX(COALESCE(paid_at, created_at)) AS settled_at
+                FROM payments WHERE status = 'paid' GROUP BY order_id
+            )
+            SELECT COUNT(*) AS orders, COALESCE(SUM(o.total_amount), 0) AS revenue
+            FROM orders o JOIN paid p ON p.order_id = o.id
+            WHERE o.status NOT IN ('voided','cancelled')
+              AND UPPER(o.currency_code) = 'KES' {$scope}
+              AND p.net >= o.total_amount - 0.01
+              AND p.settled_at BETWEEN ? AND ?
+        ", [$s, $e]);
+
+        $cogs = DB::selectOne("
+            WITH paid AS (
+                SELECT order_id, SUM(amount - COALESCE(refund_amount,0)) AS net,
+                       MAX(COALESCE(paid_at, created_at)) AS settled_at
+                FROM payments WHERE status = 'paid' GROUP BY order_id
+            )
+            SELECT COALESCE(SUM(oi.quantity * pr.cost_price), 0) AS cogs,
+                   COUNT(*) FILTER (WHERE pr.cost_price IS NULL) AS unpriced_lines
+            FROM orders o
+            JOIN paid p ON p.order_id = o.id
+            JOIN order_items oi ON oi.order_id = o.id
+            LEFT JOIN LATERAL (
+                SELECT pp.cost_price FROM product_prices pp
+                WHERE pp.product_id = oi.product_id AND UPPER(pp.currency_code) = 'KES'
+                  AND (pp.product_variant_id = oi.product_variant_id OR pp.product_variant_id IS NULL)
+                ORDER BY (pp.product_variant_id IS NOT NULL AND pp.product_variant_id = oi.product_variant_id) DESC
+                LIMIT 1
+            ) pr ON TRUE
+            WHERE o.status NOT IN ('voided','cancelled')
+              AND UPPER(o.currency_code) = 'KES' {$scope}
+              AND p.net >= o.total_amount - 0.01
+              AND p.settled_at BETWEEN ? AND ?
+        ", [$s, $e]);
+
+        $expensesTotal = (float) DB::table('expenses')
+            ->where('status', 'completed')
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+            ->whereBetween('expense_date', [$s->format('Y-m-d'), $e->format('Y-m-d')])
+            ->sum('amount_kes');
+
+        $revenue = round((float) $earned->revenue, 2);
+        $cogsVal = round((float) $cogs->cogs, 2);
+        return [
+            'earned_orders'  => (int) $earned->orders,
+            'earned_revenue' => $revenue,
+            'cogs_estimate'  => $cogsVal,
+            'unpriced_lines' => (int) $cogs->unpriced_lines,
+            'gross_profit'   => round($revenue - $cogsVal, 2),
+            'expenses'       => round($expensesTotal, 2),
+            'net_profit'     => round($revenue - $cogsVal - $expensesTotal, 2),
+            'gross_margin_pct' => $revenue > 0 ? round(($revenue - $cogsVal) / $revenue * 100, 1) : null,
+        ];
+    }
+
+    /** Completed expenses by category, with the category's monthly budget. */
+    public function expensesByCategory(Carbon $s, Carbon $e)
+    {
+        return DB::table('expenses as x')
+            ->leftJoin('expense_categories as ec', 'ec.id', '=', 'x.category_id')
+            ->where('x.status', 'completed')
+            ->when($this->outletIds, fn ($q) => $q->whereIn('x.outlet_id', $this->outletIds))
+            ->whereBetween('x.expense_date', [$s->format('Y-m-d'), $e->format('Y-m-d')])
+            ->groupBy('ec.id', 'ec.name', 'ec.budget_monthly')
+            ->selectRaw("COALESCE(ec.name, 'Uncategorised') AS category,
+                COALESCE(SUM(x.amount_kes), 0) AS spent,
+                COUNT(*) AS entries, ec.budget_monthly")
+            ->orderByDesc(DB::raw('COALESCE(SUM(x.amount_kes), 0)'))
+            ->get();
+    }
+
+    /** Weekly money in (collected) vs money out (expenses) over the window. */
+    public function cashFlowWeekly(Carbon $s, Carbon $e): array
+    {
+        $in = $this->moneyBase()
+            ->whereBetween(DB::raw(self::PAID_AT), [$s, $e])
+            ->selectRaw("DATE_TRUNC('week', " . self::PAID_AT . ")::date AS wk,
+                COALESCE(SUM(p.amount - COALESCE(p.refund_amount,0)), 0) AS v")
+            ->groupBy(DB::raw("DATE_TRUNC('week', " . self::PAID_AT . ")"))
+            ->orderBy('wk')->pluck('v', 'wk');
+
+        $out = DB::table('expenses')
+            ->where('status', 'completed')
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+            ->whereBetween('expense_date', [$s->format('Y-m-d'), $e->format('Y-m-d')])
+            ->selectRaw("DATE_TRUNC('week', expense_date)::date AS wk, COALESCE(SUM(amount_kes), 0) AS v")
+            ->groupBy(DB::raw("DATE_TRUNC('week', expense_date)"))
+            ->orderBy('wk')->pluck('v', 'wk');
+
+        $weeks = collect($in->keys())->merge($out->keys())->unique()->sort()->values();
+        return $weeks->map(fn ($wk) => [
+            'week' => $wk,
+            'in'   => round((float) ($in[$wk] ?? 0), 2),
+            'out'  => round((float) ($out[$wk] ?? 0), 2),
+            'net'  => round((float) ($in[$wk] ?? 0) - (float) ($out[$wk] ?? 0), 2),
+        ])->all();
+    }
+
+    /** Money truth per payment rail: gross, refunds, net, count. */
+    public function methodReconciliation(Carbon $s, Carbon $e)
+    {
+        return $this->moneyBase()
+            ->whereBetween(DB::raw(self::PAID_AT), [$s, $e])
+            ->groupBy('p.payment_method')
+            ->selectRaw("p.payment_method AS method, COUNT(*) AS payments,
+                COALESCE(SUM(p.amount), 0) AS gross,
+                COALESCE(SUM(COALESCE(p.refund_amount, 0)), 0) AS refunds,
+                COALESCE(SUM(p.amount - COALESCE(p.refund_amount, 0)), 0) AS net")
+            ->orderByDesc(DB::raw('COALESCE(SUM(p.amount - COALESCE(p.refund_amount, 0)), 0)'))
+            ->get();
+    }
+
     // ── Attention feed ────────────────────────────────────────────────────────
 
     /**
@@ -978,7 +1241,19 @@ class MetricEngine
             ];
         }
 
-        // 6. Low stock — items at or below their reorder point.
+        // 6. Top customers gone quiet: relationship revenue slipping away.
+        $dormant = $this->dormantTopCustomers();
+        if ($dormant->isNotEmpty()) {
+            $worst = $dormant->first();
+            $items[] = [
+                'key' => 'dormant_customers', 'severity' => 'medium',
+                'title' => $dormant->count() . ' top customer' . ($dormant->count() > 1 ? 's' : '') . ' quiet for 60+ days',
+                'detail' => "{$worst['name']} (KES " . number_format($worst['revenue_12m']) . " this year) last ordered {$worst['days_quiet']} days ago.",
+                'count' => $dormant->count(), 'link' => '/reports/customers',
+            ];
+        }
+
+        // 7. Low stock — items at or below their reorder point.
         $low = $this->lowStock();
         if ($low > 0) {
             $items[] = [

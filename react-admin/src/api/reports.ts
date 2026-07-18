@@ -36,6 +36,14 @@ export const reportsApi = {
     procurementIntelligence: (from: string, to: string) =>
         get<any>(`${BASE}/procurement-intelligence`, { params: { period: "custom", from, to } }),
 
+    // Customer intelligence: segments, new vs returning, top + dormant customers.
+    customerIntelligence: (from: string, to: string) =>
+        get<any>(`${BASE}/customer-intelligence`, { params: { period: "custom", from, to } }),
+
+    // Financial intelligence (reports.financial): earned P&L, budgets, cash flow, rails.
+    financialIntelligence: (from: string, to: string) =>
+        get<any>(`${BASE}/financial-intelligence`, { params: { period: "custom", from, to } }),
+
     // Row-level drill-down: the same query as the KPI, aggregation removed.
     drill: (metric: string, period: string, opts?: { page?: number; bucket?: string; outletId?: number }) =>
         get<any>(`${BASE}/drill/${metric}`, { params: {
