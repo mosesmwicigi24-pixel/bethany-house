@@ -1024,7 +1024,7 @@ function InventoryIntelligence({ start, end }: { start: string; end: string }) {
         staleTime: 60_000,
     });
     if (isLoading || !data) return <div className="flex justify-center py-16"><Spinner /></div>;
-    const { health, abc, stockout_risks, dead_stock, materials } = data;
+    const { health, abc, stockout_risks, dead_stock, shrinkage, materials } = data;
     const CLASS_CLR: Record<string, string> = { A: "bg-emerald-100 text-emerald-700", B: "bg-amber-100 text-amber-700", C: "bg-surface-100 text-surface-500" };
 
     return (
@@ -1085,6 +1085,44 @@ function InventoryIntelligence({ start, end }: { start: string; end: string }) {
                         </tbody>
                     </table>
                 </TableWrapper>
+            </div>
+
+            {/* Shrinkage: what the period actually wrote off, valued at cost */}
+            <div className="card card-body">
+                <SectionHeader title="Shrinkage — stock written off this period" />
+                {shrinkage.units === 0 ? (
+                    <p className="text-xs text-surface-400 py-4">No write-offs recorded in this period.</p>
+                ) : (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-1">
+                        <div>
+                            <p className="text-lg font-bold text-danger tabular-nums">
+                                {fmtKes(shrinkage.value)}
+                                <span className="text-2xs font-medium text-surface-400 ml-2">{shrinkage.units} units lost</span>
+                            </p>
+                            <div className="space-y-1.5 mt-2">
+                                {shrinkage.by_reason.map((r: any) => (
+                                    <div key={r.reason} className="flex items-center gap-3 text-xs">
+                                        <span className="font-medium text-surface-800 capitalize flex-1">{String(r.reason).replace(/_/g, " ")}</span>
+                                        <span className="text-2xs text-surface-400">{r.units} units · {r.entries}×</span>
+                                        <span className="font-bold tabular-nums text-danger">{fmtKes(r.value)}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div>
+                            <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-1.5">Most-lost items</p>
+                            <div className="space-y-1.5">
+                                {shrinkage.top_items.map((t: any) => (
+                                    <div key={t.product} className="flex items-center gap-3 text-xs">
+                                        <span className="font-medium text-surface-800 flex-1 truncate">{t.product}</span>
+                                        <span className="text-2xs text-surface-400">{t.units} units</span>
+                                        <span className="font-bold tabular-nums text-surface-700">{fmtKes(t.value)}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

@@ -237,6 +237,40 @@ class InventoryProcurementIntelligenceTest extends TestCase
         $this->assertSame(1, $row['late']);
     }
 
+    public function test_shrinkage_counts_only_negative_approved_write_offs(): void
+    {
+        $outlet = Outlet::factory()->create();
+        $this->viewer();
+
+        $lost = $this->stockedProduct($outlet, 50, 100, 200);
+        $itemId = DB::table('inventory_items')->where('product_id', $lost->id)->value('id');
+
+        DB::table('inventory_transactions')->insert([
+            // 5 damaged at cost 100 and 2 stolen at cost 200 = 7 units / 900 lost.
+            ['inventory_item_id' => $itemId, 'transaction_type' => 'adjustment', 'reason_code' => 'damaged',
+             'quantity_change' => -5, 'quantity_before' => 50, 'quantity_after' => 45, 'unit_cost' => 100,
+             'status' => 'approved', 'created_at' => now()],
+            ['inventory_item_id' => $itemId, 'transaction_type' => 'stolen', 'reason_code' => null,
+             'quantity_change' => -2, 'quantity_before' => 45, 'quantity_after' => 43, 'unit_cost' => 200,
+             'status' => 'approved', 'created_at' => now()],
+            // A sale and a found-stock increase are movements, not losses.
+            ['inventory_item_id' => $itemId, 'transaction_type' => 'sale', 'reason_code' => null,
+             'quantity_change' => -10, 'quantity_before' => 43, 'quantity_after' => 33, 'unit_cost' => 100,
+             'status' => 'approved', 'created_at' => now()],
+            ['inventory_item_id' => $itemId, 'transaction_type' => 'adjustment', 'reason_code' => 'found',
+             'quantity_change' => 3, 'quantity_before' => 33, 'quantity_after' => 36, 'unit_cost' => 100,
+             'status' => 'approved', 'created_at' => now()],
+        ]);
+
+        $res = $this->getJson('/api/v1/admin/reports/inventory-intelligence?period=last_30')->assertOk();
+
+        $this->assertSame(7, $res->json('shrinkage.units'));
+        $this->assertSame(900.0, (float) $res->json('shrinkage.value'));
+        $reasons = collect($res->json('shrinkage.by_reason'))->keyBy('reason');
+        $this->assertSame(500.0, (float) $reasons['damaged']['value']);
+        $this->assertSame(400.0, (float) $reasons['stolen']['value']);
+    }
+
     public function test_reports_view_gates_both_endpoints(): void
     {
         $user = User::factory()->create();

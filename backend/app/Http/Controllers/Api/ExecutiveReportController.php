@@ -146,6 +146,7 @@ class ExecutiveReportController extends Controller
             'abc'            => $engine->abcClassification($s, $e),
             'stockout_risks' => $engine->stockoutRisks(),
             'dead_stock'     => $engine->deadStock(),
+            'shrinkage'      => $engine->shrinkage($s, $e),
             'materials'      => $engine->materialStockHealth(),
         ]);
     }

@@ -785,6 +785,50 @@ class MetricEngine
         ];
     }
 
+    /**
+     * Shrinkage: stock written off in the window — negative approved
+     * adjustments (damaged / stolen / expired / shrinkage / corrections),
+     * valued at the transaction's own unit cost. Sales, voids and restocks
+     * are movements, not losses, and never appear here.
+     */
+    public function shrinkage(Carbon $s, Carbon $e): array
+    {
+        $writeOffReasons = ['damaged', 'stolen', 'expired', 'shrinkage', 'correction', 'stock_count', 'recount', 'adjustment'];
+        $base = fn () => DB::table('inventory_transactions as it')
+            ->join('inventory_items as ii', 'ii.id', '=', 'it.inventory_item_id')
+            ->leftJoin('products as p', 'p.id', '=', 'ii.product_id')
+            ->where('it.quantity_change', '<', 0)
+            ->whereIn(DB::raw('COALESCE(it.reason_code, it.transaction_type)'), $writeOffReasons)
+            ->where(fn ($q) => $q->whereNull('it.status')->orWhere('it.status', 'approved'))
+            ->whereBetween('it.created_at', [$s, $e])
+            ->when($this->outletIds, fn ($q) => $q->whereIn('ii.outlet_id', $this->outletIds));
+
+        $byReason = $base()
+            ->groupBy(DB::raw('COALESCE(it.reason_code, it.transaction_type)'))
+            ->selectRaw("COALESCE(it.reason_code, it.transaction_type) AS reason,
+                SUM(-it.quantity_change) AS units,
+                COALESCE(SUM(-it.quantity_change * COALESCE(it.unit_cost, 0)), 0) AS value,
+                COUNT(*) AS entries")
+            ->orderByDesc(DB::raw('COALESCE(SUM(-it.quantity_change * COALESCE(it.unit_cost, 0)), 0)'))
+            ->get();
+
+        $topItems = $base()
+            ->groupBy('p.id', 'p.slug', 'p.sku')
+            ->selectRaw("COALESCE(p.slug, p.sku, 'unknown') AS product,
+                SUM(-it.quantity_change) AS units,
+                COALESCE(SUM(-it.quantity_change * COALESCE(it.unit_cost, 0)), 0) AS value")
+            ->orderByDesc(DB::raw('COALESCE(SUM(-it.quantity_change * COALESCE(it.unit_cost, 0)), 0)'))
+            ->limit(8)
+            ->get();
+
+        return [
+            'units'     => (int) $byReason->sum('units'),
+            'value'     => round((float) $byReason->sum('value'), 2),
+            'by_reason' => $byReason,
+            'top_items' => $topItems,
+        ];
+    }
+
     // ── Procurement intelligence (Phase 4) ────────────────────────────────────
 
     /**
