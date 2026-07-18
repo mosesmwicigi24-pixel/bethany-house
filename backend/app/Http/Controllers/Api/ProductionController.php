@@ -278,6 +278,10 @@ class ProductionController extends Controller
             'quantity'                  => 'sometimes|integer|min:1',
             'priority'                  => 'sometimes|in:low,normal,high,urgent',
             'due_date'                  => 'sometimes|date',
+            // Customer-facing dates: when they come in to be fitted, and when
+            // they collect. Amendable like the schedule; audit-trailed the same.
+            'fitting_date'              => 'nullable|date',
+            'collection_date'           => 'nullable|date',
             'estimated_completion_date' => 'nullable|date',
             'specifications'            => 'nullable|array',
             'measurements'              => 'nullable|array',

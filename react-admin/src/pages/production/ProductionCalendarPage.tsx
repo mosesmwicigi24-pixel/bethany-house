@@ -42,6 +42,8 @@ interface ScheduleResponse {
 interface UpcomingOrder {
     order_number: string;
     due_date: string;
+    fitting_date?: string | null;
+    collection_date?: string | null;
     estimated_completion_date?: string | null;
     status: string;
     priority: "low" | "normal" | "high" | "urgent";
@@ -55,6 +57,8 @@ interface ProductionOrder {
     priority: "low" | "normal" | "high" | "urgent";
     due_date: string;
     estimated_completion_date?: string | null;
+    fitting_date?: string | null;
+    collection_date?: string | null;
     completion_percentage: number;
     customer_order_id?: number | null;
 }
@@ -271,6 +275,7 @@ function MonthGrid({
     year,
     month,
     ordersByDate,
+    appointmentsByDate,
     today,
     isSales,
     onDayClick,
@@ -278,6 +283,8 @@ function MonthGrid({
     year: number;
     month: number;         // 0-indexed
     ordersByDate: Map<string, ProductionOrder[]>;
+    /** Customer appointments by day: fittings and collections. */
+    appointmentsByDate?: Map<string, { type: "fitting" | "collection"; order: ProductionOrder }[]>;
     today: string;
     isSales: boolean;
     onDayClick: (dateIso: string) => void;
@@ -367,6 +374,18 @@ function MonthGrid({
                                     {orders.length > 2 && (
                                         <span className="text-2xs text-surface-400 px-1">+{orders.length - 2} more</span>
                                     )}
+                                </div>
+                            )}
+
+                            {/* Customer appointments — fittings (violet) and
+                                collections (emerald). Dots, not pills: they are
+                                moments in a day, not workload. */}
+                            {!isSales && (appointmentsByDate?.get(cell.date!)?.length ?? 0) > 0 && (
+                                <div className="mt-0.5 flex items-center gap-0.5 px-0.5">
+                                    {appointmentsByDate!.get(cell.date!)!.slice(0, 4).map((a, i) => (
+                                        <span key={i} title={`${a.type === "fitting" ? "Fitting" : "Collection"} · ${a.order.order_number}`}
+                                            className={clsx("w-1.5 h-1.5 rounded-full", a.type === "fitting" ? "bg-violet-500" : "bg-emerald-500")} />
+                                    ))}
                                 </div>
                             )}
 
@@ -500,12 +519,14 @@ function WeekGrid({
 function DayPanel({
     dateIso,
     orders,
+    appointments = [],
     isSales,
     onClose,
     onOrderClick,
 }: {
     dateIso: string;
     orders: ProductionOrder[];
+    appointments?: { type: "fitting" | "collection"; order: ProductionOrder }[];
     isSales: boolean;
     onClose: () => void;
     onOrderClick: (id: number) => void;
@@ -534,6 +555,22 @@ function DayPanel({
 
                 {/* Body */}
                 <div className="flex-1 overflow-y-auto">
+                    {!isSales && appointments.length > 0 && (
+                        <div className="px-5 py-3 border-b border-surface-100 space-y-1.5">
+                            <p className="text-2xs font-bold uppercase tracking-wide text-surface-400">Customer appointments</p>
+                            {appointments.map((a, i) => (
+                                <button key={i} onClick={() => a.order.id && onOrderClick(a.order.id)}
+                                    className="w-full flex items-center gap-2 text-left text-xs hover:bg-surface-50 rounded-lg px-2 py-1.5 transition-colors">
+                                    <span className={clsx("w-2 h-2 rounded-full shrink-0", a.type === "fitting" ? "bg-violet-500" : "bg-emerald-500")} />
+                                    <span className={clsx("font-bold", a.type === "fitting" ? "text-violet-700" : "text-emerald-700")}>
+                                        {a.type === "fitting" ? "Fitting" : "Collection"}
+                                    </span>
+                                    <span className="font-mono text-surface-500 truncate">{a.order.order_number}</span>
+                                    <span className="text-surface-400 truncate flex-1">{a.order.product_name}</span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
                     {orders.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-12 text-surface-400 gap-2">
                             <svg className="w-10 h-10 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.25}>
@@ -753,6 +790,22 @@ export default function ProductionCalendarPage() {
         }
         return map;
     }, [orders, scheduleData, canViewFull, selectedUserId, userTasks]);
+
+    // Customer appointments: fittings and collections, keyed by day. Full-view
+    // only — the sales availability view has no business seeing order details.
+    const appointmentsByDate = useMemo(() => {
+        const map = new Map<string, { type: "fitting" | "collection"; order: ProductionOrder }[]>();
+        if (!canViewFull) return map;
+        for (const o of orders) {
+            for (const [type, date] of [["fitting", o.fitting_date], ["collection", o.collection_date]] as const) {
+                const key = date?.slice(0, 10);
+                if (!key) continue;
+                if (!map.has(key)) map.set(key, []);
+                map.get(key)!.push({ type, order: o });
+            }
+        }
+        return map;
+    }, [orders, canViewFull]);
 
     // ── Navigation ───────────────────────────────────────────────────────────
 
@@ -1067,6 +1120,7 @@ export default function ProductionCalendarPage() {
                         <div className="flex justify-center py-16"><Spinner size="lg" /></div>
                     ) : viewMode === "month" ? (
                         <MonthGrid
+                            appointmentsByDate={appointmentsByDate}
                             year={cursor.getFullYear()}
                             month={cursor.getMonth()}
                             ordersByDate={ordersByDate}
@@ -1237,6 +1291,7 @@ export default function ProductionCalendarPage() {
             {/* ── Day detail modal ───────────────────────────────────────── */}
             {selectedDay && (
                 <DayPanel
+                    appointments={appointmentsByDate.get(selectedDay!) ?? []}
                     dateIso={selectedDay}
                     orders={selectedOrders}
                     isSales={isSales}
