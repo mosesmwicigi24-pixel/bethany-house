@@ -89,7 +89,9 @@ class ProductionTask extends Model
         $minPassed = $orderQty;
         foreach ($earlier as $task) {
             $passed = $task->effectivePassed($orderQty);
-            if ($passed < $minPassed) {
+            // <= on purpose: on a tie the LATEST stage takes the blame — that is
+            // the bench the pieces would actually come from.
+            if ($passed <= $minPassed) {
                 $minPassed = $passed;
                 $blocker   = $task;
             }

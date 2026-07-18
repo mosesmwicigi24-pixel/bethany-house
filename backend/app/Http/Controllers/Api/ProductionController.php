@@ -963,9 +963,9 @@ class ProductionController extends Controller
                 $earlier = ($openSiblings[$task->production_order_id] ?? collect())
                     ->filter(fn ($s) => $s->sequence !== null && $s->sequence < $task->sequence);
                 $minPassed = $qty;
-                foreach ($earlier as $s) {
+                foreach ($earlier->sortBy('sequence') as $s) {
                     $passed = min((int) $s->quantity_done, $qty);
-                    if ($passed < $minPassed) { $minPassed = $passed; $blocker = $s; }
+                    if ($passed <= $minPassed) { $minPassed = $passed; $blocker = $s; }
                 }
                 if ($minPassed > (int) $task->quantity_done) $blocker = null;
             }
@@ -1036,9 +1036,11 @@ class ProductionController extends Controller
             // count — parallel work is counted when pieces genuinely pass.)
             $ceilingTask = null;
             $ceiling     = $qty;
-            foreach ($siblings->where('sequence', '<', $task->sequence) as $prev) {
+            foreach ($siblings->where('sequence', '<', $task->sequence)->sortBy('sequence') as $prev) {
                 $passed = $prev->effectivePassed($qty);
-                if ($passed < $ceiling) {
+                // <= : on a tie, blame the nearest (latest) stage — the bench
+                // the pieces would come from.
+                if ($passed <= $ceiling) {
                     $ceiling     = $passed;
                     $ceilingTask = $prev;
                 }
@@ -1053,7 +1055,7 @@ class ProductionController extends Controller
             // Floor: later stages have already consumed these pieces.
             $floorTask = null;
             $floor     = 0;
-            foreach ($siblings->where('sequence', '>', $task->sequence) as $next) {
+            foreach ($siblings->where('sequence', '>', $task->sequence)->sortBy('sequence') as $next) {
                 $consumed = in_array($next->status, ProductionTask::SATISFIED_STATUSES)
                     ? $qty
                     : (int) $next->quantity_done;

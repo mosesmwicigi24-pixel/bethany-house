@@ -712,14 +712,21 @@ function StagesPipeline({
                     : task.assigned_to;
                 const isMyTask = currentUserId !== null && assignedId === currentUserId &&
                     !DONE_STATUSES.includes(task.status);
-                // Client-side mirror of the server gate, so the lock is VISIBLE
-                // rather than discovered as an error after tapping Start. The
-                // server remains authoritative.
-                const blocker = (!task.concurrent_allowed && task.sequence != null && !task.started_at)
-                    ? tasks.find(t =>
-                        t.sequence != null && t.sequence < (task.sequence as number) &&
-                        !GATE_SATISFIED.includes((t.status ?? "").toLowerCase()))
-                    : undefined;
+                // Client-side mirror of the server's FLOW gate, so the lock is
+                // VISIBLE rather than discovered as an error after tapping
+                // Start. An earlier stage only blocks while the pipeline has no
+                // surplus over this stage's own count; on a tie the latest
+                // stage takes the blame. The server remains authoritative.
+                let blocker: Task | undefined;
+                if (!task.concurrent_allowed && task.sequence != null && !task.started_at) {
+                    let minPassed = orderQuantity;
+                    for (const t of seq) {
+                        if (t.sequence! >= task.sequence) continue;
+                        const passed = eff(t);
+                        if (passed <= minPassed) { minPassed = passed; blocker = t; }
+                    }
+                    if (minPassed > (task.quantity_done ?? 0)) blocker = undefined;
+                }
                 const isBlocked = !!blocker && !isDone && !isActive;
 
                 const canStart    = isMyTask && !isBlocked && (task.status === "pending" || task.status === "paused");
