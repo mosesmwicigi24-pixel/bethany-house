@@ -59,6 +59,7 @@ class CustomerFinancialIntelligenceTest extends TestCase
 
         DB::table('customers')->insert([
             'customer_number' => 'CUST-P5-1', 'first_name' => 'St', 'last_name' => 'Marys',
+            'email' => 'stmarys@example.test',
             'phone' => '+254700000001', 'customer_type' => 'church', 'status' => 'active',
             'created_at' => now(), 'updated_at' => now(),
         ]);
@@ -145,8 +146,13 @@ class CustomerFinancialIntelligenceTest extends TestCase
         Payment::create(['order_id' => $open->id, 'amount' => 3000, 'currency_code' => 'KES',
             'payment_method' => 'cash', 'status' => 'paid', 'paid_at' => now()]);
 
+        $categoryId = DB::table('expense_categories')->insertGetId([
+            'name' => 'Rent & Utilities', 'code' => 'RENT', 'budget_monthly' => 5000,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
         DB::table('expenses')->insert([
-            'reference_number' => 'EXP-P5-1', 'title' => 'Rent', 'amount' => 1500, 'amount_kes' => 1500,
+            'reference_number' => 'EXP-P5-1', 'title' => 'Rent', 'category_id' => $categoryId,
+            'amount' => 1500, 'amount_kes' => 1500,
             'currency_code' => 'KES', 'expense_date' => now()->format('Y-m-d'), 'status' => 'completed',
             'payment_method' => 'cash',
             'outlet_id' => $outlet->id, 'created_at' => now(), 'updated_at' => now(),
