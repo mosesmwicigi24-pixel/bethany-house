@@ -336,3 +336,19 @@ Route::middleware(['auth'])
     ->group(function () {
         Route::get('/profile/2fa/setup', TwoFactorSetup::class)->name('profile.2fa.setup');
     });
+/*
+|--------------------------------------------------------------------------
+| Public SPA pages — /pay/{token} and /track/{token}
+|--------------------------------------------------------------------------
+| In production Nginx rewrites these to the react-admin bundle; this
+| fallback covers nginx-less deploys (single-container / local sandbox)
+| where the built frontend is copied into public/. Guarded so nothing
+| changes when no bundle is present.
+*/
+foreach (['/pay/{token}', '/track/{token}'] as $spaRoute) {
+    Route::get($spaRoute, function () {
+        $index = public_path('index.html');
+        abort_unless(file_exists($index), 404);
+        return response()->file($index);
+    })->where('token', '[a-zA-Z0-9\-_]+')->middleware('throttle:60,1');
+}

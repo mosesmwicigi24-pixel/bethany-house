@@ -5,12 +5,16 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => [
+    'allowed_origins' => array_values(array_filter([
         'https://yourdomain.com',
         'https://www.yourdomain.com',
         // Add your Next.js frontend domain
         env('FRONTEND_URL', 'http://localhost:3000'),
-    ],
+        // Customer-facing storefront (bethanyhouse.co.ke) — a separate
+        // origin from the hub frontend; needed for the guest checkout
+        // bridge and the live order-status endpoint.
+        env('STOREFRONT_URL'),
+    ])),
 
     'allowed_origins_patterns' => [],
 

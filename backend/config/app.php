@@ -73,6 +73,16 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Customer storefront URL
+    |--------------------------------------------------------------------------
+    | Base URL of the customer-facing storefront (bethanyhouse.co.ke).
+    | Used for CORS and for "back to your order" links on the public
+    | payment page. Null disables both.
+    */
+    'storefront_url' => env('STOREFRONT_URL'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Locale Configuration
     |--------------------------------------------------------------------------
     |
