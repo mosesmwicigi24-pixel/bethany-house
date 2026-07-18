@@ -806,50 +806,38 @@ function StagesPipeline({
                                     <p className="text-sm font-semibold text-surface-900">
                                         {task.stage?.name ?? `Stage ${task.production_stage_id}`}
                                     </p>
+                                    {task.concurrent_allowed && !isDone && (
+                                        <span className="text-sky-600 font-bold text-xs" title="May run in parallel — allowed by a production manager">∥</span>
+                                    )}
                                     {orderQuantity > 1 && (
                                         <span className="text-2xs font-bold tabular-nums text-surface-500 bg-surface-100 rounded-full px-1.5 py-0.5">
                                             {eff(task)}/{orderQuantity}
                                         </span>
                                     )}
                                 </div>
-                                <div className="flex items-center gap-2 shrink-0">
-                                    {isMyTask && (
-                                        <span className="text-2xs font-semibold text-brand-600 bg-brand-50 border border-brand-200 px-1.5 py-0.5 rounded-full">
-                                            My task
-                                        </span>
-                                    )}
-                                    {task.concurrent_allowed && !isDone && (
-                                        <span className="text-2xs font-semibold px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200"
-                                            title="A production manager allowed this stage to run in parallel">
-                                            ∥ Parallel
-                                        </span>
-                                    )}
-                                    {isBlocked && (
-                                        <span className="flex items-center gap-1 text-2xs font-semibold px-2 py-0.5 rounded-full bg-surface-100 text-surface-500 border border-surface-200"
-                                            title={`Locked until "${blocker?.stage?.name}" is completed`}>
+                                {/* ONE state per card. Four chips used to compete here
+                                    — My task · Pending · Allow parallel · Waiting on X —
+                                    wrapping and clipping off-screen on phones. A stage is
+                                    in exactly one state; everything else moved to quieter
+                                    homes (ownership → assignee line, the manager's unlock
+                                    → meta row, parallel → ∥ mark by the name). */}
+                                <div className="shrink-0">
+                                    {isDone && !isFailed ? (
+                                        <span className="text-2xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">✓ Done</span>
+                                    ) : isFailed || task.status === "cancelled" ? (
+                                        <span className={clsx("text-2xs font-semibold px-2 py-0.5 rounded-full", badgeColor)}>{badgeLabel}</span>
+                                    ) : isActive ? (
+                                        <span className="text-2xs font-semibold px-2 py-0.5 rounded-full bg-brand-100 text-brand-700">In progress</span>
+                                    ) : isBlocked ? (
+                                        <span className="flex items-center gap-1 text-2xs font-semibold px-2 py-0.5 rounded-full bg-surface-100 text-surface-500"
+                                            title={`Locked until "${blocker?.stage?.name}" has pieces ready`}>
                                             <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
                                             </svg>
-                                            Waiting on {blocker?.stage?.name}
+                                            <span className="truncate max-w-[110px] sm:max-w-none">Waiting on {blocker?.stage?.name}</span>
                                         </span>
-                                    )}
-                                    <span className={clsx("text-2xs font-semibold px-2 py-0.5 rounded-full", badgeColor)}>
-                                        {badgeLabel}
-                                    </span>
-                                    {canUnlock && !isDone && !task.started_at && (
-                                        <button type="button"
-                                            onClick={() => onUnlock(task.id, !task.concurrent_allowed)}
-                                            className={clsx(
-                                                "text-2xs font-bold px-2 py-0.5 rounded-full border transition-colors",
-                                                task.concurrent_allowed
-                                                    ? "text-surface-500 bg-white border-surface-200 hover:bg-surface-100"
-                                                    : "text-brand-700 bg-brand-50 border-brand-200 hover:bg-brand-100",
-                                            )}
-                                            title={task.concurrent_allowed
-                                                ? "Re-lock this stage to sequential order"
-                                                : "Let this stage run in parallel with earlier stages"}>
-                                            {task.concurrent_allowed ? "Re-lock" : "Allow parallel"}
-                                        </button>
+                                    ) : (
+                                        <span className="text-2xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Ready</span>
                                     )}
                                 </div>
                             </div>
@@ -864,6 +852,17 @@ function StagesPipeline({
                                     </span>
                                 ) : (
                                     <span className="text-surface-300 italic text-2xs">Unassigned</span>
+                                )}
+                                {isMyTask && <span className="text-2xs font-bold text-brand-600">(you)</span>}
+                                {canUnlock && !isDone && !task.started_at && (
+                                    <button type="button"
+                                        onClick={() => onUnlock(task.id, !task.concurrent_allowed)}
+                                        className="ml-auto text-2xs font-semibold text-surface-400 hover:text-brand-600 underline decoration-dotted underline-offset-2 transition-colors"
+                                        title={task.concurrent_allowed
+                                            ? "Re-lock this stage to sequential order"
+                                            : "Let this stage run in parallel with earlier stages"}>
+                                        {task.concurrent_allowed ? "Re-lock" : "Allow parallel"}
+                                    </button>
                                 )}
                                 {task.estimated_hours != null && (
                                     <span className="flex items-center gap-1">
@@ -1633,7 +1632,10 @@ export default function ProductionOrderDetailPage() {
             <div className="bg-white rounded-2xl shadow-sm border border-surface-200 overflow-hidden">
 
                 {/* Header band */}
-                <div className={clsx("px-5 py-5 sm:px-8 sm:py-6 bg-gradient-to-r",
+                {/* On a phone this header used to be a full-screen billboard —
+                    QUANTITY at 4xl pushed every action below the fold. Mobile
+                    gets one compact banner: identity, status, one stat line. */}
+                <div className={clsx("px-4 py-4 sm:px-8 sm:py-6 bg-gradient-to-r",
                     order.status === "completed" ? "from-emerald-800 to-teal-700" :
                     order.status === "cancelled" ? "from-slate-700 to-slate-600" :
                     order.status === "qc_failed" ? "from-red-800 to-red-700" :
@@ -1641,8 +1643,8 @@ export default function ProductionOrderDetailPage() {
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:flex-wrap">
                         <div>
                             <p className="text-slate-400 text-xs font-semibold uppercase tracking-widest mb-1">Production Order</p>
-                            <h1 className="text-2xl font-bold text-white font-mono">{order.order_number}</h1>
-                            <p className="text-lg text-white/80 mt-0.5">{order.product_name}</p>
+                            <h1 className="text-lg sm:text-2xl font-bold text-white font-mono">{order.order_number}</h1>
+                            <p className="text-sm sm:text-lg text-white/80 mt-0.5">{order.product_name}</p>
                             <div className="flex items-center gap-2 mt-2 flex-wrap">
                                 <span className={clsx("px-2.5 py-1 rounded-full text-xs font-semibold", statusCfg.bg, statusCfg.color)}>
                                     {statusCfg.label}
@@ -1657,10 +1659,12 @@ export default function ProductionOrderDetailPage() {
                                 )}
                             </div>
                         </div>
-                        <div className="sm:text-right">
-                            <p className="text-slate-400 text-2xs uppercase tracking-widest mb-1">Quantity</p>
-                            <p className="text-4xl font-bold text-white tabular-nums">{order.quantity}</p>
-                            <p className={clsx("text-sm mt-1 font-medium", days < 0 ? "text-red-300" : days <= 2 ? "text-amber-300" : "text-slate-400")}>
+                        {/* Mobile: one stat line. Desktop: the stat block. */}
+                        <div className="flex items-baseline gap-4 sm:block sm:text-right">
+                            <p className="text-white font-bold tabular-nums text-xl sm:text-4xl">
+                                {order.quantity}<span className="text-slate-400 text-xs font-medium ml-1">pcs</span>
+                            </p>
+                            <p className={clsx("text-xs sm:text-sm sm:mt-1 font-medium", days < 0 ? "text-red-300" : days <= 2 ? "text-amber-300" : "text-slate-400")}>
                                 {days < 0 ? `${Math.abs(days)}d overdue` : days === 0 ? "Due today" : `${days}d until due`}
                             </p>
                             <p className="text-slate-400 text-xs">{fmtDate(order.due_date)}</p>
@@ -1679,7 +1683,9 @@ export default function ProductionOrderDetailPage() {
                 </div>
 
                 {/* Action bar */}
-                <div className="px-5 py-3 bg-slate-50 border-b border-surface-100 flex flex-wrap items-center gap-2 sm:px-8">
+                {/* One thumb-height scrollable strip on phones — six buttons no
+                    longer stack into a half-screen pile. Desktop wraps as before. */}
+                <div className="px-4 py-3 bg-slate-50 border-b border-surface-100 flex items-center gap-2 overflow-x-auto no-scrollbar sm:flex-wrap sm:overflow-visible sm:px-8 [&>*]:shrink-0">
                     {canConfirm && (
                         <button onClick={() => confirmMutation.mutate()} disabled={confirmMutation.isPending}
                             className="btn-sm bg-brand-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-brand-700">
@@ -1865,12 +1871,14 @@ export default function ProductionOrderDetailPage() {
 
                         {order.product_image && (
                             <div className="rounded-xl overflow-hidden border border-surface-200">
-                                <img src={order.product_image} alt={order.product_name} className="w-full h-40 object-cover" />
+                                {/* h-28 on phones: the photo is orientation, not content */}
+                                <img src={order.product_image} alt={order.product_name} className="w-full h-28 sm:h-40 object-cover" />
                             </div>
                         )}
 
-                        {/* Stage progress mini */}
-                        <div>
+                        {/* Stage progress mini — desktop sidebar only. On phones this
+                            stacks directly under the full stage list it duplicates. */}
+                        <div className="hidden lg:block">
                             <SectionLabel>Stage Progress</SectionLabel>
                             <div className="flex gap-1 mb-2">
                                 {sortedTasks.map(t => (
