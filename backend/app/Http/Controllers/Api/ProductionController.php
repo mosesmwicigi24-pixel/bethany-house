@@ -1036,12 +1036,16 @@ class ProductionController extends Controller
         }
 
         DB::transaction(function () use ($order, $validated) {
+            // Replace-all must not lose reference photos: a batch that keeps its
+            // label keeps its images across a re-slice.
+            $imagesByLabel = $order->batches()->pluck('images', 'label');
             $order->batches()->delete();
             foreach ($validated['batches'] as $i => $b) {
                 ProductionOrderBatch::create([
                     'production_order_id' => $order->id,
                     'label'               => $b['label'],
                     'attributes'          => $b['attributes'] ?? null,
+                    'images'              => $imagesByLabel[$b['label']] ?? null,
                     'quantity'            => $b['quantity'],
                     'sort_order'          => $i,
                 ]);
@@ -1214,6 +1218,55 @@ class ProductionController extends Controller
             'message' => "Progress recorded - {$newQd} of {$qty}.",
             'task'    => $task->fresh(['stage', 'productionOrder:id,order_number,status,quantity']),
         ]);
+    }
+
+    /**
+     * Attach a reference image to a batch — the fabric, the trim, the finished
+     * look. The first image is the batch's thumbnail; all of them are visual
+     * reference for the floor. Reuses the app's ImageService (compression +
+     * thumbnail), same as product and category images.
+     */
+    public function uploadBatchImage(Request $request, $id, $batchId)
+    {
+        $order = ProductionOrder::visibleTo($request->user())->findOrFail($id);
+        $batch = ProductionOrderBatch::where('production_order_id', $order->id)->findOrFail($batchId);
+
+        $request->validate([
+            'image' => 'required|file|mimes:jpg,jpeg,png,webp|max:10240',
+        ]);
+
+        $result = app(\App\Services\ImageService::class)
+            ->process($request->file('image'), 'production-batches', 'product');
+
+        $images   = $batch->images ?? [];
+        $images[] = $result['url'];
+        $batch->update(['images' => $images]);
+
+        try {
+            ActivityLogService::log('production_batch_image_added', $order, [
+                'batch' => $batch->label, 'url' => $result['url'],
+            ]);
+        } catch (\Exception) {}
+
+        return response()->json(['message' => 'Image added.', 'batch' => $batch->fresh()]);
+    }
+
+    /** Remove one reference image from a batch (by its URL). */
+    public function deleteBatchImage(Request $request, $id, $batchId)
+    {
+        $order = ProductionOrder::visibleTo($request->user())->findOrFail($id);
+        $batch = ProductionOrderBatch::where('production_order_id', $order->id)->findOrFail($batchId);
+
+        $validated = $request->validate(['url' => 'required|string']);
+
+        $images = array_values(array_filter($batch->images ?? [], fn ($u) => $u !== $validated['url']));
+        $batch->update(['images' => $images]);
+
+        try {
+            app(\App\Services\ImageService::class)->delete($validated['url'], 'public');
+        } catch (\Exception) {}
+
+        return response()->json(['message' => 'Image removed.', 'batch' => $batch->fresh()]);
     }
 
     /**

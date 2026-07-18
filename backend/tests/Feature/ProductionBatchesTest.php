@@ -180,4 +180,48 @@ class ProductionBatchesTest extends TestCase
         $this->assertSame('completed', $stitching->fresh()->status);
         $this->assertSame('qc_pending', $order->fresh()->status);
     }
+
+    public function test_reference_images_attach_to_and_detach_from_a_batch(): void
+    {
+        \Illuminate\Support\Facades\Storage::fake('public');
+        $user  = $this->actingAsCoordinator();
+        $order = $this->seededOrder($user);
+        $batches = $this->defineBatches($order);
+        $blue = $batches['Blue trim'];
+
+        $upload = $this->post(
+            "/api/v1/admin/production-orders/{$order->id}/batches/{$blue->id}/images",
+            ['image' => \Illuminate\Http\UploadedFile::fake()->image('fabric.jpg', 600, 400)],
+        );
+        $upload->assertOk();
+
+        $images = $blue->fresh()->images;
+        $this->assertCount(1, $images);
+
+        $this->deleteJson(
+            "/api/v1/admin/production-orders/{$order->id}/batches/{$blue->id}/images",
+            ['url' => $images[0]],
+        )->assertOk();
+
+        $this->assertSame([], $blue->fresh()->images ?? []);
+    }
+
+    public function test_reference_images_survive_a_batch_resave_by_label(): void
+    {
+        $user  = $this->actingAsCoordinator();
+        $order = $this->seededOrder($user);
+        $batches = $this->defineBatches($order);
+        $batches['Blue trim']->update(['images' => ['/storage/production-batches/fabric.webp']]);
+
+        // Re-slice 10/10 → 12/8, keeping both labels.
+        $this->putJson("/api/v1/admin/production-orders/{$order->id}/batches", [
+            'batches' => [
+                ['label' => 'Blue trim',  'quantity' => 12, 'attributes' => ['piping' => 'blue']],
+                ['label' => 'Green trim', 'quantity' => 8],
+            ],
+        ])->assertOk();
+
+        $blue = $order->batches()->where('label', 'Blue trim')->first();
+        $this->assertSame(['/storage/production-batches/fabric.webp'], $blue->images);
+    }
 }

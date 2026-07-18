@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
-import { get, post, put } from "@/api/client";
+import { get, post, put, del } from "@/api/client";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
@@ -22,6 +22,8 @@ interface OrderBatch {
     label: string;
     quantity: number;
     attributes?: Record<string, string> | null;
+    /** Reference photos; the first one is the batch's thumbnail. */
+    images?: string[] | null;
 }
 
 interface ProductionOrder {
@@ -1596,8 +1598,20 @@ function AuditTrail({ orderId }: { orderId: number }) {
 
 // ── Key-value grid for specs / measurements ───────────────────────────────────
 
+// Tailoring reads top-down: the shop measures in this order, so every order
+// displays in this order — regardless of the sequence the keys were typed in.
+const MEASUREMENT_ORDER = ["neck", "shoulders", "sleeves", "wrist", "chest", "stomach", "waist", "hip", "shirt_length", "full_length"];
+const normKey = (k: string) => k.toLowerCase().trim().replace(/[\s-]+/g, "_");
+const measurementRank = (k: string) => {
+    const i = MEASUREMENT_ORDER.indexOf(normKey(k));
+    return i === -1 ? MEASUREMENT_ORDER.length : i;
+};
+
 function KeyValueGrid({ data, colorClass = "bg-surface-50" }: { data: Record<string, string>; colorClass?: string }) {
-    const entries = Object.entries(data).filter(([, v]) => v);
+    const entries = Object.entries(data).filter(([, v]) => v)
+        .map(([k, v], i) => ({ k, v, i }))
+        .sort((a, b) => (measurementRank(a.k) - measurementRank(b.k)) || (a.i - b.i))
+        .map(({ k, v }) => [k, v] as [string, string]);
     if (!entries.length) return null;
     return (
         <div className={clsx("rounded-xl p-3 space-y-1.5", colorClass)}>
@@ -1668,6 +1682,22 @@ export default function ProductionOrderDetailPage() {
         onError: (e: ApiError) => toast.error(e.message ?? "Failed to update stage lock"),
     });
 
+    const batchImageMutation = useMutation({
+        mutationFn: ({ batchId, file }: { batchId: number; file: File }) => {
+            const fd = new FormData();
+            fd.append("image", file);
+            return post(`/v1/admin/production-orders/${id}/batches/${batchId}/images`, fd);
+        },
+        onSuccess: () => { toast.success("Reference photo added"); refresh(); },
+        onError: (e: ApiError) => toast.error(e.message ?? "Upload failed"),
+    });
+    const batchImageDeleteMutation = useMutation({
+        mutationFn: ({ batchId, url }: { batchId: number; url: string }) =>
+            del(`/v1/admin/production-orders/${id}/batches/${batchId}/images`, { data: { url } }),
+        onSuccess: () => { toast.success("Photo removed"); refresh(); },
+        onError: (e: ApiError) => toast.error(e.message ?? "Failed to remove photo"),
+    });
+
     const confirmMutation = useMutation({
         mutationFn: () => post(`/v1/admin/production-orders/${id}/confirm`, {}),
         onSuccess: () => { toast.success("Order confirmed - now in production queue"); refresh(); },
@@ -1702,6 +1732,15 @@ export default function ProductionOrderDetailPage() {
     const isCustomer  = !!order.customer_order_id;
     const days        = daysUntil(order.due_date);
     const hasSpecs    = !!(order.measurements || order.specifications || order.customer_preferences);
+    // Gender leads the spec sheet — pulled out of whichever map it was typed into.
+    const specGender = [order.measurements, order.specifications, order.customer_preferences]
+        .map(d => d && Object.entries(d).find(([k, v]) => normKey(k) === "gender" && v)?.[1])
+        .find(Boolean);
+    const withoutGender = (d?: Record<string, string>) =>
+        d ? Object.fromEntries(Object.entries(d).filter(([k]) => normKey(k) !== "gender")) : d;
+    const orderMeasurements = withoutGender(order.measurements);
+    const orderSpecifications = withoutGender(order.specifications);
+    const orderPreferences = withoutGender(order.customer_preferences);
 
     const canConfirmOrderPerm = can("production.confirm_order");
     const canManageAssignees = can("production.manage_assignees");
@@ -1766,6 +1805,14 @@ export default function ProductionOrderDetailPage() {
                                     </span>
                                 )}
                             </div>
+                            {/* Everything a coordinator asks first, on the card they see first. */}
+                            {(order.outlet || order.confirmed_at || order.created_by) && (
+                                <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap mt-2 text-2xs text-slate-300/90">
+                                    {order.outlet && <span>🏬 {order.outlet.name}</span>}
+                                    {order.confirmed_at && <span>✓ Confirmed {fmtDate(order.confirmed_at)}</span>}
+                                    {order.created_by && <span>✎ {[order.created_by.first_name, order.created_by.last_name].filter(Boolean).join(" ")}</span>}
+                                </div>
+                            )}
                         </div>
                         {/* Mobile: one stat line. Desktop: the stat block. */}
                         <div className="flex items-baseline gap-4 sm:block sm:text-right">
@@ -1951,14 +1998,20 @@ export default function ProductionOrderDetailPage() {
                         )}
                         {tab === "specs" && (
                             <div className="space-y-4">
-                                {order.measurements && Object.keys(order.measurements).length > 0 && (
-                                    <div><SectionLabel>Measurements</SectionLabel><KeyValueGrid data={order.measurements} colorClass="bg-blue-50" /></div>
+                                {specGender && (
+                                    <div className="flex items-center gap-3 rounded-xl bg-slate-800 px-4 py-3">
+                                        <span className="text-2xs font-semibold uppercase tracking-widest text-slate-400">Gender</span>
+                                        <span className="text-sm font-bold text-white capitalize">{specGender}</span>
+                                    </div>
                                 )}
-                                {order.specifications && Object.keys(order.specifications).length > 0 && (
-                                    <div><SectionLabel>Specifications</SectionLabel><KeyValueGrid data={order.specifications} colorClass="bg-surface-50" /></div>
+                                {orderMeasurements && Object.keys(orderMeasurements).length > 0 && (
+                                    <div><SectionLabel>Measurements</SectionLabel><KeyValueGrid data={orderMeasurements} colorClass="bg-blue-50" /></div>
                                 )}
-                                {order.customer_preferences && Object.keys(order.customer_preferences).length > 0 && (
-                                    <div><SectionLabel>Customer Preferences</SectionLabel><KeyValueGrid data={order.customer_preferences} colorClass="bg-indigo-50" /></div>
+                                {orderSpecifications && Object.keys(orderSpecifications).length > 0 && (
+                                    <div><SectionLabel>Specifications</SectionLabel><KeyValueGrid data={orderSpecifications} colorClass="bg-surface-50" /></div>
+                                )}
+                                {orderPreferences && Object.keys(orderPreferences).length > 0 && (
+                                    <div><SectionLabel>Customer Preferences</SectionLabel><KeyValueGrid data={orderPreferences} colorClass="bg-indigo-50" /></div>
                                 )}
                                 {order.notes && (
                                     <div><SectionLabel>Notes</SectionLabel>
@@ -2045,25 +2098,69 @@ export default function ProductionOrderDetailPage() {
                                                 : 0;
                                             const full = passed >= b.quantity;
                                             const attrs = Object.entries(b.attributes ?? {});
+                                            const photos = b.images ?? [];
+                                            const thumb = photos[0];
                                             return (
-                                                <div key={b.id} className={clsx("rounded-xl border px-3 py-2", full ? "border-emerald-200 bg-emerald-50/50" : "border-surface-200 bg-white")}>
-                                                    <div className="flex items-center justify-between gap-2">
-                                                        <span className="text-xs font-bold text-surface-800">{b.label}</span>
-                                                        <span className={clsx("text-2xs font-bold tabular-nums", full ? "text-emerald-700" : "text-surface-500")}>
-                                                            {full ? "✓ " : ""}{passed}/{b.quantity}
-                                                        </span>
-                                                    </div>
-                                                    {attrs.length > 0 && (
-                                                        <div className="flex flex-wrap gap-1 mt-1">
-                                                            {attrs.map(([k, v]) => (
-                                                                <span key={k} className="text-2xs bg-surface-100 text-surface-500 rounded-full px-1.5 py-0.5">{k}: {v}</span>
-                                                            ))}
+                                                <div key={b.id} className={clsx("rounded-xl border px-3 py-2.5", full ? "border-emerald-200 bg-emerald-50/50" : "border-surface-200 bg-white")}>
+                                                    {/* Thumbnail + name first — the floor recognises a batch by sight. */}
+                                                    <div className="flex items-start gap-2.5">
+                                                        {thumb ? (
+                                                            <img src={thumb} alt={b.label} onClick={() => window.open(thumb, "_blank")}
+                                                                className="w-11 h-11 rounded-lg object-cover border border-surface-200 shrink-0 cursor-pointer" />
+                                                        ) : (
+                                                            <div className="w-11 h-11 rounded-lg bg-surface-100 flex items-center justify-center text-base shrink-0">🎨</div>
+                                                        )}
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <span className="text-xs font-bold text-surface-800 truncate">{b.label}</span>
+                                                                <span className={clsx("text-2xs font-bold tabular-nums shrink-0", full ? "text-emerald-700" : "text-surface-500")}>
+                                                                    {full ? "✓ " : ""}{passed}/{b.quantity}
+                                                                </span>
+                                                            </div>
+                                                            {attrs.length > 0 && (
+                                                                <div className="mt-1 space-y-0.5">
+                                                                    {attrs.map(([k, v]) => (
+                                                                        <div key={k} className="flex gap-2 text-2xs leading-tight">
+                                                                            <span className="text-surface-400 capitalize w-16 shrink-0 truncate">{k.replace(/_/g, " ")}</span>
+                                                                            <span className="text-surface-700 font-medium min-w-0">{v}</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
                                                         </div>
-                                                    )}
-                                                    <div className="mt-1.5 h-1.5 bg-surface-100 rounded-full overflow-hidden">
+                                                    </div>
+                                                    <div className="mt-2 h-1.5 bg-surface-100 rounded-full overflow-hidden">
                                                         <div className={clsx("h-full rounded-full", full ? "bg-emerald-500" : "bg-brand-500")}
                                                             style={{ width: `${Math.min(100, (passed / Math.max(1, b.quantity)) * 100)}%` }} />
                                                     </div>
+                                                    {/* Reference photos — fabric, trim, the finished look. */}
+                                                    {(photos.length > 0 || canEdit) && (
+                                                        <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                                                            {photos.map(u => (
+                                                                <div key={u} className="relative group">
+                                                                    <img src={u} alt="" onClick={() => window.open(u, "_blank")}
+                                                                        className="w-9 h-9 rounded-md object-cover border border-surface-200 cursor-pointer" />
+                                                                    {canEdit && (
+                                                                        <button
+                                                                            onClick={() => batchImageDeleteMutation.mutate({ batchId: b.id, url: u })}
+                                                                            className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-surface-700 text-white text-2xs leading-none hidden group-hover:flex items-center justify-center"
+                                                                            aria-label="Remove photo">×</button>
+                                                                    )}
+                                                                </div>
+                                                            ))}
+                                                            {canEdit && (
+                                                                <label className={clsx("w-9 h-9 rounded-md border border-dashed border-surface-300 text-surface-400 flex items-center justify-center text-sm cursor-pointer hover:border-brand-400 hover:text-brand-500 transition-colors", batchImageMutation.isPending && "opacity-50 pointer-events-none")}>
+                                                                    +
+                                                                    <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
+                                                                        onChange={e => {
+                                                                            const f = e.target.files?.[0];
+                                                                            if (f) batchImageMutation.mutate({ batchId: b.id, file: f });
+                                                                            e.target.value = "";
+                                                                        }} />
+                                                                </label>
+                                                            )}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             );
                                         })}
@@ -2076,25 +2173,22 @@ export default function ProductionOrderDetailPage() {
                                     + Split into colourway batches
                                 </button>
                             )}
-                            <SectionLabel>Order Info</SectionLabel>
-                            <InfoRow label="Order #" value={<span className="font-mono text-2xs">{order.order_number}</span>} />
-                            <InfoRow label="Quantity" value={<strong>{order.quantity}</strong>} />
-                            <InfoRow label="Due Date" value={
-                                <span className={clsx("font-semibold", days < 0 ? "text-red-600" : days <= 2 ? "text-amber-600" : "")}>
-                                    {fmtDate(order.due_date)}
-                                </span>
-                            } />
-                            {(order as any).fitting_date && (
-                                <InfoRow label="Fitting" value={<span className="font-semibold text-violet-700">{fmtDate((order as any).fitting_date)}</span>} />
+                            {/* Order #, quantity, due date, outlet, confirmation and creator
+                                all live on the header card now — this section keeps only the
+                                dates the header doesn't carry. */}
+                            {((order as any).fitting_date || (order as any).collection_date || order.started_at || order.completed_at) && (
+                                <>
+                                    <SectionLabel>Key Dates</SectionLabel>
+                                    {(order as any).fitting_date && (
+                                        <InfoRow label="Fitting" value={<span className="font-semibold text-violet-700">{fmtDate((order as any).fitting_date)}</span>} />
+                                    )}
+                                    {(order as any).collection_date && (
+                                        <InfoRow label="Collection" value={<span className="font-semibold text-emerald-700">{fmtDate((order as any).collection_date)}</span>} />
+                                    )}
+                                    {order.started_at && <InfoRow label="Started" value={fmtDate(order.started_at)} />}
+                                    {order.completed_at && <InfoRow label="Completed" value={fmtDate(order.completed_at)} />}
+                                </>
                             )}
-                            {(order as any).collection_date && (
-                                <InfoRow label="Collection" value={<span className="font-semibold text-emerald-700">{fmtDate((order as any).collection_date)}</span>} />
-                            )}
-                            {order.outlet && <InfoRow label="Outlet" value={order.outlet.name} />}
-                            {order.started_at && <InfoRow label="Started" value={fmtDate(order.started_at)} />}
-                            {order.completed_at && <InfoRow label="Completed" value={fmtDate(order.completed_at)} />}
-                            {order.confirmed_at && <InfoRow label="Confirmed" value={fmtDate(order.confirmed_at)} />}
-                            {order.created_by && <InfoRow label="Created By" value={`${order.created_by.first_name} ${order.created_by.last_name}`.trim()} />}
                         </div>
                     </div>
                 </div>
