@@ -88,36 +88,57 @@ function MetricCard({ label, value, sub, metric, to, money = false, downIsGood =
     );
 }
 
+// Every insight key gets a face — the eye finds "the stock one" or "the
+// money one" before reading a word.
+const ATTN_ICON: Record<string, string> = {
+    production_overdue: "⏰",
+    balances_aging:     "💰",
+    payment_approvals:  "🧾",
+    capacity_shortfall: "🏭",
+    stockout_risk:      "📦",
+    low_stock:          "📦",
+    dormant_customers:  "📞",
+    material_runway:    "🧵",
+    revenue_trend:      "📉",
+    price_drift:        "🏷️",
+};
+
 function AttentionPanel({ items }: { items: any[] }) {
     const navigate = useNavigate();
     if (!items.length) return (
-        <div className="card card-body flex items-center gap-3 border-emerald-100 bg-emerald-50/40">
-            <span className="text-lg" aria-hidden="true">✅</span>
-            <p className="text-sm text-emerald-800 font-medium">Nothing needs your attention right now.</p>
+        <div className="card card-body flex items-center gap-3 border-emerald-100 bg-emerald-50/40 py-2.5">
+            <span aria-hidden="true">✅</span>
+            <p className="text-xs text-emerald-800 font-medium">Nothing needs your attention right now.</p>
         </div>
     );
     return (
-        <div className="card overflow-hidden">
-            <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-100 flex items-center gap-2">
+        <div>
+            <div className="flex items-center gap-2 mb-2">
                 <span aria-hidden="true">⚠️</span>
-                <p className="text-xs font-bold text-amber-800 uppercase tracking-widest">Needs your attention</p>
-                <span className="ml-auto text-2xs font-bold text-amber-700">{items.length}</span>
+                <p className="text-2xs font-bold text-amber-800 uppercase tracking-widest">Needs your attention</p>
+                <span className="text-2xs font-bold text-amber-700 bg-amber-100 rounded-full px-1.5 py-0.5">{items.length}</span>
             </div>
-            <div className="divide-y divide-surface-50">
-                {items.map(it => (
-                    <button key={it.key} onClick={() => navigate(it.link)}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-50 transition-colors">
-                        <span className={clsx("w-2 h-2 rounded-full shrink-0",
-                            it.severity === "high" ? "bg-red-500" : "bg-amber-400")} />
-                        <div className="flex-1 min-w-0">
-                            <p className="text-xs font-semibold text-surface-800">{it.title}</p>
-                            <p className="text-2xs text-surface-400 truncate">{it.detail}</p>
-                        </div>
-                        <svg className="w-3.5 h-3.5 text-surface-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                        </svg>
-                    </button>
-                ))}
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+                {items.map(it => {
+                    const high = it.severity === "high";
+                    return (
+                        <button key={it.key} onClick={() => navigate(it.link)}
+                            className={clsx(
+                                "text-left rounded-xl border-l-4 border border-surface-100 p-3 flex flex-col gap-1 transition-shadow hover:shadow-md",
+                                high ? "border-l-red-500 bg-red-50/50" : "border-l-amber-400 bg-amber-50/40",
+                            )}>
+                            <div className="flex items-center justify-between gap-2">
+                                <span className="text-base leading-none" aria-hidden="true">{ATTN_ICON[it.key] ?? "⚠️"}</span>
+                                <span className={clsx("text-2xs font-bold uppercase tracking-wide",
+                                    high ? "text-red-600" : "text-amber-600")}>
+                                    {high ? "urgent" : "watch"}
+                                </span>
+                            </div>
+                            <p className="text-xs font-bold text-surface-900 leading-snug line-clamp-2">{it.title}</p>
+                            <p className="text-2xs text-surface-500 leading-snug line-clamp-2">{it.detail}</p>
+                        </button>
+                    );
+                })}
             </div>
         </div>
     );
@@ -226,7 +247,7 @@ function AgingCard({ aging, onBucket }: { aging: any; onBucket: (bucket: string,
     const buckets = aging?.buckets ?? [];
     const max = Math.max(...buckets.map((b: any) => Number(b.amount)), 1);
     return (
-        <div className="card card-body">
+        <div className="card card-body h-full">
             <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest">Balance Aging</p>
             <div className="space-y-1.5 mt-2">
                 {buckets.map((b: any) => (
@@ -281,21 +302,31 @@ function ExecutiveOverview() {
                 <>
                     <AttentionPanel items={data.attention ?? []} />
 
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    {/* One continuous grid: the whole screen is the dashboard.
+                        2-up on phones, 4-up on laptops, 8-up on big displays. */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 2xl:grid-cols-8 gap-3">
                         <MetricCard label="Revenue" metric={k.sales.revenue} money
                             onOpen={() => setDrill({ metric: "revenue", label: "Revenue — source orders", money: true, reportPath: "/reports/sales" })} />
                         <MetricCard label="Collected" metric={k.money.collected} money
                             onOpen={() => setDrill({ metric: "collected", label: "Collected — settled payments", money: true, reportPath: can_financial_path(k) })} />
-                        <MetricCard label="Orders" metric={k.sales.orders}
-                            onOpen={() => setDrill({ metric: "orders", label: "Orders in period", reportPath: "/reports/sales" })} />
-                        <MetricCard label="Avg Order Value" metric={k.sales.aov} money to="/reports/sales" />
-                    </div>
-
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                         <MetricCard label="Outstanding"
                             value={`KES ${Number(k.money.outstanding.amount).toLocaleString()}`}
                             sub={`${k.money.outstanding.orders} open orders`}
                             onOpen={() => setDrill({ metric: "outstanding", label: "Outstanding balances", money: true, reportPath: "/pos/balances" })} />
+                        <MetricCard label="Deposits Held"
+                            value={`KES ${Number(k.money.aging?.deposits_held?.amount ?? 0).toLocaleString()}`}
+                            sub={`${k.money.aging?.deposits_held?.orders ?? 0} undelivered — not income`}
+                            onOpen={() => setDrill({ metric: "outstanding", bucket: "deposits", label: "Deposits held (undelivered)", money: true })} />
+                        <MetricCard label="Orders" metric={k.sales.orders}
+                            onOpen={() => setDrill({ metric: "orders", label: "Orders in period", reportPath: "/reports/sales" })} />
+                        <MetricCard label="Avg Order Value" metric={k.sales.aov} money to="/reports/sales" />
+                        <MetricCard label="New Customers" metric={k.sales.new_customers}
+                            onOpen={() => setDrill({ metric: "new_customers", label: "New customers", reportPath: "/reports/customers" })} />
+                        <MetricCard label="Low Stock"
+                            value={String(k.inventory.low_stock)}
+                            sub={k.inventory.low_stock > 0 ? "items at reorder point" : "all healthy"}
+                            to="/reports/inventory" />
+
                         <MetricCard label="Production Done" metric={k.production.completed}
                             onOpen={() => setDrill({ metric: "production_completed", label: "Completed production orders", reportPath: "/reports/production" })} />
                         <MetricCard label="On-time %"
@@ -304,46 +335,23 @@ function ExecutiveOverview() {
                             to="/reports/production" />
                         <MetricCard label="WIP / Overdue"
                             value={`${k.production.wip}${k.production.overdue > 0 ? ` · ${k.production.overdue} late` : ""}`}
-                            sub={k.production.overdue > 0 ? "overdue orders on the floor" : "nothing overdue"}
+                            sub={k.production.overdue > 0 ? "overdue on the floor" : "nothing overdue"}
                             onOpen={k.production.overdue > 0
                                 ? () => setDrill({ metric: "production_overdue", label: "Overdue production orders", reportPath: "/production/wip" })
                                 : undefined}
                             to="/production/wip" />
-                    </div>
-
-                    {/* Money aging + deposits: how old the debt is, and whose money we hold */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <AgingCard aging={k.money.aging}
-                            onBucket={(bucket, label) => setDrill({ metric: "outstanding", bucket, label, money: true, reportPath: "/pos/balances" })} />
-                        <MetricCard label="Deposits Held"
-                            value={`KES ${Number(k.money.aging?.deposits_held?.amount ?? 0).toLocaleString()}`}
-                            sub={`${k.money.aging?.deposits_held?.orders ?? 0} undelivered orders — customer money, not income`}
-                            onOpen={() => setDrill({ metric: "outstanding", bucket: "deposits", label: "Deposits held (undelivered)", money: true })} />
-                    </div>
-
-                    {k.financial && (
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                            <MetricCard label="Expenses" metric={k.financial.expenses} money downIsGood
-                                onOpen={() => setDrill({ metric: "expenses", label: "Expenses in period", money: true, reportPath: "/expenses" })} />
-                            <MetricCard label="Net (Collected − Exp.)" metric={k.financial.net_collected} money to="/reports/financial" />
-                            <MetricCard label="New Customers" metric={k.sales.new_customers}
-                                onOpen={() => setDrill({ metric: "new_customers", label: "New customers", reportPath: "/reports/customers" })} />
-                            <MetricCard label="Low Stock"
-                                value={String(k.inventory.low_stock)}
-                                sub={k.inventory.low_stock > 0 ? "items at reorder point" : "all healthy"}
-                                to="/reports/inventory" />
+                        {k.financial && (
+                            <>
+                                <MetricCard label="Expenses" metric={k.financial.expenses} money downIsGood
+                                    onOpen={() => setDrill({ metric: "expenses", label: "Expenses in period", money: true, reportPath: "/expenses" })} />
+                                <MetricCard label="Net (Coll. − Exp.)" metric={k.financial.net_collected} money to="/reports/financial" />
+                            </>
+                        )}
+                        <div className={clsx(k.financial ? "col-span-2 2xl:col-span-3" : "col-span-2 md:col-span-3 2xl:col-span-5")}>
+                            <AgingCard aging={k.money.aging}
+                                onBucket={(bucket, label) => setDrill({ metric: "outstanding", bucket, label, money: true, reportPath: "/pos/balances" })} />
                         </div>
-                    )}
-                    {!k.financial && (
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                            <MetricCard label="New Customers" metric={k.sales.new_customers}
-                                onOpen={() => setDrill({ metric: "new_customers", label: "New customers", reportPath: "/reports/customers" })} />
-                            <MetricCard label="Low Stock"
-                                value={String(k.inventory.low_stock)}
-                                sub={k.inventory.low_stock > 0 ? "items at reorder point" : "all healthy"}
-                                to="/reports/inventory" />
-                        </div>
-                    )}
+                    </div>
                 </>
             )}
             {drill && <DrillModal {...drill} period={period} onClose={() => setDrill(null)} />}
