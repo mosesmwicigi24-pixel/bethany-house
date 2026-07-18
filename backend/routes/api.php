@@ -1434,6 +1434,8 @@ Route::prefix('v1')->group(function () {
             Route::get('/tasks/{id}',             [ProductionController::class, 'taskDetails']);
             Route::get('/tasks/{id}/history',     [ProductionController::class, 'taskHistory']);
             Route::put('/tasks/{id}/status',      [ProductionController::class, 'updateTaskStatus']);
+            // Piece progress: "how many have passed through me?" — assignee action.
+            Route::post('/tasks/{id}/progress',   [ProductionController::class, 'updateTaskProgress']);
             // Manager-only: allow a stage to run in parallel with its predecessors.
             Route::post('/tasks/{id}/unlock',     [ProductionController::class, 'unlockTask'])
                 ->middleware('permission:production.manage_assignees,sanctum');
