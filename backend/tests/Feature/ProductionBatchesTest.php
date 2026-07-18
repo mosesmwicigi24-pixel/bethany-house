@@ -205,4 +205,23 @@ class ProductionBatchesTest extends TestCase
 
         $this->assertSame([], $blue->fresh()->images ?? []);
     }
+
+    public function test_reference_images_survive_a_batch_resave_by_label(): void
+    {
+        $user  = $this->actingAsCoordinator();
+        $order = $this->seededOrder($user);
+        $batches = $this->defineBatches($order);
+        $batches['Blue trim']->update(['images' => ['/storage/production-batches/fabric.webp']]);
+
+        // Re-slice 10/10 → 12/8, keeping both labels.
+        $this->putJson("/api/v1/admin/production-orders/{$order->id}/batches", [
+            'batches' => [
+                ['label' => 'Blue trim',  'quantity' => 12, 'attributes' => ['piping' => 'blue']],
+                ['label' => 'Green trim', 'quantity' => 8],
+            ],
+        ])->assertOk();
+
+        $blue = $order->batches()->where('label', 'Blue trim')->first();
+        $this->assertSame(['/storage/production-batches/fabric.webp'], $blue->images);
+    }
 }

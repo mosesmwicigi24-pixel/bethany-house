@@ -1036,12 +1036,16 @@ class ProductionController extends Controller
         }
 
         DB::transaction(function () use ($order, $validated) {
+            // Replace-all must not lose reference photos: a batch that keeps its
+            // label keeps its images across a re-slice.
+            $imagesByLabel = $order->batches()->pluck('images', 'label');
             $order->batches()->delete();
             foreach ($validated['batches'] as $i => $b) {
                 ProductionOrderBatch::create([
                     'production_order_id' => $order->id,
                     'label'               => $b['label'],
                     'attributes'          => $b['attributes'] ?? null,
+                    'images'              => $imagesByLabel[$b['label']] ?? null,
                     'quantity'            => $b['quantity'],
                     'sort_order'          => $i,
                 ]);
