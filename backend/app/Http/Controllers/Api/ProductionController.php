@@ -11,6 +11,8 @@ use App\Models\MaterialInventory;
 use App\Models\Product;
 use App\Models\Channel;
 use App\Models\ProductionOrder;
+use App\Models\ProductionOrderBatch;
+use App\Models\ProductionTaskBatchProgress;
 use App\Models\ProductionStage;
 use App\Models\ProductionTask;
 use App\Models\ProductionAutoAssigneeRule;
@@ -110,6 +112,8 @@ class ProductionController extends Controller
     public function show($id)
     {
         $order = ProductionOrder::visibleTo(request()->user())->with([
+            'batches',
+            'tasks.batchProgress',
             'product:id,sku',
             'product.translations' => fn ($q) => $q->where('language_code', 'en')->select('product_id', 'name'),
             'product.images' => fn ($q) => $q->where('is_primary', true)->select('product_id', 'image_url'),
@@ -916,6 +920,8 @@ class ProductionController extends Controller
         $includeCompleted = filter_var($request->query('include_completed', false), FILTER_VALIDATE_BOOLEAN);
 
         $query = ProductionTask::with([
+            'batchProgress',
+            'productionOrder.batches',
             'productionOrder:id,order_number,priority,due_date,status,quantity,product_id,specifications,notes,measurements,customer_preferences,customer_id',
             'productionOrder.product.translations' => fn ($q) => $q->where('language_code', 'en')->select('product_id', 'name'),
             'productionOrder.product.images' => fn ($q) => $q->where('is_primary', true)->select('product_id', 'image_url'),
@@ -988,6 +994,73 @@ class ProductionController extends Controller
     // =========================================================================
 
     /**
+     * Define (or redefine) an order's colourway batches — atomically, as a set.
+     *
+     * "100 cassocks" is really 10 blue-trim + 10 green-trim + 80 cream: same
+     * body, trim decided at production time. Quantities must sum EXACTLY to the
+     * order's quantity — a batch set that doesn't add up is the spreadsheet
+     * error this feature exists to kill, so it is rejected whole.
+     *
+     * Redefinition is only allowed while NO piece progress has been recorded:
+     * batch counts hang off these rows, and re-slicing a half-counted order
+     * would orphan real work. Sending an empty set removes batching entirely
+     * (again only before any counting).
+     */
+    public function saveBatches(Request $request, $id)
+    {
+        $order = ProductionOrder::visibleTo($request->user())->with('tasks')->findOrFail($id);
+
+        if (in_array($order->status, ['completed', 'cancelled'])) {
+            return response()->json(['message' => 'This order is closed.'], 422);
+        }
+
+        $validated = $request->validate([
+            'batches'               => 'present|array|max:50',
+            'batches.*.label'       => 'required|string|max:100',
+            'batches.*.quantity'    => 'required|integer|min:1',
+            'batches.*.attributes'  => 'nullable|array',
+        ]);
+
+        $hasProgress = $order->tasks->sum('quantity_done') > 0;
+        if ($hasProgress) {
+            return response()->json([
+                'message' => 'Piece progress has already been recorded on this order - batches can no longer be redefined. Correct the counts to zero first if you truly need to re-slice.',
+            ], 422);
+        }
+
+        $sum = collect($validated['batches'])->sum('quantity');
+        if (!empty($validated['batches']) && $sum !== (int) $order->quantity) {
+            return response()->json([
+                'message' => "Batch quantities add up to {$sum}, but this order is for {$order->quantity} pieces - they must match exactly.",
+            ], 422);
+        }
+
+        DB::transaction(function () use ($order, $validated) {
+            $order->batches()->delete();
+            foreach ($validated['batches'] as $i => $b) {
+                ProductionOrderBatch::create([
+                    'production_order_id' => $order->id,
+                    'label'               => $b['label'],
+                    'attributes'          => $b['attributes'] ?? null,
+                    'quantity'            => $b['quantity'],
+                    'sort_order'          => $i,
+                ]);
+            }
+        });
+
+        try {
+            ActivityLogService::log('production_batches_defined', $order, [
+                'batches' => collect($validated['batches'])->map(fn ($b) => "{$b['label']} ×{$b['quantity']}")->values()->all(),
+            ]);
+        } catch (\Exception) {}
+
+        return response()->json([
+            'message' => empty($validated['batches']) ? 'Batches removed.' : 'Batches saved.',
+            'batches' => $order->batches()->get(),
+        ]);
+    }
+
+    /**
      * Record piece progress on a stage: "how many have passed through me?"
      *
      * One cumulative number per stage; the distribution across the order is
@@ -1007,9 +1080,10 @@ class ProductionController extends Controller
     {
         $validated = $request->validate([
             'quantity_done' => 'required|integer|min:0',
+            'batch_id'      => 'nullable|integer',
         ]);
 
-        $task = ProductionTask::with(['productionOrder', 'stage:id,name'])->findOrFail($id);
+        $task = ProductionTask::with(['productionOrder.batches', 'stage:id,name'])->findOrFail($id);
 
         if ($task->assigned_to !== $request->user()->id
             && !$request->user()->hasAnyRole(['admin', 'super_admin'])) {
@@ -1017,6 +1091,21 @@ class ProductionController extends Controller
         }
 
         $order = $task->productionOrder;
+
+        // ── Batched orders count per colourway ───────────────────────────────
+        // The tailor's number applies to ONE batch (10 blue, 10 green…); the
+        // task's own quantity_done becomes the SUM of its batch rows, so every
+        // existing consumer — flow gating, completion %, distribution chips,
+        // lifecycle — keeps working on the total untouched.
+        $batches = $order->batches;
+        if ($batches->isNotEmpty()) {
+            $batch = $batches->firstWhere('id', (int) ($validated['batch_id'] ?? 0));
+            if (!$batch) {
+                return response()->json(['message' => 'This order counts per batch - pick which batch you are recording.'], 422);
+            }
+            return $this->recordBatchProgress($request, $task, $batch, (int) $validated['quantity_done']);
+        }
+
         $qty   = max(1, (int) $order->quantity);
         $newQd = (int) $validated['quantity_done'];
 
@@ -1124,6 +1213,142 @@ class ProductionController extends Controller
         return response()->json([
             'message' => "Progress recorded - {$newQd} of {$qty}.",
             'task'    => $task->fresh(['stage', 'productionOrder:id,order_number,status,quantity']),
+        ]);
+    }
+
+    /**
+     * The batched twin of updateTaskProgress: one count, for one colourway.
+     *
+     * Same pipeline arithmetic, run WITHIN the batch: you cannot button more
+     * blue cassocks than were stitched blue, and green's numbers never bleed
+     * into blue's. The task's own quantity_done is then recomputed as the sum
+     * of its batch rows, so gating, completion %, the distribution chips and
+     * the task lifecycle all keep reading the total they always read.
+     */
+    private function recordBatchProgress(Request $request, ProductionTask $task, ProductionOrderBatch $batch, int $newQd)
+    {
+        $order    = $task->productionOrder;
+        $orderQty = max(1, (int) $order->quantity);
+        $batchQty = (int) $batch->quantity;
+
+        if ($newQd > $batchQty) {
+            return response()->json([
+                'message' => "\"{$batch->label}\" is a batch of {$batchQty} - you cannot record more than that.",
+            ], 422);
+        }
+
+        $siblings = ProductionTask::where('production_order_id', $order->id)
+            ->where('id', '!=', $task->id)
+            ->whereNotNull('sequence')
+            ->with([
+                'stage:id,name',
+                'batchProgress' => fn ($q) => $q->where('production_order_batch_id', $batch->id),
+            ])
+            ->get();
+
+        // What has this sibling passed FOR THIS BATCH? A satisfied stage passed
+        // everything, batches included.
+        $batchPassed = fn (ProductionTask $t) => in_array($t->status, ProductionTask::SATISFIED_STATUSES)
+            ? $batchQty
+            : (int) ($t->batchProgress->first()?->quantity_done ?? 0);
+
+        if ($task->sequence !== null) {
+            $ceilingTask = null;
+            $ceiling     = $batchQty;
+            foreach ($siblings->where('sequence', '<', $task->sequence)->sortBy('sequence') as $prev) {
+                $passed = $batchPassed($prev);
+                if ($passed <= $ceiling) {
+                    $ceiling     = $passed;
+                    $ceilingTask = $prev;
+                }
+            }
+            if ($newQd > $ceiling) {
+                $name = $ceilingTask?->stage?->name ?? 'an earlier stage';
+                return response()->json([
+                    'message' => "Only {$ceiling} \"{$batch->label}\" piece(s) have passed \"{$name}\" - you cannot record {$newQd} here yet.",
+                ], 422);
+            }
+
+            $floorTask = null;
+            $floor     = 0;
+            foreach ($siblings->where('sequence', '>', $task->sequence)->sortBy('sequence') as $next) {
+                $consumed = $batchPassed($next);
+                if ($consumed > $floor) {
+                    $floor     = $consumed;
+                    $floorTask = $next;
+                }
+            }
+            if ($newQd < $floor) {
+                $name = $floorTask?->stage?->name ?? 'a later stage';
+                return response()->json([
+                    'message' => "\"{$name}\" has already passed {$floor} \"{$batch->label}\" piece(s) - this stage cannot drop below that.",
+                ], 422);
+            }
+        }
+
+        $beforeTask = (int) $task->quantity_done;
+
+        DB::beginTransaction();
+        try {
+            $row = ProductionTaskBatchProgress::firstOrCreate(
+                ['production_task_id' => $task->id, 'production_order_batch_id' => $batch->id],
+                ['quantity_done' => 0],
+            );
+            $beforeBatch = (int) $row->quantity_done;
+            $row->update(['quantity_done' => $newQd]);
+
+            // The task total is DERIVED - a sum, never typed.
+            $sum    = (int) ProductionTaskBatchProgress::where('production_task_id', $task->id)->sum('quantity_done');
+            $update = ['quantity_done' => $sum];
+
+            if ($sum > 0 && in_array($task->status, ['pending', 'paused'])) {
+                $update['status']     = 'in_progress';
+                $update['started_at'] = $task->started_at ?? now();
+                if (!$order->started_at) {
+                    $order->update(['status' => 'in_progress', 'started_at' => now()]);
+                }
+            }
+            if ($sum === $orderQty && $task->status !== 'completed') {
+                $update['status']       = 'completed';
+                $update['completed_at'] = now();
+            }
+            if ($sum < $orderQty && $task->status === 'completed') {
+                $update['status']       = 'in_progress';
+                $update['completed_at'] = null;
+            }
+
+            $task->update($update);
+
+            $allDone = ProductionTask::where('production_order_id', $order->id)
+                ->where('status', '!=', 'completed')
+                ->doesntExist();
+            if ($allDone && $order->status !== 'qc_pending') {
+                $order->update(['status' => 'qc_pending']);
+            }
+
+            DB::commit();
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Failed to record progress.', 'error' => $e->getMessage()], 500);
+        }
+
+        try {
+            ActivityLogService::log('production_task_progress', $order, [
+                'task_id' => $task->id,
+                'stage'   => $task->stage?->name,
+                'batch'   => $batch->label,
+                'from'    => $beforeBatch,
+                'to'      => $newQd,
+                'of'      => $batchQty,
+                'task_from' => $beforeTask,
+                'task_to'   => $task->quantity_done,
+            ]);
+        } catch (\Exception) {}
+
+        return response()->json([
+            'message' => "\"{$batch->label}\": {$newQd} of {$batchQty} recorded ({$task->quantity_done} of {$orderQty} overall).",
+            'task'    => $task->fresh(['stage', 'batchProgress', 'productionOrder:id,order_number,status,quantity']),
+            'batch'   => ['id' => $batch->id, 'label' => $batch->label, 'quantity' => $batchQty, 'quantity_done' => $newQd],
         ]);
     }
 

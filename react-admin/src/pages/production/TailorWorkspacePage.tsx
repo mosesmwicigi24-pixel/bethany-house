@@ -34,6 +34,8 @@ interface MyTask {
     status: "pending" | "in_progress" | "completed" | "paused" | "failed";
     /** Pieces that have passed this stage (cumulative). Batch orders only. */
     quantity_done?: number;
+    /** Per-colourway counts (batched orders only). */
+    batch_progress?: { production_order_batch_id: number; quantity_done: number }[];
     estimated_hours?: number;
     actual_hours?: number;
     started_at?: string | null;
@@ -59,6 +61,8 @@ interface MyTask {
             images?: { image_url: string }[];
         };
         customer?: { first_name: string; last_name: string } | null;
+        /** Colourway batches — quantities sum to the order quantity. */
+        batches?: { id: number; label: string; quantity: number; attributes?: Record<string, string> | null }[];
         material_allocations?: {
             material: { name: string; unit_of_measure: string };
             quantity_required: number | string;
@@ -749,11 +753,15 @@ function FocusCard({
 }: {
     group: OrderGroup;
     onAction: (task: MyTask, action: "start" | "complete" | "pause") => void;
-    onProgress: (task: MyTask, quantityDone: number) => void;
+    onProgress: (task: MyTask, quantityDone: number, batchId?: number) => void;
     isActing: boolean;
     onNoteOpen: () => void;
     onSpecsOpen: () => void;
 }) {
+    // Which colourway the steppers apply to (batched orders). Defaults to the
+    // first batch that still has pieces to count.
+    const [activeBatchId, setActiveBatchId] = useState<number | null>(null);
+
     const elapsed = useElapsedTimer(group.activeTask);
     const order = group.activeTask?.production_order ?? null;
     const isOverdue =
@@ -988,28 +996,70 @@ function FocusCard({
                                                     : "Start"}
                                             </button>
                                         )}
-                                        {(order?.quantity ?? 1) > 1 && (task.status === "in_progress" || task.status === "pending" || task.status === "paused") && (
-                                            <div className="flex items-center gap-1.5">
-                                                <span className="text-xs font-bold tabular-nums text-surface-700">
-                                                    {task.quantity_done ?? 0}<span className="text-surface-400 font-medium">/{order!.quantity}</span>
-                                                </span>
-                                                {[1, 5, 10].map((step) => (
-                                                    <button key={step}
-                                                        onClick={() => onProgress(task, Math.min(order!.quantity, (task.quantity_done ?? 0) + step))}
-                                                        disabled={isActing || (task.quantity_done ?? 0) >= order!.quantity}
-                                                        className="px-2 py-1.5 rounded-lg bg-brand-50 border border-brand-200 text-brand-700 text-xs font-bold active:bg-brand-100 transition-colors disabled:opacity-40">
-                                                        +{step}
-                                                    </button>
-                                                ))}
-                                                <button
-                                                    onClick={() => onProgress(task, Math.max(0, (task.quantity_done ?? 0) - 1))}
-                                                    disabled={isActing || (task.quantity_done ?? 0) <= 0}
-                                                    title="Correct the count down by one"
-                                                    className="px-2 py-1.5 rounded-lg bg-surface-100 border border-surface-200 text-surface-500 text-xs font-bold active:bg-surface-200 transition-colors disabled:opacity-40">
-                                                    −1
-                                                </button>
-                                            </div>
-                                        )}
+                                        {(order?.quantity ?? 1) > 1 && (task.status === "in_progress" || task.status === "pending" || task.status === "paused") && (() => {
+                                            // Batched orders count per colourway: pick a batch
+                                            // chip, then the same +1/+5/+10 apply to it. The
+                                            // task total stays derived — blue + green = overall.
+                                            const batches = order?.batches ?? [];
+                                            const doneOf = (bid: number) =>
+                                                task.batch_progress?.find((r) => r.production_order_batch_id === bid)?.quantity_done ?? 0;
+                                            const batch = batches.length
+                                                ? (batches.find((b) => b.id === activeBatchId)
+                                                    ?? batches.find((b) => doneOf(b.id) < b.quantity)
+                                                    ?? batches[0])
+                                                : null;
+                                            const cap  = batch ? batch.quantity : order!.quantity;
+                                            const done = batch ? doneOf(batch.id) : (task.quantity_done ?? 0);
+                                            return (
+                                                <div className="space-y-1.5">
+                                                    {batches.length > 0 && (
+                                                        <div className="flex items-center gap-1 flex-wrap">
+                                                            {batches.map((b) => {
+                                                                const d = doneOf(b.id);
+                                                                const on = batch?.id === b.id;
+                                                                const full = d >= b.quantity;
+                                                                return (
+                                                                    <button key={b.id} onClick={() => setActiveBatchId(b.id)}
+                                                                        className={clsx(
+                                                                            "text-2xs font-bold px-2 py-1 rounded-full border transition-colors",
+                                                                            on ? "bg-brand-600 text-white border-brand-600"
+                                                                               : full ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                                                               : "bg-white text-surface-600 border-surface-200",
+                                                                        )}>
+                                                                        {full && !on ? "✓ " : ""}{b.label} {d}/{b.quantity}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className="text-xs font-bold tabular-nums text-surface-700">
+                                                            {done}<span className="text-surface-400 font-medium">/{cap}</span>
+                                                            {batch && (
+                                                                <span className="text-2xs text-surface-400 font-medium ml-1.5">
+                                                                    overall {task.quantity_done ?? 0}/{order!.quantity}
+                                                                </span>
+                                                            )}
+                                                        </span>
+                                                        {[1, 5, 10].map((step) => (
+                                                            <button key={step}
+                                                                onClick={() => onProgress(task, Math.min(cap, done + step), batch?.id)}
+                                                                disabled={isActing || done >= cap}
+                                                                className="px-2 py-1.5 rounded-lg bg-brand-50 border border-brand-200 text-brand-700 text-xs font-bold active:bg-brand-100 transition-colors disabled:opacity-40">
+                                                                +{step}
+                                                            </button>
+                                                        ))}
+                                                        <button
+                                                            onClick={() => onProgress(task, Math.max(0, done - 1), batch?.id)}
+                                                            disabled={isActing || done <= 0}
+                                                            title="Correct the count down by one"
+                                                            className="px-2 py-1.5 rounded-lg bg-surface-100 border border-surface-200 text-surface-500 text-xs font-bold active:bg-surface-200 transition-colors disabled:opacity-40">
+                                                            −1
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
                                         {canComplete && (order?.quantity ?? 1) === 1 && (
                                             <button
                                                 onClick={() => {
@@ -1479,8 +1529,8 @@ export default function TailorWorkspacePage() {
     // pipeline (ceiling: earlier stages; floor: later stages). The 422 message
     // names the colliding stage, so surface it verbatim.
     const progressMutation = useMutation({
-        mutationFn: ({ taskId, quantityDone }: { taskId: number; quantityDone: number }) =>
-            post(`/v1/tailor/tasks/${taskId}/progress`, { quantity_done: quantityDone }),
+        mutationFn: ({ taskId, quantityDone, batchId }: { taskId: number; quantityDone: number; batchId?: number }) =>
+            post(`/v1/tailor/tasks/${taskId}/progress`, { quantity_done: quantityDone, batch_id: batchId }),
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ["my-tasks"] });
         },
@@ -1488,9 +1538,9 @@ export default function TailorWorkspacePage() {
     });
 
     const handleProgress = useCallback(
-        (task: MyTask, quantityDone: number) => {
+        (task: MyTask, quantityDone: number, batchId?: number) => {
             navigator.vibrate?.(30);
-            progressMutation.mutate({ taskId: task.id, quantityDone });
+            progressMutation.mutate({ taskId: task.id, quantityDone, batchId });
         },
         [progressMutation]
     );

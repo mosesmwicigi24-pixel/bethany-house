@@ -17,10 +17,18 @@ import { useAuthStore } from "@/store/auth.store";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+interface OrderBatch {
+    id: number;
+    label: string;
+    quantity: number;
+    attributes?: Record<string, string> | null;
+}
+
 interface ProductionOrder {
     id: number;
     order_number: string;
     product_id: number;
+    batches?: OrderBatch[];
     product_name: string;
     product_image?: string;
     quantity: number;
@@ -58,6 +66,7 @@ interface Task {
     started_at?: string;
     completed_at?: string;
     notes?: string;
+    batch_progress?: { production_order_batch_id: number; quantity_done: number }[];
     /** Snapshot of the order's stage sequence, stamped at seeding — gating runs on this. */
     sequence?: number | null;
     /** Pieces that have passed this stage (cumulative) — batch orders. */
@@ -277,6 +286,105 @@ function EditOrderModal({ order, onClose, onSaved }: { order: ProductionOrder; o
                     <button onClick={() => mutation.mutate()} disabled={mutation.isPending}
                         className="flex-1 px-4 py-2 rounded-xl bg-brand-600 text-white text-sm font-bold hover:bg-brand-700 disabled:opacity-50 transition-colors">
                         {mutation.isPending ? "Saving…" : "Save Changes"}
+                    </button>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
+// ── Batches Modal ─────────────────────────────────────────────────────────────
+// Split an order into colourway batches: same body, different trim. Quantities
+// must sum EXACTLY to the order quantity — the Save button stays disabled until
+// the arithmetic holds, with a live remainder readout doing the explaining.
+// The server refuses redefinition once counting has started.
+
+function BatchesModal({ order, onClose, onSaved }: { order: ProductionOrder; onClose: () => void; onSaved: () => void }) {
+    const toast = useToastStore();
+    const qc = useQueryClient();
+    const [rows, setRows] = useState<{ label: string; quantity: string; attrs: string }[]>(
+        (order.batches?.length ?? 0) > 0
+            ? order.batches!.map((b) => ({
+                label: b.label,
+                quantity: String(b.quantity),
+                attrs: Object.entries(b.attributes ?? {}).map(([k, v]) => `${k}: ${v}`).join(", "),
+            }))
+            : [{ label: "", quantity: "", attrs: "" }],
+    );
+
+    const sum = rows.reduce((t, r) => t + (Number(r.quantity) || 0), 0);
+    const remainder = order.quantity - sum;
+    const valid = rows.every((r) => r.label.trim() && Number(r.quantity) > 0) && remainder === 0;
+
+    const parseAttrs = (raw: string): Record<string, string> | null => {
+        const out: Record<string, string> = {};
+        raw.split(",").map((p) => p.trim()).filter(Boolean).forEach((pair) => {
+            const [k, ...rest] = pair.split(":");
+            if (k && rest.length) out[k.trim()] = rest.join(":").trim();
+        });
+        return Object.keys(out).length ? out : null;
+    };
+
+    const mutation = useMutation({
+        mutationFn: () => put(`/v1/admin/production-orders/${order.id}/batches`, {
+            batches: rows.map((r) => ({
+                label: r.label.trim(),
+                quantity: Number(r.quantity),
+                attributes: parseAttrs(r.attrs),
+            })),
+        }),
+        onSuccess: () => {
+            toast.success("Batches saved");
+            qc.invalidateQueries({ queryKey: ["production-order", order.id] });
+            onSaved(); onClose();
+        },
+        onError: (e: ApiError) => toast.error(e.message),
+    });
+
+    return (
+        <Modal open title={`Batches - ${order.order_number}`} onClose={onClose} size="md">
+            <div className="p-5 space-y-3">
+                <p className="text-xs text-surface-500">
+                    Same garment, different trim. Give each combination a name, its quantities must
+                    add up to the order's <b>{order.quantity}</b> pieces, and tailors then count
+                    each batch separately — "10 green done" is visible the moment it happens.
+                </p>
+                {rows.map((r, i) => (
+                    <div key={i} className="rounded-xl border border-surface-200 p-3 space-y-2">
+                        <div className="flex items-center gap-2">
+                            <input value={r.label} placeholder="Label — e.g. Blue trim"
+                                onChange={(e) => setRows((p) => p.map((x, j) => j === i ? { ...x, label: e.target.value } : x))}
+                                className="input flex-1 text-sm" />
+                            <input type="number" min={1} value={r.quantity} placeholder="Qty"
+                                onChange={(e) => setRows((p) => p.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))}
+                                className="input w-20 text-sm text-right" />
+                            <button onClick={() => setRows((p) => p.filter((_, j) => j !== i))}
+                                disabled={rows.length === 1}
+                                className="shrink-0 w-8 h-8 rounded-lg text-surface-400 hover:text-danger hover:bg-danger/10 disabled:opacity-30 transition-colors"
+                                aria-label="Remove batch">✕</button>
+                        </div>
+                        <input value={r.attrs} placeholder="Attributes — e.g. piping: blue, buttons: blue"
+                            onChange={(e) => setRows((p) => p.map((x, j) => j === i ? { ...x, attrs: e.target.value } : x))}
+                            className="input w-full text-xs" />
+                    </div>
+                ))}
+                <button onClick={() => setRows((p) => [...p, { label: "", quantity: "", attrs: "" }])}
+                    className="w-full text-xs font-semibold text-brand-600 border border-dashed border-brand-300 rounded-xl py-2 hover:bg-brand-50 transition-colors">
+                    + Add batch
+                </button>
+                <div className={clsx("rounded-xl px-3 py-2 text-xs font-semibold",
+                    remainder === 0 ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")}>
+                    {remainder === 0
+                        ? `✓ ${sum} of ${order.quantity} pieces allocated — the arithmetic holds.`
+                        : remainder > 0
+                            ? `${remainder} piece(s) still unallocated — batches must add up to ${order.quantity}.`
+                            : `${-remainder} piece(s) over — batches must add up to ${order.quantity}.`}
+                </div>
+                <div className="flex gap-2 pt-1">
+                    <button onClick={onClose} className="btn-secondary flex-1 text-sm">Cancel</button>
+                    <button onClick={() => mutation.mutate()} disabled={!valid || mutation.isPending}
+                        className="flex-1 px-4 py-2 rounded-xl bg-brand-600 text-white text-sm font-bold hover:bg-brand-700 disabled:opacity-50 transition-colors">
+                        {mutation.isPending ? "Saving…" : "Save Batches"}
                     </button>
                 </div>
             </div>
@@ -1511,7 +1619,7 @@ export default function ProductionOrderDetailPage() {
     const toast = useToastStore();
     const qc = useQueryClient();
     const [tab, setTab] = useState<"stages" | "materials" | "specs" | "activity" | "audit">("stages");
-    const [modal, setModal] = useState<"assign" | "materials" | "qc" | "complete" | "edit" | null>(null);
+    const [modal, setModal] = useState<"assign" | "materials" | "qc" | "complete" | "edit" | "batches" | null>(null);
     const [showCancelConfirm, setShowCancelConfirm] = useState(false);
     const [cancelReason, setCancelReason] = useState("");
 
@@ -1915,6 +2023,59 @@ export default function ProductionOrderDetailPage() {
 
                         {/* Order info */}
                         <div>
+                            {(order.batches?.length ?? 0) > 0 && (
+                                <div className="mb-5">
+                                    <div className="flex items-center justify-between">
+                                        <SectionLabel>Batches</SectionLabel>
+                                        {canEdit && (
+                                            <button onClick={() => setModal("batches")}
+                                                className="text-2xs font-semibold text-brand-600 hover:text-brand-700">Edit</button>
+                                        )}
+                                    </div>
+                                    <div className="space-y-2 mt-1">
+                                        {order.batches!.map((b) => {
+                                            // A batch is complete when the LAST stage has
+                                            // passed its full quantity — derived, like all
+                                            // the piece arithmetic.
+                                            const last = sortedTasks[sortedTasks.length - 1];
+                                            const passed = last
+                                                ? (DONE_STATUSES.includes(last.status) && last.status === "completed"
+                                                    ? b.quantity
+                                                    : (last.batch_progress?.find((r) => r.production_order_batch_id === b.id)?.quantity_done ?? 0))
+                                                : 0;
+                                            const full = passed >= b.quantity;
+                                            const attrs = Object.entries(b.attributes ?? {});
+                                            return (
+                                                <div key={b.id} className={clsx("rounded-xl border px-3 py-2", full ? "border-emerald-200 bg-emerald-50/50" : "border-surface-200 bg-white")}>
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <span className="text-xs font-bold text-surface-800">{b.label}</span>
+                                                        <span className={clsx("text-2xs font-bold tabular-nums", full ? "text-emerald-700" : "text-surface-500")}>
+                                                            {full ? "✓ " : ""}{passed}/{b.quantity}
+                                                        </span>
+                                                    </div>
+                                                    {attrs.length > 0 && (
+                                                        <div className="flex flex-wrap gap-1 mt-1">
+                                                            {attrs.map(([k, v]) => (
+                                                                <span key={k} className="text-2xs bg-surface-100 text-surface-500 rounded-full px-1.5 py-0.5">{k}: {v}</span>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                    <div className="mt-1.5 h-1.5 bg-surface-100 rounded-full overflow-hidden">
+                                                        <div className={clsx("h-full rounded-full", full ? "bg-emerald-500" : "bg-brand-500")}
+                                                            style={{ width: `${Math.min(100, (passed / Math.max(1, b.quantity)) * 100)}%` }} />
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+                            {(order.batches?.length ?? 0) === 0 && canEdit && !["completed", "cancelled"].includes(order.status) && order.quantity > 1 && (
+                                <button onClick={() => setModal("batches")}
+                                    className="w-full mb-5 text-xs font-semibold text-brand-600 border border-dashed border-brand-300 rounded-xl py-2 hover:bg-brand-50 transition-colors">
+                                    + Split into colourway batches
+                                </button>
+                            )}
                             <SectionLabel>Order Info</SectionLabel>
                             <InfoRow label="Order #" value={<span className="font-mono text-2xs">{order.order_number}</span>} />
                             <InfoRow label="Quantity" value={<strong>{order.quantity}</strong>} />
@@ -1941,6 +2102,7 @@ export default function ProductionOrderDetailPage() {
 
             {/* Modals */}
             {modal === "edit"      && <EditOrderModal order={order} onClose={() => setModal(null)} onSaved={refresh} />}
+            {modal === "batches"   && <BatchesModal order={order} onClose={() => setModal(null)} onSaved={refresh} />}
             {modal === "assign"    && <AssignModal order={order} onClose={() => setModal(null)} onSaved={refresh} />}
             {modal === "materials" && <IssueMaterialsModal order={order} onClose={() => setModal(null)} onSaved={refresh} />}
             {modal === "qc"        && <QCModal order={order} onClose={() => setModal(null)} onDone={refresh} />}

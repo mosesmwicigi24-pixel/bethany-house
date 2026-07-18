@@ -153,6 +153,11 @@ class ProductionOrder extends Model
         }
     }
 
+    public function batches()
+    {
+        return $this->hasMany(ProductionOrderBatch::class)->orderBy('sort_order');
+    }
+
     public function materialAllocations()
     {
         return $this->hasMany(MaterialAllocation::class);

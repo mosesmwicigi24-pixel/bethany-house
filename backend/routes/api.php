@@ -894,6 +894,9 @@ Route::prefix('v1')->group(function () {
                         ->middleware('permission:production.raise_order,sanctum');
                     Route::put('/{id}',                   [ProductionController::class, 'update'])
                         ->middleware('permission:production.raise_order,sanctum');
+                    // Colourway batches - defined at production time, atomically as a set.
+                    Route::put('/{id}/batches',           [ProductionController::class, 'saveBatches'])
+                        ->middleware('permission:production.raise_order,sanctum');
                     Route::post('/{id}/confirm',          [ProductionController::class, 'confirm'])
                         ->middleware('permission:production.confirm_order,sanctum');
                     Route::post('/{id}/assign',           [ProductionController::class, 'assign'])

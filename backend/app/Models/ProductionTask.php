@@ -115,6 +115,11 @@ class ProductionTask extends Model
         return $this->belongsTo(ProductionStage::class, 'production_stage_id');
     }
 
+    public function batchProgress()
+    {
+        return $this->hasMany(ProductionTaskBatchProgress::class, 'production_task_id');
+    }
+
     public function assignedTo()
     {
         return $this->belongsTo(User::class, 'assigned_to');
