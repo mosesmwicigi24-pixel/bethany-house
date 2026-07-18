@@ -150,7 +150,7 @@ class InsightsEngineTest extends TestCase
 
         $this->assertNotNull($item);
         // 130 vs the 100 average of the two prior buys = +30%.
-        $this->assertStringContainsString('30%', $item['title']);
+        $this->assertStringContainsString('30.0%', $item['title']);
         $this->assertStringContainsString('Eastleigh Mills', $item['detail']);
     }
 
