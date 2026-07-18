@@ -188,7 +188,7 @@ class InventoryProcurementIntelligenceTest extends TestCase
         ]);
         DB::table('purchase_order_items')->insert([
             'purchase_order_id' => $purchaseId, 'item_type' => 'material', 'material_id' => $materialId,
-            'quantity' => 80, 'unit_price' => 780, 'total_price' => 62400,
+            'description' => 'Navy Wool 80m', 'quantity' => 80, 'unit_price' => 780, 'total_price' => 62400,
             'created_at' => now(), 'updated_at' => now(),
         ]);
 
