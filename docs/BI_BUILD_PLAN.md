@@ -29,7 +29,7 @@ Engine (periods, truth-separated sales/money/production/inventory metrics,
 attention feed with 4 detectors), `GET /admin/reports/executive`, RBAC tests,
 executive UI (period chips, delta+sparkline cards, needs-attention panel).
 
-## Phase 2 — Sales & Money intelligence
+## Phase 2 — SHIPPED: Sales & Money intelligence
 
 - Migrate `salesSummary` + Sales report page onto the engine (fixing its
   paid-only "revenue" to true sales truth; collections become a first-class
@@ -40,7 +40,7 @@ executive UI (period chips, delta+sparkline cards, needs-attention panel).
   hour/day-of-week retained; salesperson dimension.
 - Aging buckets (30/60/90) on outstanding balances + deposits-held view.
 
-## Phase 3 — Production intelligence
+## Phase 3 — SHIPPED: Production intelligence
 
 - Stage cycle times from task timestamps (avg time per stage, over-estimate
   flags — same arithmetic as the order page's timing intelligence).
@@ -48,7 +48,7 @@ executive UI (period chips, delta+sparkline cards, needs-attention panel).
   QC pass/rework rates, capacity view (open pieces vs recent daily
   throughput), material consumption vs allocations.
 
-## Phase 4 — Inventory & Procurement intelligence
+## Phase 4 — SHIPPED: Inventory & Procurement intelligence
 
 - Valuation, turnover, stock aging, dead stock, ABC classification (revenue
   contribution), shrinkage from adjustment reasons.
@@ -56,14 +56,14 @@ executive UI (period chips, delta+sparkline cards, needs-attention panel).
   suggestions with lead-time awareness; supplier performance (delivery time,
   fill rate, price drift).
 
-## Phase 5 — Customers & Financial statements
+## Phase 5 — SHIPPED: Customers & Financial statements
 
 - Segments (churches/institutions/individuals), retention cohorts, dormancy
   detection, lifetime value on money truth.
 - P&L on the engine (earned-revenue rule), cash-flow view, expense trends
   vs budget; payment-method reconciliation report.
 
-## Phase 6 — Insights engine ("AI layer")
+## Phase 6 — SHIPPED: Insights engine ("AI layer")
 
 Deterministic detectors over engine metrics — never fabricated, every insight
 cites its numbers and links to its drill-down:
@@ -72,9 +72,12 @@ cites its numbers and links to its drill-down:
 - capacity: due-date load next week exceeds recent throughput;
 - dormancy: top-20 customer with no order in 60 days;
 - price drift: supplier price up >10% vs 90-day average.
-Delivered on the dashboard, plus scheduled digests (email exists; WhatsApp
-via the existing EOD delivery channel). LLM-composed narrative summaries can
-sit on top later; the detectors stay deterministic.
+Delivered on the dashboard attention feed (nine detectors live: overdue
+production, aging balances, payment approvals, capacity shortfall, stockout
+risk, dormant customers, material runway, revenue trend, price drift) plus
+the `insights:digest` morning email at 07:30 EAT to the EoD recipients —
+sent only when something needs attention. WhatsApp delivery and LLM-composed
+narrative summaries can sit on top later; the detectors stay deterministic.
 
 ## Standing rules for every phase
 
