@@ -1100,6 +1100,7 @@ Route::prefix('v1')->group(function () {
             Route::middleware('permission:reports.view,sanctum')->prefix('reports')->group(function () {
                 Route::get('/executive',       [\App\Http\Controllers\Api\ExecutiveReportController::class, 'executive']);
                 Route::get('/drill/{metric}',  [\App\Http\Controllers\Api\ExecutiveReportController::class, 'drill']);
+                Route::get('/production-intelligence', [\App\Http\Controllers\Api\ExecutiveReportController::class, 'productionIntelligence']);
                 Route::get('/dashboard/kpis',  [ReportController::class, 'dashboardKPIs']);
                 Route::get('/purchase-orders', [ReportController::class, 'purchaseOrderReport']);
                 Route::get('/schedules',       [ReportController::class, 'listSchedules']);

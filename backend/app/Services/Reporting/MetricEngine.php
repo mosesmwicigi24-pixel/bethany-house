@@ -442,6 +442,167 @@ class MetricEngine
             ->count();
     }
 
+    // ── Production intelligence (Phase 3) ─────────────────────────────────────
+
+    /** Hours a task actually took: recorded actual_hours, else the timestamps. */
+    private const TASK_HOURS = "CASE
+        WHEN t.actual_hours IS NOT NULL AND t.actual_hours > 0 THEN t.actual_hours
+        WHEN t.started_at IS NOT NULL AND t.completed_at IS NOT NULL
+            THEN EXTRACT(EPOCH FROM (t.completed_at - t.started_at)) / 3600.0
+        END";
+
+    /**
+     * Average time on the bench per stage, for tasks completed in the window,
+     * against the estimate — the same arithmetic the order page shows per
+     * task, aggregated into "which stages routinely run over?".
+     */
+    public function stageCycleTimes(Carbon $s, Carbon $e)
+    {
+        $act = self::TASK_HOURS;
+        return DB::table('production_tasks as t')
+            ->join('production_orders as po', 'po.id', '=', 't.production_order_id')
+            ->join('production_stages as s', 's.id', '=', 't.production_stage_id')
+            ->where('t.status', 'completed')
+            ->whereBetween('t.completed_at', [$s, $e])
+            ->where('po.status', '!=', 'cancelled')
+            ->when($this->outletIds, fn ($q) => $q->whereIn('po.outlet_id', $this->outletIds))
+            ->groupBy('s.id', 's.name', 's.sort_order')
+            ->orderBy('s.sort_order')
+            ->selectRaw("s.name AS stage,
+                COUNT(*) AS tasks,
+                ROUND(AVG({$act})::numeric, 1) AS avg_hours,
+                ROUND(AVG(NULLIF(t.estimated_hours, 0))::numeric, 1) AS avg_est_hours,
+                COUNT(*) FILTER (WHERE t.estimated_hours > 0 AND {$act} > t.estimated_hours) AS over_estimate,
+                COUNT(*) FILTER (WHERE t.estimated_hours > 0) AS with_estimate")
+            ->get();
+    }
+
+    /**
+     * Where pieces are piling up RIGHT NOW: held at stage k = effective passed
+     * at k−1 minus effective passed at k — the exact invariant the piece
+     * pipeline enforces, summed across every open order. Sequence-less legacy
+     * tasks are excluded (their position in the pipeline is unknown).
+     */
+    public function bottlenecks()
+    {
+        $effT    = "CASE WHEN t.status IN ('completed','skipped') THEN po.quantity ELSE COALESCE(t.quantity_done, 0) END";
+        $effPrev = "CASE WHEN prev.id IS NULL THEN po.quantity
+                         WHEN prev.status IN ('completed','skipped') THEN po.quantity
+                         ELSE COALESCE(prev.quantity_done, 0) END";
+        return DB::table('production_tasks as t')
+            ->join('production_orders as po', 'po.id', '=', 't.production_order_id')
+            ->join('production_stages as s', 's.id', '=', 't.production_stage_id')
+            ->leftJoin('production_tasks as prev', function ($j) {
+                $j->on('prev.production_order_id', '=', 't.production_order_id')
+                  ->on('prev.sequence', '=', DB::raw('t.sequence - 1'));
+            })
+            ->whereNotIn('po.status', ['completed', 'cancelled', 'draft'])
+            ->whereNotIn('t.status', ['completed', 'skipped'])
+            ->whereNotNull('t.sequence')
+            ->when($this->outletIds, fn ($q) => $q->whereIn('po.outlet_id', $this->outletIds))
+            ->groupBy('s.id', 's.name', 's.sort_order')
+            ->orderByDesc(DB::raw("SUM(GREATEST(({$effPrev}) - ({$effT}), 0))"))
+            ->selectRaw("s.name AS stage,
+                SUM(GREATEST(({$effPrev}) - ({$effT}), 0)) AS held_pieces,
+                COUNT(*) FILTER (WHERE t.status = 'in_progress') AS active_tasks,
+                COUNT(*) AS open_tasks")
+            ->get();
+    }
+
+    /** Who moved how many pieces through their bench in the window. */
+    public function tailorThroughput(Carbon $s, Carbon $e)
+    {
+        $act = self::TASK_HOURS;
+        return DB::table('production_tasks as t')
+            ->join('production_orders as po', 'po.id', '=', 't.production_order_id')
+            ->join('users as u', 'u.id', '=', 't.assigned_to')
+            ->where('t.status', 'completed')
+            ->whereBetween('t.completed_at', [$s, $e])
+            ->where('po.status', '!=', 'cancelled')
+            ->when($this->outletIds, fn ($q) => $q->whereIn('po.outlet_id', $this->outletIds))
+            ->groupBy('u.id', 'u.first_name', 'u.last_name')
+            ->selectRaw("TRIM(CONCAT(u.first_name, ' ', u.last_name)) AS tailor,
+                COUNT(*) AS tasks,
+                COALESCE(SUM(CASE WHEN t.quantity_done > 0 THEN t.quantity_done ELSE po.quantity END), 0) AS pieces,
+                ROUND(AVG({$act})::numeric, 1) AS avg_hours")
+            ->orderByDesc(DB::raw('3'))
+            ->limit(10)
+            ->get();
+    }
+
+    /** QC truth from production_quality_checks: pass rate and rework load. */
+    public function qcRates(Carbon $s, Carbon $e): array
+    {
+        $row = DB::table('production_quality_checks as qc')
+            ->join('production_orders as po', 'po.id', '=', 'qc.production_order_id')
+            ->whereBetween('qc.created_at', [$s, $e])
+            ->when($this->outletIds, fn ($q) => $q->whereIn('po.outlet_id', $this->outletIds))
+            ->selectRaw('COUNT(*) AS checks,
+                COUNT(*) FILTER (WHERE qc.passed) AS passed,
+                COALESCE(SUM(qc.passed_quantity), 0) AS pieces_passed,
+                COALESCE(SUM(qc.failed_quantity), 0) AS pieces_failed')
+            ->first();
+
+        return [
+            'checks'        => (int) $row->checks,
+            'pass_rate'     => $row->checks > 0 ? round($row->passed / $row->checks * 100, 1) : null,
+            'pieces_passed' => (int) $row->pieces_passed,
+            'pieces_failed' => (int) $row->pieces_failed,
+        ];
+    }
+
+    /**
+     * Can the floor deliver what is promised? Due-date load for the next 7
+     * days vs the floor's actual pace (pieces completing production per day
+     * over the last 14). A shortfall is a fact, not a feeling.
+     */
+    public function capacityOutlook(): array
+    {
+        $now = CarbonImmutable::now(self::TZ);
+
+        $due = DB::table('production_orders')
+            ->whereNotIn('status', ['completed', 'cancelled', 'draft'])
+            ->whereBetween('due_date', [$now->format('Y-m-d'), $now->addDays(7)->format('Y-m-d')])
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+            ->selectRaw('COUNT(*) AS orders, COALESCE(SUM(quantity), 0) AS pieces')
+            ->first();
+
+        $done = DB::table('production_orders')
+            ->where('status', 'completed')
+            ->where('completed_at', '>=', $now->subDays(14))
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+            ->selectRaw('COALESCE(SUM(quantity), 0) AS pieces')
+            ->first();
+
+        $daily = round($done->pieces / 14, 1);
+
+        return [
+            'due_orders'       => (int) $due->orders,
+            'due_pieces'       => (int) $due->pieces,
+            'daily_throughput' => $daily,
+            'week_capacity'    => round($daily * 7, 1),
+            'shortfall'        => max(0, round($due->pieces - $daily * 7, 1)),
+        ];
+    }
+
+    /** Live material demand on the floor: open orders' allocations by material. */
+    public function materialDemand()
+    {
+        return DB::table('material_allocations as ma')
+            ->join('production_orders as po', 'po.id', '=', 'ma.production_order_id')
+            ->join('materials as m', 'm.id', '=', 'ma.material_id')
+            ->whereNotIn('po.status', ['completed', 'cancelled', 'draft'])
+            ->when($this->outletIds, fn ($q) => $q->whereIn('po.outlet_id', $this->outletIds))
+            ->groupBy('m.id', 'm.name', 'm.unit_of_measure')
+            ->selectRaw('m.name AS material, m.unit_of_measure AS unit,
+                COALESCE(SUM(ma.quantity_required), 0) AS required,
+                COALESCE(SUM(ma.quantity_allocated), 0) AS allocated,
+                COALESCE(SUM(ma.quantity_used), 0) AS used')
+            ->orderByDesc(DB::raw('3'))
+            ->limit(10)
+            ->get();
+    }
+
     // ── Attention feed ────────────────────────────────────────────────────────
 
     /**
@@ -502,7 +663,18 @@ class MetricEngine
             ];
         }
 
-        // 4. Low stock — items at or below their reorder point.
+        // 4. Capacity: next week's due load exceeds the floor's actual pace.
+        $cap = $this->capacityOutlook();
+        if ($cap['shortfall'] > 0 && $cap['due_pieces'] > 0) {
+            $items[] = [
+                'key' => 'capacity_shortfall', 'severity' => 'high',
+                'title' => "Next 7 days need {$cap['due_pieces']} pieces — recent pace delivers ~{$cap['week_capacity']}",
+                'detail' => "Short by ~{$cap['shortfall']} pieces at the current {$cap['daily_throughput']}/day throughput.",
+                'count' => (int) ceil($cap['shortfall']), 'link' => '/reports/production',
+            ];
+        }
+
+        // 5. Low stock — items at or below their reorder point.
         $low = $this->lowStock();
         if ($low > 0) {
             $items[] = [
