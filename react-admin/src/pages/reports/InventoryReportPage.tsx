@@ -53,7 +53,7 @@ export default function InventoryReportPage() {
     const dr = useDateRange("this_month");
     const [lowOnly, setLowOnly] = useState(false);
     const [activeTab, setActiveTab] = useState<
-        "overview" | "stock" | "movements"
+        "overview" | "stock" | "movements" | "intelligence"
     >("overview");
     const [movTypeFilter, setMovTypeFilter] = useState("");
 
@@ -225,7 +225,7 @@ export default function InventoryReportPage() {
             {/* Tabs */}
             <div className="border-b border-surface-100 overflow-x-auto no-scrollbar">
                 <nav className="flex gap-1 -mb-px">
-                    {(["overview", "stock", "movements"] as const).map(
+                    {(["overview", "stock", "movements", "intelligence"] as const).map(
                         (tab) => (
                             <button
                                 key={tab}
@@ -245,6 +245,10 @@ export default function InventoryReportPage() {
             </div>
 
             {/* ── OVERVIEW TAB ── */}
+            {activeTab === "intelligence" && (
+                <InventoryIntelligence start={dr.start} end={dr.end} />
+            )}
+
             {activeTab === "overview" && (
                 <div className="space-y-6">
                     {/* Health pie + category distribution */}
@@ -1003,6 +1007,119 @@ export default function InventoryReportPage() {
                     </div>
                 </div>
             )}
+        </div>
+    );
+}
+
+// ─── Intelligence tab ─────────────────────────────────────────────────────────
+// MetricEngine-backed: real valuation (cost + retail from product_prices),
+// ABC classes with days-of-cover, stockout risks, dead stock, material health.
+
+function InventoryIntelligence({ start, end }: { start: string; end: string }) {
+    const { data, isLoading } = useQuery({
+        queryKey: ["inventory-intelligence", start, end],
+        queryFn: () => reportsApi.inventoryIntelligence(start, end),
+        enabled: !!start && !!end,
+        staleTime: 60_000,
+    });
+    if (isLoading || !data) return <div className="flex justify-center py-16"><Spinner /></div>;
+    const { health, abc, stockout_risks, dead_stock, materials } = data;
+    const CLASS_CLR: Record<string, string> = { A: "bg-emerald-100 text-emerald-700", B: "bg-amber-100 text-amber-700", C: "bg-surface-100 text-surface-500" };
+
+    return (
+        <div className="space-y-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <KpiCard label="Stock at Cost" value={fmtKes(health.cost_value)} sub={`${health.units} units · ${health.skus} SKUs`} />
+                <KpiCard label="Stock at Retail" value={fmtKes(health.retail_value)} sub="if everything sold at list" />
+                <KpiCard label="Low / Out" value={`${health.low_stock} / ${health.out_of_stock}`} color={health.out_of_stock > 0 ? "text-danger" : "text-warning"} sub="low stock / out of stock" />
+                <KpiCard label="Material Stock" value={fmtKes(materials.cost_value)} sub={`${materials.materials} materials at unit cost`} />
+            </div>
+
+            {stockout_risks.length > 0 && (
+                <div className="card card-body border border-red-200 bg-red-50/40">
+                    <SectionHeader title="⚠ Stockout risk — best sellers running dry" />
+                    <div className="space-y-1.5 mt-1">
+                        {stockout_risks.map((r: any) => (
+                            <div key={r.product_id} className="flex items-center gap-3 text-xs">
+                                <span className="font-medium text-surface-800 flex-1 truncate">{r.product}</span>
+                                <span className="text-surface-500">{r.on_hand} left</span>
+                                <span className="font-bold text-red-700 tabular-nums">~{r.cover_days}d cover</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            <div className="card card-body">
+                <SectionHeader title="ABC — where the revenue actually comes from" />
+                <div className="flex gap-2 mt-1 mb-3">
+                    {(["A", "B", "C"] as const).map(c => (
+                        <span key={c} className={clsx("text-2xs font-bold px-2 py-1 rounded-full", CLASS_CLR[c])}>
+                            {c}: {abc.classes[c].count} items · {fmtKes(abc.classes[c].revenue)}
+                        </span>
+                    ))}
+                </div>
+                <TableWrapper>
+                    <table className="w-full text-xs">
+                        <thead><tr>
+                            <th className={TH}>Product</th><th className={TH}>Class</th>
+                            <th className={TH_R}>Revenue</th><th className={TH_R}>Share</th>
+                            <th className={TH_R}>Sold</th><th className={TH_R}>On Hand</th><th className={TH_R}>Cover</th>
+                        </tr></thead>
+                        <tbody className="divide-y divide-surface-50">
+                            {abc.items.map((i: any) => (
+                                <tr key={i.product_id}>
+                                    <td className="px-3 py-2 font-medium text-surface-800">{i.product}</td>
+                                    <td className="px-3 py-2"><span className={clsx("text-2xs font-bold px-1.5 py-0.5 rounded", CLASS_CLR[i.class])}>{i.class}</span></td>
+                                    <td className="px-3 py-2 text-right tabular-nums">{fmtKes(i.revenue)}</td>
+                                    <td className="px-3 py-2 text-right tabular-nums text-surface-500">{i.share_pct}%</td>
+                                    <td className="px-3 py-2 text-right tabular-nums">{i.units_sold}</td>
+                                    <td className="px-3 py-2 text-right tabular-nums">{i.on_hand}</td>
+                                    <td className={clsx("px-3 py-2 text-right tabular-nums font-semibold",
+                                        i.cover_days != null && i.cover_days < 7 ? "text-danger" : "text-surface-600")}>
+                                        {i.cover_days != null ? `${i.cover_days}d` : "—"}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </TableWrapper>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="card card-body">
+                    <SectionHeader title="Dead stock (nothing sold in 90 days)" />
+                    {dead_stock.length === 0 ? (
+                        <p className="text-xs text-surface-400 py-4">Nothing gathering dust.</p>
+                    ) : (
+                        <div className="space-y-1.5 mt-1">
+                            {dead_stock.map((d: any) => (
+                                <div key={d.product_id} className="flex items-center gap-3 text-xs">
+                                    <span className="font-medium text-surface-800 flex-1 truncate">{d.product}</span>
+                                    <span className="text-2xs text-surface-400">{d.last_sold ? `last ${new Date(d.last_sold).toLocaleDateString("en-KE", { month: "short", year: "2-digit" })}` : "never sold"}</span>
+                                    <span className="font-bold tabular-nums text-surface-700">{d.units} pcs</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+                <div className="card card-body">
+                    <SectionHeader title="Materials below reorder" />
+                    {materials.below_reorder.length === 0 ? (
+                        <p className="text-xs text-surface-400 py-4">All materials above their reorder points.</p>
+                    ) : (
+                        <div className="space-y-1.5 mt-1">
+                            {materials.below_reorder.map((m: any) => (
+                                <div key={m.id} className="flex items-center gap-3 text-xs">
+                                    <span className="font-medium text-surface-800 flex-1 truncate">{m.name}</span>
+                                    <span className="tabular-nums text-danger font-bold">{Number(m.available).toLocaleString()} {m.unit}</span>
+                                    <span className="text-2xs text-surface-400">reorder at {Number(m.reorder_point).toLocaleString()}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }
