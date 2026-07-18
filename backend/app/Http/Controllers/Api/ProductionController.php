@@ -32,7 +32,8 @@ class ProductionController extends Controller
 
     public function index(Request $request)
     {
-        $query = ProductionOrder::with([
+        // Workers only ever see their own slice of the floor - see scopeVisibleTo.
+        $query = ProductionOrder::visibleTo($request->user())->with([
             'product:id,sku',
             'product.translations' => fn ($q) => $q->where('language_code', 'en')->select('product_id', 'name'),
             'variant:id,variant_name,sku',
@@ -108,7 +109,7 @@ class ProductionController extends Controller
 
     public function show($id)
     {
-        $order = ProductionOrder::with([
+        $order = ProductionOrder::visibleTo(request()->user())->with([
             'product:id,sku',
             'product.translations' => fn ($q) => $q->where('language_code', 'en')->select('product_id', 'name'),
             'product.images' => fn ($q) => $q->where('is_primary', true)->select('product_id', 'image_url'),
@@ -1626,7 +1627,8 @@ class ProductionController extends Controller
 
     public function schedule()
     {
-        $active = ProductionOrder::whereIn('status', ['pending', 'in_progress', 'on_hold', 'qc_pending'])
+        $active = ProductionOrder::visibleTo(request()->user())
+            ->whereIn('status', ['pending', 'in_progress', 'on_hold', 'qc_pending'])
             ->with('tasks.stage')
             ->orderBy('due_date')
             ->get();
