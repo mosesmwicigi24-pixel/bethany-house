@@ -49,6 +49,9 @@ services:
         environment:
             TZ: Africa/Nairobi
             APP_NAME: ${APP_NAME:-Bethany House}
+            WABA_TOKEN: ${WABA_TOKEN:-}
+            WABA_PHONE_NUMBER_ID: ${WABA_PHONE_NUMBER_ID:-}
+            WABA_API_VERSION: ${WABA_API_VERSION:-v19.0}
             APP_ENV: production
             APP_KEY: ${APP_KEY:?APP_KEY is required}
             APP_DEBUG: "false"
@@ -133,6 +136,9 @@ services:
         command: php artisan queue:work --sleep=3 --tries=3 --max-time=3600
         environment:
             APP_NAME: ${APP_NAME:-Bethany House}
+            WABA_TOKEN: ${WABA_TOKEN:-}
+            WABA_PHONE_NUMBER_ID: ${WABA_PHONE_NUMBER_ID:-}
+            WABA_API_VERSION: ${WABA_API_VERSION:-v19.0}
             APP_ENV: production
             APP_KEY: ${APP_KEY}
             APP_DEBUG: "false"
@@ -184,6 +190,9 @@ services:
         command: /bin/sh -c "while true; do php artisan schedule:run --verbose --no-interaction & sleep 60; done"
         environment:
             APP_NAME: ${APP_NAME:-Bethany House}
+            WABA_TOKEN: ${WABA_TOKEN:-}
+            WABA_PHONE_NUMBER_ID: ${WABA_PHONE_NUMBER_ID:-}
+            WABA_API_VERSION: ${WABA_API_VERSION:-v19.0}
             APP_ENV: production
             APP_KEY: ${APP_KEY}
             DB_CONNECTION: pgsql
@@ -275,6 +284,9 @@ services:
         command: php artisan reverb:start --host=0.0.0.0 --port=8080
         environment:
             APP_NAME: ${APP_NAME:-Bethany House}
+            WABA_TOKEN: ${WABA_TOKEN:-}
+            WABA_PHONE_NUMBER_ID: ${WABA_PHONE_NUMBER_ID:-}
+            WABA_API_VERSION: ${WABA_API_VERSION:-v19.0}
             APP_ENV: production
             APP_KEY: ${APP_KEY:?APP_KEY is required}
             APP_DEBUG: "false"
