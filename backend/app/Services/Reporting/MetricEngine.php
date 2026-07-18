@@ -254,20 +254,172 @@ class MetricEngine
 
     // ── Point-in-time metrics (now, not a window) ─────────────────────────────
 
-    /** Sales minus money truth per open order: what customers still owe. */
-    public function outstandingBalance(): array
+    /** What a customer still owes on one open order. */
+    private const OWED = 'GREATEST(total_amount - COALESCE(pp.paid,0), 0)';
+
+    /**
+     * Open orders (pending/partial/deposit) with their settled money joined —
+     * the one base that outstanding totals, aging buckets, deposits-held and
+     * their drill-downs all share, so the four can never disagree.
+     */
+    private function openBalances()
     {
-        $row = $this->salesBase()
+        return $this->salesBase()
             ->whereIn('payment_status', ['pending', 'partial', 'deposit'])
             ->leftJoinSub(
                 DB::table('payments')->where('status', 'paid')
                     ->selectRaw('order_id, SUM(amount - COALESCE(refund_amount,0)) AS paid')
                     ->groupBy('order_id'),
                 'pp', 'pp.order_id', '=', 'orders.id',
-            )
-            ->selectRaw('COUNT(*) AS orders, COALESCE(SUM(GREATEST(total_amount - COALESCE(pp.paid,0), 0)),0) AS owed')
+            );
+    }
+
+    /** Sales minus money truth per open order: what customers still owe. */
+    public function outstandingBalance(): array
+    {
+        $row = $this->openBalances()
+            ->selectRaw('COUNT(*) AS orders, COALESCE(SUM(' . self::OWED . '),0) AS owed')
             ->first();
         return ['amount' => round((float) $row->owed, 2), 'orders' => (int) $row->orders];
+    }
+
+    /** Aging bucket cutoffs, oldest key last. */
+    private function agingCutoffs(): array
+    {
+        $now = CarbonImmutable::now(self::TZ);
+        return [$now->subDays(30), $now->subDays(60), $now->subDays(90)];
+    }
+
+    /**
+     * The outstanding balance sliced by how long it has been owed —
+     * 0-30 / 31-60 / 61-90 / 90+ days by order date — plus deposits held
+     * (money already collected on orders we have not fully delivered:
+     * a liability, not income).
+     */
+    public function outstandingAging(): array
+    {
+        [$d30, $d60, $d90] = $this->agingCutoffs();
+        $owed = self::OWED;
+
+        $row = $this->openBalances()->selectRaw("
+            COALESCE(SUM(CASE WHEN orders.created_at >= ? THEN {$owed} ELSE 0 END),0) AS a0,
+            COUNT(*) FILTER (WHERE orders.created_at >= ?) AS c0,
+            COALESCE(SUM(CASE WHEN orders.created_at < ? AND orders.created_at >= ? THEN {$owed} ELSE 0 END),0) AS a1,
+            COUNT(*) FILTER (WHERE orders.created_at < ? AND orders.created_at >= ?) AS c1,
+            COALESCE(SUM(CASE WHEN orders.created_at < ? AND orders.created_at >= ? THEN {$owed} ELSE 0 END),0) AS a2,
+            COUNT(*) FILTER (WHERE orders.created_at < ? AND orders.created_at >= ?) AS c2,
+            COALESCE(SUM(CASE WHEN orders.created_at < ? THEN {$owed} ELSE 0 END),0) AS a3,
+            COUNT(*) FILTER (WHERE orders.created_at < ?) AS c3
+        ", [$d30, $d30, $d30, $d60, $d30, $d60, $d60, $d90, $d60, $d90, $d90, $d90])->first();
+
+        $deposits = $this->openBalances()
+            ->where('payment_status', 'deposit')
+            ->selectRaw('COUNT(*) AS n, COALESCE(SUM(LEAST(COALESCE(pp.paid,0), total_amount)),0) AS held')
+            ->first();
+
+        return [
+            'buckets' => [
+                ['key' => '0_30',    'label' => '0–30d',  'amount' => round((float) $row->a0, 2), 'orders' => (int) $row->c0],
+                ['key' => '31_60',   'label' => '31–60d', 'amount' => round((float) $row->a1, 2), 'orders' => (int) $row->c1],
+                ['key' => '61_90',   'label' => '61–90d', 'amount' => round((float) $row->a2, 2), 'orders' => (int) $row->c2],
+                ['key' => '90_plus', 'label' => '90d+',   'amount' => round((float) $row->a3, 2), 'orders' => (int) $row->c3],
+            ],
+            'deposits_held' => ['orders' => (int) $deposits->n, 'amount' => round((float) $deposits->held, 2)],
+        ];
+    }
+
+    // ── Drill-downs ───────────────────────────────────────────────────────────
+
+    /**
+     * Spec rule 3: every number opens. Each drill is THE SAME base query as
+     * its aggregate with the aggregation removed — never a second query that
+     * can drift. Rows share one shape: {id, ref, at, who, detail, amount,
+     * kind[, order_id]} so every surface renders them with one component.
+     */
+    public function drill(string $metric, Carbon $s, Carbon $e, int $page = 1, ?string $bucket = null): array
+    {
+        $perPage = 25;
+        $who = "TRIM(CONCAT(COALESCE(customer_first_name,''),' ',COALESCE(customer_last_name,'')))";
+
+        $q = match ($metric) {
+            'revenue', 'orders' => $this->salesBase()
+                ->whereBetween(DB::raw('orders.created_at'), [$s, $e])
+                ->orderByDesc('orders.created_at')
+                ->selectRaw("orders.id, order_number AS ref, orders.created_at AS at, {$who} AS who,
+                    payment_status AS detail, total_amount AS amount, 'order' AS kind"),
+
+            'collected' => $this->moneyBase()
+                ->whereBetween(DB::raw(self::PAID_AT), [$s, $e])
+                ->orderByDesc(DB::raw(self::PAID_AT))
+                ->selectRaw("p.id, o.order_number AS ref, " . self::PAID_AT . " AS at,
+                    TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,''))) AS who,
+                    p.payment_method AS detail, (p.amount - COALESCE(p.refund_amount,0)) AS amount,
+                    'payment' AS kind, o.id AS order_id"),
+
+            'outstanding' => $this->openBalances()
+                ->when($bucket, fn ($q) => $this->applyAgingBucket($q, $bucket))
+                ->orderBy('orders.created_at')
+                ->selectRaw("orders.id, order_number AS ref, orders.created_at AS at, {$who} AS who,
+                    payment_status AS detail, " . self::OWED . " AS amount, 'order' AS kind"),
+
+            'new_customers' => DB::table('customers')
+                ->whereBetween('created_at', [$s, $e])
+                ->orderByDesc('created_at')
+                ->selectRaw("id, TRIM(CONCAT(COALESCE(first_name,''),' ',COALESCE(last_name,''))) AS ref,
+                    created_at AS at, COALESCE(phone,'') AS who, COALESCE(email,'') AS detail,
+                    NULL::numeric AS amount, 'customer' AS kind"),
+
+            'production_completed' => DB::table('production_orders')
+                ->where('status', 'completed')
+                ->whereBetween('completed_at', [$s, $e])
+                ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+                ->orderByDesc('completed_at')
+                ->selectRaw("id, order_number AS ref, completed_at AS at, '' AS who,
+                    CONCAT('due ', due_date) AS detail, quantity::numeric AS amount, 'production' AS kind"),
+
+            'production_overdue' => DB::table('production_orders')
+                ->whereNotIn('status', ['completed', 'cancelled', 'draft'])
+                ->where('due_date', '<', CarbonImmutable::now(self::TZ)->format('Y-m-d'))
+                ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+                ->orderBy('due_date')
+                ->selectRaw("id, order_number AS ref, due_date::timestamp AS at, '' AS who,
+                    status AS detail, quantity::numeric AS amount, 'production' AS kind"),
+
+            'expenses' => DB::table('expenses')
+                ->where('status', 'completed')
+                ->whereBetween('expense_date', [$s->format('Y-m-d'), $e->format('Y-m-d')])
+                ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+                ->orderByDesc('expense_date')
+                ->selectRaw("id, title AS ref, expense_date::timestamp AS at, COALESCE(vendor_name,'') AS who,
+                    COALESCE(department,'') AS detail, amount_kes AS amount, 'expense' AS kind"),
+
+            default => abort(422, "Metric '{$metric}' has no drill-down."),
+        };
+
+        $total = (clone $q)->count();
+        $rows  = $q->forPage(max(1, $page), $perPage)->get();
+
+        return [
+            'metric'   => $metric,
+            'rows'     => $rows,
+            'total'    => $total,
+            'page'     => max(1, $page),
+            'per_page' => $perPage,
+        ];
+    }
+
+    /** Narrow an outstanding drill to one aging bucket (or deposits). */
+    private function applyAgingBucket($q, string $bucket)
+    {
+        [$d30, $d60, $d90] = $this->agingCutoffs();
+        return match ($bucket) {
+            '0_30'     => $q->where('orders.created_at', '>=', $d30),
+            '31_60'    => $q->where('orders.created_at', '<', $d30)->where('orders.created_at', '>=', $d60),
+            '61_90'    => $q->where('orders.created_at', '<', $d60)->where('orders.created_at', '>=', $d90),
+            '90_plus'  => $q->where('orders.created_at', '<', $d90),
+            'deposits' => $q->where('payment_status', 'deposit'),
+            default    => abort(422, "Unknown aging bucket '{$bucket}'."),
+        };
     }
 
     public function productionOpen(): array
@@ -320,15 +472,9 @@ class MetricEngine
         }
 
         // 2. Aging balances — money owed on orders older than 30 days.
-        $aging = $this->salesBase()
-            ->whereIn('payment_status', ['pending', 'partial', 'deposit'])
+        $aging = $this->openBalances()
             ->where('orders.created_at', '<', CarbonImmutable::now(self::TZ)->subDays(30))
-            ->leftJoinSub(
-                DB::table('payments')->where('status', 'paid')
-                    ->selectRaw('order_id, SUM(amount - COALESCE(refund_amount,0)) AS paid')->groupBy('order_id'),
-                'pp', 'pp.order_id', '=', 'orders.id',
-            )
-            ->selectRaw('COUNT(*) AS n, COALESCE(SUM(GREATEST(total_amount - COALESCE(pp.paid,0),0)),0) AS owed')
+            ->selectRaw('COUNT(*) AS n, COALESCE(SUM(' . self::OWED . '),0) AS owed')
             ->first();
         if ($aging->n > 0 && (float) $aging->owed > 0) {
             $items[] = [
