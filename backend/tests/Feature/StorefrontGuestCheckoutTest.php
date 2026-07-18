@@ -144,23 +144,50 @@ class StorefrontGuestCheckoutTest extends TestCase
         $this->assertStringContainsString('Chest: 42', (string) $order->customer_notes);
     }
 
-    public function test_missing_required_measurements_are_rejected(): void
+    public function test_incomplete_measurements_are_rejected(): void
     {
         $gown = $this->makeProduct([
             'is_producible' => true,
             'measurements'  => [
                 ['name' => 'Chest', 'unit' => 'in', 'required' => true],
+                ['name' => 'Waist', 'unit' => 'in', 'required' => false],
             ],
         ]);
 
+        // Customer chose made-to-measure (sent measurements) but skipped a
+        // required field — refuse, don't guess.
         $res = $this->postJson('/api/v1/storefront/orders', $this->payload($gown, [
-            'items' => [['slug' => $gown->slug, 'quantity' => 1]],
+            'items' => [['slug' => $gown->slug, 'quantity' => 1, 'measurements' => ['Waist' => '32']]],
         ]));
 
         $res->assertStatus(422);
         $this->assertStringContainsString('Chest', $res->json('message'));
         $this->assertSame(0, Order::count());
         $this->assertSame(0, ProductionOrder::count());
+    }
+
+    public function test_producible_with_size_is_a_ready_made_stocked_line(): void
+    {
+        $gown = $this->makeProduct([
+            'is_producible' => true,
+            'measurements'  => [
+                ['name' => 'Chest', 'unit' => 'in', 'required' => true],
+            ],
+        ], ['KES' => 12500]);
+
+        $res = $this->postJson('/api/v1/storefront/orders', $this->payload($gown, [
+            'items' => [['slug' => $gown->slug, 'quantity' => 1, 'size' => 'L']],
+        ]));
+
+        $res->assertStatus(201);
+
+        $order = Order::where('order_number', $res->json('order.order_number'))->firstOrFail();
+        $item  = OrderItem::where('order_id', $order->id)->firstOrFail();
+        $this->assertFalse((bool) $item->requires_production);
+        $this->assertNull($item->production_order_id);
+        $this->assertStringContainsString('Size L', (string) $item->notes);
+        $this->assertSame(0, ProductionOrder::count());
+        $this->assertStringContainsString('READY-MADE', (string) $order->customer_notes);
     }
 
     public function test_same_client_request_id_is_idempotent(): void

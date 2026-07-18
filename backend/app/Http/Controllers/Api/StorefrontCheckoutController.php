@@ -65,6 +65,7 @@ class StorefrontCheckoutController extends Controller
             'items.*.quantity'       => 'required|integer|min:1|max:500',
             'items.*.measurements'   => 'nullable|array|max:30',
             'items.*.measurements.*' => 'nullable|string|max:50',
+            'items.*.size'           => 'nullable|string|max:30',
         ]);
 
         // ── Idempotency: same client_request_id → same order ─────────────────
@@ -113,8 +114,15 @@ class StorefrontCheckoutController extends Controller
             }
 
             $measurements = $this->cleanMeasurements($item['measurements'] ?? []);
+            $size         = trim((string) ($item['size'] ?? ''));
 
-            if ($product->is_producible) {
+            // A producible product is sold two ways: ready-made (a size, or
+            // no customisation at all -> stocked line) and made-to-measure
+            // (measurements supplied -> production line). Only lines that
+            // actually carry measurements go to production.
+            $isCustom = $product->is_producible && !empty($measurements);
+
+            if ($isCustom) {
                 $missing = $this->missingRequiredMeasurements($product, $measurements);
                 if (!empty($missing)) {
                     return response()->json([
@@ -133,7 +141,8 @@ class StorefrontCheckoutController extends Controller
                 'product'         => $product,
                 'quantity'        => (int) $item['quantity'],
                 'unit_price'      => (float) $price->regular_price,
-                'measurements'    => $measurements,
+                'measurements'    => $isCustom ? $measurements : [],
+                'size'            => $size,
                 // TaxCalculationService line shape (mirrors checkout()):
                 'product_id'      => $product->id,
                 'discount_amount' => 0,
@@ -229,10 +238,10 @@ class StorefrontCheckoutController extends Controller
                     'total_price'     => $lineTax['subtotal_gross'],
                     'notes'           => !empty($line['measurements'])
                         ? 'Measurements: ' . $this->measurementsToText($line['measurements'])
-                        : null,
+                        : ($line['size'] !== '' ? "Ready-made — Size {$line['size']}" : null),
                 ]);
 
-                if ($product->is_producible) {
+                if (!empty($line['measurements'])) {
                     // requires_production is intentionally not mass-assignable
                     $orderItem->requires_production = true;
 
@@ -325,9 +334,11 @@ class StorefrontCheckoutController extends Controller
             $parts[] = "Church/parish: {$cust['church']}";
         }
         foreach ($lines as $line) {
+            $name = $line['product']->translations->first()?->name ?? $line['product']->slug;
             if (!empty($line['measurements'])) {
-                $parts[] = 'MADE TO ORDER — ' . ($line['product']->translations->first()?->name ?? $line['product']->slug)
-                    . " ×{$line['quantity']} — " . $this->measurementsToText($line['measurements']);
+                $parts[] = "MADE TO ORDER — {$name} ×{$line['quantity']} — " . $this->measurementsToText($line['measurements']);
+            } elseif (($line['size'] ?? '') !== '') {
+                $parts[] = "READY-MADE — {$name} ×{$line['quantity']} — Size {$line['size']}";
             }
         }
         return $parts ? implode("\n", $parts) : null;
