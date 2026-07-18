@@ -97,6 +97,36 @@ class ExecutiveReportController extends Controller
     }
 
     /**
+     * Production intelligence — the floor explained: which stages run over,
+     * where pieces pile up, who moves them, QC truth, whether next week's
+     * promises fit the floor's actual pace, and what materials the open
+     * orders demand. All MetricEngine, all scoped.
+     */
+    public function productionIntelligence(Request $request)
+    {
+        $validated = $request->validate([
+            'period'    => 'nullable|string|in:today,yesterday,last_7,last_30,this_month,last_month,this_quarter,this_year,custom',
+            'from'      => 'nullable|date|required_if:period,custom',
+            'to'        => 'nullable|date|required_if:period,custom',
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+        ]);
+
+        $periodKey = $validated['period'] ?? 'this_month';
+        [$s, $e] = MetricEngine::resolvePeriod($periodKey, $validated['from'] ?? null, $validated['to'] ?? null);
+        $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+
+        return response()->json([
+            'period'      => ['key' => $periodKey, 'start' => $s->toIso8601String(), 'end' => $e->toIso8601String()],
+            'cycle_times' => $engine->stageCycleTimes($s, $e),
+            'bottlenecks' => $engine->bottlenecks(),
+            'tailors'     => $engine->tailorThroughput($s, $e),
+            'qc'          => $engine->qcRates($s, $e),
+            'capacity'    => $engine->capacityOutlook(),
+            'materials'   => $engine->materialDemand(),
+        ]);
+    }
+
+    /**
      * Row-level drill-down for a KPI — the same query as the aggregate with
      * the aggregation removed (spec rule 3). Financial metrics stay behind
      * reports.financial, exactly like the block they came from.

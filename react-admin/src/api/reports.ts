@@ -24,6 +24,10 @@ export const reportsApi = {
     executive: (period: string, outletId?: number) =>
         get<any>(`${BASE}/executive`, { params: { period, ...(outletId ? { outlet_id: outletId } : {}) } }),
 
+    // Production intelligence: cycle times, bottlenecks, tailors, QC, capacity, materials.
+    productionIntelligence: (from: string, to: string) =>
+        get<any>(`${BASE}/production-intelligence`, { params: { period: "custom", from, to } }),
+
     // Row-level drill-down: the same query as the KPI, aggregation removed.
     drill: (metric: string, period: string, opts?: { page?: number; bucket?: string; outletId?: number }) =>
         get<any>(`${BASE}/drill/${metric}`, { params: {

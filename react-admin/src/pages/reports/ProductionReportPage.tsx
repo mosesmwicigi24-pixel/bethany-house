@@ -41,7 +41,7 @@ import {
 export default function ProductionReportPage() {
     const dr = useDateRange("this_month");
     const [activeTab, setActiveTab] = useState<
-        "overview" | "products" | "tailors" | "costing"
+        "overview" | "products" | "tailors" | "costing" | "intelligence"
     >("overview");
 
     const { data, isLoading } = useQuery({
@@ -191,6 +191,7 @@ export default function ProductionReportPage() {
                         { id: "products", label: "Products" },
                         { id: "tailors",  label: "Tailors" },
                         { id: "costing",  label: "Costing & Profitability" },
+                        { id: "intelligence", label: "🧠 Intelligence" },
                     ] as const).map((tab) => (
                         <button
                             key={tab.id}
@@ -606,6 +607,10 @@ export default function ProductionReportPage() {
             )}
 
             {/* ── COSTING & PROFITABILITY ── */}
+            {activeTab === "intelligence" && (
+                <IntelligenceTab start={dr.start} end={dr.end} />
+            )}
+
             {activeTab === "costing" && (
                 <CostingTab
                     data={costingData}
@@ -887,6 +892,184 @@ function CostingTab({ data, isLoading, params }: {
                         </tbody>
                     </table>
                 </TableWrapper>
+            </div>
+        </div>
+    );
+}
+
+// ─── Intelligence tab ─────────────────────────────────────────────────────────
+// MetricEngine-backed floor intelligence: which stages run over their
+// estimates, where pieces pile up right now, whether next week's promises fit
+// the floor's actual pace, QC truth, benches, and live material demand.
+
+function IntelligenceTab({ start, end }: { start: string; end: string }) {
+    const { data, isLoading } = useQuery({
+        queryKey: ["production-intelligence", start, end],
+        queryFn: () => reportsApi.productionIntelligence(start, end),
+        enabled: !!start && !!end,
+        staleTime: 60_000,
+    });
+
+    if (isLoading || !data)
+        return <div className="flex justify-center py-16"><Spinner /></div>;
+
+    const { cycle_times, bottlenecks, tailors, qc, capacity, materials } = data;
+    const maxHeld = Math.max(...bottlenecks.map((b: any) => Number(b.held_pieces)), 1);
+    const short = Number(capacity.shortfall) > 0;
+
+    return (
+        <div className="space-y-6">
+            {/* Capacity: the one sentence that plans next week */}
+            <div className={clsx("card card-body border", short ? "border-red-200 bg-red-50/40" : "border-emerald-200 bg-emerald-50/30")}>
+                <SectionHeader title="Capacity — next 7 days" />
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-1">
+                    <KpiCard label="Pieces Due" value={capacity.due_pieces} sub={`${capacity.due_orders} orders`} />
+                    <KpiCard label="Floor Pace" value={`${capacity.daily_throughput}/day`} sub="last 14 days, actual" />
+                    <KpiCard label="Week Capacity" value={capacity.week_capacity} sub="at current pace" />
+                    <KpiCard label={short ? "Shortfall" : "Headroom"}
+                        value={short ? capacity.shortfall : Math.round((capacity.week_capacity - capacity.due_pieces) * 10) / 10}
+                        color={short ? "text-danger" : "text-success"}
+                        sub={short ? "pieces at risk — add hands or renegotiate dates" : "pieces to spare"} />
+                </div>
+            </div>
+
+            {/* Bottlenecks now */}
+            <div className="card card-body">
+                <SectionHeader title="Where pieces are piling up (right now)" />
+                {bottlenecks.length === 0 ? (
+                    <p className="text-xs text-surface-400 py-4">No held pieces — the pipeline is flowing.</p>
+                ) : (
+                    <div className="space-y-2 mt-2">
+                        {bottlenecks.map((b: any) => (
+                            <div key={b.stage} className="flex items-center gap-3">
+                                <span className="text-xs font-medium text-surface-700 w-28 truncate shrink-0">{b.stage}</span>
+                                <div className="flex-1 h-3 bg-surface-100 rounded-full overflow-hidden">
+                                    <div className={clsx("h-full rounded-full",
+                                        Number(b.held_pieces) === maxHeld ? "bg-red-500" : "bg-amber-400")}
+                                        style={{ width: `${(Number(b.held_pieces) / maxHeld) * 100}%` }} />
+                                </div>
+                                <span className="text-xs font-bold tabular-nums text-surface-800 w-20 text-right shrink-0">
+                                    {b.held_pieces} pcs
+                                </span>
+                                <span className="text-2xs text-surface-400 w-24 shrink-0">
+                                    {b.active_tasks} active / {b.open_tasks} open
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* Stage cycle times */}
+            <div className="card card-body">
+                <SectionHeader title="Stage cycle times (completed in period)" />
+                {cycle_times.length === 0 ? (
+                    <p className="text-xs text-surface-400 py-4">No stages completed in this period.</p>
+                ) : (
+                    <TableWrapper>
+                        <table className="w-full text-xs">
+                            <thead><tr>
+                                <th className={TH}>Stage</th>
+                                <th className={TH_R}>Tasks</th>
+                                <th className={TH_R}>Avg Actual</th>
+                                <th className={TH_R}>Avg Estimate</th>
+                                <th className={TH_R}>Ran Over</th>
+                            </tr></thead>
+                            <tbody className="divide-y divide-surface-50">
+                                {cycle_times.map((c: any) => {
+                                    const overPct = c.with_estimate > 0 ? Math.round((c.over_estimate / c.with_estimate) * 100) : null;
+                                    return (
+                                        <tr key={c.stage}>
+                                            <td className="px-3 py-2 font-medium text-surface-800">{c.stage}</td>
+                                            <td className="px-3 py-2 text-right tabular-nums">{c.tasks}</td>
+                                            <td className="px-3 py-2 text-right tabular-nums font-semibold">{c.avg_hours != null ? fmtHours(Number(c.avg_hours)) : "—"}</td>
+                                            <td className="px-3 py-2 text-right tabular-nums text-surface-500">{c.avg_est_hours != null ? fmtHours(Number(c.avg_est_hours)) : "—"}</td>
+                                            <td className={clsx("px-3 py-2 text-right tabular-nums font-semibold",
+                                                overPct != null && overPct > 50 ? "text-danger" : overPct != null && overPct > 0 ? "text-warning-dark" : "text-surface-400")}>
+                                                {overPct != null ? `${overPct}%` : "—"}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </TableWrapper>
+                )}
+            </div>
+
+            {/* QC + Tailors */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="card card-body">
+                    <SectionHeader title="Quality control" />
+                    {qc.checks === 0 ? (
+                        <p className="text-xs text-surface-400 py-4">No QC checks recorded in this period.</p>
+                    ) : (
+                        <div className="grid grid-cols-2 gap-3 mt-1">
+                            <KpiCard label="Pass Rate" value={`${qc.pass_rate}%`}
+                                color={Number(qc.pass_rate) >= 90 ? "text-success" : Number(qc.pass_rate) >= 70 ? "text-warning" : "text-danger"}
+                                sub={`${qc.checks} checks`} />
+                            <KpiCard label="Rework Pieces" value={qc.pieces_failed}
+                                color={qc.pieces_failed > 0 ? "text-danger" : "text-success"}
+                                sub={`${qc.pieces_passed} passed`} />
+                        </div>
+                    )}
+                </div>
+                <div className="card card-body">
+                    <SectionHeader title="Bench throughput (period)" />
+                    {tailors.length === 0 ? (
+                        <p className="text-xs text-surface-400 py-4">No completed assigned tasks in this period.</p>
+                    ) : (
+                        <div className="space-y-1.5 mt-1">
+                            {tailors.map((t: any, i: number) => (
+                                <div key={t.tailor} className="flex items-center gap-2.5">
+                                    <span className="text-2xs font-bold text-surface-300 w-4">{i + 1}</span>
+                                    <span className="text-xs font-medium text-surface-800 flex-1 truncate">{t.tailor}</span>
+                                    <span className="text-2xs text-surface-400">{t.tasks} stages{t.avg_hours != null ? ` · ${fmtHours(Number(t.avg_hours))} avg` : ""}</span>
+                                    <span className="text-xs font-bold tabular-nums text-surface-800 w-14 text-right">{t.pieces} pcs</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Material demand */}
+            <div className="card card-body">
+                <SectionHeader title="Live material demand (open orders)" />
+                {materials.length === 0 ? (
+                    <p className="text-xs text-surface-400 py-4">No material allocations on open orders.</p>
+                ) : (
+                    <TableWrapper>
+                        <table className="w-full text-xs">
+                            <thead><tr>
+                                <th className={TH}>Material</th>
+                                <th className={TH_R}>Required</th>
+                                <th className={TH_R}>Allocated</th>
+                                <th className={TH_R}>Used</th>
+                                <th className={TH_R}>Still Needed</th>
+                            </tr></thead>
+                            <tbody className="divide-y divide-surface-50">
+                                {materials.map((m: any) => {
+                                    const gap = Math.max(0, Number(m.required) - Number(m.allocated));
+                                    return (
+                                        <tr key={m.material}>
+                                            <td className="px-3 py-2">
+                                                <p className="font-medium text-surface-800">{m.material}</p>
+                                                <p className="text-2xs text-surface-400">{m.unit}</p>
+                                            </td>
+                                            <td className="px-3 py-2 text-right tabular-nums">{Number(m.required).toLocaleString()}</td>
+                                            <td className="px-3 py-2 text-right tabular-nums">{Number(m.allocated).toLocaleString()}</td>
+                                            <td className="px-3 py-2 text-right tabular-nums text-surface-500">{Number(m.used).toLocaleString()}</td>
+                                            <td className={clsx("px-3 py-2 text-right tabular-nums font-semibold", gap > 0 ? "text-danger" : "text-success")}>
+                                                {gap > 0 ? gap.toLocaleString() : "✓ covered"}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </TableWrapper>
+                )}
             </div>
         </div>
     );
