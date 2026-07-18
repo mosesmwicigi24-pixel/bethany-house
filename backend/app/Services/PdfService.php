@@ -116,9 +116,13 @@ class PdfService
         $email   = htmlspecialchars($s['app_email'] ?? '');
         $phone   = htmlspecialchars($s['app_phone'] ?? '');
         $logoUrl = $s['app_logo_url'] ?? '';
-        $year    = date('Y');
+        $year        = date('Y');
+        $generatedAt = date('d M Y, H:i');
 
-        $logo         = self::logoHtml($logoUrl, $appName);
+        $logo     = self::logoHtml($logoUrl, $appName);
+        $logoChip = $logo
+            ? '<div style="background:#fff;border-radius:8px;padding:6px 10px;display:inline-block;">' . $logo . '</div>'
+            : '';
         $statusColour = self::statusColour($status);
         $statusLabel  = self::statusLabel($status);
 
@@ -132,7 +136,7 @@ class PdfService
         $metaRows = '';
         foreach ($meta as $label => $value) {
             $v = htmlspecialchars((string)$value);
-            $metaRows .= "<tr><td class=\"ml\">{$label}:</td><td class=\"mv\">{$v}</td></tr>";
+            $metaRows .= "<td><span class=\"ml\">{$label}</span><span class=\"mv\">{$v}</span></td>";
         }
 
         // Totals block
@@ -154,62 +158,87 @@ class PdfService
             $totalsHtml .= '</table>';
         }
 
-        $badge = "<span style=\"display:inline-block;padding:2px 9px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.6px;background:{$statusColour};color:#fff;\">{$statusLabel}</span>";
+        $badge = "<span style=\"display:inline-block;padding:3px 12px;border-radius:20px;font-size:8px;font-weight:700;letter-spacing:1px;background:{$statusColour};color:#fff;\">{$statusLabel}</span>";
 
+        // Design language: Bethany navy (#152441, from the logo) anchors the
+        // document; the brand gold (#D98A2A) appears only as accents — the rule
+        // under the header, the doc number, dividers — never as a fill flood.
+        // Soft 8-10px corners, zebra rows instead of grid lines, air instead of
+        // boxes. dompdf constraints honoured: table layouts (no flex), solid
+        // fills (no gradients/shadows), DejaVu Sans (bundled, full glyph set).
         $css = '
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#222;background:#fff;line-height:1.45}
+body{font-family:"DejaVu Sans",Arial,sans-serif;font-size:10.5px;color:#25303f;background:#fff;line-height:1.5}
 table{border-collapse:collapse;width:100%}
-.page{padding:28px 32px;max-width:780px;margin:0 auto}
-.top-header{display:table;width:100%;margin-bottom:10px}
-.top-left{display:table-cell;vertical-align:top;width:55%}
-.top-right{display:table-cell;vertical-align:top;text-align:right}
-.doc-title{font-size:22px;font-weight:700;color:#222;letter-spacing:-.3px}
-.status-wrap{margin-top:5px}
-.org-name{font-size:13px;font-weight:700;margin-top:6px;margin-bottom:3px}
-.org-contact{font-size:10px;color:#555;line-height:1.6}
-.divider{border:none;border-top:2px solid #222;margin:10px 0 8px}
-.meta-table{font-size:10px;margin-top:2px}
-.meta-table .ml{color:#555;white-space:nowrap;padding:1px 6px 1px 0;text-align:right}
-.meta-table .mv{font-weight:600;text-align:right;white-space:nowrap}
-.party-row{display:table;width:100%;margin-bottom:10px}
+.page{padding:26px 30px;max-width:780px;margin:0 auto}
+
+.banner{background:#152441;border-radius:12px;padding:16px 20px;color:#fff}
+.banner-table{width:100%}
+.banner-left{vertical-align:middle;width:55%}
+.banner-right{vertical-align:middle;text-align:right}
+.org-name{font-size:14px;font-weight:700;color:#fff;margin-top:5px}
+.org-contact{font-size:8.5px;color:#aeb9cc;line-height:1.65;margin-top:2px}
+.doc-title{font-size:21px;font-weight:700;color:#fff;letter-spacing:.2px}
+.doc-number{font-size:10.5px;font-weight:700;color:#E8A857;margin-top:2px}
+.status-wrap{margin-top:7px}
+
+.gold-rule{border:none;border-top:2.5px solid #D98A2A;border-radius:2px;margin:14px 2px 12px;width:64px}
+
+.meta-card{margin:0 0 12px}
+.meta-table{width:100%;background:#f7f8fb;border-radius:10px}
+.meta-table td{padding:8px 6px;text-align:center;vertical-align:top}
+.meta-table .ml{display:block;font-size:7.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#8b95a6;margin-bottom:2px}
+.meta-table .mv{display:block;font-size:10px;font-weight:700;color:#25303f;white-space:nowrap}
+
+.party-row{display:table;width:100%;margin-bottom:14px;border-spacing:0}
 .party-cell{display:table-cell;width:50%;vertical-align:top;padding-right:12px}
 .party-cell:last-child{padding-right:0}
-.party-box{border:1px solid #bbb;padding:7px 9px;min-height:58px}
-.party-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#555;margin-bottom:3px}
-.party-name{font-size:11px;font-weight:700}
-.party-detail{font-size:10px;color:#444;line-height:1.55;margin-top:2px}
-.items-table{width:100%;border:1px solid #ccc}
-.items-table thead tr{background:#f0f0f0}
-.items-table thead th{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;padding:5px 7px;border-bottom:1px solid #bbb;border-right:1px solid #ddd;text-align:left}
-.items-table thead th:last-child{border-right:none}
-.items-table tbody tr{border-bottom:1px solid #e0e0e0}
-.items-table tbody td{font-size:10.5px;padding:5px 7px;border-right:1px solid #e8e8e8;vertical-align:top}
-.items-table tbody td:last-child{border-right:none}
+.party-box{background:#faf7f1;border:1px solid #f0e6d6;border-radius:10px;padding:11px 14px;min-height:64px}
+.party-label{font-size:7.5px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#B9721E;margin-bottom:4px}
+.party-name{font-size:11.5px;font-weight:700;color:#152441}
+.party-detail{font-size:9px;color:#5d6878;line-height:1.65;margin-top:3px}
+
+.items-table{width:100%;margin-top:2px}
+.items-table thead th{background:#152441;color:#fff;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;padding:8px 9px;text-align:left}
+.items-table thead th:first-child{border-radius:8px 0 0 8px}
+.items-table thead th:last-child{border-radius:0 8px 8px 0}
+.items-table tbody td{font-size:10px;padding:8px 9px;vertical-align:top;border-bottom:1px solid #eef1f5;color:#3a4656}
+.items-table tbody tr.zebra td{background:#f8f9fb}
+.items-table tbody tr:last-child td{border-bottom:none}
+.row-num{color:#a7b0bf;font-weight:700;font-size:9px}
 .tr{text-align:right}
 .tc{text-align:center}
-.sub-desc{font-size:9.5px;color:#666;margin-top:2px}
-.bottom-row{display:table;width:100%;border-top:2px solid #222}
-.bottom-left{display:table-cell;vertical-align:top;width:55%;padding-top:8px;padding-right:16px}
-.bottom-right{display:table-cell;vertical-align:top;width:45%;padding-top:0}
-.totals-table{width:100%;border:1px solid #ccc;border-top:none}
-.totals-table td{padding:4px 8px;font-size:10.5px}
-.totals-table .tl{color:#444;border-right:1px solid #ddd;width:55%}
-.totals-table .tv{text-align:right;font-weight:600}
-.totals-table tr.total-line td{font-size:12px;font-weight:700;background:#f0f0f0;border-top:2px solid #222}
-.pay-table{width:100%;margin-top:4px;font-size:10px}
-.pay-table th{text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.4px;color:#555;padding:2px 4px;border-bottom:1px solid #ccc}
-.pay-table td{padding:3px 4px;border-bottom:1px solid #eee}
-.pay-title{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#555;margin-top:8px;margin-bottom:3px}
-.notes-box{margin-top:4px;font-size:10px;color:#444;line-height:1.5}
-.notes-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#555;margin-top:8px;margin-bottom:2px}
-.sig-row{display:table;width:100%;margin-top:14px;border-top:1px solid #ccc;padding-top:8px}
-.sig-cell{display:table-cell;width:33%;font-size:10px;color:#555;padding-right:12px}
-.sig-line{border-bottom:1px solid #555;margin-bottom:3px;height:18px}
-.footer{margin-top:12px;padding-top:6px;border-top:1px solid #ddd;font-size:9px;color:#888;display:table;width:100%}
+.num{white-space:nowrap}
+.sub-desc{font-size:8.5px;color:#8b95a6;margin-top:2px}
+
+.bottom-row{display:table;width:100%;margin-top:12px}
+.bottom-left{display:table-cell;vertical-align:top;width:52%;padding-right:18px}
+.bottom-right{display:table-cell;vertical-align:top;width:48%}
+.totals-table{width:100%;background:#f7f8fb;border-radius:10px}
+.totals-table td{padding:6px 13px;font-size:10px}
+.totals-table .tl{color:#5d6878}
+.totals-table .tv{text-align:right;font-weight:700;color:#25303f;white-space:nowrap}
+.totals-table tr.total-line td{background:#152441;color:#fff;font-size:12.5px;font-weight:700;padding:10px 13px}
+.totals-table tr.total-line td.tl{border-radius:0 0 0 10px;color:#c9d2e0;font-size:9px;letter-spacing:1px;text-transform:uppercase}
+.totals-table tr.total-line td.tv{border-radius:0 0 10px 0;color:#fff}
+.totals-table tr.total-line td .gold{color:#E8A857}
+
+.pay-table{width:100%;margin-top:5px;font-size:9.5px}
+.pay-table th{text-align:left;font-size:7.5px;text-transform:uppercase;letter-spacing:.7px;color:#8b95a6;padding:3px 5px;border-bottom:1.5px solid #e4e8ee}
+.pay-table td{padding:4px 5px;border-bottom:1px solid #f0f2f6}
+.pay-title{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#B9721E;margin-top:10px;margin-bottom:3px}
+.notes-box{margin-top:4px;font-size:9.5px;color:#5d6878;line-height:1.6;background:#f7f8fb;border-radius:8px;padding:9px 12px}
+.notes-label{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#B9721E;margin-top:10px;margin-bottom:3px}
+
+.sig-row{display:table;width:100%;margin-top:26px}
+.sig-cell{display:table-cell;width:33%;font-size:8.5px;color:#8b95a6;padding-right:22px}
+.sig-line{border-bottom:1px solid #c8cfda;margin-bottom:5px;height:26px}
+
+.footer{margin-top:18px;padding-top:9px;border-top:1px solid #eef1f5;font-size:8px;color:#a7b0bf;display:table;width:100%}
 .footer-l{display:table-cell;text-align:left}
 .footer-r{display:table-cell;text-align:right}
-@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{padding:16px}}';
+.footer .gold-dot{color:#D98A2A;font-weight:700}
+@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{padding:14px}}';
 
         return <<<HTML
 <!DOCTYPE html>
@@ -221,19 +250,22 @@ table{border-collapse:collapse;width:100%}
 </head>
 <body>
 <div class="page">
-  <div class="top-header">
-    <div class="top-left">
-      {$logo}
-      <div class="org-name">{$appName}</div>
-      <div class="org-contact">{$orgLines}</div>
-    </div>
-    <div class="top-right">
-      <div class="doc-title">{$docTitle}</div>
-      <div class="status-wrap">{$badge}</div>
-      <table class="meta-table" style="margin-left:auto;margin-top:4px">{$metaRows}</table>
-    </div>
+  <div class="banner">
+    <table class="banner-table"><tr>
+      <td class="banner-left">
+        {$logoChip}
+        <div class="org-name">{$appName}</div>
+        <div class="org-contact">{$orgLines}</div>
+      </td>
+      <td class="banner-right">
+        <div class="doc-title">{$docTitle}</div>
+        <div class="doc-number">{$docNumber}</div>
+        <div class="status-wrap">{$badge}</div>
+      </td>
+    </tr></table>
   </div>
-  <hr class="divider">
+  <hr class="gold-rule">
+  <div class="meta-card"><table class="meta-table"><tr>{$metaRows}</tr></table></div>
   {$parties}
   {$table}
   <div class="bottom-row">
@@ -246,8 +278,8 @@ table{border-collapse:collapse;width:100%}
     <div class="sig-cell"><div class="sig-line"></div>Date</div>
   </div>
   <div class="footer">
-    <div class="footer-l">Generated {$docNumber} &bull; {$appName}</div>
-    <div class="footer-r">&copy; {$year} {$appName}</div>
+    <div class="footer-l">{$docNumber} <span class="gold-dot">&bull;</span> {$appName}</div>
+    <div class="footer-r">Generated {$generatedAt} <span class="gold-dot">&bull;</span> &copy; {$year} {$appName}</div>
   </div>
 </div>
 </body>
@@ -288,7 +320,10 @@ HTML;
 
     protected static function itemsTable(array $columns, array $rows): string
     {
-        $thead = '';
+        // Every document gets a row-number column for free — clean, consistent
+        // numbering was one of the explicit asks. Numeric/mono cells are
+        // nowrap so amounts never fold onto two lines mid-figure.
+        $thead = '<th style="text-align:center" width="4%">#</th>';
         foreach ($columns as $col) {
             $align = $col['align'] ?? 'left';
             $w     = isset($col['width']) ? " width=\"{$col['width']}\"" : '';
@@ -296,23 +331,25 @@ HTML;
         }
 
         $tbody = '';
-        foreach ($rows as $row) {
-            $tbody .= '<tr>';
+        foreach ($rows as $i => $row) {
+            $zebra  = $i % 2 === 1 ? ' class="zebra"' : '';
+            $tbody .= "<tr{$zebra}>";
+            $tbody .= '<td class="tc row-num">' . ($i + 1) . '</td>';
             foreach ($columns as $col) {
                 $align  = $col['align'] ?? 'left';
-                $mono   = ($col['mono'] ?? false) ? 'font-family:\'Courier New\',monospace;' : '';
+                $nowrap = (($col['mono'] ?? false) || $align === 'right') ? ' num' : '';
                 $val    = $row[$col['key']] ?? '—';
                 $sub    = isset($row[$col['key'] . '_sub']) && $row[$col['key'] . '_sub']
                     ? '<div class="sub-desc">' . htmlspecialchars($row[$col['key'] . '_sub']) . '</div>'
                     : '';
-                $tbody .= "<td style=\"text-align:{$align};{$mono}\">" . htmlspecialchars((string)$val) . "{$sub}</td>";
+                $tbody .= "<td class=\"{$nowrap}\" style=\"text-align:{$align}\">" . htmlspecialchars((string)$val) . "{$sub}</td>";
             }
             $tbody .= '</tr>';
         }
 
         if (!$rows) {
-            $colspan = count($columns);
-            $tbody   = "<tr><td colspan=\"{$colspan}\" style=\"text-align:center;color:#888;padding:10px\">No items.</td></tr>";
+            $colspan = count($columns) + 1;
+            $tbody   = "<tr><td colspan=\"{$colspan}\" style=\"text-align:center;color:#a7b0bf;padding:14px\">No items.</td></tr>";
         }
 
         return "<table class=\"items-table\">
@@ -347,19 +384,23 @@ HTML;
         );
 
         $columns = [
-            ['key' => 'type',       'label' => 'Type',       'width' => '8%'],
-            ['key' => 'desc',       'label' => 'Product / Description'],
-            ['key' => 'sku',        'label' => 'SKU',        'width' => '12%', 'mono' => true],
-            ['key' => 'qty',        'label' => 'Qty',        'align' => 'right', 'width' => '7%'],
-            ['key' => 'unit_price', 'label' => 'Unit Price', 'align' => 'right', 'width' => '13%', 'mono' => true],
-            ['key' => 'total',      'label' => 'Amount',     'align' => 'right', 'width' => '13%', 'mono' => true],
+            ['key' => 'desc',       'label' => 'Description'],
+            ['key' => 'sku',        'label' => 'SKU / Code',  'width' => '14%'],
+            ['key' => 'qty',        'label' => 'Qty',         'align' => 'right', 'width' => '13%'],
+            ['key' => 'unit_price', 'label' => 'Unit Price',  'align' => 'right', 'width' => '15%'],
+            ['key' => 'total',      'label' => 'Amount',      'align' => 'right', 'width' => '16%'],
         ];
         $rows = array_map(function ($item) use ($currency) {
+            $isMaterial = ($item['item_type'] ?? '') === 'material';
+            $unit       = $isMaterial ? ($item['material']['unit_of_measure'] ?? '') : '';
             return [
-                'type'       => ucfirst($item['item_type'] ?? '—'),
                 'desc'       => $item['description'] ?? ($item['product']['name'] ?? ($item['material']['name'] ?? '—')),
+                // Type reads better as a sub-line than as its own cramped column.
+                'desc_sub'   => $isMaterial ? 'Raw material' : 'Product',
                 'sku'        => $item['product']['sku'] ?? ($item['material']['code'] ?? '—'),
-                'qty'        => number_format((float)($item['quantity'] ?? 0), 2),
+                // The unit belongs WITH the quantity — "100.00 meters", not a
+                // stray "meters" sitting in the SKU column.
+                'qty'        => trim(number_format((float)($item['quantity'] ?? 0), 2) . ' ' . $unit),
                 'unit_price' => self::money((float)($item['unit_price'] ?? 0), $currency),
                 'total'      => self::money((float)(($item['quantity'] ?? 0) * ($item['unit_price'] ?? 0)), $currency),
             ];

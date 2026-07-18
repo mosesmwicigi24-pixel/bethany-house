@@ -65,7 +65,7 @@ class DocumentPdfController extends Controller
             'supplier:id,name,company_code,email,phone,address_line_1,city',
             'items.product:id,sku',
             'items.product.translations' => fn($q) => $q->where('language_code','en')->select('product_id','name'),
-            'items.material:id,name,unit_of_measure',
+            'items.material:id,code,name,unit_of_measure',
             'createdBy:id,first_name,last_name',
         ])->findOrFail($id);
 
