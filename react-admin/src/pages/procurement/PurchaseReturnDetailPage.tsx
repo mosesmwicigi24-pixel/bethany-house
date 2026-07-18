@@ -170,6 +170,13 @@ export default function PurchaseReturnDetailPage() {
         onError: (e: any) => toast.error(e?.message ?? "Failed"),
     });
 
+    // usePermissions reads the auth store — a React hook. It used to be
+    // called AFTER the early returns below, so the loading render recorded
+    // fewer hooks than the data render and React tore the whole tree down
+    // ("Rendered more hooks than during the previous render") — a blank
+    // white page on every direct/deep-link load of this page.
+    const { can } = usePermissions();
+
     if (isLoading) return <div className="flex items-center justify-center h-64"><Spinner /></div>;
     if (!pr) return (
         <div className="text-center py-16 text-surface-400 text-sm">
@@ -184,7 +191,6 @@ export default function PurchaseReturnDetailPage() {
     const poId         = pr.purchase_order?.id ?? pr.purchase_order_id;
     const items        = pr.items ?? [];
     const totalValue   = items.reduce((sum, i) => sum + i.quantity * (i.purchase_order_item?.unit_price ?? 0), 0);
-    const { can } = usePermissions();
     const canApprovePR = can("procurement.approve");
     const canReceivePR = can("procurement.receive");
     const canApprove  = pr.status === "pending" && canApprovePR;

@@ -164,6 +164,13 @@ export default function StockTransferDetailPage() {
         onError: (e: any) => toast.error(e?.message ?? "Action failed"),
     });
 
+    // usePermissions reads the auth store — a React hook. It used to be
+    // called AFTER the early returns below, so the loading render recorded
+    // fewer hooks than the data render and React tore the whole tree down
+    // ("Rendered more hooks than during the previous render") — a blank
+    // white page on every direct/deep-link load of this page.
+    const { can } = usePermissions();
+
     if (isLoading) return <div className="flex items-center justify-center h-64"><Spinner /></div>;
     if (!transfer) return (
         <div className="text-center py-16 text-surface-400 text-sm">
@@ -175,7 +182,6 @@ export default function StockTransferDetailPage() {
     const cfg = STATUS_CFG[transfer.status] ?? STATUS_CFG.pending;
     const totalItems    = transfer.items.reduce((s, i) => s + i.quantity_requested, 0);
     const totalReceived = transfer.items.reduce((s, i) => s + i.quantity_received, 0);
-    const { can } = usePermissions();
     const canApproveTransfer = can("inventory.approve");
     const canDoTransfer = can("inventory.transfer");
     const canApprove  = transfer.status === "pending" && canApproveTransfer;
