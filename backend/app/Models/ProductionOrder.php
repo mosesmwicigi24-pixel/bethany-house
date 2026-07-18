@@ -21,6 +21,8 @@ class ProductionOrder extends Model
         'status',
         'priority',
         'due_date',
+        'fitting_date',
+        'collection_date',
         'estimated_completion_date',
         'started_at',
         'confirmed_at',
@@ -38,6 +40,8 @@ class ProductionOrder extends Model
     protected $casts = [
         'quantity'                  => 'integer',
         'due_date'                  => 'date',
+        'fitting_date'              => 'date',
+        'collection_date'           => 'date',
         'estimated_completion_date' => 'date',
         'started_at'                => 'datetime',
         'confirmed_at'              => 'datetime',

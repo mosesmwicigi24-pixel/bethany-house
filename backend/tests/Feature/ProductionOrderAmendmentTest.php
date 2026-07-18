@@ -102,13 +102,18 @@ class ProductionOrderAmendmentTest extends TestCase
         $order = $this->order('in_progress');
 
         $this->putJson("/api/v1/admin/production-orders/{$order->id}", [
-            'priority' => 'urgent',
-            'due_date' => '2026-09-01',
-            'notes'    => 'Customer moved the ordination forward.',
+            'priority'        => 'urgent',
+            'due_date'        => '2026-09-01',
+            // The customer-facing pair: fitting and collection.
+            'fitting_date'    => '2026-08-20',
+            'collection_date' => '2026-09-02',
+            'notes'           => 'Customer moved the ordination forward.',
         ])->assertOk();
 
         $fresh = $order->fresh();
         $this->assertSame('urgent', $fresh->priority);
+        $this->assertSame('2026-08-20', $fresh->fitting_date?->format('Y-m-d'));
+        $this->assertSame('2026-09-02', $fresh->collection_date?->format('Y-m-d'));
         $this->assertSame('Customer moved the ordination forward.', $fresh->notes);
     }
 

@@ -188,6 +188,8 @@ function EditOrderModal({ order, onClose, onSaved }: { order: ProductionOrder; o
     const [quantity, setQuantity] = useState(String(order.quantity));
     const [priority, setPriority] = useState(order.priority ?? "normal");
     const [dueDate, setDueDate]   = useState((order.due_date ?? "").slice(0, 10));
+    const [fittingDate, setFittingDate]       = useState(((order as any).fitting_date ?? "").slice(0, 10));
+    const [collectionDate, setCollectionDate] = useState(((order as any).collection_date ?? "").slice(0, 10));
     const [notes, setNotes]       = useState((order as any).notes ?? "");
 
     const mutation = useMutation({
@@ -197,6 +199,8 @@ function EditOrderModal({ order, onClose, onSaved }: { order: ProductionOrder; o
                 notes: notes || null,
             };
             if (dueDate) payload.due_date = dueDate;
+            payload.fitting_date    = fittingDate || null;
+            payload.collection_date = collectionDate || null;
             // Only send quantity when it may legally change — a draft-only field
             // shouldn't even travel from a confirmed order's form.
             if (isDraft && Number(quantity) > 0) payload.quantity = Number(quantity);
@@ -242,6 +246,20 @@ function EditOrderModal({ order, onClose, onSaved }: { order: ProductionOrder; o
                     <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Due date</label>
                     <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
                         className="input mt-1 w-full text-sm" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                    <div>
+                        <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Fitting date</label>
+                        <input type="date" value={fittingDate} onChange={e => setFittingDate(e.target.value)}
+                            className="input mt-1 w-full text-sm" />
+                        <p className="text-2xs text-surface-400 mt-1">When the customer comes in to be fitted.</p>
+                    </div>
+                    <div>
+                        <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Collection date</label>
+                        <input type="date" value={collectionDate} onChange={e => setCollectionDate(e.target.value)}
+                            className="input mt-1 w-full text-sm" />
+                        <p className="text-2xs text-surface-400 mt-1">When they collect the finished garment.</p>
+                    </div>
                 </div>
                 <div>
                     <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Notes</label>
@@ -1848,6 +1866,12 @@ export default function ProductionOrderDetailPage() {
                                     {fmtDate(order.due_date)}
                                 </span>
                             } />
+                            {(order as any).fitting_date && (
+                                <InfoRow label="Fitting" value={<span className="font-semibold text-violet-700">{fmtDate((order as any).fitting_date)}</span>} />
+                            )}
+                            {(order as any).collection_date && (
+                                <InfoRow label="Collection" value={<span className="font-semibold text-emerald-700">{fmtDate((order as any).collection_date)}</span>} />
+                            )}
                             {order.outlet && <InfoRow label="Outlet" value={order.outlet.name} />}
                             {order.started_at && <InfoRow label="Started" value={fmtDate(order.started_at)} />}
                             {order.completed_at && <InfoRow label="Completed" value={fmtDate(order.completed_at)} />}
