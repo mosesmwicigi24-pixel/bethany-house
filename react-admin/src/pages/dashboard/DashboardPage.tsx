@@ -292,6 +292,122 @@ function CashTodayCard() {
 
 // ── Stat card ─────────────────────────────────────────────────────────────────
 
+// ─── Tailor home ──────────────────────────────────────────────────────────────
+// The tailor's landing screen answers ONE question: "what should I work on
+// next?" Layout order is deliberate: a compact stat strip (numbers, not
+// furniture) → My Tasks as the hero, smart-sorted by deadline risk → quick
+// actions as an icon grid → recent activity last (rendered by the parent).
+
+function TailorStatTile({ label, value, tone, href, loading }: {
+    label: string; value?: number; tone: string; href: string; loading: boolean;
+}) {
+    return (
+        <Link to={href} className="bg-white border border-surface-100 rounded-xl px-3 py-2.5 hover:border-brand-200 transition-colors">
+            <p className={clsx("text-xl font-bold leading-tight", tone)}>{loading ? "…" : (value ?? 0)}</p>
+            <p className="text-2xs text-surface-500 mt-0.5 leading-tight">{label}</p>
+        </Link>
+    );
+}
+
+function TailorHome({ stats, isLoading, can }: {
+    stats?: DashboardStats; isLoading: boolean; can: (p: string) => boolean;
+}) {
+    // Same smart-sorted feed as My Tasks (IntelligenceService orders it by
+    // deadline-miss risk) — the dashboard shows the top of that queue.
+    const { data: tasks, isLoading: tasksLoading } = useQuery<any[]>({
+        queryKey: ["tailor-home-tasks"],
+        queryFn: () => get<any[]>("/v1/tailor/tasks"),
+        staleTime: 30_000,
+    });
+    const top = (tasks ?? []).slice(0, 4);
+
+    const isQc = can("production.submit_qc") || can("production.approve_qc");
+
+    const quickActions = [
+        { label: "My Tasks",      href: "/production/my-tasks",   icon: <ClipboardIcon /> },
+        { label: "Messages",      href: "/comms",                 icon: <PaymentIcon /> },
+        { label: "Notifications", href: "/notifications",         icon: <AlertIcon />, badge: stats?.unread_notifications },
+        { label: "Calendar",      href: "/production/calendar",   icon: <ClockIcon /> },
+    ];
+
+    const dueChip = (t: any) => {
+        if (!t.production_order?.due_date) return null;
+        const days = Math.ceil((new Date(t.production_order.due_date).getTime() - Date.now()) / 86_400_000);
+        if (days < 0)  return <span className="text-2xs font-bold text-danger bg-danger-light rounded-full px-2 py-0.5">Overdue {-days}d</span>;
+        if (days === 0) return <span className="text-2xs font-bold text-warning-dark bg-warning-light rounded-full px-2 py-0.5">Due today</span>;
+        return <span className="text-2xs font-semibold text-surface-500 bg-surface-100 rounded-full px-2 py-0.5">Due in {days}d</span>;
+    };
+
+    return (
+        <div className="space-y-4">
+            {/* Compact stat strip — numbers at a glance, no vertical sprawl */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <TailorStatTile label="Active"   value={stats?.production_in_progress} tone="text-brand-600"  href="/production/my-tasks" loading={isLoading} />
+                <TailorStatTile label="In queue" value={stats?.production_queue}       tone="text-info"       href="/production/my-tasks" loading={isLoading} />
+                <TailorStatTile label="Overdue"  value={stats?.production_overdue}     tone="text-danger"     href="/production/my-tasks" loading={isLoading} />
+                {isQc
+                    ? <TailorStatTile label="QC pending" value={stats?.production_qc_pending} tone="text-purple-600" href="/production/qc" loading={isLoading} />
+                    : <TailorStatTile label="Alerts"     value={stats?.unread_notifications}  tone="text-warning-dark" href="/notifications" loading={isLoading} />}
+            </div>
+
+            {/* THE HERO — what to work on next */}
+            <div className="card overflow-hidden">
+                <div className="card-header flex items-center justify-between">
+                    <h2 className="font-semibold text-sm text-surface-900">My Tasks</h2>
+                    <Link to="/production/my-tasks" className="text-xs font-semibold text-brand-600 hover:text-brand-700">Open all →</Link>
+                </div>
+                <div className="divide-y divide-surface-50">
+                    {tasksLoading ? (
+                        <div className="py-8 text-center text-sm text-surface-400">Loading…</div>
+                    ) : top.length === 0 ? (
+                        <div className="py-8 text-center">
+                            <p className="text-sm font-medium text-surface-500">Nothing assigned right now</p>
+                            <p className="text-xs text-surface-400 mt-1">New work will appear here the moment it's assigned to you.</p>
+                        </div>
+                    ) : top.map((t: any, i: number) => (
+                        <Link key={t.id} to="/production/my-tasks"
+                            className={clsx("flex items-center gap-3 px-4 py-3 hover:bg-surface-50 transition-colors", i === 0 && "bg-brand-50/40")}>
+                            <span className={clsx("w-7 h-7 rounded-full flex items-center justify-center text-2xs font-bold shrink-0",
+                                t.status === "in_progress" ? "bg-brand-500 text-white" : "bg-surface-100 text-surface-500")}>
+                                {i + 1}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-surface-900 truncate">
+                                    {t.production_order?.product?.translations?.[0]?.name ?? t.production_order?.order_number ?? "Task"}
+                                </p>
+                                <p className="text-2xs text-surface-400 truncate">
+                                    {t.stage?.name}{t.production_order?.order_number ? ` · ${t.production_order.order_number}` : ""}
+                                    {t.blocked_by_stage ? ` · 🔒 waiting on ${t.blocked_by_stage}` : ""}
+                                </p>
+                            </div>
+                            <div className="shrink-0 flex items-center gap-2">
+                                {dueChip(t)}
+                                {t.status === "in_progress" && (
+                                    <span className="text-2xs font-bold text-brand-600 bg-brand-50 border border-brand-200 rounded-full px-2 py-0.5">In progress</span>
+                                )}
+                            </div>
+                        </Link>
+                    ))}
+                </div>
+            </div>
+
+            {/* Quick actions — icons with a name, one row, not furniture */}
+            <div className="grid grid-cols-4 gap-2.5">
+                {quickActions.map((a) => (
+                    <Link key={a.href} to={a.href}
+                        className="relative bg-white border border-surface-100 rounded-xl py-3 flex flex-col items-center gap-1.5 hover:border-brand-200 hover:bg-brand-50/30 transition-colors">
+                        <span className="text-surface-500">{a.icon}</span>
+                        <span className="text-2xs font-semibold text-surface-600">{a.label}</span>
+                        {!!a.badge && (
+                            <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-danger text-white text-2xs font-bold flex items-center justify-center">{a.badge > 99 ? "99+" : a.badge}</span>
+                        )}
+                    </Link>
+                ))}
+            </div>
+        </div>
+    );
+}
+
 function StatCard({
     label, value, icon, color, loading, href, badge,
 }: {
@@ -402,27 +518,9 @@ function RoleStatGrid({
     can: (p: string) => boolean; isAdmin: boolean; fmtCurrency: (n?: number) => string;
     kpis: any; kpiLoading: boolean;
 }) {
-    // ── Tailor view ──────────────────────────────────────────────────────────
+    // ── Tailor view — the full worker home, not just a stat grid ─────────────
     if (roles.includes("tailor")) {
-        return (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                <StatCard label="Active Tasks"       value={stats?.production_in_progress}
-                    loading={isLoading} color="bg-brand-50 text-brand-600"
-                    href="/production/my-tasks" icon={<ClipboardIcon />} />
-                <StatCard label="Tasks in Queue"     value={stats?.production_queue}
-                    loading={isLoading} color="bg-info-light text-info"
-                    href="/production/my-tasks" icon={<ClockIcon />} />
-                <StatCard label="Overdue Orders"     value={stats?.production_overdue}
-                    loading={isLoading} color="bg-danger-light text-danger"
-                    href="/production/my-tasks" icon={<AlertIcon />} />
-                <StatCard label="Notifications"      value={stats?.unread_notifications}
-                    loading={isLoading} color="bg-warning-light text-warning-dark"
-                    href="/notifications" badge={stats?.unread_notifications} icon={<PaymentIcon />} />
-                <StatCard label="QC Pending"         value={stats?.production_qc_pending}
-                    loading={isLoading} color="bg-purple-50 text-purple-600"
-                    href="/production?status=qc_pending" icon={<BoxIcon />} />
-            </div>
-        );
+        return <TailorHome stats={stats} isLoading={isLoading} can={can} />;
     }
 
     // ── POS Clerk view ───────────────────────────────────────────────────────
@@ -656,10 +754,12 @@ export default function DashboardPage() {
                 <ProductionSummaryCard stats={stats} loading={isLoading} />
             )}
 
-            {/* Bottom two-col: activity + quick actions */}
+            {/* Bottom two-col: activity + quick actions. Tailors already have an
+                icon quick-action grid in their hero, so they get activity alone,
+                full-width, LAST — it is informational, not operational. */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
                 {/* Recent Activity — takes 2/3 */}
-                <div className="lg:col-span-2 card overflow-hidden">
+                <div className={clsx("card overflow-hidden", roles.includes("tailor") ? "lg:col-span-3" : "lg:col-span-2")}>
                     <div className="card-header">
                         <h2 className="font-semibold text-sm text-surface-900">Recent Activity</h2>
                     </div>
@@ -697,7 +797,7 @@ export default function DashboardPage() {
                 </div>
 
                 {/* Role-aware quick actions — takes 1/3 */}
-                <QuickActionsPanel actions={quickActions} />
+                {!roles.includes("tailor") && <QuickActionsPanel actions={quickActions} />}
             </div>
         </div>
     );

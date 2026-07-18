@@ -159,6 +159,30 @@ class ProductionOrder extends Model
         return $this->hasMany(ProductionOrderAssignee::class);
     }
 
+    /**
+     * Scope production orders to what this user is allowed to SEE.
+     *
+     * Coordinators — anyone who manages assignees, raises or confirms orders,
+     * or holds an admin role — see the whole floor. A worker sees only orders
+     * they are actually part of: a task assigned to them, or membership on the
+     * order's assignee list. This is the server-side gate; hiding menu items is
+     * presentation, not security.
+     */
+    public function scopeVisibleTo($query, \App\Models\User $user)
+    {
+        if ($user->hasAnyRole(['admin', 'super_admin'])
+            || $user->can('production.manage_assignees')
+            || $user->can('production.raise_order')
+            || $user->can('production.confirm_order')) {
+            return $query;
+        }
+
+        return $query->where(function ($q) use ($user) {
+            $q->whereHas('tasks', fn ($t) => $t->where('assigned_to', $user->id))
+              ->orWhereHas('assignees', fn ($a) => $a->where('user_id', $user->id));
+        });
+    }
+
     public function approvals()
     {
         return $this->hasMany(ProductionOrderApproval::class);
