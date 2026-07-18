@@ -2661,11 +2661,18 @@ function OrderThreadItem({ channel, active, onClick, onDismiss }: {
                         )}>
                             {orderNum}
                         </span>
-                        {unread > 0 && (
-                            <span className="shrink-0 min-w-[16px] h-4 px-1 rounded-full bg-brand-600 text-white text-2xs font-bold flex items-center justify-center ml-auto">
-                                {unread > 99 ? "99+" : unread}
-                            </span>
-                        )}
+                        <span className="ml-auto flex items-center gap-1.5 shrink-0">
+                            {fmtWhen(channel.last_message?.created_at ?? channel.last_activity_at) && (
+                                <span className={clsx("text-2xs tabular-nums", unread > 0 ? "text-brand-600 font-semibold" : "text-surface-300")}>
+                                    {fmtWhen(channel.last_message?.created_at ?? channel.last_activity_at)}
+                                </span>
+                            )}
+                            {unread > 0 && (
+                                <span className="min-w-[16px] h-4 px-1 rounded-full bg-brand-600 text-white text-2xs font-bold flex items-center justify-center">
+                                    {unread > 99 ? "99+" : unread}
+                                </span>
+                            )}
+                        </span>
                     </div>
 
                     {/* Subtitle: product/customer·status·due (from description) */}
@@ -2784,10 +2791,16 @@ function OrderThreadsSection({ channels, activeId, onSelect, onDismiss, recently
 
                     {channels.length === 0 ? (
                         <p className="text-2xs text-surface-400 px-2 py-1">No order threads yet</p>
-                    ) : visible.length === 0 ? (
-                        <p className="text-2xs text-surface-400 px-2 py-1">No results for "{search}"</p>
+                    ) : search.trim() && searched.length === 0 ? (
+                        <p className="text-2xs text-surface-400 px-2 py-1">No orders match "{search.trim()}"</p>
                     ) : (
                         <>
+                            {/* All threads can be outside the recency window — that's a quiet
+                                list, not a failed search; the "N older threads" toggle below
+                                is the way in. */}
+                            {visible.length === 0 && !search.trim() && (
+                                <p className="text-2xs text-surface-400 px-2 py-1">Nothing active this fortnight</p>
+                            )}
                             {visible.map(c => (
                                 <OrderThreadItem key={c.id} channel={c} active={c.id === activeId} onClick={() => onSelect(c.id)} onDismiss={() => onDismiss(c)} />
                             ))}
@@ -2847,34 +2860,97 @@ function OrderThreadsSection({ channels, activeId, onSelect, onDismiss, recently
 }
 
 // ─── Channel list item ────────────────────────────────────────────────────────
+// A conversation row reads like a messenger, not a menu: identity avatar in a
+// stable per-person colour, name + relative time on one line, preview + unread
+// badge on the next. Unread rows carry visual weight; read rows recede.
 
-function ChannelItem({ channel, active, onClick }: { channel: Channel; active: boolean; onClick: () => void }) {
+const AVATAR_GRADIENTS = [
+    "from-sky-500 to-blue-600",
+    "from-emerald-500 to-teal-600",
+    "from-violet-500 to-purple-600",
+    "from-rose-500 to-pink-600",
+    "from-amber-500 to-orange-600",
+    "from-indigo-500 to-blue-700",
+    "from-cyan-500 to-sky-600",
+    "from-fuchsia-500 to-purple-600",
+];
+// Deterministic: the same person is always the same colour, everywhere.
+const avatarGradient = (seed: string) =>
+    AVATAR_GRADIENTS[[...seed].reduce((n, ch) => n + ch.charCodeAt(0), 0) % AVATAR_GRADIENTS.length];
+const initialsOf = (name: string) =>
+    name.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() ?? "").join("") || "?";
+
+/** WhatsApp-style relative time: now · 12m · 14:05 · Yest · Mon · 12 Jul */
+function fmtWhen(iso?: string | null): string | null {
+    if (!iso) return null;
+    const d = new Date(iso);
+    const now = new Date();
+    const diff = now.getTime() - d.getTime();
+    if (diff < 60_000) return "now";
+    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
+    if (d.toDateString() === now.toDateString())
+        return d.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" });
+    if (d.toDateString() === new Date(now.getTime() - 86_400_000).toDateString()) return "Yest";
+    if (diff < 6 * 86_400_000) return d.toLocaleDateString("en-KE", { weekday: "short" });
+    return d.toLocaleDateString("en-KE", { day: "2-digit", month: "short" });
+}
+
+function ChannelItem({ channel, active, onClick, currentUserName }: {
+    channel: Channel; active: boolean; onClick: () => void; currentUserName?: string | null;
+}) {
     const unread = channel.unread_count ?? 0;
+    const isDm   = channel.type === "dm";
+    const when   = fmtWhen(channel.last_message?.created_at ?? channel.last_activity_at);
+    const mine   = !!currentUserName && channel.last_message?.user_name === currentUserName;
     return (
         <button onClick={onClick} className={clsx(
-            "w-full flex items-center gap-2.5 px-2 py-2.5 sm:py-2 rounded-lg text-left transition-colors mb-0.5",
-            active ? "bg-brand-500/10 text-brand-700" : "text-surface-600 hover:bg-surface-100 hover:text-surface-900"
+            "w-full flex items-center gap-2.5 px-2 py-2 rounded-xl text-left transition-colors mb-0.5 relative",
+            active ? "bg-brand-500/10" : "hover:bg-surface-100"
         )}>
-            <div className={clsx("w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-2xs font-bold",
-                active ? "bg-brand-500/20 text-brand-700" : "bg-surface-200 text-surface-600")}>
-                {channel.type === "dm"
-                    ? (channel.name[0] ?? "D").toUpperCase()
-                    : channel.is_private ? <LockIcon /> : "#"
-                }
-            </div>
-            <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold truncate">{channel.name}</p>
-                {channel.last_message && (
-                    <p className="text-2xs text-surface-400 truncate">
-                        {channel.last_message.user_name ? `${channel.last_message.user_name}: ` : ""}{stripMarkdown(channel.last_message.body)}
-                    </p>
-                )}
-            </div>
-            {unread > 0 && (
-                <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-brand-600 text-white text-2xs font-bold flex items-center justify-center">
-                    {unread > 99 ? "99+" : unread}
-                </span>
+            {active && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-8 rounded-full bg-brand-500" aria-hidden="true" />}
+            {isDm ? (
+                <div className={clsx("w-9 h-9 rounded-full bg-gradient-to-br flex items-center justify-center shrink-0 text-2xs font-bold text-white shadow-sm", avatarGradient(channel.name))}>
+                    {initialsOf(channel.name)}
+                </div>
+            ) : (
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 flex items-center justify-center shrink-0 text-white shadow-sm">
+                    {channel.is_private ? <LockIcon /> : <span className="text-xs font-bold">#</span>}
+                </div>
             )}
+            <div className="flex-1 min-w-0">
+                <div className="flex items-baseline justify-between gap-2">
+                    <p className={clsx("text-xs truncate",
+                        active ? "font-bold text-brand-700"
+                        : unread > 0 ? "font-bold text-surface-900"
+                        : "font-semibold text-surface-800")}>
+                        {channel.name}
+                    </p>
+                    {when && (
+                        <span className={clsx("text-2xs shrink-0 tabular-nums", unread > 0 ? "text-brand-600 font-semibold" : "text-surface-300")}>
+                            {when}
+                        </span>
+                    )}
+                </div>
+                <div className="flex items-center justify-between gap-2 mt-0.5">
+                    {channel.last_message ? (
+                        <p className={clsx("text-2xs truncate", unread > 0 ? "text-surface-600 font-medium" : "text-surface-400")}>
+                            {mine
+                                ? <span className="text-surface-400">You: </span>
+                                : (!isDm && channel.last_message.user_name)
+                                    ? `${channel.last_message.user_name.split(" ")[0]}: `
+                                    : null}
+                            {stripMarkdown(channel.last_message.body)}
+                        </p>
+                    ) : (
+                        <p className="text-2xs text-surface-300 italic truncate">No messages yet</p>
+                    )}
+                    {unread > 0 && (
+                        <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-brand-600 text-white text-2xs font-bold flex items-center justify-center">
+                            {unread > 99 ? "99+" : unread}
+                        </span>
+                    )}
+                </div>
+            </div>
         </button>
     );
 }
@@ -2960,12 +3036,17 @@ export default function CommsHub() {
     };
 
     const channels      = data?.channels ?? [];
-    const dms           = channels.filter(c => c.type === "dm");
+    // Messenger order everywhere: the conversation that just spoke sits on top.
+    const byActivity = (a: Channel, b: Channel) =>
+        (b.last_activity_at ? new Date(b.last_activity_at).getTime() : 0) -
+        (a.last_activity_at ? new Date(a.last_activity_at).getTime() : 0);
+    const dms           = channels.filter(c => c.type === "dm").sort(byActivity);
     // Context channels (auto-created for orders/production orders) go into their
     // own "Order Threads" section — keeps the Spaces list clean regardless of
     // how many orders have active conversations.
     const orderThreads  = channels.filter(c => c.type !== "dm" && c.context_type != null);
-    const manualSpaces  = channels.filter(c => c.type !== "dm" && c.context_type == null);
+    const manualSpaces  = channels.filter(c => c.type !== "dm" && c.context_type == null).sort(byActivity);
+    const currentUserName = user ? `${user.first_name} ${user.last_name}` : null;
     const activeChannel = channels.find(c => c.id === activeId) ?? null;
     const totalUnread   = channels.reduce((n, c) => n + (c.unread_count ?? 0), 0);
 
@@ -3026,7 +3107,7 @@ export default function CommsHub() {
                     <SidebarSection label="Direct Messages" onAdd={() => setShowDirectory(true)} addTitle="New message">
                         {dms.length === 0
                             ? <p className="text-2xs text-surface-400 px-2 py-1">No direct messages yet</p>
-                            : dms.map(c => <ChannelItem key={c.id} channel={c} active={c.id === activeId} onClick={() => selectChannel(c.id)} />)
+                            : dms.map(c => <ChannelItem key={c.id} channel={c} active={c.id === activeId} onClick={() => selectChannel(c.id)} currentUserName={currentUserName} />)
                         }
                     </SidebarSection>
 
@@ -3044,7 +3125,7 @@ export default function CommsHub() {
                     <SidebarSection label="Spaces" onAdd={() => setShowNewSpace(true)} addTitle="New space">
                         {manualSpaces.length === 0
                             ? <p className="text-2xs text-surface-400 px-2 py-1">No spaces yet</p>
-                            : manualSpaces.map(c => <ChannelItem key={c.id} channel={c} active={c.id === activeId} onClick={() => selectChannel(c.id)} />)
+                            : manualSpaces.map(c => <ChannelItem key={c.id} channel={c} active={c.id === activeId} onClick={() => selectChannel(c.id)} currentUserName={currentUserName} />)
                         }
                     </SidebarSection>
                 </div>
@@ -3055,11 +3136,28 @@ export default function CommsHub() {
                 {activeChannel ? (
                     <ChannelView channel={activeChannel} onOpenSidebar={() => setMobileSidebarOpen(true)} />
                 ) : (
-                    <div className="flex flex-col items-center justify-center h-full gap-4 text-surface-400 p-8">
-                        <svg className="w-14 h-14 opacity-20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.25}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
-                        </svg>
-                        <p className="text-sm text-center">Select a conversation or start a new one</p>
+                    <div className="flex flex-col items-center justify-center h-full gap-5 p-8 bg-gradient-to-b from-surface-50/60 to-white">
+                        {/* A conversation, not an icon: the empty state speaks the same
+                            bubble language as the chat it's inviting you into. */}
+                        <div className="w-full max-w-[260px] space-y-2 select-none" aria-hidden="true">
+                            <div className="flex items-end gap-1.5">
+                                <div className="w-6 h-6 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-[9px] font-bold text-white shrink-0">PN</div>
+                                <div className="rounded-2xl rounded-bl-md bg-white border border-surface-200 px-3.5 py-2 text-2xs text-surface-600 shadow-sm">
+                                    The cassock batch is through QC 🎉
+                                </div>
+                            </div>
+                            <div className="flex justify-end">
+                                <div className="rounded-2xl rounded-br-md bg-slate-800 px-3.5 py-2 text-2xs text-white shadow-sm">
+                                    Well done team — dispatch at 2pm.
+                                </div>
+                            </div>
+                        </div>
+                        <div className="text-center">
+                            <h3 className="text-base font-bold text-surface-900">Your team, in one place</h3>
+                            <p className="text-xs text-surface-400 mt-1 max-w-[260px]">
+                                Direct messages, order threads and spaces — pick a conversation, or start one.
+                            </p>
+                        </div>
                         <div className="flex gap-2">
                             <button onClick={() => { setShowDirectory(true); setMobileSidebarOpen(false); }} className="btn-secondary text-xs">💬 New Message</button>
                             <button onClick={() => { setShowNewSpace(true); setMobileSidebarOpen(false); }} className="btn-primary text-xs"># New Space</button>
