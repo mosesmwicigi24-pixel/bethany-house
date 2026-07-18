@@ -184,7 +184,7 @@ class InventoryProcurementIntelligenceTest extends TestCase
         $purchaseId = DB::table('purchase_orders')->insertGetId([
             'po_number' => 'PO-P4-1', 'supplier_id' => $supplierId, 'outlet_id' => $outlet->id,
             'order_date' => now()->subDays(20)->format('Y-m-d'), 'status' => 'received',
-            'total_amount' => 64000, 'created_at' => now(), 'updated_at' => now(),
+            'subtotal' => 64000, 'total_amount' => 64000, 'created_at' => now(), 'updated_at' => now(),
         ]);
         DB::table('purchase_order_items')->insert([
             'purchase_order_id' => $purchaseId, 'item_type' => 'material', 'material_id' => $materialId,
@@ -218,7 +218,7 @@ class InventoryProcurementIntelligenceTest extends TestCase
             'po_number' => 'PO-P4-2', 'supplier_id' => $supplierId, 'outlet_id' => $outlet->id,
             'order_date' => now()->subDays(10)->format('Y-m-d'),
             'expected_delivery_date' => now()->subDays(5)->format('Y-m-d'),
-            'status' => 'received', 'total_amount' => 30000,
+            'status' => 'received', 'subtotal' => 30000, 'total_amount' => 30000,
             'created_at' => now(), 'updated_at' => now(),
         ]);
         DB::table('goods_received_notes')->insert([
