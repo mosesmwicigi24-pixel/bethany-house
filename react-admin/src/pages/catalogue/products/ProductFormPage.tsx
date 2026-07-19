@@ -593,20 +593,37 @@ function joinWithAnd(items: string[]): string {
     return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
+const isSizeKey = (k: string) => ["size", "sizes"].includes(k.trim().toLowerCase());
+const isColourKey = (k: string) => ["colour", "color"].includes(k.trim().toLowerCase());
+const isFeaturesKey = (k: string) => ["features", "feature"].includes(k.trim().toLowerCase());
+
 function composeVariantName(productName: string, attrs: Record<string, string>): string {
-    // Strip a trailing spaced-dash colour suffix ("Princes Cassock – Blue" →
-    // "Princes Cassock"), but never a hyphen inside a word ("T-Shirt").
     const base = (productName.replace(/\s+[\u2013\u2014-]\s+\S.*$/u, "").trim() || productName.trim());
 
-    const entries = Object.entries(attrs).filter(([, v]) => typeof v === "string" && v.trim() !== "");
+    // Size is a pick-your-size option, never part of the name.
+    const entries = Object.entries(attrs).filter(
+        ([k, v]) => typeof v === "string" && v.trim() !== "" && !isSizeKey(k),
+    );
     if (entries.length === 0) return base;
 
-    const colourIdx = entries.findIndex(([k]) => ["colour", "color"].includes(k.trim().toLowerCase()));
+    // Features role: the colour colours the features, the garment leads —
+    // "White Princes Cassock + Black Piping, Pleats and Buttons".
+    const featuresIdx = entries.findIndex(([k]) => isFeaturesKey(k));
+    if (featuresIdx >= 0) {
+        const colour = entries.find(([k]) => isColourKey(k))?.[1].trim() ?? "";
+        const coloured = `${colour} ${entries[featuresIdx][1].trim()}`.trim();
+        const extra = entries
+            .filter(([k], i) => i !== featuresIdx && !isColourKey(k))
+            .map(([, v]) => v.trim());
+        return `${base} + ${[coloured, ...extra].join(", ")}`.trim();
+    }
+
+    // No features: the colour leads as the body colour.
+    const colourIdx = entries.findIndex(([k]) => isColourKey(k));
     const mainIdx = colourIdx >= 0 ? colourIdx : 0;
     const mainValue = entries[mainIdx][1].trim();
     const lead = `${mainValue} ${base}`.trim();
 
-    // Secondary attributes grouped by shared value, first-seen order.
     const groups: { value: string; labels: string[] }[] = [];
     entries.forEach(([label, value], i) => {
         if (i === mainIdx) return;
@@ -637,27 +654,47 @@ function VariantGenerator({
 }: VariantGeneratorProps) {
     const toast = useToastStore();
     const [attributes, setAttributes] = useState<AttributeGroup[]>([
-        { type: "Size", values: [] },
         { type: "Colour", values: [] },
+        { type: "Features", values: [] },
+        { type: "Size", values: [] },
     ]);
     const [newAttrType, setNewAttrType] = useState("");
     const [valueInputs, setValueInputs] = useState<Record<string, string>>({});
     const [generatedVariants, setGeneratedVariants] = useState<any[]>([]);
     const [step, setStep] = useState<"attributes" | "prices">("attributes");
 
-    // Compute all combinations (cartesian product)
+    // Role-aware generation:
+    //  · Colour and Size are the axes → a variant per colour × size (each a
+    //    distinct sellable SKU).
+    //  · Features are COLLAPSED into one coloured descriptor (all features take
+    //    the colour) — never a cartesian axis, so no "S / Grey / Piping".
+    //  · Size is kept out of the name but present as its own attribute + in SKU.
     const combineAttributes = (
         groups: AttributeGroup[],
     ): Record<string, string>[] => {
-        const nonEmpty = groups.filter((g) => g.values.length > 0);
-        if (nonEmpty.length === 0) return [];
-        return nonEmpty.reduce<Record<string, string>[]>((acc, group) => {
-            if (acc.length === 0)
-                return group.values.map((v) => ({ [group.type]: v }));
-            return acc.flatMap((combo) =>
-                group.values.map((v) => ({ ...combo, [group.type]: v })),
-            );
-        }, []);
+        const colour = groups.find((g) => isColourKey(g.type) && g.values.length > 0);
+        const size = groups.find((g) => isSizeKey(g.type) && g.values.length > 0);
+        // Every non-colour, non-size value is a feature; join them once.
+        const featureValues = groups
+            .filter((g) => !isColourKey(g.type) && !isSizeKey(g.type))
+            .flatMap((g) => g.values);
+        const featuresText = joinWithAnd(featureValues);
+
+        const colourVals = colour ? colour.values : [""];
+        const sizeVals = size ? size.values : [""];
+        if (!colour && !size && featureValues.length === 0) return [];
+
+        const out: Record<string, string>[] = [];
+        for (const c of colourVals) {
+            for (const sz of sizeVals) {
+                const combo: Record<string, string> = {};
+                if (c) combo["Colour"] = c;
+                if (featuresText) combo["Features"] = featuresText;
+                if (sz) combo["Size"] = sz;
+                out.push(combo);
+            }
+        }
+        return out;
     };
 
     const combinations = useMemo(
@@ -709,7 +746,10 @@ function VariantGenerator({
         const variants = combinations.map((attrs, i) => ({
             attrs,
             name: composeVariantName(productName, attrs),
-            sku: `${productSku}-${Object.values(attrs)
+            // SKU carries the axes that vary the stock — colour + size — not the
+            // fixed features text.
+            sku: `${productSku}-${[attrs["Colour"], attrs["Size"]]
+                .filter(Boolean)
                 .map((v) => v.slice(0, 3).toUpperCase())
                 .join("-")}`,
             is_default: i === 0,
@@ -981,15 +1021,21 @@ function VariantGenerator({
                     {combinations.length > 0 && (
                         <div className="bg-surface-50 rounded-xl p-3 border border-surface-100">
                             <p className="text-xs font-semibold text-surface-500 mb-2">
-                                Preview - {combinations.length} combinations
+                                Preview - {combinations.length} variant{combinations.length !== 1 ? "s" : ""}
+                                <span className="font-normal text-surface-400"> · colour leads, features are coloured, size is a separate option</span>
                             </p>
-                            <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                            <div className="flex flex-col gap-1 max-h-28 overflow-y-auto">
                                 {combinations.map((combo, i) => (
                                     <span
                                         key={i}
-                                        className="text-xs bg-white border border-surface-200 text-surface-600 px-2 py-0.5 rounded-full"
+                                        className="text-xs text-surface-600 flex items-center gap-2"
                                     >
-                                        {Object.values(combo).join(" / ")}
+                                        <span className="font-medium text-surface-800">{composeVariantName(productName, combo)}</span>
+                                        {combo["Size"] && (
+                                            <span className="text-2xs bg-white border border-surface-200 text-surface-400 px-1.5 py-0.5 rounded-full shrink-0">
+                                                size {combo["Size"]}
+                                            </span>
+                                        )}
                                     </span>
                                 ))}
                             </div>
