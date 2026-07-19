@@ -334,7 +334,9 @@ export interface ProductCreatePayload {
 
 export interface VariantPayload {
     sku: string;
-    variant_name: string;
+    variant_name?: string;
+    /** Ask the server to compose the colour-led name from product + attributes. */
+    auto_name?: boolean;
     attributes: Record<string, string>;
     weight?: number | null;
     is_default: boolean;

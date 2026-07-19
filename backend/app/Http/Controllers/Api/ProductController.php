@@ -833,7 +833,11 @@ class ProductController extends Controller
             // one below (…-GRE-MIN → …-GRE-MIN-2 → -3) rather than hard-rejected,
             // so bulk "Generate Variants" never fails on a duplicate abbreviation.
             'sku'          => "required|string|max:100",
-            'variant_name' => 'required|string|max:255',
+            // With auto_name the server composes the merchandising name from the
+            // product + attributes (ProductVariant::composeName), so the client
+            // need not send one; manual creates still pass variant_name.
+            'variant_name' => 'required_without:auto_name|nullable|string|max:255',
+            'auto_name'    => 'sometimes|boolean',
             'attributes'   => 'nullable|array',
             'weight'       => 'nullable|numeric|min:0',
             'is_default'   => 'boolean',
@@ -856,9 +860,20 @@ class ProductController extends Controller
             // so uniqueness is checked against the uppercased value.
             $sku = $this->resolveUniqueVariantSku(strtoupper($validated['sku']));
 
+            // Compose the colour-led name server-side when asked, so every
+            // generated variant reads the same regardless of client.
+            $variantName = ($validated['auto_name'] ?? false)
+                ? ProductVariant::composeName(
+                    $product->translations->firstWhere('language_code', 'en')?->name
+                        ?? $product->translations->first()?->name
+                        ?? $product->sku,
+                    $validated['attributes'] ?? [],
+                )
+                : ($validated['variant_name'] ?? '');
+
             $variant = $product->variants()->create([
                 'sku'          => $sku,
-                'variant_name' => $validated['variant_name'],
+                'variant_name' => $variantName,
                 'attributes'   => $validated['attributes'] ?? [],
                 'weight'       => $validated['weight'] ?? null,
                 'is_default'   => $validated['is_default'] ?? false,
