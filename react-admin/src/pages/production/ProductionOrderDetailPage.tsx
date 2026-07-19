@@ -209,10 +209,13 @@ const StageIcon = ({ slug, className = "w-4 h-4" }: { slug?: string; className?:
 // (priority, due date, notes) amends at any point before completion, and every
 // change lands in the order's audit trail as field → from → to.
 
-function EditOrderModal({ order, onClose, onSaved }: { order: ProductionOrder; onClose: () => void; onSaved: () => void }) {
+function EditOrderModal({ order, onClose, onSaved, canReduce = false }: { order: ProductionOrder; onClose: () => void; onSaved: () => void; canReduce?: boolean }) {
     const toast = useToastStore();
     const qc = useQueryClient();
     const isDraft = order.status === "draft";
+    // A draft's quantity is free to change; past draft, only a privileged holder
+    // (production.delete_order / super admin) may REDUCE it, never increase.
+    const qtyEditable = isDraft || canReduce;
 
     const [quantity, setQuantity] = useState(String(order.quantity));
     const [priority, setPriority] = useState(order.priority ?? "normal");
@@ -230,9 +233,10 @@ function EditOrderModal({ order, onClose, onSaved }: { order: ProductionOrder; o
             if (dueDate) payload.due_date = dueDate;
             payload.fitting_date    = fittingDate || null;
             payload.collection_date = collectionDate || null;
-            // Only send quantity when it may legally change — a draft-only field
-            // shouldn't even travel from a confirmed order's form.
-            if (isDraft && Number(quantity) > 0) payload.quantity = Number(quantity);
+            // Send quantity only when it may legally change and actually did.
+            if (qtyEditable && Number(quantity) > 0 && Number(quantity) !== order.quantity) {
+                payload.quantity = Number(quantity);
+            }
             return put(`/v1/admin/production-orders/${order.id}`, payload);
         },
         onSuccess: () => {
@@ -249,11 +253,17 @@ function EditOrderModal({ order, onClose, onSaved }: { order: ProductionOrder; o
                 <div className="grid grid-cols-2 gap-3">
                     <div>
                         <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Quantity</label>
-                        <input type="number" min={1} value={quantity}
+                        <input type="number" min={1} max={isDraft ? undefined : order.quantity} value={quantity}
                             onChange={e => setQuantity(e.target.value)}
-                            disabled={!isDraft}
+                            disabled={!qtyEditable}
                             className="input mt-1 w-full text-sm disabled:opacity-50" />
-                        {!isDraft && (
+                        {!isDraft && canReduce && (
+                            <p className="text-2xs text-amber-600 mt-1 leading-snug">
+                                You may <b>reduce</b> this confirmed order (surplus serials void and material
+                                demand resizes). Increases aren't allowed — raise a second order instead.
+                            </p>
+                        )}
+                        {!isDraft && !canReduce && (
                             <p className="text-2xs text-surface-400 mt-1 leading-snug">
                                 Locked after confirmation — serials and material requirements were
                                 generated from it. Cancel &amp; re-raise, or raise a second order for the difference.
@@ -1981,6 +1991,7 @@ export default function ProductionOrderDetailPage() {
     const [tab, setTab] = useState<"stages" | "batches" | "materials" | "specs" | "activity" | "audit">("stages");
     const [modal, setModal] = useState<"assign" | "materials" | "qc" | "complete" | "edit" | "batches" | null>(null);
     const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [cancelReason, setCancelReason] = useState("");
 
     // Current user — to detect which stages they are assigned to
@@ -2059,6 +2070,15 @@ export default function ProductionOrderDetailPage() {
         },
         onError: (e: ApiError) => toast.error(e.message),
     });
+    const deleteMutation = useMutation({
+        mutationFn: () => del(`/v1/admin/production-orders/${id}/force`),
+        onSuccess: () => {
+            toast.success("Production order deleted.");
+            setShowDeleteConfirm(false);
+            navigate("/production/orders");
+        },
+        onError: (e: ApiError) => toast.error(e.message),
+    });
 
     if (isLoading) return <div className="flex items-center justify-center h-64"><Spinner /></div>;
     if (!order) return (
@@ -2110,6 +2130,9 @@ export default function ProductionOrderDetailPage() {
     // Same permission that raises orders; the backend refuses completed/cancelled,
     // and only drafts may change quantity (serials + materials were sized from it).
     const canEdit     = !["completed", "cancelled"].includes(order.status) && can("production.raise_order");
+    // Privileged (production.delete_order / super admin): reduce a confirmed
+    // quantity and hard-delete the order.
+    const canDelete   = order.status !== "completed" && can("production.delete_order");
     const canOpenWIP  = ["pending", "in_progress", "on_hold", "qc_pending", "qc_passed", "qc_failed"].includes(order.status);
 
     // Batches earn a tab of their own the moment they can exist: a rich batch
@@ -2263,10 +2286,17 @@ export default function ProductionOrderDetailPage() {
                     >
                         📊 Costing Report
                     </button>
+                    {canDelete && (
+                        <button onClick={() => setShowDeleteConfirm(true)}
+                            disabled={deleteMutation.isPending}
+                            className="btn-sm bg-white text-danger border border-danger/40 rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-danger/5 ml-auto">
+                            🗑 Delete Order
+                        </button>
+                    )}
                     {canCancel && (
                         <button onClick={() => setShowCancelConfirm(true)}
                             disabled={cancelMutation.isPending}
-                            className="btn-sm bg-white text-danger border border-danger/30 rounded-xl px-3 py-1.5 text-xs font-semibold ml-auto">
+                            className="btn-sm bg-white text-danger border border-danger/30 rounded-xl px-3 py-1.5 text-xs font-semibold">
                             {cancelMutation.isPending ? "Cancelling…" : "Cancel Order"}
                         </button>
                     )}
@@ -2492,7 +2522,7 @@ export default function ProductionOrderDetailPage() {
             </div>
 
             {/* Modals */}
-            {modal === "edit"      && <EditOrderModal order={order} onClose={() => setModal(null)} onSaved={refresh} />}
+            {modal === "edit"      && <EditOrderModal order={order} onClose={() => setModal(null)} onSaved={refresh} canReduce={can("production.delete_order")} />}
             {modal === "batches"   && <BatchesModal order={order} onClose={() => setModal(null)} onSaved={refresh} />}
             {modal === "assign"    && <AssignModal order={order} onClose={() => setModal(null)} onSaved={refresh} />}
             {modal === "materials" && <IssueMaterialsModal order={order} onClose={() => setModal(null)} onSaved={refresh} />}
@@ -2548,6 +2578,39 @@ export default function ProductionOrderDetailPage() {
                                     <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                                 )}
                                 {cancelMutation.isPending ? "Cancelling…" : "Cancel Order"}
+                            </button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
+
+            {/* Hard-delete confirm — privileged, irreversible */}
+            {showDeleteConfirm && (
+                <Modal open={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)}>
+                    <div className="p-6 w-full max-w-md">
+                        <div className="flex items-start gap-4 mb-4">
+                            <div className="w-10 h-10 rounded-full bg-danger-light flex items-center justify-center shrink-0">
+                                <svg className="w-5 h-5 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 className="text-base font-semibold text-surface-900">Delete Production Order</h3>
+                                <p className="text-sm text-surface-500 mt-1">
+                                    This permanently removes <span className="font-semibold text-surface-700">{order.order_number}</span> and
+                                    all its stages, batches, material allocations and serials. Any linked sales order is unlinked, not deleted.
+                                    <span className="block mt-1 text-danger font-medium">This cannot be undone — prefer “Cancel” to keep the record.</span>
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex gap-3 justify-end">
+                            <button onClick={() => setShowDeleteConfirm(false)} className="btn-secondary px-4 py-2 text-sm" disabled={deleteMutation.isPending}>
+                                Keep Order
+                            </button>
+                            <button onClick={() => deleteMutation.mutate()} disabled={deleteMutation.isPending}
+                                className="px-4 py-2 text-sm font-semibold bg-danger text-white rounded-lg hover:bg-danger/90 transition-colors disabled:opacity-50 flex items-center gap-2">
+                                {deleteMutation.isPending && (<div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />)}
+                                {deleteMutation.isPending ? "Deleting…" : "Delete Permanently"}
                             </button>
                         </div>
                     </div>
