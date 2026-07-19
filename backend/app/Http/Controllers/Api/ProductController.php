@@ -138,7 +138,7 @@ class ProductController extends Controller
 
         $query = Product::with([
             'category:id,name_en',
-            'images' => fn ($q) => $q->where('is_primary', true)->limit(1),
+            'images' => fn ($q) => $q->whereNull('product_variant_id')->where('is_primary', true)->limit(1),
             'translations' => fn ($q) => $q->where('language_code', 'en'),
             'prices' => fn ($q) => $q->whereNull('product_variant_id')->where('currency_code', 'KES'),
         ])->withCount('variants');
@@ -254,7 +254,7 @@ class ProductController extends Controller
             'prices',
             'variants.prices',
             'variants.images',
-            'images' => fn ($q) => $q->orderBy('sort_order'),
+            'images' => fn ($q) => $q->whereNull('product_variant_id')->orderBy('sort_order'),
             'seo',
         ])->findOrFail($id);
 
@@ -690,13 +690,30 @@ class ProductController extends Controller
     public function uploadImages(Request $request, $id)
     {
         $request->validate([
-            'images'   => 'required|array|min:1|max:10',
-            'images.*' => 'image|mimes:jpeg,png,jpg,webp|max:5120',
+            'images'     => 'required|array|min:1|max:10',
+            'images.*'   => 'image|mimes:jpeg,png,jpg,webp|max:5120',
+            // Optional: scope these images to one variant (colourway). The
+            // storefront shows a variant's own gallery when it has one, so a
+            // blue cassock displays blue photos rather than the generic set.
+            'variant_id' => 'nullable|integer',
         ]);
 
-        $product      = Product::findOrFail($id);
-        $maxOrder     = $product->images()->max('sort_order') ?? 0;
-        $isPrimary    = !$product->images()->exists();
+        $product   = Product::findOrFail($id);
+        $variantId = $request->filled('variant_id') ? (int) $request->variant_id : null;
+        if ($variantId !== null) {
+            // A variant image must belong to a variant of THIS product.
+            abort_unless(
+                $product->variants()->whereKey($variantId)->exists(),
+                422, 'That variant does not belong to this product.',
+            );
+        }
+
+        // Primary + ordering are scoped: a variant has its own first image and
+        // its own sort sequence, independent of the product-level gallery.
+        $scope     = fn () => ProductImage::where('product_id', $product->id)
+            ->where('product_variant_id', $variantId);
+        $maxOrder  = (clone $scope())->max('sort_order') ?? 0;
+        $isPrimary = !(clone $scope())->exists();
         $uploaded     = [];
         $imageService = app(ImageService::class);
 
@@ -705,7 +722,7 @@ class ProductController extends Controller
 
             $image = ProductImage::create([
                 'product_id'         => $product->id,
-                'product_variant_id' => null,
+                'product_variant_id' => $variantId,
                 'image_url'          => $result['url'],
                 'thumbnail_url'      => $result['thumbnail_url'] ?? $result['url'],
                 'alt_text'           => $product->translations->firstWhere('language_code', 'en')?->name ?? '',
@@ -727,9 +744,15 @@ class ProductController extends Controller
      */
     public function setPrimaryImage($productId, $imageId)
     {
-        $product = Product::findOrFail($productId);
-        $product->images()->update(['is_primary' => false]);
-        $product->images()->where('id', $imageId)->update(['is_primary' => true]);
+        $image = ProductImage::where('product_id', $productId)->where('id', $imageId)->firstOrFail();
+
+        // Primary is per-scope: setting a variant's hero resets only that
+        // variant's images; setting a product-level hero resets only the
+        // product-level (variant-less) set.
+        ProductImage::where('product_id', $productId)
+            ->where('product_variant_id', $image->product_variant_id)
+            ->update(['is_primary' => false]);
+        $image->update(['is_primary' => true]);
 
         return response()->json(['message' => 'Primary image updated.']);
     }
@@ -759,13 +782,19 @@ class ProductController extends Controller
      */
     public function deleteImage($productId, $imageId)
     {
-        $image = ProductImage::where('product_id', $productId)->where('id', $imageId)->firstOrFail();
+        $image     = ProductImage::where('product_id', $productId)->where('id', $imageId)->firstOrFail();
+        $variantId = $image->product_variant_id;
+        $wasPrimary = $image->is_primary;
         $this->deleteImageFile($image->image_url);
         $image->delete();
 
-        // Reassign primary if needed
-        if ($image->is_primary) {
-            ProductImage::where('product_id', $productId)->orderBy('sort_order')->first()?->update(['is_primary' => true]);
+        // Reassign primary within the SAME scope so a variant that loses its
+        // hero promotes another of its own images, not a product-level one.
+        if ($wasPrimary) {
+            ProductImage::where('product_id', $productId)
+                ->where('product_variant_id', $variantId)
+                ->orderBy('sort_order')
+                ->first()?->update(['is_primary' => true]);
         }
 
         return response()->json(['message' => 'Image deleted.']);
@@ -1167,7 +1196,8 @@ class ProductController extends Controller
     private function formatListItem(Product $product): array
     {
         $enTrans   = $product->translations->firstWhere('language_code', 'en');
-        $primary   = $product->images->firstWhere('is_primary', true) ?? $product->images->first();
+        $productImages = $product->images->whereNull('product_variant_id');
+        $primary   = $productImages->firstWhere('is_primary', true) ?? $productImages->first();
         $basePrice = $product->prices->whereNull('product_variant_id')->firstWhere('currency_code', 'KES');
 
         return [
@@ -1230,7 +1260,7 @@ class ProductController extends Controller
                 'prices'       => $v->prices->values(),
                 'images'       => $v->images->values(),
             ])->values(),
-            'images'              => $product->images->sortBy('sort_order')->values(),
+            'images'              => $product->images->whereNull('product_variant_id')->sortBy('sort_order')->values(),
             'seo'                 => $product->seo->values(),
             'measurements'        => $product->measurements ?? [],
             // tax_rate_ids and tax_rates are added in adminShow/store/update
