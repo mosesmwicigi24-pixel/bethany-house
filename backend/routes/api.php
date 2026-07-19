@@ -180,6 +180,16 @@ Route::prefix('v1')->group(function () {
             ->middleware('throttle:auth');
         Route::get('/storefront/orders/{token}', [\App\Http\Controllers\Api\StorefrontCheckoutController::class, 'status']);
 
+        // Passwordless "Find my orders": a one-time code (WhatsApp / email) then
+        // a 24h cache-backed session. Never gates checkout — pure lookup. See
+        // StorefrontLookupController.
+        Route::post('/storefront/otp/request', [\App\Http\Controllers\Api\StorefrontLookupController::class, 'requestCode'])
+            ->middleware('throttle:6,1');
+        Route::post('/storefront/otp/verify', [\App\Http\Controllers\Api\StorefrontLookupController::class, 'verifyCode'])
+            ->middleware('throttle:12,1');
+        Route::get('/storefront/my-orders', [\App\Http\Controllers\Api\StorefrontLookupController::class, 'myOrders'])
+            ->middleware('throttle:30,1');
+
         Route::prefix('settings')->group(function () {
             Route::get('/languages', [SettingController::class, 'languages']);
             Route::get('/currencies', [SettingController::class, 'currencies']);

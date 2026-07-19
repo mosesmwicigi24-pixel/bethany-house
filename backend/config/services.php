@@ -37,9 +37,16 @@ return [
 
 
     'whatsapp' => [
-        'token'           => env('WABA_TOKEN'),
-        'phone_number_id' => env('WABA_PHONE_NUMBER_ID'),
-        'api_version'     => env('WABA_API_VERSION', 'v19.0'),
+        'token'               => env('WABA_TOKEN'),
+        'phone_number_id'     => env('WABA_PHONE_NUMBER_ID'),
+        // WhatsApp Business Account id — required only to create/manage message
+        // templates (WhatsApp Manager → Account tools → shows the ID). Sending
+        // works without it. See `php artisan whatsapp:otp-template`.
+        'business_account_id' => env('WABA_ID'),
+        'api_version'         => env('WABA_API_VERSION', 'v19.0'),
+        // Approved AUTHENTICATION template used for passwordless order lookup.
+        'otp_template'        => env('WABA_OTP_TEMPLATE', 'order_lookup_code'),
+        'otp_template_lang'   => env('WABA_OTP_TEMPLATE_LANG', 'en'),
     ],
 
 ];
