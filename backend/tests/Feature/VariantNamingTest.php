@@ -87,6 +87,22 @@ class VariantNamingTest extends TestCase
         );
     }
 
+    public function test_the_garment_is_not_repeated_when_the_value_already_names_it(): void
+    {
+        $this->assertSame(
+            'BLACK PREACHING GOWN',
+            ProductVariant::composeName('Preaching Gown', ['Colour' => 'BLACK PREACHING GOWN']),
+        );
+        $this->assertSame(
+            'Velvet Doctorate Gown',
+            ProductVariant::composeName('Preaching Gown', ['Colour' => 'Velvet Doctorate Gown']),
+        );
+        $this->assertSame(
+            'Purple Chasuble',
+            ProductVariant::composeName('Chasuble', ['Colour' => 'Purple']),
+        );
+    }
+
     // ── Through the endpoint ─────────────────────────────────────────────────
 
     public function test_generator_auto_names_the_variant_server_side(): void

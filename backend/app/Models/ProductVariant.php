@@ -71,7 +71,13 @@ class ProductVariant extends Model
             }
         }
         $mainKey ??= array_key_first($attrs);
-        $lead = trim($attrs[$mainKey] . ' ' . $base);
+        // Don't repeat the garment when the colour value already names it:
+        // "BLACK PREACHING GOWN" for a Preaching Gown stays as-is, it doesn't
+        // become "BLACK PREACHING GOWN Preaching Gown".
+        $leadValue = trim($attrs[$mainKey]);
+        $lead = self::valueAlreadyNamesGarment($leadValue, $base)
+            ? $leadValue
+            : trim($leadValue . ' ' . $base);
 
         // Secondary attributes, grouped by shared value (first-seen order).
         $groups = [];
@@ -97,6 +103,25 @@ class ProductVariant extends Model
         }
 
         return $lead . ' + ' . implode(', ', $parts);
+    }
+
+    /**
+     * True when the colour value already contains the garment — the whole base
+     * name ("… Preaching Gown"), or its final garment word as a whole word
+     * ("… Gown") — so re-appending the base would just repeat it.
+     */
+    private static function valueAlreadyNamesGarment(string $value, string $base): bool
+    {
+        $v = mb_strtolower($value);
+        $b = mb_strtolower(trim($base));
+        if ($b !== '' && str_contains($v, $b)) {
+            return true;
+        }
+        $words = preg_split('/\s+/', $b, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $last = end($words);
+        return $last !== false
+            && mb_strlen($last) >= 4
+            && preg_match('/\b' . preg_quote($last, '/') . '\b/u', $v) === 1;
     }
 
     /** ["Piping","Buttons","Pleats"] → "Piping, Buttons and Pleats". */
