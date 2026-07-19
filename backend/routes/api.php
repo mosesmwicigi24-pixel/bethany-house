@@ -932,6 +932,8 @@ Route::prefix('v1')->group(function () {
                         ->middleware('permission:production.approve_qc,sanctum');
                     Route::delete('/{id}',                [ProductionController::class, 'destroy'])
                         ->middleware('permission:production.confirm_order,sanctum');
+                    Route::delete('/{id}/force',          [ProductionController::class, 'forceDelete'])
+                        ->middleware('permission:production.delete_order,sanctum');
                     Route::post('/{id}/cancel',           [ProductionController::class, 'destroy'])
                         ->middleware('permission:production.confirm_order,sanctum');
                     Route::post('/{id}/regenerate-tasks', [ProductionController::class, 'regenerateTasks'])

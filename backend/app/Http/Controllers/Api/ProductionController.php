@@ -302,13 +302,34 @@ class ProductionController extends Controller
         // difference.
         $quantityChanged = array_key_exists('quantity', $validated)
             && (int) $validated['quantity'] !== (int) $order->quantity;
+        $newQty = $quantityChanged ? (int) $validated['quantity'] : (int) $order->quantity;
+        $reducing = $quantityChanged && $newQty < (int) $order->quantity;
 
+        // Quantity on a non-draft order is structural — serials and material
+        // requirements were sized from it at confirmation. A draft may change
+        // freely. Past draft, only a privileged holder (production.delete_order,
+        // super_admin) may REDUCE it, and never below the work already done.
         if ($quantityChanged && $order->status !== 'draft') {
-            return response()->json([
-                'message' => 'Quantity can only be changed while the order is still a draft — '
-                    . 'serials and material requirements were generated from it at confirmation. '
-                    . 'Cancel and re-raise, or raise a second order for the difference.',
-            ], 422);
+            if (!$request->user()->can('production.delete_order')) {
+                return response()->json([
+                    'message' => 'Quantity can only be changed while the order is still a draft — '
+                        . 'serials and material requirements were generated from it at confirmation. '
+                        . 'Cancel and re-raise, or raise a second order for the difference.',
+                ], 422);
+            }
+            if (!$reducing) {
+                return response()->json([
+                    'message' => 'Only a reduction is allowed on a confirmed order — an increase mints new '
+                        . 'serials and material demand, so raise a second order for the extra units.',
+                ], 422);
+            }
+            // Never cut below pieces already worked (the furthest a stage has passed).
+            $produced = (int) ($order->tasks()->max('quantity_done') ?? 0);
+            if ($newQty < max(1, $produced)) {
+                return response()->json([
+                    'message' => "Cannot reduce below {$produced} — that many pieces have already been worked.",
+                ], 422);
+            }
         }
 
         // Amendments need a real trail: field → {from, to}, not just a list of
@@ -320,9 +341,9 @@ class ProductionController extends Controller
 
         $order->update($validated);
 
-        // A draft's material requirements follow its quantity. Only untouched
-        // allocation rows are resized — anything already allocated or used is
-        // real material in motion and is not silently rewritten.
+        // Material requirements follow the quantity. Only untouched allocation
+        // rows are resized — anything already allocated or used is real material
+        // in motion and is not silently rewritten.
         if ($quantityChanged) {
             $bom = BillOfMaterial::with('items')
                 ->where('product_id', $order->product_id)
@@ -337,6 +358,23 @@ class ProductionController extends Controller
                         ->update([
                             'quantity_required' => round($bomItem->quantity * (int) $validated['quantity'], 4),
                         ]);
+                }
+            }
+
+            // A confirmed order carries one in-production serial per unit. On a
+            // reduction, void the surplus (highest-numbered, still in production)
+            // so the serial count matches the new quantity.
+            if ($reducing) {
+                $surplus = \App\Models\ProductSerial::where('production_order_id', $order->id)
+                    ->where('status', \App\Models\ProductSerial::IN_PRODUCTION)
+                    ->orderByDesc('id')
+                    ->limit((int) $order->getOriginal('quantity') - $newQty)
+                    ->pluck('id');
+                if ($surplus->isNotEmpty()) {
+                    \App\Models\ProductSerial::whereIn('id', $surplus)->update([
+                        'status' => \App\Models\ProductSerial::CANCELLED,
+                        'notes'  => 'Cancelled: order quantity reduced.',
+                    ]);
                 }
             }
         }
@@ -866,6 +904,48 @@ class ProductionController extends Controller
         } catch (\Exception) {}
 
         return response()->json(['message' => 'Production order cancelled.']);
+    }
+
+    /**
+     * Hard-DELETE a production order and its children — the privileged version
+     * of cancel. Gated by production.delete_order (super_admin bypasses).
+     *
+     * Children cascade at the DB (tasks, batches, allocations, approvals,
+     * assignees, QC, messages); the linked sales-order item is UNLINKED, not
+     * deleted (order_items.production_order_id → set null); serials are voided
+     * first. A completed order is kept — its stock has already moved, so it is
+     * an inventory record, not something to erase.
+     */
+    public function forceDelete(Request $request, $id)
+    {
+        $order = ProductionOrder::findOrFail($id);
+
+        if ($order->status === 'completed') {
+            return response()->json([
+                'message' => 'A completed order cannot be deleted — its stock has already been produced. It stays as a record.',
+            ], 422);
+        }
+
+        $snapshot = [
+            'order_number' => $order->order_number,
+            'product_id'   => $order->product_id,
+            'quantity'     => $order->quantity,
+            'status'       => $order->status,
+        ];
+
+        DB::transaction(function () use ($order) {
+            // Void serials before the row goes (they key on the order id).
+            ProductSerialService::cancelForProductionOrder($order);
+            $order->delete(); // FK cascades handle tasks/batches/allocations/…
+        });
+
+        try {
+            ActivityLogService::log('production_order_deleted', null, array_merge($snapshot, [
+                'deleted_by' => $request->user()?->id,
+            ]));
+        } catch (\Exception) {}
+
+        return response()->json(['message' => 'Production order deleted.']);
     }
 
     // =========================================================================
