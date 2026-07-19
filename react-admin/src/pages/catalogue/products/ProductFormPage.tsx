@@ -578,9 +578,51 @@ interface VariantGeneratorProps {
     productId: number;
     currencies: any[];
     productSku: string;
+    productName: string;
     onSaved: () => void;
     /** Product-level prices from the main form — used to pre-fill variant prices */
     productPrices?: { currency_code: string; regular_price: number; sale_price?: number | null; cost_price?: number | null }[];
+}
+
+// Colour leads, the rest explains — mirror of the backend
+// ProductVariant::composeName (the server is authoritative on save; this is the
+// live preview). "White Princes Cassock + Black Piping, Buttons and Pleats".
+function joinWithAnd(items: string[]): string {
+    if (items.length <= 1) return items[0] ?? "";
+    if (items.length === 2) return `${items[0]} and ${items[1]}`;
+    return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+function composeVariantName(productName: string, attrs: Record<string, string>): string {
+    // Strip a trailing spaced-dash colour suffix ("Princes Cassock – Blue" →
+    // "Princes Cassock"), but never a hyphen inside a word ("T-Shirt").
+    const base = (productName.replace(/\s+[\u2013\u2014-]\s+\S.*$/u, "").trim() || productName.trim());
+
+    const entries = Object.entries(attrs).filter(([, v]) => typeof v === "string" && v.trim() !== "");
+    if (entries.length === 0) return base;
+
+    const colourIdx = entries.findIndex(([k]) => ["colour", "color"].includes(k.trim().toLowerCase()));
+    const mainIdx = colourIdx >= 0 ? colourIdx : 0;
+    const mainValue = entries[mainIdx][1].trim();
+    const lead = `${mainValue} ${base}`.trim();
+
+    // Secondary attributes grouped by shared value, first-seen order.
+    const groups: { value: string; labels: string[] }[] = [];
+    entries.forEach(([label, value], i) => {
+        if (i === mainIdx) return;
+        const v = value.trim();
+        const g = groups.find((x) => x.value === v);
+        if (g) g.labels.push(label);
+        else groups.push({ value: v, labels: [label] });
+    });
+    if (groups.length === 0) return lead;
+
+    const parts = groups.map((g) =>
+        groups.length === 1 && g.labels.length === 1
+            ? g.value
+            : `${g.value} ${joinWithAnd(g.labels)}`.trim(),
+    );
+    return `${lead} + ${parts.join(", ")}`;
 }
 
 function VariantGenerator({
@@ -589,6 +631,7 @@ function VariantGenerator({
     productId,
     currencies,
     productSku,
+    productName,
     onSaved,
     productPrices = [],
 }: VariantGeneratorProps) {
@@ -665,6 +708,7 @@ function VariantGenerator({
         }
         const variants = combinations.map((attrs, i) => ({
             attrs,
+            name: composeVariantName(productName, attrs),
             sku: `${productSku}-${Object.values(attrs)
                 .map((v) => v.slice(0, 3).toUpperCase())
                 .join("-")}`,
@@ -690,9 +734,9 @@ function VariantGenerator({
             for (const v of generatedVariants) {
                 await productsApi.createVariant(productId, {
                     sku: v.sku.toUpperCase(),
-                    variant_name: Object.entries(v.attrs)
-                        .map(([k, val]) => `${val}`)
-                        .join(" / "),
+                    // Server composes the canonical colour-led name from the
+                    // product + attributes (ProductVariant::composeName).
+                    auto_name: true,
                     attributes: v.attrs,
                     is_default: v.is_default,
                     is_active: true,
@@ -969,6 +1013,12 @@ function VariantGenerator({
                                 key={vi}
                                 className="border border-surface-100 rounded-xl overflow-hidden"
                             >
+                                {/* Merchandising name — colour leads, the rest explains */}
+                                <div className="px-3 pt-2 pb-1 bg-surface-50">
+                                    <p className="text-sm font-semibold text-surface-800">
+                                        {v.name}
+                                    </p>
+                                </div>
                                 <div className="flex items-center gap-3 px-3 py-2 bg-surface-50 border-b border-surface-100">
                                     <div className="flex gap-1 flex-wrap flex-1">
                                         {Object.entries(v.attrs).map(
@@ -3743,6 +3793,7 @@ export default function ProductFormPage() {
                     productId={Number(id)}
                     currencies={currencies}
                     productSku={watch("sku") || product?.sku || ""}
+                    productName={watch("translations.0.name") || product?.translations?.[0]?.name || ""}
                     productPrices={watch("prices") ?? []}
                     onSaved={() =>
                         qc.invalidateQueries({ queryKey: ["product", id] })
