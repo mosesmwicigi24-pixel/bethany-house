@@ -103,6 +103,42 @@ class VariantNamingTest extends TestCase
         );
     }
 
+    public function test_colour_colours_the_features_and_the_garment_leads(): void
+    {
+        // The flagship case: colour explains the features, garment (with its
+        // own body colour) leads, size is not in the name.
+        $this->assertSame(
+            'White Princes Cassock + Black Piping, Pleats and Buttons',
+            ProductVariant::composeName('White Princes Cassock', [
+                'Colour'   => 'Black',
+                'Features' => 'Piping, Pleats and Buttons',
+                'Size'     => 'M',
+            ]),
+        );
+    }
+
+    public function test_size_is_never_part_of_the_name(): void
+    {
+        $this->assertSame(
+            'Black Cassock',
+            ProductVariant::composeName('Cassock', ['Colour' => 'Black', 'Size' => 'XS']),
+        );
+        // Two sizes of the same colour compose to the same name (they differ by
+        // SKU and the size chip, not the name).
+        $this->assertSame(
+            ProductVariant::composeName('Cassock', ['Colour' => 'Black', 'Size' => 'S']),
+            ProductVariant::composeName('Cassock', ['Colour' => 'Black', 'Size' => 'XXL']),
+        );
+    }
+
+    public function test_features_without_a_colour_still_read_cleanly(): void
+    {
+        $this->assertSame(
+            'Cassock + Piping, Pleats and Buttons',
+            ProductVariant::composeName('Cassock', ['Features' => 'Piping, Pleats and Buttons']),
+        );
+    }
+
     // ── Through the endpoint ─────────────────────────────────────────────────
 
     public function test_generator_auto_names_the_variant_server_side(): void

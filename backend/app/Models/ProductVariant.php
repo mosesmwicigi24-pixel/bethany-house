@@ -51,15 +51,52 @@ class ProductVariant extends Model
         $base = preg_replace('/\s+[\x{2013}\x{2014}-]\s+\S.*$/u', '', $productName);
         $base = trim((string) $base) !== '' ? trim((string) $base) : trim($productName);
 
-        // Keep non-empty string attributes, preserving insertion order.
+        // Keep non-empty string attributes, preserving insertion order — and
+        // drop SIZE entirely: size is a pick-your-size option, not part of the
+        // merchandising name (a Black cassock is "…Black Piping…", the size is
+        // chosen separately).
         $attrs = [];
         foreach ($attributes as $k => $v) {
-            if (is_string($v) && trim($v) !== '') {
+            if (is_string($v) && trim($v) !== '' && !self::isSizeKey($k)) {
                 $attrs[$k] = trim($v);
             }
         }
         if (empty($attrs)) {
             return $base;
+        }
+
+        // Features role: when a "Features" attribute lists the parts (Piping,
+        // Pleats, Buttons…), the COLOUR colours those features and the garment
+        // leads by its own name — "White Princes Cassock + Black Piping, Pleats
+        // and Buttons" (the colour explains the features; it does not re-lead a
+        // garment whose colour is already in its name).
+        $featuresKey = null;
+        foreach (array_keys($attrs) as $k) {
+            if (in_array(strtolower(trim($k)), ['features', 'feature'], true)) {
+                $featuresKey = $k;
+                break;
+            }
+        }
+        if ($featuresKey !== null) {
+            $colour = '';
+            foreach ($attrs as $k => $v) {
+                if (in_array(strtolower(trim($k)), ['colour', 'color'], true)) {
+                    $colour = $v;
+                    break;
+                }
+            }
+            $coloured = trim($colour . ' ' . $attrs[$featuresKey]);
+            // Any remaining attributes (not colour, not features) trail as trim.
+            $extra = [];
+            foreach ($attrs as $k => $v) {
+                $lk = strtolower(trim($k));
+                if ($lk === strtolower(trim($featuresKey)) || in_array($lk, ['colour', 'color'], true)) {
+                    continue;
+                }
+                $extra[] = $v;
+            }
+            $suffix = implode(', ', array_merge([$coloured], $extra));
+            return trim($base . ' + ' . $suffix);
         }
 
         // Headline colour: an attribute named colour/color, else the first.
@@ -103,6 +140,12 @@ class ProductVariant extends Model
         }
 
         return $lead . ' + ' . implode(', ', $parts);
+    }
+
+    /** Size / Sizes attribute — excluded from the merchandising name. */
+    private static function isSizeKey(string $key): bool
+    {
+        return in_array(strtolower(trim($key)), ['size', 'sizes'], true);
     }
 
     /**
