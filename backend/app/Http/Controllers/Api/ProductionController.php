@@ -302,8 +302,9 @@ class ProductionController extends Controller
         // difference.
         $quantityChanged = array_key_exists('quantity', $validated)
             && (int) $validated['quantity'] !== (int) $order->quantity;
-        $newQty = $quantityChanged ? (int) $validated['quantity'] : (int) $order->quantity;
-        $reducing = $quantityChanged && $newQty < (int) $order->quantity;
+        $origQty = (int) $order->quantity;
+        $newQty = $quantityChanged ? (int) $validated['quantity'] : $origQty;
+        $reducing = $quantityChanged && $newQty < $origQty;
 
         // Quantity on a non-draft order is structural — serials and material
         // requirements were sized from it at confirmation. A draft may change
@@ -368,7 +369,7 @@ class ProductionController extends Controller
                 $surplus = \App\Models\ProductSerial::where('production_order_id', $order->id)
                     ->where('status', \App\Models\ProductSerial::IN_PRODUCTION)
                     ->orderByDesc('id')
-                    ->limit((int) $order->getOriginal('quantity') - $newQty)
+                    ->limit($origQty - $newQty)  // pre-update qty; update() re-syncs getOriginal
                     ->pluck('id');
                 if ($surplus->isNotEmpty()) {
                     \App\Models\ProductSerial::whereIn('id', $surplus)->update([
