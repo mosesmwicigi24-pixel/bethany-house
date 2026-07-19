@@ -10,6 +10,7 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\OrderShipment;
 use App\Models\ProductionOrder;
+use App\Models\ProductVariant;
 use App\Services\ActivityLogService;
 use App\Services\NotificationService;
 use App\Services\TaxCalculationService;
@@ -69,6 +70,7 @@ class StorefrontCheckoutController extends Controller
             'items.*.measurements'   => 'nullable|array|max:30',
             'items.*.measurements.*' => 'nullable|string|max:50',
             'items.*.size'           => 'nullable|string|max:30',
+            'items.*.variant_id'     => 'nullable|integer|exists:product_variants,id',
         ]);
 
         // ── Idempotency: same client_request_id → same order ─────────────────
@@ -108,8 +110,25 @@ class StorefrontCheckoutController extends Controller
                 ], 422);
             }
 
-            $price = $product->prices->firstWhere('currency_code', $currency)
-                ?? $product->prices->first();
+            // Resolve a chosen variant (storefront shows variants as their own
+            // products). Its price/name/sku take over for the line.
+            $variant = null;
+            if (!empty($item['variant_id'])) {
+                $variant = ProductVariant::with('prices')
+                    ->where('id', $item['variant_id'])
+                    ->where('product_id', $product->id)
+                    ->where('is_active', true)
+                    ->first();
+                if (!$variant) {
+                    return response()->json([
+                        'message' => "The selected option is no longer available for '{$item['slug']}'",
+                    ], 422);
+                }
+            }
+
+            $priceRows = $variant ? $variant->prices : $product->prices;
+            $price = $priceRows->firstWhere('currency_code', $currency)
+                ?? $priceRows->first();
             if (!$price) {
                 return response()->json([
                     'message' => "Product '{$item['slug']}' has no price configured",
@@ -142,6 +161,7 @@ class StorefrontCheckoutController extends Controller
 
             $lines[] = [
                 'product'         => $product,
+                'variant'         => $variant,
                 'quantity'        => (int) $item['quantity'],
                 'unit_price'      => (float) $price->regular_price,
                 'measurements'    => $isCustom ? $measurements : [],
@@ -229,11 +249,16 @@ class StorefrontCheckoutController extends Controller
                 $product = $line['product'];
                 $lineTax = $taxCalc['lines'][$index] ?? ['tax_amount' => 0, 'subtotal_gross' => $line['unit_price'] * $line['quantity']];
 
+                $variant = $line['variant'];
+                $baseName = $product->translations->first()?->name ?? $line['product']->slug;
+
                 $orderItem = OrderItem::create([
-                    'order_id'        => $order->id,
-                    'product_id'      => $product->id,
-                    'product_name'    => $product->translations->first()?->name ?? $line['product']->slug,
-                    'sku'             => $product->sku,
+                    'order_id'           => $order->id,
+                    'product_id'         => $product->id,
+                    'product_variant_id' => $variant?->id,
+                    'product_name'       => $variant ? "{$baseName} — {$variant->variant_name}" : $baseName,
+                    'variant_name'       => $variant?->variant_name,
+                    'sku'                => $variant?->sku ?? $product->sku,
                     'quantity'        => $line['quantity'],
                     'unit_price'      => $line['unit_price'],
                     'discount_amount' => 0,
@@ -254,6 +279,7 @@ class StorefrontCheckoutController extends Controller
                         'customer_order_id' => $order->id,
                         'order_item_id'     => $orderItem->id,
                         'product_id'        => $product->id,
+                        'product_variant_id' => $variant?->id,
                         'quantity'          => $line['quantity'],
                         'priority'          => 'normal',
                         'due_date'          => now()->addDays(7),

@@ -7,6 +7,7 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductionOrder;
 use App\Models\ProductPrice;
+use App\Models\ProductVariant;
 use App\Models\ProductTranslation;
 use App\Mail\StorefrontOrderReceiptMail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -261,6 +262,39 @@ class StorefrontGuestCheckoutTest extends TestCase
         $this->assertStringContainsString('/track/testtoken123', $status2->json('shipment.tracking_url'));
 
         $this->getJson('/api/v1/storefront/orders/not-a-real-token')->assertNotFound();
+    }
+
+    public function test_variant_order_sets_variant_and_price(): void
+    {
+        $product = Product::factory()->create(['status' => 'active', 'published_at' => now()->subDay(), 'product_type' => 'variable']);
+        ProductTranslation::create(['product_id' => $product->id, 'language_code' => 'en', 'name' => 'Princes Cassock']);
+        ProductPrice::create(['product_id' => $product->id, 'currency_code' => 'KES', 'regular_price' => 10000]);
+        $variant = ProductVariant::create([
+            'product_id' => $product->id, 'sku' => $product->sku . '-BLU', 'variant_name' => 'Blue', 'attributes' => ['Colour' => 'Blue'], 'is_active' => true,
+        ]);
+        ProductPrice::create(['product_id' => $product->id, 'product_variant_id' => $variant->id, 'currency_code' => 'KES', 'regular_price' => 13000]);
+
+        $res = $this->postJson('/api/v1/storefront/orders', $this->payload($product, [
+            'items' => [['slug' => $product->slug, 'variant_id' => $variant->id, 'quantity' => 1]],
+        ]));
+
+        $res->assertStatus(201);
+        $order = Order::where('order_number', $res->json('order.order_number'))->firstOrFail();
+        $item  = OrderItem::where('order_id', $order->id)->firstOrFail();
+        $this->assertSame($variant->id, $item->product_variant_id);
+        $this->assertSame('Blue', $item->variant_name);
+        $this->assertEquals(13000, (float) $item->unit_price); // variant price, not the 10000 base
+        $this->assertStringContainsString('Blue', (string) $item->product_name);
+        $this->assertEquals(13000, (float) $order->total_amount);
+    }
+
+    public function test_unknown_variant_is_rejected(): void
+    {
+        $product = $this->makeProduct(['product_type' => 'variable'], ['KES' => 5000]);
+        $res = $this->postJson('/api/v1/storefront/orders', $this->payload($product, [
+            'items' => [['slug' => $product->slug, 'variant_id' => 999999, 'quantity' => 1]],
+        ]));
+        $res->assertStatus(422);
     }
 
     public function test_unpublished_products_are_refused(): void
