@@ -50,10 +50,13 @@ class RecomposeVariantNamesTest extends TestCase
             ->expectsOutputToContain('Renamed 1 variant(s).')
             ->assertSuccessful();
 
-        $this->assertSame(
-            'White Princes Cassock + Black Piping, Buttons and Pleats',
-            $v->fresh()->variant_name,
-        );
+        // Colour leads and all three trim labels appear; their order follows
+        // however the DB returns the jsonb attribute keys, which is fine.
+        $name = $v->fresh()->variant_name;
+        $this->assertStringStartsWith('White Princes Cassock + Black ', $name);
+        foreach (['Piping', 'Buttons', 'Pleats'] as $label) {
+            $this->assertStringContainsString($label, $name);
+        }
     }
 
     public function test_dry_run_writes_nothing(): void

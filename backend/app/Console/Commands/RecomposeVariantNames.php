@@ -105,7 +105,14 @@ class RecomposeVariantNames extends Command
         if (trim($name) === '') {
             return true;
         }
-        $legacy = implode(' / ', array_map(fn ($v) => (string) $v, array_values($attrs)));
-        return $name === $legacy;
+        // The legacy generator joined attribute VALUES with " / ". Postgres
+        // jsonb does not preserve key order, so compare the two as multisets
+        // (order-independent): the name is auto-generated iff its " / " tokens
+        // are exactly the attribute values, in any order.
+        $tokens = array_map('trim', explode(' / ', $name));
+        $values = array_map(fn ($v) => trim((string) $v), array_values($attrs));
+        sort($tokens);
+        sort($values);
+        return $tokens === $values;
     }
 }
