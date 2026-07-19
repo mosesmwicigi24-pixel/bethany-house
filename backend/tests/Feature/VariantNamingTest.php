@@ -79,10 +79,11 @@ class VariantNamingTest extends TestCase
         );
     }
 
-    public function test_first_attribute_leads_when_no_colour_attribute_exists(): void
+    public function test_first_non_size_attribute_leads_when_no_colour_exists(): void
     {
+        // Size is excluded, so the fabric (first remaining attribute) leads.
         $this->assertSame(
-            'Large Robe + Cotton',
+            'Cotton Robe',
             ProductVariant::composeName('Robe', ['Size' => 'Large', 'Fabric' => 'Cotton']),
         );
     }
