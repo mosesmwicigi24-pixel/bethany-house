@@ -1108,6 +1108,167 @@ const variantSchema = z.object({
 });
 type VariantForm = z.infer<typeof variantSchema>;
 
+// ── Variant image gallery ────────────────────────────────────────────────────
+// Each colourway showcases its own look. The first (or starred) image is the
+// variant's hero on the storefront; the rest fill its gallery. Scoped entirely
+// to this variant — independent of the product's generic photos.
+
+function VariantImagesSection({
+    productId,
+    variant,
+    onChanged,
+}: {
+    productId: number;
+    variant: ProductVariant;
+    onChanged: () => void;
+}) {
+    const toast = useToastStore();
+    const [images, setImages] = useState<ProductImage[]>(variant.images ?? []);
+    const [uploading, setUploading] = useState(false);
+    const fileRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        setImages(variant.images ?? []);
+    }, [variant.id]);
+
+    const upload = useCallback(
+        async (files: FileList) => {
+            setUploading(true);
+            try {
+                const { smartCompressImage } = await import("@/utils/compressImage");
+                const optimized = await Promise.all(
+                    Array.from(files).map((f) => smartCompressImage(f).catch(() => f)),
+                );
+                const res = await productsApi.uploadVariantImages(productId, variant.id, optimized);
+                setImages((prev) => [...prev, ...res.images]);
+                toast.success(`${res.images.length} image(s) added to ${variant.variant_name}.`);
+                onChanged();
+            } catch (e: any) {
+                toast.error(e.message ?? "Upload failed.");
+            } finally {
+                setUploading(false);
+                if (fileRef.current) fileRef.current.value = "";
+            }
+        },
+        [productId, variant.id, variant.variant_name, toast, onChanged],
+    );
+
+    const setPrimary = useCallback(
+        async (imageId: number) => {
+            await productsApi.setPrimaryImage(productId, imageId);
+            setImages((prev) => prev.map((img) => ({ ...img, is_primary: img.id === imageId })));
+            onChanged();
+        },
+        [productId, onChanged],
+    );
+
+    const remove = useCallback(
+        async (imageId: number) => {
+            await productsApi.deleteImage(productId, imageId);
+            setImages((prev) => {
+                const next = prev.filter((img) => img.id !== imageId);
+                // Mirror the server: if the hero went, promote the first survivor.
+                if (!next.some((i) => i.is_primary) && next[0]) next[0].is_primary = true;
+                return [...next];
+            });
+            onChanged();
+        },
+        [productId, onChanged],
+    );
+
+    return (
+        <div>
+            <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider">
+                    Images
+                    <span className="ml-1.5 normal-case font-normal text-surface-400">
+                        shown for this colourway on the website
+                    </span>
+                </p>
+                <span className="text-2xs text-surface-400">{images.length} photo{images.length === 1 ? "" : "s"}</span>
+            </div>
+
+            <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
+                {images
+                    .slice()
+                    .sort((a, b) => (b.is_primary ? 1 : 0) - (a.is_primary ? 1 : 0) || a.sort_order - b.sort_order)
+                    .map((img) => (
+                        <div
+                            key={img.id}
+                            className={clsx(
+                                "relative group aspect-square rounded-lg overflow-hidden border-2",
+                                img.is_primary ? "border-brand-500" : "border-surface-100",
+                            )}
+                        >
+                            <img
+                                src={img.thumbnail_url || img.image_url}
+                                alt={img.alt_text ?? ""}
+                                className="w-full h-full object-cover"
+                            />
+                            {img.is_primary && (
+                                <span className="absolute top-1 left-1 text-2xs font-bold bg-brand-500 text-white px-1 py-0.5 rounded">
+                                    Hero
+                                </span>
+                            )}
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
+                                {!img.is_primary && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setPrimary(img.id)}
+                                        title="Make hero image"
+                                        className="w-7 h-7 rounded-full bg-white/90 flex items-center justify-center hover:bg-white"
+                                    >
+                                        <svg className="w-3.5 h-3.5 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.196-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.783-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                                        </svg>
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => remove(img.id)}
+                                    title="Remove image"
+                                    className="w-7 h-7 rounded-full bg-white/90 flex items-center justify-center hover:bg-white"
+                                >
+                                    <svg className="w-3.5 h-3.5 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    ))}
+
+                {/* Upload tile */}
+                <button
+                    type="button"
+                    onClick={() => fileRef.current?.click()}
+                    disabled={uploading}
+                    className="aspect-square rounded-lg border-2 border-dashed border-surface-200 flex flex-col items-center justify-center gap-1 text-surface-400 hover:border-brand-300 hover:text-brand-500 transition-colors disabled:opacity-50"
+                >
+                    {uploading ? (
+                        <Spinner size="xs" />
+                    ) : (
+                        <>
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                            </svg>
+                            <span className="text-2xs font-medium">Add</span>
+                        </>
+                    )}
+                </button>
+            </div>
+
+            <input
+                ref={fileRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                className="hidden"
+                onChange={(e) => e.target.files?.length && upload(e.target.files)}
+            />
+        </div>
+    );
+}
+
 function EditVariantModal({
     open,
     onClose,
@@ -1253,6 +1414,13 @@ function EditVariantModal({
                         />
                     </Field>
                 </div>
+
+                {/* Images — the colourway's own showcase */}
+                <VariantImagesSection
+                    productId={productId}
+                    variant={editing}
+                    onChanged={onSaved}
+                />
 
                 {/* Attributes */}
                 <div>

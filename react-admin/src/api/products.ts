@@ -194,6 +194,18 @@ export const productsApi = {
         );
     },
 
+    // Variant-scoped upload — the images showcase one colourway on the storefront.
+    uploadVariantImages: (productId: number, variantId: number, files: File[]) => {
+        const form = new FormData();
+        files.forEach((f) => form.append("images[]", f));
+        form.append("variant_id", String(variantId));
+        return post<{ message: string; images: ProductImage[] }>(
+            `/v1/admin/products/${productId}/images`,
+            form,
+            { headers: { "Content-Type": undefined } },
+        );
+    },
+
     setPrimaryImage: (productId: number, imageId: number) =>
         put<{ message: string }>(
             `/v1/admin/products/${productId}/images/${imageId}/primary`,
