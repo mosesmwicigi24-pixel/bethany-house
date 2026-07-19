@@ -66,4 +66,84 @@ class WhatsAppService
             return false;
         }
     }
+
+    /**
+     * Send a pre-approved message template. Unlike free-form text, an approved
+     * template can be delivered business-initiated (no open 24h window), which
+     * is why one-time codes must go through a template. $components follows the
+     * Cloud API template component array (body/button parameters).
+     */
+    public static function sendTemplate(string $to, string $template, string $lang, array $components = []): bool
+    {
+        if (!self::configured()) {
+            Log::info('WhatsAppService: not configured, skipping template send.');
+            return false;
+        }
+
+        $version = config('services.whatsapp.api_version', 'v19.0');
+        $phoneId = config('services.whatsapp.phone_number_id');
+        $to      = preg_replace('/[^\d+]/', '', $to);
+
+        $payload = [
+            'messaging_product' => 'whatsapp',
+            'to'                => ltrim($to, '+'),
+            'type'              => 'template',
+            'template'          => [
+                'name'     => $template,
+                'language' => ['code' => $lang],
+            ],
+        ];
+        if (!empty($components)) {
+            $payload['template']['components'] = $components;
+        }
+
+        try {
+            $res = Http::withToken(config('services.whatsapp.token'))
+                ->timeout(15)
+                ->post("https://graph.facebook.com/{$version}/{$phoneId}/messages", $payload);
+
+            if ($res->successful()) {
+                return true;
+            }
+
+            $code = $res->json('error.code');
+            Log::warning('WhatsAppService template send failed', [
+                'to' => $to, 'template' => $template, 'status' => $res->status(),
+                'error' => $res->json('error'),
+                'hint' => $code === 132001
+                    ? "Template '{$template}' does not exist or is not approved for this WABA — run `php artisan whatsapp:otp-template`."
+                    : null,
+            ]);
+            return false;
+        } catch (\Exception $e) {
+            Log::error("WhatsAppService template send exception for {$to}: {$e->getMessage()}");
+            return false;
+        }
+    }
+
+    /**
+     * Deliver a one-time login/lookup code through the approved AUTHENTICATION
+     * template. For authentication templates Meta requires the code to be
+     * echoed in BOTH the body parameter and the (copy-code) button parameter.
+     */
+    public static function sendAuthCode(string $to, string $code): bool
+    {
+        $template = config('services.whatsapp.otp_template', 'order_lookup_code');
+        $lang     = config('services.whatsapp.otp_template_lang', 'en');
+
+        $components = [
+            [
+                'type'       => 'body',
+                'parameters' => [['type' => 'text', 'text' => $code]],
+            ],
+            [
+                'type'       => 'button',
+                'sub_type'   => 'url',
+                'index'      => '0',
+                'parameters' => [['type' => 'text', 'text' => $code]],
+            ],
+        ];
+
+        return self::sendTemplate($to, $template, $lang, $components);
+    }
 }
