@@ -3406,7 +3406,17 @@ export default function OrderDetailPage() {
                     <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0">
                             <p className="text-2xs font-bold tracking-[0.18em] text-surface-400 uppercase mb-1.5">Bethany House</p>
-                            <h1 className="text-2xl sm:text-3xl font-bold font-mono text-surface-900 tracking-tight leading-none">{order.order_number}</h1>
+                            {/* Lead with WHO the order is for — a name reads faster than a
+                                SKU. The order number drops to a small mono caps line just
+                                beneath it. No customer attached → the number is the identity. */}
+                            {order.customer_name ? (
+                                <>
+                                    <h1 className="text-2xl sm:text-3xl font-bold text-surface-900 tracking-tight leading-none truncate">{order.customer_name}</h1>
+                                    <p className="text-xs font-mono font-semibold text-surface-400 uppercase tracking-wider mt-1.5">{order.order_number}</p>
+                                </>
+                            ) : (
+                                <h1 className="text-2xl sm:text-3xl font-bold font-mono text-surface-900 tracking-tight leading-none">{order.order_number}</h1>
+                            )}
                             <div className="flex flex-wrap items-center gap-2 mt-3">
                                 <span className={clsx("inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border",
                                     order.status === "completed"  ? "bg-success-light text-success-dark border-success/20" :
