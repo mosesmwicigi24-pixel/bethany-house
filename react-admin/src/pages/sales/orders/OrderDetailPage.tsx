@@ -3273,8 +3273,56 @@ export default function OrderDetailPage() {
         && !["cancelled", "voided", "refunded"].includes(order.status);
     const canAuthorizeDispatch = canDo("orders.authorize_dispatch");
 
+    // ── Receipt actions: reach the customer, copy, share ──────────────────────
+    // Turn a local Kenyan number into a wa.me number (07… → 2547…).
+    const waNumber = (p?: string | null): string | null => {
+        if (!p) return null;
+        let d = p.replace(/[^\d]/g, "");
+        if (d.startsWith("0")) d = "254" + d.slice(1);
+        else if (d.length === 9) d = "254" + d;
+        return d.length >= 11 ? d : null;
+    };
+    const receiptSummary = () => [
+        `Bethany House · ${order.order_number}`,
+        order.customer_name ? `For: ${order.customer_name}` : null,
+        `Total: ${fmt(order.total_amount, cc)}`,
+        outstanding > 0 ? `Balance due: ${fmt(outstanding, cc)}` : "Paid in full ✓",
+        "Thank you for shopping with us!",
+    ].filter(Boolean).join("\n");
+    // Prefer WhatsApp straight to the customer; fall back to the native share
+    // sheet, then to copying the summary.
+    const shareReceipt = async () => {
+        const text = receiptSummary();
+        const wa = waNumber(order.customer_phone);
+        if (wa) { window.open(`https://wa.me/${wa}?text=${encodeURIComponent(text)}`, "_blank"); return; }
+        if (navigator.share) { try { await navigator.share({ title: order.order_number, text }); return; } catch { /* cancelled */ } }
+        try { await navigator.clipboard.writeText(text); toast.success("Receipt summary copied"); } catch { toast.error("Could not share"); }
+    };
+    const copyOrderNumber = () => {
+        navigator.clipboard.writeText(order.order_number)
+            .then(() => toast.success("Order number copied")).catch(() => {});
+    };
+    const savingsPct = order.subtotal > 0 ? Math.round((order.discount_amount ?? 0) / order.subtotal * 100) : 0;
+
     return (
-        <div className="animate-fade-in max-w-5xl mx-auto pb-12 space-y-4">
+        <div className="animate-fade-in max-w-5xl mx-auto pb-24 sm:pb-12 space-y-4">
+
+            {/* ── Sticky mobile action bar — primary actions always in thumb reach ── */}
+            <div className="sm:hidden fixed bottom-0 inset-x-0 z-30 flex items-center gap-2 px-3 py-2.5 bg-white/95 backdrop-blur border-t border-surface-200"
+                style={{ paddingBottom: "max(0.625rem, env(safe-area-inset-bottom))" }}>
+                <button onClick={shareReceipt} className="flex-1 btn-secondary btn-sm justify-center gap-1.5">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" /></svg>
+                    Share
+                </button>
+                {canUpdateStatus && (
+                    <button onClick={() => setShowStatusModal(true)} className="flex-1 btn-secondary btn-sm justify-center">Status</button>
+                )}
+                {canAddPayment ? (
+                    <button onClick={() => setShowPaymentModal(true)} className="flex-1 btn-sm justify-center bg-success text-white hover:bg-success/90 rounded-lg font-medium">+ Payment</button>
+                ) : (
+                    <button onClick={() => setShowReceiptModal(true)} className="flex-1 btn-sm justify-center bg-brand-600 text-white hover:bg-brand-700 rounded-lg font-medium">Receipt</button>
+                )}
+            </div>
 
             {/* ── Dispatch authorization ────────────────────────────────────── */}
             {awaitingDispatch && (
@@ -3356,6 +3404,10 @@ export default function OrderDetailPage() {
                         )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
+                        <button onClick={shareReceipt} className="btn-secondary btn-sm gap-1.5" title="Share the receipt with the customer">
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" /></svg>
+                            Share
+                        </button>
                         {canUpdateStatus && (
                             <button onClick={() => setShowStatusModal(true)} className="btn-secondary btn-sm">Update Status</button>
                         )}
@@ -3412,7 +3464,11 @@ export default function OrderDetailPage() {
                             {order.customer_name ? (
                                 <>
                                     <h1 className="text-2xl sm:text-3xl font-bold text-surface-900 tracking-tight leading-none truncate">{order.customer_name}</h1>
-                                    <p className="text-xs font-mono font-semibold text-surface-400 uppercase tracking-wider mt-1.5">{order.order_number}</p>
+                                    <button type="button" onClick={copyOrderNumber} title="Copy order number"
+                                        className="group inline-flex items-center gap-1.5 mt-1.5 text-xs font-mono font-semibold text-surface-400 uppercase tracking-wider hover:text-surface-600 transition-colors">
+                                        {order.order_number}
+                                        <svg className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                                    </button>
                                 </>
                             ) : (
                                 <h1 className="text-2xl sm:text-3xl font-bold font-mono text-surface-900 tracking-tight leading-none">{order.order_number}</h1>
@@ -3507,7 +3563,21 @@ export default function OrderDetailPage() {
                                         <div className="space-y-0.5">
                                             <p className="text-sm font-semibold text-surface-900">{order.customer_name}</p>
                                             {order.customer_email && <p className="text-xs text-surface-500">{order.customer_email}</p>}
-                                            {order.customer_phone && <p className="text-xs text-surface-500">{order.customer_phone}</p>}
+                                            {order.customer_phone && (
+                                                <div className="flex items-center gap-2.5 pt-0.5">
+                                                    <a href={`tel:${order.customer_phone}`} className="inline-flex items-center gap-1 text-xs text-brand-600 hover:underline">
+                                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" /></svg>
+                                                        {order.customer_phone}
+                                                    </a>
+                                                    {waNumber(order.customer_phone) && (
+                                                        <a href={`https://wa.me/${waNumber(order.customer_phone)}`} target="_blank" rel="noopener noreferrer"
+                                                            className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 hover:underline">
+                                                            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 6.3A7.9 7.9 0 0012 4a8 8 0 00-6.9 12l-1 3.6 3.7-1a8 8 0 003.2.7h.1a8 8 0 006.6-12.9zM12 18.5a6.6 6.6 0 01-3.4-.9l-.2-.1-2.2.6.6-2.1-.2-.3a6.6 6.6 0 1112.1-3.7 6.6 6.6 0 01-6.7 6.5zm3.6-4.9c-.2-.1-1.2-.6-1.3-.6-.2-.1-.3-.1-.4.1l-.6.7c-.1.1-.2.2-.4.1a5.4 5.4 0 01-2.7-2.3c-.2-.3.2-.3.5-1 0-.1 0-.2 0-.3l-.6-1.4c-.1-.3-.3-.3-.4-.3h-.4a.7.7 0 00-.5.2 2 2 0 00-.6 1.5c0 .9.6 1.7.7 1.8.1.2 1.3 2 3.1 2.8 1.2.5 1.6.5 2.2.4.4 0 1.2-.5 1.3-.9.2-.5.2-.9.1-.9 0-.1-.1-.1-.3-.2z"/></svg>
+                                                            WhatsApp
+                                                        </a>
+                                                    )}
+                                                </div>
+                                            )}
                                             {order.user_id && (
                                                 <button onClick={() => navigate(`/sales/customers/${order.user_id}`)}
                                                     className="text-2xs text-brand-500 hover:underline mt-1 block">View profile →</button>
@@ -3702,6 +3772,12 @@ export default function OrderDetailPage() {
                                     <div className="flex justify-between font-bold text-sm pt-2 border-t-2 border-surface-900">
                                         <span>Total</span><span className="tabular-nums text-surface-900">{fmt(order.total_amount, cc)}</span>
                                     </div>
+                                    {(order.discount_amount ?? 0) > 0 && (
+                                        <div className="flex items-center justify-center gap-1.5 mt-2 rounded-lg bg-emerald-50 border border-emerald-200 px-2 py-1.5 text-2xs font-semibold text-emerald-700">
+                                            <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" /><path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6z" /></svg>
+                                            You saved {fmt(order.discount_amount, cc)}{savingsPct > 0 ? ` · ${savingsPct}%` : ""}
+                                        </div>
+                                    )}
                                     {totalPaid > 0 && <div className="flex justify-between text-success-dark font-medium pt-1"><span>Paid</span><span className="tabular-nums">{fmt(totalPaid, cc)}</span></div>}
                                     {outstanding > 0 && <div className="flex justify-between text-danger font-bold text-sm pt-1 border-t border-danger/20"><span>Balance Due</span><span className="tabular-nums">{fmt(outstanding, cc)}</span></div>}
                                     {order.deposit_amount && (
