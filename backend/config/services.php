@@ -49,4 +49,11 @@ return [
         'otp_template_lang'   => env('WABA_OTP_TEMPLATE_LANG', 'en'),
     ],
 
+
+    // Optional shared secret the storefront sends as X-Storefront-Key on the
+    // Neema lead/shipping endpoints. Unset ⇒ those endpoints are open (§6).
+    'storefront' => [
+        'key' => env('HUB_STOREFRONT_KEY'),
+    ],
+
 ];
