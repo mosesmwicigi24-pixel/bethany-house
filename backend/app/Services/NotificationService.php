@@ -305,6 +305,19 @@ class NotificationService
         );
     }
 
+    /**
+     * A storefront lead captured by Neema — notify owners so hot enquiries get
+     * a fast follow-up (speed-to-lead). Best-effort; the lead is persisted
+     * regardless.
+     */
+    public static function leadCaptured(int $leadId, string $who, string $intent): void
+    {
+        self::send(
+            self::resolve(self::OWNERS),
+            new \App\Notifications\LeadCapturedNotification($leadId, $who, $intent)
+        );
+    }
+
     // ── Payment notifications ─────────────────────────────────────────────────
 
     /**

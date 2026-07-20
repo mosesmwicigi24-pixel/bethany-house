@@ -180,6 +180,14 @@ Route::prefix('v1')->group(function () {
             ->middleware('throttle:auth');
         Route::get('/storefront/orders/{token}', [\App\Http\Controllers\Api\StorefrontCheckoutController::class, 'status']);
 
+        // Neema assistant bridge — lead capture + shipping estimate. Called
+        // server-side by the storefront only; docs/HUB_CONTRACT.md. Idempotent
+        // lead on client_request_id; optional X-Storefront-Key gate.
+        Route::post('/storefront/leads', [\App\Http\Controllers\Api\StorefrontLeadController::class, 'store'])
+            ->middleware('throttle:30,1');
+        Route::get('/storefront/shipping/estimate', [\App\Http\Controllers\Api\StorefrontLeadController::class, 'shippingEstimate'])
+            ->middleware('throttle:60,1');
+
         // Passwordless "Find my orders": a one-time code (WhatsApp / email) then
         // a 24h cache-backed session. Never gates checkout — pure lookup. See
         // StorefrontLookupController.
