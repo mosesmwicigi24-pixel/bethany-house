@@ -16,7 +16,7 @@ return new class extends Migration
     {
         Schema::create('leads', function (Blueprint $table) {
             $table->id();
-            $table->uuid('client_request_id')->unique(); // idempotency key
+            $table->string('client_request_id', 100)->unique(); // idempotency key (string, like the orders bridge)
             $table->string('intent', 40);                // quote|shipping|product_inquiry|measurement|order_support|other
             $table->string('readiness', 10)->default('medium'); // low|medium|high
             $table->string('name')->nullable();
