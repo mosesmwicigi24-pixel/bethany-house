@@ -1552,6 +1552,27 @@ function EditVariantModal({
                         const baseRate   = (baseCur?.exchange_rate ?? 1) as number;
                         const thisRate   = (currency.exchange_rate ?? 1) as number;
 
+                        // Editing the default currency's price derives every other
+                        // currency from its exchange rate — the same formula the
+                        // variant generator uses. Only the base row cascades; any
+                        // currency can still be overridden by hand afterwards.
+                        const regReg  = register(`prices.${i}.regular_price`);
+                        const saleReg = register(`prices.${i}.sale_price`);
+                        const cascade = (field: "regular_price" | "sale_price") =>
+                            (e: React.ChangeEvent<HTMLInputElement>) => {
+                                if (!isBase || !(baseRate > 0)) return;
+                                const raw = e.target.value;
+                                currencies.forEach((c: any, j: number) => {
+                                    if (j === i) return;
+                                    const otherRate = Number(c.exchange_rate ?? 1);
+                                    if (!(otherRate > 0)) return;
+                                    const val = raw === ""
+                                        ? (field === "sale_price" ? null : 0)
+                                        : Math.round((Number(raw) / baseRate) * otherRate * 100) / 100;
+                                    setValue(`prices.${j}.${field}` as any, val as any, { shouldDirty: true });
+                                });
+                            };
+
                         return (
                             <div
                                 key={currency.code}
@@ -1568,7 +1589,8 @@ function EditVariantModal({
                                         type="number"
                                         step="0.01"
                                         min="0"
-                                        {...register(`prices.${i}.regular_price`)}
+                                        {...regReg}
+                                        onChange={(e) => { regReg.onChange(e); cascade("regular_price")(e); }}
                                     />
                                 </Field>
                                 <Field label="Sale">
@@ -1577,7 +1599,8 @@ function EditVariantModal({
                                         type="number"
                                         step="0.01"
                                         min="0"
-                                        {...register(`prices.${i}.sale_price`)}
+                                        {...saleReg}
+                                        onChange={(e) => { saleReg.onChange(e); cascade("sale_price")(e); }}
                                         placeholder="-"
                                     />
                                 </Field>
