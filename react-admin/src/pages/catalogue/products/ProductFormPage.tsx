@@ -1468,6 +1468,34 @@ function EditVariantModal({
 
     const attrs = watch("attributes") ?? {};
 
+    // Re-pull the main product's prices for every currency — one tap to undo a
+    // per-variant override that has drifted. Missing currencies are derived from
+    // the default via exchange rate (same formula as the live cascade), so a
+    // product priced only in the base currency still fills every column.
+    const hasProductPrices = productPrices.some((p) => Number(p.regular_price) > 0);
+    const resetToProductPrice = () => {
+        const baseCur   = currencies.find((c: any) => c.is_base || c.is_default);
+        const baseRate  = Number(baseCur?.exchange_rate ?? 1);
+        const baseProd  = productPrices.find((x) => x.currency_code === baseCur?.code);
+        const convert   = (v: number, rate: number) =>
+            baseRate > 0 && rate > 0 ? Math.round((v / baseRate) * rate * 100) / 100 : 0;
+        currencies.forEach((c: any, i: number) => {
+            const fallback = productPrices.find((x) => x.currency_code === c.code);
+            const rate = Number(c.exchange_rate ?? 1);
+            const reg = fallback
+                ? Number(fallback.regular_price)
+                : baseProd ? convert(Number(baseProd.regular_price), rate) : 0;
+            const sale = fallback
+                ? (fallback.sale_price != null ? Number(fallback.sale_price) : null)
+                : (baseProd?.sale_price != null ? convert(Number(baseProd.sale_price), rate) : null);
+            const cost = fallback?.cost_price != null ? Number(fallback.cost_price) : null;
+            setValue(`prices.${i}.regular_price` as any, reg, { shouldDirty: true });
+            setValue(`prices.${i}.sale_price` as any, sale as any, { shouldDirty: true });
+            setValue(`prices.${i}.cost_price` as any, cost as any, { shouldDirty: true });
+        });
+        toast.success("Prices reset to the product price");
+    };
+
     return (
         <Modal
             open={open}
@@ -1543,14 +1571,47 @@ function EditVariantModal({
 
                 {/* Pricing */}
                 <div>
-                    <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-2">
-                        Pricing
-                    </p>
+                    <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider">
+                            Pricing
+                        </p>
+                        {hasProductPrices && (
+                            <button
+                                type="button"
+                                onClick={resetToProductPrice}
+                                className="text-2xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
+                                title="Re-pull the main product's prices for every currency"
+                            >
+                                ↺ Reset to product price
+                            </button>
+                        )}
+                    </div>
                     {currencies.map((currency, i) => {
                         const baseCur    = currencies.find((c: any) => c.is_base || c.is_default);
                         const isBase     = currency.code === baseCur?.code;
                         const baseRate   = (baseCur?.exchange_rate ?? 1) as number;
                         const thisRate   = (currency.exchange_rate ?? 1) as number;
+
+                        // Editing the default currency's price derives every other
+                        // currency from its exchange rate — the same formula the
+                        // variant generator uses. Only the base row cascades; any
+                        // currency can still be overridden by hand afterwards.
+                        const regReg  = register(`prices.${i}.regular_price`);
+                        const saleReg = register(`prices.${i}.sale_price`);
+                        const cascade = (field: "regular_price" | "sale_price") =>
+                            (e: React.ChangeEvent<HTMLInputElement>) => {
+                                if (!isBase || !(baseRate > 0)) return;
+                                const raw = e.target.value;
+                                currencies.forEach((c: any, j: number) => {
+                                    if (j === i) return;
+                                    const otherRate = Number(c.exchange_rate ?? 1);
+                                    if (!(otherRate > 0)) return;
+                                    const val = raw === ""
+                                        ? (field === "sale_price" ? null : 0)
+                                        : Math.round((Number(raw) / baseRate) * otherRate * 100) / 100;
+                                    setValue(`prices.${j}.${field}` as any, val as any, { shouldDirty: true });
+                                });
+                            };
 
                         return (
                             <div
@@ -1568,7 +1629,8 @@ function EditVariantModal({
                                         type="number"
                                         step="0.01"
                                         min="0"
-                                        {...register(`prices.${i}.regular_price`)}
+                                        {...regReg}
+                                        onChange={(e) => { regReg.onChange(e); cascade("regular_price")(e); }}
                                     />
                                 </Field>
                                 <Field label="Sale">
@@ -1577,7 +1639,8 @@ function EditVariantModal({
                                         type="number"
                                         step="0.01"
                                         min="0"
-                                        {...register(`prices.${i}.sale_price`)}
+                                        {...saleReg}
+                                        onChange={(e) => { saleReg.onChange(e); cascade("sale_price")(e); }}
                                         placeholder="-"
                                     />
                                 </Field>
@@ -1718,6 +1781,7 @@ function MeasurementsTab({
     measurements: MeasurementField[];
     onChange: (m: MeasurementField[]) => void;
 }) {
+    const toast = useToastStore();
     const [newName, setNewName] = useState("");
     const [newUnit, setNewUnit] = useState("");
     const [newRequired, setNewRequired] = useState(true);
@@ -1757,19 +1821,46 @@ function MeasurementsTab({
         (c) => !measurements.some((m) => m.name.toLowerCase() === c.name.toLowerCase()),
     );
 
-    // Standard clergy tailoring sheets — add the whole set for a gender at once.
+    // Standard clergy tailoring sheets. These behave as a GENDER SELECTOR, not
+    // additive quick-adds: Men and Ladies share seven fields, so appending only
+    // skipped the shared ones and dropped the 3-4 new fields at the bottom of a
+    // long list — off-screen on a phone, so tapping "Ladies" felt dead. Tapping
+    // now LOADS that gender's sheet: shared fields keep their config, the other
+    // gender's exclusive fields are cleared, and any custom fields are kept.
     const GENDER_SHEETS: Record<"Men" | "Ladies", string[]> = {
         Men: ["Neck", "Shoulders", "Sleeves", "Wrist", "Arm Hole", "Upper Arm",
             "Chest", "Stomach", "Shirt Length", "Full Length"],
         Ladies: ["Neck", "Shoulders", "Sleeves", "Wrist", "Arm Hole", "Upper Arm",
             "Bodice", "Waist", "Hips", "Blouse Length", "Full Length"],
     };
-    const addGenderSheet = (g: "Men" | "Ladies") => {
-        const existing = new Set(measurements.map((m) => m.name.toLowerCase()));
-        const toAdd = GENDER_SHEETS[g]
-            .filter((n) => !existing.has(n.toLowerCase()))
-            .map((n) => ({ name: n, unit: "Inches", required: true }));
-        if (toAdd.length) onChange([...measurements, ...toAdd]);
+    // Every name governed by a gender sheet — anything else the user typed is a
+    // custom field and must survive a gender switch.
+    const sheetNames = new Set(
+        [...GENDER_SHEETS.Men, ...GENDER_SHEETS.Ladies].map((n) => n.toLowerCase()),
+    );
+    // Which gender is currently loaded — a sheet is "active" when every one of
+    // its fields is present. Drives the tab highlight.
+    const hasWholeSheet = (g: "Men" | "Ladies") => {
+        const names = new Set(measurements.map((m) => m.name.toLowerCase()));
+        return GENDER_SHEETS[g].every((n) => names.has(n.toLowerCase()));
+    };
+    const activeGender: "Men" | "Ladies" | null =
+        hasWholeSheet("Men") && !hasWholeSheet("Ladies") ? "Men"
+        : hasWholeSheet("Ladies") && !hasWholeSheet("Men") ? "Ladies"
+        : null;
+
+    const applyGenderSheet = (g: "Men" | "Ladies") => {
+        if (activeGender === g) return; // already loaded — no-op, but harmless
+        const byName = new Map(measurements.map((m) => [m.name.toLowerCase(), m]));
+        // Reuse the existing field object for shared names so the user's unit /
+        // required tweaks carry across the switch.
+        const sheet: MeasurementField[] = GENDER_SHEETS[g].map(
+            (n) => byName.get(n.toLowerCase()) ?? { name: n, unit: "Inches", required: true },
+        );
+        // Preserve custom fields (not part of either standard sheet), in order.
+        const custom = measurements.filter((m) => !sheetNames.has(m.name.toLowerCase()));
+        onChange([...sheet, ...custom]);
+        toast.success(`${g}'s measurement sheet loaded — ${GENDER_SHEETS[g].length} fields`);
     };
 
     return (
@@ -1787,24 +1878,33 @@ function MeasurementsTab({
                     </p>
                 </div>
 
-                {/* Gender sheet — adds the full standard set for Men or Ladies */}
+                {/* Gender sheet — a selector: tapping LOADS that gender's sheet */}
                 <div className="px-4 pt-3 pb-3 border-b border-surface-100">
                     <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-2">
-                        Quick add — gender sheet
+                        Gender sheet
                     </p>
-                    <div className="flex flex-wrap gap-1.5">
-                        {(["Men", "Ladies"] as const).map((g) => (
-                            <button
-                                key={g}
-                                type="button"
-                                onClick={() => addGenderSheet(g)}
-                                className="text-xs px-3 py-1 rounded-full border border-brand-300 text-brand-700 bg-brand-50 hover:bg-brand-100 transition-colors font-medium"
-                            >
-                                + {g} set
-                            </button>
-                        ))}
-                        <span className="text-2xs text-surface-400 self-center ml-1">
-                            adds the full {GENDER_SHEETS.Men.length}/{GENDER_SHEETS.Ladies.length}-field sheet (skips fields already added)
+                    <div className="flex flex-wrap items-center gap-2">
+                        {(["Men", "Ladies"] as const).map((g) => {
+                            const active = activeGender === g;
+                            return (
+                                <button
+                                    key={g}
+                                    type="button"
+                                    aria-pressed={active}
+                                    onClick={() => applyGenderSheet(g)}
+                                    className={clsx(
+                                        "text-sm px-4 py-2 rounded-xl border font-semibold transition-colors",
+                                        active
+                                            ? "border-brand-500 bg-brand-600 text-white shadow-sm"
+                                            : "border-brand-300 text-brand-700 bg-brand-50 hover:bg-brand-100 active:bg-brand-200",
+                                    )}
+                                >
+                                    {active && "✓ "}{g}
+                                </button>
+                            );
+                        })}
+                        <span className="text-2xs text-surface-400 self-center ml-1 max-w-[220px] leading-snug">
+                            Loads the standard {GENDER_SHEETS.Men.length}/{GENDER_SHEETS.Ladies.length}-field sheet. Switching keeps any custom fields you added.
                         </span>
                     </div>
                 </div>

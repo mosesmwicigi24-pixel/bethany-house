@@ -1882,10 +1882,13 @@ const PRIORITY_COLOURS: Record<string, string> = {
 
 function fmtDueDate(iso: string): { label: string; cls: string } {
     const days = Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000);
-    if (days < 0)  return { label: `${Math.abs(days)}d overdue`, cls: "text-danger font-semibold" };
-    if (days === 0) return { label: "Due today",                  cls: "text-warning-dark font-semibold" };
-    if (days <= 3)  return { label: `Due in ${days}d`,            cls: "text-warning-dark" };
-    return { label: new Date(iso).toLocaleDateString("en-KE", { day: "2-digit", month: "short", year: "numeric" }), cls: "text-surface-500" };
+    const date = new Date(iso).toLocaleDateString("en-KE", { day: "2-digit", month: "short", year: "numeric" });
+    // Colour signals health at a glance: red past due, amber closing in,
+    // green when there's comfortable runway.
+    if (days < 0)   return { label: `${date} · ${Math.abs(days)}d overdue`, cls: "text-danger font-semibold" };
+    if (days === 0) return { label: `${date} · due today`,                  cls: "text-warning-dark font-semibold" };
+    if (days <= 3)  return { label: `${date} · in ${days}d`,                cls: "text-warning-dark font-medium" };
+    return { label: date, cls: "text-emerald-600 font-medium" };
 }
 
 // ─── Space settings panel ─────────────────────────────────────────────────────
@@ -2228,8 +2231,8 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                         {orderCtx ? (
                             /* ── Context channel: live order data ── */
                             <div className="flex flex-col gap-0.5 min-w-0">
-                                {/* Row 1: type pill + order number + priority */}
-                                <div className="flex items-center gap-1.5 flex-wrap">
+                                {/* Row 1: type pill + PRODUCT NAME (leads) + status + priority */}
+                                <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                                     <span className={clsx(
                                         "text-2xs font-bold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0",
                                         orderCtx.type === "production_order"
@@ -2238,8 +2241,8 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                     )}>
                                         {orderCtx.type === "production_order" ? "Production" : "Order"}
                                     </span>
-                                    <span className="text-sm font-bold text-surface-900 font-mono">
-                                        {orderCtx.orderNumber}
+                                    <span className="text-sm font-bold text-surface-900 truncate">
+                                        {orderCtx.title ?? orderCtx.orderNumber}
                                     </span>
                                     {orderCtx.status && (() => {
                                         const sc = PROD_STATUS_COLOURS[orderCtx.status] ?? { text: "text-surface-500", bg: "bg-surface-100" };
@@ -2255,11 +2258,9 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                         </span>
                                     )}
                                 </div>
-                                {/* Row 2: product/customer · stage · due date · members */}
+                                {/* Row 2: order number (small, mono) · stage · due date · members */}
                                 <div className="flex items-center gap-2 flex-wrap text-2xs text-surface-500">
-                                    {orderCtx.title && (
-                                        <span className="font-medium text-surface-700 truncate max-w-[160px]">{orderCtx.title}</span>
-                                    )}
+                                    <span className="font-mono font-semibold text-surface-400 shrink-0">{orderCtx.orderNumber}</span>
                                     {orderCtx.currentStage && (
                                         <>
                                             <span className="text-surface-300">·</span>
@@ -2278,7 +2279,9 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                     {orderCtx.completion != null && (
                                         <>
                                             <span className="text-surface-300">·</span>
-                                            <span>{orderCtx.completion}% done</span>
+                                            <span className={clsx(orderCtx.completion >= 100 ? "text-emerald-600 font-medium" : undefined)}>
+                                                {orderCtx.completion}% done
+                                            </span>
                                         </>
                                     )}
                                     <span className="text-surface-300">·</span>
