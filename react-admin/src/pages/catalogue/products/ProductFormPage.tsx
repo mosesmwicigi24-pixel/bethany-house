@@ -1468,6 +1468,34 @@ function EditVariantModal({
 
     const attrs = watch("attributes") ?? {};
 
+    // Re-pull the main product's prices for every currency — one tap to undo a
+    // per-variant override that has drifted. Missing currencies are derived from
+    // the default via exchange rate (same formula as the live cascade), so a
+    // product priced only in the base currency still fills every column.
+    const hasProductPrices = productPrices.some((p) => Number(p.regular_price) > 0);
+    const resetToProductPrice = () => {
+        const baseCur   = currencies.find((c: any) => c.is_base || c.is_default);
+        const baseRate  = Number(baseCur?.exchange_rate ?? 1);
+        const baseProd  = productPrices.find((x) => x.currency_code === baseCur?.code);
+        const convert   = (v: number, rate: number) =>
+            baseRate > 0 && rate > 0 ? Math.round((v / baseRate) * rate * 100) / 100 : 0;
+        currencies.forEach((c: any, i: number) => {
+            const fallback = productPrices.find((x) => x.currency_code === c.code);
+            const rate = Number(c.exchange_rate ?? 1);
+            const reg = fallback
+                ? Number(fallback.regular_price)
+                : baseProd ? convert(Number(baseProd.regular_price), rate) : 0;
+            const sale = fallback
+                ? (fallback.sale_price != null ? Number(fallback.sale_price) : null)
+                : (baseProd?.sale_price != null ? convert(Number(baseProd.sale_price), rate) : null);
+            const cost = fallback?.cost_price != null ? Number(fallback.cost_price) : null;
+            setValue(`prices.${i}.regular_price` as any, reg, { shouldDirty: true });
+            setValue(`prices.${i}.sale_price` as any, sale as any, { shouldDirty: true });
+            setValue(`prices.${i}.cost_price` as any, cost as any, { shouldDirty: true });
+        });
+        toast.success("Prices reset to the product price");
+    };
+
     return (
         <Modal
             open={open}
@@ -1543,9 +1571,21 @@ function EditVariantModal({
 
                 {/* Pricing */}
                 <div>
-                    <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-2">
-                        Pricing
-                    </p>
+                    <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider">
+                            Pricing
+                        </p>
+                        {hasProductPrices && (
+                            <button
+                                type="button"
+                                onClick={resetToProductPrice}
+                                className="text-2xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
+                                title="Re-pull the main product's prices for every currency"
+                            >
+                                ↺ Reset to product price
+                            </button>
+                        )}
+                    </div>
                     {currencies.map((currency, i) => {
                         const baseCur    = currencies.find((c: any) => c.is_base || c.is_default);
                         const isBase     = currency.code === baseCur?.code;
