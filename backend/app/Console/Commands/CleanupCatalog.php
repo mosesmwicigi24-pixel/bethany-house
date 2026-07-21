@@ -2,10 +2,12 @@
 
 namespace App\Console\Commands;
 
+use App\Models\Category;
 use App\Models\Product;
 use App\Services\ActivityLogService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * One-off, re-runnable catalog hygiene: messy names, slug/name mismatches, and
@@ -37,11 +39,13 @@ use Illuminate\Support\Facades\DB;
 class CleanupCatalog extends Command
 {
     protected $signature = 'catalog:cleanup
-                            {--apply       : Write changes. Without this flag the command only previews.}
-                            {--fix-names   : Normalise messy names (trim/collapse spaces + known typo fixes).}
-                            {--titlecase   : Also Title-Case names that are entirely lower-case (implies --fix-names).}
-                            {--fix-slugs   : Apply slug corrections (see class docblock — coordinate with the storefront).}
-                            {--archive=    : Comma-separated product IDs to archive (duplicate rows).}';
+                            {--apply          : Write changes. Without this flag the command only previews.}
+                            {--fix-names      : Normalise messy names (trim/collapse spaces + known typo fixes).}
+                            {--titlecase      : Also Title-Case names that are entirely lower-case (implies --fix-names).}
+                            {--fix-slugs      : Apply slug corrections (see class docblock — coordinate with the storefront).}
+                            {--fix-mismatches : Rename mis-named rows to their true identity + reassign categories (NAME_OVERRIDES / CATEGORY_ASSIGN).}
+                            {--merge=*        : Merge duplicate products. Format keeper:loser (e.g. 6:33). Repeatable.}
+                            {--archive=       : Comma-separated product IDs to archive (duplicate rows).}';
 
     protected $description = 'Audit and clean catalog data: messy names, slug/name mismatches, duplicate rows.';
 
@@ -71,8 +75,33 @@ class CleanupCatalog extends Command
         50 => 'golden-communion-tray',
     ];
 
+    /**
+     * True-identity renames for rows whose name was overwritten with a
+     * different product's name (the slug is the reliable identity). Confirmed
+     * by the shop owner. Applied under --fix-mismatches.
+     */
+    private const NAME_OVERRIDES = [
+        48 => 'Chalice Cup Medium',  // slug chalice-cup-medium — mis-named "Pectoral Cross"
+        37 => 'Horn',                // slug horn — mis-named "Stole"
+        39 => 'Canon Gown',          // slug canon-gown — mis-named "Stole"
+    ];
+
+    /** Category reassignments keyed by product id → category name (resolved at runtime). */
+    private const CATEGORY_ASSIGN = [
+        11 => 'Vestments',           // the genuine Pectoral Cross
+    ];
+
     /** IDs the reconciliation flagged — always shown in the audit. */
     private const FLAGGED = [6, 7, 11, 33, 37, 39, 48, 50, 75, 95];
+
+    /**
+     * Tables that record a product's HISTORY/allocations by a plain product_id
+     * (no per-product uniqueness) — safe to repoint wholesale during a merge.
+     */
+    private const MERGE_REPOINT_TABLES = [
+        'order_items', 'production_orders', 'quotation_items',
+        'purchase_order_items', 'inventory_transfer_items',
+    ];
 
     public function handle(): int
     {
@@ -94,6 +123,14 @@ class CleanupCatalog extends Command
 
         $fixSlugs ? $this->doSlugFixes($apply)
                   : $this->comment('Slug fixes: skipped — pass --fix-slugs (note storefront overlay coupling).');
+
+        if ($this->option('fix-mismatches')) {
+            $this->doFixMismatches($apply);
+        }
+
+        foreach ((array) $this->option('merge') as $pair) {
+            $this->doMerge((string) $pair, $apply);
+        }
 
         if ($archiveIds->isNotEmpty()) {
             $this->doArchive($archiveIds, $apply);
@@ -272,6 +309,102 @@ class CleanupCatalog extends Command
                 $p->delete(); // soft delete — references preserved, restorable via restore()
                 $this->logChange('product_archived_duplicate', $id, $this->nameOf($p), 'archived');
             }
+        }
+    }
+
+    // ── Fix mismatches: rename to true identity + reassign category ─────────────
+
+    private function doFixMismatches(bool $apply): void
+    {
+        $this->newLine();
+        $this->line('<comment>Rename mis-named rows to their true identity</comment>' . ($apply ? ' — applying:' : ' — would apply:'));
+        foreach (self::NAME_OVERRIDES as $id => $name) {
+            $t = DB::table('product_translations')->where('product_id', $id)->where('language_code', 'en')->first();
+            if (!$t) { $this->warn("  id {$id}: no en translation — skipped."); continue; }
+            if ($t->name === $name) { $this->line("  id {$id}: already '{$name}'."); continue; }
+            $this->line("  id {$id}: '{$t->name}' → '{$name}'");
+            if ($apply) {
+                DB::table('product_translations')->where('id', $t->id)->update(['name' => $name]);
+                $this->logChange('product_name_corrected', $id, (string) $t->name, $name);
+            }
+        }
+
+        $this->newLine();
+        $this->line('<comment>Reassign categories</comment>' . ($apply ? ' — applying:' : ' — would apply:'));
+        foreach (self::CATEGORY_ASSIGN as $id => $categoryName) {
+            $p = Product::withTrashed()->find($id);
+            if (!$p) { $this->warn("  id {$id}: not found — skipped."); continue; }
+            $cat = Category::where('name_en', 'ILIKE', $categoryName)
+                ->orWhere('slug', 'ILIKE', str_replace(' ', '-', strtolower($categoryName)))
+                ->first();
+            if (!$cat) { $this->warn("  id {$id}: category '{$categoryName}' not found — skipped."); continue; }
+            if ((int) $p->category_id === (int) $cat->id) { $this->line("  id {$id}: already in '{$categoryName}'."); continue; }
+            $this->line("  id {$id} ('{$this->nameOf($p)}') → category '{$cat->name_en}' (#{$cat->id})");
+            if ($apply) {
+                $from = (string) $p->category_id;
+                $p->category_id = $cat->id;
+                $p->save();
+                $this->logChange('product_recategorised', $id, "category {$from}", "category {$cat->id} ({$categoryName})");
+            }
+        }
+    }
+
+    // ── Merge a duplicate into a keeper ─────────────────────────────────────────
+    // Repoints history/allocations (orders, production, quotations, POs, transfers)
+    // and product-level stock onto the keeper, then archives the loser. The loser's
+    // OWN attribute rows (translations, prices, images, variants…) stay with the
+    // archived row — the keeper has its own. Variant-level stock is left in place
+    // and reported, since the loser's variants don't exist on the keeper.
+
+    private function doMerge(string $pair, bool $apply): void
+    {
+        [$keeper, $loser] = array_pad(array_map('intval', explode(':', $pair)), 2, 0);
+        $this->newLine();
+        $this->line("<comment>Merge {$loser} → {$keeper}</comment>" . ($apply ? ' — applying:' : ' — would apply:'));
+
+        if (!$keeper || !$loser || $keeper === $loser) { $this->warn("  invalid pair '{$pair}' — expected keeper:loser."); return; }
+        $k = Product::withTrashed()->find($keeper);
+        $l = Product::withTrashed()->find($loser);
+        if (!$k || !$l) { $this->warn('  keeper or loser not found — skipped.'); return; }
+        if ($l->trashed()) { $this->line("  loser {$loser} already archived — skipped."); return; }
+
+        // Repoint plain product_id history/allocation tables.
+        foreach (self::MERGE_REPOINT_TABLES as $tbl) {
+            if (!Schema::hasTable($tbl) || !Schema::hasColumn($tbl, 'product_id')) continue;
+            $n = DB::table($tbl)->where('product_id', $loser)->count();
+            if ($n === 0) continue;
+            $this->line("  {$tbl}: repoint {$n} row(s)");
+            if ($apply) DB::table($tbl)->where('product_id', $loser)->update(['product_id' => $keeper]);
+        }
+
+        // Product-level stock (variant_id NULL): move to keeper, summing on the
+        // (product, outlet) unique key. Variant-level stock stays on the loser.
+        $prodLevel = DB::table('inventory_items')->where('product_id', $loser)->whereNull('product_variant_id')->get();
+        $variantLevel = DB::table('inventory_items')->where('product_id', $loser)->whereNotNull('product_variant_id')->count();
+        $this->line("  inventory_items: move " . count($prodLevel) . " product-level row(s)" .
+            ($variantLevel ? ", LEAVE {$variantLevel} variant-level row(s) on the archived loser" : ''));
+        if ($apply) {
+            foreach ($prodLevel as $inv) {
+                $existing = DB::table('inventory_items')->where('product_id', $keeper)
+                    ->whereNull('product_variant_id')->where('outlet_id', $inv->outlet_id)->first();
+                if ($existing) {
+                    DB::table('inventory_items')->where('id', $existing->id)->update([
+                        'quantity_on_hand'  => $existing->quantity_on_hand + $inv->quantity_on_hand,
+                        'quantity_reserved' => $existing->quantity_reserved + $inv->quantity_reserved,
+                    ]);
+                    DB::table('inventory_items')->where('id', $inv->id)->delete();
+                } else {
+                    DB::table('inventory_items')->where('id', $inv->id)->update(['product_id' => $keeper]);
+                }
+            }
+        }
+
+        // Archive the loser (soft delete — reversible).
+        $this->line("  archive loser {$loser} ('{$this->nameOf($l)}')");
+        if ($apply) {
+            if ($l->status !== Product::STATUS_ARCHIVED) { $l->status = Product::STATUS_ARCHIVED; $l->save(); }
+            $l->delete();
+            $this->logChange('product_merged', $loser, "merged into {$keeper}", 'archived');
         }
     }
 
