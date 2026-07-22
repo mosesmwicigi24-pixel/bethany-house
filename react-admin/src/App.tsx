@@ -191,6 +191,8 @@ const ProcurementReportPage = lazy(() => import("@/pages/reports/ProcurementRepo
 const FinancialReportPage   = lazy(() => import("@/pages/reports/FinancialReportPage"));
 const ProductCostingReportPage = lazy(() => import("@/pages/reports/ProductCostingReportPage"));
 const IntelligenceDashboard = lazy(() => import("@/pages/intelligence/IntelligenceDashboard"));
+const CustomerGeographyPage = lazy(() => import("@/pages/intelligence/CustomerGeographyPage"));
+const ChannelEngagementPage = lazy(() => import("@/pages/intelligence/ChannelEngagementPage"));
 
 const ModulePlaceholder = lazy(
     (): Promise<{ default: React.ComponentType }> =>
@@ -986,6 +988,26 @@ export default function App() {
                                 <ProtectedRoute anyOf={["inventory.view", "production.view", "customers.view", "expenses.view"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <IntelligenceDashboard />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/intelligence/geography"
+                            element={
+                                <ProtectedRoute anyOf={["customers.view"]}>
+                                <Suspense fallback={<PageLoader />}>
+                                    <CustomerGeographyPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/intelligence/channels"
+                            element={
+                                <ProtectedRoute anyOf={["customers.view"]}>
+                                <Suspense fallback={<PageLoader />}>
+                                    <ChannelEngagementPage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }
