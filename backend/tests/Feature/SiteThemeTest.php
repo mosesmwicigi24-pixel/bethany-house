@@ -70,9 +70,11 @@ class SiteThemeTest extends TestCase
             'promotion_id' => $promo->id, 'banner_id' => $banner->id,
         ]);
 
-        $this->getJson('/api/v1/site/theme')->assertOk()
-            ->assertJsonPath('campaign.discount_value', 15.0)
+        $res = $this->getJson('/api/v1/site/theme')->assertOk()
             ->assertJsonPath('campaign.discount_type', 'percentage')
             ->assertJsonPath('banner.title', 'Harvest Blessed Friday');
+        // discount_value is a JSON number; compare loosely (15 vs 15.0) so the
+        // test doesn't hinge on int/float strictness across DB drivers.
+        $this->assertEquals(15, $res->json('campaign.discount_value'));
     }
 }
