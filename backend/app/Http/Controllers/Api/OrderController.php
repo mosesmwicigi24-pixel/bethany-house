@@ -1534,12 +1534,21 @@ class OrderController extends Controller
 
         $order = Order::findOrFail($id);
 
-        // Only allow attaching a customer while the order is still open
-        $allowedStatuses = ['pending', 'pending_payment', 'processing', 'confirmed'];
-        if (!in_array($order->status, $allowedStatuses)) {
+        // Capture-once, then locked. If this order already has customer
+        // details recorded (walk-in sales start blank), they are frozen -
+        // the receipt/ledger must not be rewritten after the fact. Callers
+        // may only fill in the blank on a guest order, never overwrite a
+        // captured one. This is the server-authoritative half of the
+        // "update if not captured, otherwise lock" rule; the UI mirrors it.
+        $alreadyCaptured = $order->customer_id
+            || $order->user_id
+            || trim((string) $order->customer_first_name) !== ''
+            || trim((string) $order->customer_last_name) !== ''
+            || trim((string) $order->customer_phone) !== '';
+        if ($alreadyCaptured) {
             return response()->json([
-                'message' => 'Customer can only be attached to orders that are pending, processing, or confirmed.',
-                'reason'  => 'invalid_status',
+                'message' => 'Customer details are already captured and locked for this order.',
+                'reason'  => 'customer_locked',
             ], 422);
         }
 

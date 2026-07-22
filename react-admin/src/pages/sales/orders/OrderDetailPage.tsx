@@ -2926,7 +2926,7 @@ function AttachCustomerModal({ order, onClose, onDone }: {
     const canSave = mode === "existing" ? !!selectedCustomer : firstName.trim().length > 0 && phone.trim().length > 0;
 
     return (
-        <Modal open title={order.customer_name ? "Edit Customer" : "Attach Customer"} onClose={onClose}>
+        <Modal open title="Add Customer Details" onClose={onClose}>
             <div className="space-y-4 p-5">
                 <div className="flex gap-1 bg-surface-100 rounded-xl p-1">
                     {(["existing", "new"] as const).map(m => (
@@ -3245,8 +3245,13 @@ export default function OrderDetailPage() {
     const canVoid = ["pending", "processing", "confirmed"].includes(order.status);
     const cc = order.currency_code ?? "KES";
 
-    // Customer can be attached/updated while order is still open
-    const canAttachCustomer = ["pending", "pending_payment", "processing", "confirmed"].includes(order.status);
+    // Capture-once, then locked: a walk-in / guest order can have its
+    // customer details filled in at any time (even after it's completed —
+    // e.g. a receipt printed before the cashier keyed the name in), but once
+    // captured they're frozen. Mirrors the server-authoritative rule in
+    // OrderController::attachCustomer.
+    const customerCaptured = !!(order.customer_name?.trim() || order.user_id || order.customer_phone?.trim());
+    const canAttachCustomer = !customerCaptured;
 
     // Country/currency can only be changed while no payment has been started
     const canChangeCurrency = order.payment_status === "pending" &&
@@ -3424,7 +3429,7 @@ export default function OrderDetailPage() {
                             </button>
                         )}
                         <MoreActionsMenu items={[
-                            canAttachCustomer && { icon: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>, label: order.customer_name ? "Edit Customer" : "Attach Customer", onClick: () => setShowCustomerModal(true) },
+                            canAttachCustomer && { icon: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>, label: "Add Customer Details", onClick: () => setShowCustomerModal(true) },
                             { icon: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0110.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0l.229 2.523a1.125 1.125 0 01-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0021 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 00-1.913-.247M6.34 18H5.25A2.25 2.25 0 013 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.056 48.056 0 011.913-.247m10.5 0a48.536 48.536 0 00-10.5 0" /></svg>, label: "Receipt", onClick: () => setShowReceiptModal(true) },
                             { icon: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>, label: pdfLoading ? "Generating…" : "Download Order PDF", onClick: () => downloadPdf("orders", order.id), disabled: pdfLoading },
                             { icon: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>, label: pdfLoading ? "Generating…" : "Download Invoice PDF", onClick: () => downloadPdf("orders", order.id, "invoice"), disabled: pdfLoading },
@@ -3554,7 +3559,15 @@ export default function OrderDetailPage() {
                         {/* Bill To / Ship To */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-8">
                             <div>
-                                <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2.5">Bill To</p>
+                                <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2.5 flex items-center gap-1.5">
+                                    Bill To
+                                    {customerCaptured && (
+                                        <span className="inline-flex items-center gap-0.5 text-2xs font-semibold text-surface-400 normal-case tracking-normal" title="Customer details are captured and locked for this order.">
+                                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
+                                            Locked
+                                        </span>
+                                    )}
+                                </p>
                                 {order.customer_name ? (
                                     <div className="flex items-start gap-3">
                                         <div className="w-8 h-8 rounded-lg bg-surface-100 flex items-center justify-center shrink-0 text-surface-500 font-bold text-sm">
@@ -3589,7 +3602,16 @@ export default function OrderDetailPage() {
                                         <div className="w-8 h-8 rounded-lg bg-surface-100 flex items-center justify-center shrink-0">
                                             <svg className="w-4 h-4 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" /></svg>
                                         </div>
-                                        <p className="text-xs text-surface-400 italic">Walk-in / Guest</p>
+                                        <div className="space-y-1">
+                                            <p className="text-xs text-surface-400 italic">Walk-in / Guest</p>
+                                            {canAttachCustomer && (
+                                                <button onClick={() => setShowCustomerModal(true)}
+                                                    className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:underline">
+                                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+                                                    Add customer details
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                 )}
                             </div>
