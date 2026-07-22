@@ -321,6 +321,19 @@ const NAV: NavGroup[] = [
         ],
     },
 
+    // ── Home Front Customization ────────────────────────────────────────────────
+    {
+        label: "Home Front Customization",
+        items: [
+            {
+                label: "Home Page",
+                href: "/home-front/home",
+                icon: "dashboard",
+                permission: "products.view",
+            },
+        ],
+    },
+
     // ── Finance ───────────────────────────────────────────────────────────────
     {
         label: "Finance",

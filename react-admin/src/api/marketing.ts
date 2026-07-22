@@ -94,3 +94,42 @@ export const promotionsApi = {
     update: (id: number, body: PromotionInput) => put<{ data: Promotion }>(`/v1/admin/marketing/promotions/${id}`, body),
     remove: (id: number) => del<{ message: string }>(`/v1/admin/marketing/promotions/${id}`),
 };
+
+/* ── Home-front content blocks (banners) ──────────────────────────────────── */
+
+export interface Banner {
+    id: number;
+    title?: string | null;
+    subtitle?: string | null;
+    image_url?: string | null;
+    mobile_image_url?: string | null;
+    link_url?: string | null;
+    link_text?: string | null;
+    position: string;          // slot: home_hero, home_promo, shop_hero, …
+    placement?: string | null; // page: homepage, shop, …
+    is_active: boolean;
+    open_in_new_tab?: boolean;
+    sort_order?: number;       // order within the slot (slide 1, 2, 3…)
+    starts_at?: string | null;
+    ends_at?: string | null;
+    styles?: Record<string, unknown> | null;
+}
+
+export type BannerInput = Partial<Omit<Banner, "id">>;
+
+export const bannersApi = {
+    list: (placement?: string) =>
+        get<{ data: Banner[]; stats: MarketingStats }>(
+            `/v1/admin/marketing/banners${placement ? `?placement=${encodeURIComponent(placement)}` : ""}`,
+        ),
+    get: (id: number) => get<{ data: Banner }>(`/v1/admin/marketing/banners/${id}`),
+    create: (body: BannerInput) => post<{ data: Banner }>("/v1/admin/marketing/banners", body),
+    update: (id: number, body: BannerInput) => put<{ data: Banner }>(`/v1/admin/marketing/banners/${id}`, body),
+    remove: (id: number) => del<{ message: string }>(`/v1/admin/marketing/banners/${id}`),
+    uploadImage: (id: number, file: File, field: "image_url" | "mobile_image_url" = "image_url") => {
+        const fd = new FormData();
+        fd.append("image", file);
+        fd.append("field", field);
+        return post<{ data: Banner; url: string }>(`/v1/admin/marketing/banners/${id}/image`, fd);
+    },
+};
