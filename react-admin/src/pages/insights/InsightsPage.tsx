@@ -85,11 +85,22 @@ export default function InsightsPage() {
     });
 
     const d: AnalyticsOverview | undefined = data;
-    const maxVisit = Math.max(1, ...(d?.visitors_by_country ?? []).map((c) => c.visits));
-    const maxOrders = Math.max(1, ...(d?.buyers_by_country ?? []).map((c) => c.orders));
-    const deviceData = (d?.devices ?? []).map((x) => ({ name: x.device_type, value: x.visits }));
-    const osData = (d?.os ?? []).map((x) => ({ name: x.os, value: x.visits }));
-    const power = powerSignal(d?.totals.mobile_share ?? 0);
+    // Postgres count(*) can serialize as a JSON string ("2") through PDO — coerce
+    // every numeric once so formatting + charts are safe regardless of the driver.
+    const n = (v: unknown) => Number(v ?? 0) || 0;
+    const totals = {
+        visits: n(d?.totals.visits),
+        orders: n(d?.totals.orders),
+        countries: n(d?.totals.countries),
+        mobile_share: n(d?.totals.mobile_share),
+    };
+    const visitors = (d?.visitors_by_country ?? []).map((c) => ({ cc: c.country_code, visits: n(c.visits) }));
+    const buyers = (d?.buyers_by_country ?? []).map((c) => ({ cc: c.country_code, orders: n(c.orders), revenue: n(c.revenue) }));
+    const deviceData = (d?.devices ?? []).map((x) => ({ name: x.device_type, value: n(x.visits) }));
+    const osData = (d?.os ?? []).map((x) => ({ name: x.os, value: n(x.visits) }));
+    const maxVisit = Math.max(1, ...visitors.map((c) => c.visits));
+    const maxOrders = Math.max(1, ...buyers.map((c) => c.orders));
+    const power = powerSignal(totals.mobile_share);
 
     return (
         <div className="space-y-6 animate-fade-in">
@@ -133,10 +144,10 @@ export default function InsightsPage() {
                 <>
                     {/* ── KPIs ── */}
                     <div className={KPI_GRID}>
-                        <KpiCard label="Visits" value={(d?.totals.visits ?? 0).toLocaleString()} sub={`Last ${days} days`} />
-                        <KpiCard label="Countries Reached" value={d?.totals.countries ?? 0} sub="Distinct visitor countries" color="text-brand-600" />
-                        <KpiCard label="Mobile Share" value={`${d?.totals.mobile_share ?? 0}%`} sub={power.label} color={power.color} />
-                        <KpiCard label="Online Orders" value={d?.totals.orders ?? 0} sub="Storefront checkouts" color="text-success" />
+                        <KpiCard label="Visits" value={totals.visits.toLocaleString()} sub={`Last ${days} days`} />
+                        <KpiCard label="Countries Reached" value={totals.countries} sub="Distinct visitor countries" color="text-brand-600" />
+                        <KpiCard label="Mobile Share" value={`${totals.mobile_share}%`} sub={power.label} color={power.color} />
+                        <KpiCard label="Online Orders" value={totals.orders} sub="Storefront checkouts" color="text-success" />
                     </div>
 
                     {/* ── Visitors vs Buyers by country ── */}
@@ -156,14 +167,14 @@ export default function InsightsPage() {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-surface-50">
-                                        {(d?.visitors_by_country ?? []).length === 0 ? (
+                                        {visitors.length === 0 ? (
                                             <EmptyRow cols={3} text="No visits recorded yet." />
                                         ) : (
-                                            (d?.visitors_by_country ?? []).map((c) => (
-                                                <tr key={c.country_code} className="hover:bg-surface-50/50">
+                                            visitors.map((c) => (
+                                                <tr key={c.cc} className="hover:bg-surface-50/50">
                                                     <td className="px-4 py-3">
-                                                        <span className="mr-2 text-base align-middle">{flagOf(c.country_code)}</span>
-                                                        <span className="font-medium text-surface-800 align-middle">{nameOf(c.country_code)}</span>
+                                                        <span className="mr-2 text-base align-middle">{flagOf(c.cc)}</span>
+                                                        <span className="font-medium text-surface-800 align-middle">{nameOf(c.cc)}</span>
                                                     </td>
                                                     <td className="px-4 py-3 text-right tabular-nums font-semibold text-surface-900">{c.visits.toLocaleString()}</td>
                                                     <td className="px-4 py-3">
@@ -193,14 +204,14 @@ export default function InsightsPage() {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-surface-50">
-                                        {(d?.buyers_by_country ?? []).length === 0 ? (
+                                        {buyers.length === 0 ? (
                                             <EmptyRow cols={4} text="No online orders in this range yet." />
                                         ) : (
-                                            (d?.buyers_by_country ?? []).map((c) => (
-                                                <tr key={c.country_code} className="hover:bg-surface-50/50">
+                                            buyers.map((c) => (
+                                                <tr key={c.cc} className="hover:bg-surface-50/50">
                                                     <td className="px-4 py-3">
-                                                        <span className="mr-2 text-base align-middle">{flagOf(c.country_code)}</span>
-                                                        <span className="font-medium text-surface-800 align-middle">{nameOf(c.country_code)}</span>
+                                                        <span className="mr-2 text-base align-middle">{flagOf(c.cc)}</span>
+                                                        <span className="font-medium text-surface-800 align-middle">{nameOf(c.cc)}</span>
                                                     </td>
                                                     <td className="px-4 py-3 text-right tabular-nums font-semibold text-surface-900">{c.orders}</td>
                                                     <td className="px-4 py-3 text-right tabular-nums text-surface-600">{fmtKes(c.revenue)}</td>
