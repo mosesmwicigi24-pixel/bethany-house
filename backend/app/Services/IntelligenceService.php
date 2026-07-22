@@ -9,6 +9,7 @@ use App\Models\{
     MaterialAllocation, Order, OrderItem, Product,
     Customer, User, Expense, ExpenseBudget, ExpenseCategory
 };
+use App\Support\CountryInference;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
@@ -731,80 +732,74 @@ class IntelligenceService
     // =========================================================================
     public static function customerGeography(): array
     {
-        $dead = ['cancelled', 'voided', 'refunded'];
-        // A single resolved country expression, reused below.
-        $country = "COALESCE(NULLIF(o.customer_country_code,''), NULLIF(o.shipping_country_code,''), NULLIF(o.billing_country_code,''))";
-
-        // One country per identified customer = their latest order's country.
+        // One row per identified customer = their LATEST order, carrying every
+        // location signal we hold (order country codes + phone). Phone is joined
+        // by customer_id first, then user_id, then the order's own phone.
         $perCustomer = DB::select("
-            SELECT country, COUNT(*) AS customers
-            FROM (
-                SELECT DISTINCT ON (cust_key)
-                       COALESCE(o.customer_id, c.id) AS cust_key,
-                       {$country} AS country
-                FROM orders o
-                LEFT JOIN customers c ON c.user_id = o.user_id
-                WHERE (o.customer_id IS NOT NULL OR o.user_id IS NOT NULL)
-                  AND o.status NOT IN ('cancelled','voided','refunded')
-                ORDER BY cust_key, o.created_at DESC
-            ) t
-            WHERE country IS NOT NULL
-            GROUP BY country
-        ");
-
-        // Orders + revenue per country across ALL live orders (incl. guests),
-        // with each country's dominant currency (never mix currencies in a sum).
-        $perOrders = DB::select("
-            SELECT {$country} AS country,
-                   COUNT(*) AS orders,
-                   SUM(o.total_amount) AS revenue,
-                   MODE() WITHIN GROUP (ORDER BY o.currency_code) AS currency
+            SELECT DISTINCT ON (cust_key)
+                   COALESCE(o.customer_id, c2.id) AS cust_key,
+                   o.customer_country_code, o.shipping_country_code, o.billing_country_code,
+                   COALESCE(NULLIF(o.customer_phone,''), c1.phone, c2.phone) AS phone
             FROM orders o
+            LEFT JOIN customers c1 ON c1.id = o.customer_id
+            LEFT JOIN customers c2 ON c2.user_id = o.user_id
+            WHERE (o.customer_id IS NOT NULL OR o.user_id IS NOT NULL)
+              AND o.status NOT IN ('cancelled','voided','refunded')
+            ORDER BY cust_key, o.created_at DESC
+        ");
+
+        // Every live order (incl. guests) for the orders/revenue geography.
+        $perOrders = DB::select("
+            SELECT o.customer_country_code, o.shipping_country_code, o.billing_country_code,
+                   COALESCE(NULLIF(o.customer_phone,''), c1.phone, c2.phone) AS phone,
+                   o.total_amount, o.currency_code
+            FROM orders o
+            LEFT JOIN customers c1 ON c1.id = o.customer_id
+            LEFT JOIN customers c2 ON c2.user_id = o.user_id
             WHERE o.status NOT IN ('cancelled','voided','refunded')
-              AND {$country} IS NOT NULL
-            GROUP BY {$country}
         ");
 
-        // Customers with an order but no resolvable country — surfaced, not hidden.
-        $unlocated = (int) DB::scalar("
-            SELECT COUNT(*) FROM (
-                SELECT DISTINCT ON (cust_key) COALESCE(o.customer_id, c.id) AS cust_key, {$country} AS country
-                FROM orders o
-                LEFT JOIN customers c ON c.user_id = o.user_id
-                WHERE (o.customer_id IS NOT NULL OR o.user_id IS NOT NULL)
-                  AND o.status NOT IN ('cancelled','voided','refunded')
-                ORDER BY cust_key, o.created_at DESC
-            ) t
-            WHERE country IS NULL
-        ");
-
-        // Code → display name from the countries table.
         $names = DB::table('countries')->pluck('name', 'code')->toArray();
 
-        $byCode = [];
+        $row = fn (string $code) => [
+            'country_code' => $code,
+            'country_name' => $names[$code] ?? $code,
+            'customers'    => 0,
+            'orders'       => 0,
+            'revenue'      => 0.0,
+            'currency'     => null,
+        ];
+
+        // Customers per resolved country (order country → phone prefix → null).
+        $byCode    = [];
+        $unlocated = 0;
         foreach ($perCustomer as $r) {
-            $byCode[$r->country] = [
-                'country_code' => $r->country,
-                'country_name' => $names[$r->country] ?? $r->country,
-                'customers'    => (int) $r->customers,
-                'orders'       => 0,
-                'revenue'      => 0,
-                'currency'     => null,
-            ];
+            $code = CountryInference::resolve(
+                [$r->customer_country_code, $r->shipping_country_code, $r->billing_country_code],
+                $r->phone,
+            );
+            if ($code === null) { $unlocated++; continue; }
+            $byCode[$code] ??= $row($code);
+            $byCode[$code]['customers']++;
         }
+
+        // Orders + revenue per country, with each country's dominant currency.
+        $currencyTally = [];
         foreach ($perOrders as $r) {
-            $row = $byCode[$r->country] ?? [
-                'country_code' => $r->country,
-                'country_name' => $names[$r->country] ?? $r->country,
-                'customers'    => 0,
-                'orders'       => 0,
-                'revenue'      => 0,
-                'currency'     => null,
-            ];
-            $row['orders']   = (int) $r->orders;
-            $row['revenue']  = (float) $r->revenue;
-            $row['currency'] = $r->currency;
-            $byCode[$r->country] = $row;
+            $code = CountryInference::resolve(
+                [$r->customer_country_code, $r->shipping_country_code, $r->billing_country_code],
+                $r->phone,
+            );
+            if ($code === null) { continue; }
+            $byCode[$code] ??= $row($code);
+            $byCode[$code]['orders']++;
+            $byCode[$code]['revenue'] += (float) $r->total_amount;
+            $cur = $r->currency_code ?: 'KES';
+            $currencyTally[$code][$cur] = ($currencyTally[$code][$cur] ?? 0) + 1;
+        }
+        foreach ($currencyTally as $code => $tally) {
+            arsort($tally);
+            $byCode[$code]['currency'] = array_key_first($tally);
         }
 
         // Rank by customer head-count, then revenue.

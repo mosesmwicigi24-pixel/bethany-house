@@ -58,16 +58,31 @@ class AnalyticsController extends Controller
             ->select('country_code', DB::raw('count(*) as visits'))
             ->groupBy('country_code')->orderByDesc('visits')->limit(50)->get();
 
-        $buyersByCountry = DB::table('orders')
-            ->where('created_at', '>=', $since)
-            ->where('order_type', 'online')
-            ->whereNotNull('customer_country_code')
-            ->select(
-                'customer_country_code as country_code',
-                DB::raw('count(*) as orders'),
-                DB::raw('coalesce(sum(total_amount), 0) as revenue'),
-            )
-            ->groupBy('customer_country_code')->orderByDesc('orders')->limit(50)->get();
+        // Online buyers by country. Country codes are captured on few orders, so
+        // fall back to the phone dialing-prefix (shared CountryInference resolver
+        // — same one the Intelligence audience view uses) before giving up.
+        $onlineOrders = DB::table('orders as o')
+            ->leftJoin('customers as c1', 'c1.id', '=', 'o.customer_id')
+            ->leftJoin('customers as c2', 'c2.user_id', '=', 'o.user_id')
+            ->where('o.created_at', '>=', $since)
+            ->where('o.order_type', 'online')
+            ->selectRaw("o.customer_country_code, o.shipping_country_code, o.billing_country_code,
+                         COALESCE(NULLIF(o.customer_phone,''), c1.phone, c2.phone) as phone,
+                         o.total_amount")
+            ->get();
+        $buyerTally = [];
+        foreach ($onlineOrders as $o) {
+            $code = \App\Support\CountryInference::resolve(
+                [$o->customer_country_code, $o->shipping_country_code, $o->billing_country_code],
+                $o->phone,
+            );
+            if ($code === null) { continue; }
+            $buyerTally[$code] ??= ['country_code' => $code, 'orders' => 0, 'revenue' => 0.0];
+            $buyerTally[$code]['orders']++;
+            $buyerTally[$code]['revenue'] += (float) $o->total_amount;
+        }
+        $buyersByCountry = collect(array_values($buyerTally))
+            ->sortByDesc('orders')->take(50)->values();
 
         $devices = DB::table('site_visits')
             ->where('created_at', '>=', $since)->whereNotNull('device_type')
