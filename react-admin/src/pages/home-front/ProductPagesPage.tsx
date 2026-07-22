@@ -36,8 +36,10 @@ interface Slot {
 }
 
 const SLOTS: Slot[] = [
+    { key: "product_highlight", label: "Highlights", hint: "Skimmable auto-advancing cards near the top — one claim + image each (the “Get the highlights” strip).", titleLabel: "Headline", subLabel: "Short text", small: "Tab label" },
     { key: "product_poster", label: "Poster", hint: "The editorial banner — headline + spec strip + image. One per product.", titleLabel: "Headline", subLabel: "Spec strip (use  |  between specs)", small: "Eyebrow" },
     { key: "product_feature", label: "Take a closer look", hint: "Interactive feature cards, each with its own image (the Apple pattern). Order = 1, 2, 3…", titleLabel: "Feature label", subLabel: "Description", small: "—" },
+    { key: "product_chapter", label: "Story chapters", hint: "Cinematic editorial sections — eyebrow + big headline + copy over a full-bleed image (the Health/Fitness pattern). Stack a few in order.", titleLabel: "Headline", subLabel: "Copy", small: "Eyebrow" },
     { key: "product_pillar", label: "Best place to buy", hint: "The value cards below the story (icon + title + text).", titleLabel: "Title", subLabel: "Text", small: "Icon (emoji)" },
 ];
 const SLOT_BY_KEY = Object.fromEntries(SLOTS.map((s) => [s.key, s]));
