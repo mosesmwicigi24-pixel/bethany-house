@@ -302,6 +302,25 @@ const NAV: NavGroup[] = [
         ],
     },
 
+    // ── Marketing ─────────────────────────────────────────────────────────────
+    {
+        label: "Marketing",
+        items: [
+            {
+                label: "Seasons",
+                href: "/marketing/seasons",
+                icon: "calendar",
+                permission: "products.view",
+            },
+            {
+                label: "Campaigns",
+                href: "/marketing/campaigns",
+                icon: "taxes",
+                permission: "products.view",
+            },
+        ],
+    },
+
     // ── Finance ───────────────────────────────────────────────────────────────
     {
         label: "Finance",

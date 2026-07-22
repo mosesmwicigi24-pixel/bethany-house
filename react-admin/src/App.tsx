@@ -31,6 +31,8 @@ const LanguagesPage = lazy(
     () => import("@/pages/setup/languages/LanguagesPage"),
 );
 const TaxRatesPage = lazy(() => import("@/pages/setup/taxes/TaxRatesPage"));
+const SeasonsPage = lazy(() => import("@/pages/marketing/seasons/SeasonsPage"));
+const CampaignsPage = lazy(() => import("@/pages/marketing/campaigns/CampaignsPage"));
 const OutletsPage = lazy(() => import("@/pages/setup/outlets/OutletsPage"));
 const AttendancePage = lazy(() => import("@/pages/setup/attendance/AttendancePage"));
 const PaymentMethodsPage = lazy(
@@ -1180,6 +1182,26 @@ export default function App() {
                                 <ProtectedRoute permission="settings.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <ShippingSettingsPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/marketing/seasons"
+                            element={
+                                <ProtectedRoute permission="products.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <SeasonsPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/marketing/campaigns"
+                            element={
+                                <ProtectedRoute permission="products.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <CampaignsPage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }
