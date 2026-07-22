@@ -491,6 +491,27 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:products.edit,sanctum');
             });
 
+            // ── Marketing: liturgical seasons + Blessed Friday campaigns ──────
+            Route::middleware('permission:products.view,sanctum')->prefix('marketing')->group(function () {
+                Route::get('/seasons',          [\App\Http\Controllers\Api\SeasonController::class, 'adminIndex']);
+                Route::get('/seasons/{id}',     [\App\Http\Controllers\Api\SeasonController::class, 'adminShow']);
+                Route::post('/seasons',         [\App\Http\Controllers\Api\SeasonController::class, 'store'])
+                    ->middleware('permission:products.edit,sanctum');
+                Route::put('/seasons/{id}',     [\App\Http\Controllers\Api\SeasonController::class, 'update'])
+                    ->middleware('permission:products.edit,sanctum');
+                Route::delete('/seasons/{id}',  [\App\Http\Controllers\Api\SeasonController::class, 'destroy'])
+                    ->middleware('permission:products.delete,sanctum');
+
+                Route::get('/promotions',         [\App\Http\Controllers\Api\PromotionController::class, 'adminIndex']);
+                Route::get('/promotions/{id}',    [\App\Http\Controllers\Api\PromotionController::class, 'adminShow']);
+                Route::post('/promotions',        [\App\Http\Controllers\Api\PromotionController::class, 'store'])
+                    ->middleware('permission:products.edit,sanctum');
+                Route::put('/promotions/{id}',    [\App\Http\Controllers\Api\PromotionController::class, 'update'])
+                    ->middleware('permission:products.edit,sanctum');
+                Route::delete('/promotions/{id}', [\App\Http\Controllers\Api\PromotionController::class, 'destroy'])
+                    ->middleware('permission:products.delete,sanctum');
+            });
+
             // ── Reviews ──────────────────────────────────────────────────────
             Route::middleware('permission:products.edit,sanctum')->prefix('reviews')->group(function () {
                 Route::get('/',              [ProductReviewController::class, 'adminIndex']);
