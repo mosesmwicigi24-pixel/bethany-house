@@ -118,6 +118,26 @@ class CustomerGeographyTest extends TestCase
         $this->assertNotContains('UG', $codes);
     }
 
+    public function test_country_is_inferred_from_phone_when_no_country_code(): void
+    {
+        $this->actAs();
+
+        // The common case: a POS sale with no country code, but a phone number.
+        $customer = $this->newCustomer();
+        Order::factory()->create([
+            'customer_id' => $customer->id, 'user_id' => $customer->user_id,
+            'customer_country_code' => null, 'shipping_country_code' => null, 'billing_country_code' => null,
+            'customer_phone' => '+263771234567',   // Zimbabwe
+            'currency_code' => 'USD', 'total_amount' => 40, 'status' => 'completed',
+        ]);
+
+        $data = $this->geography();
+
+        $this->assertSame('ZW', $data['summary']['top_country_code']);
+        $this->assertSame(1, $data['summary']['located_customers']);
+        $this->assertSame(0, $data['summary']['unlocated_customers']);
+    }
+
     public function test_guest_orders_count_toward_orders_not_customers(): void
     {
         $this->actAs();
