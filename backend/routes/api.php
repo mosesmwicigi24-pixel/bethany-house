@@ -208,6 +208,10 @@ Route::prefix('v1')->group(function () {
         // + motif) and its Blessed Friday campaign. Read by the storefront (ISR)
         // to theme itself; returns { season: null } out of season → default look.
         Route::get('/site/theme', [\App\Http\Controllers\Api\SiteController::class, 'theme']);
+        // Storefront marketing content blocks (hero slider, promo strips, etc.) —
+        // active banners grouped by position. Read by the storefront (ISR); an
+        // empty slot falls back to the storefront's built-in content.
+        Route::get('/site/content', [\App\Http\Controllers\Api\BannerController::class, 'content']);
     });
 
     // ═══ AUTHENTICATED ROUTES ═════════════════════════════════════════════════
@@ -509,6 +513,18 @@ Route::prefix('v1')->group(function () {
                 Route::put('/promotions/{id}',    [\App\Http\Controllers\Api\PromotionController::class, 'update'])
                     ->middleware('permission:products.edit,sanctum');
                 Route::delete('/promotions/{id}', [\App\Http\Controllers\Api\PromotionController::class, 'destroy'])
+                    ->middleware('permission:products.delete,sanctum');
+
+                // Marketing content blocks (homepage hero slider, promos, etc.)
+                Route::get('/banners',             [\App\Http\Controllers\Api\BannerController::class, 'adminIndex']);
+                Route::get('/banners/{id}',        [\App\Http\Controllers\Api\BannerController::class, 'adminShow']);
+                Route::post('/banners',            [\App\Http\Controllers\Api\BannerController::class, 'store'])
+                    ->middleware('permission:products.edit,sanctum');
+                Route::post('/banners/{id}/image', [\App\Http\Controllers\Api\BannerController::class, 'uploadImage'])
+                    ->middleware('permission:products.edit,sanctum');
+                Route::put('/banners/{id}',        [\App\Http\Controllers\Api\BannerController::class, 'update'])
+                    ->middleware('permission:products.edit,sanctum');
+                Route::delete('/banners/{id}',     [\App\Http\Controllers\Api\BannerController::class, 'destroy'])
                     ->middleware('permission:products.delete,sanctum');
             });
 
