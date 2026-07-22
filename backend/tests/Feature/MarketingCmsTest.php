@@ -33,8 +33,8 @@ class MarketingCmsTest extends TestCase
 
     public function test_marketing_endpoints_require_auth(): void
     {
-        $seasons = $this->getJson('/api/v1/marketing/seasons');
-        $promos  = $this->getJson('/api/v1/marketing/promotions');
+        $seasons = $this->getJson('/api/v1/admin/marketing/seasons');
+        $promos  = $this->getJson('/api/v1/admin/marketing/promotions');
         $this->assertContains($seasons->status(), [401, 403]);
         $this->assertContains($promos->status(), [401, 403]);
     }
@@ -43,7 +43,7 @@ class MarketingCmsTest extends TestCase
     {
         $this->admin();
 
-        $create = $this->postJson('/api/v1/marketing/seasons', [
+        $create = $this->postJson('/api/v1/admin/marketing/seasons', [
             'key'       => 'test-feast',
             'name'      => 'Test Feast',
             'scripture' => 'Rejoice always.',
@@ -57,12 +57,12 @@ class MarketingCmsTest extends TestCase
         $id = $create->json('data.id');
         $this->assertDatabaseHas('seasons', ['key' => 'test-feast', 'name' => 'Test Feast']);
 
-        $this->putJson("/api/v1/marketing/seasons/{$id}", [
+        $this->putJson("/api/v1/admin/marketing/seasons/{$id}", [
             'key'  => 'test-feast',
             'name' => 'Test Feast Renamed',
         ])->assertOk()->assertJsonPath('data.name', 'Test Feast Renamed');
 
-        $this->deleteJson("/api/v1/marketing/seasons/{$id}")->assertOk();
+        $this->deleteJson("/api/v1/admin/marketing/seasons/{$id}")->assertOk();
         $this->assertSoftDeleted('seasons', ['id' => $id]);
     }
 
@@ -70,7 +70,7 @@ class MarketingCmsTest extends TestCase
     {
         $this->admin();
 
-        $this->postJson('/api/v1/marketing/promotions', [
+        $this->postJson('/api/v1/admin/marketing/promotions', [
             'name'           => 'Blessed Friday — Harvest',
             'discount_type'  => 'percentage',
             'discount_value' => 15,
@@ -86,7 +86,7 @@ class MarketingCmsTest extends TestCase
     {
         $this->admin();
 
-        $this->postJson('/api/v1/marketing/promotions', [
+        $this->postJson('/api/v1/admin/marketing/promotions', [
             'name'           => 'Bad Promo',
             'discount_type'  => 'percentage',
             'discount_value' => 150,
