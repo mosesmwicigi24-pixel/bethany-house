@@ -62,6 +62,9 @@ class ProductController extends Controller
         // so an out-of-stock item is never quoted. `aliases` serialises via the
         // model cast automatically.
         $products->getCollection()->each->append(['in_stock', 'available_qty']);
+        // Overlay any active promotion's discounted sale_price (DISPLAY) — the
+        // same PromotionService that checkout CHARGES from, so shelf == charge.
+        (new \App\Services\PromotionService())->overlayCollection($products->getCollection());
 
         return response()->json($products);
     }
@@ -120,6 +123,8 @@ class ProductController extends Controller
     {
         $product  = Product::findOrFail($id);
         $variants = $product->variants()->with(['prices', 'images'])->where('is_active', true)->get();
+        // Overlay the parent's active promotion onto variant sale_prices (display).
+        (new \App\Services\PromotionService())->overlayVariants($product, $variants);
         return response()->json(['data' => $variants]);
     }
 
