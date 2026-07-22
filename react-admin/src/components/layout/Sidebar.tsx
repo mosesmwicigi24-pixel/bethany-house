@@ -331,6 +331,12 @@ const NAV: NavGroup[] = [
                 icon: "dashboard",
                 permission: "products.view",
             },
+            {
+                label: "Product Pages",
+                href: "/home-front/products",
+                icon: "products",
+                permission: "products.view",
+            },
         ],
     },
 
