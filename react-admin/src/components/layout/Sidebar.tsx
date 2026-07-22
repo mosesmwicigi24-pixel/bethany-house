@@ -340,6 +340,19 @@ const NAV: NavGroup[] = [
         ],
     },
 
+    // ── Insights ───────────────────────────────────────────────────────────────
+    {
+        label: "Insights",
+        items: [
+            {
+                label: "Storefront Insights",
+                href: "/insights",
+                icon: "countries",
+                permission: "reports.view",
+            },
+        ],
+    },
+
     // ── Finance ───────────────────────────────────────────────────────────────
     {
         label: "Finance",
