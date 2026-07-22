@@ -136,7 +136,13 @@ export default function HomeContentPage() {
                 link_url: v.link_url || null,
                 link_text: v.link_text || null,
                 is_active: v.is_active,
-                styles: { eyebrow: v.eyebrow || undefined, theme: v.theme || undefined },
+                // Preserve any rich style fields (marks, plate, second CTA) that
+                // the form doesn't edit — only override eyebrow + theme.
+                styles: {
+                    ...((editing?.styles as Record<string, unknown>) ?? {}),
+                    eyebrow: v.eyebrow || undefined,
+                    theme: v.theme || undefined,
+                },
             };
             const saved = editing
                 ? await bannersApi.update(editing.id, body)
