@@ -13,7 +13,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { clsx } from "clsx";
 import { intelligenceApi, type ReorderSuggestion, type TailorWorkload,
-         type ChurnRiskCustomer, type MaterialShortage, type BudgetWarning } from "@/api/intelligence";
+         type ChurnRiskCustomer, type MaterialShortage, type BudgetWarning,
+         type CountryStat } from "@/api/intelligence";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
@@ -388,6 +389,76 @@ function BudgetWarningsCard() {
     );
 }
 
+// ── Customer geography ────────────────────────────────────────────────────────
+
+/** ISO-3166 alpha-2 → flag emoji (regional indicator letters). */
+function flagOf(code: string): string {
+    if (!code || code.length !== 2) return "🏳️";
+    return String.fromCodePoint(...[...code.toUpperCase()].map(c => 0x1f1e6 + c.charCodeAt(0) - 65));
+}
+/** Money in the country's own currency — never mixed across countries. */
+function money(n: number, currency: string | null): string {
+    try {
+        return new Intl.NumberFormat("en-KE", { style: "currency", currency: currency || "KES", maximumFractionDigits: 0 }).format(n);
+    } catch {
+        return `${currency || ""} ${fmtNum(Math.round(n))}`.trim();
+    }
+}
+
+function CustomerGeographyCard() {
+    const { data, isLoading } = useQuery({
+        queryKey: ["intelligence", "geography"],
+        queryFn:  intelligenceApi.customerGeography,
+        staleTime: 5 * 60_000,
+    });
+
+    const countries = data?.countries ?? [];
+    const summary   = data?.summary;
+    const maxCust   = Math.max(1, ...countries.map(c => c.customers));
+
+    return (
+        <SectionCard
+            title="Customer Geography"
+            icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9 9 0 100-18 9 9 0 000 18zM3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 010 18M12 3a15 15 0 000 18"/></svg>}
+            badge={summary?.top_country_name ? `Top: ${summary.top_country_name}` : undefined}
+            badgeColor="bg-brand-50 text-brand-700"
+        >
+            {isLoading ? <div className="py-6 flex justify-center"><Spinner /></div> :
+             countries.length === 0 ? <EmptyRow message="No customer location data yet — it builds from order countries." /> : (
+                <>
+                    <div className="divide-y divide-surface-50">
+                        {countries.map((c: CountryStat) => (
+                            <div key={c.country_code} className="flex items-center gap-3 px-5 py-3">
+                                <span className="text-xl shrink-0" aria-hidden>{flagOf(c.country_code)}</span>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <p className="text-sm font-medium text-surface-900 truncate">{c.country_name}</p>
+                                        <p className="text-sm font-bold text-surface-900 shrink-0">{fmtNum(c.customers)}
+                                            <span className="text-xs font-normal text-surface-400"> {c.customers === 1 ? "customer" : "customers"}</span></p>
+                                    </div>
+                                    <div className="mt-1 h-1.5 rounded-full bg-surface-100 overflow-hidden">
+                                        <div className="h-full rounded-full bg-brand-500" style={{ width: `${(c.customers / maxCust) * 100}%` }} />
+                                    </div>
+                                    <p className="text-xs text-surface-400 mt-1">
+                                        {fmtNum(c.orders)} orders{c.revenue > 0 ? ` · ${money(c.revenue, c.currency)}` : ""}
+                                    </p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    {summary && (
+                        <div className="px-5 py-3 border-t border-surface-100 flex flex-wrap gap-x-5 gap-y-1 text-xs text-surface-500">
+                            <span><b className="text-surface-800">{fmtNum(summary.located_customers)}</b> located across <b className="text-surface-800">{summary.distinct_countries}</b> countries</span>
+                            {summary.unlocated_customers > 0 &&
+                                <span><b className="text-surface-800">{fmtNum(summary.unlocated_customers)}</b> without a known country</span>}
+                        </div>
+                    )}
+                </>
+            )}
+        </SectionCard>
+    );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function IntelligenceDashboard() {
@@ -401,6 +472,7 @@ export default function IntelligenceDashboard() {
             </div>
 
             <div className="grid grid-cols-1 gap-5">
+                <CustomerGeographyCard />
                 <ReorderSuggestions />
                 <TailorWorkloadCard />
                 <ChurnRiskCard />

@@ -717,4 +717,112 @@ class IntelligenceService
             default       => ['label' => ucfirst(str_replace('_', ' ', $status)), 'color' => 'neutral'],
         };
     }
+
+    // =========================================================================
+    // Customer geography — "which country has more customers?"
+    //
+    // Built entirely from order data we already hold (no new instrumentation):
+    // every order carries a resolved country (customer → shipping → billing).
+    // A customer's country is their MOST RECENT order's country, so a buyer who
+    // relocates is counted once, where they are now. Guest orders (no identity)
+    // are excluded from the customer head-count but still counted in the
+    // orders/revenue geography so totals stay honest. Money is NOT summed across
+    // currencies — each country reports its own dominant currency.
+    // =========================================================================
+    public static function customerGeography(): array
+    {
+        $dead = ['cancelled', 'voided', 'refunded'];
+        // A single resolved country expression, reused below.
+        $country = "COALESCE(NULLIF(o.customer_country_code,''), NULLIF(o.shipping_country_code,''), NULLIF(o.billing_country_code,''))";
+
+        // One country per identified customer = their latest order's country.
+        $perCustomer = DB::select("
+            SELECT country, COUNT(*) AS customers
+            FROM (
+                SELECT DISTINCT ON (cust_key)
+                       COALESCE(o.customer_id, c.id) AS cust_key,
+                       {$country} AS country
+                FROM orders o
+                LEFT JOIN customers c ON c.user_id = o.user_id
+                WHERE (o.customer_id IS NOT NULL OR o.user_id IS NOT NULL)
+                  AND o.status NOT IN ('cancelled','voided','refunded')
+                ORDER BY cust_key, o.created_at DESC
+            ) t
+            WHERE country IS NOT NULL
+            GROUP BY country
+        ");
+
+        // Orders + revenue per country across ALL live orders (incl. guests),
+        // with each country's dominant currency (never mix currencies in a sum).
+        $perOrders = DB::select("
+            SELECT {$country} AS country,
+                   COUNT(*) AS orders,
+                   SUM(o.total_amount) AS revenue,
+                   MODE() WITHIN GROUP (ORDER BY o.currency_code) AS currency
+            FROM orders o
+            WHERE o.status NOT IN ('cancelled','voided','refunded')
+              AND {$country} IS NOT NULL
+            GROUP BY {$country}
+        ");
+
+        // Customers with an order but no resolvable country — surfaced, not hidden.
+        $unlocated = (int) DB::scalar("
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT ON (cust_key) COALESCE(o.customer_id, c.id) AS cust_key, {$country} AS country
+                FROM orders o
+                LEFT JOIN customers c ON c.user_id = o.user_id
+                WHERE (o.customer_id IS NOT NULL OR o.user_id IS NOT NULL)
+                  AND o.status NOT IN ('cancelled','voided','refunded')
+                ORDER BY cust_key, o.created_at DESC
+            ) t
+            WHERE country IS NULL
+        ");
+
+        // Code → display name from the countries table.
+        $names = DB::table('countries')->pluck('name', 'code')->toArray();
+
+        $byCode = [];
+        foreach ($perCustomer as $r) {
+            $byCode[$r->country] = [
+                'country_code' => $r->country,
+                'country_name' => $names[$r->country] ?? $r->country,
+                'customers'    => (int) $r->customers,
+                'orders'       => 0,
+                'revenue'      => 0,
+                'currency'     => null,
+            ];
+        }
+        foreach ($perOrders as $r) {
+            $row = $byCode[$r->country] ?? [
+                'country_code' => $r->country,
+                'country_name' => $names[$r->country] ?? $r->country,
+                'customers'    => 0,
+                'orders'       => 0,
+                'revenue'      => 0,
+                'currency'     => null,
+            ];
+            $row['orders']   = (int) $r->orders;
+            $row['revenue']  = (float) $r->revenue;
+            $row['currency'] = $r->currency;
+            $byCode[$r->country] = $row;
+        }
+
+        // Rank by customer head-count, then revenue.
+        $countries = array_values($byCode);
+        usort($countries, fn ($a, $b) =>
+            [$b['customers'], $b['revenue']] <=> [$a['customers'], $a['revenue']]);
+
+        $locatedCustomers = array_sum(array_column($countries, 'customers'));
+
+        return [
+            'countries' => $countries,
+            'summary'   => [
+                'located_customers'   => $locatedCustomers,
+                'unlocated_customers' => $unlocated,
+                'distinct_countries'  => count(array_filter($countries, fn ($c) => $c['customers'] > 0)),
+                'top_country_code'    => $countries[0]['country_code'] ?? null,
+                'top_country_name'    => $countries[0]['country_name'] ?? null,
+            ],
+        ];
+    }
 }
