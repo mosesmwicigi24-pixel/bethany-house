@@ -126,6 +126,15 @@ class IntelligenceController extends Controller
         return response()->json(IntelligenceService::customerGeography());
     }
 
+    // ── GET /intelligence/channel-engagement ──────────────────────────────────
+    // How often customers reach us on each platform (WhatsApp/Messenger/Instagram/
+    // Facebook from Neema, web from site_visits). Unconnected channels read as
+    // not-yet-connected.
+    public function channelEngagement()
+    {
+        return response()->json(IntelligenceService::channelEngagement());
+    }
+
     // ── GET /intelligence/material-shortages ──────────────────────────────────
     // Aggregate shortages across all active production orders.
 

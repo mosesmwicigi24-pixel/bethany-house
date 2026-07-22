@@ -820,4 +820,81 @@ class IntelligenceService
             ],
         ];
     }
+
+    // =========================================================================
+    // Channel engagement — how often customers reach us on each platform.
+    //
+    // Messaging channels (WhatsApp/Messenger/Instagram/Facebook) come from
+    // channel_touchpoints, synced from Neema and matched to customers by phone.
+    // Web is the anonymous site_visits stream. The five platforms are always
+    // returned in order; a channel with no data reads as not-yet-connected
+    // (e.g. Messenger/IG until Neema's Meta ingestion is switched on).
+    // =========================================================================
+    public static function channelEngagement(): array
+    {
+        $byChannel = [];
+        foreach (DB::table('channel_touchpoints')
+            ->select('channel',
+                DB::raw('COUNT(*) as contacts'),
+                DB::raw('COUNT(customer_id) as customers'),
+                DB::raw('COALESCE(SUM(messages),0) as messages'),
+                DB::raw('MAX(last_seen) as last_seen'))
+            ->groupBy('channel')->get() as $r) {
+            $byChannel[$r->channel] = [
+                'channel'   => $r->channel,
+                'contacts'  => (int) $r->contacts,
+                'customers' => (int) $r->customers,
+                'messages'  => (int) $r->messages,
+                'last_seen' => $r->last_seen,
+                'connected' => true,
+            ];
+        }
+
+        $webVisits = (int) DB::table('site_visits')->count();
+        $webLast   = DB::table('site_visits')->max('created_at');
+
+        // The five platforms, always in this order.
+        $order = ['whatsapp', 'messenger', 'instagram', 'facebook', 'web'];
+        $channels = [];
+        foreach ($order as $ch) {
+            if ($ch === 'web') {
+                $channels[] = [
+                    'channel' => 'web', 'contacts' => $webVisits, 'customers' => 0,
+                    'messages' => $webVisits, 'last_seen' => $webLast, 'connected' => $webVisits > 0,
+                ];
+            } else {
+                $channels[] = $byChannel[$ch] ?? [
+                    'channel' => $ch, 'contacts' => 0, 'customers' => 0,
+                    'messages' => 0, 'last_seen' => null, 'connected' => false,
+                ];
+            }
+        }
+
+        // Most-engaged customers across the messaging channels.
+        $top = DB::table('channel_touchpoints as t')
+            ->join('customers as c', 'c.id', '=', 't.customer_id')
+            ->whereNotNull('t.customer_id')
+            ->groupBy('c.id', 'c.first_name', 'c.last_name')
+            ->select('c.id', 'c.first_name', 'c.last_name',
+                DB::raw('SUM(t.messages) as messages'),
+                DB::raw("string_agg(DISTINCT t.channel, ',') as channels"))
+            ->orderByDesc(DB::raw('SUM(t.messages)'))
+            ->limit(10)->get()
+            ->map(fn ($r) => [
+                'customer_id' => $r->id,
+                'name'        => trim(($r->first_name ?? '') . ' ' . ($r->last_name ?? '')),
+                'messages'    => (int) $r->messages,
+                'channels'    => $r->channels ? explode(',', $r->channels) : [],
+            ])->values();
+
+        return [
+            'channels'      => $channels,
+            'top_customers' => $top,
+            'summary'       => [
+                'connected_channels' => count(array_filter($channels, fn ($c) => $c['connected'])),
+                'message_channels'   => array_sum(array_map(
+                    fn ($c) => $c['channel'] === 'web' ? 0 : $c['messages'], $channels)),
+            ],
+        ];
+    }
 }

@@ -24,6 +24,13 @@ Schedule::command(\App\Console\Commands\RunIntelligenceChecks::class)
     ->onFailure(function () {
         \Illuminate\Support\Facades\Log::error('[Intelligence] Nightly checks failed.');
     });
+
+// ── Cross-channel engagement — pull Neema's message rollup nightly ───────────
+Schedule::command(\App\Console\Commands\SyncChannelTouchpoints::class)
+    ->dailyAt('06:30')
+    ->timezone('Africa/Nairobi')
+    ->withoutOverlapping()
+    ->runInBackground();
 // ── Reap abandoned POS orders — hourly ───────────────────────────────────────
 // Cancels unpaid pending POS orders older than 24h and restores their reserved
 // stock, so abandoned carts never silently drain the shelf count.
