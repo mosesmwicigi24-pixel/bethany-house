@@ -53,6 +53,8 @@ services:
             WABA_PHONE_NUMBER_ID: ${WABA_PHONE_NUMBER_ID:-}
             WABA_API_VERSION: ${WABA_API_VERSION:-v19.0}
             APP_ENV: production
+            NEEMA_API_URL: ${NEEMA_API_URL:-https://neema.bethanyhouse.co.ke}
+            NEEMA_ANALYTICS_KEY: ${NEEMA_ANALYTICS_KEY:-}
             STOREFRONT_URL: ${STOREFRONT_URL:-}
             APP_KEY: ${APP_KEY:?APP_KEY is required}
             APP_DEBUG: "false"
@@ -141,6 +143,8 @@ services:
             WABA_PHONE_NUMBER_ID: ${WABA_PHONE_NUMBER_ID:-}
             WABA_API_VERSION: ${WABA_API_VERSION:-v19.0}
             APP_ENV: production
+            NEEMA_API_URL: ${NEEMA_API_URL:-https://neema.bethanyhouse.co.ke}
+            NEEMA_ANALYTICS_KEY: ${NEEMA_ANALYTICS_KEY:-}
             STOREFRONT_URL: ${STOREFRONT_URL:-}
             APP_KEY: ${APP_KEY}
             APP_DEBUG: "false"
@@ -196,6 +200,8 @@ services:
             WABA_PHONE_NUMBER_ID: ${WABA_PHONE_NUMBER_ID:-}
             WABA_API_VERSION: ${WABA_API_VERSION:-v19.0}
             APP_ENV: production
+            NEEMA_API_URL: ${NEEMA_API_URL:-https://neema.bethanyhouse.co.ke}
+            NEEMA_ANALYTICS_KEY: ${NEEMA_ANALYTICS_KEY:-}
             STOREFRONT_URL: ${STOREFRONT_URL:-}
             APP_KEY: ${APP_KEY}
             DB_CONNECTION: pgsql
@@ -291,6 +297,8 @@ services:
             WABA_PHONE_NUMBER_ID: ${WABA_PHONE_NUMBER_ID:-}
             WABA_API_VERSION: ${WABA_API_VERSION:-v19.0}
             APP_ENV: production
+            NEEMA_API_URL: ${NEEMA_API_URL:-https://neema.bethanyhouse.co.ke}
+            NEEMA_ANALYTICS_KEY: ${NEEMA_ANALYTICS_KEY:-}
             STOREFRONT_URL: ${STOREFRONT_URL:-}
             APP_KEY: ${APP_KEY:?APP_KEY is required}
             APP_DEBUG: "false"
