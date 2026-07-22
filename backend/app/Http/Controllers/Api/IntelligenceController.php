@@ -118,6 +118,14 @@ class IntelligenceController extends Controller
         ]);
     }
 
+    // ── GET /intelligence/customer-geography ──────────────────────────────────
+    // "Which country has more customers?" — a country league table (customers,
+    // orders, revenue) resolved from order geography. No new instrumentation.
+    public function customerGeography()
+    {
+        return response()->json(IntelligenceService::customerGeography());
+    }
+
     // ── GET /intelligence/material-shortages ──────────────────────────────────
     // Aggregate shortages across all active production orders.
 

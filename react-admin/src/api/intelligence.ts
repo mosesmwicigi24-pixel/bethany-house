@@ -50,6 +50,26 @@ export interface ChurnRiskCustomer {
     risk_level:        "high" | "medium";
 }
 
+export interface CountryStat {
+    country_code: string;
+    country_name: string;
+    customers:    number;
+    orders:       number;
+    revenue:      number;
+    currency:     string | null;
+}
+
+export interface CustomerGeography {
+    countries: CountryStat[];
+    summary: {
+        located_customers:   number;
+        unlocated_customers: number;
+        distinct_countries:  number;
+        top_country_code:    string | null;
+        top_country_name:    string | null;
+    };
+}
+
 export interface MaterialShortage {
     material_id:    number;
     material_name:  string;
@@ -110,6 +130,9 @@ export const intelligenceApi = {
 
     churnRisk: (limit = 50) =>
         get<{ customers: ChurnRiskCustomer[] }>(`${BASE}/churn-risk`, { params: { limit } }),
+
+    customerGeography: () =>
+        get<CustomerGeography>(`${BASE}/customer-geography`),
 
     materialShortages: () =>
         get<{ shortages: MaterialShortage[] }>(`${BASE}/material-shortages`),
