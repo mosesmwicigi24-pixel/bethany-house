@@ -427,6 +427,18 @@ const NAV: NavGroup[] = [
                 icon: "intelligence",
                 permission: "reports.view",
             },
+            {
+                label: "Customer Geography",
+                href: "/intelligence/geography",
+                icon: "customers",
+                permission: "customers.view",
+            },
+            {
+                label: "Channel Engagement",
+                href: "/intelligence/channels",
+                icon: "customers",
+                permission: "customers.view",
+            },
         ],
     },
 
