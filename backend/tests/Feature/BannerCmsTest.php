@@ -113,4 +113,17 @@ class BannerCmsTest extends TestCase
         $this->assertStringContainsString('altar', (string) $data['home_hero'][0]['title']);
         $this->assertNotEmpty($data['home_hero'][0]['image_url']);
     }
+
+    public function test_clergy_cassock_product_page_is_seeded(): void
+    {
+        // A full Apple-style product page seeded as CMS blocks (placement=product:<slug>).
+        $data = $this->getJson('/api/v1/site/content?placement=' . urlencode('product:clergy-cassock'))
+            ->assertOk()->json('data');
+        $this->assertArrayHasKey('product_highlight', $data);
+        $this->assertArrayHasKey('product_feature', $data);
+        $this->assertArrayHasKey('product_chapter', $data);
+        $this->assertCount(3, $data['product_highlight']);
+        $this->assertCount(4, $data['product_feature']);
+        $this->assertCount(2, $data['product_chapter']);
+    }
 }
