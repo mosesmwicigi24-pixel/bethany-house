@@ -6,7 +6,7 @@ use App\Models\Order;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
-use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
@@ -23,8 +23,10 @@ class OrderAttachCustomerTest extends TestCase
 
     private function actAsEditor(): User
     {
+        // The reporter is a Super Admin; Gate::before clears the route's
+        // orders.edit|orders.create middleware for them.
         $user = User::factory()->create();
-        $user->givePermissionTo(Permission::findOrCreate('orders.edit', 'sanctum'));
+        $user->assignRole(Role::findOrCreate('super_admin', 'sanctum'));
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
         return $user;
