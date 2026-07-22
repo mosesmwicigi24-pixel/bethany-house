@@ -203,6 +203,11 @@ Route::prefix('v1')->group(function () {
             Route::get('/currencies', [SettingController::class, 'currencies']);
             Route::get('/app-info',  [SettingController::class, 'appInfo']);
         });
+
+        // Storefront seasonal skin — the active liturgical season (subtle palette
+        // + motif) and its Blessed Friday campaign. Read by the storefront (ISR)
+        // to theme itself; returns { season: null } out of season → default look.
+        Route::get('/site/theme', [\App\Http\Controllers\Api\SiteController::class, 'theme']);
     });
 
     // ═══ AUTHENTICATED ROUTES ═════════════════════════════════════════════════
