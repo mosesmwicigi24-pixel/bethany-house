@@ -133,3 +133,33 @@ export const bannersApi = {
         return post<{ data: Banner; url: string }>(`/v1/admin/marketing/banners/${id}/image`, fd);
     },
 };
+
+/* ============================================================
+   Storefront Insights — visitor + buyer analytics.
+   Backend: GET /api/v1/admin/analytics/overview?days=N
+   (see AnalyticsController::overview). Country + device only —
+   no IP is ever stored (Kenya DPA / our Privacy Policy).
+   ============================================================ */
+
+export interface CountryVisits { country_code: string; visits: number }
+export interface CountryBuyers { country_code: string; orders: number; revenue: number }
+export interface DimensionCount { visits: number }
+
+export interface AnalyticsOverview {
+    range_days: number;
+    totals: {
+        visits: number;
+        orders: number;
+        countries: number;
+        mobile_share: number; // 0–100
+    };
+    visitors_by_country: CountryVisits[];
+    buyers_by_country: CountryBuyers[];
+    devices: (DimensionCount & { device_type: string })[];
+    os: (DimensionCount & { os: string })[];
+}
+
+export const analyticsApi = {
+    overview: (days = 30) =>
+        get<AnalyticsOverview>(`/v1/admin/analytics/overview?days=${days}`),
+};
