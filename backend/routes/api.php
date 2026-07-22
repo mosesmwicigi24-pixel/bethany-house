@@ -212,6 +212,9 @@ Route::prefix('v1')->group(function () {
         // active banners grouped by position. Read by the storefront (ISR); an
         // empty slot falls back to the storefront's built-in content.
         Route::get('/site/content', [\App\Http\Controllers\Api\BannerController::class, 'content']);
+        // Storefront visit beacon — country + device only, no IP. Powers Insights.
+        Route::post('/site/track', [\App\Http\Controllers\Api\AnalyticsController::class, 'track'])
+            ->middleware('throttle:120,1');
     });
 
     // ═══ AUTHENTICATED ROUTES ═════════════════════════════════════════════════
@@ -526,6 +529,11 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:products.edit,sanctum');
                 Route::delete('/banners/{id}',     [\App\Http\Controllers\Api\BannerController::class, 'destroy'])
                     ->middleware('permission:products.delete,sanctum');
+            });
+
+            // ── Insights / analytics ──────────────────────────────────────────
+            Route::middleware('permission:reports.view,sanctum')->prefix('analytics')->group(function () {
+                Route::get('/overview', [\App\Http\Controllers\Api\AnalyticsController::class, 'overview']);
             });
 
             // ── Reviews ──────────────────────────────────────────────────────
