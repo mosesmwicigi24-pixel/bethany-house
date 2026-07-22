@@ -30,14 +30,27 @@ class CustomerGeographyTest extends TestCase
         Sanctum::actingAs($user);
     }
 
+    private int $seq = 0;
+
     private function geography(): array
     {
         return $this->getJson('/api/v1/admin/intelligence/customer-geography')->assertOk()->json();
     }
 
+    /** No CustomerFactory in this app — create the row directly. */
+    private function newCustomer(): Customer
+    {
+        $this->seq++;
+        return Customer::create([
+            'first_name' => 'Cust',
+            'last_name'  => "No{$this->seq}",
+            'phone'      => '+2547' . str_pad((string) $this->seq, 8, '0', STR_PAD_LEFT),
+        ]);
+    }
+
     private function customerOrder(string $country, string $currency, float $total, array $over = []): Order
     {
-        $customer = Customer::factory()->create();
+        $customer = $this->newCustomer();
         return Order::factory()->create(array_merge([
             'customer_id'           => $customer->id,
             'user_id'               => $customer->user_id,
@@ -70,7 +83,7 @@ class CustomerGeographyTest extends TestCase
     {
         $this->actAs();
 
-        $customer = Customer::factory()->create();
+        $customer = $this->newCustomer();
         // Older order from Kenya, newer from Tanzania → counts as Tanzania, once.
         Order::factory()->create([
             'customer_id' => $customer->id, 'user_id' => $customer->user_id,
