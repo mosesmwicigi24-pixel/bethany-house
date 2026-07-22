@@ -74,20 +74,21 @@ class BannerCmsTest extends TestCase
 
     public function test_public_content_groups_active_blocks_by_position_ordered(): void
     {
-        Banner::create(['title' => 'Slide B', 'position' => 'home_hero', 'placement' => 'homepage', 'sort_order' => 2, 'is_active' => true]);
-        Banner::create(['title' => 'Slide A', 'position' => 'home_hero', 'placement' => 'homepage', 'sort_order' => 1, 'is_active' => true]);
-        Banner::create(['title' => 'Promo',   'position' => 'home_promo', 'placement' => 'homepage', 'sort_order' => 1, 'is_active' => true]);
-        Banner::create(['title' => 'Hidden',  'position' => 'home_hero', 'placement' => 'homepage', 'sort_order' => 9, 'is_active' => false]);
+        // Use isolated positions so the seeded home_hero slides don't affect counts.
+        Banner::create(['title' => 'Slide B', 'position' => 'zz_hero', 'placement' => 'homepage', 'sort_order' => 2, 'is_active' => true]);
+        Banner::create(['title' => 'Slide A', 'position' => 'zz_hero', 'placement' => 'homepage', 'sort_order' => 1, 'is_active' => true]);
+        Banner::create(['title' => 'Promo',   'position' => 'zz_promo', 'placement' => 'homepage', 'sort_order' => 1, 'is_active' => true]);
+        Banner::create(['title' => 'Hidden',  'position' => 'zz_hero', 'placement' => 'homepage', 'sort_order' => 9, 'is_active' => false]);
 
         $data = $this->getJson('/api/v1/site/content?placement=homepage')->assertOk()->json('data');
 
-        $this->assertArrayHasKey('home_hero', $data);
-        $this->assertArrayHasKey('home_promo', $data);
+        $this->assertArrayHasKey('zz_hero', $data);
+        $this->assertArrayHasKey('zz_promo', $data);
 
-        // Inactive excluded; hero slides ordered by sort_order (A before B).
-        $this->assertCount(2, $data['home_hero']);
-        $this->assertEquals('Slide A', $data['home_hero'][0]['title']);
-        $this->assertEquals('Slide B', $data['home_hero'][1]['title']);
+        // Inactive excluded; slides ordered by sort_order (A before B).
+        $this->assertCount(2, $data['zz_hero']);
+        $this->assertEquals('Slide A', $data['zz_hero'][0]['title']);
+        $this->assertEquals('Slide B', $data['zz_hero'][1]['title']);
     }
 
     public function test_text_only_block_without_image_is_allowed(): void
@@ -99,5 +100,17 @@ class BannerCmsTest extends TestCase
         $data = $this->getJson('/api/v1/site/content?placement=homepage')->assertOk()->json('data');
         $this->assertArrayHasKey('home_newsletter', $data);
         $this->assertNull($data['home_newsletter'][0]['image_url']);
+    }
+
+    public function test_home_hero_slides_are_seeded_from_the_website(): void
+    {
+        // The seed migration puts the storefront's current 3 hero slides into
+        // the CMS as home_hero entries, ordered 1/2/3.
+        $data = $this->getJson('/api/v1/site/content?placement=homepage')->assertOk()->json('data');
+        $this->assertArrayHasKey('home_hero', $data);
+        $this->assertCount(3, $data['home_hero']);
+        $this->assertEquals(1, $data['home_hero'][0]['sort_order']);
+        $this->assertStringContainsString('altar', (string) $data['home_hero'][0]['title']);
+        $this->assertNotEmpty($data['home_hero'][0]['image_url']);
     }
 }
