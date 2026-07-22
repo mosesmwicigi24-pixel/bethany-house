@@ -97,6 +97,11 @@ class StorefrontCheckoutController extends Controller
         }
 
         // ── Load & vet products, price lines ─────────────────────────────────
+        // Server-authoritative discounts: the same resolver that overlays the
+        // storefront's displayed sale_price also drives the CHARGED discount, so
+        // shelf price and charged price can never diverge.
+        $promoService  = new \App\Services\PromotionService();
+        $totalDiscount = 0.0;
         $lines = [];
         foreach ($validated['items'] as $index => $item) {
             $product = Product::published()
@@ -159,27 +164,49 @@ class StorefrontCheckoutController extends Controller
                 ], 422);
             }
 
+            // Charge the current selling price (a manual sale if any) minus the
+            // active promotion — resolved on the server, never sent by the client.
+            $regular   = (float) $price->regular_price;
+            $effective = (float) $price->getEffectivePrice();   // honours a manual sale_price
+            $promo     = $promoService->promotionFor($product);
+            $finalUnit = $promo ? $promoService->discountedUnit($effective, $promo) : $effective;
+            $qty       = (int) $item['quantity'];
+            // The line discount captures BOTH any manual sale and the promotion,
+            // measured against the regular list price (which stays the unit_price).
+            $lineDiscount   = round(max(0, $regular - $finalUnit) * $qty, 2);
+            $totalDiscount += $lineDiscount;
+
             $lines[] = [
                 'product'         => $product,
                 'variant'         => $variant,
-                'quantity'        => (int) $item['quantity'],
-                'unit_price'      => (float) $price->regular_price,
+                'quantity'        => $qty,
+                'unit_price'      => $regular,
                 'measurements'    => $isCustom ? $measurements : [],
                 'size'            => $size,
                 // TaxCalculationService line shape (mirrors checkout()):
                 'product_id'      => $product->id,
-                'discount_amount' => 0,
+                'discount_amount' => $lineDiscount,
             ];
         }
 
-        $taxCalc      = TaxCalculationService::calculateOrder(array_map(fn ($l) => [
+        // Charge pass: real per-line discounts flow into subtotal/tax/total_gross.
+        $taxCalc = TaxCalculationService::calculateOrder(array_map(fn ($l) => [
+            'product_id'      => $l['product_id'],
+            'unit_price'      => $l['unit_price'],
+            'quantity'        => $l['quantity'],
+            'discount_amount' => $l['discount_amount'],
+        ], $lines));
+        // Pre-discount pass: the list subtotal, so the order header reads the
+        // standard way (subtotal − discount + tax = total), like the POS path.
+        $taxPre = TaxCalculationService::calculateOrder(array_map(fn ($l) => [
             'product_id'      => $l['product_id'],
             'unit_price'      => $l['unit_price'],
             'quantity'        => $l['quantity'],
             'discount_amount' => 0,
         ], $lines));
-        $taxInclusive = $taxCalc['tax_inclusive'];
-        $totalAmount  = $taxCalc['total_gross']; // shipping confirmed later, see class doc
+        $taxInclusive  = $taxCalc['tax_inclusive'];
+        $totalDiscount = round($totalDiscount, 2);
+        $totalAmount   = $taxCalc['total_gross']; // shipping confirmed later, see class doc
 
         $prefix      = DB::table('settings')->where('key', 'order_prefix')->value('value') ?? 'ORD-';
         $orderNumber = $prefix . strtoupper(Str::random(8));
@@ -217,7 +244,8 @@ class StorefrontCheckoutController extends Controller
                 'currency_code'            => $currency,
                 'customer_country_code'    => $countryCode,
                 'is_international'         => $isInternational,
-                'subtotal'                 => $taxCalc['subtotal'],
+                'subtotal'                 => $taxPre['subtotal'],
+                'discount_amount'          => $totalDiscount,
                 'tax_amount'               => $taxCalc['total_tax'],
                 'prices_include_tax'       => $taxInclusive,
                 'shipping_amount'          => 0,
@@ -261,7 +289,7 @@ class StorefrontCheckoutController extends Controller
                     'sku'                => $variant?->sku ?? $product->sku,
                     'quantity'        => $line['quantity'],
                     'unit_price'      => $line['unit_price'],
-                    'discount_amount' => 0,
+                    'discount_amount' => $line['discount_amount'],
                     'tax_amount'      => $lineTax['tax_amount'],
                     'total_price'     => $lineTax['subtotal_gross'],
                     'notes'           => !empty($line['measurements'])
