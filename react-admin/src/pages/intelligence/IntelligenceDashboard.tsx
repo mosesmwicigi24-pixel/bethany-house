@@ -14,7 +14,7 @@ import { useNavigate } from "react-router-dom";
 import { clsx } from "clsx";
 import { intelligenceApi, type ReorderSuggestion, type TailorWorkload,
          type ChurnRiskCustomer, type MaterialShortage, type BudgetWarning,
-         type CountryStat } from "@/api/intelligence";
+         type CountryStat, type ChannelStat } from "@/api/intelligence";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
@@ -459,6 +459,89 @@ function CustomerGeographyCard() {
     );
 }
 
+// ── Channel engagement ────────────────────────────────────────────────────────
+
+const CHANNEL_META: Record<string, { label: string; emoji: string }> = {
+    whatsapp:  { label: "WhatsApp",  emoji: "🟢" },
+    messenger: { label: "Messenger", emoji: "💬" },
+    instagram: { label: "Instagram", emoji: "📸" },
+    facebook:  { label: "Facebook",  emoji: "👍" },
+    web:       { label: "Webpage",   emoji: "🌐" },
+};
+
+function ChannelEngagementCard() {
+    const navigate = useNavigate();
+    const { data, isLoading } = useQuery({
+        queryKey: ["intelligence", "channels"],
+        queryFn:  intelligenceApi.channelEngagement,
+        staleTime: 5 * 60_000,
+    });
+
+    const channels = data?.channels ?? [];
+    const top      = data?.top_customers ?? [];
+    const maxMsg   = Math.max(1, ...channels.map(c => c.messages));
+    const connected = data?.summary?.connected_channels ?? 0;
+
+    return (
+        <SectionCard
+            title="Channel Engagement"
+            icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4-.8L3 20l.8-3.6A7.9 7.9 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>}
+            badge={`${connected}/5 connected`}
+            badgeColor="bg-brand-50 text-brand-700"
+        >
+            {isLoading ? <div className="py-6 flex justify-center"><Spinner /></div> : (
+                <>
+                    <div className="divide-y divide-surface-50">
+                        {channels.map((c: ChannelStat) => {
+                            const meta = CHANNEL_META[c.channel] ?? { label: c.channel, emoji: "•" };
+                            return (
+                                <div key={c.channel} className={clsx("flex items-center gap-3 px-5 py-3", !c.connected && "opacity-55")}>
+                                    <span className="text-lg shrink-0" aria-hidden>{meta.emoji}</span>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <p className="text-sm font-medium text-surface-900">{meta.label}</p>
+                                            {c.connected ? (
+                                                <p className="text-sm font-bold text-surface-900 shrink-0">{fmtNum(c.messages)}
+                                                    <span className="text-xs font-normal text-surface-400"> {c.channel === "web" ? "visits" : "msgs"}</span></p>
+                                            ) : (
+                                                <span className="text-2xs font-semibold text-surface-400 uppercase tracking-wide shrink-0">Not connected</span>
+                                            )}
+                                        </div>
+                                        {c.connected && (
+                                            <div className="mt-1 h-1.5 rounded-full bg-surface-100 overflow-hidden">
+                                                <div className="h-full rounded-full bg-emerald-500" style={{ width: `${(c.messages / maxMsg) * 100}%` }} />
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                    {top.length > 0 && (
+                        <div className="border-t border-surface-100">
+                            <p className="px-5 pt-3 pb-1 text-2xs font-bold text-surface-400 uppercase tracking-widest">Most engaged</p>
+                            {top.slice(0, 5).map(t => (
+                                <div key={t.customer_id}
+                                     className="flex items-center gap-3 px-5 py-2 hover:bg-surface-50/50 cursor-pointer transition-colors"
+                                     onClick={() => navigate(`/sales/customers/${t.customer_id}`)}>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-medium text-surface-900 truncate">{t.name || "—"}</p>
+                                        <p className="text-xs text-surface-400">{t.channels.map(ch => CHANNEL_META[ch]?.label ?? ch).join(" · ")}</p>
+                                    </div>
+                                    <p className="text-xs font-semibold text-surface-700 shrink-0">{fmtNum(t.messages)} msgs</p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    <div className="px-5 py-2.5 border-t border-surface-100 text-2xs text-surface-400">
+                        WhatsApp + web are live; Messenger, Instagram &amp; Facebook light up once Neema's Meta channels are switched on.
+                    </div>
+                </>
+            )}
+        </SectionCard>
+    );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function IntelligenceDashboard() {
@@ -473,6 +556,7 @@ export default function IntelligenceDashboard() {
 
             <div className="grid grid-cols-1 gap-5">
                 <CustomerGeographyCard />
+                <ChannelEngagementCard />
                 <ReorderSuggestions />
                 <TailorWorkloadCard />
                 <ChurnRiskCard />

@@ -56,4 +56,12 @@ return [
         'key' => env('HUB_STOREFRONT_KEY'),
     ],
 
+    // Neema (the WhatsApp/Meta AI agent) — we pull its per-person × per-channel
+    // message rollup to show cross-channel customer engagement. Both must be set
+    // for the nightly channels:sync-touchpoints pull to run; unset ⇒ it no-ops.
+    'neema' => [
+        'url'           => env('NEEMA_API_URL', 'https://neema.bethanyhouse.co.ke'),
+        'analytics_key' => env('NEEMA_ANALYTICS_KEY'),
+    ],
+
 ];

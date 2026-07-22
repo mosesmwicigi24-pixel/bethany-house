@@ -354,6 +354,8 @@ Route::prefix('v1')->group(function () {
                 ->middleware('permission:customers.view,sanctum');
             Route::get('/customer-geography', [IntelligenceController::class, 'customerGeography'])
                 ->middleware('permission:customers.view,sanctum');
+            Route::get('/channel-engagement', [IntelligenceController::class, 'channelEngagement'])
+                ->middleware('permission:customers.view,sanctum');
             Route::get('/budget-warnings', [IntelligenceController::class, 'budgetWarnings'])
                 ->middleware('permission:expenses.view,sanctum');
             // smart-tasks and entity-previews stay open to all authenticated

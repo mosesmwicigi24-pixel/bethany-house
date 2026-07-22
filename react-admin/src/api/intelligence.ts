@@ -70,6 +70,21 @@ export interface CustomerGeography {
     };
 }
 
+export interface ChannelStat {
+    channel:   string;
+    contacts:  number;
+    customers: number;
+    messages:  number;
+    last_seen: string | null;
+    connected: boolean;
+}
+
+export interface ChannelEngagement {
+    channels: ChannelStat[];
+    top_customers: { customer_id: number; name: string; messages: number; channels: string[] }[];
+    summary: { connected_channels: number; message_channels: number };
+}
+
 export interface MaterialShortage {
     material_id:    number;
     material_name:  string;
@@ -133,6 +148,9 @@ export const intelligenceApi = {
 
     customerGeography: () =>
         get<CustomerGeography>(`${BASE}/customer-geography`),
+
+    channelEngagement: () =>
+        get<ChannelEngagement>(`${BASE}/channel-engagement`),
 
     materialShortages: () =>
         get<{ shortages: MaterialShortage[] }>(`${BASE}/material-shortages`),
