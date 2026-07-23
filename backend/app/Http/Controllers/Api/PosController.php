@@ -3628,6 +3628,12 @@ class PosController extends Controller
                     'is_customer_order'  => true,
                     'due_date'           => now()->addDays(14)->toDateString(),
                     'notes'              => $pi['production_notes'] ?? null,
+                    // Carry the measurements the cashier captured at POS onto the
+                    // production order so the workshop actually sees them (the
+                    // production module reads production_orders.measurements, not
+                    // the order line). Without this they were captured but never
+                    // surfaced to production.
+                    'measurements'       => !empty($pi['measurement_values']) ? json_encode($pi['measurement_values']) : null,
                     'created_by'         => $user->id,
                     'created_at'         => now(),
                     'updated_at'         => now(),
