@@ -2097,4 +2097,103 @@ class OrderController extends Controller
             return response()->json(['message' => 'Failed to update price.'], 500);
         }
     }
+
+    // =========================================================================
+    // POST /admin/orders/{orderId}/items/{itemId}/production
+    //
+    // Raise a Made-to-Order production order for one line of a sales order —
+    // the quote→invoice→receipt flow has no POS-style MTO toggle, so this lets
+    // staff send a paid line to production and capture its details (measurements,
+    // colour, notes). Mirrors how POS raises a draft production order.
+    // =========================================================================
+    public function raiseItemProduction(Request $request, int $orderId, int $itemId)
+    {
+        $validated = $request->validate([
+            'measurements'   => 'nullable|array',
+            'color'          => 'nullable|string|max:100',
+            'specifications' => 'nullable|array',
+            'notes'          => 'nullable|string|max:2000',
+            'due_date'       => 'nullable|date',
+        ]);
+
+        $order = Order::with('items')->findOrFail($orderId);
+
+        if (in_array($order->status, ['cancelled', 'refunded', 'voided'])) {
+            return response()->json(['message' => 'Production cannot be raised on a cancelled or refunded order.'], 422);
+        }
+
+        $item = $order->items->firstWhere('id', $itemId);
+        if (!$item) {
+            return response()->json(['message' => 'Order item not found on this order.'], 404);
+        }
+        if ($item->production_order_id) {
+            return response()->json([
+                'message' => 'This item is already in production.',
+                'reason'  => 'already_in_production',
+            ], 422);
+        }
+        if (!$item->product_id) {
+            return response()->json(['message' => 'This line has no product to produce.'], 422);
+        }
+
+        // Colour rides in the measurements map so it displays and edits alongside
+        // the other fields (the production module reads production_orders.measurements).
+        $measurements = $validated['measurements'] ?? [];
+        if (!empty($validated['color'])) {
+            $measurements = array_merge(['Colour' => $validated['color']], $measurements);
+        }
+        $measurementsJson = !empty($measurements) ? json_encode($measurements) : null;
+
+        return DB::transaction(function () use ($request, $order, $item, $validated, $measurements, $measurementsJson) {
+            $prodNum = 'PO-' . date('ymd') . '-' . strtoupper(Str::random(5));
+            while (DB::table('production_orders')->where('order_number', $prodNum)->exists()) {
+                $prodNum = 'PO-' . date('ymd') . '-' . strtoupper(Str::random(5));
+            }
+
+            $poId = DB::table('production_orders')->insertGetId([
+                'order_number'       => $prodNum,
+                'product_id'         => $item->product_id,
+                'product_variant_id' => $item->product_variant_id,
+                'quantity'           => $item->quantity,
+                'priority'           => 'normal',
+                'status'             => 'draft',
+                'outlet_id'          => $order->outlet_id,
+                'customer_order_id'  => $order->id,
+                'order_item_id'      => $item->id,
+                'is_customer_order'  => true,
+                'due_date'           => !empty($validated['due_date'])
+                    ? $validated['due_date']
+                    : now()->addDays(14)->toDateString(),
+                'notes'              => $validated['notes'] ?? null,
+                'measurements'       => $measurementsJson,
+                'specifications'     => !empty($validated['specifications']) ? json_encode($validated['specifications']) : null,
+                'created_by'         => $request->user()->id,
+                'created_at'         => now(),
+                'updated_at'         => now(),
+            ]);
+
+            // requires_production / measurement_values aren't mass-assignable, so
+            // write them directly.
+            DB::table('order_items')->where('id', $item->id)->update([
+                'requires_production' => true,
+                'production_order_id' => $poId,
+                'measurement_values'  => $measurementsJson,
+                'updated_at'          => now(),
+            ]);
+
+            ActivityLogService::log('production_raised_from_order', $order, [
+                'order_item_id'       => $item->id,
+                'production_order_id'  => $poId,
+                'production_order_number' => $prodNum,
+                'product'             => $item->product_name,
+                'quantity'            => $item->quantity,
+            ]);
+
+            return response()->json([
+                'message'                 => 'Production order raised.',
+                'production_order_id'     => $poId,
+                'production_order_number' => $prodNum,
+            ]);
+        });
+    }
 }

@@ -353,6 +353,16 @@ export const ordersApi = {
             order_subtotal: number;
         }>(`/v1/admin/orders/${orderId}/items/${itemId}/price`, { unit_price: newPrice }),
 
+    /** Raise a Made-to-Order production order for one line + capture its details. */
+    raiseItemProduction: (orderId: number, itemId: number, data: {
+        measurements?: Record<string, string>;
+        color?: string;
+        notes?: string;
+        due_date?: string;
+    }) =>
+        post<{ message: string; production_order_id: number; production_order_number: string }>(
+            `/v1/admin/orders/${orderId}/items/${itemId}/production`, data),
+
     exportCsv: (params?: OrderFilters) =>
         get<Blob>("/v1/admin/orders/export", {
             params: params as Record<string, string>,

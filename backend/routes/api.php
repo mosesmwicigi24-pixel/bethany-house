@@ -582,6 +582,8 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:orders.set_shipping_fee,sanctum');
                 Route::patch('/{id}/items/{itemId}/price', [OrderController::class, 'adjustItemPrice'])
                     ->middleware('permission:orders.edit,sanctum');
+                Route::post('/{id}/items/{itemId}/production', [OrderController::class, 'raiseItemProduction'])
+                    ->middleware('permission:production.raise_order,sanctum');
                 Route::post('/{id}/set-deposit',         [OrderController::class, 'setDeposit'])
                     ->middleware('permission:orders.set_deposit,sanctum');
                 Route::post('/{id}/update-currency',     [OrderController::class, 'updateCurrency'])
