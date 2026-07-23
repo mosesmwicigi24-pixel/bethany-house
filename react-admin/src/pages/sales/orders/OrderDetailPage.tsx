@@ -2894,6 +2894,90 @@ aria-label="Close">
 
 // ── Attach Customer Modal ─────────────────────────────────────────────────────
 
+// ── Send an order line to production (MTO) — capture its details ──────────────
+function RaiseProductionModal({ order, item, onClose, onDone }: {
+    order: Order; item: any; onClose: () => void; onDone: () => void;
+}) {
+    const toast = useToastStore();
+    const [color, setColor] = useState("");
+    const [notes, setNotes] = useState("");
+    const [dueDate, setDueDate] = useState("");
+    const [rows, setRows] = useState<{ k: string; v: string }[]>([{ k: "", v: "" }]);
+    const setRow = (i: number, patch: Partial<{ k: string; v: string }>) =>
+        setRows(rs => rs.map((r, idx) => idx === i ? { ...r, ...patch } : r));
+
+    const mutation = useMutation({
+        mutationFn: () => ordersApi.raiseItemProduction(order.id, item.id, {
+            measurements: Object.fromEntries(rows.filter(r => r.k.trim()).map(r => [r.k.trim(), r.v])),
+            color: color.trim() || undefined,
+            notes: notes.trim() || undefined,
+            due_date: dueDate || undefined,
+        }),
+        onSuccess: (res: any) => {
+            toast.success(`Production order ${res?.production_order_number ?? ""} raised`);
+            onDone(); onClose();
+        },
+        onError: (e: ApiError) => toast.error(e.message),
+    });
+
+    return (
+        <Modal open title="Send to production" onClose={onClose}>
+            <div className="p-5 space-y-4">
+                <div className="bg-surface-50 rounded-xl px-4 py-3">
+                    <p className="text-sm font-semibold text-surface-900">{item.product_name}{item.variant_name ? ` (${item.variant_name})` : ""}</p>
+                    <p className="text-xs text-surface-400 mt-0.5">Quantity {item.quantity} · a production order will be raised for this line.</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                    <div>
+                        <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Colour</label>
+                        <input value={color} onChange={e => setColor(e.target.value)} placeholder="e.g. Purple"
+                            className="input mt-1 w-full text-sm" />
+                    </div>
+                    <div>
+                        <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Due date</label>
+                        <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
+                            className="input mt-1 w-full text-sm" />
+                    </div>
+                </div>
+                <div>
+                    <div className="flex items-center justify-between">
+                        <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Measurements</label>
+                        <button type="button" onClick={() => setRows(rs => [...rs, { k: "", v: "" }])}
+                            className="text-2xs font-bold text-brand-600 hover:underline">+ Add measurement</button>
+                    </div>
+                    <div className="mt-1.5 space-y-1.5">
+                        {rows.map((r, i) => (
+                            <div key={i} className="flex items-center gap-2">
+                                <input value={r.k} onChange={e => setRow(i, { k: e.target.value })} placeholder="Field (e.g. Chest)"
+                                    className="input text-sm flex-1 min-w-0" />
+                                <input value={r.v} onChange={e => setRow(i, { v: e.target.value })} placeholder="Value (e.g. 40 in)"
+                                    className="input text-sm flex-1 min-w-0" />
+                                <button type="button" onClick={() => setRows(rs => rs.filter((_, idx) => idx !== i))}
+                                    className="w-7 h-7 shrink-0 rounded-lg flex items-center justify-center text-surface-300 hover:text-danger hover:bg-danger-light" aria-label="Remove">
+                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                    <p className="text-2xs text-surface-400 mt-1">You can add or edit these later on the production order too.</p>
+                </div>
+                <div>
+                    <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Production notes</label>
+                    <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
+                        placeholder="Style, finishing, customer request…" className="input mt-1 w-full text-sm resize-none" />
+                </div>
+                <div className="flex gap-2 pt-1">
+                    <button onClick={onClose} className="btn-secondary flex-1 text-sm">Cancel</button>
+                    <button onClick={() => mutation.mutate()} disabled={mutation.isPending}
+                        className="flex-1 px-4 py-2 rounded-xl bg-brand-600 text-white text-sm font-bold hover:bg-brand-700 disabled:opacity-50 transition-colors">
+                        {mutation.isPending ? "Raising…" : "Raise production"}
+                    </button>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
 function AttachCustomerModal({ order, onClose, onDone }: {
     order: Order; onClose: () => void; onDone: () => void;
 }) {
@@ -3163,6 +3247,14 @@ export default function OrderDetailPage() {
     const refresh = () => qc.invalidateQueries({ queryKey: ["order", id] });
 
     const { can: canDo } = usePermissions();
+
+    // Send-to-production (MTO) per line: available once payment is received, for
+    // staff who can raise production. The quote→invoice→receipt flow has no POS
+    // MTO toggle, so this is where a paid line gets sent to the workshop.
+    const [productionItem, setProductionItem] = useState<any | null>(null);
+    const paymentReceived = ["paid", "partial", "deposit"].includes(order?.payment_status ?? "");
+    const canRaiseProduction = paymentReceived && canDo("production.raise_order")
+        && !["cancelled", "refunded", "voided"].includes(order?.status ?? "");
 
     // ── Dispatch authorization (hand-over control) ────────────────────────────
     const dispatchMutation = useMutation({
@@ -3688,6 +3780,20 @@ export default function OrderDetailPage() {
                                                                     </span>
                                                                 )}
                                                             </div>
+                                                            {/* Made-to-Order: already in production → chip; else a per-row toggle. */}
+                                                            {item.production_order_id ? (
+                                                                <Link to={`/production/orders/${item.production_order_id}`}
+                                                                    className="inline-flex items-center gap-1 mt-1.5 text-2xs font-semibold text-purple-700 bg-purple-50 border border-purple-200 rounded-full px-2 py-0.5 hover:bg-purple-100 transition-colors">
+                                                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 4h2m-1 0v4m0 0a4 4 0 100 8 4 4 0 000-8zm-6.5 8H4m16 0h-1.5"/></svg>
+                                                                    In production →
+                                                                </Link>
+                                                            ) : canRaiseProduction ? (
+                                                                <button onClick={() => setProductionItem(item)}
+                                                                    className="inline-flex items-center gap-1 mt-1.5 text-2xs font-semibold text-brand-600 hover:text-white hover:bg-brand-600 border border-brand-300 rounded-full px-2 py-0.5 transition-colors">
+                                                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
+                                                                    MTO · Send to production
+                                                                </button>
+                                                            ) : null}
                                                         </div>
                                                     </div>
                                                 </td>
@@ -4182,6 +4288,7 @@ export default function OrderDetailPage() {
             {showRefundModal   && <RefundModal          order={order} onClose={() => setShowRefundModal(false)}   onDone={refresh}    />}
             {showPaymentModal  && <AddPaymentModal      order={order} onClose={() => setShowPaymentModal(false)}  onDone={refresh}    />}
             {showCustomerModal && <AttachCustomerModal  order={order} onClose={() => setShowCustomerModal(false)} onDone={refresh}    />}
+            {productionItem && <RaiseProductionModal order={order} item={productionItem} onClose={() => setProductionItem(null)} onDone={refresh} />}
             {showAuditLog      && <OrderAuditLog        orderId={order.id}                                        onClose={() => setShowAuditLog(false)} />}
             {showReceiptModal  && <ReceiptModal         order={order} onClose={() => setShowReceiptModal(false)}                      />}
             {showShippingModal && <SetShippingFeeModal  order={order} onClose={() => setShowShippingModal(false)} onDone={refresh}    />}
