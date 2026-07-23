@@ -63,7 +63,7 @@ class PosProductionMeasurementsTest extends TestCase
                 'production_notes'    => 'Purple, ordination',
                 'measurement_values' => ['Chest' => '40 in', 'Sleeve' => '24 in'],
             ]],
-        ])->assertOk();
+        ])->assertSuccessful();
 
         $poNumber = $res->json('production_orders.0');
         $this->assertNotNull($poNumber);
