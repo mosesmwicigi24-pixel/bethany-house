@@ -94,12 +94,16 @@ class PosPaymentBalanceTest extends TestCase
         $this->openRegister($outlet, $user);
         $order  = $this->pendingOrder($outlet, 1000);
 
+        // Two cash tenders (no approval needed) so the partial-save status is
+        // unambiguous. A reference method like Western Union would instead land
+        // the order in pending_approval until the proof is approved — also a
+        // valid saved state, just gated on approval.
         $res = $this->postJson("/api/v1/admin/pos/pending-order/{$order->id}/pay", [
             'is_deposit'     => true,
             'deposit_amount' => 700,
             'payments'       => [
-                ['method' => 'cash',  'amount' => 300, 'cash_received' => 300],
-                ['method' => 'other', 'amount' => 400, 'reference' => 'WU-123'],
+                ['method' => 'cash', 'amount' => 200, 'cash_received' => 200],
+                ['method' => 'cash', 'amount' => 500, 'cash_received' => 500],
             ],
         ])->assertOk();
 
