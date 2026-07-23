@@ -47,6 +47,7 @@ class OrderRaiseProductionTest extends TestCase
             'sku'          => 'GOWN-1',
             'quantity'     => $qty,
             'unit_price'   => 130,
+            'total_price'  => 130 * $qty,
         ]);
         return [$order, $item];
     }
