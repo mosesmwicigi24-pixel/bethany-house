@@ -223,12 +223,28 @@ function EditOrderModal({ order, onClose, onSaved, canReduce = false }: { order:
     const [fittingDate, setFittingDate]       = useState(((order as any).fitting_date ?? "").slice(0, 10));
     const [collectionDate, setCollectionDate] = useState(((order as any).collection_date ?? "").slice(0, 10));
     const [notes, setNotes]       = useState((order as any).notes ?? "");
+    // Measurements are editable at any stage (the garment isn't cut yet, or is
+    // being re-measured) — only the QUANTITY is structural and locked. Kept as
+    // ordered key/value rows so fields captured at POS can be corrected and new
+    // ones added after the sale.
+    const [measRows, setMeasRows] = useState<{ k: string; v: string }[]>(
+        Object.entries(((order as any).measurements ?? {}) as Record<string, unknown>)
+            .map(([k, v]) => ({ k, v: v == null ? "" : String(v) })),
+    );
+    const setMeas = (i: number, patch: Partial<{ k: string; v: string }>) =>
+        setMeasRows(rows => rows.map((r, idx) => idx === i ? { ...r, ...patch } : r));
+    const addMeas = () => setMeasRows(rows => [...rows, { k: "", v: "" }]);
+    const removeMeas = (i: number) => setMeasRows(rows => rows.filter((_, idx) => idx !== i));
 
     const mutation = useMutation({
         mutationFn: () => {
             const payload: Record<string, unknown> = {
                 priority,
                 notes: notes || null,
+                // Rebuild the measurements map from the rows (drop blank keys).
+                measurements: Object.fromEntries(
+                    measRows.filter(r => r.k.trim()).map(r => [r.k.trim(), r.v]),
+                ),
             };
             if (dueDate) payload.due_date = dueDate;
             payload.fitting_date    = fittingDate || null;
@@ -299,6 +315,33 @@ function EditOrderModal({ order, onClose, onSaved, canReduce = false }: { order:
                             className="input mt-1 w-full text-sm" />
                         <p className="text-2xs text-surface-400 mt-1">When they collect the finished garment.</p>
                     </div>
+                </div>
+                <div>
+                    <div className="flex items-center justify-between">
+                        <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Measurements</label>
+                        <button type="button" onClick={addMeas} className="text-2xs font-bold text-brand-600 hover:underline">+ Add measurement</button>
+                    </div>
+                    {measRows.length === 0 ? (
+                        <p className="text-2xs text-surface-400 mt-1">No measurements yet — add the customer's measurements for the workshop.</p>
+                    ) : (
+                        <div className="mt-1.5 space-y-1.5">
+                            {measRows.map((r, i) => (
+                                <div key={i} className="flex items-center gap-2">
+                                    <input value={r.k} onChange={e => setMeas(i, { k: e.target.value })}
+                                        placeholder="Field (e.g. Chest)"
+                                        className="input text-sm flex-1 min-w-0" />
+                                    <input value={r.v} onChange={e => setMeas(i, { v: e.target.value })}
+                                        placeholder="Value (e.g. 40 in)"
+                                        className="input text-sm flex-1 min-w-0" />
+                                    <button type="button" onClick={() => removeMeas(i)}
+                                        className="w-7 h-7 shrink-0 rounded-lg flex items-center justify-center text-surface-300 hover:text-danger hover:bg-danger-light transition-all" aria-label="Remove">
+                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    <p className="text-2xs text-surface-400 mt-1">Editable any time before completion — only the quantity is locked.</p>
                 </div>
                 <div>
                     <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Notes</label>

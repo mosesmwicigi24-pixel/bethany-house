@@ -51,6 +51,27 @@ class ProductionOrderAmendmentTest extends TestCase
         ]);
     }
 
+    public function test_measurements_can_be_edited_after_the_order_is_confirmed(): void
+    {
+        // "Access measurements/details for production even after the receipt is
+        // saved" — measurements stay editable through in_progress; only the
+        // quantity is structural and locked.
+        $this->actingAsRaiser();
+        $order = $this->order('in_progress', 20);
+
+        $this->putJson("/api/v1/admin/production-orders/{$order->id}", [
+            'measurements' => ['Chest' => '42 in', 'Sleeve' => '25 in'],
+            'notes'        => 'Re-measured at fitting',
+        ])->assertOk();
+
+        $fresh = $order->fresh();
+        $this->assertSame('42 in', $fresh->measurements['Chest'] ?? null);
+        $this->assertSame('25 in', $fresh->measurements['Sleeve'] ?? null);
+        $this->assertSame('Re-measured at fitting', $fresh->notes);
+        // Quantity untouched — measurements never move the count.
+        $this->assertSame(20, $fresh->quantity);
+    }
+
     public function test_a_draft_quantity_can_be_amended_and_requirements_follow(): void
     {
         $this->actingAsRaiser();
