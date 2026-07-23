@@ -44,6 +44,7 @@ class OrderRaiseProductionTest extends TestCase
             'order_id'     => $order->id,
             'product_id'   => $product->id,
             'product_name' => 'Preaching Gown',
+            'sku'          => 'GOWN-1',
             'quantity'     => $qty,
             'unit_price'   => 130,
         ]);
