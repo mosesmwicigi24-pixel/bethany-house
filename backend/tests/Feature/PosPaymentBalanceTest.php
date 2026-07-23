@@ -83,6 +83,41 @@ class PosPaymentBalanceTest extends TestCase
         $this->assertSame('paid', $order->fresh()->payment_status);
     }
 
+    public function test_a_split_payment_can_be_saved_partially_with_the_balance_owing(): void
+    {
+        // The cashier collected part of the total across methods and wants to
+        // save the order now, with the balance standing (the "Save · balance
+        // owing" button). Front-end sends the split lines + is_deposit with the
+        // collected sum as the deposit amount.
+        $user   = $this->actor();
+        $outlet = Outlet::factory()->create();
+        $this->openRegister($outlet, $user);
+        $order  = $this->pendingOrder($outlet, 1000);
+
+        $res = $this->postJson("/api/v1/admin/pos/pending-order/{$order->id}/pay", [
+            'is_deposit'     => true,
+            'deposit_amount' => 700,
+            'payments'       => [
+                ['method' => 'cash',  'amount' => 300, 'cash_received' => 300],
+                ['method' => 'other', 'amount' => 400, 'reference' => 'WU-123'],
+            ],
+        ])->assertOk();
+
+        $order->refresh();
+        // Saved partially paid, balance standing.
+        $this->assertSame('deposit', $order->payment_status);
+        $this->assertEqualsWithDelta(300.0, $order->outstandingBalance(), 0.01);
+        // BOTH split lines were recorded, not just one.
+        $this->assertSame(2, $order->payments()->count());
+        $this->assertEqualsWithDelta(700.0, (float) $order->totalPaid(), 0.01);
+
+        // The order still accepts the remaining balance later.
+        $this->postJson("/api/v1/admin/pos/pending-order/{$order->id}/pay", [
+            'method' => 'cash', 'amount' => 300, 'cash_received' => 300,
+        ])->assertOk();
+        $this->assertSame('paid', $order->fresh()->payment_status);
+    }
+
     public function test_a_payment_exceeding_the_balance_is_rejected(): void
     {
         $user   = $this->actor();

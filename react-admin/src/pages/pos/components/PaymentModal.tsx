@@ -1294,16 +1294,32 @@ aria-label="Close">
                     </>) /* end !isCreatingOrder */}
                 </div>
 
-                {/* Footer - only needed for split mode completion, not while order is being created */}
+                {/* Footer - split-mode completion. Fully paid → Complete; part-paid
+                    → Save with the balance owing (records the collected split
+                    payments as a deposit so the order is saved partially paid and
+                    reopens later for the balance). Not shown while creating order. */}
                 {!isCreatingOrder && splitMode && !depositMode && (
                     <div className="p-5 pt-0 flex gap-3 shrink-0 border-t border-surface-100">
                         <button onClick={onClose} disabled={isProcessing} className="btn-secondary flex-1">Cancel</button>
-                        <button onClick={() => onCharge(payments)} disabled={!isFullyPaid || isProcessing || !orderId} className="btn-primary flex-1 gap-2">
-                            {isProcessing
-                                ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                : <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>}
-                            {isProcessing ? "Processing…" : `Complete - ${currency} ${fmtAmt(total)}`}
-                        </button>
+                        {isFullyPaid ? (
+                            <button onClick={() => onCharge(payments)} disabled={isProcessing || !orderId} className="btn-primary flex-1 gap-2">
+                                {isProcessing
+                                    ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    : <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>}
+                                {isProcessing ? "Processing…" : `Complete - ${currency} ${fmtAmt(total)}`}
+                            </button>
+                        ) : (
+                            <button
+                                onClick={() => onCharge(payments, totalPaid)}
+                                disabled={isProcessing || !orderId || payments.length === 0}
+                                title={payments.length === 0 ? "Add at least one payment first" : `Saves ${currency} ${fmtAmt(totalPaid)} now; ${currency} ${fmtAmt(remaining)} owed`}
+                                className="btn-primary flex-1 gap-2 !bg-warning-dark hover:!bg-warning-dark/90 disabled:opacity-40 disabled:cursor-not-allowed">
+                                {isProcessing
+                                    ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    : <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7M5 19h14" opacity="0"/><path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-8 0V5a2 2 0 012-2h4a2 2 0 012 2v2m-8 0h8"/></svg>}
+                                {isProcessing ? "Processing…" : `Save · ${currency} ${fmtAmt(remaining)} balance owing`}
+                            </button>
+                        )}
                     </div>
                 )}
             </div>
