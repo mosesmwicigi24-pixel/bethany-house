@@ -1,0 +1,54 @@
+# Manually-triggered runner for the products:seed-pages artisan command on the VPS.
+#
+# Dispatch with no input     -> preview the blocks that WOULD be written (safe).
+# Dispatch with `--dump`      -> emit each product's raw source data as JSON.
+# Dispatch with `--apply`     -> write the CMS blocks into the banners table.
+# Dispatch with `--slug=alb`  -> limit to one product (preview or apply).
+#
+# Reuses the same VPS secrets as the deploy workflow. Output appears in the job
+# log. The command is preview-by-default, so a bare run is always safe.
+
+name: Seed product pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      flags:
+        description: 'Flags for products:seed-pages (empty = preview). e.g. --dump  |  --apply  |  --slug=alb'
+        required: false
+        default: ''
+
+concurrency:
+  group: seed-product-pages
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Run products:seed-pages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "${{ secrets.VPS_KNOWN_HOSTS }}" ]; then
+            printf '%s\n' "${{ secrets.VPS_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          else
+            for i in 1 2 3 4 5; do
+              ssh-keyscan -T 15 -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+              [ -s ~/.ssh/known_hosts ] && break
+              sleep $((i * 5))
+            done
+            [ -s ~/.ssh/known_hosts ] || { echo "::error::Could not read host key"; exit 1; }
+          fi
+        timeout-minutes: 3
+
+      - name: Run products:seed-pages on the VPS
+        # Pass flags via env to keep them out of the shell-expansion path.
+        env:
+          FLAGS: ${{ github.event.inputs.flags }}
+        run: |
+          ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 \
+            -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" \
+            "cd /opt/bethany-house && docker compose run --rm -T laravel php artisan products:seed-pages ${FLAGS}"
