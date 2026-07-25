@@ -3,7 +3,7 @@
  * Full page under Intelligence. Country league table resolved from order
  * geography + phone-prefix inference (see backend CountryInference).
  */
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { intelligenceApi, type CountryStat } from "@/api/intelligence";
 import { Spinner } from "@/components/ui/Spinner";
@@ -22,15 +22,19 @@ function money(n: number, currency: string | null): string {
     }
 }
 
-// A metric column header — a coloured icon chip + label. Each funnel stage
-// gets its own hue so the columns read at a glance: landed → cart → orders.
-function ThMetric({ tone, icon, label }: { tone: string; icon: ReactNode; label: string }) {
+// A sortable metric column header — a coloured icon chip + label + sort arrow.
+// Clicking ranks the table by this column, highest first.
+function ThMetric({ tone, icon, label, active, onSort }: {
+    tone: string; icon: ReactNode; label: string; active: boolean; onSort: () => void;
+}) {
     return (
         <th className="px-4 py-3 text-right whitespace-nowrap">
-            <span className="inline-flex items-center gap-1.5 text-2xs font-bold uppercase tracking-widest text-surface-400">
+            <button type="button" onClick={onSort}
+                className={`inline-flex items-center gap-1.5 text-2xs font-bold uppercase tracking-widest transition-colors ${active ? "text-surface-800" : "text-surface-400 hover:text-surface-600"}`}>
                 <span className={`w-4 h-4 rounded flex items-center justify-center shrink-0 ${tone}`} aria-hidden>{icon}</span>
                 {label}
-            </span>
+                <span className={`text-[9px] ${active ? "opacity-100" : "opacity-0"}`} aria-hidden>▼</span>
+            </button>
         </th>
     );
 }
@@ -62,6 +66,16 @@ export default function CustomerGeographyPage() {
     const s = data?.summary;
     const maxCust = Math.max(1, ...countries.map(c => c.customers));
 
+    // Sort the table, highest first — default customers, or by a metric the
+    // user picks (landed / spending). Revenue is the tiebreaker so "highest
+    // landing" still ranks the bigger spenders first among ties.
+    type SortKey = "customers" | "visits" | "carts" | "orders" | "revenue";
+    const [sortKey, setSortKey] = useState<SortKey>("customers");
+    const val = (c: CountryStat, k: SortKey) => c[k];
+    const rows = [...countries].sort(
+        (a, b) => (val(b, sortKey) - val(a, sortKey)) || (b.revenue - a.revenue) || (b.customers - a.customers),
+    );
+
     return (
         <div className="space-y-5 animate-fade-in">
             <div className="page-header">
@@ -79,8 +93,9 @@ export default function CustomerGeographyPage() {
                     </div>
 
                     <div className="bg-white rounded-2xl border border-surface-200 overflow-hidden">
-                        <div className="px-5 py-3 border-b border-surface-100">
+                        <div className="px-5 py-3 border-b border-surface-100 flex items-center justify-between gap-3">
                             <h2 className="font-semibold text-surface-900 text-sm">Countries</h2>
+                            <span className="text-2xs text-surface-400">Tap a column to rank — highest first</span>
                         </div>
                         {countries.length === 0 ? (
                             <p className="px-5 py-10 text-center text-sm text-surface-400">No customer location data yet.</p>
@@ -90,15 +105,21 @@ export default function CustomerGeographyPage() {
                                     <thead>
                                         <tr className="bg-surface-50/70 border-b border-surface-100">
                                             <th className="text-left px-5 py-3 text-2xs font-bold uppercase tracking-widest text-surface-400">Country</th>
-                                            <ThMetric tone="bg-violet-50 text-violet-600"  icon={<LandedIcon />}  label="Landed" />
-                                            <ThMetric tone="bg-sky-50 text-sky-600"         icon={<CartIcon />}    label="Carts" />
-                                            <ThMetric tone="bg-emerald-50 text-emerald-600" icon={<OrdersIcon />}  label="Orders" />
-                                            <ThMetric tone="bg-amber-50 text-amber-600"     icon={<RevenueIcon />} label="Revenue" />
-                                            <th className="text-right px-5 py-3 text-2xs font-bold uppercase tracking-widest text-surface-400">Customers</th>
+                                            <ThMetric tone="bg-violet-50 text-violet-600"  icon={<LandedIcon />}  label="Landed"  active={sortKey === "visits"}  onSort={() => setSortKey("visits")} />
+                                            <ThMetric tone="bg-sky-50 text-sky-600"         icon={<CartIcon />}    label="Carts"   active={sortKey === "carts"}   onSort={() => setSortKey("carts")} />
+                                            <ThMetric tone="bg-emerald-50 text-emerald-600" icon={<OrdersIcon />}  label="Orders"  active={sortKey === "orders"}  onSort={() => setSortKey("orders")} />
+                                            <ThMetric tone="bg-amber-50 text-amber-600"     icon={<RevenueIcon />} label="Revenue" active={sortKey === "revenue"} onSort={() => setSortKey("revenue")} />
+                                            <th className="text-right px-5 py-3 whitespace-nowrap">
+                                                <button type="button" onClick={() => setSortKey("customers")}
+                                                    className={`inline-flex items-center gap-1.5 text-2xs font-bold uppercase tracking-widest transition-colors ${sortKey === "customers" ? "text-surface-800" : "text-surface-400 hover:text-surface-600"}`}>
+                                                    Customers
+                                                    <span className={`text-[9px] ${sortKey === "customers" ? "opacity-100" : "opacity-0"}`} aria-hidden>▼</span>
+                                                </button>
+                                            </th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-surface-50">
-                                        {countries.map((c: CountryStat) => (
+                                        {rows.map((c: CountryStat) => (
                                             <tr key={c.country_code} className="hover:bg-surface-50/50 transition-colors">
                                                 {/* Identity — flag tile + country, like the member avatar + name */}
                                                 <td className="px-5 py-3.5">
