@@ -114,18 +114,27 @@ const schema = z.object({
             }),
         )
         .optional(),
+    features: z
+        .array(
+            z.object({
+                icon: z.string().optional(),
+                text: z.string().min(1, "Feature text required"),
+            }),
+        )
+        .optional(),
     tax_rate_ids: z.array(z.number()).optional().default([]),
     production_stage_ids: z.array(z.number()).optional().default([]),
 });
 
 type FormValues = z.infer<typeof schema>;
-type Tab = "content" | "media" | "pricing" | "variants" | "seo" | "measurements" | "stages" | "bom";
+type Tab = "content" | "media" | "pricing" | "variants" | "features" | "seo" | "measurements" | "stages" | "bom";
 
 const BASE_TABS: { id: Tab; label: string }[] = [
     { id: "content", label: "Content" },
     { id: "media", label: "Images" },
     { id: "pricing", label: "Pricing" },
     { id: "variants", label: "Variants" },
+    { id: "features", label: "Features" },
     { id: "seo", label: "SEO" },
 ];
 
@@ -2250,6 +2259,100 @@ const PriceRows = React.memo(function PriceRows({
     );
 });
 
+// ── Features Tab ──────────────────────────────────────────────────────────────
+// Selling-point features shown on the storefront product page (icon + label),
+// e.g. "24K gold-plated brass", "Free engraving available". Managed like the
+// variants list: add / edit / reorder / remove.
+
+interface Feature { icon?: string; text: string; }
+
+const FEATURE_ICON_SUGGESTIONS = ["✨", "🪙", "🎁", "📏", "🛡️", "✂️", "🚚", "♻️", "⭐", "💎", "🧵", "✦"];
+
+function FeaturesTab({ features, onChange }: { features: Feature[]; onChange: (f: Feature[]) => void }) {
+    const update = (i: number, patch: Partial<Feature>) =>
+        onChange(features.map((f, idx) => (idx === i ? { ...f, ...patch } : f)));
+    const remove = (i: number) => onChange(features.filter((_, idx) => idx !== i));
+    const move = (i: number, dir: -1 | 1) => {
+        const j = i + dir;
+        if (j < 0 || j >= features.length) return;
+        const next = features.slice();
+        [next[i], next[j]] = [next[j], next[i]];
+        onChange(next);
+    };
+
+    return (
+        <div className="space-y-3">
+            <div className="card">
+                <div className="card-header">
+                    <h3 className="text-sm font-semibold text-surface-900">Features</h3>
+                    <p className="text-xs text-surface-400 mt-0.5">
+                        Selling points shown on the product page — an icon and a short line each
+                        (e.g. “24K gold-plated brass”, “Free engraving available”). Order top-to-bottom = display order.
+                    </p>
+                </div>
+                <div className="p-4 space-y-2">
+                    {features.length === 0 ? (
+                        <div className="px-4 py-8 text-center text-sm text-surface-400">
+                            No features yet. Add the highlights that sell this product.
+                        </div>
+                    ) : (
+                        features.map((f, i) => (
+                            <div key={i} className="flex items-center gap-2">
+                                <input className="input w-14 text-center text-lg py-1.5" value={f.icon ?? ""}
+                                    onChange={(e) => update(i, { icon: e.target.value })} placeholder="✨" aria-label="Icon" maxLength={2} />
+                                <input className="input flex-1 text-sm" value={f.text}
+                                    onChange={(e) => update(i, { text: e.target.value })} placeholder="e.g. 24K gold-plated brass" />
+                                <div className="flex items-center gap-0.5 shrink-0">
+                                    <button type="button" onClick={() => move(i, -1)} disabled={i === 0}
+                                        className="w-7 h-7 rounded-lg text-surface-400 hover:text-surface-700 hover:bg-surface-100 disabled:opacity-30" aria-label="Move up">↑</button>
+                                    <button type="button" onClick={() => move(i, 1)} disabled={i === features.length - 1}
+                                        className="w-7 h-7 rounded-lg text-surface-400 hover:text-surface-700 hover:bg-surface-100 disabled:opacity-30" aria-label="Move down">↓</button>
+                                    <button type="button" onClick={() => remove(i)}
+                                        className="w-7 h-7 rounded-lg text-surface-400 hover:text-danger hover:bg-danger/10" aria-label="Remove">✕</button>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                    <button type="button" onClick={() => onChange([...features, { icon: "✨", text: "" }])}
+                        className="w-full text-sm font-semibold text-brand-600 border border-dashed border-brand-300 rounded-xl py-2.5 hover:bg-brand-50 transition-colors">
+                        + Add feature
+                    </button>
+                    {features.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                            <span className="text-2xs text-surface-400 self-center mr-1">Quick icons:</span>
+                            {FEATURE_ICON_SUGGESTIONS.map((em) => (
+                                <button key={em} type="button"
+                                    onClick={() => {
+                                        const idx = features.findIndex((x) => !x.icon);
+                                        if (idx >= 0) update(idx, { icon: em });
+                                        else onChange([...features, { icon: em, text: "" }]);
+                                    }}
+                                    className="w-8 h-8 rounded-lg border border-surface-200 hover:border-brand-300 hover:bg-brand-50 text-lg leading-none">
+                                    {em}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+            {/* Live preview — mirrors the storefront's icon + line feature rows */}
+            {features.some((f) => f.text.trim()) && (
+                <div className="card">
+                    <div className="card-header"><h3 className="text-sm font-semibold text-surface-900">Preview</h3></div>
+                    <div className="p-4 divide-y divide-surface-50">
+                        {features.filter((f) => f.text.trim()).map((f, i) => (
+                            <div key={i} className="flex items-center gap-3 py-3">
+                                <span className="w-9 h-9 rounded-full bg-surface-900 text-white flex items-center justify-center text-base shrink-0">{f.icon || "✦"}</span>
+                                <span className="text-sm font-medium text-surface-800">{f.text}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function ProductFormPage() {
@@ -2363,6 +2466,7 @@ export default function ProductFormPage() {
                 },
             ],
             measurements: [],
+            features: [],
             production_stage_ids: [],
         },
     });
@@ -2482,6 +2586,7 @@ export default function ProductFormPage() {
                 measurements: Array.isArray(product.measurements)
                     ? product.measurements
                     : [],
+                features: Array.isArray((product as any).features) ? (product as any).features : [],
                 production_stage_ids: Array.isArray((product as any).production_stage_ids) ? (product as any).production_stage_ids : [],
             });
             setImages(
@@ -2536,6 +2641,7 @@ export default function ProductFormPage() {
                     },
                 ],
                 measurements: [],
+                features: [],
             production_stage_ids: [],
             });
         }
@@ -2577,6 +2683,7 @@ export default function ProductFormPage() {
                 // getValues ensures we get the latest measurements even if setValue
                 // didn't trigger a re-render cycle before handleSubmit fired
                 measurements: getValues("measurements") ?? values.measurements ?? [],
+                features: (getValues("features") ?? values.features ?? []).filter((f) => f.text?.trim()),
                 production_stage_ids: getValues("production_stage_ids") ?? values.production_stage_ids ?? [],
             };
             const normalizedPayload = {
@@ -3689,6 +3796,13 @@ export default function ProductFormPage() {
                     )}
 
                     {/* ── MEASUREMENTS TAB ───────────────────────────────────────── */}
+                    {activeTab === "features" && (
+                        <FeaturesTab
+                            features={watch("features") ?? []}
+                            onChange={(f) => setValue("features", f, { shouldDirty: true })}
+                        />
+                    )}
+
                     {activeTab === "measurements" && (
                         <MeasurementsTab
                             measurements={watch("measurements") ?? []}

@@ -89,6 +89,7 @@ export interface Product {
     created_at: string;
     updated_at: string;
     measurements: { name: string; unit?: string; required: boolean }[];
+    features?: { icon?: string; text: string }[];
     // Relations
     category: { id: number; name_en: string } | null;
     translations: ProductTranslation[];
@@ -327,6 +328,11 @@ export interface ProductCreatePayload {
         name: string;
         unit?: string;
         required: boolean;
+    }[];
+    // Storefront selling-point features (icon + short line)
+    features?: {
+        icon?: string;
+        text: string;
     }[];
     // Phase 2 - tax rate IDs (optional; synced after save)
     tax_rate_ids?: number[];

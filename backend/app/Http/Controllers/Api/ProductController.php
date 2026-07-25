@@ -333,6 +333,10 @@ class ProductController extends Controller
             'measurements.*.name'                   => 'required_with:measurements|string|max:100',
             'measurements.*.unit'                   => 'nullable|string|max:30',
             'measurements.*.required'               => 'boolean',
+            // Storefront selling-point features (icon + short line)
+            'features'                              => 'nullable|array',
+            'features.*.icon'                       => 'nullable|string|max:8',
+            'features.*.text'                       => 'required_with:features|string|max:120',
             // Per-product production stage template - which stages this product's
             // orders pass through, in this order. Empty/null = all active stages.
             'production_stage_ids'                  => 'nullable|array',
@@ -365,6 +369,7 @@ class ProductController extends Controller
                 'height'              => $validated['height'] ?? null,
                 'published_at'        => $validated['status'] === 'active' ? now() : null,
                 'measurements'        => !empty($validated['measurements']) ? $validated['measurements'] : null,
+                'features'            => !empty($validated['features']) ? array_values($validated['features']) : null,
                 'production_stage_ids' => !empty($validated['production_stage_ids']) ? array_values(array_unique(array_map('intval', $validated['production_stage_ids']))) : null,
             ]);
 
@@ -478,6 +483,9 @@ class ProductController extends Controller
             'measurements.*.name'              => 'required_with:measurements|string|max:100',
             'measurements.*.unit'              => 'nullable|string|max:30',
             'measurements.*.required'          => 'boolean',
+            'features'                         => 'sometimes|nullable|array',
+            'features.*.icon'                  => 'nullable|string|max:8',
+            'features.*.text'                  => 'required_with:features|string|max:120',
             'production_stage_ids'             => 'sometimes|nullable|array',
             'production_stage_ids.*'           => 'integer|exists:production_stages,id',
             // Phase 2 - tax rate IDs
@@ -498,6 +506,12 @@ class ProductController extends Controller
             if (array_key_exists('measurements', $validated)) {
                 $update['measurements'] = !empty($validated['measurements'])
                     ? $validated['measurements']
+                    : null;
+            }
+
+            if (array_key_exists('features', $validated)) {
+                $update['features'] = !empty($validated['features'])
+                    ? array_values($validated['features'])
                     : null;
             }
 
