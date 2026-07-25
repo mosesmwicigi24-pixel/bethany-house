@@ -1306,7 +1306,21 @@ function CartRow({
                     >
                         <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12h-15"/></svg>
                     </button>
-                    <span className="w-7 text-center text-xs font-bold text-surface-900 select-none tabular-nums">{item.quantity}</span>
+                    {/* Typable quantity — for bulk items, focus selects all so you
+                        can just type the number instead of tapping + repeatedly. */}
+                    <input
+                        type="number"
+                        min={1}
+                        inputMode="numeric"
+                        value={item.quantity}
+                        onChange={(e) => {
+                            const v = Math.min(100000, Math.floor(Number(e.target.value)));
+                            if (Number.isFinite(v) && v >= 1) onQty(index, v);
+                        }}
+                        onFocus={(e) => e.target.select()}
+                        aria-label="Quantity"
+                        className="w-10 h-8 sm:h-6 text-center text-xs font-bold text-surface-900 tabular-nums bg-transparent outline-none border-x border-surface-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
                     <button
                         onClick={() => onQty(index, item.quantity + 1)}
                         className="w-8 h-8 sm:w-6 sm:h-6 flex items-center justify-center text-surface-400 hover:bg-surface-100 active:bg-surface-200 transition-colors"
