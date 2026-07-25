@@ -54,6 +54,8 @@ export interface CountryStat {
     country_code: string;
     country_name: string;
     customers:    number;
+    visits:       number;
+    carts:        number;
     orders:       number;
     revenue:      number;
     currency:     string | null;
@@ -65,6 +67,8 @@ export interface CustomerGeography {
         located_customers:   number;
         unlocated_customers: number;
         distinct_countries:  number;
+        total_visits?:       number;
+        total_carts?:        number;
         top_country_code:    string | null;
         top_country_name:    string | null;
     };
