@@ -765,6 +765,8 @@ class IntelligenceService
             'country_code' => $code,
             'country_name' => $names[$code] ?? $code,
             'customers'    => 0,
+            'visits'       => 0,   // storefront landings (site_visits, geo-IP)
+            'carts'        => 0,   // carts created, resolved via the customer's phone
             'orders'       => 0,
             'revenue'      => 0.0,
             'currency'     => null,
@@ -802,6 +804,38 @@ class IntelligenceService
             $byCode[$code]['currency'] = array_key_first($tally);
         }
 
+        // Storefront landings per country — site_visits stores a geo-IP country
+        // directly (no personal data), so this is the one funnel stage with full
+        // coverage. Countries that only browsed (no orders) surface here too.
+        foreach (
+            DB::table('site_visits')
+                ->select('country_code', DB::raw('COUNT(*) AS n'))
+                ->whereNotNull('country_code')
+                ->groupBy('country_code')
+                ->get() as $v
+        ) {
+            $code = strtoupper($v->country_code);
+            $byCode[$code] ??= $row($code);
+            $byCode[$code]['visits'] = (int) $v->n;
+        }
+
+        // Carts created per country. A cart carries no country, so it is located
+        // through its customer's phone prefix; guest/session-only carts have no
+        // customer and stay unlocated (the discrepancy we build around).
+        $cartRows = DB::select("
+            SELECT COALESCE(NULLIF(c1.phone,''), c2.phone) AS phone
+            FROM carts ct
+            LEFT JOIN customers c1 ON c1.id = ct.customer_id
+            LEFT JOIN customers c2 ON c2.user_id = ct.user_id
+            WHERE ct.status <> 'expired'
+        ");
+        foreach ($cartRows as $r) {
+            $code = CountryInference::resolve([], $r->phone);
+            if ($code === null) { continue; }
+            $byCode[$code] ??= $row($code);
+            $byCode[$code]['carts']++;
+        }
+
         // Rank by customer head-count, then revenue.
         $countries = array_values($byCode);
         usort($countries, fn ($a, $b) =>
@@ -815,6 +849,8 @@ class IntelligenceService
                 'located_customers'   => $locatedCustomers,
                 'unlocated_customers' => $unlocated,
                 'distinct_countries'  => count(array_filter($countries, fn ($c) => $c['customers'] > 0)),
+                'total_visits'        => array_sum(array_column($countries, 'visits')),
+                'total_carts'         => array_sum(array_column($countries, 'carts')),
                 'top_country_code'    => $countries[0]['country_code'] ?? null,
                 'top_country_name'    => $countries[0]['country_name'] ?? null,
             ],
