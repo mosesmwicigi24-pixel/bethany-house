@@ -22,17 +22,16 @@ function money(n: number, currency: string | null): string {
     }
 }
 
-// One funnel stat — a coloured icon chip + value. Each stage gets its own hue
-// so the row reads at a glance: landed → cart → orders → revenue.
-function FunnelStat({ tone, icon, value, label }: {
-    tone: string; icon: ReactNode; value: string; label: string;
-}) {
+// A metric column header — a coloured icon chip + label. Each funnel stage
+// gets its own hue so the columns read at a glance: landed → cart → orders.
+function ThMetric({ tone, icon, label }: { tone: string; icon: ReactNode; label: string }) {
     return (
-        <span className="inline-flex items-center gap-1.5" title={label}>
-            <span className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${tone}`}>{icon}</span>
-            <span className="text-xs font-semibold text-surface-800 tabular-nums">{value}</span>
-            <span className="text-2xs text-surface-400 hidden sm:inline">{label}</span>
-        </span>
+        <th className="px-4 py-3 text-right whitespace-nowrap">
+            <span className="inline-flex items-center gap-1.5 text-2xs font-bold uppercase tracking-widest text-surface-400">
+                <span className={`w-4 h-4 rounded flex items-center justify-center shrink-0 ${tone}`} aria-hidden>{icon}</span>
+                {label}
+            </span>
+        </th>
     );
 }
 
@@ -81,37 +80,53 @@ export default function CustomerGeographyPage() {
 
                     <div className="bg-white rounded-2xl border border-surface-200 overflow-hidden">
                         <div className="px-5 py-3 border-b border-surface-100">
-                            <h2 className="font-semibold text-surface-900 text-sm">Countries by customers</h2>
+                            <h2 className="font-semibold text-surface-900 text-sm">Countries</h2>
                         </div>
                         {countries.length === 0 ? (
                             <p className="px-5 py-10 text-center text-sm text-surface-400">No customer location data yet.</p>
                         ) : (
-                            <div className="divide-y divide-surface-50">
-                                {countries.map((c: CountryStat) => (
-                                    <div key={c.country_code} className="flex items-center gap-4 px-5 py-3.5">
-                                        <span className="text-2xl shrink-0" aria-hidden>{flagOf(c.country_code)}</span>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between gap-3">
-                                                <p className="text-sm font-semibold text-surface-900 truncate">{c.country_name}</p>
-                                                <p className="text-sm font-bold text-surface-900 shrink-0">
-                                                    {fmtNum(c.customers)} <span className="text-xs font-normal text-surface-400">{c.customers === 1 ? "customer" : "customers"}</span>
-                                                </p>
-                                            </div>
-                                            <div className="mt-1.5 h-2 rounded-full bg-surface-100 overflow-hidden">
-                                                <div className="h-full rounded-full bg-brand-500" style={{ width: `${(c.customers / maxCust) * 100}%` }} />
-                                            </div>
-                                            {/* Funnel in one row: landed → cart → orders → revenue */}
-                                            <div className="flex items-center gap-x-4 gap-y-1.5 flex-wrap mt-2">
-                                                <FunnelStat tone="bg-violet-50 text-violet-600"  icon={<LandedIcon />}  value={fmtNum(c.visits)} label="landed" />
-                                                <FunnelStat tone="bg-sky-50 text-sky-600"        icon={<CartIcon />}    value={fmtNum(c.carts)}  label="carts" />
-                                                <FunnelStat tone="bg-emerald-50 text-emerald-600" icon={<OrdersIcon />} value={fmtNum(c.orders)} label="orders" />
-                                                {c.revenue > 0 && (
-                                                    <FunnelStat tone="bg-amber-50 text-amber-600" icon={<RevenueIcon />} value={money(c.revenue, c.currency)} label="revenue" />
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm min-w-[760px]">
+                                    <thead>
+                                        <tr className="bg-surface-50/70 border-b border-surface-100">
+                                            <th className="text-left px-5 py-3 text-2xs font-bold uppercase tracking-widest text-surface-400">Country</th>
+                                            <ThMetric tone="bg-violet-50 text-violet-600"  icon={<LandedIcon />}  label="Landed" />
+                                            <ThMetric tone="bg-sky-50 text-sky-600"         icon={<CartIcon />}    label="Carts" />
+                                            <ThMetric tone="bg-emerald-50 text-emerald-600" icon={<OrdersIcon />}  label="Orders" />
+                                            <ThMetric tone="bg-amber-50 text-amber-600"     icon={<RevenueIcon />} label="Revenue" />
+                                            <th className="text-right px-5 py-3 text-2xs font-bold uppercase tracking-widest text-surface-400">Customers</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-surface-50">
+                                        {countries.map((c: CountryStat) => (
+                                            <tr key={c.country_code} className="hover:bg-surface-50/50 transition-colors">
+                                                {/* Identity — flag tile + country, like the member avatar + name */}
+                                                <td className="px-5 py-3.5">
+                                                    <div className="flex items-center gap-3">
+                                                        <span className="w-10 h-10 rounded-xl bg-surface-50 border border-surface-100 flex items-center justify-center text-xl shrink-0" aria-hidden>{flagOf(c.country_code)}</span>
+                                                        <div className="min-w-0">
+                                                            <p className="font-semibold text-surface-900 truncate">{c.country_name}</p>
+                                                            <p className="text-2xs text-surface-400 font-mono uppercase tracking-wide">{c.country_code}</p>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-3.5 text-right tabular-nums font-semibold text-surface-800">{fmtNum(c.visits)}</td>
+                                                <td className="px-4 py-3.5 text-right tabular-nums font-semibold text-surface-800">{fmtNum(c.carts)}</td>
+                                                <td className="px-4 py-3.5 text-right tabular-nums font-semibold text-surface-800">{fmtNum(c.orders)}</td>
+                                                <td className="px-4 py-3.5 text-right tabular-nums font-bold text-surface-900 whitespace-nowrap">{c.revenue > 0 ? money(c.revenue, c.currency) : <span className="text-surface-300 font-normal">—</span>}</td>
+                                                {/* Customers — number + share bar, like the Progress column */}
+                                                <td className="px-5 py-3.5">
+                                                    <div className="flex items-center justify-end gap-2.5">
+                                                        <div className="w-20 h-2 rounded-full bg-surface-100 overflow-hidden hidden md:block">
+                                                            <div className="h-full rounded-full bg-brand-500" style={{ width: `${(c.customers / maxCust) * 100}%` }} />
+                                                        </div>
+                                                        <span className="tabular-nums font-bold text-surface-900 w-8 text-right">{fmtNum(c.customers)}</span>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             </div>
                         )}
                     </div>
