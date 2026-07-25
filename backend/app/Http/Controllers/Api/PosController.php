@@ -1640,28 +1640,48 @@ class PosController extends Controller
             'per_page' => 'nullable|integer|min:1|max:20',
         ]);
 
-        $q = trim($validated['q']);
+        $q      = trim($validated['q']);
+        $like   = "%{$q}%";
+        $prefix = "{$q}%";
 
         $customers = \App\Models\Customer::with('user:id,first_name,last_name,email,phone')
-            ->where(function ($query) use ($q) {
-                $query->where('phone', 'ILIKE', "%{$q}%")
-                    ->orWhereHas('user', function ($uq) use ($q) {
-                        $uq->where('first_name', 'ILIKE', "%{$q}%")
-                           ->orWhere('last_name',  'ILIKE', "%{$q}%")
-                           ->orWhere('email',       'ILIKE', "%{$q}%")
-                           ->orWhere('phone',       'ILIKE', "%{$q}%")
-                           ->orWhereRaw("CONCAT(first_name, ' ', last_name) ILIKE ?", ["%{$q}%"]);
+            ->where(function ($query) use ($like) {
+                // Most customers have their name on the customers row itself (POS
+                // "New", attach-at-order, imports) with no linked user — search
+                // that FIRST. Then also match any linked user account.
+                $query->where('first_name', 'ILIKE', $like)
+                    ->orWhere('last_name', 'ILIKE', $like)
+                    ->orWhere('email',     'ILIKE', $like)
+                    ->orWhere('phone',     'ILIKE', $like)
+                    ->orWhereRaw("TRIM(CONCAT(COALESCE(first_name,''), ' ', COALESCE(last_name,''))) ILIKE ?", [$like])
+                    ->orWhereHas('user', function ($uq) use ($like) {
+                        $uq->where('first_name', 'ILIKE', $like)
+                           ->orWhere('last_name',  'ILIKE', $like)
+                           ->orWhere('email',       'ILIKE', $like)
+                           ->orWhere('phone',       'ILIKE', $like)
+                           ->orWhereRaw("CONCAT(first_name, ' ', last_name) ILIKE ?", [$like]);
                     });
             })
+            // Prefix matches (name/phone that STARTS with the query) rank first,
+            // then alphabetically — so typing "mo" surfaces "Moses" at the top.
+            ->orderByRaw(
+                "CASE WHEN first_name ILIKE ? OR last_name ILIKE ? OR phone ILIKE ? THEN 0 ELSE 1 END",
+                [$prefix, $prefix, $prefix],
+            )
+            ->orderByRaw("TRIM(CONCAT(COALESCE(first_name,''), ' ', COALESCE(last_name,'')))")
             ->limit($validated['per_page'] ?? 8)
             ->get()
-            ->map(fn ($c) => [
-                'id'    => $c->id,
-                'name'  => trim(($c->user?->first_name ?? '') . ' ' . ($c->user?->last_name ?? ''))
-                           ?: ($c->phone ?? "Customer #{$c->id}"),
-                'phone' => $c->phone ?? $c->user?->phone,
-                'email' => $c->user?->email,
-            ]);
+            ->map(function ($c) {
+                // Prefer the customer's own name, fall back to a linked user.
+                $first = $c->first_name ?: $c->user?->first_name;
+                $last  = $c->last_name  ?: $c->user?->last_name;
+                return [
+                    'id'    => $c->id,
+                    'name'  => trim(($first ?? '') . ' ' . ($last ?? '')) ?: ($c->phone ?? "Customer #{$c->id}"),
+                    'phone' => $c->phone ?? $c->user?->phone,
+                    'email' => $c->email ?? $c->user?->email,
+                ];
+            });
 
         return response()->json(['data' => $customers]);
     }
