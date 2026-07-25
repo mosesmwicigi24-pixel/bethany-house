@@ -7,9 +7,16 @@ use App\Services\NotificationService;
 use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Support\SortResolver;
 
 class ReturnController extends Controller
 {
+    /** Columns a client may sort the returns list by (columns on order_returns). */
+    private const SORTABLE_COLUMNS = [
+        'requested_at', 'approved_at', 'received_at', 'refunded_at',
+        'created_at', 'updated_at', 'status', 'refund_amount', 'return_number',
+    ];
+
     /**
      * Request return (Customer)
      */
@@ -286,8 +293,12 @@ class ReturnController extends Controller
             });
         }
 
-        $sortBy = $request->get('sort_by', 'requested_at');
-        $sortOrder = $request->get('sort_order', 'desc');
+        [$sortBy, $sortOrder] = SortResolver::resolve(
+            $request->get('sort_by'),
+            $request->get('sort_order', 'desc'),
+            self::SORTABLE_COLUMNS,
+            'requested_at'
+        );
         $query->orderBy("order_returns.{$sortBy}", $sortOrder);
 
         $perPage = $request->get('per_page', 20);

@@ -10,9 +10,16 @@ use App\Models\Outlet;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Services\IntelligenceService;
+use App\Support\SortResolver;
 
 class StockLevelsController extends Controller
 {
+    /** Columns a client may sort the stock-levels list by. */
+    private const SORTABLE_COLUMNS = [
+        'quantity_on_hand', 'quantity_reserved', 'reorder_point',
+        'reorder_quantity', 'last_counted_at', 'created_at', 'updated_at',
+    ];
+
     // =========================================================================
     // GET /api/v1/admin/inventory/stock-levels
     // Paginated stock levels across all products, outlets, variants.
@@ -66,8 +73,13 @@ class StockLevelsController extends Controller
             });
         }
 
-        $sortBy = $request->get('sort_by', 'quantity_on_hand');
-        $query->orderBy($sortBy, $request->get('sort_dir', 'asc'));
+        [$sortBy, $sortDir] = SortResolver::resolve(
+            $request->get('sort_by'),
+            $request->get('sort_dir', 'asc'),
+            self::SORTABLE_COLUMNS,
+            'quantity_on_hand'
+        );
+        $query->orderBy($sortBy, $sortDir);
 
         $items = $query->paginate($perPage);
 

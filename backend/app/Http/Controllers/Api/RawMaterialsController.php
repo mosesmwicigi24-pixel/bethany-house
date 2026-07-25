@@ -10,9 +10,16 @@ use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use App\Support\SortResolver;
 
 class RawMaterialsController extends Controller
 {
+    /** Columns a client may sort the raw-materials list by. */
+    private const SORTABLE_COLUMNS = [
+        'name', 'code', 'category', 'unit_cost',
+        'reorder_point', 'is_active', 'created_at', 'updated_at',
+    ];
+
     // Actual DB columns:
     // id, code, name, description, unit_of_measure, category,
     // unit_cost, reorder_point, is_active, created_at, updated_at
@@ -64,7 +71,13 @@ class RawMaterialsController extends Controller
             );
         }
 
-        $query->orderBy($request->get('sort_by', 'name'), $request->get('sort_dir', 'asc'));
+        [$sortBy, $sortDir] = SortResolver::resolve(
+            $request->get('sort_by'),
+            $request->get('sort_dir', 'asc'),
+            self::SORTABLE_COLUMNS,
+            'name'
+        );
+        $query->orderBy($sortBy, $sortDir);
 
         $materials = $query->paginate($perPage);
 
