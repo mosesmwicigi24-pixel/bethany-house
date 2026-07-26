@@ -171,22 +171,33 @@ jobs:
         timeout-minutes: 3
 
       - name: Sync compose file
+        # The VPS can be briefly unreachable (a reboot, a network blip, or
+        # fail2ban/the firewall dropping GitHub runner IPs -> port 22 times out).
+        # Retry with backoff over a few minutes before giving up.
+        timeout-minutes: 6
         run: |
-          # Retry: a transient SSH blip shouldn't fail a green build.
-          for i in 1 2 3; do
-            scp -o ConnectTimeout=15 -o ServerAliveInterval=15 \
+          scp_it() {
+            scp -o ConnectTimeout=20 -o ServerAliveInterval=15 \
               -i ~/.ssh/deploy_key docker-compose.yml \
-              "root@${{ secrets.VPS_HOST }}:/opt/bethany-house/docker-compose.yml" && exit 0
-            echo "scp attempt $i failed; retrying in $((i * 5))s…"
-            sleep $((i * 5))
+              "root@${{ secrets.VPS_HOST }}:/opt/bethany-house/docker-compose.yml"
+          }
+          n=1
+          until scp_it; do
+            if [ "$n" -ge 6 ]; then
+              echo "::error::Could not reach the VPS to copy docker-compose.yml after $n attempts. The VPS may be down, or fail2ban/the firewall may be dropping GitHub runner IPs (port 22 times out). Fix: allowlist GitHub Actions IPs in fail2ban (ignoreip), or use a self-hosted runner / pull-based deploy so no inbound SSH from GitHub is needed."
+              exit 1
+            fi
+            echo "scp attempt $n failed (VPS unreachable?); retrying in 20s..."
+            sleep 20
+            n=$((n + 1))
           done
-          echo "::error::Could not copy docker-compose.yml to the VPS after 3 attempts."
-          exit 1
 
       - name: Pull images, migrate, restart
+        timeout-minutes: 12
         run: |
-          ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 \
-            -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" bash -s <<'DEPLOY'
+          # Remote deploy script (kept identical), written to a file so the SSH
+          # call can be retried around it without wrestling a heredoc.
+          cat > /tmp/deploy.sh <<'DEPLOY'
           set -euo pipefail
           cd /opt/bethany-house
 
@@ -202,8 +213,8 @@ jobs:
           echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
 
           docker compose pull laravel nextjs react-admin
-          # -T + </dev/null: without them `compose run` eats the rest of this
-          # heredoc as container stdin and the script dies here "successfully".
+          # -T + </dev/null: without them `compose run` eats the container stdin
+          # and the script dies here "successfully".
           docker compose run --rm --no-deps -T laravel php artisan migrate --force </dev/null
           docker compose up -d --remove-orphans
 
@@ -212,3 +223,26 @@ jobs:
 
           docker compose ps
           DEPLOY
+
+          # Retry ONLY when SSH can't establish the connection (exit 255). A real
+          # failure inside the remote script (e.g. a migration error) exits with
+          # its own code and must fail fast -- never mask it behind retries.
+          set +e
+          n=1
+          while true; do
+            ssh -o ConnectTimeout=20 -o ServerAliveInterval=15 \
+              -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" bash -s < /tmp/deploy.sh
+            rc=$?
+            [ "$rc" -eq 0 ] && break
+            if [ "$rc" -ne 255 ]; then
+              echo "::error::Remote deploy failed (exit $rc) -- a real error on the VPS, not a connection problem. See the log above."
+              exit "$rc"
+            fi
+            if [ "$n" -ge 6 ]; then
+              echo "::error::Could not reach the VPS over SSH after $n attempts. Same cause/fix as the compose-sync step."
+              exit 1
+            fi
+            echo "ssh connection attempt $n failed (exit 255, VPS unreachable?); retrying in 20s..."
+            sleep 20
+            n=$((n + 1))
+          done
