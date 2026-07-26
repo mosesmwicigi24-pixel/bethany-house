@@ -785,8 +785,15 @@ class IntelligenceService
             $byCode[$code]['customers']++;
         }
 
-        // Orders + revenue per country, with each country's dominant currency.
-        $currencyTally = [];
+        // Orders + revenue per country, always reported in the hub's base
+        // currency (KES) so the figures are comparable and match the rest of the
+        // hub. Order totals are stored as KES magnitudes — the checkout resolves
+        // non-KE customers to a USD currency_code but prices the cart from the
+        // KES catalogue, so total_amount is the real KES value regardless of the
+        // code. Summing raw is therefore correct; FX-dividing by a USD rate would
+        // wrongly shrink genuine KES amounts. We label every row with the base
+        // currency rather than an order's (possibly misleading) currency_code.
+        $baseCurrency = DB::table('currencies')->where('is_base', true)->value('code') ?: 'KES';
         foreach ($perOrders as $r) {
             $code = CountryInference::resolve(
                 [$r->customer_country_code, $r->shipping_country_code, $r->billing_country_code],
@@ -796,12 +803,7 @@ class IntelligenceService
             $byCode[$code] ??= $row($code);
             $byCode[$code]['orders']++;
             $byCode[$code]['revenue'] += (float) $r->total_amount;
-            $cur = $r->currency_code ?: 'KES';
-            $currencyTally[$code][$cur] = ($currencyTally[$code][$cur] ?? 0) + 1;
-        }
-        foreach ($currencyTally as $code => $tally) {
-            arsort($tally);
-            $byCode[$code]['currency'] = array_key_first($tally);
+            $byCode[$code]['currency'] = $baseCurrency;
         }
 
         // Storefront landings per country — site_visits stores a geo-IP country

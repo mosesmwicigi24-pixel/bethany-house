@@ -262,7 +262,7 @@ class SeedProductPages extends Command
         }
 
         $name = $s['name'];
-        $profile = $this->profileFor($s['category']);
+        $profile = $this->profileFor($s['category'], $s['is_producible']);
         $rich = $this->isRich($s['description']);
         $sentences = $rich ? $this->sentences($s['description']) : [];
 
@@ -463,12 +463,18 @@ class SeedProductPages extends Command
      * Keyed by category keyword. `tailorable` marks categories we would tailor
      * to measure (vestments/gowns). `cards` are true, category-level highlights;
      * `poster`/`chapter` are the thin-data fallbacks. {name} is substituted.
+     *
+     * The "vestments" bucket holds both tailored fabric (cassocks, gowns,
+     * chasubles) and non-fabric regalia (crosses, mitres, cinctures, collars).
+     * Only genuinely made-to-order items ($producible) get "made to measure"
+     * copy; everything else gets regalia language that is true for metalwork
+     * and ready-made pieces alike.
      */
-    private function profileFor(?string $category): array
+    private function profileFor(?string $category, bool $producible = false): array
     {
         $c = mb_strtolower((string) $category);
 
-        $vestments = [
+        $vestments = $producible ? [
             'tailorable' => true,
             'poster'     => '{name}, Vested for Worship',
             'cards'      => [
@@ -477,6 +483,15 @@ class SeedProductPages extends Command
                 ['Craft', 'Finished by hand', 'Sewn and finished by hand from quality, breathable fabric chosen to keep its drape through a long service.'],
             ],
             'chapter'    => ['eyebrow' => 'The Craft', 'title' => 'The {name}, made in Nairobi.', 'copy' => 'A {name} for the altar, made to serve through every season of the church.'],
+        ] : [
+            'tailorable' => false,
+            'poster'     => 'The {name}, for the Altar',
+            'cards'      => [
+                ['For the altar', 'Made for worship', 'A {name} made for the altar and the vesting of clergy and worship leaders.'],
+                ['Craft', 'Finished with care', 'Chosen and finished to Bethany House standards to look right in the sanctuary and last through regular use.'],
+                ['Set apart', 'Part of the vestments', 'The piece that completes the vestment and honours the liturgical life of the church.'],
+            ],
+            'chapter'    => ['eyebrow' => 'For the Altar', 'title' => 'The {name}.', 'copy' => 'A {name} made for worship and the vesting of clergy.'],
         ];
         $communion = [
             'tailorable' => false,
