@@ -323,7 +323,31 @@ class SeedProductPages extends Command
             ];
         }
 
-        return $blocks;
+        // Keep every block inside the banners column limits (title 150,
+        // subtitle 255) — real descriptions run long, so clip on a word boundary.
+        return array_map(function ($b) {
+            $b['title'] = $this->clip($b['title'], 150);
+            $b['subtitle'] = $this->clip($b['subtitle'], 255);
+            return $b;
+        }, $blocks);
+    }
+
+    /** Trim to a column limit at a word boundary, adding an ellipsis if cut. */
+    private function clip(?string $s, int $max): ?string
+    {
+        if ($s === null) {
+            return null;
+        }
+        $s = trim($s);
+        if (mb_strlen($s) <= $max) {
+            return $s;
+        }
+        $cut = mb_substr($s, 0, $max - 1);
+        $sp = mb_strrpos($cut, ' ');
+        if ($sp !== false && $sp > $max * 0.6) {
+            $cut = mb_substr($cut, 0, $sp);
+        }
+        return rtrim($cut, " ,.;:—-") . '…';
     }
 
     // ── Copy helpers ────────────────────────────────────────────────────────────
