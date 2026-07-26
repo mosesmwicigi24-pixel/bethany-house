@@ -1472,8 +1472,8 @@ export default function StockLevelsPage() {
 
     return (
         <div className="space-y-5 animate-fade-in">
-            {/* Header */}
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            {/* Header — the opening-stock action is a small corner button, not a slab */}
+            <div className="flex items-start justify-between gap-3">
                 <div>
                     <h1 className="page-title">Stock Levels</h1>
                     <p className="page-subtitle">
@@ -1485,16 +1485,16 @@ export default function StockLevelsPage() {
                 {canAdjust && (
                 <button
                     onClick={() => setOpeningModal(true)}
-                    className="btn-primary self-start"
+                    className="btn-secondary btn-sm shrink-0 whitespace-nowrap"
                 >
-                    + Set Opening Stock
+                    + Opening stock
                 </button>
                 )}
             </div>
 
-            {/* Stats cards */}
+            {/* Stat chips — one compact row that filters the table on tap */}
             {stats && (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="grid grid-cols-4 gap-2">
                     {[
                         {
                             label: "Total SKUs",
@@ -1529,7 +1529,7 @@ export default function StockLevelsPage() {
                                 )
                             }
                             className={clsx(
-                                "card p-4 text-center transition-all hover:shadow-sm",
+                                "card px-1.5 py-2.5 text-center transition-all hover:shadow-sm",
                                 statusFilter === s.filter && s.filter
                                     ? "ring-2 ring-brand-300"
                                     : "",
@@ -1537,13 +1537,13 @@ export default function StockLevelsPage() {
                         >
                             <p
                                 className={clsx(
-                                    "text-2xl font-bold",
+                                    "text-lg sm:text-2xl font-bold leading-none",
                                     s.color || "text-surface-900",
                                 )}
                             >
                                 {s.value}
                             </p>
-                            <p className="text-xs text-surface-500 mt-0.5">
+                            <p className="text-[10px] sm:text-xs text-surface-500 mt-1 leading-tight">
                                 {s.label}
                             </p>
                         </button>
@@ -1551,48 +1551,50 @@ export default function StockLevelsPage() {
                 </div>
             )}
 
-            {/* Filters */}
-            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            {/* Filters — search on one row, the two dropdowns side-by-side on the next */}
+            <div className="space-y-2">
                 <input
-                    className="input w-full sm:max-w-xs"
+                    className="input w-full"
                     placeholder="Search product or SKU…"
                     value={table.state.search}
                     onChange={(e) => table.setSearch(e.target.value)}
                 />
-                <select
-                    className="input flex-1 sm:w-44 sm:flex-none"
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                >
-                    <option value="">All statuses</option>
-                    <option value="in_stock">In Stock</option>
-                    <option value="low_stock">Low Stock</option>
-                    <option value="out_of_stock">Out of Stock</option>
-                </select>
-                <select
-                    className="input flex-1 sm:w-44 sm:flex-none"
-                    value={outletFilter}
-                    onChange={(e) => setOutletFilter(e.target.value)}
-                >
-                    <option value="">All outlets</option>
-                    {outlets.map((o: any) => (
-                        <option key={o.id} value={o.id}>
-                            {o.name}
-                        </option>
-                    ))}
-                </select>
-                {(table.state.search || statusFilter || outletFilter) && (
-                    <button
-                        onClick={() => {
-                            table.setSearch("");
-                            setStatusFilter("");
-                            setOutletFilter("");
-                        }}
-                        className="btn-ghost btn-sm text-xs"
+                <div className="flex items-center gap-2">
+                    <select
+                        className="input flex-1 min-w-0"
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value)}
                     >
-                        ✕ Clear
-                    </button>
-                )}
+                        <option value="">All statuses</option>
+                        <option value="in_stock">In Stock</option>
+                        <option value="low_stock">Low Stock</option>
+                        <option value="out_of_stock">Out of Stock</option>
+                    </select>
+                    <select
+                        className="input flex-1 min-w-0"
+                        value={outletFilter}
+                        onChange={(e) => setOutletFilter(e.target.value)}
+                    >
+                        <option value="">All outlets</option>
+                        {outlets.map((o: any) => (
+                            <option key={o.id} value={o.id}>
+                                {o.name}
+                            </option>
+                        ))}
+                    </select>
+                    {(table.state.search || statusFilter || outletFilter) && (
+                        <button
+                            onClick={() => {
+                                table.setSearch("");
+                                setStatusFilter("");
+                                setOutletFilter("");
+                            }}
+                            className="btn-ghost btn-sm text-xs shrink-0 whitespace-nowrap"
+                        >
+                            ✕ Clear
+                        </button>
+                    )}
+                </div>
             </div>
 
             {/* Table */}
