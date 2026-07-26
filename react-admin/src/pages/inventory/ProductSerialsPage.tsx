@@ -26,6 +26,15 @@ function StatusBadge({ status }: { status: SerialStatus }) {
     return <span className={clsx("badge text-2xs", m.badge)}>{m.label}</span>;
 }
 
+/** "12 Jul 2026" — the date a unit reached the shelf or left it. */
+function fmtDate(iso?: string | null): string | null {
+    if (!iso) return null;
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime())
+        ? null
+        : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
 export default function ProductSerialsPage() {
     const [filters, setFilters] = useState<SerialFilters>({ per_page: 30 });
     const [page, setPage] = useState(1);
@@ -151,17 +160,42 @@ export default function ProductSerialsPage() {
                                         <p className="text-2xs text-surface-400 font-mono">{s.product_sku}</p>
                                     </td>
                                     <td className="px-4 py-3"><StatusBadge status={s.status} /></td>
+                                    {/* On shelf — the date it landed, with how long it has sat there. */}
                                     <td className="px-4 py-3 text-2xs">
-                                        {s.status === "in_stock" && s.days_in_stock != null ? (
-                                            <span className={clsx("tabular-nums", s.aged ? "text-amber-700 font-bold" : "text-surface-500")}>
-                                                {s.days_in_stock}d{s.aged ? " ⏳" : ""}
-                                            </span>
-                                        ) : "—"}
+                                        {fmtDate(s.stocked_at) ? (
+                                            <>
+                                                <p className="text-surface-700 whitespace-nowrap">{fmtDate(s.stocked_at)}</p>
+                                                {s.days_in_stock != null && (
+                                                    <p className={clsx("tabular-nums", s.aged ? "text-amber-700 font-bold" : "text-surface-400")}>
+                                                        {s.days_in_stock}d on shelf{s.aged ? " ⏳" : ""}
+                                                    </p>
+                                                )}
+                                            </>
+                                        ) : (
+                                            <span className="text-surface-300">—</span>
+                                        )}
                                     </td>
                                     <td className="px-4 py-3 font-mono text-2xs text-surface-500">{s.production_order_number ?? "—"}</td>
                                     <td className="px-4 py-3 text-surface-600">{s.outlet_name ?? "—"}</td>
-                                    <td className="px-4 py-3 text-2xs text-surface-500">
-                                        {s.order_number ? <span className="font-mono">{s.order_number}</span> : "—"}
+                                    {/* Sold on — the date of sale, with the order it went out on. */}
+                                    <td className="px-4 py-3 text-2xs">
+                                        {fmtDate(s.sold_at) || s.order_number ? (
+                                            <>
+                                                {fmtDate(s.sold_at) && (
+                                                    <p className="text-surface-700 whitespace-nowrap">{fmtDate(s.sold_at)}</p>
+                                                )}
+                                                {s.order_number && (
+                                                    <p className="font-mono text-surface-400">{s.order_number}</p>
+                                                )}
+                                                {fmtDate(s.dispatched_at) && (
+                                                    <p className="text-indigo-500 whitespace-nowrap">
+                                                        Dispatched {fmtDate(s.dispatched_at)}
+                                                    </p>
+                                                )}
+                                            </>
+                                        ) : (
+                                            <span className="text-surface-300">—</span>
+                                        )}
                                     </td>
                                 </tr>
                             ))}
