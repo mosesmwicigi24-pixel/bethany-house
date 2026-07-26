@@ -1212,8 +1212,8 @@ export default function RawMaterialsPage() {
             className="flex flex-col animate-fade-in"
             style={{ minHeight: "calc(100vh - 120px)" }}
         >
-            {/* Header */}
-            <div className="flex flex-col gap-3 mb-4 shrink-0 sm:flex-row sm:items-start sm:justify-between">
+            {/* Header — the action stays a small corner button, not a full-width slab */}
+            <div className="flex items-start justify-between gap-3 mb-4 shrink-0">
                 <div>
                     <h1 className="page-title">Raw Materials</h1>
                     <p className="page-subtitle">
@@ -1228,16 +1228,16 @@ export default function RawMaterialsPage() {
                         setEditingMat(null);
                         setFormModal(true);
                     }}
-                    className="btn-primary self-start"
+                    className="btn-secondary btn-sm shrink-0 whitespace-nowrap"
                 >
-                    + Add Material
+                    + Add
                 </button>
                 )}
             </div>
 
-            {/* Stats */}
+            {/* Stats — one compact row */}
             {stats && (
-                <div className="grid grid-cols-2 gap-3 mb-4 shrink-0 sm:grid-cols-4">
+                <div className="grid grid-cols-4 gap-2 mb-4 shrink-0">
                     {[
                         {
                             label: "Total",
@@ -1272,7 +1272,7 @@ export default function RawMaterialsPage() {
                                 )
                             }
                             className={clsx(
-                                "card p-4 text-center transition-all",
+                                "card px-1.5 py-2.5 text-center transition-all",
                                 s.filter && statusFilter === s.filter
                                     ? "ring-2 ring-brand-300"
                                     : "",
@@ -1281,13 +1281,13 @@ export default function RawMaterialsPage() {
                         >
                             <p
                                 className={clsx(
-                                    "text-2xl font-bold",
+                                    "text-lg sm:text-2xl font-bold leading-none",
                                     s.color || "text-surface-900",
                                 )}
                             >
                                 {s.value}
                             </p>
-                            <p className="text-xs text-surface-500 mt-0.5">
+                            <p className="text-[10px] sm:text-xs text-surface-500 mt-1 leading-tight">
                                 {s.label}
                             </p>
                         </button>
@@ -1299,40 +1299,42 @@ export default function RawMaterialsPage() {
             <div className="flex flex-col gap-4 flex-1 min-h-0 lg:flex-row">
                 {/* LEFT: List */}
                 <div className="flex-1 flex flex-col min-w-0 space-y-3">
-                    {/* Filters */}
-                    <div className="flex flex-wrap gap-3 shrink-0">
+                    {/* Filters — search on one row, the type select beside Clear on the next */}
+                    <div className="space-y-2 shrink-0">
                         <input
-                            className="input w-full sm:max-w-xs"
+                            className="input w-full"
                             placeholder="Search name, code…"
                             value={table.state.search}
                             onChange={(e) => table.setSearch(e.target.value)}
                         />
-                        <select
-                            className="input flex-1 sm:w-40 sm:flex-none"
-                            value={typeFilter}
-                            onChange={(e) => setTypeFilter(e.target.value)}
-                        >
-                            <option value="">All types</option>
-                            {(stats?.types ?? stats?.categories ?? MATERIAL_TYPES).map(
-                                (t: string) => (
-                                    <option key={t} value={t}>
-                                        {t}
-                                    </option>
-                                ),
-                            )}
-                        </select>
-                        {(table.state.search || typeFilter || statusFilter) && (
-                            <button
-                                onClick={() => {
-                                    table.setSearch("");
-                                    setTypeFilter("");
-                                    setStatusFilter("");
-                                }}
-                                className="btn-ghost btn-sm text-xs"
+                        <div className="flex items-center gap-2">
+                            <select
+                                className="input flex-1 min-w-0"
+                                value={typeFilter}
+                                onChange={(e) => setTypeFilter(e.target.value)}
                             >
-                                ✕ Clear
-                            </button>
-                        )}
+                                <option value="">All types</option>
+                                {(stats?.types ?? stats?.categories ?? MATERIAL_TYPES).map(
+                                    (t: string) => (
+                                        <option key={t} value={t}>
+                                            {t}
+                                        </option>
+                                    ),
+                                )}
+                            </select>
+                            {(table.state.search || typeFilter || statusFilter) && (
+                                <button
+                                    onClick={() => {
+                                        table.setSearch("");
+                                        setTypeFilter("");
+                                        setStatusFilter("");
+                                    }}
+                                    className="btn-ghost btn-sm text-xs shrink-0 whitespace-nowrap"
+                                >
+                                    ✕ Clear
+                                </button>
+                            )}
+                        </div>
                     </div>
 
                     {/* Table */}

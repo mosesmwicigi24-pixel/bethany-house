@@ -54,7 +54,8 @@ export default function ProductSerialsPage() {
 
     return (
         <div className="flex flex-col gap-5 animate-fade-in">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            {/* Header — the action stays a small corner button, never a full-width slab */}
+            <div className="flex items-start justify-between gap-3">
                 <div>
                     <h1 className="page-title">Product Serials</h1>
                     <p className="page-subtitle">
@@ -62,8 +63,8 @@ export default function ProductSerialsPage() {
                         {isFetching && !isLoading && <span className="ml-2 text-brand-500 text-xs">Refreshing…</span>}
                     </p>
                 </div>
-                <button onClick={() => setShowReconcile(true)} className="btn-secondary btn-sm">
-                    🔍 Reconcile stock
+                <button onClick={() => setShowReconcile(true)} className="btn-secondary btn-sm shrink-0 whitespace-nowrap">
+                    🔍 Reconcile
                 </button>
             </div>
 
@@ -84,40 +85,42 @@ export default function ProductSerialsPage() {
                 </button>
             )}
 
-            {/* Status summary */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+            {/* Status summary — compact chips in one row rather than tall stacked cards */}
+            <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
                 {STATUS_ORDER.map((s) => (
                     <button
                         key={s}
                         onClick={() => setFilter("status", filters.status === s ? "" : s)}
                         className={clsx(
-                            "rounded-xl border p-3 text-left transition-colors",
+                            "rounded-xl border px-1.5 py-2 text-center transition-colors",
                             filters.status === s ? "border-brand-400 bg-brand-50" : "border-surface-200 hover:border-brand-300",
                         )}
                     >
-                        <p className="text-2xs uppercase tracking-widest text-surface-400">{STATUS_META[s].label}</p>
-                        <p className="text-xl font-bold text-surface-900 tabular-nums">{summary[s] ?? 0}</p>
+                        <p className="text-base sm:text-xl font-bold text-surface-900 tabular-nums leading-none">{summary[s] ?? 0}</p>
+                        <p className="text-[9px] sm:text-2xs uppercase tracking-wider text-surface-400 mt-1 leading-tight">{STATUS_META[s].label}</p>
                     </button>
                 ))}
             </div>
 
-            {/* Filters */}
-            <div className="card card-body flex flex-wrap items-center gap-3">
+            {/* Filters — search on one row, the status select beside Clear on the next */}
+            <div className="space-y-2">
                 <input
-                    className="input flex-1 min-w-[200px]"
+                    className="input w-full"
                     placeholder="Search serial number…"
                     value={filters.search ?? ""}
                     onChange={(e) => setFilter("search", e.target.value)}
                 />
-                <select className="input w-44" value={filters.status ?? ""} onChange={(e) => setFilter("status", e.target.value)}>
-                    <option value="">All statuses</option>
-                    {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
-                </select>
-                {(filters.search || filters.status || filters.aged) && (
-                    <button onClick={() => { setFilters({ per_page: 30 }); setPage(1); }} className="btn-ghost btn-sm text-danger">
-                        Clear
-                    </button>
-                )}
+                <div className="flex items-center gap-2">
+                    <select className="input flex-1 min-w-0" value={filters.status ?? ""} onChange={(e) => setFilter("status", e.target.value)}>
+                        <option value="">All statuses</option>
+                        {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
+                    </select>
+                    {(filters.search || filters.status || filters.aged) && (
+                        <button onClick={() => { setFilters({ per_page: 30 }); setPage(1); }} className="btn-ghost btn-sm text-danger shrink-0 whitespace-nowrap">
+                            ✕ Clear
+                        </button>
+                    )}
+                </div>
             </div>
 
             {/* Table */}

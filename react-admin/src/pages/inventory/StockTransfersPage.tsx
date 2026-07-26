@@ -911,7 +911,8 @@ export default function StockTransfersPage() {
 
     return (
         <div className="space-y-5 animate-fade-in">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            {/* Header — the action stays a small corner button, not a full-width slab */}
+            <div className="flex items-start justify-between gap-3">
                 <div>
                     <h1 className="page-title">Stock Transfers</h1>
                     <p className="page-subtitle">
@@ -923,15 +924,16 @@ export default function StockTransfersPage() {
                 {canTransfer && (
                 <button
                     onClick={() => setNewModal(true)}
-                    className="btn-primary self-start"
+                    className="btn-secondary btn-sm shrink-0 whitespace-nowrap"
                 >
-                    + New Transfer
+                    + New
                 </button>
                 )}
             </div>
 
+            {/* Stats — one compact row */}
             {stats && (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
                     {(
                         [
                             {
@@ -974,16 +976,16 @@ export default function StockTransfersPage() {
                                 )
                             }
                             className={clsx(
-                                "card p-4 text-center transition-all hover:shadow-sm",
+                                "card px-1 py-2.5 text-center transition-all hover:shadow-sm",
                                 statusFilter === s.filter
                                     ? "ring-2 ring-brand-300"
                                     : "",
                             )}
                         >
-                            <p className={clsx("text-2xl font-bold", s.color)}>
+                            <p className={clsx("text-lg sm:text-2xl font-bold leading-none", s.color)}>
                                 {s.value}
                             </p>
-                            <p className="text-xs text-surface-500 mt-0.5">
+                            <p className="text-[10px] sm:text-xs text-surface-500 mt-1 leading-tight">
                                 {s.label}
                             </p>
                         </button>
@@ -991,37 +993,38 @@ export default function StockTransfersPage() {
                 </div>
             )}
 
-            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            {/* Filters — search on one row, the status select beside Clear on the next */}
+            <div className="space-y-2">
                 <input
-                    className="input w-full sm:max-w-xs"
+                    className="input w-full"
                     placeholder="Search transfer #…"
                     value={table.state.search}
                     onChange={(e) => table.setSearch(e.target.value)}
                 />
-                <div className="flex gap-2 flex-wrap">
-                <select
-                    className="input flex-1 sm:w-40 sm:flex-none"
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                >
-                    <option value="">All statuses</option>
-                    {Object.entries(STATUS_CONFIG).map(([k, v]) => (
-                        <option key={k} value={k}>
-                            {v.label}
-                        </option>
-                    ))}
-                </select>
-                {(table.state.search || statusFilter) && (
-                    <button
-                        onClick={() => {
-                            table.setSearch("");
-                            setStatusFilter("");
-                        }}
-                        className="btn-ghost btn-sm text-xs"
+                <div className="flex items-center gap-2">
+                    <select
+                        className="input flex-1 min-w-0"
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value)}
                     >
-                        ✕ Clear
-                    </button>
-                )}
+                        <option value="">All statuses</option>
+                        {Object.entries(STATUS_CONFIG).map(([k, v]) => (
+                            <option key={k} value={k}>
+                                {v.label}
+                            </option>
+                        ))}
+                    </select>
+                    {(table.state.search || statusFilter) && (
+                        <button
+                            onClick={() => {
+                                table.setSearch("");
+                                setStatusFilter("");
+                            }}
+                            className="btn-ghost btn-sm text-xs shrink-0 whitespace-nowrap"
+                        >
+                            ✕ Clear
+                        </button>
+                    )}
                 </div>
             </div>
 
