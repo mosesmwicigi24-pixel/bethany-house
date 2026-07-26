@@ -10,25 +10,30 @@ use Illuminate\Support\Str;
 /**
  * Seed Apple-style Product Page CMS blocks (the banners table, placement
  * product:<slug>) for every product, so the storefront PDP renders a poster +
- * highlights + "Take a closer look" + story chapters instead of falling back to
- * built-in copy. Blocks are surfaced/edited in admin → Home Front → Product Pages.
+ * highlights + "Take a closer look" + story chapters + value pillars instead of
+ * falling back to built-in copy. Blocks are surfaced/edited in admin → Home
+ * Front → Product Pages.
  *
- * GROUNDED, NOT FABRICATED. Every block is built from the product's OWN data —
- * its name, category, short/long description, price, features, measurements and
- * its real hosted images. No invented specs, no borrowed photos. A product with
- * thin data gets fewer (but still true) blocks rather than made-up claims.
+ * GROUNDED, NOT FABRICATED. Every block is composed from what is TRUE about the
+ * product: its real name, category, price, producible flag and its own hosted
+ * images — plus, when the product's own description is rich enough, its real
+ * prose. Where a product's description is thin or unreliable (many are just
+ * "Golden" / "stole" / "Bishops"), the copy falls back to category-level truths
+ * about that kind of church good (vestments are tailored to liturgical colour,
+ * communion ware serves the Lord's table, etc.) rather than inventing specifics.
+ * No borrowed photos, no made-up measurements.
  *
  * PREVIEW BY DEFAULT — nothing is written unless --apply is passed.
  *
- *   php artisan products:seed-pages --dump      # emit raw product data as JSON (inspect the catalog)
+ *   php artisan products:seed-pages --dump      # emit each product's raw source data as JSON
  *   php artisan products:seed-pages             # preview the blocks that WOULD be written
  *   php artisan products:seed-pages --apply     # write the blocks
- *   php artisan products:seed-pages --slug=alb  # limit to one product (preview or apply)
- *   php artisan products:seed-pages --force     # also (re)seed products that already have curated blocks
+ *   php artisan products:seed-pages --slug=alb  # limit to one product
+ *   php artisan products:seed-pages --force     # re-seed products that already have curated blocks
  *
- * Idempotent: updateOrInsert keyed by placement+position+sort_order. By default
- * a product that ALREADY has curated blocks (e.g. the hand-written Clergy
- * Cassock) is skipped so this never clobbers bespoke work; --force overrides.
+ * Idempotent: updateOrInsert keyed by placement+position+sort_order. A product
+ * that already has curated blocks (e.g. the hand-written Clergy Cassock) is
+ * skipped by default so bespoke work is never clobbered; --force overrides.
  */
 class SeedProductPages extends Command
 {
@@ -38,10 +43,18 @@ class SeedProductPages extends Command
                             {--slug=       : Limit to a single product slug.}
                             {--force       : Re-seed products that already have curated blocks (default: skip them).}';
 
-    protected $description = 'Seed grounded, per-product Apple-style page blocks (poster, highlights, features, chapters) into the banners CMS.';
+    protected $description = 'Seed grounded, per-product Apple-style page blocks (poster, highlights, features, chapters, pillars) into the banners CMS.';
 
     /** Products the storefront/migrations already curate by hand — never touch. */
     private const HAND_CURATED = ['clergy-cassock'];
+
+    /**
+     * A description is only mined for prose when it is genuinely a written
+     * blurb, not a one-word label. Below this it is ignored and the product
+     * falls back to category truths (avoids "Horn" → headline "stole").
+     */
+    private const RICH_MIN_CHARS = 60;
+    private const RICH_MIN_WORDS = 12;
 
     public function handle(): int
     {
@@ -101,19 +114,19 @@ class SeedProductPages extends Command
             $blocks = $this->buildBlocks($src);
 
             if (empty($blocks)) {
-                $this->line("  <fg=yellow>skip</> {$slug} — too little data to ground a page");
+                $this->line("  <fg=yellow>skip</> {$slug} — no image to ground a page");
                 $skipped++;
                 continue;
             }
 
             $this->line('');
-            $this->line("<fg=cyan>■</> <options=bold>{$src['name']}</> <fg=gray>· {$src['sku']} · product:{$slug}</>");
+            $this->line("<fg=cyan>■</> <options=bold>{$src['name']}</> <fg=gray>· {$src['sku']} · {$src['category']} · product:{$slug}</>");
             foreach ($blocks as $b) {
                 $eyebrow = $b['styles']['eyebrow'] ?? $b['styles']['icon'] ?? '';
-                $tag = str_pad($this->slotLabel($b['position']), 18);
+                $tag = str_pad($this->slotLabel($b['position']), 12);
                 $this->line("   <fg=gray>{$tag}</> " . ($eyebrow ? "<fg=magenta>[{$eyebrow}]</> " : '') . $b['title']);
                 if (! empty($b['subtitle'])) {
-                    $this->line("   <fg=gray>" . str_repeat(' ', 18) . "</> <fg=gray>{$b['subtitle']}</>");
+                    $this->line("   <fg=gray>" . str_repeat(' ', 12) . "</> <fg=gray>{$b['subtitle']}</>");
                 }
             }
 
@@ -149,75 +162,83 @@ class SeedProductPages extends Command
 
     /**
      * Collapse a product into the plain, real-data shape the generator reads.
-     * This is the single source of truth — the --dump output and buildBlocks()
-     * both consume it, so what you review is exactly what gets generated.
+     * Single source of truth: --dump output and buildBlocks() both consume it.
      */
     private function source(Product $p): array
     {
         $tr = $p->translations->first();
         $price = $p->prices->first();
 
-        $images = $p->images
-            ->pluck('image_url')
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
+        $images = $p->images->pluck('image_url')->filter()->unique()->values()->all();
 
         return [
-            'id'           => $p->id,
-            'slug'         => $p->slug,
-            'sku'          => $p->sku,
-            'name'         => $tr?->name ?: Str::headline($p->slug),
-            'category'     => $p->category?->name_en ?: null,
-            'short'        => $this->clean($tr?->short_description),
-            'description'  => $this->clean($tr?->description),
-            'price'        => $price ? (float) ($price->sale_price ?? $price->regular_price) : null,
-            'is_producible'=> (bool) $p->is_producible,
-            'features'     => collect($p->features ?? [])
+            'id'            => $p->id,
+            'slug'          => $p->slug,
+            'sku'           => $p->sku,
+            'name'          => $tr?->name ?: Str::headline($p->slug),
+            'category'      => $p->category?->name_en ?: null,
+            'short'         => $this->normalize($tr?->short_description),
+            'description'   => $this->normalize($tr?->description),
+            'price'         => $price ? (float) ($price->sale_price ?? $price->regular_price) : null,
+            'is_producible' => (bool) $p->is_producible,
+            'features'      => collect($p->features ?? [])
                 ->map(fn ($f) => is_array($f) ? trim((string) ($f['text'] ?? '')) : trim((string) $f))
-                ->filter()
-                ->values()
-                ->all(),
-            'measurements' => collect($p->measurements ?? [])
+                ->filter()->values()->all(),
+            'measurements'  => collect($p->measurements ?? [])
                 ->map(fn ($m) => is_array($m) ? trim((string) ($m['name'] ?? '')) : trim((string) $m))
-                ->filter()
-                ->values()
-                ->all(),
-            'images'       => $images,
+                ->filter()->values()->all(),
+            'images'        => $images,
         ];
     }
 
-    /** Strip HTML/entities/whitespace from a CMS text field. */
-    private function clean(?string $s): string
+    /**
+     * Clean AND repair a CMS text field. The catalog's descriptions are pasted
+     * from source sites and routinely lose the spaces after punctuation
+     * ("embellishment.The Priest") and join list items in camelCase
+     * ("serversLectorsDeacons"). Strip markup, then restore those breaks so the
+     * prose can be split into real sentences.
+     */
+    private function normalize(?string $s): string
     {
         if (! $s) {
             return '';
         }
         $s = html_entity_decode(strip_tags($s), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $s = preg_replace('/\s+/u', ' ', $s);
+        // Space after . , : ; ! ? when glued to a following letter (not a digit,
+        // so "1.5" and "1,000" survive).
+        $s = preg_replace('/([.,:;!?])(?=\p{L})/u', '$1 ', $s);
+        // ALLCAPS label glued to a following Title word ("FEATURESUses" → "FEATURES Uses").
+        $s = preg_replace('/(\p{Lu}{2,})(\p{Lu}\p{Ll})/u', '$1 $2', $s);
+        // camelCase / list-join boundary: a lowercase letter glued to an
+        // uppercase one becomes a comma-separated list ("servers, Lectors").
+        $s = preg_replace('/(\p{Ll})(\p{Lu})/u', '$1, $2', $s);
         return trim(preg_replace('/\s+/u', ' ', $s));
     }
 
-    /** Split prose into sentences (for chapters/highlights) — naive but robust. */
+    /** Split prose into clean sentences. */
     private function sentences(string $text): array
     {
         if ($text === '') {
             return [];
         }
-        $parts = preg_split('/(?<=[.!?])\s+(?=[A-Z“"\'])/u', $text) ?: [];
+        $parts = preg_split('/(?<=[.!?])\s+/u', $text) ?: [];
         return collect($parts)
-            ->map(fn ($s) => trim($s))
-            ->filter(fn ($s) => mb_strlen($s) >= 12)
+            ->map(fn ($x) => trim($x))
+            ->filter(fn ($x) => mb_strlen($x) >= 14 && str_word_count($x) >= 3)
             ->values()
             ->all();
     }
 
+    private function isRich(string $desc): bool
+    {
+        return mb_strlen($desc) >= self::RICH_MIN_CHARS
+            && str_word_count($desc) >= self::RICH_MIN_WORDS;
+    }
+
     private function img(array $images, int $i): ?string
     {
-        if (empty($images)) {
-            return null;
-        }
-        return $images[$i % count($images)];
+        return empty($images) ? null : $images[$i % count($images)];
     }
 
     private function slotLabel(string $pos): string
@@ -231,123 +252,110 @@ class SeedProductPages extends Command
         ][$pos] ?? $pos;
     }
 
-    /**
-     * The generator. Every string here is composed from real product fields; the
-     * only fixed phrasing is Bethany House's own service promises (Nairobi
-     * workshop, delivery), which are true for the whole catalog.
-     */
+    // ── The generator ──────────────────────────────────────────────────────────
+
     private function buildBlocks(array $s): array
     {
-        $name = $s['name'];
-        $cat = $s['category'];
-        $short = $s['short'];
-        $desc = $s['description'];
         $imgs = $s['images'];
-        $feats = $s['features'];
-        $producible = $s['is_producible'];
-
-        // Need at least a primary image to render an editorial page honestly.
         if (empty($imgs)) {
-            return [];
+            return []; // no honest way to render an editorial page without a photo
         }
 
-        $descSentences = $this->sentences($desc);
-        // Pool of true, product-specific claim lines, richest first.
-        $claims = array_values(array_unique(array_filter(array_merge(
-            $feats,
-            $short !== '' && $short !== $desc ? [$short] : [],
-            $descSentences,
-        ))));
+        $name = $s['name'];
+        $profile = $this->profileFor($s['category']);
+        $rich = $this->isRich($s['description']);
+        $sentences = $rich ? $this->sentences($s['description']) : [];
+
+        // Claim pool for the skimmable cards. Prefer the product's own prose when
+        // it is rich; otherwise use the category's true talking points.
+        $claims = $rich && count($sentences) >= 2
+            ? array_map(fn ($x) => ['title' => $this->headline($x), 'text' => $this->expand($x), 'eyebrow' => $this->eyebrowFor($x, $s['is_producible'])], $sentences)
+            : $this->profileCards($profile, $s);
 
         $blocks = [];
 
-        // ── Poster ────────────────────────────────────────────────────────────
-        $specStrip = $this->specStrip($s);
+        // ── Poster ─────────────────────────────────────────────────────────────
         $blocks[] = [
             'position' => 'product_poster', 'sort_order' => 1,
-            'title' => $this->posterHeadline($s),
-            'subtitle' => $specStrip,
-            'image_url' => $this->img($imgs, 0),
-            'styles' => ['eyebrow' => "{$name} · Bethany House"],
+            'title'    => $this->posterHeadline($s, $profile),
+            'subtitle' => $this->specStrip($s, $profile),
+            'image_url'=> $this->img($imgs, 0),
+            'styles'   => ['eyebrow' => "{$name} · Bethany House"],
         ];
 
-        // ── Highlights (up to 3 skimmable claim cards) ─────────────────────────
-        $order = 1;
-        foreach (array_slice($claims, 0, 3) as $i => $claim) {
+        // ── Highlights (skimmable strip) ────────────────────────────────────────
+        foreach (array_slice($claims, 0, 3) as $i => $c) {
             $blocks[] = [
-                'position' => 'product_highlight', 'sort_order' => $order,
-                'title' => $this->headlineFrom($claim),
-                'subtitle' => $this->expand($claim),
+                'position' => 'product_highlight', 'sort_order' => $i + 1,
+                'title' => $c['title'], 'subtitle' => $c['text'],
                 'image_url' => $this->img($imgs, $i + 1),
-                'styles' => ['eyebrow' => $this->eyebrowFor($claim, $producible, $order)],
+                'styles' => ['eyebrow' => $c['eyebrow']],
             ];
-            $order++;
         }
 
-        // ── Take a closer look (up to 4 feature cards) ─────────────────────────
-        $order = 1;
-        foreach (array_slice($claims, 0, 4) as $i => $claim) {
+        // ── Take a closer look (feature cards) ──────────────────────────────────
+        foreach (array_slice($claims, 0, 4) as $i => $c) {
             $blocks[] = [
-                'position' => 'product_feature', 'sort_order' => $order,
-                'title' => $this->headlineFrom($claim),
-                'subtitle' => $this->expand($claim),
+                'position' => 'product_feature', 'sort_order' => $i + 1,
+                'title' => $c['title'], 'subtitle' => $c['text'],
                 'image_url' => $this->img($imgs, $i),
                 'styles' => [],
             ];
-            $order++;
         }
 
-        // ── Story chapters (1–2 cinematic sections) ────────────────────────────
-        $chapters = $this->chapters($s, $descSentences);
-        $order = 1;
-        foreach ($chapters as $ch) {
+        // ── Story chapters ──────────────────────────────────────────────────────
+        foreach ($this->chapters($s, $profile, $sentences) as $i => $ch) {
             $blocks[] = [
-                'position' => 'product_chapter', 'sort_order' => $order,
-                'title' => $ch['title'],
-                'subtitle' => $ch['copy'],
-                'image_url' => $this->img($imgs, $order),
+                'position' => 'product_chapter', 'sort_order' => $i + 1,
+                'title' => $ch['title'], 'subtitle' => $ch['copy'],
+                'image_url' => $this->img($imgs, $i + 1),
                 'styles' => ['eyebrow' => $ch['eyebrow']],
             ];
-            $order++;
+        }
+
+        // ── Best place to buy (value pillars) ───────────────────────────────────
+        foreach ($this->pillars($s) as $i => $pl) {
+            $blocks[] = [
+                'position' => 'product_pillar', 'sort_order' => $i + 1,
+                'title' => $pl['title'], 'subtitle' => $pl['text'],
+                'image_url' => '', // pillars are icon + text, no photo
+                'styles' => ['icon' => $pl['icon']],
+            ];
         }
 
         return $blocks;
     }
 
-    /** A poster headline that reads as marketing, not a data dump. */
-    private function posterHeadline(array $s): string
+    // ── Copy helpers ────────────────────────────────────────────────────────────
+
+    private function posterHeadline(array $s, array $p): string
     {
         $name = $s['name'];
-        if ($s['is_producible']) {
+        if ($s['is_producible'] && $p['tailorable']) {
             return "{$name}, Made to Your Measure";
         }
-        if ($s['short'] !== '' && mb_strlen($s['short']) <= 60) {
-            return Str::ucfirst($s['short']);
-        }
-        return "The {$name}, Done Properly";
+        return str_replace('{name}', $name, $p['poster']);
     }
 
-    /** Spec strip: real features/category/price joined with the ` | ` convention. */
-    private function specStrip(array $s): string
+    private function specStrip(array $s, array $p): string
     {
         $bits = [];
-        foreach (array_slice($s['features'], 0, 3) as $f) {
-            $bits[] = $this->headlineFrom($f);
+        foreach (array_slice($s['features'], 0, 2) as $f) {
+            $bits[] = $this->headline($f);
         }
-        if (count($bits) < 2 && $s['category']) {
+        if ($s['category']) {
             $bits[] = $s['category'];
         }
-        if (count($bits) < 3) {
-            $bits[] = $s['is_producible'] ? 'Made in Nairobi' : 'In stock, ships nationwide';
-        }
+        $bits[] = $s['is_producible']
+            ? ($p['tailorable'] ? 'Made to order in Nairobi' : 'Made in Kenya')
+            : 'In stock · ships nationwide';
         if ($s['price']) {
             $bits[] = 'KES ' . number_format($s['price']);
         }
         return implode('  |  ', array_slice(array_values(array_unique($bits)), 0, 4));
     }
 
-    /** Trim a claim into a tight card headline (a few words, no trailing stop). */
-    private function headlineFrom(string $claim): string
+    private function headline(string $claim): string
     {
         $claim = rtrim(trim($claim), '.');
         $words = preg_split('/\s+/u', $claim);
@@ -357,75 +365,64 @@ class SeedProductPages extends Command
         return Str::ucfirst($claim);
     }
 
-    /** Expand a claim into a supporting line; if it is already a full sentence, keep it. */
     private function expand(string $claim): string
     {
         $claim = trim($claim);
         if (mb_strlen($claim) >= 40 && preg_match('/[.!?]$/u', $claim)) {
             return Str::ucfirst($claim);
         }
-        $claim = rtrim($claim, '.');
-        return Str::ucfirst($claim) . '.';
+        return Str::ucfirst(rtrim($claim, '.')) . '.';
     }
 
-    private function eyebrowFor(string $claim, bool $producible, int $order): string
+    private function eyebrowFor(string $claim, bool $producible): string
     {
         $c = mb_strtolower($claim);
         return match (true) {
             str_contains($c, 'gold') || str_contains($c, 'silver') || str_contains($c, 'brass') || str_contains($c, 'plated') => 'Finish',
             str_contains($c, 'engrav') || str_contains($c, 'custom') || str_contains($c, 'personal') => 'Personalisation',
             str_contains($c, 'measure') || str_contains($c, 'fit') || str_contains($c, 'tailor') => 'Made to measure',
-            str_contains($c, 'colour') || str_contains($c, 'color') => 'Colour',
-            str_contains($c, 'day') || str_contains($c, 'week') || str_contains($c, 'fast') || str_contains($c, 'ready') => 'Turnaround',
-            str_contains($c, 'hand') || str_contains($c, 'craft') => 'Craft',
-            default => $producible ? 'Made to order' : ['Quality', 'Detail', 'Built to last'][$order % 3],
+            str_contains($c, 'colour') || str_contains($c, 'color') || str_contains($c, 'liturg') => 'Liturgical colour',
+            str_contains($c, 'hand') || str_contains($c, 'craft') || str_contains($c, 'artisan') => 'Craft',
+            str_contains($c, 'day') || str_contains($c, 'week') || str_contains($c, 'fast') || str_contains($c, 'ready') || str_contains($c, 'deliver') => 'Turnaround',
+            str_contains($c, 'wear') || str_contains($c, 'worn') || str_contains($c, 'worship') || str_contains($c, 'prayer') => 'In worship',
+            default => $producible ? 'Made to order' : 'The detail',
         };
     }
 
-    /**
-     * 1–2 story chapters. Prefer real description prose split into halves; fall
-     * back to a craft/quality chapter grounded in category + service promise.
-     */
-    private function chapters(array $s, array $sentences): array
+    /** 1–2 chapters. Real prose when rich; category truth when thin. */
+    private function chapters(array $s, array $p, array $sentences): array
     {
         $name = $s['name'];
-        $cat = $s['category'];
-        $out = [];
-
-        if (count($sentences) >= 2) {
+        if (count($sentences) >= 3) {
             $mid = (int) ceil(count($sentences) / 2);
-            $first = implode(' ', array_slice($sentences, 0, $mid));
-            $second = implode(' ', array_slice($sentences, $mid));
-            $out[] = [
+            $out = [[
                 'eyebrow' => $s['is_producible'] ? 'The Craft' : 'The Detail',
-                'title' => $this->chapterTitle($sentences[0], $name),
-                'copy' => $first,
-            ];
-            if (mb_strlen($second) >= 24) {
+                'title'   => $this->chapterTitle($sentences[0]),
+                'copy'    => implode(' ', array_slice($sentences, 0, $mid)),
+            ]];
+            $second = implode(' ', array_slice($sentences, $mid));
+            if (mb_strlen($second) >= 30) {
                 $out[] = [
-                    'eyebrow' => $cat ?: 'Why Bethany House',
-                    'title' => $this->chapterTitle($sentences[$mid] ?? $second, $name),
-                    'copy' => $second,
+                    'eyebrow' => $s['category'] ?: 'Bethany House',
+                    'title'   => $this->chapterTitle($sentences[$mid] ?? $second),
+                    'copy'    => $second,
                 ];
             }
             return $out;
         }
 
-        // Thin prose: one grounded chapter from what we do know.
-        $lead = $s['short'] !== '' ? $s['short'] : ($sentences[0] ?? '');
-        if ($s['is_producible']) {
-            $copy = trim(($lead ? $this->expand($lead) . ' ' : '')
-                . "Cut and finished by hand in our Nairobi workshop, made to your measurements and delivered anywhere in Kenya.");
-            $out[] = ['eyebrow' => 'Made in Nairobi', 'title' => 'Made to measure, by hand.', 'copy' => $copy];
-        } else {
-            $copy = trim(($lead ? $this->expand($lead) . ' ' : '')
-                . "Sourced and finished to Bethany House standards" . ($cat ? " for {$cat}" : '') . ", ready to ship nationwide.");
-            $out[] = ['eyebrow' => $cat ?: 'Bethany House', 'title' => "The {$name}, done properly.", 'copy' => $copy];
-        }
-        return $out;
+        // Thin data → one grounded, category-true chapter (+ the house promise).
+        $lead = str_replace('{name}', $name, $p['chapter']['copy']);
+        return [[
+            'eyebrow' => $p['chapter']['eyebrow'],
+            'title'   => str_replace('{name}', $name, $p['chapter']['title']),
+            'copy'    => $s['is_producible'] && $p['tailorable']
+                ? $lead . ' Cut and finished by hand in our Nairobi workshop, made to your measurements and delivered anywhere in Kenya.'
+                : $lead . ' Sourced and checked to Bethany House standards, ready to ship anywhere in Kenya.',
+        ]];
     }
 
-    private function chapterTitle(string $sentence, string $name): string
+    private function chapterTitle(string $sentence): string
     {
         $t = rtrim(trim($sentence), '.');
         $words = preg_split('/\s+/u', $t);
@@ -433,5 +430,109 @@ class SeedProductPages extends Command
             $t = implode(' ', array_slice($words, 0, 9));
         }
         return Str::ucfirst($t) . '.';
+    }
+
+    /** The four "why buy from Bethany House" cards — true for the whole catalog. */
+    private function pillars(array $s): array
+    {
+        $made = $s['is_producible']
+            ? ['icon' => '✂️', 'title' => 'Crafted to order', 'text' => 'Tailored and finished by hand in our Nairobi workshop.']
+            : ['icon' => '✅', 'title' => 'Ready to ship', 'text' => 'In stock and dispatched quickly from Nairobi.'];
+        return [
+            ['icon' => '⛪', 'title' => 'Made for the Church', 'text' => 'Vestments, communion ware and church supplies from one trusted house.'],
+            $made,
+            ['icon' => '🚚', 'title' => 'Delivered nationwide', 'text' => 'Fast, tracked delivery anywhere in Kenya.'],
+            ['icon' => '💬', 'title' => 'Talk to a person', 'text' => 'Message us on WhatsApp for sizing, colours and bulk orders.'],
+        ];
+    }
+
+    // ── Category profiles: real, true talking points per kind of church good ─────
+
+    private function profileCards(array $p, array $s): array
+    {
+        return array_map(function ($c) use ($s) {
+            return [
+                'title'   => str_replace('{name}', $s['name'], $c[1]),
+                'text'    => str_replace('{name}', $s['name'], $c[2]),
+                'eyebrow' => $c[0],
+            ];
+        }, $p['cards']);
+    }
+
+    /**
+     * Keyed by category keyword. `tailorable` marks categories we would tailor
+     * to measure (vestments/gowns). `cards` are true, category-level highlights;
+     * `poster`/`chapter` are the thin-data fallbacks. {name} is substituted.
+     */
+    private function profileFor(?string $category): array
+    {
+        $c = mb_strtolower((string) $category);
+
+        $vestments = [
+            'tailorable' => true,
+            'poster'     => '{name}, Vested for Worship',
+            'cards'      => [
+                ['Made to measure', 'Cut to your measurements', 'Tailored to your own measurements in our Nairobi workshop for a fit that is yours alone.'],
+                ['Liturgical colour', 'Every liturgical colour', 'Available across the colours of the church year — black, white, purple, red and green — with the trim your parish prefers.'],
+                ['Craft', 'Finished by hand', 'Sewn and finished by hand from quality, breathable fabric chosen to keep its drape through a long service.'],
+            ],
+            'chapter'    => ['eyebrow' => 'The Craft', 'title' => 'The {name}, made in Nairobi.', 'copy' => 'A {name} for the altar, made to serve through every season of the church.'],
+        ];
+        $communion = [
+            'tailorable' => false,
+            'poster'     => '{name} for the Lord\'s Table',
+            'cards'      => [
+                ['For the Table', 'Made for communion', 'Designed for the Lord\'s table — dignified, practical and easy to serve from during the communion service.'],
+                ['Finish', 'A reverent finish', 'A clean, reverent finish that looks right in the sanctuary and stands up to regular use.'],
+                ['Care', 'Easy to keep', 'Straightforward to clean and store between services, so it is always ready for the next.'],
+            ],
+            'chapter'    => ['eyebrow' => 'The Lord\'s Table', 'title' => 'Set for communion.', 'copy' => 'A {name} chosen to serve the Lord\'s table with reverence and care.'],
+        ];
+        $bibles = [
+            'tailorable' => false,
+            'poster'     => '{name}',
+            'cards'      => [
+                ['Readable', 'Clear, readable print', 'Laid out for easy reading in the pew, at the desk or on the go.'],
+                ['Everyday', 'For every day', 'A Bible to carry into worship, study and quiet time alike.'],
+                ['A gift', 'Ready to gift', 'A meaningful gift for baptisms, confirmations and dedications.'],
+            ],
+            'chapter'    => ['eyebrow' => 'The Word', 'title' => '{name}.', 'copy' => 'A {name} to read, carry and treasure.'],
+        ];
+        $anointing = [
+            'tailorable' => false,
+            'poster'     => '{name}, Set Apart',
+            'cards'      => [
+                ['For prayer', 'For prayer and anointing', 'Set apart for prayer, anointing and worship in the life of the church.'],
+                ['Quality', 'Chosen with care', 'Selected to Bethany House standards for use in ministry.'],
+            ],
+            'chapter'    => ['eyebrow' => 'Set Apart', 'title' => 'For prayer and anointing.', 'copy' => 'A {name} set apart for the ministry of prayer and anointing.'],
+        ];
+        $accessories = [
+            'tailorable' => false,
+            'poster'     => 'The {name}, Done Properly',
+            'cards'      => [
+                ['The detail', 'The finishing detail', 'The small piece that completes the vestment and gets the details right.'],
+                ['Quality', 'Made to last', 'Chosen to hold up to regular wear through the church year.'],
+            ],
+            'chapter'    => ['eyebrow' => 'The Detail', 'title' => 'The {name}.', 'copy' => 'A {name} to finish the look properly.'],
+        ];
+        $default = [
+            'tailorable' => false,
+            'poster'     => 'The {name}, Done Properly',
+            'cards'      => [
+                ['Quality', 'Chosen with care', 'Selected and checked to Bethany House standards.'],
+                ['For the Church', 'For your ministry', 'Part of a full range of church supplies from one trusted house.'],
+            ],
+            'chapter'    => ['eyebrow' => 'Bethany House', 'title' => 'The {name}.', 'copy' => 'A {name} chosen with care for your ministry.'],
+        ];
+
+        return match (true) {
+            str_contains($c, 'vestment') || str_contains($c, 'gown') || str_contains($c, 'clergy vest') => $vestments,
+            str_contains($c, 'communion') || str_contains($c, 'chalice') || str_contains($c, 'tray') || str_contains($c, 'wine') => $communion,
+            str_contains($c, 'bible') => $bibles,
+            str_contains($c, 'anoint') => $anointing,
+            str_contains($c, 'accessor') => $accessories,
+            default => $default,
+        };
     }
 }
