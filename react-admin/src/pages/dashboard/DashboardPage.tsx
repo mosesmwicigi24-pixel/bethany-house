@@ -206,39 +206,13 @@ function channelData(onlineRevenue?: number | string, posRevenue?: number | stri
     };
 }
 
-function ChannelBarCard({
-    onlineRevenue, posRevenue, loading,
-}: {
-    onlineRevenue?: number | string; posRevenue?: number | string; loading: boolean;
-}) {
-    const { rows } = channelData(onlineRevenue, posRevenue);
-    return (
-        <div className="card card-body">
-            <p className="text-xs text-surface-500 mb-2">Channel split — revenue</p>
-            {loading ? (
-                <div className="skeleton h-28 w-full rounded-xl" />
-            ) : (
-                <div className="h-28">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={rows} margin={{ top: 6, right: 6, left: 0, bottom: 0 }}>
-                            <XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--color-text-tertiary)" }}
-                                axisLine={false} tickLine={false} />
-                            <YAxis hide />
-                            <Tooltip cursor={{ fill: "var(--color-surface-100, #f1f5f9)" }}
-                                contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid var(--color-border-tertiary)" }}
-                                formatter={(v: any) => [fmtCompact(Number(v ?? 0)), "Revenue"]} />
-                            <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={64}>
-                                {rows.map((d) => <Cell key={d.name} fill={d.color} />)}
-                            </Bar>
-                        </BarChart>
-                    </ResponsiveContainer>
-                </div>
-            )}
-        </div>
-    );
-}
-
-function ChannelPieCard({
+/**
+ * One channel card, not two. The old bar card and donut card plotted the same
+ * two numbers, costing a whole phone screen to say one thing. This shows the
+ * donut for share and puts the actual revenue next to each percentage, so the
+ * legend carries the detail the bar chart used to.
+ */
+function ChannelSplitCard({
     onlineRevenue, posRevenue, onlineCount, posCount, loading,
 }: {
     onlineRevenue?: number | string; posRevenue?: number | string;
@@ -246,20 +220,31 @@ function ChannelPieCard({
     loading: boolean;
 }) {
     const { rows, total } = channelData(onlineRevenue, posRevenue);
-    const pct = (v: number) => total > 0 ? Math.round(v / total * 100) : 50;
+    const pct = (v: number) => total > 0 ? Math.round(v / total * 100) : 0;
+    const counts: Record<string, number> = {
+        Online: Number(onlineCount ?? 0),
+        POS:    Number(posCount ?? 0),
+    };
 
     return (
         <div className="card card-body">
-            <p className="text-xs text-surface-500 mb-2">Channel split — share</p>
+            <div className="flex items-center justify-between gap-2 mb-3">
+                <p className="text-xs font-medium text-surface-500">Channel split</p>
+                <span className="text-2xs text-surface-400">
+                    {(counts.Online + counts.POS).toLocaleString()} orders
+                </span>
+            </div>
             {loading ? (
-                <div className="skeleton h-28 w-full rounded-xl" />
+                <div className="skeleton h-24 w-full rounded-xl" />
+            ) : total === 0 ? (
+                <p className="text-xs text-surface-400 py-6 text-center">No sales in this period.</p>
             ) : (
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-4">
                     <div className="h-24 w-24 shrink-0">
                         <ResponsiveContainer width="100%" height="100%">
                             <PieChart>
                                 <Pie data={rows} dataKey="value" nameKey="name"
-                                    innerRadius="58%" outerRadius="100%" paddingAngle={2} stroke="none">
+                                    innerRadius="60%" outerRadius="100%" paddingAngle={2} stroke="none">
                                     {rows.map((d) => <Cell key={d.name} fill={d.color} />)}
                                 </Pie>
                                 <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid var(--color-border-tertiary)" }}
@@ -267,19 +252,23 @@ function ChannelPieCard({
                             </PieChart>
                         </ResponsiveContainer>
                     </div>
-                    <div className="flex-1 min-w-0 space-y-1.5">
+                    <div className="flex-1 min-w-0 space-y-2.5">
                         {rows.map((d) => (
-                            <div key={d.name} className="flex items-center justify-between gap-2">
-                                <span className="flex items-center gap-1.5 text-xs text-surface-600">
-                                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: d.color }} />
-                                    {d.name}
-                                </span>
-                                <span className="text-xs font-semibold text-surface-900 tabular-nums">{pct(d.value)}%</span>
+                            <div key={d.name} className="min-w-0">
+                                <div className="flex items-baseline justify-between gap-2">
+                                    <span className="flex items-center gap-1.5 text-xs font-medium text-surface-700">
+                                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.color }} />
+                                        {d.name}
+                                    </span>
+                                    <span className="text-sm font-bold tabular-nums" style={{ color: d.color }}>
+                                        {pct(d.value)}%
+                                    </span>
+                                </div>
+                                <p className="text-2xs text-surface-400 pl-4 tabular-nums">
+                                    {fmtCompact(d.value)} · {counts[d.name]?.toLocaleString() ?? 0} orders
+                                </p>
                             </div>
                         ))}
-                        <p className="text-2xs text-surface-400 pt-0.5">
-                            {(Number(onlineCount ?? 0) + Number(posCount ?? 0)).toLocaleString()} orders total
-                        </p>
                     </div>
                 </div>
             )}
@@ -316,7 +305,8 @@ function CashTodayCard({ compact = false }: { compact?: boolean }) {
 
     if (compact) {
         return (
-            <KpiTile label="Cash today" value={fmtCompact(totalCash)} tone="text-success"
+            <KpiTile label="Cash today" value={fmtCompact(totalCash)}
+                tone="text-emerald-700" bg="bg-emerald-100/70"
                 href="/approvals" loading={isLoading} />
         );
     }
@@ -353,12 +343,21 @@ function CashTodayCard({ compact = false }: { compact?: boolean }) {
 // A small stat: a bold number over a label, tappable. Deliberately dense so a
 // whole row of six fits on a phone without dominating the screen.
 
-function KpiTile({ label, value, tone = "text-surface-900", href, loading, badge }: {
-    label: string; value?: number | string; tone?: string;
+/**
+ * A KPI tile. `bg` tints the whole tile rather than leaving a white box with a
+ * coloured numeral — the same treatment the Production Queue stages already
+ * use, which is what makes that row readable at a glance on a phone.
+ */
+function KpiTile({ label, value, tone = "text-surface-900", bg, href, loading, badge }: {
+    label: string; value?: number | string; tone?: string; bg?: string;
     href?: string; loading?: boolean; badge?: number;
 }) {
     const body = (
-        <div className="relative bg-white border border-surface-100 rounded-xl px-2.5 py-2 h-full hover:border-brand-200 transition-colors">
+        <div className={clsx(
+            "relative rounded-xl px-2.5 py-2.5 h-full transition-all",
+            bg ?? "bg-white border border-surface-100",
+            href && "hover:opacity-80 active:scale-[0.98]",
+        )}>
             {loading ? (
                 <div className="skeleton h-5 w-12 rounded mb-1" />
             ) : (
@@ -681,29 +680,41 @@ function RoleStatGrid({
     // the day's trading numbers (cash leads); row 2 the operational watch-list.
     // Small on purpose — the whole picture fits a phone above the fold.
     return (
-        <div className="space-y-3">
+        <div className="space-y-2.5">
+            {/* Today's trading — tinted so each number is findable by colour. */}
             <div className="grid grid-cols-3 lg:grid-cols-6 gap-2">
                 <CashTodayCard compact />
                 <KpiTile label="Today's Sales"   value={fmtCompact(stats?.today_sales)}
-                    tone="text-success" loading={isLoading} href="/sales/orders" />
+                    tone="text-emerald-700" bg="bg-emerald-50"
+                    loading={isLoading} href="/sales/orders" />
                 <KpiTile label="Today's Orders"  value={stats?.today_orders}
+                    tone="text-brand-700" bg="bg-brand-50"
                     loading={isLoading} href="/sales/orders" />
                 <KpiTile label="Pending Orders"  value={stats?.pending_orders}
-                    tone="text-warning-dark" loading={isLoading} href="/sales/orders?status=pending" />
+                    tone="text-warning-dark" bg="bg-warning-light"
+                    loading={isLoading} href="/sales/orders?status=pending" />
                 <KpiTile label="Customers"       value={stats?.customers}
-                    tone="text-info" loading={isLoading} href="/sales/customers" />
+                    tone="text-sky-700" bg="bg-sky-50"
+                    loading={isLoading} href="/sales/customers" />
                 <KpiTile label="Active Products" value={stats?.total_products}
+                    tone="text-purple-700" bg="bg-purple-50"
                     loading={isLoading} href="/catalogue/products" />
             </div>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                <KpiTile label="Low Stock Alerts"     value={stats?.low_stock_products}
-                    tone="text-danger" loading={isLoading} href="/inventory/low-stock" />
-                <KpiTile label="Shipments In Transit" value={stats?.shipments_in_transit}
-                    tone="text-purple-600" loading={isLoading} href="/sales/shipments" />
-                <KpiTile label="Pending Approvals"    value={stats?.pending_payment_approvals}
-                    tone="text-warning-dark" loading={isLoading} href="/approvals"
+            {/* The watch-list — four across, one row, so it reads as a band
+                distinct from the trading numbers above. */}
+            <div className="grid grid-cols-4 gap-2">
+                <KpiTile label="Low Stock"        value={stats?.low_stock_products}
+                    tone="text-danger" bg="bg-danger-light"
+                    loading={isLoading} href="/inventory/low-stock" />
+                <KpiTile label="In Transit"       value={stats?.shipments_in_transit}
+                    tone="text-indigo-700" bg="bg-indigo-50"
+                    loading={isLoading} href="/sales/shipments" />
+                <KpiTile label="Approvals"        value={stats?.pending_payment_approvals}
+                    tone="text-warning-dark" bg="bg-warning-light"
+                    loading={isLoading} href="/approvals"
                     badge={stats?.pending_payment_approvals} />
-                <KpiTile label="Open Purchase Orders" value={kpis.procurement?.open_pos}
+                <KpiTile label="Open POs"         value={kpis.procurement?.open_pos}
+                    tone="text-teal-700" bg="bg-teal-50"
                     loading={kpiLoading} href="/procurement/purchase-orders" />
             </div>
         </div>
@@ -776,7 +787,7 @@ export default function DashboardPage() {
     const quickActions = useQuickActions(stats, roles, can);
 
     return (
-        <div className="animate-fade-in space-y-6">
+        <div className="animate-fade-in space-y-4 sm:space-y-6">
             {/* Header + period toggle */}
             <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div>
@@ -809,22 +820,25 @@ export default function DashboardPage() {
                  tailors work on production tasks, procurement officers manage
                  purchasing, POS clerks see only their own till summary. */}
             {!hideFinancials && (
-                <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                     <RevenueCard
                         revenue={Number(summary.total_revenue ?? 0) || undefined}
                         orders={Number(summary.total_orders   ?? 0) || undefined}
-                        avgValue={summary.avg_order_value != null ? Number(summary.avg_order_value) : undefined}
+                        /* Fall back to revenue ÷ orders — the summary omits
+                           avg_order_value on some periods, which rendered "avg —". */
+                        avgValue={
+                            summary.avg_order_value != null
+                                ? Number(summary.avg_order_value)
+                                : Number(summary.total_orders) > 0
+                                  ? Number(summary.total_revenue ?? 0) / Number(summary.total_orders)
+                                  : undefined
+                        }
                         trend={trend}
                         loading={salesLoading}
                         periodLabel={period.label.toLowerCase()}
                     />
-                    {/* Channel split: bar (compare) + pie (share), each its own card */}
-                    <ChannelBarCard
-                        onlineRevenue={summary.online_revenue}
-                        posRevenue={summary.pos_revenue}
-                        loading={salesLoading}
-                    />
-                    <ChannelPieCard
+                    {/* One channel card — donut for share, revenue in the legend */}
+                    <ChannelSplitCard
                         onlineRevenue={summary.online_revenue}
                         posRevenue={summary.pos_revenue}
                         onlineCount={summary.online_count}
@@ -1026,7 +1040,9 @@ function QuickActionsPanel({ actions }: { actions: QuickAction[] }) {
                         )}>
                             <QuickLinkIcon name={icon} />
                         </span>
-                        <span className="flex-1 truncate">{label}</span>
+                        {/* Wrap rather than truncate — "New Production Order" and
+                            "View Approvals" were being clipped to "New Producti…". */}
+                        <span className="flex-1 min-w-0 leading-tight">{label}</span>
                         {badge && badge > 0 ? (
                             <span className="min-w-[20px] h-5 px-1.5 bg-danger text-white text-2xs font-bold rounded-full flex items-center justify-center shrink-0">
                                 {badge > 99 ? "99+" : badge}
