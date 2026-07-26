@@ -276,8 +276,8 @@ export default function LowStockAlertsPage() {
 
     return (
         <div className="space-y-5 animate-fade-in">
-            {/* Header */}
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            {/* Header — the action stays a small corner button, not a full-width slab */}
+            <div className="flex items-start justify-between gap-3">
                 <div>
                     <h1 className="page-title">Low Stock Alerts</h1>
                     <p className="page-subtitle">
@@ -288,15 +288,15 @@ export default function LowStockAlertsPage() {
                 </div>
                 <button
                     onClick={() => refetch()}
-                    className="btn-secondary btn-sm text-xs self-start"
+                    className="btn-secondary btn-sm text-xs shrink-0 whitespace-nowrap"
                 >
                     ↺ Refresh
                 </button>
             </div>
 
-            {/* Summary cards */}
+            {/* Summary — one compact row */}
             {summary && (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="grid grid-cols-4 gap-2">
                     {[
                         {
                             label: "Products Out",
@@ -327,11 +327,11 @@ export default function LowStockAlertsPage() {
                             filter: "low_stock" as const,
                         },
                     ].map((s, i) => (
-                        <div key={i} className="card p-4 text-center">
-                            <p className={clsx("text-2xl font-bold", s.color)}>
+                        <div key={i} className="card px-1.5 py-2.5 text-center">
+                            <p className={clsx("text-lg sm:text-2xl font-bold leading-none", s.color)}>
                                 {s.value}
                             </p>
-                            <p className="text-xs text-surface-500 mt-0.5">
+                            <p className="text-[10px] sm:text-xs text-surface-500 mt-1 leading-tight">
                                 {s.label}
                             </p>
                         </div>

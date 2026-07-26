@@ -986,8 +986,8 @@ export default function StockAdjustmentsPage() {
 
     return (
         <div className="space-y-5 animate-fade-in">
-            {/* Header */}
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            {/* Header — the action stays a small corner button, not a full-width slab */}
+            <div className="flex items-start justify-between gap-3">
                 <div>
                     <h1 className="page-title">Stock Adjustments</h1>
                     <p className="page-subtitle">
@@ -999,16 +999,16 @@ export default function StockAdjustmentsPage() {
                 {canAdjust && (
                 <button
                     onClick={() => setNewModal(true)}
-                    className="btn-primary self-start"
+                    className="btn-secondary btn-sm shrink-0 whitespace-nowrap"
                 >
-                    + New Adjustment
+                    + New
                 </button>
                 )}
             </div>
 
-            {/* Stats */}
+            {/* Stats — one compact row */}
             {stats && (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="grid grid-cols-4 gap-2">
                     {[
                         {
                             label: "Total",
@@ -1044,7 +1044,7 @@ export default function StockAdjustmentsPage() {
                                 )
                             }
                             className={clsx(
-                                "card p-4 text-center transition-all",
+                                "card px-1.5 py-2.5 text-center transition-all",
                                 s.filter && statusFilter === s.filter
                                     ? "ring-2 ring-brand-300"
                                     : "",
@@ -1055,13 +1055,13 @@ export default function StockAdjustmentsPage() {
                         >
                             <p
                                 className={clsx(
-                                    "text-2xl font-bold",
+                                    "text-lg sm:text-2xl font-bold leading-none",
                                     s.color || "text-surface-900",
                                 )}
                             >
                                 {s.value}
                             </p>
-                            <p className="text-xs text-surface-500 mt-0.5">
+                            <p className="text-[10px] sm:text-xs text-surface-500 mt-1 leading-tight">
                                 {s.label}
                             </p>
                         </button>
@@ -1072,17 +1072,19 @@ export default function StockAdjustmentsPage() {
             {/* Pending approvals panel */}
             <PendingPanel onReview={(adj) => setReviewAdj(adj)} />
 
-            {/* Filters */}
-            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            {/* Filters — search row, then the selects in one row, then the dates.
+                Previously all five squeezed into a single wrap row and collapsed
+                into unreadable slivers on a phone. */}
+            <div className="space-y-2">
                 <input
-                    className="input w-full sm:max-w-xs"
+                    className="input w-full"
                     placeholder="Search product or SKU…"
                     value={table.state.search}
                     onChange={(e) => table.setSearch(e.target.value)}
                 />
-                <div className="flex flex-wrap gap-2">
+                <div className="grid grid-cols-3 gap-2">
                     <select
-                        className="input flex-1 sm:w-44 sm:flex-none"
+                        className="input min-w-0"
                         value={statusFilter}
                         onChange={(e) => setStatusFilter(e.target.value)}
                     >
@@ -1092,7 +1094,7 @@ export default function StockAdjustmentsPage() {
                         <option value="rejected">Rejected</option>
                     </select>
                     <select
-                        className="input flex-1 sm:w-44 sm:flex-none"
+                        className="input min-w-0"
                         value={reasonFilter}
                         onChange={(e) => setReasonFilter(e.target.value)}
                     >
@@ -1104,7 +1106,7 @@ export default function StockAdjustmentsPage() {
                         ))}
                     </select>
                     <select
-                        className="input flex-1 sm:w-44 sm:flex-none"
+                        className="input min-w-0"
                         value={outletFilter}
                         onChange={(e) => setOutletFilter(e.target.value)}
                     >
@@ -1115,14 +1117,16 @@ export default function StockAdjustmentsPage() {
                             </option>
                         ))}
                     </select>
+                </div>
+                <div className="flex items-center gap-2">
                     <input
-                        className="input flex-1 sm:w-36 sm:flex-none"
+                        className="input flex-1 min-w-0"
                         type="date"
                         value={fromDate}
                         onChange={(e) => setFromDate(e.target.value)}
                     />
                     <input
-                        className="input flex-1 sm:w-36 sm:flex-none"
+                        className="input flex-1 min-w-0"
                         type="date"
                         value={toDate}
                         onChange={(e) => setToDate(e.target.value)}
@@ -1142,7 +1146,7 @@ export default function StockAdjustmentsPage() {
                                 setFromDate("");
                                 setToDate("");
                             }}
-                            className="btn-ghost btn-sm text-xs"
+                            className="btn-ghost btn-sm text-xs shrink-0 whitespace-nowrap"
                         >
                             ✕ Clear
                         </button>
