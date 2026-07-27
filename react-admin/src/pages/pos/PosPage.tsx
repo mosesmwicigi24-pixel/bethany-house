@@ -2356,6 +2356,13 @@ export default function PosPage() {
     const cartQty = cart.reduce((s, i) => s + i.quantity, 0);
     const hasMto  = cart.some((i) => i.is_production);
 
+    // Payment must be collected against the OUTSTANDING balance — the order total
+    // minus whatever a resumed deposit/part-paid order has already collected — so
+    // the cashier can never enter more than what's actually owed (which the
+    // backend rejects as "exceeds the outstanding balance").
+    const amountAlreadyPaid = Number((pendingOrderData as any)?.order?.amount_paid ?? 0);
+    const amountDue = Math.max(0, totals.total - amountAlreadyPaid);
+
     // ── Two-step POS checkout ──────────────────────────────────────────────────
     //
     // Step 1: "Charge" → build cart payload → POST /admin/pos/pending-order
@@ -3469,7 +3476,7 @@ export default function PosPage() {
 
             {showPaymentModal && (
                 <PaymentModal
-                    total={totals.total}
+                    total={amountDue}
                     currency={effectiveCurrency}
                     orderId={pendingOrderId ?? 0}
                     configuredMethods={configuredMethodsForCurrency}

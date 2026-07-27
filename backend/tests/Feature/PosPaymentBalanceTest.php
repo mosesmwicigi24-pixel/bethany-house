@@ -122,6 +122,25 @@ class PosPaymentBalanceTest extends TestCase
         $this->assertSame('paid', $order->fresh()->payment_status);
     }
 
+    public function test_the_sale_payload_exposes_amount_paid_and_outstanding(): void
+    {
+        // The POS payment modal reads these to collect against the OUTSTANDING
+        // balance (never the full total again) after a deposit — otherwise it
+        // lets the cashier over-pay and the backend rejects it.
+        $user   = $this->actor();
+        $outlet = Outlet::factory()->create();
+        $this->openRegister($outlet, $user);
+        $order  = $this->pendingOrder($outlet, 1000);
+
+        $res = $this->postJson("/api/v1/admin/pos/pending-order/{$order->id}/pay", [
+            'is_deposit' => true, 'deposit_amount' => 400,
+            'method' => 'cash', 'amount' => 400, 'cash_received' => 400,
+        ])->assertOk();
+
+        $this->assertEqualsWithDelta(400.0, (float) $res->json('order.amount_paid'), 0.01);
+        $this->assertEqualsWithDelta(600.0, (float) $res->json('order.outstanding'), 0.01);
+    }
+
     public function test_a_payment_exceeding_the_balance_is_rejected(): void
     {
         $user   = $this->actor();

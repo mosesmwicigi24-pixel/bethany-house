@@ -4189,6 +4189,11 @@ class PosController extends Controller
             'cart_discount_value' => (float) ($order->cart_discount_value ?? 0),
             'tax_amount'          => (float) $order->tax_amount,
             'total'               => (float) $order->total_amount,
+            // How much has already been collected and what's still owed — so the
+            // POS payment modal collects against the OUTSTANDING balance (net of
+            // prior deposits/part-payments), never the full total again.
+            'amount_paid'         => round((float) $order->totalPaid(), 2),
+            'outstanding'         => round((float) $order->outstandingBalance(), 2),
             'currency_code'       => $order->currency_code ?? 'KES',
             'prices_include_tax'  => (bool) ($order->prices_include_tax ?? false),
             'payment_method'      => $order->payment_method,
