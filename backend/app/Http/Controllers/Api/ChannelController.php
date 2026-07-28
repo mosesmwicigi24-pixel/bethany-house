@@ -478,35 +478,48 @@ class ChannelController extends Controller
 
     // ── POST /channels/attachments ────────────────────────────────────────────────
 
+    // Media + docs staff share in chat. Whitelisted by EXTENSION (not server MIME)
+    // because phone uploads — iPhone .mov/.heic, Android .3gp voice notes — are
+    // frequently mislabelled by finfo, which would wrongly reject legitimate media.
+    private const ATTACHMENT_IMAGE_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp', 'svg'];
+    private const ATTACHMENT_VIDEO_EXT = ['mp4', 'mov', 'm4v', 'webm', '3gp', '3gpp', 'avi', 'mkv'];
+    private const ATTACHMENT_AUDIO_EXT = ['mp3', 'm4a', 'wav', 'aac', 'ogg', 'oga', 'opus', 'amr', 'flac', 'weba'];
+    private const ATTACHMENT_DOC_EXT   = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt', 'csv'];
+
     public function uploadAttachment(Request $request)
     {
+        // 100 MB ceiling covers short phone clips; larger recordings should be
+        // trimmed or shared as a link.
         $request->validate([
-            'file' => [
-                'required', 'file', 'max:10240',
-                'mimetypes:image/jpeg,image/png,image/gif,image/webp,application/pdf,' .
-                    'application/msword,' .
-                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document,' .
-                    'application/vnd.ms-excel,' .
-                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,' .
-                    'text/plain,text/csv',
-            ],
+            'file' => ['required', 'file', 'max:102400'],
         ]);
 
-        $file      = $request->file('file');
-        $extension = $file->getClientOriginalExtension();
-        $filename  = Str::uuid() . '.' . $extension;
-        $path      = 'channel-attachments/' . now()->format('Y/m') . '/' . $filename;
+        $file = $request->file('file');
+        $ext  = strtolower($file->getClientOriginalExtension());
+
+        $kind = in_array($ext, self::ATTACHMENT_IMAGE_EXT) ? 'image'
+              : (in_array($ext, self::ATTACHMENT_VIDEO_EXT) ? 'video'
+              : (in_array($ext, self::ATTACHMENT_AUDIO_EXT) ? 'audio'
+              : (in_array($ext, self::ATTACHMENT_DOC_EXT) ? 'file' : null)));
+
+        if ($kind === null) {
+            return response()->json([
+                'message' => 'That file type can\'t be shared here. Allowed: images, video, audio, and documents.',
+            ], 422);
+        }
+
+        $filename = Str::uuid() . '.' . $ext;
+        $path     = 'channel-attachments/' . now()->format('Y/m') . '/' . $filename;
 
         Storage::disk('local')->put($path, file_get_contents($file->getRealPath()));
-
-        $isImage = str_starts_with($file->getMimeType(), 'image/');
 
         return response()->json([
             'path'      => $path,
             'name'      => $file->getClientOriginalName(),
             'size'      => $file->getSize(),
             'mime_type' => $file->getMimeType(),
-            'is_image'  => $isImage,
+            'kind'      => $kind,
+            'is_image'  => $kind === 'image',
             'url'       => url('/api/v1/admin/channels/attachments/serve?path=' . urlencode($path)),
         ], 201);
     }

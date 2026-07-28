@@ -429,27 +429,78 @@ function useAuthBlob(url: string, autoFetch = false) {
     return { blobUrl, loading, error, fetch: fetch_ };
 }
 
-// Image attachment - auto-fetches, shows thumbnail, opens full preview on click
-function AuthImage({ url, alt, isOwn }: { url: string; alt: string; isOwn: boolean }) {
-    const { blobUrl, loading, error, fetch: fetchBlob } = useAuthBlob(url, true);
+// Image attachment - auto-fetches, shows thumbnail, opens full preview on click.
+// `grid` makes it fill a square cell (used when several media share a bubble).
+function AuthImage({ url, alt, isOwn, grid = false }: { url: string; alt: string; isOwn: boolean; grid?: boolean }) {
+    const { blobUrl, loading, error } = useAuthBlob(url, true);
     const [modal, setModal] = useState(false);
 
     if (error) return <AuthFileLink url={url} name={alt || "image"} isOwn={isOwn} />;
     if (loading || !blobUrl) return (
-        <span className="inline-block w-48 h-32 rounded-xl bg-surface-100 animate-pulse" />
+        <span className={clsx("inline-block rounded-xl bg-surface-100 animate-pulse", grid ? "w-full aspect-square" : "w-48 h-32")} />
     );
 
     return (
         <>
             <button type="button" onClick={() => setModal(true)}
-                className="block rounded-xl overflow-hidden hover:opacity-90 transition-opacity cursor-zoom-in max-w-[260px]">
-                <img src={blobUrl} alt={alt} className="max-w-full max-h-52 object-cover" />
+                className={clsx("block rounded-xl overflow-hidden hover:opacity-90 transition-opacity cursor-zoom-in",
+                    grid ? "w-full aspect-square" : "max-w-[260px]")}>
+                <img src={blobUrl} alt={alt} className={clsx("object-cover", grid ? "w-full h-full" : "max-w-full max-h-52")} />
             </button>
             {modal && (
                 <PreviewModal src={blobUrl} name={alt || "image"} kind="image"
                     rawUrl={url} onClose={() => setModal(false)} />
             )}
         </>
+    );
+}
+
+// Video attachment - shows a poster thumbnail (first frame) with a play button;
+// clicking plays it INLINE in the lightbox (never opens a new tab).
+function AuthVideo({ url, name, isOwn, grid = false }: { url: string; name: string; isOwn: boolean; grid?: boolean }) {
+    const { blobUrl, loading, error, fetch: fetchBlob } = useAuthBlob(url, true);
+    const [modal, setModal] = useState(false);
+
+    if (error) return <AuthFileLink url={url} name={name} isOwn={isOwn} />;
+
+    return (
+        <>
+            <button type="button" onClick={() => { if (!blobUrl) fetchBlob(); setModal(true); }}
+                className={clsx("relative block rounded-xl overflow-hidden bg-black group",
+                    grid ? "w-full aspect-square" : "max-w-[260px] w-64 h-40")}>
+                {blobUrl
+                    ? <video src={blobUrl} muted preload="metadata" className="w-full h-full object-cover" />
+                    : <div className={clsx("w-full bg-surface-900", grid ? "aspect-square" : "h-40", loading && "animate-pulse")} />}
+                <span className="absolute inset-0 flex items-center justify-center">
+                    <span className="w-11 h-11 rounded-full bg-black/55 group-hover:bg-black/70 flex items-center justify-center transition-colors">
+                        <svg className="w-5 h-5 text-white translate-x-0.5" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                    </span>
+                </span>
+            </button>
+            {modal && blobUrl && (
+                <PreviewModal src={blobUrl} name={name} kind="video"
+                    rawUrl={url} onClose={() => setModal(false)} />
+            )}
+        </>
+    );
+}
+
+// Audio attachment - inline player right in the thread.
+function AuthAudio({ url, name, isOwn }: { url: string; name: string; isOwn: boolean }) {
+    const { blobUrl, loading, error } = useAuthBlob(url, true);
+    if (error) return <AuthFileLink url={url} name={name} isOwn={isOwn} />;
+    return (
+        <div className="flex items-center gap-2.5 rounded-xl px-3 py-2 bg-surface-50 border border-surface-200 w-64 sm:w-72">
+            <div className="w-9 h-9 rounded-lg bg-sky-50 flex items-center justify-center shrink-0">
+                <FileKindIcon kind="audio" className="w-4.5 h-4.5" />
+            </div>
+            <div className="flex-1 min-w-0">
+                <p className="text-2xs font-semibold truncate text-surface-700 mb-1">{name}</p>
+                {blobUrl
+                    ? <audio src={blobUrl} controls className="w-full h-8" />
+                    : <div className={clsx("h-8 rounded bg-surface-100", loading && "animate-pulse")} />}
+            </div>
+        </div>
     );
 }
 
@@ -1129,7 +1180,14 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
             previewsRef.current.push(previewUrl);
             newPreviews.push(previewUrl);
             try {
-                const att = await channelApi.uploadAttachment(file);
+                // Compress images before upload (WebP, ≤6MB) — same optimiser as
+                // product photos — so big phone shots go up fast at good quality.
+                let toUpload: File = file;
+                if (file.type.startsWith("image/")) {
+                    const { smartCompressImage } = await import("@/utils/compressImage");
+                    toUpload = await smartCompressImage(file);
+                }
+                const att = await channelApi.uploadAttachment(toUpload);
                 uploaded.push(att);
             } catch (e) {
                 console.error("Upload failed for", file.name, e);
@@ -1325,7 +1383,7 @@ aria-label="Delete">✕</button>
                         </svg>
                     </button>
                     <input ref={fileInputRef} type="file" multiple
-                        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
+                        accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
                         className="hidden"
                         onChange={e => { handleFiles(e.target.files); e.target.value = ""; }} />
 
@@ -1537,17 +1595,31 @@ function MessageContent({ body, isOwn, linkedEntities, entityPreviews, timeLabel
                 </div>
             )}
 
-            {/* Attachments - no bubble background, rendered as plain thumbnails / file chips */}
-            {hasAttachments && (
-                <div className="flex flex-col gap-1">
-                    {images.map((img, i) => (
-                        <AuthImage key={`img${i}`} url={img.url} alt={img.name} isOwn={isOwn} />
-                    ))}
-                    {files.map((f, i) => (
-                        <AuthFileLink key={`file${i}`} url={f.url} name={f.name} isOwn={isOwn} />
-                    ))}
+            {/* Attachments — classified by kind: images + videos in a thumbnail
+                grid (click to enlarge / play inline), audio inline, docs as cards. */}
+            {hasAttachments && (() => {
+                const media = [
+                    ...images.map(x => ({ url: x.url, name: x.name, kind: "image" as FileKind })),
+                    ...files.map(x  => ({ url: x.url, name: x.name, kind: getFileKind(x.name) })),
+                ];
+                const visuals = media.filter(m => m.kind === "image" || m.kind === "video");
+                const audios  = media.filter(m => m.kind === "audio");
+                const docs    = media.filter(m => !["image", "video", "audio"].includes(m.kind));
+                const cols    = visuals.length > 1;
+                return (
+                <div className="flex flex-col gap-1.5">
+                    {visuals.length > 0 && (
+                        <div className={clsx("grid gap-1 max-w-[280px]", cols ? "grid-cols-2" : "grid-cols-1")}>
+                            {visuals.map((m, i) => m.kind === "image"
+                                ? <AuthImage key={`v${i}`} url={m.url} alt={m.name} isOwn={isOwn} grid={cols} />
+                                : <AuthVideo key={`v${i}`} url={m.url} name={m.name} isOwn={isOwn} grid={cols} />)}
+                        </div>
+                    )}
+                    {audios.map((m, i) => <AuthAudio    key={`a${i}`} url={m.url} name={m.name} isOwn={isOwn} />)}
+                    {docs.map((m, i)   => <AuthFileLink key={`d${i}`} url={m.url} name={m.name} isOwn={isOwn} />)}
                 </div>
-            )}
+                );
+            })()}
         </div>
     );
 }

@@ -98,7 +98,13 @@ function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number):
  */
 export async function smartCompressImage(
     file: File,
-    { maxDimension = 2560, quality = 0.9, skipUnderBytes = 1_500_000 } = {},
+    {
+        maxDimension  = 2560,        // longest edge — QHD keeps intricate detail
+        quality       = 0.85,        // WebP base quality (near visually-lossless)
+        skipUnderBytes = 1_500_000,  // already-small photos upload as-is
+        targetBytes   = 6 * 1024 * 1024, // hard output ceiling (6 MB)
+        minQuality    = 0.72,        // don't degrade detail below this
+    } = {},
 ): Promise<File> {
     if (!file.type.startsWith("image/")) return file;
 
@@ -119,13 +125,23 @@ export async function smartCompressImage(
         canvas.height = h;
         const ctx = canvas.getContext("2d");
         if (!ctx) return file;
+        // High-quality downscale for fine detail (embroidery, gold thread).
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality  = "high";
         ctx.fillStyle = "#ffffff"; // flatten transparency
         ctx.fillRect(0, 0, w, h);
         ctx.drawImage(img, 0, 0, w, h);
 
-        const blob =
-            (await canvasToBlob(canvas, "image/webp", quality)) ??
-            (await canvasToBlob(canvas, "image/jpeg", quality));
+        // Encode once at the base quality, then step DOWN only if the result
+        // still exceeds the ceiling — so most photos keep full quality, and only
+        // the genuinely huge ones give up a little to fit. WebP, JPEG fallback.
+        const type = (await canvasToBlob(canvas, "image/webp", quality)) ? "image/webp" : "image/jpeg";
+        let q = quality;
+        let blob = await canvasToBlob(canvas, type, q);
+        while (blob && blob.size > targetBytes && q > minQuality) {
+            q = Math.max(minQuality, q - 0.06);
+            blob = await canvasToBlob(canvas, type, q);
+        }
         if (!blob) return file;
 
         const ext = blob.type === "image/webp" ? ".webp" : ".jpg";

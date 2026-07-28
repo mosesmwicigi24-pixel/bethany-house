@@ -710,7 +710,9 @@ class ProductController extends Controller
     {
         $request->validate([
             'images'     => 'required|array|min:1|max:10',
-            'images.*'   => 'image|mimes:jpeg,png,jpg,webp|max:5120',
+            // 8 MB clears the client optimiser's 6 MB ceiling with headroom; the
+            // browser compresses big phone photos to WebP before they get here.
+            'images.*'   => 'image|mimes:jpeg,png,jpg,webp|max:8192',
             // Optional: scope these images to one variant (colourway). The
             // storefront shows a variant's own gallery when it has one, so a
             // blue cassock displays blue photos rather than the generic set.
