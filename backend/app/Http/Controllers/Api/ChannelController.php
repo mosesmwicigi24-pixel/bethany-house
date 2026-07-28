@@ -520,7 +520,9 @@ class ChannelController extends Controller
             'mime_type' => $file->getMimeType(),
             'kind'      => $kind,
             'is_image'  => $kind === 'image',
-            'url'       => url('/api/v1/admin/channels/attachments/serve?path=' . urlencode($path)),
+            // secure_url so the browser never blocks the attachment as mixed
+            // content on the https app (url() can emit http:// behind the proxy).
+            'url'       => secure_url('/api/v1/admin/channels/attachments/serve?path=' . urlencode($path)),
         ], 201);
     }
 

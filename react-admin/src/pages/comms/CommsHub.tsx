@@ -405,7 +405,11 @@ function useAuthBlob(url: string, autoFetch = false) {
         try {
             const { tokenStorage } = await import("@/api/client");
             const token = tokenStorage.get();
-            const r = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+            // Older messages baked in an http:// serve URL — the browser blocks
+            // that as mixed content on this https page (the attachment then can't
+            // load and falls back to a file card). Upgrade to https before fetch.
+            const secureUrl = url.replace(/^http:\/\//i, "https://");
+            const r = await fetch(secureUrl, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
             if (!r.ok) throw new Error(String(r.status));
             const blob = await r.blob();
             const obj  = URL.createObjectURL(blob);
@@ -517,7 +521,10 @@ function AuthFileLink({ url, name, isOwn }: { url: string; name: string; isOwn: 
         e.preventDefault();
         if (loading) return;
         const obj = await fetchBlob();
-        if (!obj) { window.open(url, "_blank"); return; }
+        // The serve URL needs an auth header, so opening it in a new tab just
+        // bounces through login to the dashboard — never do that. If the blob
+        // couldn't be fetched, fail quietly.
+        if (!obj) return;
         if (canPreviewDirect || kind === "word" || kind === "excel") {
             setModal(true);
         } else {
