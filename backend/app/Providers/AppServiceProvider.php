@@ -15,6 +15,8 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        //
+        // Order lifecycle events → Neema (one hook for every writer: admin UI,
+        // POS, payment webhooks). Inert until NEEMA_EVENTS_SECRET is set.
+        \App\Models\Order::observe(\App\Observers\OrderObserver::class);
     }
 }
