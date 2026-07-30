@@ -25,6 +25,45 @@ class ProductController extends Controller
     // =========================================================================
 
     /**
+     * Token-AND full-catalog matcher shared by index(?search=) and search().
+     *
+     * Every whitespace token must match at least one of: translated name,
+     * description, short_description, sku, or the aliases JSON (synonyms +
+     * Swahili terms + common misspellings seeded per product). Multi-word
+     * queries like "clergy robe" or "children bible" match products whose
+     * words are split across fields — the old single-phrase ILIKE could not.
+     *
+     * The whole match lives in ONE grouped where so the base constraints
+     * (published(), category) keep applying — the previous top-level
+     * ->orWhere('sku') let draft/archived products leak into public results
+     * on a SKU hit.
+     */
+    private function applyCatalogSearch($query, string $search, string $lang): void
+    {
+        $tokens = array_filter(preg_split('/\s+/', trim($search)) ?: []);
+        if (!$tokens) {
+            return;
+        }
+
+        $query->where(function ($outer) use ($tokens, $lang) {
+            foreach ($tokens as $token) {
+                $outer->where(function ($q) use ($token, $lang) {
+                    $q->whereHas('translations', function ($t) use ($token, $lang) {
+                        $t->where('language_code', $lang)
+                          ->where(function ($tq) use ($token) {
+                              $tq->where('name', 'ILIKE', "%{$token}%")
+                                 ->orWhere('description', 'ILIKE', "%{$token}%")
+                                 ->orWhere('short_description', 'ILIKE', "%{$token}%");
+                          });
+                    })
+                    ->orWhere('sku', 'ILIKE', "%{$token}%")
+                    ->orWhereRaw("COALESCE(aliases::text, '') ILIKE ?", ["%{$token}%"]);
+                });
+            }
+        });
+    }
+
+    /**
      * GET /api/v1/products  - storefront product listing
      */
     public function index(Request $request)
@@ -41,14 +80,7 @@ class ProductController extends Controller
         }
 
         if ($request->filled('search')) {
-            $search = $request->search;
-            $query->whereHas('translations', function ($q) use ($search, $lang) {
-                $q->where('language_code', $lang)
-                  ->where(function ($q2) use ($search) {
-                      $q2->where('name', 'ILIKE', "%{$search}%")
-                         ->orWhere('description', 'ILIKE', "%{$search}%");
-                  });
-            })->orWhere('sku', 'ILIKE', "%{$search}%");
+            $this->applyCatalogSearch($query, $request->search, $lang);
         }
 
         match ($request->get('sort', 'newest')) {
@@ -74,11 +106,24 @@ class ProductController extends Controller
      */
     public function show(Request $request, $slug)
     {
-        $product = Product::with([
+        $with = [
             'category', 'translations', 'prices',
             'variants.prices', 'variants.images',
             'images', 'seo', 'reviews',
-        ])->where('slug', $slug)->published()->firstOrFail();
+        ];
+        $product = Product::with($with)->where('slug', $slug)->published()->first();
+
+        // Renamed slug? The 2026_30_07 cleanup left redirect rows so old URLs,
+        // bookmarks and Neema/WhatsApp references keep resolving.
+        if (!$product) {
+            $redirectId = DB::table('product_slug_redirects')->where('old_slug', $slug)->value('product_id');
+            abort_if(!$redirectId, 404);
+            $product = Product::with($with)->where('id', $redirectId)->published()->firstOrFail();
+
+            $payload = $this->formatPublic($product);
+            $payload['redirected_from'] = $slug; // clients may 301 to $payload['slug']
+            return response()->json(['product' => $payload]);
+        }
 
         return response()->json(['product' => $this->formatPublic($product)]);
     }
@@ -107,14 +152,9 @@ class ProductController extends Controller
         $request->validate(['q' => 'required|string|min:2']);
         $lang = $request->get('lang', 'en');
 
-        $products = Product::with(['images', 'translations'])
-            ->published()
-            ->whereHas('translations', fn ($q) =>
-                $q->where('language_code', $lang)
-                  ->where('name', 'ILIKE', "%{$request->q}%")
-            )
-            ->orWhere('sku', 'ILIKE', "%{$request->q}%")
-            ->limit(20)->get();
+        $query = Product::with(['images', 'translations'])->published();
+        $this->applyCatalogSearch($query, $request->q, $lang);
+        $products = $query->limit(20)->get();
 
         return response()->json(['data' => $products]);
     }

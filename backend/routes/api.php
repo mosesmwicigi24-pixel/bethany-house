@@ -140,10 +140,12 @@ Route::prefix('v1')->group(function () {
             Route::get('/',             [ProductController::class, 'index']);
             Route::get('/featured',     [ProductController::class, 'featured']);
             Route::get('/new-arrivals', [ProductController::class, 'newArrivals']);
-            Route::get('/{slug}',       [ProductController::class, 'show']);
-            Route::get('/{id}/variants', [ProductController::class, 'variants']);
+            // /search MUST precede /{slug} — the wildcard was capturing it, so
+            // GET /products/search 404'd ("no product with slug search") since launch.
             Route::get('/search',       [ProductController::class, 'search'])
                 ->middleware('throttle:search')->withoutMiddleware('throttle:public-api');
+            Route::get('/{slug}',       [ProductController::class, 'show']);
+            Route::get('/{id}/variants', [ProductController::class, 'variants']);
             Route::get('/{id}/reviews', [ProductReviewController::class, 'index']);
             Route::get('/reviews/{id}', [ProductReviewController::class, 'show']);
         });
