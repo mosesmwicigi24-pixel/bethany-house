@@ -106,11 +106,24 @@ class ProductController extends Controller
      */
     public function show(Request $request, $slug)
     {
-        $product = Product::with([
+        $with = [
             'category', 'translations', 'prices',
             'variants.prices', 'variants.images',
             'images', 'seo', 'reviews',
-        ])->where('slug', $slug)->published()->firstOrFail();
+        ];
+        $product = Product::with($with)->where('slug', $slug)->published()->first();
+
+        // Renamed slug? The 2026_30_07 cleanup left redirect rows so old URLs,
+        // bookmarks and Neema/WhatsApp references keep resolving.
+        if (!$product) {
+            $redirectId = DB::table('product_slug_redirects')->where('old_slug', $slug)->value('product_id');
+            abort_if(!$redirectId, 404);
+            $product = Product::with($with)->where('id', $redirectId)->published()->firstOrFail();
+
+            $payload = $this->formatPublic($product);
+            $payload['redirected_from'] = $slug; // clients may 301 to $payload['slug']
+            return response()->json(['product' => $payload]);
+        }
 
         return response()->json(['product' => $this->formatPublic($product)]);
     }

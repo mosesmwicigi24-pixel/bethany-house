@@ -51,6 +51,28 @@ class StorefrontCheckoutController extends Controller
 {
     public function store(Request $request)
     {
+        // A cart built before the 2026_30_07 slug cleanup can carry an old slug;
+        // remap through product_slug_redirects BEFORE validation (whose
+        // exists:products,slug rule would otherwise reject the whole order).
+        $items = $request->input('items');
+        if (is_array($items)) {
+            $slugs = collect($items)->pluck('slug')->filter()->unique()->values();
+            if ($slugs->isNotEmpty()) {
+                $redirects = DB::table('product_slug_redirects')
+                    ->join('products', 'products.id', '=', 'product_slug_redirects.product_id')
+                    ->whereIn('old_slug', $slugs)
+                    ->pluck('products.slug', 'old_slug');
+                if ($redirects->isNotEmpty()) {
+                    foreach ($items as $i => $item) {
+                        if (isset($item['slug'], $redirects[$item['slug']])) {
+                            $items[$i]['slug'] = $redirects[$item['slug']];
+                        }
+                    }
+                    $request->merge(['items' => $items]);
+                }
+            }
+        }
+
         $validated = $request->validate([
             'client_request_id'      => 'nullable|string|max:100',
             'country_code'           => 'nullable|string|size:2',
