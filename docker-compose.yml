@@ -55,6 +55,7 @@ services:
             APP_ENV: production
             NEEMA_API_URL: ${NEEMA_API_URL:-https://neema.bethanyhouse.co.ke}
             NEEMA_ANALYTICS_KEY: ${NEEMA_ANALYTICS_KEY:-}
+            NEEMA_EVENTS_SECRET: ${NEEMA_EVENTS_SECRET:-}
             STOREFRONT_URL: ${STOREFRONT_URL:-}
             APP_KEY: ${APP_KEY:?APP_KEY is required}
             APP_DEBUG: "false"
@@ -145,6 +146,7 @@ services:
             APP_ENV: production
             NEEMA_API_URL: ${NEEMA_API_URL:-https://neema.bethanyhouse.co.ke}
             NEEMA_ANALYTICS_KEY: ${NEEMA_ANALYTICS_KEY:-}
+            NEEMA_EVENTS_SECRET: ${NEEMA_EVENTS_SECRET:-}
             STOREFRONT_URL: ${STOREFRONT_URL:-}
             APP_KEY: ${APP_KEY}
             APP_DEBUG: "false"
@@ -202,6 +204,7 @@ services:
             APP_ENV: production
             NEEMA_API_URL: ${NEEMA_API_URL:-https://neema.bethanyhouse.co.ke}
             NEEMA_ANALYTICS_KEY: ${NEEMA_ANALYTICS_KEY:-}
+            NEEMA_EVENTS_SECRET: ${NEEMA_EVENTS_SECRET:-}
             STOREFRONT_URL: ${STOREFRONT_URL:-}
             APP_KEY: ${APP_KEY}
             DB_CONNECTION: pgsql
@@ -299,6 +302,7 @@ services:
             APP_ENV: production
             NEEMA_API_URL: ${NEEMA_API_URL:-https://neema.bethanyhouse.co.ke}
             NEEMA_ANALYTICS_KEY: ${NEEMA_ANALYTICS_KEY:-}
+            NEEMA_EVENTS_SECRET: ${NEEMA_EVENTS_SECRET:-}
             STOREFRONT_URL: ${STOREFRONT_URL:-}
             APP_KEY: ${APP_KEY:?APP_KEY is required}
             APP_DEBUG: "false"
