@@ -1339,6 +1339,12 @@ class ProductController extends Controller
             'images'              => $product->images->whereNull('product_variant_id')->sortBy('sort_order')->values(),
             'seo'                 => $product->seo->values(),
             'measurements'        => $product->measurements ?? [],
+            // features/aliases were populated for the whole catalog on
+            // 2026-07-30 but this formatter never exposed them — the admin
+            // Features tab loaded an empty list (and a Save from that state
+            // would have wiped the stored values).
+            'features'            => $product->features ?? [],
+            'aliases'             => $product->aliases ?? [],
             // tax_rate_ids and tax_rates are added in adminShow/store/update
             'tax_rate_ids'        => [],
             'tax_rates'           => [],
