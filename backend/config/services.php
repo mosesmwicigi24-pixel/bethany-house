@@ -62,6 +62,9 @@ return [
     'neema' => [
         'url'           => env('NEEMA_API_URL', 'https://neema.bethanyhouse.co.ke'),
         'analytics_key' => env('NEEMA_ANALYTICS_KEY'),
+        // Order-lifecycle events → POST {url}/api/hub/events, HMAC-signed.
+        // Unset ⇒ no events are emitted (the emitter is inert).
+        'events_secret' => env('NEEMA_EVENTS_SECRET'),
     ],
 
 ];
