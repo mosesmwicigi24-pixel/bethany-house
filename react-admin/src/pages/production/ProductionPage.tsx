@@ -1898,52 +1898,76 @@ function ProductionOrdersTab() {
                                         const cfg = STATUS_CFG[o.status] ?? STATUS_CFG.draft;
                                         const late = days < 0;
                                         return (
-                                            <button
-                                                key={o.id}
-                                                onClick={() => navigate(`/production/orders/${o.id}`)}
-                                                className="w-full text-left px-3.5 py-3 active:bg-surface-50 transition-colors"
-                                            >
-                                                {/* Line 1 — WHO the job is for. The floor asks this first,
-                                                    so the owner's name leads and carries the status. */}
-                                                <div className="flex items-start gap-2">
-                                                    <span className={clsx('mt-1.5 w-1.5 h-1.5 rounded-full shrink-0', cfg.dot)} />
-                                                    <p className="flex-1 min-w-0 font-bold text-surface-900 text-[14px] leading-snug truncate">
-                                                        {o.customer_label ?? (o.customer_order_id ? 'Name missing' : 'For stock')}
-                                                    </p>
-                                                    <span className={clsx('shrink-0 text-2xs font-bold px-2 py-0.5 rounded-full', cfg.bg, cfg.text)}>
-                                                        {cfg.label}
-                                                    </span>
-                                                </div>
+                                            <div key={o.id} className="relative flex items-stretch">
+                                                {/* Status as a left accent read peripherally: you see the
+                                                    stripe pattern down the page before reading a word.
+                                                    The BAR carries time-risk (late wins), the CHIP carries
+                                                    workflow state — two signals that never collide. */}
+                                                <span
+                                                    aria-hidden="true"
+                                                    className={clsx(
+                                                        'absolute left-0 top-0 bottom-0 w-[3px]',
+                                                        late ? 'bg-danger' : cfg.dot,
+                                                    )}
+                                                />
+                                                <button
+                                                    onClick={() => navigate(`/production/orders/${o.id}`)}
+                                                    className="flex-1 min-w-0 text-left pl-4 pr-2 py-3 active:bg-surface-50 transition-colors"
+                                                >
+                                                    {/* 1 — who it is for, and its state */}
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="flex-1 min-w-0 font-bold text-surface-900 text-[14.5px] leading-snug truncate">
+                                                            {o.customer_label ?? (o.customer_order_id ? 'Name missing' : 'For stock')}
+                                                        </p>
+                                                        <span className={clsx('shrink-0 text-2xs font-bold px-2 py-0.5 rounded-full', cfg.bg, cfg.text)}>
+                                                            {cfg.label}
+                                                        </span>
+                                                    </div>
 
-                                                {/* Line 2 — how to reach them (omitted for stock jobs) */}
+                                                    {/* 2 — what is being made */}
+                                                    <p className="mt-0.5 text-[13px] font-medium text-surface-600 truncate">
+                                                        {o.product_name}
+                                                    </p>
+
+                                                    {/* 3 — job reference and the clock */}
+                                                    <div className="mt-1.5 flex items-center gap-2">
+                                                        <span className="font-mono text-2xs text-surface-400 truncate">
+                                                            {o.order_number}
+                                                        </span>
+                                                        {o.quantity > 1 && (
+                                                            <span className="text-2xs text-surface-400 shrink-0">x{o.quantity}</span>
+                                                        )}
+                                                        <span className={clsx(
+                                                            'ml-auto shrink-0 text-[11.5px] tabular-nums font-bold',
+                                                            late ? 'text-danger' : days <= 2 ? 'text-amber-dark' : 'text-surface-500',
+                                                        )}>
+                                                            {late ? `${Math.abs(days)}d late` : days === 0 ? 'Due today' : `${days}d left`}
+                                                        </span>
+                                                    </div>
+                                                </button>
+
+                                                {/* One tap to call. A phone number printed as TEXT on a list
+                                                    is a dead end — you cannot dial it from here. As a tel:
+                                                    link it keeps the capability and gives the line back.
+                                                    Sibling of the card button, never nested: a <button>
+                                                    inside a <button> is invalid and swallows the tap. */}
                                                 {o.customer_contact && (
-                                                    <p className="mt-0.5 pl-3.5 text-[12.5px] text-surface-500 tabular-nums truncate">
-                                                        {o.customer_contact}
-                                                    </p>
+                                                    <a
+                                                        href={`tel:${o.customer_contact.replace(/[^+\d]/g, '')}`}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        aria-label={`Call ${o.customer_label ?? 'customer'} on ${o.customer_contact}`}
+                                                        className="shrink-0 self-center mr-3 w-9 h-9 rounded-full bg-surface-100
+                                                                   flex items-center justify-center text-surface-600
+                                                                   active:bg-surface-200 transition-colors"
+                                                    >
+                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24"
+                                                             stroke="currentColor" strokeWidth={1.9}
+                                                             strokeLinecap="round" strokeLinejoin="round">
+                                                            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.9.36 1.78.7 2.61a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.47-1.27a2 2 0 0 1 2.11-.45c.83.34 1.71.57 2.61.7A2 2 0 0 1 22 16.92z" />
+                                                        </svg>
+                                                    </a>
                                                 )}
-
-                                                {/* Line 3 — what is being made, and its stock code */}
-                                                <p className="mt-1 pl-3.5 text-[13px] text-surface-800 font-medium truncate">
-                                                    {o.product_name}
-                                                    {o.product?.sku && (
-                                                        <span className="font-mono font-normal text-surface-500"> · {o.product.sku}</span>
-                                                    )}
-                                                </p>
-
-                                                {/* Line 4 — the job reference and the clock */}
-                                                <div className="mt-1 pl-3.5 flex items-center gap-2 text-2xs">
-                                                    <span className="font-mono font-bold text-brand-700 truncate">{o.order_number}</span>
-                                                    {o.quantity > 1 && (
-                                                        <span className="text-surface-500 shrink-0">x{o.quantity}</span>
-                                                    )}
-                                                    <span className={clsx(
-                                                        'ml-auto shrink-0 tabular-nums font-bold',
-                                                        late ? 'text-danger' : days <= 2 ? 'text-warning-dark' : 'text-surface-500',
-                                                    )}>
-                                                        {late ? `${Math.abs(days)}d late` : days === 0 ? 'Due today' : `${days}d left`}
-                                                    </span>
-                                                </div>
-                                            </button>
+                                            </div>
                                         );
                                     })}
                                 </div>
