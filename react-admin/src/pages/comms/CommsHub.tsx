@@ -1673,12 +1673,9 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
     const isOwn    = message.user?.id === currentUserId;
     const isSystem = message.type === "system";
 
-    // ChannelController::editMessage allows the author to edit for 10 minutes.
-    // The action is hidden once that lapses rather than shown and rejected —
-    // an option that always 422s is worse than no option at all.
-    const EDIT_WINDOW_MS = 10 * 60 * 1000;
-    const sentAt  = new Date(message.created_at).getTime();
-    const canEdit = isOwn && Number.isFinite(sentAt) && Date.now() - sentAt < EDIT_WINDOW_MS;
+    // You can edit your own message at any age (ChannelController::editMessage);
+    // the (edited) marker keeps the change visible to everyone in the space.
+    const canEdit = isOwn;
     // Backend (ChannelController::deleteMessage) allows the author OR
     // admin/super_admin to delete any message - the "other people's
     // messages" toolbar below previously had no delete option at all, so
@@ -1824,7 +1821,7 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                                 </svg>
                             </button>
                             {canEdit && (
-                                <button onClick={beginEdit} title="Edit (within 10 minutes of sending)"
+                                <button onClick={beginEdit} title="Edit message"
                                     className="w-7 h-7 flex items-center justify-center rounded-lg text-surface-400 hover:text-brand-600 hover:bg-surface-100 transition-colors"
                                     aria-label="Edit message">
                                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

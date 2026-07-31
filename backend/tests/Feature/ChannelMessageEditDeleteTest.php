@@ -15,8 +15,8 @@ use Tests\TestCase;
 /**
  * Editing and deleting your own messages in the comms hub. The endpoints
  * existed but the admin UI never exposed an edit affordance; these lock the
- * rules the UI now relies on — author-only edits, a 10-minute window, an
- * edited_at marker, and admin moderation of anyone's message.
+ * rules the UI now relies on — author-only edits at any age, an edited_at
+ * marker, and admin moderation of anyone's message.
  */
 class ChannelMessageEditDeleteTest extends TestCase
 {
@@ -88,20 +88,22 @@ class ChannelMessageEditDeleteTest extends TestCase
         $this->assertSame('Good morning all', $msg->fresh()->body);
     }
 
-    public function test_edit_window_closes_after_ten_minutes(): void
+    public function test_author_can_edit_an_old_message(): void
     {
         $channel = $this->channel();
         $author  = $this->member($channel);
         $msg     = $this->message($channel, $author);
-        // Older than the window the UI hides the action after.
-        $msg->forceFill(['created_at' => now()->subMinutes(11)])->save();
+        // Instructions to the floor stay actionable for days; a correction
+        // hours later beats an enforced typo. There is no edit window.
+        $msg->forceFill(['created_at' => now()->subDays(2)])->save();
 
         Sanctum::actingAs($author);
         $this->patchJson("/api/v1/admin/channels/{$channel->id}/messages/{$msg->id}", [
-            'body' => 'too late',
-        ])->assertStatus(422);
+            'body' => 'Corrected two days later',
+        ])->assertOk();
 
-        $this->assertSame('Good morning all', $msg->fresh()->body);
+        $this->assertSame('Corrected two days later', $msg->fresh()->body);
+        $this->assertNotNull($msg->fresh()->edited_at);
     }
 
     public function test_author_can_delete_own_message_at_any_age(): void

@@ -340,9 +340,11 @@ class ChannelController extends Controller
         if ($message->user_id !== $request->user()->id) {
             return response()->json(['message' => 'You can only edit your own messages.'], 403);
         }
-        if ($message->created_at->diffInMinutes(now()) > 10) {
-            return response()->json(['message' => 'Messages can only be edited within 10 minutes.'], 422);
-        }
+        // No time limit on editing your OWN message. This is an internal
+        // operations hub: instructions to the floor ("the cope has not passed
+        // QC") stay actionable for days, and a correction hours later is worth
+        // more than an enforced typo. The (edited) marker keeps it honest, and
+        // delete has never been time-limited either.
 
         $validated = $request->validate(['body' => 'required|string|max:10000']);
 
