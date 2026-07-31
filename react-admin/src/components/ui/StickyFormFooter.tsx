@@ -83,7 +83,10 @@ export function StickyFormFooter({
             {/* Sticky bar */}
             <div
                 className={clsx(
-                    "fixed bottom-0 left-0 right-0 z-40",
+                    // Sits ABOVE the phone tab bar (56px + home-indicator inset);
+                    // on desktop there is no tab bar, so it returns to the floor.
+                    "fixed left-0 right-0 z-40",
+                    "bottom-[calc(3.5rem+env(safe-area-inset-bottom))] md:bottom-0",
                     "transition-transform duration-300 ease-out",
                     isDirty ? "translate-y-0" : "translate-y-full",
                 )}
