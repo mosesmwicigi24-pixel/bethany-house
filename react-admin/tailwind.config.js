@@ -60,7 +60,11 @@ export default {
         // have made 900 lighter than 800 and broken the ramp's monotonicity.
         ink:  '#373a36',   // reference body text AND footer fill — 11.53:1 on white
         tint: '#f48364',   // the softer orange used for CTAs sitting ON an orange band
-        mist: '#e9e9ea',   // reference card / chip fill
+        // NOTE: the reference's card/chip grey is #e9e9ea, but surface-200
+        // (#e7eae6) is already that colour to within two units — both compute
+        // to 1.21:1 on white. A separate `mist` token was minted here and then
+        // removed: two names for one colour is how a palette forks, with half
+        // the app landing on each. Use surface-200 for the grey chip.
         // A hairline that is visible but never heavy, and the pale fill used
         // inside select/inputs. Re-hued warm to match the ramp above.
         line:   '#e5e7e3',
