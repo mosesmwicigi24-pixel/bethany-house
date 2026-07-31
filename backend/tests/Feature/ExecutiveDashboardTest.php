@@ -12,6 +12,7 @@ use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
+use Tests\Concerns\FreezesClockMidMonth;
 use Tests\TestCase;
 
 /**
@@ -29,6 +30,7 @@ use Tests\TestCase;
 class ExecutiveDashboardTest extends TestCase
 {
     use RefreshDatabase;
+    use FreezesClockMidMonth;
 
     private function reportViewer(array $extraPerms = [], ?Outlet $assignedOutlet = null): User
     {
