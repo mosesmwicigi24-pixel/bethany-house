@@ -119,11 +119,11 @@
     }
 
     .card-header {
-        @apply px-5 py-4 border-b border-surface-100 flex items-center justify-between;
+        @apply px-4 py-3 md:px-5 md:py-4 border-b border-surface-100 flex items-center justify-between;
     }
 
     .card-body {
-        @apply px-5 py-5 md:px-6 md:py-6;
+        @apply px-4 py-4 md:px-6 md:py-6;
     }
 
     /* ─── Badges ──────────────────────────────────────────────── */
@@ -184,15 +184,17 @@
 
     /* ─── Page layout ─────────────────────────────────────────── */
     .page-header {
-        @apply mb-6;
+        @apply mb-4 md:mb-6;
     }
 
     .page-title {
-        @apply font-display text-2xl font-bold text-surface-900;
+        /* 20px on a phone, 24px from md. A 24px title on a 430px screen eats
+           the fold before any data appears. */
+        @apply font-display text-xl md:text-2xl font-bold text-surface-900 tracking-tight;
     }
 
     .page-subtitle {
-        @apply mt-1 text-sm text-surface-500;
+        @apply mt-0.5 text-[13px] md:text-sm text-surface-500;
     }
 }
 

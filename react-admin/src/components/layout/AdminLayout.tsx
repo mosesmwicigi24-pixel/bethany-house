@@ -254,7 +254,7 @@ export function AdminLayout() {
                     The bottom tab bar is fixed, so on phones the scroll area
                     reserves its height (56px) plus the home-indicator inset —
                     otherwise the last row of every list sits underneath it. */}
-                <main className="flex-1 overflow-y-auto p-4 md:p-6">
+                <main className="flex-1 overflow-y-auto px-3 py-3 md:p-6">
                     {/* key: a crash on one page must not follow you to the next */}
                     <PageErrorBoundary key={location.pathname}>
                         <Outlet />
