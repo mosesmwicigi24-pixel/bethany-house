@@ -3405,7 +3405,7 @@ export default function OrderDetailPage() {
         <div className="animate-fade-in max-w-5xl mx-auto pb-24 sm:pb-12 space-y-4">
 
             {/* ── Sticky mobile action bar — primary actions always in thumb reach ── */}
-            <div className="sm:hidden fixed bottom-0 inset-x-0 z-30 flex items-center gap-2 px-3 py-2.5 bg-white/95 backdrop-blur border-t border-surface-200"
+            <div className="sm:hidden fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom))] inset-x-0 z-30 flex items-center gap-2 px-3 py-2.5 bg-white/95 backdrop-blur border-t border-surface-200"
                 style={{ paddingBottom: "max(0.625rem, env(safe-area-inset-bottom))" }}>
                 <button onClick={shareReceipt} className="flex-1 btn-secondary btn-sm justify-center gap-1.5">
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" /></svg>

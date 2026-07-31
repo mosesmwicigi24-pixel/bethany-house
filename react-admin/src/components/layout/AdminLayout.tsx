@@ -2,6 +2,7 @@ import { Component, useState, useEffect, type ReactNode } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
+import { BottomTabBar } from './BottomTabBar'
 import { PWAInstallBanner } from '@/components/pwa/PWAInstallBanner'
 import { CommandPalette } from '@/components/ui/CommandPalette'
 
@@ -197,7 +198,7 @@ export function AdminLayout() {
         // the shell ran ~110px taller than the visible area. Being overflow-hidden,
         // that bottom strip could not be scrolled to: the last row of every page
         // sat under the toolbar, untappable. That is the "unresponsive cards".
-        <div className="flex h-screen-safe overflow-hidden bg-surface-50">
+        <div className="flex h-screen-safe overflow-hidden bg-surface-canvas">
 
             {/* ── PWA banners (install prompt, offline bar, update alert) ── */}
             <PWAInstallBanner />
@@ -249,13 +250,21 @@ export function AdminLayout() {
                     breadcrumbs={breadcrumbs}
                 />
 
-                {/* Page content */}
+                {/* Page content.
+                    The bottom tab bar is fixed, so on phones the scroll area
+                    reserves its height (56px) plus the home-indicator inset —
+                    otherwise the last row of every list sits underneath it. */}
                 <main className="flex-1 overflow-y-auto p-4 md:p-6">
                     {/* key: a crash on one page must not follow you to the next */}
                     <PageErrorBoundary key={location.pathname}>
                         <Outlet />
                     </PageErrorBoundary>
                 </main>
+
+                {/* Phone-only app shell. A flex sibling of <main>, so the column
+                    reserves its height instead of the bar floating over the last
+                    row of every list. */}
+                <BottomTabBar onOpenMenu={() => setMobileOpen(true)} />
             </div>
         </div>
     )

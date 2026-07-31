@@ -17,7 +17,7 @@
     }
 
     body {
-        @apply font-sans text-sm leading-relaxed;
+        @apply font-sans text-base antialiased;
     }
 
     /* Scrollbar styling */
@@ -36,7 +36,7 @@
 
     /* Focus visible only - no outline on mouse click */
     :focus-visible {
-        @apply outline-none ring-2 ring-brand-500 ring-offset-1;
+        @apply outline-none ring-2 ring-surface-900 ring-offset-2;
     }
     :focus:not(:focus-visible) {
         @apply outline-none;
@@ -46,8 +46,8 @@
 @layer components {
     /* ─── Form inputs ─────────────────────────────────────────── */
     .input {
-        @apply block w-full rounded-lg border border-surface-300 bg-white px-3 py-2
-           text-sm text-surface-900 placeholder:text-surface-400
+        @apply block w-full rounded-control border border-surface-300 bg-white px-3.5 py-2.5
+           text-base text-surface-900 placeholder:text-surface-400
            transition-colors duration-150
            focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500
            disabled:cursor-not-allowed disabled:bg-surface-100 disabled:text-surface-400;
@@ -67,16 +67,17 @@
 
     /* ─── Buttons ─────────────────────────────────────────────── */
     .btn {
-        @apply inline-flex items-center justify-center gap-2 rounded-lg
-           px-4 py-2 text-sm font-medium
+        @apply inline-flex items-center justify-center gap-2 rounded-full
+           px-5 py-2.5 text-sm font-semibold min-h-[40px]
            transition-all duration-150 cursor-pointer
            disabled:cursor-not-allowed disabled:opacity-50
-           focus-visible:ring-2 focus-visible:ring-offset-1;
+           focus-visible:ring-2 focus-visible:ring-offset-2;
     }
 
     .btn-primary {
-        @apply btn bg-brand-500 text-white hover:bg-brand-600 active:bg-brand-700
-           focus-visible:ring-brand-500;
+        @apply btn bg-brand-500 text-surface-900 shadow-btn-brand
+           hover:bg-brand-400 active:bg-brand-600
+           focus-visible:ring-surface-900;
     }
 
     .btn-secondary {
@@ -95,7 +96,7 @@
     }
 
     .btn-sm {
-        @apply px-3 py-1.5 text-xs;
+        @apply px-4 text-xs min-h-[36px] py-0;
     }
 
     .btn-lg {
@@ -103,12 +104,18 @@
     }
 
     .btn-icon {
-        @apply btn p-2 aspect-square;
+        @apply btn p-0 aspect-square min-h-[44px] min-w-[44px];
     }
 
     /* ─── Cards ───────────────────────────────────────────────── */
     .card {
-        @apply bg-white rounded-xl shadow-card border border-surface-100;
+        @apply bg-white rounded-card shadow-card;
+    }
+
+    /* Nested inside another card — avoids shadow-on-shadow, the other way
+       this look breaks. */
+    .card-flat {
+        @apply bg-surface-50 rounded-card;
     }
 
     .card-header {
@@ -116,7 +123,7 @@
     }
 
     .card-body {
-        @apply px-5 py-4;
+        @apply px-5 py-5 md:px-6 md:py-6;
     }
 
     /* ─── Badges ──────────────────────────────────────────────── */

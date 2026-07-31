@@ -133,7 +133,7 @@ function AndroidInstallBanner({
             role="complementary"
             aria-label="Install app prompt"
             className={clsx(
-                "fixed bottom-0 left-0 right-0 z-[9990]",
+                "fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom))] md:bottom-0 left-0 right-0 z-[9990]",
                 "bg-white border-t border-surface-200 shadow-xl",
                 "px-4 py-3 sm:px-5",
                 "animate-slide-up",
@@ -218,7 +218,7 @@ function IosInstallSheet({ onDismiss }: { onDismiss: () => void }) {
                 aria-modal="true"
                 aria-label="Install app on iOS"
                 className={clsx(
-                    "fixed bottom-0 left-0 right-0 z-[9992]",
+                    "fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom))] md:bottom-0 left-0 right-0 z-[9992]",
                     "bg-white rounded-t-2xl shadow-2xl",
                     "px-5 pt-4 pb-8",
                     "animate-slide-up",
