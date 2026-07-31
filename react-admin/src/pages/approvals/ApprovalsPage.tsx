@@ -268,7 +268,7 @@ function PurchaseOrdersPanel() {
             )}
             <div className="divide-y divide-surface-50">
                 {items.map(po => (
-                    <div key={po.id} className={clsx("px-4 py-4 hover:bg-surface-50 transition-colors", bulkSelected.has(po.id) && "bg-brand-50/50")}>
+                    <div key={po.id} className={clsx("px-3.5 py-3 sm:px-4 sm:py-4 hover:bg-surface-50 transition-colors", bulkSelected.has(po.id) && "bg-brand-50/50")}>
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                             <div className="flex items-start gap-3 flex-1 min-w-0">
                                 {canApprove && items.length > 1 && (
@@ -287,7 +287,7 @@ function PurchaseOrdersPanel() {
                                             <span className="text-2xs text-surface-400">{po.items_count} item{po.items_count !== 1 ? "s" : ""}</span>
                                         )}
                                     </div>
-                                    <p className="text-sm font-medium text-surface-900 mt-0.5">{po.supplier?.name ?? "Unknown Supplier"}</p>
+                                    <p className="text-sm font-medium text-surface-900 mt-0.5 truncate">{po.supplier?.name ?? "Unknown Supplier"}</p>
                                     <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-xs text-surface-500">
                                         <span>Total: <strong className="text-surface-900">{po.currency_code} {(po.total_amount ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</strong></span>
                                         {po.created_by && <span>By: {po.created_by.first_name} {po.created_by.last_name}</span>}
@@ -392,17 +392,23 @@ function PurchaseReturnsPanel() {
         <>
             <div className="divide-y divide-surface-50">
                 {items.map(ret => (
-                    <div key={ret.id} className="px-4 py-4 hover:bg-surface-50 transition-colors">
+                    <div key={ret.id} className="px-3.5 py-3 sm:px-4 sm:py-4 hover:bg-surface-50 transition-colors">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                             <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 flex-wrap">
-                                    <button onClick={() => navigate(`/procurement/purchase-returns`)}
+                                    {/* Canonical route is /procurement/returns/:id (see App.tsx and
+                                        PurchaseReturnsPage). `/procurement/purchase-returns` is not a
+                                        registered path — it fell through /procurement/* to the
+                                        ModulePlaceholder, so this link went nowhere. */}
+                                    <button onClick={() => navigate(`/procurement/returns/${ret.id}`)}
                                         className="font-mono font-semibold text-danger text-sm hover:underline">
                                         {ret.return_number}
                                     </button>
                                     <span className="badge badge-warning text-2xs">Pending</span>
                                 </div>
-                                <p className="text-sm font-medium text-surface-900 mt-0.5">
+                                {/* Two-part line (supplier · PO ref): clamp to 2 lines rather than
+                                    `truncate`, or a long supplier name eats the PO ref on a phone. */}
+                                <p className="text-sm font-medium text-surface-900 mt-0.5 line-clamp-2">
                                     {ret.supplier?.name ?? ret.purchase_order?.po_number ?? "-"}
                                     {ret.purchase_order?.po_number && <span className="text-surface-400 ml-1 text-xs">· {ret.purchase_order.po_number}</span>}
                                 </p>
@@ -509,7 +515,7 @@ function StockAdjustmentsPanel() {
         <>
             <div className="divide-y divide-surface-50">
                 {items.map(adj => (
-                    <div key={adj.id} className="px-4 py-4 hover:bg-surface-50 transition-colors">
+                    <div key={adj.id} className="px-3.5 py-3 sm:px-4 sm:py-4 hover:bg-surface-50 transition-colors">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                             <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 flex-wrap">
@@ -520,7 +526,9 @@ function StockAdjustmentsPanel() {
                                     <span className="badge badge-neutral text-2xs capitalize">{adj.reason_label}</span>
                                     <span className="badge badge-warning text-2xs">Pending</span>
                                 </div>
-                                <p className="text-sm font-medium text-surface-900 mt-0.5">
+                                {/* Two-part line (product · variant): clamp to 2 lines rather than
+                                    `truncate`, or a long product name eats the variant on a phone. */}
+                                <p className="text-sm font-medium text-surface-900 mt-0.5 line-clamp-2">
                                     {adj.product_name ?? "-"}
                                     {adj.variant_name && <span className="text-surface-400 ml-1">· {adj.variant_name}</span>}
                                 </p>
@@ -576,6 +584,7 @@ function StockTransfersPanel() {
     const { canAny } = usePermissions();
     const canApprove = canAny("inventory.approve", "admin.all");
 
+    const navigate = useNavigate();
     const [selected, setSelected] = useState<PendingTransfer | null>(null);
     const [action,   setAction]   = useState<"approve" | "reject" | null>(null);
 
@@ -627,19 +636,25 @@ function StockTransfersPanel() {
         <>
         <div className="divide-y divide-surface-50">
             {items.map(t => (
-                <div key={t.id} className="px-4 py-4 hover:bg-surface-50 transition-colors">
+                <div key={t.id} className="px-3.5 py-3 sm:px-4 sm:py-4 hover:bg-surface-50 transition-colors">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                         <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-mono font-semibold text-brand-600 text-sm">{t.transfer_number}</span>
+                                {/* Was an inert <span> styled in link colour — misleading on a phone,
+                                    where the card reads as tappable. /inventory/transfers/:id exists
+                                    (App.tsx), so match the other panels and actually navigate. */}
+                                <button onClick={() => navigate(`/inventory/transfers/${t.id}`)}
+                                    className="font-mono font-semibold text-brand-600 text-sm hover:underline">
+                                    {t.transfer_number}
+                                </button>
                                 <span className="badge badge-warning text-2xs">Pending</span>
                             </div>
                             <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                <span className="text-sm font-medium text-surface-900">{t.from_outlet?.name ?? "-"}</span>
+                                <span className="text-sm font-medium text-surface-900 min-w-0 truncate">{t.from_outlet?.name ?? "-"}</span>
                                 <svg className="w-4 h-4 text-surface-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
                                 </svg>
-                                <span className="text-sm font-medium text-surface-900">{t.to_outlet?.name ?? "-"}</span>
+                                <span className="text-sm font-medium text-surface-900 min-w-0 truncate">{t.to_outlet?.name ?? "-"}</span>
                             </div>
                             <div className="flex flex-wrap gap-x-4 mt-1 text-xs text-surface-500">
                                 {t.requested_by && <span>By: {t.requested_by.first_name} {t.requested_by.last_name}</span>}
@@ -859,6 +874,11 @@ function PaymentApprovalsPanel() {
     const toast    = useToastStore();
     const qc       = useQueryClient();
     const navigate = useNavigate();
+    const { canAny } = usePermissions();
+    // Mirrors the server: POST /v1/admin/payments/{id}/{approve,reject} is behind
+    // `permission:payments.approve_international`. Without this gate the buttons
+    // render for every user who can reach the page and 403 on click.
+    const canApprove = canAny("payments.approve_international", "admin.all");
 
     const [selected, setSelected] = useState<PendingPayment | null>(null);
     const [action,   setAction]   = useState<"approve" | "reject" | null>(null);
@@ -930,7 +950,7 @@ function PaymentApprovalsPanel() {
 
                     return (
                         <div key={p.id} className={clsx(
-                            "p-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4 hover:bg-surface-50 transition-colors",
+                            "p-3.5 sm:p-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4 hover:bg-surface-50 transition-colors",
                             isUrgent && "bg-danger-light/30"
                         )}>
                             {/* Left: order + customer info */}
@@ -962,15 +982,17 @@ function PaymentApprovalsPanel() {
                                         of {fmt(p.order_total, p.currency_code)} order total
                                     </span>
                                     {/* customer_name is always resolved server-side */}
-                                    <span className="font-medium text-surface-800">{p.customer_name}</span>
+                                    <span className="font-medium text-surface-800 max-w-full truncate">{p.customer_name}</span>
+                                    {/* Contact detail is desk work — on a phone the reviewer only needs
+                                        amount + who + proof to decide, so these stay ≥sm. */}
                                     {p.customer_email && (
-                                        <span className="text-surface-400">{p.customer_email}</span>
+                                        <span className="hidden sm:inline text-surface-400 max-w-full truncate">{p.customer_email}</span>
                                     )}
                                     {p.customer_phone && (
-                                        <span className="text-surface-400">{p.customer_phone}</span>
+                                        <span className="hidden sm:inline text-surface-400">{p.customer_phone}</span>
                                     )}
                                     {p.customer_country_code && (
-                                        <span className="text-surface-400 uppercase">{p.customer_country_code}</span>
+                                        <span className="hidden sm:inline text-surface-400 uppercase">{p.customer_country_code}</span>
                                     )}
                                 </div>
 
@@ -994,10 +1016,15 @@ function PaymentApprovalsPanel() {
                                 </div>
                             </div>
 
-                            {/* Right: actions */}
-                            <div className="flex gap-2 shrink-0 flex-col items-end">
+                            {/* Right: actions — gated to match the server. The left column
+                                already states the no-proof warning at every breakpoint, so a
+                                read-only reviewer loses no information when this column goes. */}
+                            {canApprove && (
+                            <div className="flex gap-2 shrink-0 flex-col items-stretch sm:items-end">
                                 {!hasProof && (
-                                    <span className="inline-flex items-center gap-1 text-2xs text-warning-dark bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+                                    /* The left column already says "No proof uploaded yet"; on a phone
+                                       the two stack directly on top of each other. Keep one. */
+                                    <span className="hidden sm:inline-flex items-center gap-1 text-2xs text-warning-dark bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
                                         <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
                                         </svg>
@@ -1017,6 +1044,7 @@ function PaymentApprovalsPanel() {
                                     </button>
                                 </div>
                             </div>
+                            )}
                         </div>
                     );
                 })}

@@ -289,8 +289,88 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                 <FiltersBar filters={filters} onChange={updateFilter} onClear={clearFilters} hideChannel={!!channel} />
             </div>
 
-            {/* ── Table ───────────────────────────────────────────────────── */}
+            {/* ── Phone: a card list ──────────────────────────────────────────
+                A 9-column table on a 430px screen scrolls sideways and wraps the
+                order number onto three lines — the reference app never puts a
+                table on a handset. Desktop keeps the table below, where the
+                columns genuinely fit. Same rows, same grouping, same
+                destination on tap. */}
+            <div className="md:hidden">
+                {isLoading ? (
+                    <div className="flex justify-center py-16"><Spinner size="lg" /></div>
+                ) : orders.length === 0 ? (
+                    <div className="card card-body text-center text-surface-500 text-sm py-12">
+                        No orders found
+                    </div>
+                ) : (
+                    <div className="space-y-4">
+                        {orderGroups.map((group) => (
+                            <div key={group.key}>
+                                <p className="px-1 pb-1.5 text-2xs font-bold uppercase tracking-wider text-surface-500">
+                                    {group.label}
+                                </p>
+                                <div className="card divide-y divide-surface-100">
+                                    {group.items.map((order) => {
+                                        const cfg = STATUS_CONFIG[order.status] ?? { label: order.status, badge: "badge-neutral", dot: "bg-surface-400" };
+                                        // Same "real email or fall back to phone" rule the table row uses.
+                                        // `||` not `??`: the table treats an empty-string contact as
+                                        // absent (`sub ? … : null`), so an order with customer_phone: ""
+                                        // must fall through here too, not print a dangling separator.
+                                        const email = order.customer_email && !order.customer_email.startsWith('noemail+') ? order.customer_email : null;
+                                        const contact = email || order.customer_phone || null;
+                                        const channelLabel = CHANNEL_LABELS[order.order_type]?.label ?? order.order_type;
+                                        const paymentLabel = PAYMENT_METHOD_LABELS[order.payment_method] ?? order.payment_method;
+                                        // Contact if we have one, otherwise the payment method — never an empty tail.
+                                        const detail = contact || paymentLabel || null;
+                                        return (
+                                            <button
+                                                key={order.id}
+                                                onClick={() => navigate(`/sales/orders/${order.id}`)}
+                                                className="w-full text-left px-3.5 py-3 active:bg-surface-50 transition-colors"
+                                            >
+                                                {/* Line 1 — who it's for, and where it stands */}
+                                                <div className="flex items-start gap-2">
+                                                    <span className={clsx('mt-1.5 w-1.5 h-1.5 rounded-full shrink-0', cfg.dot)} />
+                                                    <p className="flex-1 min-w-0 font-bold text-surface-900 text-[13.5px] leading-snug truncate">
+                                                        {order.customer_name || "Guest"}
+                                                    </p>
+                                                    <span className={clsx("badge shrink-0", cfg.badge)}>
+                                                        {cfg.label}
+                                                    </span>
+                                                </div>
+
+                                                {/* Line 2 — how it came in, and how to reach them */}
+                                                <p className="mt-1 pl-3.5 text-[12.5px] text-surface-600 truncate">
+                                                    {channelLabel}
+                                                    {detail && <span className="text-surface-400"> · {detail}</span>}
+                                                </p>
+
+                                                {/* Line 3 — the reference, the size, the money */}
+                                                <div className="mt-1 pl-3.5 flex items-center gap-2 text-2xs">
+                                                    <span className="min-w-0 font-mono font-bold text-brand-700 truncate">{order.order_number}</span>
+                                                    <span className="text-surface-500 shrink-0">
+                                                        {order.items.length} item{order.items.length !== 1 ? "s" : ""}
+                                                    </span>
+                                                    <span className="ml-auto shrink-0 tabular-nums font-bold text-surface-900">
+                                                        {order.currency_code} {fmt(order.total_amount)}
+                                                        {order.is_international && (
+                                                            <span className="ml-1 text-blue-600" title="International order">🌐</span>
+                                                        )}
+                                                    </span>
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* ── Table (desktop) ─────────────────────────────────────────── */}
             <div className="card overflow-hidden">
+                <div className="hidden md:block">
                 {isLoading ? (
                     <div className="flex items-center justify-center h-48">
                         <Spinner size="lg" />
@@ -396,10 +476,13 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                         </table>
                     </div>
                 )}
+                </div>
 
-                {/* Pagination */}
+                {/* Pagination — shared by both layouts. Below md the table above
+                    it is display:none, so the divider would be a hairline with
+                    nothing above it; drop it there. */}
                 {meta && meta.last_page > 1 && (
-                    <div className="px-4 py-3 border-t border-surface-100 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="px-4 py-3 border-t max-md:border-t-0 border-surface-100 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <p className="text-xs text-surface-500">
                             Page {meta.current_page} of {meta.last_page} · {meta.total.toLocaleString()} orders
                         </p>

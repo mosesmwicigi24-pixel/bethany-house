@@ -545,7 +545,136 @@ export default function CustomersPage() {
                         <p className="text-sm">No customers found</p>
                     </div>
                 ) : (
-                    <div className="table-wrapper rounded-none border-0">
+                    <>
+                    {/* Phone: a card list. An 8-column table on a 430px screen
+                        scrolls sideways and wraps the customer name onto three
+                        lines — the reference app never puts a table on a handset.
+                        Desktop keeps the table, where the columns genuinely fit. */}
+                    <div className="md:hidden divide-y divide-surface-100">
+                        {customers.map((customer) => {
+                            const fullName = `${customer.first_name} ${customer.last_name}`;
+                            // `||` not `??`: the create form posts "" for an
+                            // omitted email/phone, so a nullish check would keep
+                            // the empty string and render a blank contact line.
+                            const email =
+                                customer.email || customer.user?.email || null;
+                            const phone =
+                                customer.phone || customer.user?.phone || null;
+                            const status =
+                                customer.status ??
+                                customer.user?.status ??
+                                "active";
+                            const isWalkIn = !customer.user_id;
+                            const orders = customer.total_orders ?? 0;
+                            return (
+                                <div
+                                    key={customer.id}
+                                    className="flex items-stretch"
+                                >
+                                <button
+                                    onClick={() =>
+                                        navigate(
+                                            `/sales/customers/${customer.id}`,
+                                        )
+                                    }
+                                    className="flex-1 min-w-0 text-left pl-3.5 pr-1 py-3 active:bg-surface-50 transition-colors"
+                                >
+                                    <div className="flex items-start gap-2.5">
+                                        <Avatar name={fullName} />
+                                        <div className="flex-1 min-w-0">
+                                            {/* Line 1 — who they are, and whether the account is live */}
+                                            <div className="flex items-center gap-2">
+                                                <p className="flex-1 min-w-0 font-bold text-surface-900 text-[13.5px] leading-snug truncate">
+                                                    {fullName}
+                                                </p>
+                                                <span className="shrink-0 flex items-center gap-1">
+                                                    {isWalkIn && (
+                                                        <span
+                                                            className="badge text-2xs badge-neutral"
+                                                            title="No portal account"
+                                                        >
+                                                            Walk-in
+                                                        </span>
+                                                    )}
+                                                    <StatusBadge status={status} />
+                                                </span>
+                                            </div>
+
+                                            {/* Line 2 — how to reach them */}
+                                            <p className="mt-0.5 text-[12.5px] text-surface-600 truncate">
+                                                {phone ?? email ?? "No contact details"}
+                                                {phone && email && (
+                                                    <span className="text-surface-400">
+                                                        {" · "}
+                                                        {email}
+                                                    </span>
+                                                )}
+                                            </p>
+
+                                            {/* Line 3 — how much they matter */}
+                                            <div className="mt-1 flex items-center gap-2 text-2xs">
+                                                <span className="min-w-0 truncate text-surface-500">
+                                                    {orders} order
+                                                    {orders === 1 ? "" : "s"}
+                                                    {customer.last_order_date && (
+                                                        <span className="text-surface-400">
+                                                            {" · last "}
+                                                            {new Date(
+                                                                customer.last_order_date,
+                                                            ).toLocaleDateString(
+                                                                "en-KE",
+                                                                {
+                                                                    dateStyle:
+                                                                        "medium",
+                                                                },
+                                                            )}
+                                                        </span>
+                                                    )}
+                                                </span>
+                                                <span className="ml-auto shrink-0 tabular-nums font-bold text-brand-600">
+                                                    KES{" "}
+                                                    {fmt(
+                                                        customer.total_spent ??
+                                                            0,
+                                                    )}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </button>
+                                {/* Edit is the one row action with no other home:
+                                    the detail page can change status and view
+                                    orders, but cannot edit. Sibling of the card
+                                    button, never nested inside it — a button
+                                    inside a button is invalid HTML and the
+                                    inner one stops firing. 44px tap target. */}
+                                <button
+                                    onClick={() => setEditingCustomer(customer)}
+                                    className="shrink-0 w-11 flex items-center justify-center text-surface-400 active:bg-surface-50 transition-colors"
+                                    aria-label={`Edit ${fullName}`}
+                                    title="Edit"
+                                >
+                                    <svg
+                                        className="w-4 h-4"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                        strokeWidth={2}
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"
+                                        />
+                                    </svg>
+                                </button>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Desktop table — unchanged */}
+                    <div className="hidden md:block table-wrapper rounded-none border-0">
                         <table className="table">
                             <thead>
                                 <tr>
@@ -804,6 +933,7 @@ export default function CustomersPage() {
                             </tbody>
                         </table>
                     </div>
+                    </>
                 )}
 
                 {/* Pagination */}
