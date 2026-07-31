@@ -35,6 +35,11 @@ interface ProductionOrder {
     // Type: null = for stock, set = customer order
     customer_order_id?: number | null;
     customer_order?: { order_number: string; customer_first_name?: string | null; customer_last_name?: string | null; customer_phone?: string | null; customer_email?: string | null } | null;
+    /** Resolved server-side (ProductionOrder::getCustomerLabelAttribute): the
+        production order's own customer → the sales-order snapshot → the sales
+        order's customer record. Null for stock jobs. */
+    customer_label?: string | null;
+    customer_contact?: string | null;
     specifications?: Record<string, string>;
     measurements?: Record<string, string>;
     customer_preferences?: Record<string, string>;
@@ -1869,7 +1874,7 @@ function ProductionOrdersTab() {
                         <table className="w-full text-sm">
                             <thead className="bg-surface-50 border-b border-surface-100 sticky top-0">
                                 <tr>
-                                    {["Order #", "Type", "Product", "Qty", "Priority", "Status", "Progress", "Due", ""].map((h, i) => (
+                                    {["Order #", "Type", "Product", "Customer", "Qty", "Priority", "Status", "Progress", "Due", ""].map((h, i) => (
                                         <th key={h || i} className={`px-3 py-3 text-left text-2xs font-bold text-surface-400 uppercase tracking-wider whitespace-nowrap ${["Type","Priority","Progress"].includes(h) ? "hidden md:table-cell" : ""} ${["Due"].includes(h) ? "hidden sm:table-cell" : ""}`}>{h}</th>
                                     ))}
                                 </tr>
@@ -1877,7 +1882,7 @@ function ProductionOrdersTab() {
                             <tbody className="divide-y divide-surface-50">
                                 {orderGroups.map((group) => (
                                     <Fragment key={group.key}>
-                                        <DateGroupHeaderRow label={group.label} colSpan={9} />
+                                        <DateGroupHeaderRow label={group.label} colSpan={10} />
                                         {group.items.map(o => {
                                     const days = daysUntil(o.due_date);
                                     const isCustomer = !!o.customer_order_id;
@@ -1895,8 +1900,22 @@ function ProductionOrdersTab() {
                                                 {isCustomer && o.customer_order && (
                                                     <p className="text-2xs text-indigo-500">{o.customer_order.order_number}</p>
                                                 )}
-                                                {isCustomer && o.customer_order && (o.customer_order.customer_first_name || o.customer_order.customer_last_name) && (
-                                                    <p className="text-2xs text-indigo-400 truncate">{[o.customer_order.customer_first_name, o.customer_order.customer_last_name].filter(Boolean).join(" ")}{o.customer_order.customer_phone ? ` · ${o.customer_order.customer_phone}` : ""}</p>
+                                            </td>
+                                            {/* Whose job is this — the question the floor asks first. Name is
+                                                resolved server-side across all three identity routes, so a POS
+                                                sale that only carries a customer_id still shows a name. */}
+                                            <td className="px-3 py-3 max-w-40">
+                                                {o.customer_label ? (
+                                                    <>
+                                                        <p className="font-semibold text-surface-900 truncate text-xs">{o.customer_label}</p>
+                                                        {o.customer_contact && (
+                                                            <p className="text-2xs text-surface-400 tabular-nums truncate">{o.customer_contact}</p>
+                                                        )}
+                                                    </>
+                                                ) : isCustomer ? (
+                                                    <span className="text-2xs text-warning-dark bg-warning-light rounded px-1.5 py-0.5">Name missing</span>
+                                                ) : (
+                                                    <span className="text-2xs text-surface-400">For stock</span>
                                                 )}
                                             </td>
                                             <td className="px-3 py-3 text-surface-600 tabular-nums">{o.quantity}</td>
@@ -1928,7 +1947,7 @@ function ProductionOrdersTab() {
                                     </Fragment>
                                 ))}
                                 {orders.length === 0 && !isLoading && (
-                                    <tr><td colSpan={9} className="text-center py-16 text-surface-400">No production orders found</td></tr>
+                                    <tr><td colSpan={10} className="text-center py-16 text-surface-400">No production orders found</td></tr>
                                 )}
                             </tbody>
                         </table>

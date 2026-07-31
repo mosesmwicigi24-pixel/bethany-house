@@ -110,6 +110,16 @@ class Order extends Model
         return $this->belongsTo(User::class);
     }
 
+    /**
+     * The customer record this order is attached to. POS can set customer_id
+     * while leaving the snapshot name columns blank, so this is the last
+     * resort when resolving who an order (or its production job) is for.
+     */
+    public function customer()
+    {
+        return $this->belongsTo(Customer::class);
+    }
+
     public function outlet()
     {
         return $this->belongsTo(Outlet::class);
