@@ -150,6 +150,13 @@ const fmtDate = (d?: string | null) =>
 const fmtDateTime = (d?: string | null) =>
     d ? new Date(d).toLocaleString("en-KE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
 const daysUntil = (d: string) => Math.ceil((new Date(d).getTime() - Date.now()) / 86_400_000);
+
+// Shared geometry for the detail-page action row. Defined once so the width
+// budget in the comment above that row stays true — a one-off `px-3` on a
+// single button is what pushed it onto a second line before.
+const ACT_BTN = "flex items-center gap-1 bg-white border border-surface-200 rounded-lg px-2.5 h-8 sm:h-9 " +
+    "text-[11px] sm:text-xs font-semibold text-surface-700 hover:border-brand-300 hover:text-brand-600 transition-colors";
+const MENU_ITEM = "w-full text-left px-3.5 py-2.5 text-xs font-semibold text-surface-700 hover:bg-surface-50 transition-colors";
 const fmtNum = (n: number) => n.toLocaleString("en-KE", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
 const hoursBetween = (from?: string | null, to?: string | null): number | null =>
     from ? ((to ? new Date(to).getTime() : Date.now()) - new Date(from).getTime()) / 3_600_000 : null;
@@ -2334,82 +2341,78 @@ export default function ProductionOrderDetailPage() {
                     </div>
                 </div>
 
-                {/* Action bar */}
-                {/* One thumb-height scrollable strip on phones — six buttons no
-                    longer stack into a half-screen pile. Desktop wraps as before. */}
-                {/* Actions WRAP on a phone; they used to sit in an overflow-x
-                    scroller with no-scrollbar, so Delete and Costing Report were
-                    off the right edge with no visual cue they existed at all —
-                    you had to guess and swipe. Wrapping costs one row and makes
-                    every action discoverable. The primary button spans the full
-                    width on its own row so the next step is unmissable and in
-                    the thumb zone. */}
-                <div className="px-4 py-3 bg-white border-b border-line flex items-center gap-2 flex-wrap sm:px-8
+                {/* Action bar — ONE row on a phone.
+                    Three earlier attempts failed here, so the sizing below is
+                    measured rather than eyeballed. A 412px viewport leaves
+                    348px of content width inside this bar (412 − 32px page
+                    chrome − 32px px-4 padding). The old row asked for 686px on
+                    an in-progress order and broke into three lines.
+                    Budget at 11px/px-2.5/h-8, worst realistic case (pending or
+                    in_progress → Assign + Materials + PDF + Costing + ⋯):
+                        60 + 75 + 56 + 65 + 32 + 4 gaps × 6 = 312 ≤ 348 ✓
+                    Levers used, in order of preference:
+                      1. labels shorten below `sm` (full words return on desktop)
+                      2. emoji drop below `sm` — same trick as the tabs
+                      3. WIP Board moves into ⋯ (it is navigation, not an action)
+                    flex-wrap is kept as a safety net for a narrower phone rather
+                    than clipping, but at 412 it never engages. */}
+                <div className="px-4 py-3 bg-white border-b border-line flex items-center gap-1.5 flex-wrap sm:gap-2 sm:px-8
                                 [&>*]:shrink-0">
                     {canConfirm && (
                         <button onClick={() => confirmMutation.mutate()} disabled={confirmMutation.isPending}
-                            className="bg-brand-500 text-white rounded-full px-4 min-h-[36px] text-xs font-bold hover:bg-brand-600 active:bg-brand-700 transition-colors flex items-center gap-1.5">
-                            {confirmMutation.isPending ? "Confirming…" : "✓ Confirm Order"}
+                            className="bg-brand-500 text-white rounded-full px-3 sm:px-4 h-8 sm:h-9 text-[11px] sm:text-xs font-bold hover:bg-brand-600 active:bg-brand-700 transition-colors flex items-center gap-1">
+                            {confirmMutation.isPending ? "Confirming…" : <>✓ Confirm<span className="hidden sm:inline">&nbsp;Order</span></>}
                         </button>
                     )}
                     {canAssign && (
-                        <button onClick={() => setModal("assign")}
-                            className="btn-sm bg-white border border-surface-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-surface-700 hover:border-brand-300 hover:text-brand-600 transition-colors">
-                            👥 Assign Tasks
+                        <button onClick={() => setModal("assign")} className={ACT_BTN}>
+                            <span className="hidden sm:inline">👥 </span>Assign<span className="hidden sm:inline">&nbsp;Tasks</span>
                         </button>
                     )}
                     {canMaterials && (
-                        <button onClick={() => setModal("materials")}
-                            className="btn-sm bg-white border border-surface-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-surface-700 hover:border-brand-300 hover:text-brand-600 transition-colors">
-                            🧵 Issue Materials
+                        <button onClick={() => setModal("materials")} className={ACT_BTN}>
+                            <span className="hidden sm:inline">🧵 Issue </span>Materials
                         </button>
                     )}
                     {canQC && (
                         <button onClick={() => setModal("qc")}
-                            className="btn-sm bg-purple-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-purple-700">
-                            🔍 Quality Check
+                            className="bg-purple-600 text-white border border-purple-600 rounded-lg px-2.5 h-8 sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-purple-700 transition-colors flex items-center gap-1">
+                            <span className="hidden sm:inline">🔍 Quality Check</span><span className="sm:hidden">QC</span>
                         </button>
                     )}
                     {canComplete && (
                         <button onClick={() => setModal("complete")}
-                            className="btn-sm bg-emerald-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-emerald-700">
-                            ✅ Complete & Stock
+                            className="bg-emerald-600 text-white border border-emerald-600 rounded-lg px-2.5 h-8 sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-emerald-700 transition-colors flex items-center gap-1">
+                            <span className="hidden sm:inline">✅ Complete &amp; Stock</span><span className="sm:hidden">Complete</span>
                         </button>
                     )}
-                    {canOpenWIP && (
-                        <button onClick={() => navigate("/production/wip", { state: { openOrderId: order.id } })}
-                            className="btn-sm bg-white border border-surface-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-surface-700 hover:border-brand-300 hover:text-brand-600 transition-colors">
-                            Open in WIP Board ↗
-                        </button>
-                    )}
-                    <PdfDownloadButton type="production-orders" id={order.id} label="Download PDF" />
+                    <PdfDownloadButton type="production-orders" id={order.id} label="PDF"
+                        className="!rounded-lg !px-2.5 !h-8 sm:!h-9 !text-[11px] sm:!text-xs" />
                     <button
                         onClick={() => navigate(`/reports/production/costing/${order.id}`)}
-                        className="btn-sm bg-white border border-surface-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-surface-700 hover:border-emerald-300 hover:text-emerald-700 transition-colors"
+                        className={clsx(ACT_BTN, "hover:!border-emerald-300 hover:!text-emerald-700")}
                     >
-                        📊 <span className="sm:hidden">Costing</span><span className="hidden sm:inline">Costing Report</span>
+                        <span className="hidden sm:inline">📊 </span>Costing<span className="hidden sm:inline">&nbsp;Report</span>
                     </button>
 
-                    {/* Edit / Cancel / Delete live behind ⋯ at the end of the row.
-                        They are occasional and two of them are destructive, so
-                        they earn a deliberate second tap rather than a permanent
-                        slice of a 412px-wide action bar. Both destructive items
-                        still open their existing confirmation modals.
+                    {/* WIP Board / Edit / Cancel / Delete live behind ⋯ at the end
+                        of the row. They are occasional, one is navigation and two
+                        are destructive, so they earn a deliberate second tap
+                        rather than a permanent slice of a 348px action bar. Both
+                        destructive items still open their existing confirm modals.
 
-                        NOT `ml-auto`: pushing ⋯ to the far edge both separated it
-                        from the group it belongs to and, on a wrapping row, left
-                        it stranded alone on a second line whenever the buttons
-                        came within a few px of the width. Sitting directly after
-                        the last action, it reads as part of the group and wraps
-                        with it. */}
-                    {(canEdit || canDelete || canCancel) && (
+                        NOT `ml-auto`: pushing ⋯ to the far edge separated it from
+                        the group it belongs to and, on a wrapping row, stranded it
+                        alone on a second line whenever the buttons came within a
+                        few px of the width. */}
+                    {(canOpenWIP || canEdit || canDelete || canCancel) && (
                         <div className="relative" ref={menuRef}>
                             <button
                                 onClick={() => setMenuOpen(o => !o)}
                                 aria-haspopup="menu"
                                 aria-expanded={menuOpen}
                                 aria-label="More actions"
-                                className={clsx("w-9 h-9 rounded-xl border flex items-center justify-center transition-colors",
+                                className={clsx("w-8 h-8 sm:w-9 sm:h-9 rounded-lg border flex items-center justify-center transition-colors",
                                     menuOpen ? "bg-surface-100 border-surface-300 text-surface-900"
                                              : "bg-white border-surface-200 text-surface-600 hover:border-surface-300 hover:text-surface-900")}
                             >
@@ -2419,25 +2422,31 @@ export default function ProductionOrderDetailPage() {
                             </button>
                             {menuOpen && (
                                 <div role="menu"
-                                    className="absolute right-0 top-full mt-1.5 z-30 min-w-[176px] bg-white rounded-control
+                                    className="absolute right-0 top-full mt-1.5 z-30 min-w-[180px] bg-white rounded-control
                                                border border-line shadow-pop py-1 animate-fade-in">
+                                    {canOpenWIP && (
+                                        <button role="menuitem" onClick={() => { setMenuOpen(false); navigate("/production/wip", { state: { openOrderId: order.id } }); }}
+                                            className={MENU_ITEM}>
+                                            Open in WIP Board ↗
+                                        </button>
+                                    )}
                                     {canEdit && (
                                         <button role="menuitem" onClick={() => { setMenuOpen(false); setModal("edit"); }}
-                                            className="w-full text-left px-3.5 py-2.5 text-xs font-semibold text-surface-700 hover:bg-surface-50 transition-colors">
+                                            className={MENU_ITEM}>
                                             ✎ Edit Order
                                         </button>
                                     )}
                                     {canCancel && (
                                         <button role="menuitem" onClick={() => { setMenuOpen(false); setShowCancelConfirm(true); }}
                                             disabled={cancelMutation.isPending}
-                                            className="w-full text-left px-3.5 py-2.5 text-xs font-semibold text-danger hover:bg-danger/5 transition-colors">
+                                            className={clsx(MENU_ITEM, "!text-danger hover:!bg-danger/5")}>
                                             {cancelMutation.isPending ? "Cancelling…" : "⊘ Cancel Order"}
                                         </button>
                                     )}
                                     {canDelete && (
                                         <button role="menuitem" onClick={() => { setMenuOpen(false); setShowDeleteConfirm(true); }}
                                             disabled={deleteMutation.isPending}
-                                            className="w-full text-left px-3.5 py-2.5 text-xs font-semibold text-danger hover:bg-danger/5 transition-colors">
+                                            className={clsx(MENU_ITEM, "!text-danger hover:!bg-danger/5")}>
                                             🗑 Delete Order
                                         </button>
                                     )}
