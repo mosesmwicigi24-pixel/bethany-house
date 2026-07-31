@@ -265,7 +265,7 @@ export default function LoginPage() {
                         <img src={`${import.meta.env.BASE_URL}images/logo.png`} alt="Bethany House" className="h-10 w-auto object-contain" />
                     </div>
 
-                    <div className="card p-8 shadow-card-lg">
+                    <div className="card p-8">
 
                         {/* ── credentials ──────────────────────────────── */}
                         {step === "credentials" && (
