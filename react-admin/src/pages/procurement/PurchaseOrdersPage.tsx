@@ -1173,7 +1173,123 @@ export default function PurchaseOrdersPage() {
                     </div>
                 ) : (
                     <>
-                        <div className="table-wrapper rounded-none border-0">
+                        {/* Phone: a card list. A 7-column table on a 390px
+                            screen scrolls sideways and wraps the PO number onto
+                            three lines — the reference app never puts a table on
+                            a handset. Desktop keeps the table, where the columns
+                            genuinely fit. Same rows, same date groups, same
+                            destination on tap. */}
+                        <div className="md:hidden">
+                            {/* groupRowsByDate only compares a row against the
+                                PREVIOUS group, so a calendar date can legitimately
+                                repeat non-contiguously (the API sorts by
+                                order_date, we group by created_at). Suffix the
+                                index so React never sees two children with the
+                                same key. */}
+                            {orderGroups.map((group, groupIndex) => (
+                                <div
+                                    key={`${group.key}-${groupIndex}`}
+                                    className="border-t border-surface-100 first:border-t-0"
+                                >
+                                    <p className="px-3.5 py-1.5 bg-surface-50 border-b border-surface-100 text-2xs font-bold uppercase tracking-wider text-surface-500">
+                                        {group.label}
+                                    </p>
+                                    <div className="divide-y divide-surface-100">
+                                        {group.items.map((po) => {
+                                            const cfg =
+                                                PO_STATUSES[po.status] ??
+                                                PO_STATUSES.draft;
+                                            const itemCount =
+                                                po.items?.length ?? 0;
+                                            // Same "late" rule the Expected
+                                            // Delivery column uses.
+                                            const overdue =
+                                                ![
+                                                    "received",
+                                                    "cancelled",
+                                                ].includes(po.status) &&
+                                                new Date(
+                                                    po.expected_delivery_date,
+                                                ) < new Date();
+                                            return (
+                                                <button
+                                                    key={po.id}
+                                                    onClick={() =>
+                                                        navigate(
+                                                            `/procurement/purchase-orders/${po.id}`,
+                                                        )
+                                                    }
+                                                    className="w-full text-left px-3.5 py-3 active:bg-surface-50 transition-colors"
+                                                >
+                                                    {/* Line 1 — who we're buying from, and where it stands */}
+                                                    <div className="flex items-start gap-2">
+                                                        <span
+                                                            className={clsx(
+                                                                "mt-1.5 w-1.5 h-1.5 rounded-full shrink-0",
+                                                                cfg.dot,
+                                                            )}
+                                                        />
+                                                        <p className="flex-1 min-w-0 font-bold text-surface-900 text-[13.5px] leading-snug truncate">
+                                                            {po.supplier?.name ??
+                                                                "-"}
+                                                        </p>
+                                                        <span
+                                                            className={clsx(
+                                                                "badge shrink-0",
+                                                                cfg.badge,
+                                                            )}
+                                                        >
+                                                            {cfg.label}
+                                                        </span>
+                                                    </div>
+
+                                                    {/* Line 2 — when it lands, and how big it is */}
+                                                    <p className="mt-1 pl-3.5 text-[12.5px] truncate">
+                                                        <span
+                                                            className={clsx(
+                                                                overdue
+                                                                    ? "text-danger font-medium"
+                                                                    : "text-surface-600",
+                                                            )}
+                                                        >
+                                                            Expected{" "}
+                                                            {new Date(
+                                                                po.expected_delivery_date,
+                                                            ).toLocaleDateString()}
+                                                        </span>
+                                                        <span className="text-surface-400">
+                                                            {" · "}
+                                                            {itemCount} item
+                                                            {itemCount === 1
+                                                                ? ""
+                                                                : "s"}
+                                                        </span>
+                                                    </p>
+
+                                                    {/* Line 3 — the reference and the money */}
+                                                    <div className="mt-1 pl-3.5 flex items-center gap-2 text-2xs">
+                                                        <span className="min-w-0 truncate font-mono font-bold text-brand-700">
+                                                            {po.po_number}
+                                                        </span>
+                                                        <span className="ml-auto shrink-0 tabular-nums font-bold text-surface-900">
+                                                            {po.currency ??
+                                                                po.currency_code}{" "}
+                                                            {Number(
+                                                                po.total ??
+                                                                    po.total_amount,
+                                                            ).toLocaleString()}
+                                                        </span>
+                                                    </div>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Desktop table — unchanged */}
+                        <div className="table-wrapper rounded-none border-0 hidden md:block">
                             <table className="table">
                                 <thead>
                                     <tr>

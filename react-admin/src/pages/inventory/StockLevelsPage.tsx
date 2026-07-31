@@ -1620,7 +1620,111 @@ export default function StockLevelsPage() {
                         )}
                     </div>
                 ) : (
-                    <div className="overflow-x-auto">
+                    <>
+                    {/* Phone: a card list. An 8-column table with a 640px minimum
+                        scrolls sideways on a 390px screen, so the one fact that
+                        matters — is this line low or out of stock — ends up off
+                        the right edge. Desktop keeps the table, where the columns
+                        genuinely fit. */}
+                    <div className="md:hidden divide-y divide-surface-100">
+                        {items.map((item) => {
+                            const status = STATUS_CONFIG[item.status];
+                            return (
+                                <div
+                                    key={item.id}
+                                    className="flex items-stretch"
+                                >
+                                <button
+                                    onClick={() => setHistoryItem(item)}
+                                    className="flex-1 min-w-0 text-left pl-3.5 pr-1 py-3 active:bg-surface-50 transition-colors"
+                                >
+                                    {/* Line 1 — what it is, and whether it needs attention */}
+                                    <div className="flex items-start gap-2">
+                                        <span
+                                            className={clsx(
+                                                "mt-1.5 w-1.5 h-1.5 rounded-full shrink-0",
+                                                status.dot,
+                                            )}
+                                        />
+                                        <p className="flex-1 min-w-0 font-bold text-surface-900 text-[13.5px] leading-snug truncate">
+                                            {item.product?.name ?? "-"}
+                                            {item.variant && (
+                                                <span className="font-medium text-surface-500">
+                                                    {" · "}
+                                                    {item.variant.variant_name}
+                                                </span>
+                                            )}
+                                        </p>
+                                        <span
+                                            className={clsx(
+                                                "shrink-0 text-2xs font-bold px-2 py-0.5 rounded-full",
+                                                status.bg,
+                                                status.text,
+                                            )}
+                                        >
+                                            {status.label}
+                                        </span>
+                                    </div>
+
+                                    {/* Line 2 — where it sits, and when it should be reordered */}
+                                    <p className="mt-1 pl-3.5 text-[12.5px] text-surface-600 truncate">
+                                        {item.outlet?.name ?? "-"}
+                                        {item.reorder_point > 0 && (
+                                            <span className="text-surface-400">
+                                                {" · reorder at "}
+                                                {item.reorder_point}
+                                            </span>
+                                        )}
+                                    </p>
+
+                                    {/* Line 3 — the reference, and the number people act on */}
+                                    <div className="mt-1 pl-3.5 flex items-center gap-2 text-2xs">
+                                        <span className="min-w-0 font-mono font-bold text-brand-700 truncate">
+                                            {item.product?.sku}
+                                        </span>
+                                        {item.quantity_reserved > 0 && (
+                                            <span className="shrink-0 text-warning font-semibold tabular-nums">
+                                                {item.quantity_reserved} reserved
+                                            </span>
+                                        )}
+                                        <span
+                                            className={clsx(
+                                                "ml-auto shrink-0 tabular-nums font-bold",
+                                                item.quantity_available === 0
+                                                    ? "text-danger"
+                                                    : item.status === "low_stock"
+                                                      ? "text-warning"
+                                                      : "text-success",
+                                            )}
+                                        >
+                                            {item.quantity_available}
+                                            <span className="font-medium text-surface-400">
+                                                {" avail"}
+                                            </span>
+                                        </span>
+                                    </div>
+                                </button>
+
+                                {/* Same permission-gated action the table row
+                                    carries. A sibling of the card button, not a
+                                    child — a button inside a button is invalid
+                                    and swallows the inner tap. */}
+                                {canAdjust && (
+                                    <button
+                                        title="Reorder settings"
+                                        aria-label="Reorder settings"
+                                        onClick={() => setReorderItem(item)}
+                                        className="shrink-0 px-3 flex items-center text-surface-300 active:text-brand-600 transition-colors"
+                                    >
+                                        <SettingsIcon />
+                                    </button>
+                                )}
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    <div className="hidden md:block overflow-x-auto">
                     <table className="w-full min-w-[640px]">
                         <thead>
                             <tr className="border-b border-surface-100 bg-surface-50/50">
@@ -1814,6 +1918,7 @@ export default function StockLevelsPage() {
                         </tbody>
                     </table>
                     </div>
+                    </>
                 )}
 
                 {/* Pagination */}
