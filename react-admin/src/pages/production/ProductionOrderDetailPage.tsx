@@ -2036,6 +2036,23 @@ export default function ProductionOrderDetailPage() {
     const [showCancelConfirm, setShowCancelConfirm] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [cancelReason, setCancelReason] = useState("");
+    // Overflow (⋯) menu holding the rare + destructive actions, so the action
+    // row stays short enough to fit a phone without wrapping to three lines.
+    const [menuOpen, setMenuOpen] = useState(false);
+    const menuRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if (!menuOpen) return;
+        const onDown = (e: MouseEvent) => {
+            if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+        };
+        const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenuOpen(false); };
+        document.addEventListener("mousedown", onDown);
+        document.addEventListener("keydown", onKey);
+        return () => {
+            document.removeEventListener("mousedown", onDown);
+            document.removeEventListener("keydown", onKey);
+        };
+    }, [menuOpen]);
 
     // Current user — to detect which stages they are assigned to
     const currentUserId = useAuthStore(s => s.user?.id ?? null);
@@ -2144,7 +2161,6 @@ export default function ProductionOrderDetailPage() {
     // the header rather than a card further down the page.
     const customerName = [order.customer_order?.customer_first_name, order.customer_order?.customer_last_name]
         .filter(Boolean).join(" ").trim() || null;
-    const customerPhone = order.customer_order?.customer_phone?.trim() || null;
     // Finished = pieces past the LAST stage — the same arithmetic the pipeline
     // runs on, surfaced as a headline number.
     const seqTasks = sortedTasks.filter(t => t.sequence != null);
@@ -2186,14 +2202,17 @@ export default function ProductionOrderDetailPage() {
     // Batches earn a tab of their own the moment they can exist: a rich batch
     // card needs the main column, not a 260px sidebar sliver.
     const showBatchesTab = (order.batches?.length ?? 0) > 0 || (canEdit && order.quantity > 1);
+    // Icon is split from the label so it can be dropped below `sm`: five tabs
+    // with emoji measure ~414px and overflow a 412px phone, which is exactly
+    // how Audit ended up off-screen. Text-only they fit with room to spare.
     const tabs = [
-        { key: "stages",    label: `⚙️ Stages (${sortedTasks.length})` },
-        ...(showBatchesTab ? [{ key: "batches", label: `🎨 Batches (${order.batches?.length ?? 0})` }] : []),
-        { key: "materials", label: `🧵 Materials (${allocations.length})` },
-        ...(hasSpecs ? [{ key: "specs", label: "📐 Specs" }] : []),
-        { key: "activity",  label: "💬 Notes" },
-        { key: "audit",     label: "🕐 Audit" },
-    ] as { key: string; label: string }[];
+        { key: "stages",    icon: "⚙️", label: `Stages (${sortedTasks.length})` },
+        ...(showBatchesTab ? [{ key: "batches", icon: "🎨", label: `Batches (${order.batches?.length ?? 0})` }] : []),
+        { key: "materials", icon: "🧵", label: `Materials (${allocations.length})` },
+        ...(hasSpecs ? [{ key: "specs", icon: "📐", label: "Specs" }] : []),
+        { key: "activity",  icon: "💬", label: "Notes" },
+        { key: "audit",     icon: "🕐", label: "Audit" },
+    ] as { key: string; icon: string; label: string }[];
 
     return (
         <div className="max-w-6xl mx-auto">
@@ -2213,80 +2232,84 @@ export default function ProductionOrderDetailPage() {
                     QUANTITY at 4xl pushed every action below the fold. Mobile
                     gets one compact banner: identity, status, one stat line. */}
                 <div className="px-4 py-4 sm:px-8 sm:py-6 bg-white border-b border-line">
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:flex-wrap">
-                        <div className="min-w-0">
-                            {/* WHAT it is leads. The reference number is how you got
-                                here, not what you came to read — it moves to the
-                                metadata line below. */}
-                            <h1 className="text-[22px] sm:text-3xl font-extrabold text-surface-900 tracking-[-0.02em] leading-tight truncate">
-                                {order.product_name}
-                            </h1>
 
-                            {/* WHOSE it is, integrated into the header itself. */}
-                            <div className="flex items-center gap-2 mt-1">
-                                <p className="min-w-0 text-[15px] font-bold text-surface-700 truncate">
-                                    {customerName ?? (isCustomer ? "Customer order" : "For stock")}
-                                </p>
-                                {customerPhone && (
-                                    <a
-                                        href={`tel:${customerPhone.replace(/[^+\d]/g, "")}`}
-                                        aria-label={`Call ${customerName ?? "customer"} on ${customerPhone}`}
-                                        className="shrink-0 w-8 h-8 rounded-full bg-surface-100 flex items-center justify-center
-                                                   text-surface-600 active:bg-surface-200 transition-colors"
-                                    >
-                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                                             strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
-                                            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.9.36 1.78.7 2.61a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.47-1.27a2 2 0 0 1 2.11-.45c.83.34 1.71.57 2.61.7A2 2 0 0 1 22 16.92z" />
-                                        </svg>
-                                    </a>
-                                )}
-                            </div>
-
-                            <div className="flex items-center gap-2 mt-2.5 flex-wrap">
-                                <span className={clsx("px-2.5 py-1 rounded-full text-xs font-bold", statusCfg.bg, statusCfg.color)}>
-                                    {statusCfg.label}
-                                </span>
-                                {/* Priority earns a chip only when it is NOT normal —
-                                    a loud "NORMAL" badge is the least actionable thing
-                                    on the page competing with the primary action. */}
-                                {order.priority !== "normal" && (
-                                    <span className={clsx("text-2xs font-bold px-2 py-0.5 rounded-full uppercase tracking-wide", priorityCfg.cls)}>
-                                        {priorityCfg.label}
-                                    </span>
-                                )}
-                                {isCustomer && (
-                                    <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-brand-50 text-brand-700">
-                                        Custom Order
-                                    </span>
-                                )}
-                            </div>
+                    {/* Eyebrow: the sales order this was raised against. It used to
+                        be a separate card below the actions — a second identity
+                        block saying the same thing twice. Here it reads as the
+                        provenance of the name directly beneath it. The customer
+                        PHONE is deliberately NOT shown: a production order is a
+                        works ticket for the floor, and contact details are not
+                        needed to make the garment. */}
+                    {isCustomer && (
+                        <div className="flex items-center gap-1.5 mb-1.5 text-2xs">
+                            <span className="font-bold uppercase tracking-widest text-indigo-500">Sales order</span>
+                            {order.customer_order ? (
+                                <Link to={`/sales/orders/${order.customer_order_id}`}
+                                    className="font-mono font-bold text-indigo-700 hover:underline truncate">
+                                    {order.customer_order.order_number}
+                                </Link>
+                            ) : (
+                                <span className="font-bold text-indigo-700">#{order.customer_order_id}</span>
+                            )}
                         </div>
+                    )}
 
-                        <div className="flex items-start gap-5 sm:gap-7 sm:justify-end">
-                            <div className="sm:text-right">
-                                <p className="text-surface-900 font-extrabold tabular-nums text-xl sm:text-3xl leading-none">{order.quantity}</p>
-                                <p className="text-surface-400 text-2xs font-bold uppercase tracking-wide mt-1">pieces</p>
-                            </div>
-                            <div className="sm:text-right">
-                                <p className={clsx("font-extrabold tabular-nums text-xl sm:text-3xl leading-none",
-                                    finishedPieces >= order.quantity && order.quantity > 0 ? "text-success-dark" : finishedPieces > 0 ? "text-success" : "text-surface-400")}>
-                                    {finishedPieces}
-                                </p>
-                                <p className="text-surface-400 text-2xs font-bold uppercase tracking-wide mt-1">finished</p>
-                            </div>
-                            <div className="sm:text-right">
-                                <p className={clsx("font-extrabold tabular-nums text-xl sm:text-3xl leading-none",
-                                    days < 0 ? "text-danger" : days <= 2 ? "text-amber-dark" : "text-surface-900")}>
-                                    {days < 0 ? `${Math.abs(days)}d` : days === 0 ? "Today" : `${days}d`}
-                                </p>
-                                <p className="text-surface-400 text-2xs font-bold uppercase tracking-wide mt-1 whitespace-nowrap">
-                                    {days < 0 ? "overdue" : "until due"} · {fmtDate(order.due_date)}
-                                </p>
-                            </div>
+                    {/* WHOSE job this is leads the page — it is the first thing
+                        anyone on the floor or the counter asks. The product sits
+                        directly under it as the answer to "making what?". */}
+                    <h1 className="text-[22px] sm:text-3xl font-extrabold text-surface-900 tracking-[-0.02em] leading-tight truncate">
+                        {customerName ?? order.product_name}
+                    </h1>
+                    <p className="mt-0.5 text-sm sm:text-base font-semibold text-surface-600 truncate">
+                        {customerName ? order.product_name : (isCustomer ? "Customer order" : "For stock")}
+                    </p>
+
+                    <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                        <span className={clsx("px-2 py-0.5 rounded-full text-2xs font-bold", statusCfg.bg, statusCfg.color)}>
+                            {statusCfg.label}
+                        </span>
+                        {/* Priority earns a chip only when it is NOT normal — a loud
+                            "NORMAL" badge is the least actionable thing on the page. */}
+                        {order.priority !== "normal" && (
+                            <span className={clsx("text-2xs font-bold px-2 py-0.5 rounded-full uppercase tracking-wide", priorityCfg.cls)}>
+                                {priorityCfg.label}
+                            </span>
+                        )}
+                        {isCustomer && (
+                            <span className="px-2 py-0.5 rounded-full text-2xs font-bold bg-brand-50 text-brand-700">
+                                Custom
+                            </span>
+                        )}
+                    </div>
+
+                    {/* The three numbers, ruled into equal columns instead of
+                        floating loose at three different widths. Smaller than the
+                        old 19/28px figures — they are supporting facts, not the
+                        headline. */}
+                    <div className="mt-3 grid grid-cols-3 rounded-field border border-line divide-x divide-line overflow-hidden bg-field">
+                        <div className="px-2.5 py-2">
+                            <p className="text-surface-900 font-extrabold tabular-nums text-[17px] sm:text-xl leading-none">{order.quantity}</p>
+                            <p className="text-surface-500 text-2xs font-bold uppercase tracking-wide mt-1 leading-tight">pieces</p>
+                        </div>
+                        <div className="px-2.5 py-2">
+                            <p className={clsx("font-extrabold tabular-nums text-[17px] sm:text-xl leading-none",
+                                finishedPieces >= order.quantity && order.quantity > 0 ? "text-success-dark" : finishedPieces > 0 ? "text-success" : "text-surface-500")}>
+                                {finishedPieces}
+                            </p>
+                            <p className="text-surface-500 text-2xs font-bold uppercase tracking-wide mt-1 leading-tight">finished</p>
+                        </div>
+                        <div className="px-2.5 py-2">
+                            <p className={clsx("font-extrabold tabular-nums text-[17px] sm:text-xl leading-none",
+                                days < 0 ? "text-danger" : days <= 2 ? "text-amber-dark" : "text-surface-900")}>
+                                {days < 0 ? `${Math.abs(days)}d` : days === 0 ? "Today" : `${days}d`}
+                            </p>
+                            <p className="text-surface-500 text-2xs font-bold uppercase tracking-wide mt-1 leading-tight">
+                                {days < 0 ? "overdue" : "until due"} · {fmtDate(order.due_date)}
+                            </p>
                         </div>
                     </div>
 
-                    <div className="mt-4">
+                    <div className="mt-3">
                         <div className="flex justify-between text-2xs text-surface-500 mb-1.5">
                             <span>{order.current_stage ?? "Not started"}</span>
                             <span className="font-bold">{order.completion_percentage}% complete</span>
@@ -2298,10 +2321,13 @@ export default function ProductionOrderDetailPage() {
                         </div>
                     </div>
 
-                    {/* References and provenance — needed occasionally, so they sit
-                        last and quiet rather than leading the page. */}
-                    <div className="flex items-center gap-x-3 gap-y-1 flex-wrap mt-3 text-2xs text-surface-400">
-                        <span className="font-mono">{order.order_number}</span>
+                    {/* References and provenance. Was surface-400 on white — 2.55:1,
+                        below AA and genuinely hard to read on a workshop phone.
+                        Now a tinted strip with the PO number carried in brand-700
+                        (4.9:1): present, findable, still clearly secondary. */}
+                    <div className="flex items-center gap-x-2 gap-y-0.5 flex-wrap mt-3 px-2.5 py-1.5
+                                    rounded-field bg-surface-50 text-2xs text-surface-600">
+                        <span className="font-mono font-bold text-brand-700">{order.order_number}</span>
                         {order.outlet && <span>· {order.outlet.name}</span>}
                         {order.created_by && <span>· {[order.created_by.first_name, order.created_by.last_name].filter(Boolean).join(" ")}</span>}
                         {order.confirmed_at && <span>· confirmed {fmtDate(order.confirmed_at)}</span>}
@@ -2319,10 +2345,10 @@ export default function ProductionOrderDetailPage() {
                     width on its own row so the next step is unmissable and in
                     the thumb zone. */}
                 <div className="px-4 py-3 bg-white border-b border-line flex items-center gap-2 flex-wrap sm:px-8
-                                [&>*]:shrink-0 [&>.btn-block]:w-full [&>.btn-block]:sm:w-auto">
+                                [&>*]:shrink-0">
                     {canConfirm && (
                         <button onClick={() => confirmMutation.mutate()} disabled={confirmMutation.isPending}
-                            className="btn-block w-full sm:w-auto justify-center bg-brand-500 text-white rounded-full px-5 min-h-[48px] sm:min-h-[36px] text-sm font-bold hover:bg-brand-600 active:bg-brand-700 transition-colors flex items-center gap-2">
+                            className="bg-brand-500 text-white rounded-full px-4 min-h-[36px] text-xs font-bold hover:bg-brand-600 active:bg-brand-700 transition-colors flex items-center gap-1.5">
                             {confirmMutation.isPending ? "Confirming…" : "✓ Confirm Order"}
                         </button>
                     )}
@@ -2356,12 +2382,6 @@ export default function ProductionOrderDetailPage() {
                             Open in WIP Board ↗
                         </button>
                     )}
-                    {canEdit && (
-                        <button onClick={() => setModal("edit")}
-                            className="btn-sm bg-white border border-surface-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-surface-700 hover:border-brand-300 hover:text-brand-600 transition-colors">
-                            ✎ Edit Order
-                        </button>
-                    )}
                     <PdfDownloadButton type="production-orders" id={order.id} label="Download PDF" />
                     <button
                         onClick={() => navigate(`/reports/production/costing/${order.id}`)}
@@ -2369,19 +2389,54 @@ export default function ProductionOrderDetailPage() {
                     >
                         📊 Costing Report
                     </button>
-                    {canDelete && (
-                        <button onClick={() => setShowDeleteConfirm(true)}
-                            disabled={deleteMutation.isPending}
-                            className="btn-sm bg-white text-danger border border-danger/40 rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-danger/5 ml-auto">
-                            🗑 Delete Order
-                        </button>
-                    )}
-                    {canCancel && (
-                        <button onClick={() => setShowCancelConfirm(true)}
-                            disabled={cancelMutation.isPending}
-                            className="btn-sm bg-white text-danger border border-danger/30 rounded-xl px-3 py-1.5 text-xs font-semibold">
-                            {cancelMutation.isPending ? "Cancelling…" : "Cancel Order"}
-                        </button>
+
+                    {/* Edit / Cancel / Delete live behind ⋯ at the end of the row.
+                        They are occasional and two of them are destructive, so
+                        they earn a deliberate second tap rather than a permanent
+                        slice of a 412px-wide action bar. Both destructive items
+                        still open their existing confirmation modals. */}
+                    {(canEdit || canDelete || canCancel) && (
+                        <div className="relative ml-auto" ref={menuRef}>
+                            <button
+                                onClick={() => setMenuOpen(o => !o)}
+                                aria-haspopup="menu"
+                                aria-expanded={menuOpen}
+                                aria-label="More actions"
+                                className={clsx("w-9 h-9 rounded-xl border flex items-center justify-center transition-colors",
+                                    menuOpen ? "bg-surface-100 border-surface-300 text-surface-900"
+                                             : "bg-white border-surface-200 text-surface-600 hover:border-surface-300 hover:text-surface-900")}
+                            >
+                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                    <circle cx="12" cy="5" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="12" cy="19" r="1.6" />
+                                </svg>
+                            </button>
+                            {menuOpen && (
+                                <div role="menu"
+                                    className="absolute right-0 top-full mt-1.5 z-30 min-w-[176px] bg-white rounded-control
+                                               border border-line shadow-pop py-1 animate-fade-in">
+                                    {canEdit && (
+                                        <button role="menuitem" onClick={() => { setMenuOpen(false); setModal("edit"); }}
+                                            className="w-full text-left px-3.5 py-2.5 text-xs font-semibold text-surface-700 hover:bg-surface-50 transition-colors">
+                                            ✎ Edit Order
+                                        </button>
+                                    )}
+                                    {canCancel && (
+                                        <button role="menuitem" onClick={() => { setMenuOpen(false); setShowCancelConfirm(true); }}
+                                            disabled={cancelMutation.isPending}
+                                            className="w-full text-left px-3.5 py-2.5 text-xs font-semibold text-danger hover:bg-danger/5 transition-colors">
+                                            {cancelMutation.isPending ? "Cancelling…" : "⊘ Cancel Order"}
+                                        </button>
+                                    )}
+                                    {canDelete && (
+                                        <button role="menuitem" onClick={() => { setMenuOpen(false); setShowDeleteConfirm(true); }}
+                                            disabled={deleteMutation.isPending}
+                                            className="w-full text-left px-3.5 py-2.5 text-xs font-semibold text-danger hover:bg-danger/5 transition-colors">
+                                            🗑 Delete Order
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                        </div>
                     )}
                 </div>
 
@@ -2391,42 +2446,19 @@ export default function ProductionOrderDetailPage() {
                     {/* Left */}
                     <div className="space-y-4 lg:pr-8">
 
-                        {/* Linked sales order — one line, not a billboard: the order
-                            number is the link, customer name and phone ride along. */}
-                        {isCustomer && (
-                            <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl border bg-indigo-50/70 border-indigo-100 text-xs">
-                                <svg className="w-4 h-4 text-indigo-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                                </svg>
-                                <div className="flex items-center gap-x-2 gap-y-0.5 flex-wrap min-w-0">
-                                    <span className="text-2xs text-indigo-500 font-semibold uppercase tracking-widest">Sales Order</span>
-                                    {order.customer_order ? (
-                                        <Link to={`/sales/orders/${order.customer_order_id}`}
-                                            className="font-bold text-indigo-800 font-mono hover:underline">
-                                            {order.customer_order.order_number}
-                                        </Link>
-                                    ) : (
-                                        <span className="font-bold text-indigo-800">#{order.customer_order_id}</span>
-                                    )}
-                                    {order.customer_order && (order.customer_order.customer_first_name || order.customer_order.customer_last_name) && (
-                                        <span className="text-indigo-700 font-medium">
-                                            {[order.customer_order.customer_first_name, order.customer_order.customer_last_name].filter(Boolean).join(" ")}
-                                        </span>
-                                    )}
-                                    {order.customer_order?.customer_phone && (
-                                        <span className="text-indigo-500">{order.customer_order.customer_phone}</span>
-                                    )}
-                                </div>
-                            </div>
-                        )}
+                        {/* The linked sales order used to be repeated here as its own
+                            card. It now leads the header — one identity block, not
+                            two — so this space goes straight to the tabs. */}
 
-                        {/* Tabs */}
+                        {/* Tabs — tighter padding and no emoji below `sm`, so the
+                            full set fits a phone instead of scrolling Audit off the
+                            right edge with the scrollbar hidden. */}
                         <div className="flex border-b border-surface-100 overflow-x-auto no-scrollbar gap-0 -mb-px">
                             {tabs.map(t => (
                                 <button key={t.key} onClick={() => setTab(t.key as any)}
-                                    className={clsx("px-4 py-2.5 text-xs font-semibold border-b-2 transition-all whitespace-nowrap",
-                                        tab === t.key ? "border-brand-500 text-brand-600" : "border-transparent text-surface-400 hover:text-surface-700")}>
-                                    {t.label}
+                                    className={clsx("px-2 sm:px-4 py-2 sm:py-2.5 text-[11.5px] sm:text-xs font-semibold border-b-2 transition-all whitespace-nowrap",
+                                        tab === t.key ? "border-brand-500 text-brand-600" : "border-transparent text-surface-500 hover:text-surface-700")}>
+                                    <span className="hidden sm:inline">{t.icon} </span>{t.label}
                                 </button>
                             ))}
                         </div>
