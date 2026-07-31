@@ -2140,6 +2140,11 @@ export default function ProductionOrderDetailPage() {
     const allocations = order.material_allocations ?? [];
     const isCustomer  = !!order.customer_order_id;
     const days        = daysUntil(order.due_date);
+    // Whose job this is — the question the floor asks first, so it belongs in
+    // the header rather than a card further down the page.
+    const customerName = [order.customer_order?.customer_first_name, order.customer_order?.customer_last_name]
+        .filter(Boolean).join(" ").trim() || null;
+    const customerPhone = order.customer_order?.customer_phone?.trim() || null;
     // Finished = pieces past the LAST stage — the same arithmetic the pipeline
     // runs on, surfaced as a headline number.
     const seqTasks = sortedTasks.filter(t => t.sequence != null);
@@ -2185,9 +2190,9 @@ export default function ProductionOrderDetailPage() {
         { key: "stages",    label: `⚙️ Stages (${sortedTasks.length})` },
         ...(showBatchesTab ? [{ key: "batches", label: `🎨 Batches (${order.batches?.length ?? 0})` }] : []),
         { key: "materials", label: `🧵 Materials (${allocations.length})` },
-        ...(hasSpecs ? [{ key: "specs", label: "📐 Specs & Measurements" }] : []),
-        { key: "activity",  label: "💬 Activity" },
-        { key: "audit",     label: "🕐 Audit Trail" },
+        ...(hasSpecs ? [{ key: "specs", label: "📐 Specs" }] : []),
+        { key: "activity",  label: "💬 Notes" },
+        { key: "audit",     label: "🕐 Audit" },
     ] as { key: string; label: string }[];
 
     return (
@@ -2207,82 +2212,117 @@ export default function ProductionOrderDetailPage() {
                 {/* On a phone this header used to be a full-screen billboard —
                     QUANTITY at 4xl pushed every action below the fold. Mobile
                     gets one compact banner: identity, status, one stat line. */}
-                <div className={clsx("px-4 py-4 sm:px-8 sm:py-6 bg-gradient-to-r",
-                    order.status === "completed" ? "from-emerald-800 to-teal-700" :
-                    order.status === "cancelled" ? "from-slate-700 to-slate-600" :
-                    order.status === "qc_failed" ? "from-red-800 to-red-700" :
-                    "from-slate-800 to-slate-700")}>
+                <div className="px-4 py-4 sm:px-8 sm:py-6 bg-white border-b border-line">
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:flex-wrap">
-                        <div>
-                            <p className="text-slate-400 text-xs font-semibold uppercase tracking-widest mb-1">Production Order</p>
-                            <h1 className="text-lg sm:text-2xl font-bold text-white font-mono">{order.order_number}</h1>
-                            <p className="text-sm sm:text-lg text-white/80 mt-0.5">{order.product_name}</p>
-                            <div className="flex items-center gap-2 mt-2 flex-wrap">
-                                <span className={clsx("px-2.5 py-1 rounded-full text-xs font-semibold", statusCfg.bg, statusCfg.color)}>
+                        <div className="min-w-0">
+                            {/* WHAT it is leads. The reference number is how you got
+                                here, not what you came to read — it moves to the
+                                metadata line below. */}
+                            <h1 className="text-[22px] sm:text-3xl font-extrabold text-surface-900 tracking-[-0.02em] leading-tight truncate">
+                                {order.product_name}
+                            </h1>
+
+                            {/* WHOSE it is, integrated into the header itself. */}
+                            <div className="flex items-center gap-2 mt-1">
+                                <p className="min-w-0 text-[15px] font-bold text-surface-700 truncate">
+                                    {customerName ?? (isCustomer ? "Customer order" : "For stock")}
+                                </p>
+                                {customerPhone && (
+                                    <a
+                                        href={`tel:${customerPhone.replace(/[^+\d]/g, "")}`}
+                                        aria-label={`Call ${customerName ?? "customer"} on ${customerPhone}`}
+                                        className="shrink-0 w-8 h-8 rounded-full bg-surface-100 flex items-center justify-center
+                                                   text-surface-600 active:bg-surface-200 transition-colors"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                             strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.9.36 1.78.7 2.61a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.47-1.27a2 2 0 0 1 2.11-.45c.83.34 1.71.57 2.61.7A2 2 0 0 1 22 16.92z" />
+                                        </svg>
+                                    </a>
+                                )}
+                            </div>
+
+                            <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+                                <span className={clsx("px-2.5 py-1 rounded-full text-xs font-bold", statusCfg.bg, statusCfg.color)}>
                                     {statusCfg.label}
                                 </span>
-                                <span className={clsx("text-2xs font-bold px-1.5 py-0.5 rounded border uppercase tracking-wide", priorityCfg.cls)}>
-                                    {priorityCfg.label}
-                                </span>
+                                {/* Priority earns a chip only when it is NOT normal —
+                                    a loud "NORMAL" badge is the least actionable thing
+                                    on the page competing with the primary action. */}
+                                {order.priority !== "normal" && (
+                                    <span className={clsx("text-2xs font-bold px-2 py-0.5 rounded-full uppercase tracking-wide", priorityCfg.cls)}>
+                                        {priorityCfg.label}
+                                    </span>
+                                )}
                                 {isCustomer && (
-                                    <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700">
+                                    <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-brand-50 text-brand-700">
                                         Custom Order
                                     </span>
                                 )}
                             </div>
-                            {/* Everything a coordinator asks first, on the card they see first. */}
-                            {(order.outlet || order.confirmed_at || order.created_by) && (
-                                <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap mt-2 text-2xs text-slate-300/90">
-                                    {order.outlet && <span>🏬 {order.outlet.name}</span>}
-                                    {order.confirmed_at && <span>✓ Confirmed {fmtDate(order.confirmed_at)}</span>}
-                                    {order.created_by && <span>✎ {[order.created_by.first_name, order.created_by.last_name].filter(Boolean).join(" ")}</span>}
-                                </div>
-                            )}
                         </div>
-                        {/* KPI strip: the three numbers a manager reads first —
-                            how many, how many are done, and how long is left. */}
+
                         <div className="flex items-start gap-5 sm:gap-7 sm:justify-end">
                             <div className="sm:text-right">
-                                <p className="text-white font-bold tabular-nums text-xl sm:text-3xl leading-none">{order.quantity}</p>
-                                <p className="text-slate-400 text-2xs uppercase tracking-wide mt-1">pieces</p>
+                                <p className="text-surface-900 font-extrabold tabular-nums text-xl sm:text-3xl leading-none">{order.quantity}</p>
+                                <p className="text-surface-400 text-2xs font-bold uppercase tracking-wide mt-1">pieces</p>
                             </div>
                             <div className="sm:text-right">
-                                <p className={clsx("font-bold tabular-nums text-xl sm:text-3xl leading-none",
-                                    finishedPieces >= order.quantity && order.quantity > 0 ? "text-emerald-300" : finishedPieces > 0 ? "text-emerald-200" : "text-white/60")}>
+                                <p className={clsx("font-extrabold tabular-nums text-xl sm:text-3xl leading-none",
+                                    finishedPieces >= order.quantity && order.quantity > 0 ? "text-success-dark" : finishedPieces > 0 ? "text-success" : "text-surface-400")}>
                                     {finishedPieces}
                                 </p>
-                                <p className="text-slate-400 text-2xs uppercase tracking-wide mt-1">finished</p>
+                                <p className="text-surface-400 text-2xs font-bold uppercase tracking-wide mt-1">finished</p>
                             </div>
                             <div className="sm:text-right">
-                                <p className={clsx("font-bold tabular-nums text-xl sm:text-3xl leading-none",
-                                    days < 0 ? "text-red-300" : days <= 2 ? "text-amber-300" : "text-white")}>
+                                <p className={clsx("font-extrabold tabular-nums text-xl sm:text-3xl leading-none",
+                                    days < 0 ? "text-danger" : days <= 2 ? "text-amber-dark" : "text-surface-900")}>
                                     {days < 0 ? `${Math.abs(days)}d` : days === 0 ? "Today" : `${days}d`}
                                 </p>
-                                <p className="text-slate-400 text-2xs uppercase tracking-wide mt-1 whitespace-nowrap">
+                                <p className="text-surface-400 text-2xs font-bold uppercase tracking-wide mt-1 whitespace-nowrap">
                                     {days < 0 ? "overdue" : "until due"} · {fmtDate(order.due_date)}
                                 </p>
                             </div>
                         </div>
                     </div>
-                    {/* Progress bar */}
+
                     <div className="mt-4">
-                        <div className="flex justify-between text-2xs text-slate-400 mb-1">
+                        <div className="flex justify-between text-2xs text-surface-500 mb-1.5">
                             <span>{order.current_stage ?? "Not started"}</span>
-                            <span>{order.completion_percentage}% complete</span>
+                            <span className="font-bold">{order.completion_percentage}% complete</span>
                         </div>
-                        <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
-                            <div className="h-full bg-white/60 rounded-full transition-all" style={{ width: `${order.completion_percentage}%` }} />
+                        <div className="w-full h-1.5 bg-surface-100 rounded-full overflow-hidden">
+                            <div className={clsx("h-full rounded-full transition-all",
+                                order.completion_percentage >= 100 ? "bg-success-vivid" : "bg-amber")}
+                                style={{ width: `${Math.max(order.completion_percentage, 2)}%` }} />
                         </div>
+                    </div>
+
+                    {/* References and provenance — needed occasionally, so they sit
+                        last and quiet rather than leading the page. */}
+                    <div className="flex items-center gap-x-3 gap-y-1 flex-wrap mt-3 text-2xs text-surface-400">
+                        <span className="font-mono">{order.order_number}</span>
+                        {order.outlet && <span>· {order.outlet.name}</span>}
+                        {order.created_by && <span>· {[order.created_by.first_name, order.created_by.last_name].filter(Boolean).join(" ")}</span>}
+                        {order.confirmed_at && <span>· confirmed {fmtDate(order.confirmed_at)}</span>}
                     </div>
                 </div>
 
                 {/* Action bar */}
                 {/* One thumb-height scrollable strip on phones — six buttons no
                     longer stack into a half-screen pile. Desktop wraps as before. */}
-                <div className="px-4 py-3 bg-slate-50 border-b border-surface-100 flex items-center gap-2 overflow-x-auto no-scrollbar sm:flex-wrap sm:overflow-visible sm:px-8 [&>*]:shrink-0">
+                {/* Actions WRAP on a phone; they used to sit in an overflow-x
+                    scroller with no-scrollbar, so Delete and Costing Report were
+                    off the right edge with no visual cue they existed at all —
+                    you had to guess and swipe. Wrapping costs one row and makes
+                    every action discoverable. The primary button spans the full
+                    width on its own row so the next step is unmissable and in
+                    the thumb zone. */}
+                <div className="px-4 py-3 bg-white border-b border-line flex items-center gap-2 flex-wrap sm:px-8
+                                [&>*]:shrink-0 [&>.btn-block]:w-full [&>.btn-block]:sm:w-auto">
                     {canConfirm && (
                         <button onClick={() => confirmMutation.mutate()} disabled={confirmMutation.isPending}
-                            className="btn-sm bg-brand-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-brand-700">
+                            className="btn-block w-full sm:w-auto justify-center bg-brand-500 text-white rounded-full px-5 min-h-[48px] sm:min-h-[36px] text-sm font-bold hover:bg-brand-600 active:bg-brand-700 transition-colors flex items-center gap-2">
                             {confirmMutation.isPending ? "Confirming…" : "✓ Confirm Order"}
                         </button>
                     )}
