@@ -1655,9 +1655,11 @@ function RenderTextOnly({ body, isOwn }: { body: string; isOwn: boolean }) {
 
 // ─── Message bubble ───────────────────────────────────────────────────────────
 
-function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, onReaction, continued = false }: {
+function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, onEdited, onReaction, continued = false }: {
     message: ChannelMessage; channelId: number; currentUserId?: number;
     onReply: (m: ChannelMessage) => void; onDeleted: (id: number) => void;
+    /** Called with the server-confirmed message after a successful edit. */
+    onEdited: (m: ChannelMessage) => void;
     /** Called with the server-confirmed reactions map after a successful toggle. */
     onReaction: (messageId: number, reactions: Record<string, number[]>) => void;
     /** Same author, moments after the previous message: drop the avatar and header. */
@@ -1665,8 +1667,15 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
 }) {
     const [hovering, setHovering]           = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
+    const [editing, setEditing]             = useState(false);
+    const [draft, setDraft]                 = useState(message.body);
+    const [editError, setEditError]         = useState<string | null>(null);
     const isOwn    = message.user?.id === currentUserId;
     const isSystem = message.type === "system";
+
+    // You can edit your own message at any age (ChannelController::editMessage);
+    // the (edited) marker keeps the change visible to everyone in the space.
+    const canEdit = isOwn;
     // Backend (ChannelController::deleteMessage) allows the author OR
     // admin/super_admin to delete any message - the "other people's
     // messages" toolbar below previously had no delete option at all, so
@@ -1678,6 +1687,27 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
         mutationFn: () => channelApi.deleteMessage(channelId, message.id),
         onSuccess: () => onDeleted(message.id),
     });
+    const editMutation = useMutation({
+        mutationFn: (body: string) => channelApi.edit(channelId, message.id, body),
+        onSuccess: (data) => {
+            onEdited(data.message);
+            setEditing(false);
+            setEditError(null);
+        },
+        // Surface the server's own words (403 not yours / 422 window lapsed)
+        // in place rather than failing silently.
+        onError: (err: unknown) => {
+            const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+            setEditError(msg ?? "Could not save that edit.");
+        },
+    });
+
+    const beginEdit = () => { setDraft(message.body); setEditError(null); setEditing(true); };
+    const saveEdit  = () => {
+        const body = draft.trim();
+        if (!body || body === message.body) { setEditing(false); return; }
+        editMutation.mutate(body);
+    };
     const reactMutation = useMutation({
         mutationFn: (emoji: string) => channelApi.react(channelId, message.id, emoji),
         // Optimistic update: apply the toggle locally before the server responds
@@ -1790,6 +1820,15 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6M3 10l6-6"/>
                                 </svg>
                             </button>
+                            {canEdit && (
+                                <button onClick={beginEdit} title="Edit message"
+                                    className="w-7 h-7 flex items-center justify-center rounded-lg text-surface-400 hover:text-brand-600 hover:bg-surface-100 transition-colors"
+                                    aria-label="Edit message">
+                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                                    </svg>
+                                </button>
+                            )}
                             <button onClick={() => setConfirmDelete(true)} title="Delete"
                                 className="w-7 h-7 flex items-center justify-center rounded-lg text-surface-400 hover:text-danger hover:bg-danger/10 transition-colors"
                                 aria-label="Delete">
@@ -1799,8 +1838,38 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                             </button>
                         </div>
                     )}
+                    {editing ? (
+                        /* Edit in place — the message stays where it sits in the
+                           conversation, so you keep the context you are correcting. */
+                        <div className={clsx("w-full min-w-[16rem] rounded-2xl border border-brand-300 bg-white p-2 shadow-sm", isOwn && "self-end")}>
+                            <textarea
+                                autoFocus
+                                value={draft}
+                                onChange={e => setDraft(e.target.value)}
+                                onKeyDown={e => {
+                                    if (e.key === "Escape") { e.preventDefault(); setEditing(false); }
+                                    // Enter saves, Shift+Enter adds a line — same contract as the composer.
+                                    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); saveEdit(); }
+                                }}
+                                rows={Math.min(6, Math.max(2, draft.split("\n").length))}
+                                className="w-full resize-none bg-transparent text-sm text-surface-900 outline-none px-1.5 py-1"
+                                aria-label="Edit message"
+                            />
+                            {editError && <p className="text-2xs text-danger px-1.5 pb-1">{editError}</p>}
+                            <div className="flex items-center justify-end gap-2 px-1.5 pb-0.5">
+                                <span className="text-2xs text-surface-400 mr-auto">Enter to save · Esc to cancel</span>
+                                <button onClick={() => setEditing(false)}
+                                    className="text-2xs font-semibold text-surface-500 hover:text-surface-800 px-2 py-1">Cancel</button>
+                                <button onClick={saveEdit} disabled={editMutation.isPending}
+                                    className="text-2xs font-bold text-white bg-brand-600 hover:bg-brand-700 disabled:opacity-50 rounded-lg px-3 py-1">
+                                    {editMutation.isPending ? "Saving…" : "Save"}
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
                     <MessageContent body={message.body} isOwn={isOwn} timeLabel={fmtClock(message.created_at)}
                         linkedEntities={message.linked_entities} entityPreviews={message.entity_previews} />
+                    )}
                     {/* Same as above, mirrored to the right of the bubble. */}
                     {!isOwn && (
                         <div className={clsx(
@@ -2458,6 +2527,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                     continued={isContinuation(msg, msgs[i - 1])}
                                     currentUserId={user?.id} onReply={setReplyTo}
                                     onDeleted={id => setMessages(prev => prev.filter(m => m.id !== id))}
+                                    onEdited={updated => setMessages(prev => prev.map(m => m.id === updated.id ? updated : m))}
                                     onReaction={(msgId, reactions) =>
                                         setMessages(prev => prev.map(m => m.id === msgId ? { ...m, reactions } : m))
                                     } />

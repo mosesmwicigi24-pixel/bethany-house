@@ -42,7 +42,13 @@ class ProductionController extends Controller
             'tasks.stage',
             'tasks.assignedTo:id,first_name,last_name',
             'createdBy:id,first_name,last_name',
-            'customerOrder:id,order_number,customer_first_name,customer_last_name,customer_phone,customer_email',
+            'customerOrder:id,order_number,customer_id,customer_first_name,customer_last_name,customer_phone,customer_email',
+            // Both customer routes are eager-loaded so ProductionOrder's
+            // customer_label/customer_contact accessors resolve without N+1:
+            // a job raised straight against a customer, and the customer
+            // record behind a sales order whose snapshot names are blank.
+            'customer:id,first_name,last_name,phone',
+            'customerOrder.customer:id,first_name,last_name,phone',
         ]);
 
         if ($request->filled('status')) {
@@ -54,17 +60,35 @@ class ProductionController extends Controller
             }
         }
         if ($request->filled('priority')) $query->where('priority', $request->priority);
+        // The admin's "All Types / For Stock / Customer Orders" select has always
+        // sent ?type=, and nothing ever read it — picking "Customer Orders"
+        // silently returned every row.
+        if ($request->filled('type') && in_array($request->type, ['stock', 'customer'], true)) {
+            $query->where('is_customer_order', $request->type === 'customer');
+        }
         if ($request->filled('outlet_id')) $query->where('outlet_id', $request->outlet_id);
         if ($request->filled('product_id')) $query->where('product_id', $request->product_id);
 
         if ($request->filled('search')) {
             $s = $request->search;
-            $query->where(fn ($q) =>
+            // Floor staff look a job up by whoever it is for as often as by its
+            // number, so the same box matches customer name/phone across all
+            // three identity routes, plus the linked sales-order number.
+            $query->where(function ($q) use ($s) {
                 $q->where('order_number', 'ILIKE', "%{$s}%")
                   ->orWhereHas('product.translations', fn ($qt) =>
-                      $qt->where('name', 'ILIKE', "%{$s}%")
-                  )
-            );
+                      $qt->where('name', 'ILIKE', "%{$s}%"))
+                  ->orWhereHas('customer', fn ($qc) =>
+                      $qc->whereRaw("CONCAT(first_name, ' ', last_name) ILIKE ?", ["%{$s}%"])
+                         ->orWhere('phone', 'ILIKE', "%{$s}%"))
+                  ->orWhereHas('customerOrder', fn ($qo) =>
+                      $qo->where('order_number', 'ILIKE', "%{$s}%")
+                         ->orWhereRaw("CONCAT(COALESCE(customer_first_name,''), ' ', COALESCE(customer_last_name,'')) ILIKE ?", ["%{$s}%"])
+                         ->orWhere('customer_phone', 'ILIKE', "%{$s}%")
+                         ->orWhereHas('customer', fn ($qoc) =>
+                             $qoc->whereRaw("CONCAT(first_name, ' ', last_name) ILIKE ?", ["%{$s}%"])
+                                 ->orWhere('phone', 'ILIKE', "%{$s}%")));
+            });
         }
 
         if ($request->filled('due_before')) $query->whereDate('due_date', '<=', $request->due_before);
@@ -118,7 +142,9 @@ class ProductionController extends Controller
             'product.translations' => fn ($q) => $q->where('language_code', 'en')->select('product_id', 'name'),
             'product.images' => fn ($q) => $q->where('is_primary', true)->select('product_id', 'image_url'),
             'variant:id,variant_name,sku',
-            'customerOrder:id,order_number,customer_first_name,customer_last_name,customer_phone,customer_email',
+            'customerOrder:id,order_number,customer_id,customer_first_name,customer_last_name,customer_phone,customer_email',
+            'customer:id,first_name,last_name,phone',
+            'customerOrder.customer:id,first_name,last_name,phone',
             'outlet:id,name',
             'tasks.stage:id,name,slug,sort_order',
             'tasks.assignedTo:id,first_name,last_name',
@@ -980,7 +1006,10 @@ class ProductionController extends Controller
     public function allTasks(Request $request)
     {
         $query = ProductionTask::with([
-            'productionOrder:id,order_number,priority,due_date,status,quantity,product_id',
+            'productionOrder:id,order_number,priority,due_date,status,quantity,product_id,is_customer_order,customer_id,customer_order_id',
+            'productionOrder.customer:id,first_name,last_name,phone',
+            'productionOrder.customerOrder:id,order_number,customer_id,customer_first_name,customer_last_name,customer_phone',
+            'productionOrder.customerOrder.customer:id,first_name,last_name,phone',
             'stage:id,name,slug',
             'assignedTo:id,first_name,last_name',
         ]);
@@ -1003,11 +1032,16 @@ class ProductionController extends Controller
         $query = ProductionTask::with([
             'batchProgress',
             'productionOrder.batches',
-            'productionOrder:id,order_number,priority,due_date,status,quantity,product_id,specifications,notes,measurements,customer_preferences,customer_id',
+            'productionOrder:id,order_number,priority,due_date,status,quantity,product_id,specifications,notes,measurements,customer_preferences,customer_id,customer_order_id,is_customer_order',
             'productionOrder.product.translations' => fn ($q) => $q->where('language_code', 'en')->select('product_id', 'name'),
             'productionOrder.product.images' => fn ($q) => $q->where('is_primary', true)->select('product_id', 'image_url'),
             'productionOrder.materialAllocations.material:id,name,unit_of_measure',
-            'productionOrder.customer:id,first_name,last_name',
+            'productionOrder.customer:id,first_name,last_name,phone',
+            // Route 2/3 of the identity chain: an admin- or auto-raised job never
+            // persists customer_id, so without these the tailor's screen (and the
+            // appended customer_label) shows nothing for a genuine customer job.
+            'productionOrder.customerOrder:id,order_number,customer_id,customer_first_name,customer_last_name,customer_phone',
+            'productionOrder.customerOrder.customer:id,first_name,last_name,phone',
             'stage:id,name,slug',
         ])
         ->where('assigned_to', $request->user()->id);

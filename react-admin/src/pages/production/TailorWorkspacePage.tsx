@@ -103,6 +103,11 @@ function getProductName(task: MyTask) {
 }
 
 function getCustomerName(task: MyTask) {
+    // The server resolves identity across all three routes (own customer_id →
+    // sales-order snapshot → the order's customer record). The direct join is
+    // kept only as a fallback for payloads that predate customer_label.
+    const label = (task.production_order as { customer_label?: string | null }).customer_label;
+    if (label) return label;
     const c = task.production_order.customer;
     return c ? `${c.first_name} ${c.last_name}`.trim() : null;
 }

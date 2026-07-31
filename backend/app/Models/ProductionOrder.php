@@ -52,6 +52,68 @@ class ProductionOrder extends Model
         'is_customer_order'         => 'boolean',
     ];
 
+    /*
+    |--------------------------------------------------------------------------
+    | Customer identity
+    |--------------------------------------------------------------------------
+    | "Whose order is this?" must be answerable from any surface that lists
+    | production orders, so the resolution lives on the model rather than in
+    | one controller. Identity can arrive by three different routes and the
+    | first non-empty one wins:
+    |
+    |   1. the production order's own customer_id (a job raised straight
+    |      against a customer),
+    |   2. the linked sales order's snapshot names (what was typed at the
+    |      till / on the storefront at the time of sale),
+    |   3. the linked sales order's customer record — POS can attach a
+    |      customer_id while leaving the snapshot names blank, which is why
+    |      some rows used to show no name at all.
+    |
+    | Stock jobs legitimately have no customer; they report null and the UI
+    | labels them "For stock" so a blank never reads as missing data.
+    */
+    protected $appends = ['customer_label', 'customer_contact'];
+
+    /** Display name of whoever this job is for, or null for a stock job. */
+    public function getCustomerLabelAttribute(): ?string
+    {
+        $direct = $this->relationLoaded('customer') ? $this->customer : null;
+        if ($direct) {
+            $name = trim("{$direct->first_name} {$direct->last_name}");
+            if ($name !== '') return $name;
+        }
+
+        $order = $this->relationLoaded('customerOrder') ? $this->customerOrder : null;
+        if ($order) {
+            $snapshot = trim("{$order->customer_first_name} {$order->customer_last_name}");
+            if ($snapshot !== '') return $snapshot;
+
+            $linked = $order->relationLoaded('customer') ? $order->customer : null;
+            if ($linked) {
+                $name = trim("{$linked->first_name} {$linked->last_name}");
+                if ($name !== '') return $name;
+            }
+        }
+
+        return null;
+    }
+
+    /** Phone for the resolved customer — same precedence as the label. */
+    public function getCustomerContactAttribute(): ?string
+    {
+        $direct = $this->relationLoaded('customer') ? $this->customer : null;
+        if ($direct && !empty($direct->phone)) return $direct->phone;
+
+        $order = $this->relationLoaded('customerOrder') ? $this->customerOrder : null;
+        if ($order) {
+            if (!empty($order->customer_phone)) return $order->customer_phone;
+            $linked = $order->relationLoaded('customer') ? $order->customer : null;
+            if ($linked && !empty($linked->phone)) return $linked->phone;
+        }
+
+        return null;
+    }
+
     protected static function boot()
     {
         parent::boot();
