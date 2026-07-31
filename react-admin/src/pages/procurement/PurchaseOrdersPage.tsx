@@ -1255,7 +1255,7 @@ export default function PurchaseOrdersPage() {
                                                             Expected{" "}
                                                             {new Date(
                                                                 po.expected_delivery_date,
-                                                            ).toLocaleDateString()}
+                                                            ).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
                                                         </span>
                                                         <span className="text-surface-400">
                                                             {" · "}
@@ -1323,7 +1323,7 @@ export default function PurchaseOrdersPage() {
                                                 <p className="text-2xs text-surface-400 mt-0.5">
                                                     {new Date(
                                                         po.created_at,
-                                                    ).toLocaleDateString()}
+                                                    ).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
                                                 </p>
                                             </td>
                                             <td>
@@ -1348,7 +1348,7 @@ export default function PurchaseOrdersPage() {
                                                 >
                                                     {new Date(
                                                         po.expected_delivery_date,
-                                                    ).toLocaleDateString()}
+                                                    ).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
                                                 </span>
                                             </td>
                                             <td>
