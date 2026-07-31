@@ -2386,8 +2386,12 @@ export default function ProductionOrderDetailPage() {
                             <span className="hidden sm:inline">✅ Complete &amp; Stock</span><span className="sm:hidden">Complete</span>
                         </button>
                     )}
+                    {/* `btn-sm` carries min-h-[36px], which a plain h-8 cannot
+                        override — that left this one button 4px taller than its
+                        neighbours and the row visibly ragged. min-h is reset
+                        alongside the height. */}
                     <PdfDownloadButton type="production-orders" id={order.id} label="PDF"
-                        className="!rounded-lg !px-2.5 !h-8 sm:!h-9 !text-[11px] sm:!text-xs" />
+                        className="!rounded-lg !px-2.5 !h-8 !min-h-[32px] sm:!h-9 sm:!min-h-[36px] !text-[11px] sm:!text-xs" />
                     <button
                         onClick={() => navigate(`/reports/production/costing/${order.id}`)}
                         className={clsx(ACT_BTN, "hover:!border-emerald-300 hover:!text-emerald-700")}
