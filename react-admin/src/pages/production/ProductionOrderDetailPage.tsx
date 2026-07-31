@@ -154,7 +154,7 @@ const daysUntil = (d: string) => Math.ceil((new Date(d).getTime() - Date.now()) 
 // Shared geometry for the detail-page action row. Defined once so the width
 // budget in the comment above that row stays true — a one-off `px-3` on a
 // single button is what pushed it onto a second line before.
-const ACT_BTN = "flex items-center gap-1 bg-white border border-surface-200 rounded-lg px-2.5 h-8 sm:h-9 " +
+const ACT_BTN = "flex items-center gap-1 bg-white border border-surface-200 rounded-lg px-2.5 h-11 sm:h-9 " +
     "text-[11px] sm:text-xs font-semibold text-surface-700 hover:border-brand-300 hover:text-brand-600 transition-colors";
 const MENU_ITEM = "w-full text-left px-3.5 py-2.5 text-xs font-semibold text-surface-700 hover:bg-surface-50 transition-colors";
 const fmtNum = (n: number) => n.toLocaleString("en-KE", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
@@ -2347,20 +2347,26 @@ export default function ProductionOrderDetailPage() {
                     348px of content width inside this bar (412 − 32px page
                     chrome − 32px px-4 padding). The old row asked for 686px on
                     an in-progress order and broke into three lines.
-                    Budget at 11px/px-2.5/h-8, worst realistic case (pending or
-                    in_progress → Assign + Materials + PDF + Costing + ⋯):
-                        60 + 75 + 56 + 65 + 32 + 4 gaps × 6 = 312 ≤ 348 ✓
+                    Measured budget at 11px/px-2.5, worst realistic case (pending
+                    or in_progress → Assign + Materials + PDF + Costing + ⋯):
+                        57 + 70 + 64 + 64 + 32 + 4 gaps × 6 = 311 ≤ 348 ✓
                     Levers used, in order of preference:
                       1. labels shorten below `sm` (full words return on desktop)
                       2. emoji drop below `sm` — same trick as the tabs
                       3. WIP Board moves into ⋯ (it is navigation, not an action)
+                    HEIGHT is deliberately NOT a lever: fitting one row is a width
+                    constraint, so squeezing height buys nothing and costs the tap
+                    target. These are h-11 (44px) on a phone — the accessibility
+                    floor — dropping to h-9 at `sm` where a mouse is precise. An
+                    earlier pass shrank them to 32px, which fit no better and was
+                    both below that floor and well under the 48px reference CTA.
                     flex-wrap is kept as a safety net for a narrower phone rather
                     than clipping, but at 412 it never engages. */}
                 <div className="px-4 py-3 bg-white border-b border-line flex items-center gap-1.5 flex-wrap sm:gap-2 sm:px-8
                                 [&>*]:shrink-0">
                     {canConfirm && (
                         <button onClick={() => confirmMutation.mutate()} disabled={confirmMutation.isPending}
-                            className="bg-brand-500 text-white rounded-full px-3 sm:px-4 h-8 sm:h-9 text-[11px] sm:text-xs font-bold hover:bg-brand-600 active:bg-brand-700 transition-colors flex items-center gap-1">
+                            className="bg-brand-500 text-white rounded-full px-3 sm:px-4 h-11 sm:h-9 text-[11px] sm:text-xs font-bold hover:bg-brand-600 active:bg-brand-700 transition-colors flex items-center gap-1">
                             {confirmMutation.isPending ? "Confirming…" : <>✓ Confirm<span className="hidden sm:inline">&nbsp;Order</span></>}
                         </button>
                     )}
@@ -2376,22 +2382,22 @@ export default function ProductionOrderDetailPage() {
                     )}
                     {canQC && (
                         <button onClick={() => setModal("qc")}
-                            className="bg-purple-600 text-white border border-purple-600 rounded-lg px-2.5 h-8 sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-purple-700 transition-colors flex items-center gap-1">
+                            className="bg-purple-600 text-white border border-purple-600 rounded-lg px-2.5 h-11 sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-purple-700 transition-colors flex items-center gap-1">
                             <span className="hidden sm:inline">🔍 Quality Check</span><span className="sm:hidden">QC</span>
                         </button>
                     )}
                     {canComplete && (
                         <button onClick={() => setModal("complete")}
-                            className="bg-emerald-600 text-white border border-emerald-600 rounded-lg px-2.5 h-8 sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-emerald-700 transition-colors flex items-center gap-1">
+                            className="bg-emerald-600 text-white border border-emerald-600 rounded-lg px-2.5 h-11 sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-emerald-700 transition-colors flex items-center gap-1">
                             <span className="hidden sm:inline">✅ Complete &amp; Stock</span><span className="sm:hidden">Complete</span>
                         </button>
                     )}
-                    {/* `btn-sm` carries min-h-[36px], which a plain h-8 cannot
+                    {/* `btn-sm` carries min-h-[36px], which a plain height cannot
                         override — that left this one button 4px taller than its
                         neighbours and the row visibly ragged. min-h is reset
                         alongside the height. */}
                     <PdfDownloadButton type="production-orders" id={order.id} label="PDF"
-                        className="!rounded-lg !px-2.5 !h-8 !min-h-[32px] sm:!h-9 sm:!min-h-[36px] !text-[11px] sm:!text-xs" />
+                        className="!rounded-lg !px-2.5 !h-11 !min-h-[44px] sm:!h-9 sm:!min-h-[36px] !text-[11px] sm:!text-xs" />
                     <button
                         onClick={() => navigate(`/reports/production/costing/${order.id}`)}
                         className={clsx(ACT_BTN, "hover:!border-emerald-300 hover:!text-emerald-700")}
@@ -2416,7 +2422,7 @@ export default function ProductionOrderDetailPage() {
                                 aria-haspopup="menu"
                                 aria-expanded={menuOpen}
                                 aria-label="More actions"
-                                className={clsx("w-8 h-8 sm:w-9 sm:h-9 rounded-lg border flex items-center justify-center transition-colors",
+                                className={clsx("w-11 h-11 sm:w-9 sm:h-9 rounded-lg border flex items-center justify-center transition-colors",
                                     menuOpen ? "bg-surface-100 border-surface-300 text-surface-900"
                                              : "bg-white border-surface-200 text-surface-600 hover:border-surface-300 hover:text-surface-900")}
                             >
