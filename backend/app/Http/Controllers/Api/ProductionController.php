@@ -60,6 +60,12 @@ class ProductionController extends Controller
             }
         }
         if ($request->filled('priority')) $query->where('priority', $request->priority);
+        // The admin's "All Types / For Stock / Customer Orders" select has always
+        // sent ?type=, and nothing ever read it — picking "Customer Orders"
+        // silently returned every row.
+        if ($request->filled('type') && in_array($request->type, ['stock', 'customer'], true)) {
+            $query->where('is_customer_order', $request->type === 'customer');
+        }
         if ($request->filled('outlet_id')) $query->where('outlet_id', $request->outlet_id);
         if ($request->filled('product_id')) $query->where('product_id', $request->product_id);
 
@@ -1000,7 +1006,10 @@ class ProductionController extends Controller
     public function allTasks(Request $request)
     {
         $query = ProductionTask::with([
-            'productionOrder:id,order_number,priority,due_date,status,quantity,product_id',
+            'productionOrder:id,order_number,priority,due_date,status,quantity,product_id,is_customer_order,customer_id,customer_order_id',
+            'productionOrder.customer:id,first_name,last_name,phone',
+            'productionOrder.customerOrder:id,order_number,customer_id,customer_first_name,customer_last_name,customer_phone',
+            'productionOrder.customerOrder.customer:id,first_name,last_name,phone',
             'stage:id,name,slug',
             'assignedTo:id,first_name,last_name',
         ]);
@@ -1023,11 +1032,16 @@ class ProductionController extends Controller
         $query = ProductionTask::with([
             'batchProgress',
             'productionOrder.batches',
-            'productionOrder:id,order_number,priority,due_date,status,quantity,product_id,specifications,notes,measurements,customer_preferences,customer_id',
+            'productionOrder:id,order_number,priority,due_date,status,quantity,product_id,specifications,notes,measurements,customer_preferences,customer_id,customer_order_id,is_customer_order',
             'productionOrder.product.translations' => fn ($q) => $q->where('language_code', 'en')->select('product_id', 'name'),
             'productionOrder.product.images' => fn ($q) => $q->where('is_primary', true)->select('product_id', 'image_url'),
             'productionOrder.materialAllocations.material:id,name,unit_of_measure',
-            'productionOrder.customer:id,first_name,last_name',
+            'productionOrder.customer:id,first_name,last_name,phone',
+            // Route 2/3 of the identity chain: an admin- or auto-raised job never
+            // persists customer_id, so without these the tailor's screen (and the
+            // appended customer_label) shows nothing for a genuine customer job.
+            'productionOrder.customerOrder:id,order_number,customer_id,customer_first_name,customer_last_name,customer_phone',
+            'productionOrder.customerOrder.customer:id,first_name,last_name,phone',
             'stage:id,name,slug',
         ])
         ->where('assigned_to', $request->user()->id);

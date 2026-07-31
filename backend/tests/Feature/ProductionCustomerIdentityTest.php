@@ -162,4 +162,22 @@ class ProductionCustomerIdentityTest extends TestCase
         $ids = collect($this->listOrders(['search' => 'Otieno']))->pluck('id');
         $this->assertTrue($ids->contains($po->id));
     }
+
+    public function test_type_filter_separates_stock_from_customer_jobs(): void
+    {
+        $this->actAsManager();
+        $order = Order::factory()->create(['customer_first_name' => 'Jane', 'customer_last_name' => 'Doe']);
+        $customerJob = $this->productionOrder(['customer_order_id' => $order->id, 'is_customer_order' => true]);
+        $stockJob    = $this->productionOrder(['is_customer_order' => false]);
+
+        // The admin select has always sent ?type=; nothing read it, so choosing
+        // "Customer Orders" silently returned everything.
+        $customerIds = collect($this->listOrders(['type' => 'customer']))->pluck('id');
+        $this->assertTrue($customerIds->contains($customerJob->id));
+        $this->assertFalse($customerIds->contains($stockJob->id));
+
+        $stockIds = collect($this->listOrders(['type' => 'stock']))->pluck('id');
+        $this->assertTrue($stockIds->contains($stockJob->id));
+        $this->assertFalse($stockIds->contains($customerJob->id));
+    }
 }

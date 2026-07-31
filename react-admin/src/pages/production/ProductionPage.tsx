@@ -40,6 +40,7 @@ interface ProductionOrder {
         order's customer record. Null for stock jobs. */
     customer_label?: string | null;
     customer_contact?: string | null;
+    is_customer_order?: boolean;
     specifications?: Record<string, string>;
     measurements?: Record<string, string>;
     customer_preferences?: Record<string, string>;
@@ -1464,11 +1465,11 @@ aria-label="Close">
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <p className="text-sm font-bold text-indigo-800 font-mono">{order.customer_order.order_number}</p>
-                                    {(order.customer_order.customer_first_name || order.customer_order.customer_last_name) && (
-                                        <p className="text-xs text-indigo-700 mt-0.5 font-medium">{[order.customer_order.customer_first_name, order.customer_order.customer_last_name].filter(Boolean).join(" ")}</p>
+                                    {(order.customer_label || order.customer_order.customer_first_name || order.customer_order.customer_last_name) && (
+                                        <p className="text-xs text-indigo-700 mt-0.5 font-medium">{order.customer_label ?? [order.customer_order.customer_first_name, order.customer_order.customer_last_name].filter(Boolean).join(" ")}</p>
                                     )}
-                                    {order.customer_order.customer_phone && (
-                                        <p className="text-2xs text-indigo-500">{order.customer_order.customer_phone}</p>
+                                    {(order.customer_contact || order.customer_order.customer_phone) && (
+                                        <p className="text-2xs text-indigo-500">{order.customer_contact ?? order.customer_order.customer_phone}</p>
                                     )}
                                     <p className="text-2xs text-indigo-400 mt-0.5">Click to view the full sales order →</p>
                                 </div>
@@ -1885,14 +1886,16 @@ function ProductionOrdersTab() {
                                         <DateGroupHeaderRow label={group.label} colSpan={10} />
                                         {group.items.map(o => {
                                     const days = daysUntil(o.due_date);
-                                    const isCustomer = !!o.customer_order_id;
+                                    // Must agree with the resolved customer name, or the TYPE pill can read
+                                    // "For Stock" on a row that names a real person.
+                                    const isCustomer = o.is_customer_order ?? !!(o.customer_order_id || o.customer_id);
                                     return (
                                         <tr key={o.id} onClick={() => navigate(`/production/orders/${o.id}`)}
                                             className="cursor-pointer hover:bg-surface-50 transition-colors">
                                             <td className="px-3 py-3">
                                                 <span className="font-mono text-xs font-bold text-brand-600">{o.order_number}</span>
                                             </td>
-                                            <td className="px-3 py-3">
+                                            <td className="px-3 py-3 hidden md:table-cell">
                                                 <OrderTypePill isCustomer={isCustomer} />
                                             </td>
                                             <td className="px-3 py-3 max-w-44">
@@ -1907,7 +1910,7 @@ function ProductionOrdersTab() {
                                             <td className="px-3 py-3 max-w-40">
                                                 {o.customer_label ? (
                                                     <>
-                                                        <p className="font-semibold text-surface-900 truncate text-xs">{o.customer_label}</p>
+                                                        <p className="font-semibold text-surface-900 truncate text-xs" title={o.customer_label}>{o.customer_label}</p>
                                                         {o.customer_contact && (
                                                             <p className="text-2xs text-surface-400 tabular-nums truncate">{o.customer_contact}</p>
                                                         )}
@@ -1919,13 +1922,13 @@ function ProductionOrdersTab() {
                                                 )}
                                             </td>
                                             <td className="px-3 py-3 text-surface-600 tabular-nums">{o.quantity}</td>
-                                            <td className="px-3 py-3"><PriorityBadge priority={o.priority} /></td>
+                                            <td className="px-3 py-3 hidden md:table-cell"><PriorityBadge priority={o.priority} /></td>
                                             <td className="px-3 py-3"><StatusBadge status={o.status} /></td>
-                                            <td className="px-3 py-3 w-28">
+                                            <td className="px-3 py-3 w-28 hidden md:table-cell">
                                                 <ProgressBar pct={o.completion_percentage} />
                                                 <p className="text-2xs text-surface-400 mt-0.5 tabular-nums">{o.completion_percentage}%</p>
                                             </td>
-                                            <td className={clsx("px-3 py-3 text-xs font-medium",
+                                            <td className={clsx("px-3 py-3 text-xs font-medium hidden sm:table-cell",
                                                 days < 0 ? "text-danger" : days <= 2 ? "text-warning-dark" : "text-surface-400")}>
                                                 {days < 0 ? `${Math.abs(days)}d ago` : days === 0 ? "Today" : `${days}d`}
                                             </td>
@@ -2168,7 +2171,9 @@ function WIPTab({
                                     </div>
                                     <div className="flex flex-col gap-2.5 overflow-y-auto flex-1 pr-0.5">
                                         {colOrders.map(o => {
-                                            const isCustomer = !!o.customer_order_id;
+                                            // Must agree with the resolved customer name, or the TYPE pill can read
+                                    // "For Stock" on a row that names a real person.
+                                    const isCustomer = o.is_customer_order ?? !!(o.customer_order_id || o.customer_id);
                                             const days = daysUntil(o.due_date);
                                             return (
                                                 <div key={o.id} onClick={() => setSelectedId(o.id === selectedId ? null : o.id)}
@@ -2181,6 +2186,11 @@ function WIPTab({
                                                                 <PriorityBadge priority={o.priority} />
                                                             </div>
                                                             <p className="text-xs font-semibold text-surface-900 mt-0.5 truncate">{o.product_name}</p>
+                                                            {/* The board the floor actually works from — it named no
+                                                                customer at all before, which is the same gap as the list. */}
+                                                            <p className="text-2xs text-surface-500 truncate" title={o.customer_label ?? undefined}>
+                                                                {o.customer_label ?? (isCustomer ? "Name missing" : "For stock")}
+                                                            </p>
                                                         </div>
                                                         <OrderTypePill isCustomer={isCustomer} />
                                                     </div>
@@ -2820,7 +2830,9 @@ function QualityControlTab() {
                 ) : (
                     <div className="overflow-y-auto flex-1 space-y-2 pb-4">
                         {orders.map(o => {
-                            const isCustomer = !!o.customer_order_id;
+                            // Must agree with the resolved customer name, or the TYPE pill can read
+                                    // "For Stock" on a row that names a real person.
+                                    const isCustomer = o.is_customer_order ?? !!(o.customer_order_id || o.customer_id);
                             const days = daysUntil(o.due_date);
                             return (
                                 <div key={o.id} onClick={() => setSelectedId(o.id === selectedId ? null : o.id)}
@@ -2837,6 +2849,10 @@ function QualityControlTab() {
                                             <p className="font-semibold text-sm text-surface-900">{o.product_name}</p>
                                             <div className="flex gap-4 mt-1 text-xs text-surface-500">
                                                 <span>Qty: <strong className="text-surface-900">{o.quantity}</strong></span>
+                                                {/* The inspector passing or failing a garment should know who it is for. */}
+                                                {o.customer_label
+                                                    ? <span className="font-semibold text-surface-800 truncate max-w-[14rem]" title={o.customer_label}>{o.customer_label}</span>
+                                                    : isCustomer && <span className="text-warning-dark">Name missing</span>}
                                                 {isCustomer && o.customer_order && (
                                                     <span className="text-indigo-600">{o.customer_order.order_number}</span>
                                                 )}
