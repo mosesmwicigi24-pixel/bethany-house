@@ -60,6 +60,22 @@ export default {
         // have made 900 lighter than 800 and broken the ramp's monotonicity.
         ink:  '#373a36',   // reference body text AND footer fill — 11.53:1 on white
         tint: '#f48364',   // the softer orange used for CTAs sitting ON an orange band
+
+        // Sidebar chrome, taken from the Neema admin portal (owner's request,
+        // 2026-08-01). Exact values lifted from that codebase's Sidebar.tsx
+        // rather than eyeballed from a screenshot.
+        // A deliberately COOL slab against warm content: the navigation is
+        // chrome, not content, and the hue break is what separates them — the
+        // same job the reference gives its charcoal footer.
+        // NOTE the active pill stays on OUR brand orange rather than Neema's
+        // gold. Neema's accent is #f59e0b, which is exactly this system's
+        // `amber` token, and amber already means "in progress" in the work-state
+        // traffic lights; reusing it for navigation would collide with that.
+        nav: {
+          DEFAULT: '#0e1729',   // slab
+          border:  '#1e2a44',   // dividers
+          hover:   '#1b2740',   // hover fill
+        },
         // NOTE: the reference's card/chip grey is #e9e9ea, but surface-200
         // (#e7eae6) is already that colour to within two units — both compute
         // to 1.21:1 on white. A separate `mist` token was minted here and then
