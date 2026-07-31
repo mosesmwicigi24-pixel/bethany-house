@@ -2387,16 +2387,23 @@ export default function ProductionOrderDetailPage() {
                         onClick={() => navigate(`/reports/production/costing/${order.id}`)}
                         className="btn-sm bg-white border border-surface-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-surface-700 hover:border-emerald-300 hover:text-emerald-700 transition-colors"
                     >
-                        📊 Costing Report
+                        📊 <span className="sm:hidden">Costing</span><span className="hidden sm:inline">Costing Report</span>
                     </button>
 
                     {/* Edit / Cancel / Delete live behind ⋯ at the end of the row.
                         They are occasional and two of them are destructive, so
                         they earn a deliberate second tap rather than a permanent
                         slice of a 412px-wide action bar. Both destructive items
-                        still open their existing confirmation modals. */}
+                        still open their existing confirmation modals.
+
+                        NOT `ml-auto`: pushing ⋯ to the far edge both separated it
+                        from the group it belongs to and, on a wrapping row, left
+                        it stranded alone on a second line whenever the buttons
+                        came within a few px of the width. Sitting directly after
+                        the last action, it reads as part of the group and wraps
+                        with it. */}
                     {(canEdit || canDelete || canCancel) && (
-                        <div className="relative ml-auto" ref={menuRef}>
+                        <div className="relative" ref={menuRef}>
                             <button
                                 onClick={() => setMenuOpen(o => !o)}
                                 aria-haspopup="menu"
