@@ -240,14 +240,14 @@ export default function ProductionAutoAssigneesPage() {
                     <>
                         <div className="overflow-x-auto">
                         {/* Table header */}
-                        <div className="grid grid-cols-[2fr_2fr_1fr_auto] gap-4 px-5 py-2.5 bg-surface-50 border-b border-surface-100 min-w-[560px]">
+                        <div className="grid grid-cols-[2fr_2fr_1fr_auto] gap-4 px-5 py-2.5 bg-surface-50 border-b border-line min-w-[560px]">
                             <p className="text-2xs font-semibold text-surface-400 uppercase tracking-wide">User</p>
                             <p className="text-2xs font-semibold text-surface-400 uppercase tracking-wide">Role on Order</p>
                             <p className="text-2xs font-semibold text-surface-400 uppercase tracking-wide">Outlet Scope</p>
                             <p className="text-2xs font-semibold text-surface-400 uppercase tracking-wide w-8" />
                         </div>
 
-                        <div className="divide-y divide-surface-50 min-w-[560px]">
+                        <div className="divide-y divide-line min-w-[560px]">
                             {rules.map(rule => {
                                 const name = rule.user
                                     ? `${rule.user.first_name} ${rule.user.last_name}`

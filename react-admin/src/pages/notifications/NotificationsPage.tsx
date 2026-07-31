@@ -305,7 +305,7 @@ export default function NotificationsPage() {
                     <div>
                         {groups.map(([date, items]) => (
                             <div key={date}>
-                                <div className="px-5 py-2.5 bg-surface-50 border-b border-surface-100">
+                                <div className="px-5 py-2.5 bg-surface-50 border-b border-line">
                                     <p className="text-2xs font-semibold text-surface-400 uppercase tracking-wide">{date}</p>
                                 </div>
                                 {items.map(n => (
@@ -330,7 +330,7 @@ export default function NotificationsPage() {
 
                 {/* Pagination */}
                 {meta && meta.last_page > 1 && (
-                    <div className="px-5 py-3 border-t border-surface-100 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="px-5 py-3 border-t border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <p className="text-xs text-surface-400">
                             Page {meta.current_page} of {meta.last_page}
                         </p>

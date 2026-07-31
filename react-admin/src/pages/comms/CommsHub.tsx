@@ -2084,8 +2084,8 @@ function SpaceSettings({ channel, currentUserId, onClose }: {
     const existingIds = members.map(m => m.id);
 
     return (
-        <div className="w-72 shrink-0 border-l border-surface-100 bg-white flex flex-col overflow-y-auto">
-            <div className="flex items-center justify-between px-4 py-3.5 border-b border-surface-100 shrink-0">
+        <div className="w-72 shrink-0 border-l border-line bg-white flex flex-col overflow-y-auto">
+            <div className="flex items-center justify-between px-4 py-3.5 border-b border-line shrink-0">
                 <h3 className="text-sm font-bold text-surface-900">Space Settings</h3>
                 <button onClick={onClose} className="text-surface-400 hover:text-surface-700 p-1 rounded transition-colors"
 aria-label="Close">
@@ -2538,7 +2538,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                         <div className="flex items-center gap-2 px-4 py-2">
                             {/* Three breathing dots read as "someone is there" far faster
                                 than the word "typing" ever does. */}
-                            <span className="flex items-center gap-1 bg-white border border-surface-100 rounded-full px-2.5 py-1.5 shadow-sm">
+                            <span className="flex items-center gap-1 bg-white border border-line rounded-full px-2.5 py-1.5 shadow-sm">
                                 {[0, 150, 300].map(delay => (
                                     <span key={delay} className="w-1.5 h-1.5 rounded-full bg-surface-300 animate-bounce"
                                         style={{ animationDelay: `${delay}ms`, animationDuration: "1s" }} />
@@ -2657,7 +2657,7 @@ function UserDirectory({ onOpenDm, onClose }: { onOpenDm: (id: number) => void; 
     return (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[70vh] flex flex-col">
-                <div className="flex items-center justify-between px-4 py-3.5 border-b border-surface-100 shrink-0">
+                <div className="flex items-center justify-between px-4 py-3.5 border-b border-line shrink-0">
                     <h3 className="text-sm font-bold text-surface-900">New Message</h3>
                     <button onClick={onClose} className="text-surface-400 hover:text-surface-700 p-1 rounded"
 aria-label="Close">
@@ -2666,7 +2666,7 @@ aria-label="Close">
                         </svg>
                     </button>
                 </div>
-                <div className="px-4 py-2 border-b border-surface-100 shrink-0">
+                <div className="px-4 py-2 border-b border-line shrink-0">
                     <input className="input" value={q} onChange={e => setQ(e.target.value)} placeholder="Search by name or email…" autoFocus />
                 </div>
                 <div className="flex-1 overflow-y-auto py-2">
@@ -2990,7 +2990,7 @@ function OrderThreadsSection({ channels, activeId, onSelect, onDismiss, recently
                         fine — the dismissal itself is still in effect on the
                         server either way. */}
                     {recentlyDismissed.length > 0 && (
-                        <div className="mt-2 pt-2 border-t border-surface-100">
+                        <div className="mt-2 pt-2 border-t border-line">
                             <p className="text-2xs font-semibold text-surface-400 px-2 py-1">Recently dismissed</p>
                             {recentlyDismissed.map(c => (
                                 <div key={c.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-surface-100 transition-colors">
@@ -3219,14 +3219,14 @@ export default function CommsHub() {
 
             {/* Sidebar - always visible on sm+, slide-over on mobile */}
             <div className={clsx(
-                "flex flex-col bg-surface-50 border-r border-surface-100 shrink-0 transition-transform duration-200 z-30",
+                "flex flex-col bg-surface-50 border-r border-line shrink-0 transition-transform duration-200 z-30",
                 // Desktop: static in flow
                 "sm:relative sm:translate-x-0 sm:w-64",
                 // Mobile: fixed overlay, slide in/out
                 "max-sm:fixed max-sm:inset-y-0 max-sm:left-0 max-sm:w-72 max-sm:shadow-2xl",
                 mobileSidebarOpen ? "max-sm:translate-x-0" : "max-sm:-translate-x-full"
             )}>
-                <div className="px-4 py-3.5 border-b border-surface-100 shrink-0">
+                <div className="px-4 py-3.5 border-b border-line shrink-0">
                     <div className="flex items-center justify-between">
                         <h2 className="text-sm font-bold text-surface-900 flex items-center gap-2">
                             Messages

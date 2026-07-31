@@ -89,7 +89,7 @@ export default function DatabaseManagementPage() {
 
             {/* Tabs */}
             <div className="card overflow-hidden">
-                <div className="flex border-b border-surface-100 overflow-x-auto no-scrollbar">
+                <div className="flex border-b border-line overflow-x-auto no-scrollbar">
                     {TABS.map((tab) => (
                         <button
                             key={tab.key}
@@ -212,7 +212,7 @@ function BackupsTab({ pgDumpAvailable }: { pgDumpAvailable: boolean }) {
                 <div className="overflow-x-auto -mx-5">
                     <table className="w-full text-sm">
                         <thead>
-                            <tr className="text-left text-2xs uppercase text-surface-400 border-b border-surface-100">
+                            <tr className="text-left text-2xs uppercase text-surface-400 border-b border-line">
                                 <th className="px-5 py-2 font-medium">Filename</th>
                                 <th className="px-5 py-2 font-medium">Type</th>
                                 <th className="px-5 py-2 font-medium">Status</th>
@@ -223,7 +223,7 @@ function BackupsTab({ pgDumpAvailable }: { pgDumpAvailable: boolean }) {
                                 <th className="px-5 py-2 font-medium text-right">Actions</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-surface-50">
+                        <tbody className="divide-y divide-line">
                             {data.data.map((b) => (
                                 <tr key={b.id} className="hover:bg-surface-50/60">
                                     <td className="px-5 py-2.5 font-mono text-2xs text-surface-700">{b.filename}</td>
@@ -901,7 +901,7 @@ function TableGroup({
             <p className="text-xs text-surface-500 mt-0.5 mb-3">{hint}</p>
             <div className="grid sm:grid-cols-2 gap-2">
                 {tables.map((t) => (
-                    <label key={t.key} className="flex items-start gap-2 text-sm text-surface-700 rounded-lg border border-surface-100 bg-white px-3 py-2 cursor-pointer hover:border-surface-300">
+                    <label key={t.key} className="flex items-start gap-2 text-sm text-surface-700 rounded-lg border border-line bg-white px-3 py-2 cursor-pointer hover:border-surface-300">
                         <input
                             type="checkbox"
                             checked={selected.includes(t.key)}

@@ -254,11 +254,21 @@ export function AdminLayout() {
                     The bottom tab bar is fixed, so on phones the scroll area
                     reserves its height (56px) plus the home-indicator inset —
                     otherwise the last row of every list sits underneath it. */}
-                <main className="flex-1 overflow-y-auto px-3 py-3 md:p-6">
-                    {/* key: a crash on one page must not follow you to the next */}
-                    <PageErrorBoundary key={location.pathname}>
-                        <Outlet />
-                    </PageErrorBoundary>
+                <main className="flex-1 overflow-y-auto">
+                    {/* The measure. <main> previously carried the gutter and no
+                        max-width, so the content column was simply "whatever the
+                        monitor is" — 1616px on a 1920px display, 2256px on a
+                        2560px one. The reference centres content at 1200px; that
+                        is now a single token (max-w-content) owned here, so every
+                        page inherits one consistent measure instead of the four
+                        different max-w-*xl values pages used to pick for
+                        themselves. Phones are unaffected: 1200px never binds. */}
+                    <div className="mx-auto w-full max-w-content px-3 py-3 md:px-8 md:py-8">
+                        {/* key: a crash on one page must not follow you to the next */}
+                        <PageErrorBoundary key={location.pathname}>
+                            <Outlet />
+                        </PageErrorBoundary>
+                    </div>
                 </main>
 
                 {/* Phone-only app shell. A flex sibling of <main>, so the column

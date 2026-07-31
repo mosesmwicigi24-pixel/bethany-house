@@ -293,8 +293,8 @@ function FeasibilityPanel({ productId, bom }: { productId: number; bom: Bom }) {
     });
 
     return (
-        <div className="border border-surface-100 rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 bg-surface-50 border-b border-surface-100">
+        <div className="border border-line rounded-xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 bg-surface-50 border-b border-line">
                 <p className="text-sm font-semibold text-surface-800">
                     Production Feasibility Check
                 </p>
@@ -685,7 +685,7 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                     <div className="overflow-x-auto">
                     <table className="w-full min-w-[560px]">
                         <thead>
-                            <tr className="border-b border-surface-100 bg-surface-50/50">
+                            <tr className="border-b border-line bg-surface-50/50">
                                 <th className="px-3 py-2.5 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider w-8">
                                     #
                                 </th>
@@ -731,7 +731,7 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                         </tbody>
                         {lineItems.length > 0 && (
                             <tfoot>
-                                <tr className="border-t-2 border-surface-100 bg-surface-50">
+                                <tr className="border-t-2 border-line bg-surface-50">
                                     <td
                                         colSpan={4}
                                         className="px-3 py-2.5 text-xs text-surface-500"
@@ -856,12 +856,12 @@ export default function BomTab({ productId, variants }: BomTabProps) {
             {/* Version history */}
             {showHistory && boms.length > 1 && (
                 <div className="card overflow-hidden">
-                    <div className="px-4 py-2.5 border-b border-surface-100 bg-surface-50">
+                    <div className="px-4 py-2.5 border-b border-line bg-surface-50">
                         <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider">
                             Version History
                         </p>
                     </div>
-                    <div className="divide-y divide-surface-50">
+                    <div className="divide-y divide-line">
                         {boms.map((bom) => (
                             <div
                                 key={bom.id}
@@ -941,7 +941,7 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                     <div className="overflow-x-auto">
                     <table className="w-full min-w-[480px]">
                         <thead>
-                            <tr className="border-b border-surface-100 bg-surface-50/50">
+                            <tr className="border-b border-line bg-surface-50/50">
                                 <th className="px-3 py-2.5 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider w-8">
                                     #
                                 </th>
@@ -962,7 +962,7 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                                 </th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-surface-50">
+                        <tbody className="divide-y divide-line">
                             {viewingBom.items.map((item, i) => (
                                 <tr
                                     key={item.id ?? i}
@@ -1009,7 +1009,7 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                             ))}
                         </tbody>
                         <tfoot>
-                            <tr className="border-t-2 border-surface-100 bg-surface-50">
+                            <tr className="border-t-2 border-line bg-surface-50">
                                 <td
                                     colSpan={5}
                                     className="px-3 py-2.5 text-xs text-surface-500"

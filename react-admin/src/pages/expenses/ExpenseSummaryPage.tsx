@@ -178,14 +178,14 @@ export default function ExpenseSummaryPage() {
               <div className="overflow-x-auto">
               <table className="w-full min-w-[480px]">
                 <thead>
-                  <tr className="border-y border-surface-100 bg-surface-50/50">
+                  <tr className="border-y border-line bg-surface-50/50">
                     <th className="px-4 py-3 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider">Category</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-surface-500 uppercase tracking-wider">Expenses</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-surface-500 uppercase tracking-wider">Total</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider min-w-[120px]">Share</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-surface-50">
+                <tbody className="divide-y divide-line">
                   {byCategory.map((cat: any, i: number) => {
                     const totalAll = byCategory.reduce((s: number, c: any) => s + Number(c.total), 0)
                     const pct = totalAll > 0 ? (Number(cat.total) / totalAll) * 100 : 0

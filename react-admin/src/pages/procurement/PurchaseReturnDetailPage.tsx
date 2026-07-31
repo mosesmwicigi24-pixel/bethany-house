@@ -106,7 +106,7 @@ function AuditTrail({ returnId }: { returnId: number }) {
         <div className="text-center py-12 text-xs text-surface-400">No audit entries yet.</div>
     );
     return (
-        <div className="divide-y divide-surface-50">
+        <div className="divide-y divide-line">
             {logs.map((e) => (
                 <div key={e.id} className="flex gap-3 py-3.5">
                     <div className="w-7 h-7 rounded-full bg-red-100 flex items-center justify-center shrink-0 mt-0.5">
@@ -243,7 +243,7 @@ export default function PurchaseReturnDetailPage() {
                 {(canApprove || canReject || canComplete) && (
                     <div className={clsx(
                         "px-5 py-3 border-b flex flex-col gap-2 sm:px-8 sm:flex-row sm:items-center sm:flex-wrap",
-                        canApprove ? "bg-amber-50 border-amber-100" : "bg-slate-50 border-surface-100"
+                        canApprove ? "bg-amber-50 border-amber-100" : "bg-slate-50 border-line"
                     )}>
                         {canApprove && (
                             <span className="text-xs text-amber-700 font-semibold flex-1">
@@ -292,18 +292,18 @@ export default function PurchaseReturnDetailPage() {
                 )}
 
                 {/* PDF / secondary action bar — always visible */}
-                <div className="px-5 py-3 bg-white border-b border-surface-100 flex items-center gap-2 sm:px-8">
+                <div className="px-5 py-3 bg-white border-b border-line flex items-center gap-2 sm:px-8">
                     <PdfDownloadButton type="purchase-returns" id={pr.id} label="Download PDF" />
                 </div>
 
                 {/* Body */}
-                <div className="px-5 py-5 grid grid-cols-1 lg:grid-cols-[1fr_240px] gap-6 lg:gap-8 sm:px-8 sm:py-6 lg:divide-x divide-surface-100">
+                <div className="px-5 py-5 grid grid-cols-1 lg:grid-cols-[1fr_240px] gap-6 lg:gap-8 sm:px-8 sm:py-6 lg:divide-x divide-line">
 
                     {/* Left */}
                     <div className="space-y-4 lg:pr-8">
 
                         {/* Tabs */}
-                        <div className="flex border-b border-surface-100 overflow-x-auto no-scrollbar">
+                        <div className="flex border-b border-line overflow-x-auto no-scrollbar">
                             {(["items", "audit"] as const).map((t) => (
                                 <button key={t} onClick={() => setTab(t)}
                                     className={clsx("px-4 py-2.5 text-xs font-semibold border-b-2 transition-all whitespace-nowrap shrink-0",
@@ -327,7 +327,7 @@ export default function PurchaseReturnDetailPage() {
                                                 <th className="text-left px-3 py-2.5 font-semibold text-surface-600">Reason</th>
                                             </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-surface-100">
+                                        <tbody className="divide-y divide-line">
                                             {items.map((item) => {
                                                 const poi = item.purchase_order_item;
                                                 const name = poi?.product?.name ?? poi?.material?.name ?? poi?.description ?? `Item #${item.po_item_id}`;

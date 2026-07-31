@@ -433,7 +433,7 @@ function SupplierDetailModal({
                             ].map((s) => (
                                 <div
                                     key={s.label}
-                                    className="text-center border border-surface-100 rounded-xl py-3"
+                                    className="text-center border border-line rounded-xl py-3"
                                 >
                                     <p
                                         className={clsx(
@@ -817,7 +817,7 @@ export default function SuppliersPage() {
                         </div>
 
                         {meta && meta.last_page > 1 && (
-                            <div className="px-4 py-3 border-t border-surface-100 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="px-4 py-3 border-t border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                 <p className="text-xs text-surface-500">
                                     Showing {meta.from}–{meta.to} of{" "}
                                     {meta.total}

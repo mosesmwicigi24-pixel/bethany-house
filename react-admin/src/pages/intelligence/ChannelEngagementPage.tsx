@@ -56,10 +56,10 @@ export default function ChannelEngagementPage() {
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="bg-white rounded-2xl border border-surface-200 overflow-hidden">
-                            <div className="px-5 py-3 border-b border-surface-100">
+                            <div className="px-5 py-3 border-b border-line">
                                 <h2 className="font-semibold text-surface-900 text-sm">By platform</h2>
                             </div>
-                            <div className="divide-y divide-surface-50">
+                            <div className="divide-y divide-line">
                                 {channels.map((c: ChannelStat) => {
                                     const meta = CHANNEL_META[c.channel] ?? { label: c.channel, emoji: "•" };
                                     return (
@@ -88,19 +88,19 @@ export default function ChannelEngagementPage() {
                                     );
                                 })}
                             </div>
-                            <div className="px-5 py-3 border-t border-surface-100 text-2xs text-surface-400">
+                            <div className="px-5 py-3 border-t border-line text-2xs text-surface-400">
                                 Instagram lights up once its Neema ingestion carries traffic — no further setup needed.
                             </div>
                         </div>
 
                         <div className="bg-white rounded-2xl border border-surface-200 overflow-hidden">
-                            <div className="px-5 py-3 border-b border-surface-100">
+                            <div className="px-5 py-3 border-b border-line">
                                 <h2 className="font-semibold text-surface-900 text-sm">Most engaged customers</h2>
                             </div>
                             {top.length === 0 ? (
                                 <p className="px-5 py-10 text-center text-sm text-surface-400">No matched customers yet.</p>
                             ) : (
-                                <div className="divide-y divide-surface-50">
+                                <div className="divide-y divide-line">
                                     {top.map(t => (
                                         <div key={t.customer_id}
                                              className="flex items-center gap-3 px-5 py-3 hover:bg-surface-50/50 cursor-pointer transition-colors"

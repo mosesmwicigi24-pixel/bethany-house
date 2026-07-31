@@ -62,7 +62,7 @@ export default function OutstandingBalancesPage() {
     return (
         <div className="flex flex-col h-full min-w-0 overflow-hidden">
             {/* Header */}
-            <div className="px-4 sm:px-6 pt-5 pb-4 border-b border-surface-100">
+            <div className="px-4 sm:px-6 pt-5 pb-4 border-b border-line">
                 <div className="flex items-start justify-between gap-4 flex-wrap">
                     <div>
                         <h1 className="text-lg sm:text-xl font-bold text-surface-900">Outstanding Balances</h1>
@@ -89,7 +89,7 @@ export default function OutstandingBalancesPage() {
                 ) : rows.length === 0 ? (
                     <p className="text-center text-surface-400 py-16">No outstanding balances. 🎉</p>
                 ) : (
-                    <div className="overflow-x-auto rounded-xl border border-surface-100">
+                    <div className="overflow-x-auto rounded-xl border border-line">
                         <table className="w-full text-sm">
                             <thead className="bg-surface-50 text-surface-500 text-xs">
                                 <tr>
@@ -102,7 +102,7 @@ export default function OutstandingBalancesPage() {
                                     <th className="text-left font-medium px-4 py-2.5">Due</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-surface-100">
+                            <tbody className="divide-y divide-line">
                                 {rows.map((r) => (
                                     <tr key={r.id} className="hover:bg-surface-50">
                                         <td className="px-4 py-2.5 font-medium text-surface-900">{r.order_number}</td>

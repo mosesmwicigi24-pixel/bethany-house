@@ -626,7 +626,7 @@ export default function ExpenseCategoriesPage() {
                     <div className="overflow-x-auto">
                     <table className="w-full min-w-[640px]">
                         <thead>
-                            <tr className="border-b border-surface-100 bg-surface-50/50">
+                            <tr className="border-b border-line bg-surface-50/50">
                                 <th className="px-4 py-3 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider">
                                     Category
                                 </th>
@@ -651,7 +651,7 @@ export default function ExpenseCategoriesPage() {
                                 <th className="px-4 py-3 w-12" />
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-surface-50">
+                        <tbody className="divide-y divide-line">
                             {catLoading ? (
                                 <tr>
                                     <td
@@ -839,7 +839,7 @@ export default function ExpenseCategoriesPage() {
                         <div className="overflow-x-auto">
                         <table className="w-full min-w-[560px]">
                             <thead>
-                                <tr className="border-b border-surface-100 bg-surface-50/50">
+                                <tr className="border-b border-line bg-surface-50/50">
                                     <th className="px-4 py-3 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider">
                                         Category
                                     </th>
@@ -861,7 +861,7 @@ export default function ExpenseCategoriesPage() {
                                     <th className="px-4 py-3 w-12" />
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-surface-50">
+                            <tbody className="divide-y divide-line">
                                 {bgtLoading ? (
                                     <tr>
                                         <td

@@ -39,7 +39,7 @@ function SaleDetailPanel({
 
     return (
         <div className="absolute inset-0 bg-white z-10 flex flex-col animate-slide-left">
-            <div className="px-5 py-4 border-b border-surface-100 flex items-center gap-3">
+            <div className="px-5 py-4 border-b border-line flex items-center gap-3">
                 <button onClick={onClose} className="btn-ghost btn-icon btn-sm">
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
@@ -121,7 +121,7 @@ function SaleDetailPanel({
                 </div>
 
                 {/* Totals */}
-                <div className="border-t border-surface-100 pt-3 space-y-1.5 text-xs">
+                <div className="border-t border-line pt-3 space-y-1.5 text-xs">
                     <div className="flex justify-between text-surface-500">
                         <span>Subtotal</span><span>{fmt(sale.subtotal)}</span>
                     </div>
@@ -135,7 +135,7 @@ function SaleDetailPanel({
                             <span>VAT</span><span>{fmt(sale.tax_amount)}</span>
                         </div>
                     )}
-                    <div className="flex justify-between font-bold text-sm pt-1 border-t border-surface-100">
+                    <div className="flex justify-between font-bold text-sm pt-1 border-t border-line">
                         <span>Total</span>
                         <span className="text-brand-600">KES {fmt(sale.total)}</span>
                     </div>
@@ -154,7 +154,7 @@ function SaleDetailPanel({
 
             {/* Action buttons */}
             {sale.status !== "voided" && (
-                <div className="p-4 border-t border-surface-100 space-y-2">
+                <div className="p-4 border-t border-line space-y-2">
                     {/* Restore to cart — only for unpaid pending orders */}
                     {restorable && onRestore && (
                         <button
@@ -256,7 +256,7 @@ export default function SalesHistoryDrawer({ outletId, outletName, onClose, onRe
                 )}
 
                 {/* Header */}
-                <div className="px-5 py-4 border-b border-surface-100 shrink-0">
+                <div className="px-5 py-4 border-b border-line shrink-0">
                     <div className="flex items-center justify-between mb-3">
                         <div>
                             <h2 className="font-bold text-surface-900">My Orders</h2>
@@ -306,7 +306,7 @@ export default function SalesHistoryDrawer({ outletId, outletName, onClose, onRe
                             <p className="text-2xs text-surface-300">Only your orders appear here</p>
                         </div>
                     ) : (
-                        <div className="divide-y divide-surface-50">
+                        <div className="divide-y divide-line">
                             {filteredSales.map((sale) => {
                                 const pending = isRestorable(sale);
                                 return (

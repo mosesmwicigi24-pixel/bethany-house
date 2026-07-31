@@ -138,7 +138,7 @@ function TypeIcon({ type }: { type: SearchResultType | string }) {
 
 function GroupHeader({ label }: { label: string }) {
     return (
-        <div className="px-4 py-1.5 text-2xs font-semibold text-surface-400 uppercase tracking-wider bg-surface-50 border-b border-surface-100 sticky top-0">
+        <div className="px-4 py-1.5 text-2xs font-semibold text-surface-400 uppercase tracking-wider bg-surface-50 border-b border-line sticky top-0">
             {label}
         </div>
     );
@@ -320,11 +320,11 @@ export function CommandPalette() {
 
             {/* Palette */}
             <div
-                className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl overflow-hidden border border-surface-100 animate-scale-in"
+                className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl overflow-hidden border border-line animate-scale-in"
                 onKeyDown={handleKeyDown}
             >
                 {/* Search input */}
-                <div className="flex items-center gap-3 px-4 h-14 border-b border-surface-100">
+                <div className="flex items-center gap-3 px-4 h-14 border-b border-line">
                     {loading ? (
                         <svg className="w-4 h-4 text-surface-400 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4}/>
@@ -408,7 +408,7 @@ export function CommandPalette() {
                 </div>
 
                 {/* Footer */}
-                <div className="border-t border-surface-100 px-4 py-2 flex items-center gap-4 text-2xs text-surface-400">
+                <div className="border-t border-line px-4 py-2 flex items-center gap-4 text-2xs text-surface-400">
                     <span className="flex items-center gap-1">
                         <kbd className="px-1 py-0.5 rounded border border-surface-200 font-mono">↑↓</kbd> navigate
                     </span>

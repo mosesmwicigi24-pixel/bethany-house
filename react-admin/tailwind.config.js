@@ -17,38 +17,58 @@ export default {
           200: '#ffc7b0',
           300: '#ffa17d',
           400: '#fb7a4c',
-          500: '#f0562a',   // primary — CTA fill
+          500: '#f05423',   // primary — CTA fill. EXACT value measured off
+                            // mukuru.com (was #f0562a, an eyeballed approximation).
           600: '#d8431a',
-          700: '#b23514',   // 4.9:1 on white — safe for text and icons
+          700: '#b23514',   // 6.15:1 on white — safe for text and icons
           800: '#8f2c13',
           900: '#742714',
           950: '#3f1106',
         },
-        // UI neutrals - cool slate base
+        // UI neutrals — WARM green-grey, hue 105.
+        // The reference's neutrals are warm (its body text and footer are
+        // #373a36, hsl(105, 3.6%, 22%)); ours were cool blue-slate (#121926,
+        // hsl(217, 35%, 11%)). That hue mismatch — not the orange, which was
+        // already right — is what made the hub read as a generic admin panel
+        // rather than the reference.
+        // Every step keeps the LIGHTNESS of the cool ramp it replaces, so the
+        // contrast ratios already verified against this palette still hold;
+        // only hue and saturation moved. Saturation rises slightly at the light
+        // end so pale fills read warm instead of dead grey.
         surface: {
-          // Page background only — never a card fill. surface-50 is ~1.6% off
-          // white, too close for a white card to read as floating; this is ~4%,
-          // which separates softly without looking grey. Kept separate because
-          // surface-50 is also the table row-hover tint.
-          canvas: '#f1f2f3',
+          // Page background only — never a card fill.
+          canvas: '#f2f3f1',
           0:   '#ffffff',
-          50:  '#f8f9fb',
-          100: '#f0f2f5',
-          200: '#e4e7ec',
-          300: '#cdd2da',
-          400: '#9aa3b0',
-          500: '#697586',
-          600: '#4b5565',
-          700: '#364152',
-          800: '#202939',
-          900: '#121926',
-          950: '#0d1117',
+          50:  '#f9faf9',
+          100: '#f2f3f2',
+          200: '#e7eae6',
+          300: '#d2d6d1',
+          // Darkened from the direct re-hue (#a3a9a0, 2.40:1). This token is
+          // used ~1178x, much of it on text, and 2.40:1 fails AA outright.
+          // 3.13:1 clears the 3:1 bar for UI and large text.
+          400: '#8c9489',
+          500: '#757d72',
+          600: '#565c54',
+          700: '#434741',
+          800: '#2c2e2b',
+          900: '#1b1d1b',
+          950: '#121311',
         },
-        // Sampled from the reference screens: a flat grey canvas the white
-        // cards sit on, a hairline that is visible but never heavy, and the
-        // pale fill used inside select/inputs.
-        line:   '#e6e7e9',
-        field:  '#fafafa',
+        // Exact values measured off mukuru.com — not approximations. Kept as
+        // their own names (rather than forced into the ramp) because #373a36
+        // sits at L22%, between our 700 and 800; jamming it in as 900 would
+        // have made 900 lighter than 800 and broken the ramp's monotonicity.
+        ink:  '#373a36',   // reference body text AND footer fill — 11.53:1 on white
+        tint: '#f48364',   // the softer orange used for CTAs sitting ON an orange band
+        // NOTE: the reference's card/chip grey is #e9e9ea, but surface-200
+        // (#e7eae6) is already that colour to within two units — both compute
+        // to 1.21:1 on white. A separate `mist` token was minted here and then
+        // removed: two names for one colour is how a palette forks, with half
+        // the app landing on each. Use surface-200 for the grey chip.
+        // A hairline that is visible but never heavy, and the pale fill used
+        // inside select/inputs. Re-hued warm to match the ramp above.
+        line:   '#e5e7e3',
+        field:  '#fafbfa',
 
         // Semantic
         // Work-state semantics (owner's rule): in flight = amber, finished = a
@@ -61,6 +81,15 @@ export default {
         warning: { light: '#fef9c3', DEFAULT: '#ca8a04', dark: '#713f12' },
         danger:  { light: '#fee2e2', DEFAULT: '#dc2626', dark: '#7f1d1d' },
         info:    { light: '#dbeafe', DEFAULT: '#2563eb', dark: '#1e3a8a' },
+      },
+      // The reference centres its content in a 1200px column. Our <main> had no
+      // max-width at all: on a 1920px display with the sidebar expanded the
+      // column rendered 1616px, and 2256px on a 2560px display — tables and form
+      // grids stretched edge-to-edge and the reading measure collapsed. One
+      // token owns the measure so pages stop disagreeing (they previously used
+      // max-w-4xl/5xl/6xl/7xl, none of which is 1200px).
+      maxWidth: {
+        content: '1200px',
       },
       fontFamily: {
         // One typeface across the hub AND the storefront. `display` stays as a
@@ -81,6 +110,15 @@ export default {
         'xl':   ['1.1875rem', { lineHeight: '1.625rem', letterSpacing: '-0.015em' }],
         '2xl':  ['1.5rem',    { lineHeight: '1.875rem', letterSpacing: '-0.02em' }],
         '3xl':  ['1.75rem',   { lineHeight: '2.125rem', letterSpacing: '-0.025em' }],
+        // Desktop display sizes, matching the reference's measured heading ramp
+        // (h1 40/lh44, h2 30/lh33). Our old top end was 28px, which is why big
+        // screens read as a scaled-up phone rather than a designed desktop.
+        // NOTE: the reference sets h1 at weight 900. Plus Jakarta Sans tops out
+        // at 800, so `font-extrabold` is as heavy as we can actually render —
+        // asking for font-black would silently fall back to 800 anyway.
+        '4xl':  ['2.5rem',    { lineHeight: '2.75rem',  letterSpacing: '-0.02em' }],
+        // body stays 15px/24px (1.6) — the reference is 15px/24.9px (1.66),
+        // already a match, so the body ramp needed no change.
       },
       // 8–12px is dense-admin geometry; the reference is 20–24px with pill
       // buttons. Named by role so intent survives future edits.

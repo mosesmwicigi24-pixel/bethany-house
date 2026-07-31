@@ -204,9 +204,9 @@ function NotificationBell() {
 
             {/* Dropdown */}
             {open && (
-                <div className="absolute right-0 top-full mt-1.5 w-80 bg-white rounded-2xl shadow-card-lg border border-surface-100 z-50 animate-slide-down overflow-hidden">
+                <div className="absolute right-0 top-full mt-1.5 w-80 bg-white rounded-2xl shadow-card-lg border border-line z-50 animate-slide-down overflow-hidden">
                     {/* Header */}
-                    <div className="flex items-center justify-between px-4 py-3 border-b border-surface-100">
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-line">
                         <div className="flex items-center gap-2">
                             <h3 className="text-sm font-semibold text-surface-900">
                                 Notifications
@@ -229,7 +229,7 @@ function NotificationBell() {
                     </div>
 
                     {/* List */}
-                    <div className="max-h-96 overflow-y-auto divide-y divide-surface-50">
+                    <div className="max-h-96 overflow-y-auto divide-y divide-line">
                         {isLoading ? (
                             <div className="flex items-center justify-center py-10 text-surface-400">
                                 <div className="w-5 h-5 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
@@ -333,7 +333,7 @@ function NotificationBell() {
 
                     {/* Footer */}
                     {notifications.length > 0 && (
-                        <div className="px-4 py-2.5 border-t border-surface-100 text-center">
+                        <div className="px-4 py-2.5 border-t border-line text-center">
                             <button
                                 onClick={() => {
                                     setOpen(false);
@@ -412,9 +412,9 @@ function MessagesButton() {
             </button>
 
             {open && (
-                <div className="absolute right-0 top-full mt-1.5 w-72 bg-white rounded-2xl shadow-card-lg border border-surface-100 z-50 animate-slide-down overflow-hidden">
+                <div className="absolute right-0 top-full mt-1.5 w-72 bg-white rounded-2xl shadow-card-lg border border-line z-50 animate-slide-down overflow-hidden">
                     {/* Header */}
-                    <div className="flex items-center justify-between px-4 py-3 border-b border-surface-100">
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-line">
                         <div className="flex items-center gap-2">
                             <h3 className="text-sm font-semibold text-surface-900">Messages</h3>
                             {totalUnread > 0 && (
@@ -432,7 +432,7 @@ function MessagesButton() {
                     </div>
 
                     {/* Channel list */}
-                    <div className="max-h-80 overflow-y-auto divide-y divide-surface-50">
+                    <div className="max-h-80 overflow-y-auto divide-y divide-line">
                         {isLoading ? (
                             <div className="flex items-center justify-center py-10">
                                 <div className="w-5 h-5 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
@@ -496,7 +496,7 @@ function MessagesButton() {
 
                     {/* Footer */}
                     {channels.length > 0 && (
-                        <div className="px-4 py-2.5 border-t border-surface-100 text-center">
+                        <div className="px-4 py-2.5 border-t border-line text-center">
                             <button
                                 onClick={() => { setOpen(false); navigate("/comms"); }}
                                 className="text-xs text-brand-500 hover:underline"
@@ -551,7 +551,7 @@ export function Topbar({
     };
 
     return (
-        <header className="h-[60px] bg-white border-b border-surface-100 flex items-center px-4 gap-4 shrink-0 z-10">
+        <header className="h-[60px] bg-white border-b border-line flex items-center px-4 gap-4 shrink-0 z-10">
             {/* Collapse toggle (desktop) / Hamburger (mobile) */}
             <button
                 onClick={() => {
@@ -667,14 +667,14 @@ export function Topbar({
                     })()}
 
                     {userMenuOpen && (
-                        <div className="absolute right-0 top-full mt-1.5 w-56 bg-white rounded-xl shadow-card-lg border border-surface-100 py-1.5 animate-slide-down z-50">
+                        <div className="absolute right-0 top-full mt-1.5 w-56 bg-white rounded-xl shadow-card-lg border border-line py-1.5 animate-slide-down z-50">
                             {(() => {
                                 const fullName = user?.first_name || user?.last_name
                                     ? `${user?.first_name ?? ""} ${user?.last_name ?? ""}`.trim()
                                     : (user?.name ?? "");
                                 const roleName = formatRoleName(user?.roles?.[0]?.display_name ?? user?.roles?.[0]?.name ?? user?.user_type ?? "");
                                 return (
-                                    <div className="px-4 py-2.5 border-b border-surface-100 mb-1">
+                                    <div className="px-4 py-2.5 border-b border-line mb-1">
                                         <p className="text-sm font-semibold text-surface-900">{fullName}</p>
                                         <p className="text-xs text-surface-500 mt-0.5">{user?.email}</p>
                                         {roleName && (
@@ -691,7 +691,7 @@ export function Topbar({
                             >
                                 My Profile
                             </MenuLink>
-                            <div className="my-1 border-t border-surface-100" />
+                            <div className="my-1 border-t border-line" />
                             <button
                                 onClick={handleLogout}
                                 disabled={isLoggingOut}

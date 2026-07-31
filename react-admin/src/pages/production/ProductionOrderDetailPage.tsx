@@ -573,7 +573,7 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                         {activeTasks.map(task => {
                             const currentId = typeof task.assigned_to === "object" ? (task.assigned_to as any)?.id?.toString() ?? "" : task.assigned_to?.toString() ?? "";
                             return (
-                                <div key={task.id} className="grid grid-cols-12 gap-3 items-center p-3 rounded-xl bg-surface-50 border border-surface-100">
+                                <div key={task.id} className="grid grid-cols-12 gap-3 items-center p-3 rounded-xl bg-surface-50 border border-line">
                                     <div className="col-span-4 flex items-center gap-2">
                                         <input type="checkbox" checked={!!checked[task.id]}
                                             onChange={e => setChecked(p => ({ ...p, [task.id]: e.target.checked }))}
@@ -989,7 +989,7 @@ function StagesPipeline({
                             ? "bg-red-50 border-red-200"
                             : isMyTask
                                 ? "bg-white border-brand-100"
-                                : "bg-surface-50 border-surface-100";
+                                : "bg-surface-50 border-line";
 
                 const dotColor = isDone && !isFailed
                     ? "bg-emerald-500"
@@ -1143,7 +1143,7 @@ function StagesPipeline({
                             )}
 
                             {task.notes && (
-                                <p className="mt-1.5 text-xs text-surface-600 bg-white/70 rounded-lg px-2.5 py-1.5 border border-surface-100 whitespace-pre-wrap">
+                                <p className="mt-1.5 text-xs text-surface-600 bg-white/70 rounded-lg px-2.5 py-1.5 border border-line whitespace-pre-wrap">
                                     {task.notes}
                                 </p>
                             )}
@@ -1600,7 +1600,7 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
             </div>
 
             {/* Composer */}
-            <div className="border-t border-surface-100 p-3 bg-surface-50 rounded-b-xl shrink-0">
+            <div className="border-t border-line p-3 bg-surface-50 rounded-b-xl shrink-0">
                 <div className="relative">
                     {mentionQ !== null && (
                         <ThreadMentionPopup query={mentionQ} onSelect={insertMention} />
@@ -1730,7 +1730,7 @@ function AuditTrail({ orderId }: { orderId: number }) {
     if (isLoading) return <div className="flex justify-center py-10"><Spinner /></div>;
     if (!logs.length) return <div className="text-center py-12 text-xs text-surface-400">No audit entries yet.</div>;
     return (
-        <div className="divide-y divide-surface-50">
+        <div className="divide-y divide-line">
             {logs.map(e => (
                 <div key={e.id} className="flex gap-3 py-3.5">
                     <div className="w-7 h-7 rounded-full bg-brand-100 flex items-center justify-center shrink-0 mt-0.5">
@@ -1765,7 +1765,7 @@ const measurementRank = (k: string) => {
 // Three measurements per row: a tape-measure card, not a ledger. Each cell is
 // name-over-value so the eye sweeps left-to-right exactly the way the shop
 // measures top-to-bottom — three at a glance instead of one per line.
-function SpecGrid({ data, accentClass = "bg-surface-50 border-surface-100" }: { data: Record<string, string>; accentClass?: string }) {
+function SpecGrid({ data, accentClass = "bg-surface-50 border-line" }: { data: Record<string, string>; accentClass?: string }) {
     const entries = Object.entries(data).filter(([, v]) => v)
         .map(([k, v], i) => ({ k, v, i }))
         .sort((a, b) => (measurementRank(a.k) - measurementRank(b.k)) || (a.i - b.i))
@@ -1941,7 +1941,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
 
             {/* Material share — what this batch consumes of the order's allocations */}
             {allocations.length > 0 && share > 0 && (
-                <details className="border-t border-surface-100 group">
+                <details className="border-t border-line group">
                     <summary className="px-3 sm:px-4 py-2 text-2xs font-bold text-surface-400 uppercase tracking-widest cursor-pointer select-none hover:text-surface-600 flex items-center gap-1.5 list-none [&::-webkit-details-marker]:hidden">
                         <svg className="w-3 h-3 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -1955,7 +1955,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                             <span className="col-span-2 text-right">Used</span>
                             <span className="col-span-3 text-right">Remaining</span>
                         </div>
-                        <div className="divide-y divide-surface-50">
+                        <div className="divide-y divide-line">
                             {allocations.map(a => {
                                 const req  = a.quantity_required * share;
                                 const used = a.quantity_used * share;
@@ -2468,7 +2468,7 @@ export default function ProductionOrderDetailPage() {
                 </div>
 
                 {/* Body */}
-                <div className="px-5 py-5 grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-6 lg:gap-8 sm:px-8 sm:py-6 lg:divide-x divide-surface-100">
+                <div className="px-5 py-5 grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-6 lg:gap-8 sm:px-8 sm:py-6 lg:divide-x divide-line">
 
                     {/* Left */}
                     <div className="space-y-4 lg:pr-8">
@@ -2480,7 +2480,7 @@ export default function ProductionOrderDetailPage() {
                         {/* Tabs — tighter padding and no emoji below `sm`, so the
                             full set fits a phone instead of scrolling Audit off the
                             right edge with the scrollbar hidden. */}
-                        <div className="flex border-b border-surface-100 overflow-x-auto no-scrollbar gap-0 -mb-px">
+                        <div className="flex border-b border-line overflow-x-auto no-scrollbar gap-0 -mb-px">
                             {tabs.map(t => (
                                 <button key={t.key} onClick={() => setTab(t.key as any)}
                                     className={clsx("px-2 sm:px-4 py-2 sm:py-2.5 text-[11.5px] sm:text-xs font-semibold border-b-2 transition-all whitespace-nowrap",
@@ -2526,7 +2526,7 @@ export default function ProductionOrderDetailPage() {
                                                 <th className="text-left px-3 py-2.5 font-semibold text-surface-600">Status</th>
                                             </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-surface-100">
+                                        <tbody className="divide-y divide-line">
                                             {allocations.map(a => {
                                                 const pct = a.quantity_required > 0 ? (a.quantity_allocated / a.quantity_required) * 100 : 0;
                                                 return (
@@ -2564,7 +2564,7 @@ export default function ProductionOrderDetailPage() {
                                     <div><SectionLabel>Measurements</SectionLabel><SpecGrid data={orderMeasurements} accentClass="bg-blue-50/70 border-blue-100" /></div>
                                 )}
                                 {orderSpecifications && Object.keys(orderSpecifications).length > 0 && (
-                                    <div><SectionLabel>Specifications</SectionLabel><SpecGrid data={orderSpecifications} accentClass="bg-surface-50 border-surface-100" /></div>
+                                    <div><SectionLabel>Specifications</SectionLabel><SpecGrid data={orderSpecifications} accentClass="bg-surface-50 border-line" /></div>
                                 )}
                                 {orderPreferences && Object.keys(orderPreferences).length > 0 && (
                                     <div><SectionLabel>Customer Preferences</SectionLabel><SpecGrid data={orderPreferences} accentClass="bg-indigo-50/70 border-indigo-100" /></div>

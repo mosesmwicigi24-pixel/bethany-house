@@ -227,7 +227,7 @@ export default function FinancialReportPage() {
             </div>
 
             {/* Tabs */}
-            <div className="border-b border-surface-100 overflow-x-auto no-scrollbar">
+            <div className="border-b border-line overflow-x-auto no-scrollbar">
                 <nav className="flex gap-1 -mb-px">
                     {(["pl", "expenses", "trends", "tax", "cashflow", "intelligence"] as const).map((tab) => (
                         <button
@@ -264,7 +264,7 @@ export default function FinancialReportPage() {
                                 params={dr.params}
                             />
                         </SectionHeader>
-                        <div className="divide-y divide-surface-100">
+                        <div className="divide-y divide-line">
                             {plRows.map((row, i) => (
                                 <div
                                     key={i}
@@ -480,7 +480,7 @@ export default function FinancialReportPage() {
                         <TableWrapper>
                             <table className="w-full">
                                 <thead>
-                                    <tr className="border-y border-surface-100 bg-surface-50/50">
+                                    <tr className="border-y border-line bg-surface-50/50">
                                         <th className={TH}>Ref #</th>
                                         <th className={TH}>Title</th>
                                         <th className={TH}>Category</th>
@@ -491,7 +491,7 @@ export default function FinancialReportPage() {
                                         <th className={TH_R}>Amount</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-surface-50">
+                                <tbody className="divide-y divide-line">
                                     {expQuery.isLoading ? (
                                         <tr>
                                             <td
@@ -683,7 +683,7 @@ export default function FinancialReportPage() {
                                     <TableWrapper>
                                         <table className="w-full">
                                             <thead>
-                                                <tr className="border-y border-surface-100 bg-surface-50/50">
+                                                <tr className="border-y border-line bg-surface-50/50">
                                                     <th className={TH}>Tax Name</th>
                                                     <th className={TH_R}>Rate</th>
                                                     <th className={TH_R}>Orders</th>
@@ -691,7 +691,7 @@ export default function FinancialReportPage() {
                                                     <th className={TH_R}>Tax Collected</th>
                                                 </tr>
                                             </thead>
-                                            <tbody className="divide-y divide-surface-50">
+                                            <tbody className="divide-y divide-line">
                                                 {taxQuery.data.by_tax_rate.map((row: any, i: number) => (
                                                     <tr key={i} className="hover:bg-surface-50/50 transition-colors">
                                                         <td className="px-4 py-3 font-medium text-surface-900">{row.tax_name ?? row.tax_rate + "% VAT"}</td>

@@ -188,7 +188,7 @@ export default function OutletsPage() {
                         }
                     />
                 ) : (
-                    <div className="divide-y divide-surface-50">
+                    <div className="divide-y divide-line">
                         {outlets.map((outlet) => (
                             <div
                                 key={outlet.id}
@@ -348,7 +348,7 @@ export default function OutletsPage() {
                         </Field>
                     </div>
 
-                    <div className="border-t border-surface-100 pt-4">
+                    <div className="border-t border-line pt-4">
                         <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-3">
                             Address
                         </p>
@@ -404,7 +404,7 @@ export default function OutletsPage() {
                         </div>
                     </div>
 
-                    <div className="border-t border-surface-100 pt-4">
+                    <div className="border-t border-line pt-4">
                         <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-1">
                             Location & Geofence
                         </p>
@@ -442,7 +442,7 @@ export default function OutletsPage() {
                         </div>
                     </div>
 
-                    <div className="space-y-3 pt-2 border-t border-surface-100">
+                    <div className="space-y-3 pt-2 border-t border-line">
                         <Toggle
                             checked={watch("is_active")}
                             onChange={(v) => setValue("is_active", v)}

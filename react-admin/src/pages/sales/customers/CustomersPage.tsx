@@ -550,7 +550,7 @@ export default function CustomersPage() {
                         scrolls sideways and wraps the customer name onto three
                         lines — the reference app never puts a table on a handset.
                         Desktop keeps the table, where the columns genuinely fit. */}
-                    <div className="md:hidden divide-y divide-surface-100">
+                    <div className="md:hidden divide-y divide-line">
                         {customers.map((customer) => {
                             const fullName = `${customer.first_name} ${customer.last_name}`;
                             // `||` not `??`: the create form posts "" for an
@@ -952,7 +952,7 @@ export default function CustomersPage() {
 
                 {/* Pagination */}
                 {meta && meta.last_page > 1 && (
-                    <div className="px-4 py-3 border-t border-surface-100 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="px-4 py-3 border-t border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <p className="text-xs text-surface-500">
                             Page {meta.current_page} of {meta.last_page} ·{" "}
                             {meta.total.toLocaleString()} customers

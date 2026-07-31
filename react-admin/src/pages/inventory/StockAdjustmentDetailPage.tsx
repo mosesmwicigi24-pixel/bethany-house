@@ -76,7 +76,7 @@ function AuditTrail({ adjId }: { adjId: number }) {
     if (isLoading) return <div className="flex justify-center py-10"><Spinner /></div>;
     if (!logs.length) return <div className="text-center py-12 text-xs text-surface-400">No audit entries yet.</div>;
     return (
-        <div className="divide-y divide-surface-50">
+        <div className="divide-y divide-line">
             {logs.map((entry) => (
                 <div key={entry.id} className="flex gap-3 py-3.5">
                     <div className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center shrink-0 mt-0.5">
@@ -230,7 +230,7 @@ export default function StockAdjustmentDetailPage() {
                     </div>
                 )}
                 {canReverse && (
-                    <div className="px-5 py-3 bg-slate-50 border-b border-surface-100 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
+                    <div className="px-5 py-3 bg-slate-50 border-b border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
                         <button onClick={() => {
                             const notes = window.prompt("Reason for reversal (required):");
                             if (notes) reverseMutation.mutate(notes);
@@ -243,18 +243,18 @@ export default function StockAdjustmentDetailPage() {
                 )}
 
                 {/* PDF action bar — always visible */}
-                <div className="px-5 py-3 bg-white border-b border-surface-100 flex items-center gap-2 sm:px-8">
+                <div className="px-5 py-3 bg-white border-b border-line flex items-center gap-2 sm:px-8">
                     <PdfDownloadButton type="stock-adjustments" id={adj.id} label="Download PDF" />
                 </div>
 
                 {/* Body */}
-                <div className="px-5 py-5 grid grid-cols-1 lg:grid-cols-[1fr_240px] gap-6 lg:gap-8 sm:px-8 sm:py-6 lg:divide-x divide-surface-100">
+                <div className="px-5 py-5 grid grid-cols-1 lg:grid-cols-[1fr_240px] gap-6 lg:gap-8 sm:px-8 sm:py-6 lg:divide-x divide-line">
 
                     {/* Left */}
                     <div className="space-y-6 lg:pr-8">
 
                         {/* Tabs */}
-                        <div className="flex border-b border-surface-100 overflow-x-auto no-scrollbar">
+                        <div className="flex border-b border-line overflow-x-auto no-scrollbar">
                             {(["details", "audit"] as const).map((t) => (
                                 <button key={t} onClick={() => setTab(t)}
                                     className={clsx("px-4 py-2.5 text-xs font-semibold border-b-2 transition-all",

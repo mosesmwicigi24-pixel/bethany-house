@@ -371,7 +371,7 @@ function RightDrawer({
                     open ? "translate-x-0" : "translate-x-full"
                 )}
             >
-                <div className="flex items-center gap-3 px-4 py-3.5 border-b border-surface-100 shrink-0">
+                <div className="flex items-center gap-3 px-4 py-3.5 border-b border-line shrink-0">
                     <button
                         onClick={onClose}
                         className="tap-target w-8 h-8 flex items-center justify-center rounded-xl bg-surface-100 text-surface-600 active:bg-surface-200 transition-colors"
@@ -525,7 +525,7 @@ function SpecsDrawer({
                                 ([k, v]) => (
                                     <div
                                         key={k}
-                                        className="rounded-xl bg-surface-50 border border-surface-100 px-3 py-2.5 flex flex-col gap-0.5"
+                                        className="rounded-xl bg-surface-50 border border-line px-3 py-2.5 flex flex-col gap-0.5"
                                     >
                                         <span className="text-2xs text-surface-400 uppercase tracking-wide">
                                             {k}
@@ -801,7 +801,7 @@ function FocusCard({
                         <img
                             src={group.imageUrl}
                             alt={group.productName}
-                            className="w-14 h-14 rounded-xl object-cover border border-surface-100 shrink-0"
+                            className="w-14 h-14 rounded-xl object-cover border border-line shrink-0"
                         />
                     ) : (
                         <div className="w-14 h-14 rounded-xl bg-surface-100 flex items-center justify-center shrink-0 text-surface-300">
@@ -873,7 +873,7 @@ function FocusCard({
                                 ([k, v]) => (
                                     <div
                                         key={k}
-                                        className="bg-white/80 border border-surface-100 rounded-xl px-2 py-2 flex flex-col gap-0.5"
+                                        className="bg-white/80 border border-line rounded-xl px-2 py-2 flex flex-col gap-0.5"
                                     >
                                         <span className="text-2xs text-surface-400 truncate">
                                             {k}
@@ -915,7 +915,7 @@ function FocusCard({
                 </div>
 
                 {/* Task rows */}
-                <div className="divide-y divide-surface-50">
+                <div className="divide-y divide-line">
                     {group.tasks.map((task) => {
                         const isActive = task.id === group.activeTask?.id;
                         const isDone = task.status === "completed";
@@ -1099,10 +1099,10 @@ function FocusCard({
                 </div>
 
                 {/* Note / Specs shortcuts at the bottom of the card */}
-                <div className="flex border-t border-surface-100">
+                <div className="flex border-t border-line">
                     <button
                         onClick={onNoteOpen}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold text-surface-500 active:bg-surface-50 transition-colors border-r border-surface-100"
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold text-surface-500 active:bg-surface-50 transition-colors border-r border-line"
                     >
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
@@ -1160,7 +1160,7 @@ function DeliveryWeekStrip({ groups }: { groups: OrderGroup[] }) {
                     return (
                         <div key={i} className={clsx(
                             "rounded-lg py-1.5 text-center border",
-                            isToday ? "border-brand-300 bg-brand-50" : "border-surface-100 bg-surface-50",
+                            isToday ? "border-brand-300 bg-brand-50" : "border-line bg-surface-50",
                         )}>
                             <p className="text-2xs text-surface-400 leading-none">
                                 {d.toLocaleDateString("en-KE", { weekday: "short" })}
@@ -1232,7 +1232,7 @@ function QueueOrderGroup({
                     <img
                         src={group.imageUrl}
                         alt={group.productName}
-                        className="w-10 h-10 rounded-lg object-cover border border-surface-100 shrink-0"
+                        className="w-10 h-10 rounded-lg object-cover border border-line shrink-0"
                     />
                 ) : (
                     <div className="w-10 h-10 rounded-lg bg-surface-100 flex items-center justify-center shrink-0 text-surface-300">
@@ -1314,7 +1314,7 @@ function QueueOrderGroup({
 
             {/* Task rows (collapsible) */}
             {open && (
-                <div className="border-t border-surface-100 divide-y divide-surface-50">
+                <div className="border-t border-line divide-y divide-line">
                     {group.tasks.map((task) => {
                         const isDone = task.status === "completed";
                         const isInProgress = task.status === "in_progress";
@@ -1632,7 +1632,7 @@ export default function TailorWorkspacePage() {
             />
 
             {/* Tab bar */}
-            <div className="flex border-b border-surface-100 bg-white shrink-0 px-4">
+            <div className="flex border-b border-line bg-white shrink-0 px-4">
                 {(["focus", "queue"] as const).map((tab) => (
                     <button
                         key={tab}

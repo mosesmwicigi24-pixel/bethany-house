@@ -766,7 +766,7 @@ function PODetailModal({
                         <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-2">
                             Line Items
                         </p>
-                        <div className="border border-surface-100 rounded-lg overflow-hidden">
+                        <div className="border border-line rounded-lg overflow-hidden">
                             <div className="table-wrapper rounded-none border-0">
                             <table className="table">
                                 <thead>
@@ -1094,7 +1094,7 @@ export default function PurchaseOrdersPage() {
                     <div
                         key={s.label}
                         className={clsx(
-                            "rounded-xl px-4 py-3 border border-surface-100",
+                            "rounded-xl px-4 py-3 border border-line",
                             s.bg,
                         )}
                     >
@@ -1189,12 +1189,12 @@ export default function PurchaseOrdersPage() {
                             {orderGroups.map((group, groupIndex) => (
                                 <div
                                     key={`${group.key}-${groupIndex}`}
-                                    className="border-t border-surface-100 first:border-t-0"
+                                    className="border-t border-line first:border-t-0"
                                 >
-                                    <p className="px-3.5 py-1.5 bg-surface-50 border-b border-surface-100 text-2xs font-bold uppercase tracking-wider text-surface-500">
+                                    <p className="px-3.5 py-1.5 bg-surface-50 border-b border-line text-2xs font-bold uppercase tracking-wider text-surface-500">
                                         {group.label}
                                     </p>
-                                    <div className="divide-y divide-surface-100">
+                                    <div className="divide-y divide-line">
                                         {group.items.map((po) => {
                                             const cfg =
                                                 PO_STATUSES[po.status] ??
@@ -1407,7 +1407,7 @@ export default function PurchaseOrdersPage() {
                             </table>
                         </div>
                         {meta && meta.last_page > 1 && (
-                            <div className="px-4 py-3 border-t border-surface-100 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="px-4 py-3 border-t border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                 <p className="text-xs text-surface-500">
                                     Showing {meta.from}–{meta.to} of{" "}
                                     {meta.total}

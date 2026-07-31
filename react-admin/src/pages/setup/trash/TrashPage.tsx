@@ -292,7 +292,7 @@ function ModelTab({
                 </div>
             ) : (
                 <>
-                    <div className="divide-y divide-surface-50 border border-surface-100 rounded-xl overflow-hidden">
+                    <div className="divide-y divide-line border border-line rounded-xl overflow-hidden">
                         {items.map((item) => (
                             <div
                                 key={item.id}
@@ -475,7 +475,7 @@ export default function TrashPage() {
 
             {/* Model tabs */}
             <div className="card overflow-hidden">
-                <div className="flex border-b border-surface-100 overflow-x-auto no-scrollbar">
+                <div className="flex border-b border-line overflow-x-auto no-scrollbar">
                     {(Object.entries(MODEL_CONFIG) as [ModelKey, typeof MODEL_CONFIG[ModelKey]][]).map(([key, cfg]) => {
                         const count = summary?.[key] ?? 0;
                         return (
@@ -516,7 +516,7 @@ export default function TrashPage() {
             </div>
 
             {/* Info banner */}
-            <div className="rounded-xl bg-surface-50 border border-surface-100 px-4 py-3 text-xs text-surface-500 space-y-1">
+            <div className="rounded-xl bg-surface-50 border border-line px-4 py-3 text-xs text-surface-500 space-y-1">
                 <p className="font-semibold text-surface-700">About the Recycle Bin</p>
                 <p>Items are soft-deleted when removed — they stay here until permanently deleted or restored. Restoring puts the item back exactly as it was. Permanent deletion removes all associated data and cannot be undone.</p>
                 <p>Products can be restored and immediately edited. Other models are restored to their last known state.</p>

@@ -355,7 +355,7 @@ function KpiTile({ label, value, tone = "text-surface-900", bg, href, loading, b
     const body = (
         <div className={clsx(
             "relative rounded-xl px-2.5 py-2.5 h-full transition-all",
-            bg ?? "bg-white border border-surface-100",
+            bg ?? "bg-white border border-line",
             href && "hover:opacity-80 active:scale-[0.98]",
         )}>
             {loading ? (
@@ -388,7 +388,7 @@ function TailorStatTile({ label, value, tone, href, loading }: {
     label: string; value?: number; tone: string; href: string; loading: boolean;
 }) {
     return (
-        <Link to={href} className="bg-white border border-surface-100 rounded-xl px-3 py-2.5 hover:border-brand-200 transition-colors">
+        <Link to={href} className="bg-white border border-line rounded-xl px-3 py-2.5 hover:border-brand-200 transition-colors">
             <p className={clsx("text-xl font-bold leading-tight", tone)}>{loading ? "…" : (value ?? 0)}</p>
             <p className="text-2xs text-surface-500 mt-0.5 leading-tight">{label}</p>
         </Link>
@@ -442,7 +442,7 @@ function TailorHome({ stats, isLoading, can }: {
                     <h2 className="font-semibold text-sm text-surface-900">My Tasks</h2>
                     <Link to="/production/my-tasks" className="text-xs font-semibold text-brand-600 hover:text-brand-700">Open all →</Link>
                 </div>
-                <div className="divide-y divide-surface-50">
+                <div className="divide-y divide-line">
                     {tasksLoading ? (
                         <div className="py-8 text-center text-sm text-surface-400">Loading…</div>
                     ) : top.length === 0 ? (
@@ -481,7 +481,7 @@ function TailorHome({ stats, isLoading, can }: {
             <div className="grid grid-cols-4 gap-2.5">
                 {quickActions.map((a) => (
                     <Link key={a.href} to={a.href}
-                        className="relative bg-white border border-surface-100 rounded-xl py-3 flex flex-col items-center gap-1.5 hover:border-brand-200 hover:bg-brand-50/30 transition-colors">
+                        className="relative bg-white border border-line rounded-xl py-3 flex flex-col items-center gap-1.5 hover:border-brand-200 hover:bg-brand-50/30 transition-colors">
                         <span className="text-surface-500">{a.icon}</span>
                         <span className="text-2xs font-semibold text-surface-600">{a.label}</span>
                         {!!a.badge && (
@@ -871,7 +871,7 @@ export default function DashboardPage() {
                 <div className="card-header">
                     <h2 className="font-semibold text-sm text-surface-900">Recent Activity</h2>
                 </div>
-                <div className="divide-y divide-surface-50">
+                <div className="divide-y divide-line">
                     {isLoading ? (
                         Array.from({ length: 5 }).map((_, i) => (
                             <div key={i} className="px-5 py-3.5 flex items-center gap-3">
@@ -1032,7 +1032,7 @@ function QuickActionsPanel({ actions }: { actions: QuickAction[] }) {
                             "relative flex items-center gap-2.5 px-3 py-3 rounded-xl transition-colors text-sm font-medium group border",
                             highlight
                                 ? "bg-brand-50 text-brand-700 border-brand-100 hover:bg-brand-100"
-                                : "text-surface-700 border-surface-100 hover:bg-surface-50 hover:border-surface-200",
+                                : "text-surface-700 border-line hover:bg-surface-50 hover:border-surface-200",
                         )}>
                         <span className={clsx(
                             "w-6 flex items-center justify-center shrink-0 transition-colors",

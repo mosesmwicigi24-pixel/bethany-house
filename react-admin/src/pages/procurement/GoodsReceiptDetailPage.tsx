@@ -56,7 +56,7 @@ function AuditTrail({ grnId }: { grnId: number }) {
     if (isLoading) return <div className="flex justify-center py-10"><Spinner /></div>;
     if (!logs.length) return <div className="text-center py-12 text-xs text-surface-400">No audit entries yet.</div>;
     return (
-        <div className="divide-y divide-surface-50">
+        <div className="divide-y divide-line">
             {logs.map((entry) => (
                 <div key={entry.id} className="flex gap-3 py-3.5">
                     <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 mt-0.5">
@@ -178,7 +178,7 @@ export default function GoodsReceiptDetailPage() {
                 </div>
 
                 {/* Action bar */}
-                <div className="px-5 py-3 bg-slate-50 border-b border-surface-100 flex flex-wrap items-center gap-2 sm:px-8">
+                <div className="px-5 py-3 bg-slate-50 border-b border-line flex flex-wrap items-center gap-2 sm:px-8">
                     {canReceive && (
                     <button onClick={() => printMutation.mutate()} disabled={printMutation.isPending}
                         className="btn-sm bg-white border border-surface-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-surface-700 hover:border-surface-300">
@@ -201,11 +201,11 @@ export default function GoodsReceiptDetailPage() {
                 </div>
 
                 {/* Body */}
-                <div className="px-5 py-5 grid grid-cols-1 lg:grid-cols-[1fr_240px] gap-6 lg:gap-8 sm:px-8 sm:py-6 lg:divide-x divide-surface-100">
+                <div className="px-5 py-5 grid grid-cols-1 lg:grid-cols-[1fr_240px] gap-6 lg:gap-8 sm:px-8 sm:py-6 lg:divide-x divide-line">
 
                     {/* Left */}
                     <div className="space-y-4 lg:pr-8">
-                        <div className="flex border-b border-surface-100 overflow-x-auto no-scrollbar">
+                        <div className="flex border-b border-line overflow-x-auto no-scrollbar">
                             {(["items", "audit"] as const).map((t) => (
                                 <button key={t} onClick={() => setTab(t)}
                                     className={clsx("px-4 py-2.5 text-xs font-semibold border-b-2 transition-all whitespace-nowrap shrink-0",
@@ -230,7 +230,7 @@ export default function GoodsReceiptDetailPage() {
                                             <th className="text-right px-3 py-2.5 font-semibold text-surface-600">Line Value</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-surface-100">
+                                    <tbody className="divide-y divide-line">
                                         {items.map((item) => {
                                             const accepted = item.quantity_received - item.quantity_rejected;
                                             const lineValue = accepted * (item.purchase_order_item?.unit_price ?? 0);

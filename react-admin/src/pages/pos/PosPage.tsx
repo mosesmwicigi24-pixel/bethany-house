@@ -496,7 +496,7 @@ function CountryPickerPanel({
             {/* Expanded picker */}
             {open && (
                 <div className="border border-brand-200 rounded-xl bg-white shadow-md overflow-hidden">
-                    <div className="flex items-center gap-2 px-3 py-2 border-b border-surface-100">
+                    <div className="flex items-center gap-2 px-3 py-2 border-b border-line">
                         <svg className="w-3.5 h-3.5 text-surface-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
                         </svg>
@@ -520,7 +520,7 @@ aria-label="Close">
                     {value && (
                         <button
                             onClick={() => { onChange(""); setSearch(""); setOpen(false); }}
-                            className="w-full flex items-center gap-2 px-3 py-1.5 text-2xs text-surface-400 hover:bg-surface-50 border-b border-surface-100 transition-colors"
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-2xs text-surface-400 hover:bg-surface-50 border-b border-line transition-colors"
                         >
                             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
                             Local / home country (clear)
@@ -564,7 +564,7 @@ aria-label="Close">
                     </div>
 
                     {activeCurrencies.length > 0 && (
-                        <p className="px-3 py-1.5 text-2xs text-surface-300 border-t border-surface-100">
+                        <p className="px-3 py-1.5 text-2xs text-surface-300 border-t border-line">
                             Active currencies: {activeCurrencies.join(", ")}
                         </p>
                     )}
@@ -866,7 +866,7 @@ function VariantPicker({
                 <div className="flex justify-center pt-3 pb-1 sm:hidden">
                     <div className="w-10 h-1 rounded-full bg-surface-200" />
                 </div>
-                <div className="px-5 pt-3 pb-2 border-b border-surface-100 flex items-center justify-between">
+                <div className="px-5 pt-3 pb-2 border-b border-line flex items-center justify-between">
                     <div>
                         <p className="font-semibold text-surface-900 text-sm">
                             {product.name}
@@ -911,7 +911,7 @@ function VariantPicker({
                                 className={clsx(
                                     "flex items-center justify-between p-3 rounded-xl border text-left transition-all active:scale-[0.98]",
                                     oos && !mto
-                                        ? "border-surface-100 bg-surface-50 opacity-50 cursor-not-allowed"
+                                        ? "border-line bg-surface-50 opacity-50 cursor-not-allowed"
                                         : mto && oos
                                           ? "border-purple-200 bg-purple-50 cursor-pointer hover:border-purple-400"
                                           : "border-surface-200 hover:border-brand-400 hover:bg-brand-50 cursor-pointer",
@@ -999,7 +999,7 @@ function ProductCard({
             className={clsx(
                 "group relative flex flex-col rounded-2xl overflow-hidden text-left transition-all duration-150 border bg-white active:scale-[0.97] active:brightness-[0.97]",
                 blocked
-                    ? "border-surface-100 opacity-60 cursor-not-allowed"
+                    ? "border-line opacity-60 cursor-not-allowed"
                     : mto && oos
                       ? "border-purple-200 cursor-pointer hover:border-purple-400 hover:shadow-lg active:scale-[0.97]"
                       : "border-surface-200 cursor-pointer hover:border-brand-400 hover:shadow-lg active:scale-[0.97]",
@@ -1127,7 +1127,7 @@ function MeasurementSheet({
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
             <div className="relative z-10 w-full max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden">
                 {/* Sheet header */}
-                <div className="flex items-center justify-between px-5 py-4 border-b border-surface-100">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-line">
                     <div>
                         <h3 className="font-bold text-surface-900 text-sm">{item.product_name}</h3>
                         <p className="text-2xs text-purple-600 font-medium mt-0.5">Made-to-Order details</p>
@@ -2952,7 +2952,7 @@ export default function PosPage() {
                     )}
 
                     {/* Search + categories */}
-                    <div className="px-4 pt-4 pb-3 border-b border-surface-100 space-y-2.5 shrink-0">
+                    <div className="px-4 pt-4 pb-3 border-b border-line space-y-2.5 shrink-0">
                         <div className="relative">
                             <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-surface-400 pointer-events-none">
                                 {searching ? (
@@ -3135,7 +3135,7 @@ export default function PosPage() {
                     )}
                 >
                     {/* ZONE 1 - Header: order title + customer search (fixed, never scrolls) */}
-                    <div className="shrink-0 border-b border-surface-100">
+                    <div className="shrink-0 border-b border-line">
                         {/* Title row */}
                         <div className="px-3 py-2.5 flex items-center justify-between">
                             <div className="flex items-center gap-1.5">
@@ -3246,7 +3246,7 @@ export default function PosPage() {
 
                     {/* ZONE 3 - Totals + charge (fixed footer, never scrolls, always visible) */}
                     {cart.length > 0 && (
-                        <div className="shrink-0 border-t border-surface-100 bg-white">
+                        <div className="shrink-0 border-t border-line bg-white">
                             {/* Compact totals row */}
                             <div className="px-3 pt-2.5 pb-1 space-y-1">
                                 {/* Cart-level discount control */}
@@ -3317,7 +3317,7 @@ export default function PosPage() {
                                                 <button
                                                     onClick={() => { setSelectedShippingId(null); setShippingAddress(""); setShowShippingPanel(false); }}
                                                     className={clsx("w-full text-left text-2xs px-2 py-1.5 rounded-lg border transition-all",
-                                                        !selectedShippingId ? "border-brand-300 bg-brand-50 text-brand-700" : "border-surface-100 text-surface-500 hover:border-surface-200")}
+                                                        !selectedShippingId ? "border-brand-300 bg-brand-50 text-brand-700" : "border-line text-surface-500 hover:border-surface-200")}
                                                 >
                                                     No shipping / collect in-store
                                                 </button>
@@ -3325,7 +3325,7 @@ export default function PosPage() {
                                                     <button key={m.id}
                                                         onClick={() => { setSelectedShippingId(m.id); setShowShippingPanel(false); }}
                                                         className={clsx("w-full flex items-center justify-between text-2xs px-2 py-1.5 rounded-lg border transition-all",
-                                                            selectedShippingId === m.id ? "border-brand-300 bg-brand-50 text-brand-700" : "border-surface-100 text-surface-600 hover:border-surface-200")}
+                                                            selectedShippingId === m.id ? "border-brand-300 bg-brand-50 text-brand-700" : "border-line text-surface-600 hover:border-surface-200")}
                                                     >
                                                         <div className="min-w-0">
                                                             <p className="font-medium truncate">{m.name}</p>

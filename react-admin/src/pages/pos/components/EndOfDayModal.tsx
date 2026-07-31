@@ -27,7 +27,7 @@ export default function EndOfDayModal({ outletId, outletName, onClose }: Props) 
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col animate-slide-up">
                 {/* Header */}
-                <div className="px-5 py-4 border-b border-surface-100 flex flex-col gap-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
+                <div className="px-5 py-4 border-b border-line flex flex-col gap-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                         <h2 className="font-bold text-surface-900">End of Day Report</h2>
                         <p className="text-xs text-surface-500">{outletName}</p>
@@ -170,7 +170,7 @@ export default function EndOfDayModal({ outletId, outletName, onClose }: Props) 
                     )}
                 </div>
 
-                <div className="p-4 border-t border-surface-100 shrink-0">
+                <div className="p-4 border-t border-line shrink-0">
                     <button onClick={onClose} className="btn-secondary w-full">Close</button>
                 </div>
             </div>

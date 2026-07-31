@@ -185,7 +185,7 @@ export default function ProductionReportPage() {
             </div>
 
             {/* Tabs */}
-            <div className="border-b border-surface-100">
+            <div className="border-b border-line">
                 <nav className="flex gap-1 -mb-px">
                     {([
                         { id: "overview", label: "Overview" },
@@ -424,7 +424,7 @@ export default function ProductionReportPage() {
                         <TableWrapper>
                             <table className="w-full">
                                 <thead>
-                                    <tr className="border-y border-surface-100 bg-surface-50/50">
+                                    <tr className="border-y border-line bg-surface-50/50">
                                         <th className={TH}>Product</th>
                                         <th className={TH}>SKU</th>
                                         <th className={TH_R}>Orders</th>
@@ -435,7 +435,7 @@ export default function ProductionReportPage() {
                                         <th className={TH_R}>Completion</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-surface-50">
+                                <tbody className="divide-y divide-line">
                                     {byProduct.length === 0 ? (
                                         <EmptyRow cols={8} />
                                     ) : (
@@ -546,7 +546,7 @@ export default function ProductionReportPage() {
                     <TableWrapper>
                         <table className="w-full">
                             <thead>
-                                <tr className="border-y border-surface-100 bg-surface-50/50">
+                                <tr className="border-y border-line bg-surface-50/50">
                                     <th className={clsx(TH, "w-8")}>#</th>
                                     <th className={TH}>Tailor</th>
                                     <th className={TH_R}>Orders Completed</th>
@@ -555,7 +555,7 @@ export default function ProductionReportPage() {
                                     <th className={TH}>Output</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-surface-50">
+                            <tbody className="divide-y divide-line">
                                 {byTailor.length === 0 ? (
                                     <EmptyRow cols={6} />
                                 ) : (
@@ -706,7 +706,7 @@ function CostingTab({ data, isLoading, params }: {
                 <TableWrapper>
                     <table className="w-full">
                         <thead>
-                            <tr className="border-y border-surface-100 bg-surface-50/50">
+                            <tr className="border-y border-line bg-surface-50/50">
                                 <th className={TH}>Product</th>
                                 <th className={TH_R}>Batches</th>
                                 <th className={TH_R}>Units Produced</th>
@@ -717,7 +717,7 @@ function CostingTab({ data, isLoading, params }: {
                                 <th className={TH}>Revenue Share</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-surface-50">
+                        <tbody className="divide-y divide-line">
                             {byProduct.length === 0 ? (
                                 <EmptyRow cols={8} />
                             ) : (
@@ -800,7 +800,7 @@ function CostingTab({ data, isLoading, params }: {
                 <TableWrapper>
                     <table className="w-full">
                         <thead>
-                            <tr className="border-y border-surface-100 bg-surface-50/50">
+                            <tr className="border-y border-line bg-surface-50/50">
                                 <th className={TH}>Batch</th>
                                 <th className={TH}>Product</th>
                                 <th className={TH_R}>Produced</th>
@@ -813,7 +813,7 @@ function CostingTab({ data, isLoading, params }: {
                                 <th className={TH}></th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-surface-50">
+                        <tbody className="divide-y divide-line">
                             {orders.length === 0 ? (
                                 <EmptyRow cols={10} />
                             ) : (
@@ -976,7 +976,7 @@ function IntelligenceTab({ start, end }: { start: string; end: string }) {
                                 <th className={TH_R}>Avg Estimate</th>
                                 <th className={TH_R}>Ran Over</th>
                             </tr></thead>
-                            <tbody className="divide-y divide-surface-50">
+                            <tbody className="divide-y divide-line">
                                 {cycle_times.map((c: any) => {
                                     const overPct = c.with_estimate > 0 ? Math.round((c.over_estimate / c.with_estimate) * 100) : null;
                                     return (
@@ -1049,7 +1049,7 @@ function IntelligenceTab({ start, end }: { start: string; end: string }) {
                                 <th className={TH_R}>Used</th>
                                 <th className={TH_R}>Still Needed</th>
                             </tr></thead>
-                            <tbody className="divide-y divide-surface-50">
+                            <tbody className="divide-y divide-line">
                                 {materials.map((m: any) => {
                                     const gap = Math.max(0, Number(m.required) - Number(m.allocated));
                                     return (

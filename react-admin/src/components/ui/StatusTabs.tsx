@@ -71,7 +71,7 @@ export function StatusTabs({
 }: StatusTabsProps) {
     if (variant === "underline") {
         return (
-            <div className={clsx("flex gap-1 border-b border-surface-100 overflow-x-auto no-scrollbar", className)}>
+            <div className={clsx("flex gap-1 border-b border-line overflow-x-auto no-scrollbar", className)}>
                 {tabs.map((tab) => {
                     const isActive = tab.value === value;
                     return (

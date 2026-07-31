@@ -243,7 +243,7 @@ function UpcomingRow({ order, isSales }: { order: ProductionOrder; isSales: bool
     return (
         <div
             className={clsx(
-                "flex items-start gap-3 px-4 py-3 border-b border-surface-100 last:border-0",
+                "flex items-start gap-3 px-4 py-3 border-b border-line last:border-0",
                 !isSales && "cursor-pointer hover:bg-surface-50 transition-colors"
             )}
             onClick={() => !isSales && navigate(`/production/orders/${order.id}`)}
@@ -331,7 +331,7 @@ function MonthGrid({
                                 "relative h-24 p-1.5 rounded-lg border transition-colors cursor-pointer group",
                                 isToday
                                     ? "border-brand-400 bg-brand-50/60"
-                                    : "border-surface-100 hover:border-brand-200",
+                                    : "border-line hover:border-brand-200",
                                 isPast && !isToday ? "opacity-60" : "",
                                 !isSales && count > 0 ? heatClass(count) : "",
                             )}
@@ -443,7 +443,7 @@ function WeekGrid({
                             "flex flex-col gap-1.5 rounded-xl p-2 min-h-[180px] border transition-colors",
                             isToday
                                 ? "border-brand-400 bg-brand-50/60"
-                                : "border-surface-100 bg-white",
+                                : "border-line bg-white",
                             isPast && !isToday && "opacity-60",
                         )}
                     >
@@ -539,7 +539,7 @@ function DayPanel({
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
             <div className="relative z-10 w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
                 {/* Header */}
-                <div className="flex items-center justify-between px-5 py-4 border-b border-surface-100 shrink-0">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-line shrink-0">
                     <div>
                         <p className="text-xs text-surface-400 uppercase tracking-wide font-semibold">
                             {isSales ? "Workshop Schedule" : "Due on this day"}
@@ -556,7 +556,7 @@ function DayPanel({
                 {/* Body */}
                 <div className="flex-1 overflow-y-auto">
                     {!isSales && appointments.length > 0 && (
-                        <div className="px-5 py-3 border-b border-surface-100 space-y-1.5">
+                        <div className="px-5 py-3 border-b border-line space-y-1.5">
                             <p className="text-2xs font-bold uppercase tracking-wide text-surface-400">Customer appointments</p>
                             {appointments.map((a, i) => (
                                 <button key={i} onClick={() => a.order.id && onOrderClick(a.order.id)}
@@ -611,7 +611,7 @@ function DayPanel({
                         </div>
                     ) : (
                         /* Full view - order list */
-                        <div className="divide-y divide-surface-100">
+                        <div className="divide-y divide-line">
                             {orders.map(o => {
                                 const cfg = STATUS_COLORS[o.status] ?? "bg-surface-100 text-surface-600";
                                 return (
@@ -1145,7 +1145,7 @@ export default function ProductionCalendarPage() {
                     {(canViewFull || isWorker) && (
                         /* Production team / worker: upcoming orders list */
                         <div className="card p-0 flex flex-col overflow-hidden max-h-[520px]">
-                            <div className="px-4 py-3 border-b border-surface-100 shrink-0 flex items-center justify-between gap-2">
+                            <div className="px-4 py-3 border-b border-line shrink-0 flex items-center justify-between gap-2">
                                 <p className="text-xs font-bold text-surface-800 uppercase tracking-wide">
                                     Due next 14 days
                                 </p>
@@ -1195,7 +1195,7 @@ export default function ProductionCalendarPage() {
                                 </div>
                             </div>
 
-                            <div className="border-t border-surface-100 pt-4">
+                            <div className="border-t border-line pt-4">
                                 <p className="text-xs font-bold text-surface-800 uppercase tracking-wide mb-2">
                                     Suggested earliest date
                                 </p>
@@ -1209,7 +1209,7 @@ export default function ProductionCalendarPage() {
                                 </div>
                             </div>
 
-                            <div className="border-t border-surface-100 pt-4">
+                            <div className="border-t border-line pt-4">
                                 <p className="text-xs font-bold text-surface-800 uppercase tracking-wide mb-2">
                                     Active right now
                                 </p>

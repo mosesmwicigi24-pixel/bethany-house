@@ -143,7 +143,7 @@ function ProductPicker({
                             className="fixed z-[61] bg-white rounded-2xl border border-surface-200 shadow-2xl overflow-hidden flex flex-col"
                             style={{ top: coords.top, left: coords.left, width: coords.width, maxHeight: "22rem" }}
                         >
-                            <div className="p-2 border-b border-surface-100 shrink-0">
+                            <div className="p-2 border-b border-line shrink-0">
                                 <input
                                     autoFocus
                                     value={query}

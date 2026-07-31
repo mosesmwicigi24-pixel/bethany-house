@@ -314,7 +314,7 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                                 <p className="px-1 pb-1.5 text-2xs font-bold uppercase tracking-wider text-surface-500">
                                     {group.label}
                                 </p>
-                                <div className="card divide-y divide-surface-100">
+                                <div className="card divide-y divide-line">
                                     {group.items.map((order) => {
                                         const cfg = STATUS_CONFIG[order.status] ?? { label: order.status, badge: "badge-neutral", dot: "bg-surface-400" };
                                         // Same "real email or fall back to phone" rule the table row uses.
@@ -487,7 +487,7 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                     it is display:none, so the divider would be a hairline with
                     nothing above it; drop it there. */}
                 {meta && meta.last_page > 1 && (
-                    <div className="px-4 py-3 border-t max-md:border-t-0 border-surface-100 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="px-4 py-3 border-t max-md:border-t-0 border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <p className="text-xs text-surface-500">
                             Page {meta.current_page} of {meta.last_page} · {meta.total.toLocaleString()} orders
                         </p>

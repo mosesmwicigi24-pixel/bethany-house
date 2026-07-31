@@ -474,7 +474,7 @@ export default function ProfilePage() {
                   <h3 className="font-semibold text-sm text-surface-900">Two-Factor Authentication</h3>
                 </div>
                 <div className="card-body space-y-4">
-                  <div className="flex items-start gap-4 p-4 rounded-xl bg-surface-50 border border-surface-100">
+                  <div className="flex items-start gap-4 p-4 rounded-xl bg-surface-50 border border-line">
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-lg ${profile?.two_factor_enabled ? 'bg-success-light' : 'bg-surface-200'}`}>
                       {profile?.two_factor_enabled ? '✓' : <svg className="w-3.5 h-3.5 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>}
                     </div>
@@ -529,7 +529,7 @@ export default function ProfilePage() {
                     Revoke all other sessions
                   </button>
                 </div>
-                <div className="card-body divide-y divide-surface-50">
+                <div className="card-body divide-y divide-line">
                   {sessions.length === 0 ? (
                     <p className="text-sm text-surface-400 py-4 text-center">No active sessions found.</p>
                   ) : sessions.map((s) => (
@@ -660,7 +660,7 @@ export default function ProfilePage() {
           <p className="text-sm text-surface-600">Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.)</p>
           {qrData && (
             <div className="flex justify-center">
-              <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(qrData.url)}`} alt="2FA QR Code" className="rounded-xl border border-surface-100" />
+              <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(qrData.url)}`} alt="2FA QR Code" className="rounded-xl border border-line" />
             </div>
           )}
           {qrData && (

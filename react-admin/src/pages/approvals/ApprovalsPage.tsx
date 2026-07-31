@@ -243,7 +243,7 @@ function PurchaseOrdersPanel() {
         <>
             {/* Bulk action toolbar */}
             {canApprove && items.length > 1 && (
-                <div className="px-5 py-2.5 border-b border-surface-100 flex items-center gap-3 bg-surface-50">
+                <div className="px-5 py-2.5 border-b border-line flex items-center gap-3 bg-surface-50">
                     <label className="flex items-center gap-2 cursor-pointer text-xs text-surface-600 select-none">
                         <input type="checkbox" checked={allSelected} onChange={toggleAll}
                             className="w-3.5 h-3.5 rounded border-surface-300 cursor-pointer" />
@@ -266,7 +266,7 @@ function PurchaseOrdersPanel() {
                     )}
                 </div>
             )}
-            <div className="divide-y divide-surface-50">
+            <div className="divide-y divide-line">
                 {items.map(po => (
                     <div key={po.id} className={clsx("px-3.5 py-3 sm:px-4 sm:py-4 hover:bg-surface-50 transition-colors", bulkSelected.has(po.id) && "bg-brand-50/50")}>
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
@@ -390,7 +390,7 @@ function PurchaseReturnsPanel() {
 
     return (
         <>
-            <div className="divide-y divide-surface-50">
+            <div className="divide-y divide-line">
                 {items.map(ret => (
                     <div key={ret.id} className="px-3.5 py-3 sm:px-4 sm:py-4 hover:bg-surface-50 transition-colors">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
@@ -513,7 +513,7 @@ function StockAdjustmentsPanel() {
 
     return (
         <>
-            <div className="divide-y divide-surface-50">
+            <div className="divide-y divide-line">
                 {items.map(adj => (
                     <div key={adj.id} className="px-3.5 py-3 sm:px-4 sm:py-4 hover:bg-surface-50 transition-colors">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
@@ -634,7 +634,7 @@ function StockTransfersPanel() {
 
     return (
         <>
-        <div className="divide-y divide-surface-50">
+        <div className="divide-y divide-line">
             {items.map(t => (
                 <div key={t.id} className="px-3.5 py-3 sm:px-4 sm:py-4 hover:bg-surface-50 transition-colors">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
@@ -816,7 +816,7 @@ function ProofViewer({ proofUrl, paymentNumber }: { proofUrl: string; paymentNum
                          style={{ maxHeight: "90vh" }}>
 
                         {/* Header */}
-                        <div className="flex items-center justify-between px-5 py-3.5 border-b border-surface-100 shrink-0">
+                        <div className="flex items-center justify-between px-5 py-3.5 border-b border-line shrink-0">
                             <div>
                                 <p className="font-semibold text-sm text-surface-900">Proof of Payment</p>
                                 <p className="text-2xs text-surface-400 mt-0.5">{paymentNumber}</p>
@@ -932,7 +932,7 @@ function PaymentApprovalsPanel() {
     return (
         <>
             {/* Search */}
-            <div className="p-4 border-b border-surface-100">
+            <div className="p-4 border-b border-line">
                 <input
                     className="input input-sm w-full sm:w-64"
                     placeholder="Search order, customer…"
@@ -941,7 +941,7 @@ function PaymentApprovalsPanel() {
                 />
             </div>
 
-            <div className="divide-y divide-surface-100">
+            <div className="divide-y divide-line">
                 {payments.map(p => {
                     const isUrgent    = p.waiting_hours >= 48;
                     const hasProof    = !!p.proof_url;
@@ -1187,7 +1187,7 @@ export default function ApprovalsPage() {
             {/* Tabs + content */}
             <div className="card overflow-hidden">
                 {/* Tab bar */}
-                <div className="flex border-b border-surface-100 overflow-x-auto no-scrollbar">
+                <div className="flex border-b border-line overflow-x-auto no-scrollbar">
                     {tabs.map(tab => (
                         <button key={tab.key} onClick={() => setActiveTab(tab.key)}
                             className={clsx(

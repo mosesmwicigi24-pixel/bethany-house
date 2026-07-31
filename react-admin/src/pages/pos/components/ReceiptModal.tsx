@@ -535,7 +535,7 @@ function FullInvoice({ sale, outlet }: { sale: PosSale; outlet: Outlet }) {
                     </thead>
                     <tbody>
                         {sale.items.map((item, i) => (
-                            <tr key={i} className="border-b border-surface-100">
+                            <tr key={i} className="border-b border-line">
                                 <td className="py-1.5 text-surface-400 font-mono text-2xs">
                                     {((item as any).sku ?? "").slice(-8) || `#${i + 1}`}
                                 </td>
@@ -608,7 +608,7 @@ function FullInvoice({ sale, outlet }: { sale: PosSale; outlet: Outlet }) {
                         </thead>
                         <tbody>
                             {payments.map((p: any, i: number) => (
-                                <tr key={i} className="border-b border-surface-100">
+                                <tr key={i} className="border-b border-line">
                                     <td className="py-1.5 capitalize font-medium">
                                         {(p.payment_method ?? "other").replace(/_/g, " ")}
                                     </td>
@@ -639,7 +639,7 @@ function FullInvoice({ sale, outlet }: { sale: PosSale; outlet: Outlet }) {
             </div>
 
             {/* Footer */}
-            <p className="text-center text-surface-400 text-xs pt-2 border-t border-surface-100">
+            <p className="text-center text-surface-400 text-xs pt-2 border-t border-line">
                 Bethany House · {outlet.name} · Thank you for your business.
             </p>
         </div>
@@ -702,7 +702,7 @@ export default function ReceiptModal({ sale, outlet, onClose, requiresApproval =
                 tab === "invoice" ? "w-full max-w-2xl" : "w-full max-w-sm"
             )}>
                 {/* Header */}
-                <div className="no-print px-5 py-4 border-b border-surface-100 flex flex-col gap-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
+                <div className="no-print px-5 py-4 border-b border-line flex flex-col gap-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
                     {/* Tab switcher */}
                     <div className="flex gap-1 bg-surface-100 rounded-xl p-1">
                         {!requiresApproval && (
@@ -748,7 +748,7 @@ aria-label="Close">
 
                 {/* Email input (receipt mode only) */}
                 {showEmailInput && tab === "receipt" && (
-                    <div className="no-print px-4 py-3 bg-surface-50 border-b border-surface-100 flex gap-2">
+                    <div className="no-print px-4 py-3 bg-surface-50 border-b border-line flex gap-2">
                         <input type="email" placeholder="customer@email.com" value={emailInput}
                             onChange={e => setEmailInput(e.target.value)} className="input flex-1 text-sm" />
                         <button onClick={() => emailMutation.mutate(emailInput)}
@@ -767,7 +767,7 @@ aria-label="Close">
                 </div>
 
                 {/* Footer */}
-                <div className="no-print p-4 border-t border-surface-100 shrink-0">
+                <div className="no-print p-4 border-t border-line shrink-0">
                     <button onClick={onClose} className="btn-primary w-full">
                         {requiresApproval ? "Done" : "New Sale"}
                     </button>

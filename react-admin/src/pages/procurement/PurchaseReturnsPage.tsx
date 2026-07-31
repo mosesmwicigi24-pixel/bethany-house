@@ -154,7 +154,7 @@ function ReturnDetailModal({
                             Returned Items ({detail.items?.length ?? 0})
                         </p>
                         {detail.items && detail.items.length > 0 ? (
-                            <div className="border border-surface-100 rounded-lg overflow-hidden">
+                            <div className="border border-line rounded-lg overflow-hidden">
                                 <div className="table-wrapper rounded-none border-0">
                                 <table className="table">
                                     <thead>
@@ -841,7 +841,7 @@ export default function PurchaseReturnsPage() {
                             </table>
                         </div>
                         {meta && meta.last_page > 1 && (
-                            <div className="px-4 py-3 border-t border-surface-100 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="px-4 py-3 border-t border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                 <p className="text-xs text-surface-500">
                                     Showing {meta.from}–{meta.to} of{" "}
                                     {meta.total}

@@ -151,7 +151,7 @@ export default function CustomerDetailPage() {
                                     </svg>
                                 </button>
                                 {statusDropdown && (
-                                    <div className="absolute right-0 top-full mt-1 bg-white rounded-xl shadow-lg border border-surface-100 z-20 min-w-36 overflow-hidden">
+                                    <div className="absolute right-0 top-full mt-1 bg-white rounded-xl shadow-lg border border-line z-20 min-w-36 overflow-hidden">
                                         {(["active", "inactive", "suspended"] as const).filter((s) => s !== (customer.user?.status ?? customer.status)).map((s) => (
                                             <button
                                                 key={s}

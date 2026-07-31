@@ -124,7 +124,7 @@ function AttentionPanel({ items }: { items: any[] }) {
                     return (
                         <button key={it.key} onClick={() => navigate(it.link)}
                             className={clsx(
-                                "text-left rounded-xl border-l-4 border border-surface-100 p-3 flex flex-col gap-1 transition-shadow hover:shadow-md",
+                                "text-left rounded-xl border-l-4 border border-line p-3 flex flex-col gap-1 transition-shadow hover:shadow-md",
                                 high ? "border-l-red-500 bg-red-50/50" : "border-l-amber-400 bg-amber-50/40",
                             )}>
                             <div className="flex items-center justify-between gap-2">
@@ -175,7 +175,7 @@ function DrillModal({ metric, label, money, bucket, period, reportPath, onClose 
             onClick={onClose}>
             <div className="bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[85vh] flex flex-col"
                 onClick={e => e.stopPropagation()}>
-                <div className="px-4 py-3 border-b border-surface-100 flex items-center gap-3">
+                <div className="px-4 py-3 border-b border-line flex items-center gap-3">
                     <div className="min-w-0">
                         <p className="text-sm font-bold text-surface-900">{label}</p>
                         <p className="text-2xs text-surface-400">
@@ -196,7 +196,7 @@ function DrillModal({ metric, label, money, bucket, period, reportPath, onClose 
                     ) : rows.length === 0 ? (
                         <p className="text-center text-xs text-surface-400 py-12">No records in this period.</p>
                     ) : (
-                        <div className="divide-y divide-surface-50">
+                        <div className="divide-y divide-line">
                             {rows.map((r: any) => {
                                 const path = KIND_PATH[r.kind]?.(r) ?? null;
                                 return (
@@ -221,7 +221,7 @@ function DrillModal({ metric, label, money, bucket, period, reportPath, onClose 
                         </div>
                     )}
                 </div>
-                <div className="px-4 py-2.5 border-t border-surface-100 flex items-center gap-2">
+                <div className="px-4 py-2.5 border-t border-line flex items-center gap-2">
                     {pages > 1 && (
                         <>
                             <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}

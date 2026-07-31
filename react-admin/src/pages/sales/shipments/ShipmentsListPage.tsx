@@ -154,7 +154,7 @@ export default function ShipmentsListPage() {
                     <div className="overflow-x-auto">
                         <table className="min-w-full text-xs">
                             <thead>
-                                <tr className="bg-surface-50 border-b border-surface-100">
+                                <tr className="bg-surface-50 border-b border-line">
                                     <th className="text-left px-4 py-3 font-semibold text-surface-500 uppercase tracking-wide text-2xs">Shipment #</th>
                                     <th className="text-left px-4 py-3 font-semibold text-surface-500 uppercase tracking-wide text-2xs">Order</th>
                                     <th className="text-left px-4 py-3 font-semibold text-surface-500 uppercase tracking-wide text-2xs">Customer</th>
@@ -165,7 +165,7 @@ export default function ShipmentsListPage() {
                                     <th className="text-right px-4 py-3 font-semibold text-surface-500 uppercase tracking-wide text-2xs">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-surface-50">
+                            <tbody className="divide-y divide-line">
                                 {shipmentGroups.map((group) => (
                                     <Fragment key={group.key}>
                                         <DateGroupHeaderRow label={group.label} colSpan={8} />
@@ -261,7 +261,7 @@ export default function ShipmentsListPage() {
 
                     {/* Pagination */}
                     {meta && meta.last_page > 1 && (
-                        <div className="flex items-center justify-between px-4 py-3 border-t border-surface-100">
+                        <div className="flex items-center justify-between px-4 py-3 border-t border-line">
                             <p className="text-xs text-surface-500">
                                 Page {meta.current_page} of {meta.last_page} &nbsp;·&nbsp; {meta.total} total
                             </p>

@@ -606,7 +606,7 @@ function DetailPanel({
 
     return (
         <div className="flex flex-col h-full">
-            <div className="p-5 border-b border-surface-100">
+            <div className="p-5 border-b border-line">
                 <div className="flex items-start gap-4">
                     <div
                         className={clsx(
@@ -802,7 +802,7 @@ function DetailPanel({
                 </div>
             </div>
 
-            <div className="grid grid-cols-3 divide-x divide-surface-100 border-b border-surface-100 shrink-0">
+            <div className="grid grid-cols-3 divide-x divide-line border-b border-line shrink-0">
                 {[
                     { label: "Products", value: category.products_count },
                     {
@@ -902,7 +902,7 @@ function DetailPanel({
                         <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-2">
                             SEO Preview
                         </p>
-                        <div className="border border-surface-100 rounded-xl p-3 bg-surface-50 space-y-1">
+                        <div className="border border-line rounded-xl p-3 bg-surface-50 space-y-1">
                             <p className="text-sm text-blue-600 font-medium truncate">
                                 {category.meta_title || category.name_en} |
                                 Bethany House
@@ -927,7 +927,7 @@ function DetailPanel({
                             {category.children!.map((child) => (
                                 <div
                                     key={child.id}
-                                    className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-50 border border-surface-100"
+                                    className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-50 border border-line"
                                 >
                                     <span className="text-sm">
                                         {child.icon || "📁"}
@@ -1298,7 +1298,7 @@ export default function CategoriesPage() {
             <div className="flex flex-col gap-4 flex-1 min-h-0 lg:flex-row">
                 {/* LEFT: Tree */}
                 <div className="w-full lg:w-80 lg:shrink-0 flex flex-col card overflow-hidden" style={{ minHeight: "400px" }}>
-                    <div className="p-3 border-b border-surface-100 space-y-2">
+                    <div className="p-3 border-b border-line space-y-2">
                         <input
                             className="input text-sm"
                             placeholder="Search categories…"
@@ -1506,7 +1506,7 @@ export default function CategoriesPage() {
                     </>
                 }
             >
-                <div className="flex gap-1 border-b border-surface-100 mb-5 -mx-6 px-6 overflow-x-auto no-scrollbar">
+                <div className="flex gap-1 border-b border-line mb-5 -mx-6 px-6 overflow-x-auto no-scrollbar">
                     {tabs.map((tab) => (
                         <button
                             key={tab.id}
@@ -1699,7 +1699,7 @@ export default function CategoriesPage() {
                             />
                         </Field>
                         {(watch("name_en") || watch("meta_title")) && (
-                            <div className="border border-surface-100 rounded-xl p-4 bg-surface-50">
+                            <div className="border border-line rounded-xl p-4 bg-surface-50">
                                 <p className="text-2xs text-surface-400 mb-2 font-semibold uppercase tracking-wider">
                                     Preview
                                 </p>

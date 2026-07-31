@@ -843,7 +843,7 @@ function ChangeCurrencyModal({ order, onClose, onDone }: {
                         className="input mb-2"
                         autoFocus
                     />
-                    <div className="max-h-52 overflow-y-auto border border-surface-200 rounded-xl divide-y divide-surface-100">
+                    <div className="max-h-52 overflow-y-auto border border-surface-200 rounded-xl divide-y divide-line">
                         {filteredCountries.length === 0 ? (
                             <p className="text-xs text-surface-400 italic px-3 py-4 text-center">No countries found.</p>
                         ) : filteredCountries.map((c: any) => (
@@ -1373,7 +1373,7 @@ function AddPaymentModal({ order, onClose, onDone }: {
 
                 {/* Tax note - read-only, derived from order settings */}
                 {order.tax_amount > 0 && (
-                    <div className="rounded-xl bg-surface-50 border border-surface-100 px-3 py-2.5 text-2xs text-surface-500">
+                    <div className="rounded-xl bg-surface-50 border border-line px-3 py-2.5 text-2xs text-surface-500">
                         {taxInclusive
                             ? <>Tax ({cc} {fmt(order.tax_amount)}) is <strong>included</strong> in the prices above.</>
                             : <>Tax ({cc} {fmt(taxOnAmount > 0 ? taxOnAmount : order.tax_amount)}) is <strong>added on top</strong> of the net price.</>
@@ -1470,7 +1470,7 @@ function AddPaymentModal({ order, onClose, onDone }: {
 
                         {/* Section 2: Manual transaction code + Daraja verify */}
                         <div className="rounded-xl border border-surface-200 bg-white overflow-hidden">
-                            <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-surface-100 bg-surface-50">
+                            <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-line bg-surface-50">
                                 <div className="w-6 h-6 rounded-lg bg-surface-700 flex items-center justify-center shrink-0">
                                     <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z"/>
@@ -1821,7 +1821,7 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
     return (
         <Modal open title={mode === "order" ? "Receipt / Invoice" : "Payment Receipt"} onClose={onClose} size="lg">
             {/* ── Toolbar ── */}
-            <div className="no-print px-5 py-3 border-b border-surface-100 flex items-center justify-between gap-3 flex-wrap">
+            <div className="no-print px-5 py-3 border-b border-line flex items-center justify-between gap-3 flex-wrap">
                 <div className="flex gap-1 bg-surface-100 rounded-lg p-1">
                     <button onClick={() => setMode("order")}
                         className={clsx("px-3 py-1 rounded-md text-xs font-semibold transition-all",
@@ -2195,7 +2195,7 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
                 </div>
             </div>
 
-            <div className="no-print p-4 border-t border-surface-100 flex gap-2">
+            <div className="no-print p-4 border-t border-line flex gap-2">
                 <button onClick={onClose} className="btn-secondary flex-1">Close</button>
             </div>
         </Modal>
@@ -2680,7 +2680,7 @@ function ProductionOrderChannelThread({ poId }: { poId: number }) {
             </div>
 
             {/* Composer */}
-            <div className="border-t border-surface-100 p-3 bg-surface-50 rounded-b-xl shrink-0">
+            <div className="border-t border-line p-3 bg-surface-50 rounded-b-xl shrink-0">
                 <div className="relative">
                     {mentionQ !== null && <ThreadMentionPopup query={mentionQ} onSelect={insertMention} />}
                     {entityQ  !== null && <ThreadEntityPopup  query={entityQ}  onSelect={insertEntity}  onDismiss={() => setEntityQ(null)} />}
@@ -2798,7 +2798,7 @@ function ProductionOrderDrawer({ po, onClose }: { po: any; onClose: () => void }
     return (
         <div className="border border-surface-200 rounded-2xl bg-white shadow-lg overflow-hidden">
             {/* Drawer header */}
-            <div className="flex items-center justify-between px-4 py-3 bg-surface-50 border-b border-surface-100">
+            <div className="flex items-center justify-between px-4 py-3 bg-surface-50 border-b border-line">
                 <div>
                     <span className="font-mono text-sm font-bold text-surface-900">{po.order_number}</span>
                     <span className="ml-2 text-xs text-surface-500">{po.product_name} · Qty {po.quantity}</span>
@@ -2810,7 +2810,7 @@ aria-label="Close">
             </div>
 
             {/* Tab bar */}
-            <div className="flex border-b border-surface-100">
+            <div className="flex border-b border-line">
                 {(["details", "activity"] as const).map(t => (
                     <button key={t} onClick={() => setTab(t)}
                         className={clsx("flex-1 py-2.5 text-xs font-semibold transition-colors border-b-2 -mb-px",
@@ -3030,7 +3030,7 @@ function AttachCustomerModal({ order, onClose, onDone }: {
                                 placeholder="Name, phone, or email…" className="input" autoFocus />
                         </div>
                         {customers.length > 0 && (
-                            <div className="border border-surface-200 rounded-xl divide-y divide-surface-100 max-h-52 overflow-y-auto">
+                            <div className="border border-surface-200 rounded-xl divide-y divide-line max-h-52 overflow-y-auto">
                                 {customers.map((c: any) => (
                                     <button key={c.id} onClick={() => setSelectedCustomer(c)}
                                         className={clsx("w-full text-left px-4 py-2.5 text-xs hover:bg-surface-50 transition-colors",
@@ -3138,7 +3138,7 @@ function OrderAuditLog({ orderId, onClose }: { orderId: number; onClose: () => v
         <div className="fixed inset-0 z-40 flex justify-end">
             <div className="flex-1 bg-black/20" onClick={onClose} />
             <div className="w-full max-w-md bg-white shadow-2xl flex flex-col animate-slide-left">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-surface-100 shrink-0">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-line shrink-0">
                     <div>
                         <h2 className="font-bold text-surface-900">Audit Trail</h2>
                         <p className="text-2xs text-surface-400 mt-0.5">All activity on this order</p>
@@ -3472,10 +3472,10 @@ export default function OrderDetailPage() {
             )}
 
             {/* ── Main document shell ───────────────────────────────────────── */}
-            <div className="bg-white rounded-2xl shadow-sm border border-surface-100 overflow-hidden">
+            <div className="bg-white rounded-2xl shadow-sm border border-line overflow-hidden">
 
                 {/* ── Top action bar ──────────────────────────────────────────── */}
-                <div className="flex items-center justify-between gap-3 px-6 py-3 bg-surface-50/80 border-b border-surface-100">
+                <div className="flex items-center justify-between gap-3 px-6 py-3 bg-surface-50/80 border-b border-line">
                     <div className="flex items-center gap-2.5 min-w-0">
                         <button onClick={() => navigate("/sales/orders")}
                             className="flex items-center gap-1.5 text-xs text-surface-500 hover:text-surface-900 font-medium transition-colors shrink-0">
@@ -3588,7 +3588,7 @@ export default function OrderDetailPage() {
                                         order.status === "cancelled"  ? "bg-danger" : "bg-surface-400")} />
                                     {STATUS_FLOW[order.status]?.label ?? order.status}
                                 </span>
-                                <span className="inline-flex items-center gap-1.5 text-xs text-surface-500 font-medium bg-surface-50 border border-surface-100 px-2.5 py-1.5 rounded-full">
+                                <span className="inline-flex items-center gap-1.5 text-xs text-surface-500 font-medium bg-surface-50 border border-line px-2.5 py-1.5 rounded-full">
                                     {order.order_type === "pos"
                                         ? <svg className="w-3.5 h-3.5 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round"><path d="M13.5 21v-7.5a.75.75 0 01.75-.75h3a.75.75 0 01.75.75V21m-4.5 0H2.36m11.14 0H18m0 0h3.64m-1.39 0V9.349m-16.5 11.65V9.35m0 0a3.001 3.001 0 003.75-.615A2.993 2.993 0 009.75 9.75c.896 0 1.7-.393 2.25-1.016a2.993 2.993 0 002.25 1.016c.896 0 1.7-.393 2.25-1.016a3.001 3.001 0 003.75.614m-16.5 0a3.004 3.004 0 01-.621-4.72L4.318 3.44A1.5 1.5 0 015.378 3h13.243a1.5 1.5 0 011.06.44l1.19 2.189a3 3 0 01-.621 4.72m-13.5 8.65h3.75a.75.75 0 00.75-.75V13.5a.75.75 0 00-.75-.75H6.75a.75.75 0 00-.75.75v3.75c0 .415.336.75.75.75z"/></svg>
                                         : <svg className="w-3.5 h-3.5 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
@@ -3643,7 +3643,7 @@ export default function OrderDetailPage() {
                 </div>
 
                 {/* ── Body ─────────────────────────────────────────────────── */}
-                <div className="border-t border-surface-100 grid grid-cols-1 lg:grid-cols-[1fr_272px] lg:divide-x divide-surface-100">
+                <div className="border-t border-line grid grid-cols-1 lg:grid-cols-[1fr_272px] lg:divide-x divide-line">
 
                     {/* ══ LEFT COLUMN ══════════════════════════════════════════ */}
                     <div className="p-6 sm:p-8 space-y-0">
@@ -3732,18 +3732,18 @@ export default function OrderDetailPage() {
                         </div>
 
                         {/* Items */}
-                        <div className="py-8 border-t border-surface-100">
+                        <div className="py-8 border-t border-line">
                             <div className="flex items-center gap-2 mb-4">
                                 <div className="w-6 h-6 rounded-lg bg-surface-100 flex items-center justify-center">
                                     <svg className="w-3.5 h-3.5 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z"/></svg>
                                 </div>
                                 <p className="text-xs font-bold text-surface-700 uppercase tracking-widest">Items</p>
                             </div>
-                            <div className="rounded-xl border border-surface-100 overflow-hidden">
+                            <div className="rounded-xl border border-line overflow-hidden">
                                 <div className="overflow-x-auto">
                                 <table className="w-full text-xs min-w-[560px]">
                                     <thead>
-                                        <tr className="bg-surface-50 border-b border-surface-100">
+                                        <tr className="bg-surface-50 border-b border-line">
                                             <th className="text-left px-4 py-2.5 font-semibold text-surface-500 w-6">#</th>
                                             <th className="text-left px-4 py-2.5 font-semibold text-surface-500">Description</th>
                                             <th className="text-right px-4 py-2.5 font-semibold text-surface-500 w-10">Qty</th>
@@ -3752,13 +3752,13 @@ export default function OrderDetailPage() {
                                             <th className="text-right px-4 py-2.5 font-semibold text-surface-500 w-24">Total</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-surface-50">
+                                    <tbody className="divide-y divide-line">
                                         {(order.items ?? []).map((item: any, i: number) => (
                                             <tr key={item.id ?? i} className="hover:bg-surface-50/50 transition-colors">
                                                 <td className="px-4 py-3 text-surface-300 align-top">{i + 1}</td>
                                                 <td className="px-4 py-3 align-top">
                                                     <div className="flex items-start gap-2.5">
-                                                        {item.image_url && <img src={item.image_url} alt="" className="w-9 h-9 rounded-lg object-cover shrink-0 mt-0.5 border border-surface-100" />}
+                                                        {item.image_url && <img src={item.image_url} alt="" className="w-9 h-9 rounded-lg object-cover shrink-0 mt-0.5 border border-line" />}
                                                         <div>
                                                             <p className="font-semibold text-surface-900">{item.product_name}</p>
                                                             {item.variant_name && <p className="text-surface-400 mt-0.5">{item.variant_name}</p>}
@@ -3967,11 +3967,11 @@ export default function OrderDetailPage() {
                                 )}
                             </div>
                             {order.payments && order.payments.length > 0 ? (
-                                <div className="rounded-xl border border-surface-100 overflow-hidden">
+                                <div className="rounded-xl border border-line overflow-hidden">
                                     <div className="overflow-x-auto">
                                     <table className="w-full text-xs min-w-[560px]">
                                         <thead>
-                                            <tr className="bg-surface-50 border-b border-surface-100">
+                                            <tr className="bg-surface-50 border-b border-line">
                                                 <th className="text-left px-4 py-2.5 font-semibold text-surface-500">Method</th>
                                                 <th className="text-left px-4 py-2.5 font-semibold text-surface-500">Reference / Proof</th>
                                                 <th className="text-left px-4 py-2.5 font-semibold text-surface-500 hidden sm:table-cell">Date</th>
@@ -3979,7 +3979,7 @@ export default function OrderDetailPage() {
                                                 <th className="text-right px-4 py-2.5 font-semibold text-surface-500">Amount</th>
                                             </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-surface-50">
+                                        <tbody className="divide-y divide-line">
                                             {order.payments.map((p: any) => (
                                                 <tr key={p.id} className={clsx("hover:bg-surface-50/50 transition-colors",
                                                     p.requires_approval && p.approval_status !== "approved" && "bg-amber-50/40")}>
@@ -4032,7 +4032,7 @@ export default function OrderDetailPage() {
                                     </div>
                                 </div>
                             ) : (
-                                <div className="py-10 text-center border-2 border-dashed border-surface-100 rounded-xl">
+                                <div className="py-10 text-center border-2 border-dashed border-line rounded-xl">
                                     <div className="w-10 h-10 rounded-xl bg-surface-50 flex items-center justify-center mx-auto mb-2">
                                         <svg className="w-5 h-5 text-surface-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z"/></svg>
                                     </div>
@@ -4130,13 +4130,13 @@ export default function OrderDetailPage() {
                                     </div>
                                 )}
                                 {order.customer_notes && (
-                                    <div className="rounded-xl p-4 bg-surface-50 border border-surface-100">
+                                    <div className="rounded-xl p-4 bg-surface-50 border border-line">
                                         <p className="text-xs font-semibold text-surface-900 mb-1.5">Customer Notes</p>
                                         <p className="text-xs text-surface-700 whitespace-pre-wrap">{order.customer_notes}</p>
                                     </div>
                                 )}
                                 {!order.notes && !order.customer_notes && <p className="text-xs text-surface-300 italic">No notes on this order.</p>}
-                                <div className="space-y-2 pt-1 border-t border-surface-100">
+                                <div className="space-y-2 pt-1 border-t border-line">
                                     <textarea value={noteText} onChange={e => setNoteText(e.target.value)}
                                         placeholder="Add a note…" rows={2} className="input resize-none text-xs w-full" />
                                     <div className="flex items-center justify-between">
@@ -4157,8 +4157,8 @@ export default function OrderDetailPage() {
                     <div className="p-5 space-y-4 bg-surface-50/40">
 
                         {/* Order Details card */}
-                        <div className="bg-white rounded-xl border border-surface-100 overflow-hidden">
-                            <div className="px-4 py-2.5 border-b border-surface-100 bg-surface-50">
+                        <div className="bg-white rounded-xl border border-line overflow-hidden">
+                            <div className="px-4 py-2.5 border-b border-line bg-surface-50">
                                 <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest">Order Details</p>
                             </div>
                             <div className="px-4 py-3 space-y-2.5 text-xs">
@@ -4185,8 +4185,8 @@ export default function OrderDetailPage() {
                         </div>
 
                         {/* Payment card */}
-                        <div className="bg-white rounded-xl border border-surface-100 overflow-hidden">
-                            <div className="px-4 py-2.5 border-b border-surface-100 bg-surface-50">
+                        <div className="bg-white rounded-xl border border-line overflow-hidden">
+                            <div className="px-4 py-2.5 border-b border-line bg-surface-50">
                                 <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest">Payment</p>
                             </div>
                             <div className="px-4 py-3 space-y-2.5 text-xs">
@@ -4246,8 +4246,8 @@ export default function OrderDetailPage() {
 
                         {/* Order Status card */}
                         {canUpdateStatus && (
-                            <div className="bg-white rounded-xl border border-surface-100 overflow-hidden">
-                                <div className="px-4 py-2.5 border-b border-surface-100 bg-surface-50">
+                            <div className="bg-white rounded-xl border border-line overflow-hidden">
+                                <div className="px-4 py-2.5 border-b border-line bg-surface-50">
                                     <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest">Order Status</p>
                                 </div>
                                 <div className="px-4 py-3.5">

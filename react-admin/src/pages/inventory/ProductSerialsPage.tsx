@@ -137,7 +137,7 @@ export default function ProductSerialsPage() {
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                         <thead>
-                            <tr className="text-left text-2xs uppercase tracking-widest text-surface-400 border-b border-surface-100">
+                            <tr className="text-left text-2xs uppercase tracking-widest text-surface-400 border-b border-line">
                                 <th className="px-4 py-3">Serial</th>
                                 <th className="px-4 py-3">Product</th>
                                 <th className="px-4 py-3">Status</th>
@@ -203,7 +203,7 @@ export default function ProductSerialsPage() {
                     </table>
                 </div>
                 {meta && meta.last_page > 1 && (
-                    <div className="flex items-center justify-between px-4 py-3 border-t border-surface-100 text-xs">
+                    <div className="flex items-center justify-between px-4 py-3 border-t border-line text-xs">
                         <span className="text-surface-400">Page {meta.current_page} of {meta.last_page}</span>
                         <div className="flex gap-2">
                             <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="btn-secondary btn-sm disabled:opacity-40">Prev</button>

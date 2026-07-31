@@ -352,7 +352,7 @@ export default function PaymentMethodsPage() {
                         }
                     />
                 ) : (
-                    <div className="divide-y divide-surface-50">
+                    <div className="divide-y divide-line">
                         {methods
                             .sort((a, b) => a.sort_order - b.sort_order)
                             .map((method) => (
@@ -590,7 +590,7 @@ export default function PaymentMethodsPage() {
                             </div>
                         </Field>
                     </div>
-                    <div className="space-y-3 pt-2 border-t border-surface-100">
+                    <div className="space-y-3 pt-2 border-t border-line">
                         <Toggle
                             checked={watch("is_active")}
                             onChange={(v) => setValue("is_active", v)}

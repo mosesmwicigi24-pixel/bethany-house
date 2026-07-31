@@ -135,7 +135,7 @@ function RichEditor({ value, onChange, rows = 6, className }: RichEditorProps) {
         <div className={clsx("rounded-xl border border-surface-200 overflow-hidden focus-within:ring-2 focus-within:ring-brand-300 focus-within:border-brand-400 transition-all", className)}>
             {/* Toolbar */}
             <div
-                className="flex items-center gap-0.5 px-2 py-1.5 bg-surface-50 border-b border-surface-100"
+                className="flex items-center gap-0.5 px-2 py-1.5 bg-surface-50 border-b border-line"
                 onMouseDown={prevent}
             >
                 {[
@@ -278,7 +278,7 @@ export default function UserEodModal({
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col animate-slide-up">
 
                 {/* ── Header ── */}
-                <div className="px-5 py-4 border-b border-surface-100 shrink-0">
+                <div className="px-5 py-4 border-b border-line shrink-0">
                     <div className="flex items-start justify-between gap-3">
                         <div>
                             <h2 className="font-bold text-surface-900 flex items-center gap-2 text-base">
@@ -463,7 +463,7 @@ export default function UserEodModal({
                                                         "rounded-xl border transition-all",
                                                         isExpanded
                                                             ? "border-brand-200 bg-brand-50/30"
-                                                            : "border-surface-100 bg-surface-50 hover:border-surface-200",
+                                                            : "border-line bg-surface-50 hover:border-surface-200",
                                                     )}
                                                 >
                                                     {/* Row header — click to expand */}
@@ -536,7 +536,7 @@ export default function UserEodModal({
 
                                                     {/* Expanded detail */}
                                                     {isExpanded && (
-                                                        <div className="px-4 pb-4 space-y-3 border-t border-surface-100 pt-3">
+                                                        <div className="px-4 pb-4 space-y-3 border-t border-line pt-3">
                                                             {/* Items */}
                                                             <div className="space-y-1">
                                                                 {order.items.map((item, i) => (
@@ -569,7 +569,7 @@ export default function UserEodModal({
                                                             </div>
 
                                                             {/* Totals reconciliation */}
-                                                            <div className="bg-white rounded-lg px-3 py-2 space-y-1 text-xs border border-surface-100">
+                                                            <div className="bg-white rounded-lg px-3 py-2 space-y-1 text-xs border border-line">
                                                                 <div className="flex justify-between text-surface-600">
                                                                     <span>Total</span>
                                                                     <span className="font-semibold text-surface-900">
@@ -583,7 +583,7 @@ export default function UserEodModal({
                                                                     </span>
                                                                 </div>
                                                                 {hasBal && (
-                                                                    <div className="flex justify-between border-t border-surface-100 pt-1 font-semibold text-warning">
+                                                                    <div className="flex justify-between border-t border-line pt-1 font-semibold text-warning">
                                                                         <span>Balance</span>
                                                                         <span>KES {fmtNum(order.balance)}</span>
                                                                     </div>
@@ -636,7 +636,7 @@ export default function UserEodModal({
                 </div>
 
                 {/* ── Footer ── */}
-                <div className="p-4 border-t border-surface-100 shrink-0 flex gap-3">
+                <div className="p-4 border-t border-line shrink-0 flex gap-3">
                     <button
                         onClick={onClose}
                         className="btn-secondary flex-1"

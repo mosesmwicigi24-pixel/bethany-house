@@ -167,7 +167,7 @@ export function DateRangePicker({ value, onChange, className }: DateRangePickerP
 
             {/* Dropdown */}
             {open && (
-                <div className="absolute right-0 top-full mt-1.5 w-56 bg-white rounded-xl shadow-card-lg border border-surface-100 py-1.5 z-50 animate-slide-down">
+                <div className="absolute right-0 top-full mt-1.5 w-56 bg-white rounded-xl shadow-card-lg border border-line py-1.5 z-50 animate-slide-down">
                     {presets.map((p) => (
                         <button
                             key={p.preset}
@@ -184,7 +184,7 @@ export function DateRangePicker({ value, onChange, className }: DateRangePickerP
                     ))}
 
                     {/* Divider */}
-                    <div className="my-1 border-t border-surface-100" />
+                    <div className="my-1 border-t border-line" />
 
                     {/* Custom range toggle */}
                     <button
@@ -200,7 +200,7 @@ export function DateRangePicker({ value, onChange, className }: DateRangePickerP
                     </button>
 
                     {showCustom && (
-                        <div className="px-3 py-3 border-t border-surface-100 space-y-2">
+                        <div className="px-3 py-3 border-t border-line space-y-2">
                             <div>
                                 <label className="label">From</label>
                                 <input

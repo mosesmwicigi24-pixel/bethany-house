@@ -95,7 +95,7 @@ function AuditTrail({ poId }: { poId: number }) {
     );
 
     return (
-        <div className="divide-y divide-surface-50">
+        <div className="divide-y divide-line">
             {logs.map((entry) => (
                 <div key={entry.id} className="flex gap-3 py-3.5 px-1">
                     <div className="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center shrink-0 mt-0.5">
@@ -213,7 +213,7 @@ function ReceiveModal({ po, onClose, onDone }: {
                                 <th className="text-center px-3 py-2 font-semibold text-surface-600">Quality</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-surface-100">
+                        <tbody className="divide-y divide-line">
                             {(po.items ?? []).map((poItem: any, idx: number) => {
                                 const remaining = poItem.quantity - poItem.quantity_received;
                                 const entry = items[idx];
@@ -392,7 +392,7 @@ export default function PurchaseOrderDetailPage() {
                 </div>
 
                 {/* ── Action bar ── */}
-                <div className="px-5 py-3 bg-slate-50 border-b border-surface-100 flex flex-wrap items-center gap-2 sm:px-8">
+                <div className="px-5 py-3 bg-slate-50 border-b border-line flex flex-wrap items-center gap-2 sm:px-8">
                     {canSubmit && (
                         <button onClick={() => actionMutation.mutate({ action: "submit" })}
                             disabled={actionMutation.isPending}
@@ -444,13 +444,13 @@ export default function PurchaseOrderDetailPage() {
                 </div>
 
                 {/* ── Body: two-column ── */}
-                <div className="px-5 py-5 grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-6 lg:gap-8 sm:px-8 sm:py-6 lg:divide-x divide-surface-100">
+                <div className="px-5 py-5 grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-6 lg:gap-8 sm:px-8 sm:py-6 lg:divide-x divide-line">
 
                     {/* LEFT */}
                     <div className="space-y-8 lg:pr-8">
 
                         {/* Tabs */}
-                        <div className="flex border-b border-surface-100 overflow-x-auto no-scrollbar">
+                        <div className="flex border-b border-line overflow-x-auto no-scrollbar">
                             {(["details", "grn", "audit"] as const).map((t) => (
                                 <button key={t} onClick={() => setTab(t)}
                                     className={clsx("px-4 py-2.5 text-xs font-semibold border-b-2 transition-all whitespace-nowrap shrink-0",
@@ -476,7 +476,7 @@ export default function PurchaseOrderDetailPage() {
                                                 <th className="text-right px-3 py-2.5 font-semibold text-surface-600">Line Total</th>
                                             </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-surface-100">
+                                        <tbody className="divide-y divide-line">
                                             {(po.items ?? []).map((item: any) => {
                                                 const outstanding = item.quantity - item.quantity_received;
                                                 const fullyReceived = outstanding <= 0;
@@ -555,7 +555,7 @@ export default function PurchaseOrderDetailPage() {
                                                 </span>
                                             </div>
                                             {grn.notes && (
-                                                <div className="px-4 py-2 border-b border-surface-100 bg-white">
+                                                <div className="px-4 py-2 border-b border-line bg-white">
                                                     <p className="text-xs text-surface-600 italic">{grn.notes}</p>
                                                 </div>
                                             )}

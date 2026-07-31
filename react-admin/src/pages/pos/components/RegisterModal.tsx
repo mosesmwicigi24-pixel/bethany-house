@@ -120,7 +120,7 @@ export default function RegisterModal({
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-slide-up">
 
                 {/* ── Header ── */}
-                <div className="p-5 border-b border-surface-100">
+                <div className="p-5 border-b border-line">
                     <h2 className="font-bold text-lg text-surface-900">
                         {mode === "open" ? "Open Cash Register" : "Close Cash Register"}
                     </h2>
@@ -258,7 +258,7 @@ export default function RegisterModal({
 
                             {/* Optional denomination count — close mode */}
                             {mode === "close" && (
-                                <div className="rounded-xl border border-surface-100 p-3">
+                                <div className="rounded-xl border border-line p-3">
                                     <div className="flex items-center justify-between mb-2">
                                         <label className="label mb-0">
                                             Count by denomination <span className="text-surface-400 font-normal">(optional)</span>
