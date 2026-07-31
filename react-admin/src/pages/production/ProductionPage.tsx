@@ -1814,19 +1814,23 @@ function ProductionOrdersTab() {
                 compact stat strip (centered, small label, bold number) instead
                 of stacking. Tapping a tile still filters by that status. */}
             <div className="grid grid-cols-6 gap-1 sm:gap-2">
+                {/* Each state carries its own soft tint, so the row reads as a
+                    status spectrum at a glance instead of six identical white
+                    chips — the reference app's use of colour as information. */}
                 {[
-                    { key: "draft",       label: "Draft",       color: "text-surface-400" },
-                    { key: "pending",     label: "Pending",     color: "text-surface-700" },
-                    { key: "in_progress", label: "In Progress", color: "text-brand-600"   },
-                    { key: "qc_pending",  label: "QC",          color: "text-purple-600"  },
-                    { key: "completed",   label: "Completed",   color: "text-success"     },
-                    { key: "overdue",     label: "Overdue",     color: "text-danger"      },
-                ].map(({ key, label, color }) => (
+                    { key: "draft",       label: "Draft",       tint: "bg-surface-100", color: "text-surface-600" },
+                    { key: "pending",     label: "Pending",     tint: "bg-surface-100", color: "text-surface-700" },
+                    { key: "in_progress", label: "In Progress", tint: "bg-brand-50",    color: "text-brand-700"   },
+                    { key: "qc_pending",  label: "QC",          tint: "bg-purple-50",   color: "text-purple-700"  },
+                    { key: "completed",   label: "Completed",   tint: "bg-success-light", color: "text-success-dark" },
+                    { key: "overdue",     label: "Overdue",     tint: "bg-danger-light", color: "text-danger"      },
+                ].map(({ key, label, tint, color }) => (
                     <button key={key} onClick={() => setF("status", filters.status === key ? "" : key)}
-                        className={clsx("card px-0.5 py-2 sm:p-3 hover:shadow-sm transition-all min-w-0 flex flex-col items-center sm:items-start justify-center",
-                            filters.status === key && "ring-2 ring-brand-400 ring-offset-1")}>
-                        <p className={clsx("text-base sm:text-2xl font-bold tabular-nums sm:mt-0.5", color)}>{stats[key] ?? 0}</p>
-                        <p className="text-2xs text-surface-400 truncate leading-tight sm:order-first">{label}</p>
+                        className={clsx("rounded-control px-0.5 py-2 sm:p-3 transition-all min-w-0 flex flex-col items-center sm:items-start justify-center",
+                            tint,
+                            filters.status === key ? "ring-2 ring-brand-500 ring-offset-1" : "hover:brightness-95")}>
+                        <p className={clsx("text-[15px] sm:text-2xl font-extrabold tabular-nums sm:mt-0.5", color)}>{stats[key] ?? 0}</p>
+                        <p className={clsx("text-2xs truncate leading-tight sm:order-first font-semibold", color, "opacity-70")}>{label}</p>
                     </button>
                 ))}
             </div>
@@ -1867,10 +1871,81 @@ function ProductionOrdersTab() {
                 )}
             </div>
 
-            {/* Table */}
-            <div className="flex-1 min-h-0 overflow-auto card">
+            {/* Phone: a card list. A 9-column table on a 430px screen scrolls
+                sideways and wraps the order number onto three lines — the
+                reference app never puts a table on a handset. Desktop keeps the
+                table, where the columns genuinely fit. */}
+            <div className="md:hidden flex-1 min-h-0 overflow-auto -mx-3 px-3">
+                {isLoading ? (
+                    <div className="flex justify-center py-16"><Spinner size="lg" /></div>
+                ) : orderGroups.length === 0 ? (
+                    <div className="card card-body text-center text-surface-500 text-sm py-12">
+                        No production orders found
+                    </div>
+                ) : (
+                    <div className="space-y-4 pb-2">
+                        {orderGroups.map((group) => (
+                            <div key={group.key}>
+                                <p className="px-1 pb-1.5 text-2xs font-bold uppercase tracking-wider text-surface-500">
+                                    {group.label}
+                                </p>
+                                <div className="card divide-y divide-surface-100">
+                                    {group.items.map((o) => {
+                                        const days = daysUntil(o.due_date);
+                                        const cfg = STATUS_CFG[o.status] ?? STATUS_CFG.draft;
+                                        const late = days < 0;
+                                        return (
+                                            <button
+                                                key={o.id}
+                                                onClick={() => navigate(`/production/orders/${o.id}`)}
+                                                className="w-full text-left px-3.5 py-3 active:bg-surface-50 transition-colors"
+                                            >
+                                                {/* Line 1 — what it is, and how far along */}
+                                                <div className="flex items-start gap-2">
+                                                    <span className={clsx('mt-1.5 w-1.5 h-1.5 rounded-full shrink-0', cfg.dot)} />
+                                                    <p className="flex-1 min-w-0 font-bold text-surface-900 text-[13.5px] leading-snug truncate">
+                                                        {o.product_name}
+                                                    </p>
+                                                    <span className={clsx('shrink-0 text-2xs font-bold px-2 py-0.5 rounded-full', cfg.bg, cfg.text)}>
+                                                        {cfg.label}
+                                                    </span>
+                                                </div>
+
+                                                {/* Line 2 — whose job it is */}
+                                                <p className="mt-1 pl-3.5 text-[12.5px] text-surface-600 truncate">
+                                                    {o.customer_label ?? (o.customer_order_id ? 'Name missing' : 'For stock')}
+                                                    {o.customer_contact && (
+                                                        <span className="text-surface-400"> · {o.customer_contact}</span>
+                                                    )}
+                                                </p>
+
+                                                {/* Line 3 — the reference numbers and the clock */}
+                                                <div className="mt-1 pl-3.5 flex items-center gap-2 text-2xs">
+                                                    <span className="font-mono font-bold text-brand-700 truncate">{o.order_number}</span>
+                                                    {o.quantity > 1 && (
+                                                        <span className="text-surface-500 shrink-0">x{o.quantity}</span>
+                                                    )}
+                                                    <span className={clsx(
+                                                        'ml-auto shrink-0 tabular-nums font-bold',
+                                                        late ? 'text-danger' : days <= 2 ? 'text-warning-dark' : 'text-surface-500',
+                                                    )}>
+                                                        {late ? `${Math.abs(days)}d late` : days === 0 ? 'Due today' : `${days}d left`}
+                                                    </span>
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* Desktop table */}
+            <div className="hidden md:flex flex-1 min-h-0 overflow-auto card">
                     {isLoading ? (
-                        <div className="flex justify-center py-16"><Spinner size="lg" /></div>
+                        <div className="flex justify-center py-16 w-full"><Spinner size="lg" /></div>
                     ) : (
                         <table className="w-full text-sm">
                             <thead className="bg-surface-50 border-b border-surface-100 sticky top-0">
