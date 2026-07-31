@@ -893,7 +893,7 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                                 ? (task.assigned_to as any)?.id?.toString() ?? ""
                                 : task.assigned_to?.toString() ?? "";
                             return (
-                                <div key={task.id} className="grid grid-cols-12 gap-3 items-center p-3 rounded-xl bg-surface-50 border border-surface-100">
+                                <div key={task.id} className="grid grid-cols-12 gap-3 items-center p-3 rounded-xl bg-surface-50 border border-line">
                                     <div className="col-span-4">
                                         <p className="text-sm font-semibold text-surface-900 flex items-center gap-1.5">
                                             <StageIcon slug={task.stage?.slug} className="w-3.5 h-3.5 text-surface-500" />
@@ -1282,7 +1282,7 @@ function ActivityLog({ orderId, currentUserId }: { orderId: number; currentUserI
             </div>
 
             {/* Input area */}
-            <div className="shrink-0 border-t border-surface-100 p-3 space-y-2">
+            <div className="shrink-0 border-t border-line p-3 space-y-2">
                 {/* Type selector */}
                 <div className="flex gap-1">
                     {(["message", "note"] as const).map(t => (
@@ -1382,7 +1382,7 @@ function OrderDetail({ orderId, onClose, onUpdated }: { orderId: number; onClose
     return (
         <div className="flex flex-col h-full overflow-hidden">
             {/* Panel header */}
-            <div className="p-4 border-b border-surface-100 bg-white shrink-0">
+            <div className="p-4 border-b border-line bg-white shrink-0">
                 <div className="flex items-start gap-2 justify-between">
                     <div className="flex-1 min-w-0">
                         <div className="flex flex-wrap items-center gap-1.5 mb-1">
@@ -1514,7 +1514,7 @@ aria-label="Close">
                                         active   ? "border-brand-200 bg-brand-50 shadow-sm" :
                                         failed   ? "border-danger/20 bg-danger-light/30" :
                                         isMyTask ? "border-brand-100 bg-white" :
-                                        "border-surface-100 bg-white")}>
+                                        "border-line bg-white")}>
                                     <div className={clsx("w-7 h-7 rounded-full flex items-center justify-center text-sm shrink-0 font-bold mt-0.5",
                                         done   ? "bg-success text-white" :
                                         active ? "bg-brand-500 text-white" :
@@ -1648,7 +1648,7 @@ aria-label="Close">
             </div>
 
             {/* ── Detail tabs: Details / Activity ── */}
-            <div className="shrink-0 flex border-t border-surface-100 bg-white">
+            <div className="shrink-0 flex border-t border-line bg-white">
                 {(["details", "activity"] as const).map(tab => (
                     <button key={tab} onClick={() => setDetailTab(tab)}
                         className={clsx(
@@ -1892,7 +1892,7 @@ function ProductionOrdersTab() {
                                 <p className="px-1 pb-1.5 text-2xs font-bold uppercase tracking-wider text-surface-500">
                                     {group.label}
                                 </p>
-                                <div className="card divide-y divide-surface-100">
+                                <div className="card divide-y divide-line">
                                     {group.items.map((o) => {
                                         const days = daysUntil(o.due_date);
                                         const cfg = STATUS_CFG[o.status] ?? STATUS_CFG.draft;
@@ -1983,14 +1983,14 @@ function ProductionOrdersTab() {
                         <div className="flex justify-center py-16 w-full"><Spinner size="lg" /></div>
                     ) : (
                         <table className="w-full text-sm">
-                            <thead className="bg-surface-50 border-b border-surface-100 sticky top-0">
+                            <thead className="bg-surface-50 border-b border-line sticky top-0">
                                 <tr>
                                     {["Order #", "Type", "Product", "Customer", "Qty", "Priority", "Status", "Progress", "Due", ""].map((h, i) => (
                                         <th key={h || i} className={`px-3 py-3 text-left text-2xs font-bold text-surface-400 uppercase tracking-wider whitespace-nowrap ${["Type","Priority","Progress"].includes(h) ? "hidden md:table-cell" : ""} ${["Due"].includes(h) ? "hidden sm:table-cell" : ""}`}>{h}</th>
                                     ))}
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-surface-50">
+                            <tbody className="divide-y divide-line">
                                 {orderGroups.map((group) => (
                                     <Fragment key={group.key}>
                                         <DateGroupHeaderRow label={group.label} colSpan={10} />
@@ -2069,7 +2069,7 @@ function ProductionOrdersTab() {
 
                 {/* Pagination */}
                 {meta && meta.last_page > 1 && (
-                    <div className="px-4 py-3 border-t border-surface-100 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between shrink-0">
+                    <div className="px-4 py-3 border-t border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between shrink-0">
                         <p className="text-xs text-surface-500">
                             Showing {meta.from}–{meta.to} of {meta.total}
                         </p>
@@ -2342,7 +2342,7 @@ function WIPTab({
                                             );
                                         })}
                                         {colOrders.length === 0 && (
-                                            <div className="text-center py-10 text-surface-200 text-2xs border-2 border-dashed border-surface-100 rounded-xl">
+                                            <div className="text-center py-10 text-surface-200 text-2xs border-2 border-dashed border-line rounded-xl">
                                                 Empty
                                             </div>
                                         )}
@@ -2423,7 +2423,7 @@ function BOMTab() {
                     ) : products.length === 0 ? (
                         <p className="text-xs text-surface-400 text-center py-8 px-4">No producible products found</p>
                     ) : (
-                        <div className="divide-y divide-surface-50">
+                        <div className="divide-y divide-line">
                             {products.map(p => {
                                 const name = p.en_translation?.name ?? p.name ?? p.sku;
                                 const price = p.base_price?.regular_price;
@@ -2536,7 +2536,7 @@ function BOMTab() {
                             {boms.map(bom => (
                                 <div key={bom.id} className={clsx("card overflow-hidden",
                                     bom.is_active && "ring-2 ring-brand-300")}>
-                                    <div className="px-4 py-3 border-b border-surface-100 flex items-center justify-between gap-3">
+                                    <div className="px-4 py-3 border-b border-line flex items-center justify-between gap-3">
                                         <div className="flex items-center gap-2 min-w-0">
                                             <span className="text-sm font-bold text-surface-900">v{bom.version}</span>
                                             {bom.is_active && (
@@ -2563,7 +2563,7 @@ function BOMTab() {
                                                     ))}
                                                 </tr>
                                             </thead>
-                                            <tbody className="divide-y divide-surface-50">
+                                            <tbody className="divide-y divide-line">
                                                 {(bom.items ?? []).map(item => (
                                                     <tr key={item.id} className={clsx(item.is_short && "bg-danger-light/30")}>
                                                         <td className="px-3 py-2 font-medium text-surface-900">
@@ -2608,7 +2608,7 @@ function BOMTab() {
                                     </div>
 
                                     {/* Mobile: material cards */}
-                                    <div className="sm:hidden divide-y divide-surface-50">
+                                    <div className="sm:hidden divide-y divide-line">
                                         {(bom.items ?? []).map(item => {
                                             const materialName = item.material?.name ?? item.material_name ?? "-";
                                             const code = item.material?.code ?? item.material_code ?? "-";
@@ -2661,7 +2661,7 @@ function BOMTab() {
                                             );
                                         })}
                                         {bom.total_cost != null && (
-                                            <div className="px-4 py-3 bg-surface-50 flex items-center justify-between border-t border-surface-100">
+                                            <div className="px-4 py-3 bg-surface-50 flex items-center justify-between border-t border-line">
                                                 <span className="text-xs font-bold text-surface-700">Total BOM Cost</span>
                                                 <span className="text-xs font-bold text-surface-900 tabular-nums">KES {fmtNum(bom.total_cost, 2)}</span>
                                             </div>

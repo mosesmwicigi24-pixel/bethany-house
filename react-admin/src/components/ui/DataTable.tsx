@@ -327,7 +327,7 @@ export function DataTable<T extends Record<string, unknown>>({
 
             {/* Pagination footer - driven by the PaginationProps passed to DataTable */}
             {pagination && (
-                <div className="flex items-center justify-between gap-4 px-4 py-3 border-t border-surface-100 bg-white rounded-b-xl flex-wrap">
+                <div className="flex items-center justify-between gap-4 px-4 py-3 border-t border-line bg-white rounded-b-xl flex-wrap">
                     {/* Left: count summary + per-page */}
                     <div className="flex items-center gap-4 text-xs text-surface-500">
                         <span>
@@ -453,7 +453,7 @@ export function Pagination({
     if (lastPage <= 1) return null;
 
     return (
-        <div className="flex items-center justify-between px-4 py-3 border-t border-surface-100 text-xs text-surface-500">
+        <div className="flex items-center justify-between px-4 py-3 border-t border-line text-xs text-surface-500">
             <span>
                 {isLoading ? (
                     <span className="skeleton h-3 w-24 rounded inline-block" />

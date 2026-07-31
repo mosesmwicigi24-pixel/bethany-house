@@ -238,7 +238,7 @@ function RichEditor({
             )}
         >
             {/* Toolbar */}
-            <div className="flex items-center gap-0.5 px-2 py-1.5 border-b border-surface-100 bg-surface-50 flex-wrap">
+            <div className="flex items-center gap-0.5 px-2 py-1.5 border-b border-line bg-surface-50 flex-wrap">
                 {[
                     {
                         title: "Bold",
@@ -865,7 +865,7 @@ function VariantGenerator({
                     {attributes.map((attr) => (
                         <div
                             key={attr.type}
-                            className="border border-surface-100 rounded-xl p-3 space-y-2"
+                            className="border border-line rounded-xl p-3 space-y-2"
                         >
                             <div className="flex items-center justify-between">
                                 <p className="text-sm font-semibold text-surface-800">
@@ -1028,7 +1028,7 @@ function VariantGenerator({
 
                     {/* Preview */}
                     {combinations.length > 0 && (
-                        <div className="bg-surface-50 rounded-xl p-3 border border-surface-100">
+                        <div className="bg-surface-50 rounded-xl p-3 border border-line">
                             <p className="text-xs font-semibold text-surface-500 mb-2">
                                 Preview - {combinations.length} variant{combinations.length !== 1 ? "s" : ""}
                                 <span className="font-normal text-surface-400"> · colour leads, features are coloured, size is a separate option</span>
@@ -1066,7 +1066,7 @@ function VariantGenerator({
                         {generatedVariants.map((v, vi) => (
                             <div
                                 key={vi}
-                                className="border border-surface-100 rounded-xl overflow-hidden"
+                                className="border border-line rounded-xl overflow-hidden"
                             >
                                 {/* Merchandising name — colour leads, the rest explains */}
                                 <div className="px-3 pt-2 pb-1 bg-surface-50">
@@ -1074,7 +1074,7 @@ function VariantGenerator({
                                         {v.name}
                                     </p>
                                 </div>
-                                <div className="flex items-center gap-3 px-3 py-2 bg-surface-50 border-b border-surface-100">
+                                <div className="flex items-center gap-3 px-3 py-2 bg-surface-50 border-b border-line">
                                     <div className="flex gap-1 flex-wrap flex-1">
                                         {Object.entries(v.attrs).map(
                                             ([k, val]) => (
@@ -1302,7 +1302,7 @@ function VariantImagesSection({
                             key={img.id}
                             className={clsx(
                                 "relative group aspect-square rounded-lg overflow-hidden border-2",
-                                img.is_primary ? "border-brand-500" : "border-surface-100",
+                                img.is_primary ? "border-brand-500" : "border-line",
                             )}
                         >
                             <img
@@ -1668,7 +1668,7 @@ function EditVariantModal({
                     })}
                 </div>
 
-                <div className="flex gap-4 pt-2 border-t border-surface-100">
+                <div className="flex gap-4 pt-2 border-t border-line">
                     <Toggle
                         checked={watch("is_default")}
                         onChange={(v) => setValue("is_default", v)}
@@ -1888,7 +1888,7 @@ function MeasurementsTab({
                 </div>
 
                 {/* Gender sheet — a selector: tapping LOADS that gender's sheet */}
-                <div className="px-4 pt-3 pb-3 border-b border-surface-100">
+                <div className="px-4 pt-3 pb-3 border-b border-line">
                     <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-2">
                         Gender sheet
                     </p>
@@ -1920,7 +1920,7 @@ function MeasurementsTab({
 
                 {/* Quick-add common */}
                 {unaddedCommon.length > 0 && (
-                    <div className="px-4 pb-3 border-b border-surface-100">
+                    <div className="px-4 pb-3 border-b border-line">
                         <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-2">
                             Quick add — individual field
                         </p>
@@ -1945,7 +1945,7 @@ function MeasurementsTab({
                 )}
 
                 {/* Existing fields */}
-                <div className="divide-y divide-surface-50">
+                <div className="divide-y divide-line">
                     {measurements.length === 0 ? (
                         <div className="px-4 py-8 text-center text-sm text-surface-400">
                             No measurement fields yet. Add from the quick-add list above or define a custom one below.
@@ -2005,7 +2005,7 @@ function MeasurementsTab({
                 </div>
 
                 {/* Add custom field */}
-                <div className="px-4 py-3 border-t border-surface-100 bg-surface-50/50">
+                <div className="px-4 py-3 border-t border-line bg-surface-50/50">
                     <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-2">
                         Custom field
                     </p>
@@ -2156,9 +2156,9 @@ const PriceRows = React.memo(function PriceRows({
             return (
                 <div
                     key={field.id}
-                    className={`border rounded-xl overflow-hidden ${isBase ? "border-brand-300 ring-1 ring-brand-200" : "border-surface-100"}`}
+                    className={`border rounded-xl overflow-hidden ${isBase ? "border-brand-300 ring-1 ring-brand-200" : "border-line"}`}
                 >
-                    <div className={`flex items-center justify-between px-4 py-2.5 border-b ${isBase ? "bg-brand-50 border-brand-200" : "bg-surface-50 border-surface-100"}`}>
+                    <div className={`flex items-center justify-between px-4 py-2.5 border-b ${isBase ? "bg-brand-50 border-brand-200" : "bg-surface-50 border-line"}`}>
                         <div className="flex items-center gap-2">
                             <span className={`text-sm font-bold font-mono ${isBase ? "text-brand-700" : "text-surface-900"}`}>
                                 {field.currency_code}
@@ -2339,7 +2339,7 @@ function FeaturesTab({ features, onChange }: { features: Feature[]; onChange: (f
             {features.some((f) => f.text.trim()) && (
                 <div className="card">
                     <div className="card-header"><h3 className="text-sm font-semibold text-surface-900">Preview</h3></div>
-                    <div className="p-4 divide-y divide-surface-50">
+                    <div className="p-4 divide-y divide-line">
                         {features.filter((f) => f.text.trim()).map((f, i) => (
                             <div key={i} className="flex items-center gap-3 py-3">
                                 <span className="w-9 h-9 rounded-full bg-surface-900 text-white flex items-center justify-center text-base shrink-0">{f.icon || "✦"}</span>
@@ -2928,7 +2928,7 @@ export default function ProductFormPage() {
             <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
                 {/* ── LEFT: Main content ─────────────────────────────────────────── */}
                 <div className="flex-1 min-w-0 space-y-3">
-                    <div className="flex gap-0 border-b border-surface-100 overflow-x-auto no-scrollbar">
+                    <div className="flex gap-0 border-b border-line overflow-x-auto no-scrollbar">
                         {[...BASE_TABS, ...(watch("is_producible") ? PRODUCTION_TABS : [])].map((tab) => {
                             // Determine if this tab has any validation errors
                             const tabHasError =
@@ -3144,7 +3144,7 @@ export default function ProductFormPage() {
                                                     />
                                                 </svg>
                                             </summary>
-                                            <div className="px-4 pb-4 space-y-3 border-t border-surface-100 pt-3">
+                                            <div className="px-4 pb-4 space-y-3 border-t border-line pt-3">
                                                 <Field label="Name">
                                                     <FieldInput
                                                         className="input"
@@ -3367,7 +3367,7 @@ export default function ProductFormPage() {
                             <div className="card-body space-y-4">
 
                                 {/* ── Tax Rates (moved to top) ─────────────────── */}
-                                <div className="rounded-xl border border-surface-100 bg-surface-50/50 p-4 space-y-3">
+                                <div className="rounded-xl border border-line bg-surface-50/50 p-4 space-y-3">
                                     <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                                         <div>
                                             <h4 className="text-sm font-semibold text-surface-800">
@@ -3513,7 +3513,7 @@ export default function ProductFormPage() {
                                         <div className="overflow-x-auto -mx-4 sm:mx-0">
                                         <table className="w-full text-sm min-w-[500px]">
                                             <thead>
-                                                <tr className="border-b border-surface-100 text-xs text-surface-500 uppercase">
+                                                <tr className="border-b border-line text-xs text-surface-500 uppercase">
                                                     <th className="pb-2 text-left font-semibold">
                                                         Variant
                                                     </th>
@@ -3539,7 +3539,7 @@ export default function ProductFormPage() {
                                                     <th className="pb-2" />
                                                 </tr>
                                             </thead>
-                                            <tbody className="divide-y divide-surface-50">
+                                            <tbody className="divide-y divide-line">
                                                 {product?.variants?.map((v) => (
                                                     <tr
                                                         key={v.id}
@@ -3772,7 +3772,7 @@ export default function ProductFormPage() {
                                                 />
                                             </Field>
                                             {(metaTitle || enName) && (
-                                                <div className="border border-surface-100 rounded-xl p-3 bg-surface-50 text-xs">
+                                                <div className="border border-line rounded-xl p-3 bg-surface-50 text-xs">
                                                     <p className="text-blue-600 font-medium">
                                                         {metaTitle || enName} |
                                                         Bethany House
@@ -3942,7 +3942,7 @@ export default function ProductFormPage() {
 
                     {/* Shipping */}
                     <div className="card">
-                        <div className="px-3 py-2 border-b border-surface-100">
+                        <div className="px-3 py-2 border-b border-line">
                             <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider">
                                 Shipping
                             </p>

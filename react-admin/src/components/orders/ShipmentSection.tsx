@@ -137,23 +137,23 @@ function AttachmentPreviewModal({
                         <Spinner />
                     </div>
                 ) : error ? (
-                    <div className="rounded-xl border border-surface-100 bg-surface-50 py-12 flex flex-col items-center gap-2">
+                    <div className="rounded-xl border border-line bg-surface-50 py-12 flex flex-col items-center gap-2">
                         <p className="text-sm text-danger">{error}</p>
                         <button onClick={() => toast.error(error)} className="hidden" />
                     </div>
                 ) : attachment.is_image ? (
-                    <div className="rounded-xl border border-surface-100 bg-surface-50 flex items-center justify-center overflow-hidden" style={{ maxHeight: "70vh" }}>
+                    <div className="rounded-xl border border-line bg-surface-50 flex items-center justify-center overflow-hidden" style={{ maxHeight: "70vh" }}>
                         <img src={blobUrl!} alt={attachment.name} className="max-w-full max-h-[70vh] object-contain" />
                     </div>
                 ) : isPdf ? (
                     <iframe
                         src={blobUrl!}
                         title={attachment.name}
-                        className="w-full rounded-xl border border-surface-100"
+                        className="w-full rounded-xl border border-line"
                         style={{ height: "70vh" }}
                     />
                 ) : (
-                    <div className="rounded-xl border border-surface-100 bg-surface-50 py-12 flex flex-col items-center gap-2">
+                    <div className="rounded-xl border border-line bg-surface-50 py-12 flex flex-col items-center gap-2">
                         <svg className="w-10 h-10 text-surface-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
                         </svg>
@@ -284,7 +284,7 @@ function AttachmentRow({
 
     return (
         <>
-            <div className="flex items-center gap-2 text-xs border border-surface-100 rounded-xl px-3 py-2 bg-surface-50">
+            <div className="flex items-center gap-2 text-xs border border-line rounded-xl px-3 py-2 bg-surface-50">
                 {attachment.mime_type === "application/pdf" ? (
                     <svg className="w-4 h-4 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
@@ -432,7 +432,7 @@ function AddTrackingModal({
                     {files.length > 0 && (
                         <div className="mt-2 space-y-1.5">
                             {files.map((f, idx) => (
-                                <div key={idx} className="flex items-center gap-2 p-2 bg-surface-50 rounded-lg border border-surface-100">
+                                <div key={idx} className="flex items-center gap-2 p-2 bg-surface-50 rounded-lg border border-line">
                                     <span className="text-xs text-surface-700 truncate flex-1">{f.file.name}</span>
                                     <label className="flex items-center gap-1.5 text-2xs text-surface-500 shrink-0">
                                         <input
@@ -616,7 +616,7 @@ function CreateShipmentModal({
                     {files.length > 0 && (
                         <div className="mt-2 space-y-1.5">
                             {files.map((f, idx) => (
-                                <div key={idx} className="flex items-center gap-2 p-2 bg-surface-50 rounded-lg border border-surface-100">
+                                <div key={idx} className="flex items-center gap-2 p-2 bg-surface-50 rounded-lg border border-line">
                                     <span className="text-xs text-surface-700 truncate flex-1">{f.file.name}</span>
                                     <label className="flex items-center gap-1.5 text-2xs text-surface-500 shrink-0">
                                         <input
@@ -809,7 +809,7 @@ function EditShipmentModal({
                     {newFiles.length > 0 && (
                         <div className="mt-2 space-y-1.5">
                             {newFiles.map((f, idx) => (
-                                <div key={idx} className="flex items-center gap-2 p-2 bg-surface-50 rounded-lg border border-surface-100">
+                                <div key={idx} className="flex items-center gap-2 p-2 bg-surface-50 rounded-lg border border-line">
                                     <span className="text-xs text-surface-700 truncate flex-1">{f.file.name}</span>
                                     <label className="flex items-center gap-1.5 text-2xs text-surface-500 shrink-0">
                                         <input
@@ -1062,7 +1062,7 @@ export function ShipmentSection({
                                 </svg>
                                 All tracking events ({detail.tracking_history.length})
                             </summary>
-                            <div className="mt-2 space-y-2 pl-2 border-l-2 border-surface-100">
+                            <div className="mt-2 space-y-2 pl-2 border-l-2 border-line">
                                 {[...detail.tracking_history].reverse().map((event, i) => (
                                     <div key={i} className="text-xs space-y-0.5">
                                         <div className="flex items-center gap-2">
@@ -1092,7 +1092,7 @@ export function ShipmentSection({
 
                     {/* Tracking URL actions */}
                     {detail?.tracking_url && (
-                        <div className="pt-2 border-t border-surface-100 space-y-2">
+                        <div className="pt-2 border-t border-line space-y-2">
                             <p className="text-2xs text-surface-400">Customer tracking link</p>
                             <div className="flex items-center gap-2 p-2 bg-surface-50 rounded-lg">
                                 <p className="flex-1 text-2xs font-mono text-surface-600 truncate">

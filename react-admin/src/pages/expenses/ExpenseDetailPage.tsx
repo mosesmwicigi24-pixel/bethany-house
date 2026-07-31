@@ -57,7 +57,7 @@ function SectionCard({
 }) {
     return (
         <div className="card overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-surface-100">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-line">
                 <h3 className="font-semibold text-surface-900 text-sm">
                     {title}
                 </h3>
@@ -188,7 +188,7 @@ function EditExpenseModal({
         <Modal open={open} onClose={onClose} title="Edit Expense" size="lg">
             <div className="space-y-4">
                 {/* Created by - read-only */}
-                <div className="flex items-center gap-2 px-3 py-2 bg-surface-50 rounded-lg border border-surface-100">
+                <div className="flex items-center gap-2 px-3 py-2 bg-surface-50 rounded-lg border border-line">
                     <svg
                         className="w-4 h-4 text-surface-400 shrink-0"
                         fill="none"
@@ -379,7 +379,7 @@ function EditExpenseModal({
                         </div>
                     </label>
                     {isRecurring && (
-                        <div className="px-4 pb-4 pt-1 border-t border-surface-100 grid grid-cols-1 gap-4 sm:grid-cols-2 bg-surface-50/50">
+                        <div className="px-4 pb-4 pt-1 border-t border-line grid grid-cols-1 gap-4 sm:grid-cols-2 bg-surface-50/50">
                             <Field label="Frequency">
                                 <FieldSelect
                                     id="edit-freq"
@@ -1020,7 +1020,7 @@ export default function ExpenseDetailPage() {
                         </dl>
 
                         {(expense.description || expense.notes) && (
-                            <div className="mt-5 pt-5 border-t border-surface-100 space-y-4">
+                            <div className="mt-5 pt-5 border-t border-line space-y-4">
                                 {expense.description && (
                                     <div>
                                         <p className="text-xs text-surface-500 uppercase tracking-wide mb-1">
@@ -1045,7 +1045,7 @@ export default function ExpenseDetailPage() {
                         )}
 
                         {expense.tags && expense.tags.length > 0 && (
-                            <div className="mt-4 pt-4 border-t border-surface-100">
+                            <div className="mt-4 pt-4 border-t border-line">
                                 <p className="text-xs text-surface-500 uppercase tracking-wide mb-2">
                                     Tags
                                 </p>
@@ -1116,7 +1116,7 @@ export default function ExpenseDetailPage() {
                     {/* Line items */}
                     {expense.lineItems && expense.lineItems.length > 0 && (
                         <div className="card overflow-hidden">
-                            <div className="flex items-center justify-between px-5 py-4 border-b border-surface-100">
+                            <div className="flex items-center justify-between px-5 py-4 border-b border-line">
                                 <h3 className="font-semibold text-surface-900 text-sm">
                                     Line Items
                                 </h3>
@@ -1127,7 +1127,7 @@ export default function ExpenseDetailPage() {
                             <div className="overflow-x-auto">
                             <table className="w-full min-w-[520px]">
                                 <thead>
-                                    <tr className="border-b border-surface-100 bg-surface-50/50">
+                                    <tr className="border-b border-line bg-surface-50/50">
                                         <th className="px-4 py-3 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider">
                                             Description
                                         </th>
@@ -1148,7 +1148,7 @@ export default function ExpenseDetailPage() {
                                         </th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-surface-50">
+                                <tbody className="divide-y divide-line">
                                     {expense.lineItems.map((item) => (
                                         <tr
                                             key={item.id}
@@ -1446,7 +1446,7 @@ export default function ExpenseDetailPage() {
                             </div>
                         )}
                         {receiptBlob && (
-                            <div className="flex justify-between items-center pt-2 border-t border-surface-100">
+                            <div className="flex justify-between items-center pt-2 border-t border-line">
                                 <p className="text-xs text-surface-400">
                                     {receiptBlob.mimeType === "application/pdf"
                                         ? "PDF document"

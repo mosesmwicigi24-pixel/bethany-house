@@ -499,7 +499,7 @@ function GRNHistoryTab() {
                 ) : (
                     <>
                         {/* Mobile cards */}
-                        <div className="sm:hidden divide-y divide-surface-100">
+                        <div className="sm:hidden divide-y divide-line">
                             {grns.map((grn: any) => (
                                 <div
                                     key={grn.id}
@@ -607,7 +607,7 @@ function GRNHistoryTab() {
                         </div>
 
                         {meta && meta.last_page > 1 && (
-                            <div className="px-4 py-3 border-t border-surface-100 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="px-4 py-3 border-t border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                 <p className="text-xs text-surface-500">
                                     Showing {meta.from}–{meta.to} of {meta.total}
                                 </p>
@@ -771,7 +771,7 @@ export default function GoodsReceiptPage() {
                         ) : (
                             <>
                                 {/* Mobile: cards */}
-                                <div className="sm:hidden divide-y divide-surface-100">
+                                <div className="sm:hidden divide-y divide-line">
                                     {orders.map((po) => {
                                         const totalItems = po.items?.length ?? 0;
                                         const receivedItems =
@@ -984,7 +984,7 @@ export default function GoodsReceiptPage() {
                                 </div>
 
                                 {meta && meta.last_page > 1 && (
-                                    <div className="px-4 py-3 border-t border-surface-100 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                    <div className="px-4 py-3 border-t border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                         <p className="text-xs text-surface-500">
                                             Showing {meta.from}–{meta.to} of{" "}
                                             {meta.total}

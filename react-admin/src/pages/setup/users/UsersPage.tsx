@@ -102,7 +102,7 @@ interface RolePickerProps {
 
 function RolePicker({ roles, roleIds, onToggle, error }: RolePickerProps) {
     return (
-        <div className="border-t border-surface-100 pt-4">
+        <div className="border-t border-line pt-4">
             <p className="label mb-2">
                 Roles <span className="text-danger">*</span>
                 {error && <span className="field-error ml-2">{error}</span>}
@@ -710,7 +710,7 @@ export default function UsersPage() {
                                 ?.message as string
                         }
                     />
-                    <div className="border-t border-surface-100 pt-3">
+                    <div className="border-t border-line pt-3">
                         <Toggle
                             checked={createForm.watch("must_setup_2fa")}
                             onChange={(v) =>
@@ -841,7 +841,7 @@ export default function UsersPage() {
                                 ?.message as string
                         }
                     />
-                    <div className="border-t border-surface-100 pt-3">
+                    <div className="border-t border-line pt-3">
                         <Toggle
                             checked={editForm.watch("must_setup_2fa")}
                             onChange={(v) =>
@@ -918,7 +918,7 @@ export default function UsersPage() {
                             {...pwForm.register("password_confirmation")}
                         />
                     </Field>
-                    <div className="border-t border-surface-100 pt-3">
+                    <div className="border-t border-line pt-3">
                         <p className="text-xs font-medium text-surface-500 mb-2">
                             Or send a reset link via email:
                         </p>

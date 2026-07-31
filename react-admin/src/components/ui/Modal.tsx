@@ -150,7 +150,7 @@ export function Modal({
       >
         {/* Header */}
         {title && (
-          <div className="flex items-center justify-between px-6 py-4 border-b border-surface-100 shrink-0">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-line shrink-0">
             {/* id matches aria-labelledby on the panel above */}
             <h2
               id={titleId}
@@ -175,7 +175,7 @@ export function Modal({
 
         {/* Footer */}
         {footer && (
-          <div className="px-6 py-4 border-t border-surface-100 flex items-center justify-end gap-3 shrink-0 bg-surface-50/50 rounded-b-2xl">
+          <div className="px-6 py-4 border-t border-line flex items-center justify-end gap-3 shrink-0 bg-surface-50/50 rounded-b-2xl">
             {footer}
           </div>
         )}

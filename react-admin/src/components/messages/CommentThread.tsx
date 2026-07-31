@@ -296,7 +296,7 @@ function CommentRow({ comment, model, id, currentUserId, depth = 0, onDeleted, o
     const isNote = comment.type === "note";
 
     return (
-        <div className={clsx("group", depth > 0 && "ml-8 border-l-2 border-surface-100 pl-4")}>
+        <div className={clsx("group", depth > 0 && "ml-8 border-l-2 border-line pl-4")}>
             <div className={clsx(
                 "rounded-xl p-3 mb-1",
                 isNote ? "bg-amber-50 border border-amber-200/60" : "bg-surface-50"

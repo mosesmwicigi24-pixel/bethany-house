@@ -147,7 +147,7 @@ export default function ProcurementReportPage() {
             </div>
 
             {/* Tabs */}
-            <div className="border-b border-surface-100 overflow-x-auto no-scrollbar">
+            <div className="border-b border-line overflow-x-auto no-scrollbar">
                 <nav className="flex gap-1 -mb-px">
                     {(["overview", "suppliers", "items", "intelligence"] as const).map(
                         (tab) => (
@@ -329,7 +329,7 @@ export default function ProcurementReportPage() {
                         <TableWrapper>
                             <table className="w-full">
                                 <thead>
-                                    <tr className="border-y border-surface-100 bg-surface-50/50">
+                                    <tr className="border-y border-line bg-surface-50/50">
                                         <th className={TH}>Supplier</th>
                                         <th className={TH}>Email</th>
                                         <th className={TH_R}>POs</th>
@@ -345,7 +345,7 @@ export default function ProcurementReportPage() {
                                         </th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-surface-50">
+                                <tbody className="divide-y divide-line">
                                     {bySupplier.length === 0 ? (
                                         <EmptyRow cols={8} />
                                     ) : (
@@ -403,7 +403,7 @@ export default function ProcurementReportPage() {
                     <TableWrapper>
                         <table className="w-full">
                             <thead>
-                                <tr className="border-y border-surface-100 bg-surface-50/50">
+                                <tr className="border-y border-line bg-surface-50/50">
                                     <th className={clsx(TH, "w-8")}>#</th>
                                     <th className={TH}>Product</th>
                                     <th className={TH}>SKU</th>
@@ -412,7 +412,7 @@ export default function ProcurementReportPage() {
                                     <th className={TH_R}>Total Spend</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-surface-50">
+                            <tbody className="divide-y divide-line">
                                 {topItems.length === 0 ? (
                                     <EmptyRow cols={6} />
                                 ) : (
@@ -496,7 +496,7 @@ function ProcurementIntelligence({ start, end }: { start: string; end: string })
                                 <th className={TH_R}>Est. Cost</th>
                                 <th className={TH}>Last Bought</th>
                             </tr></thead>
-                            <tbody className="divide-y divide-surface-50">
+                            <tbody className="divide-y divide-line">
                                 {suggestions.map((r: any) => (
                                     <tr key={r.code}>
                                         <td className="px-3 py-2">
@@ -536,7 +536,7 @@ function ProcurementIntelligence({ start, end }: { start: string; end: string })
                                 <th className={TH_R}>Late</th>
                                 <th className={TH_R}>Rejected</th>
                             </tr></thead>
-                            <tbody className="divide-y divide-surface-50">
+                            <tbody className="divide-y divide-line">
                                 {suppliers.map((sup: any) => {
                                     const rejPct = Number(sup.qty_received) > 0
                                         ? Math.round((Number(sup.qty_rejected) / Number(sup.qty_received)) * 100) : null;

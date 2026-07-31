@@ -33,7 +33,7 @@ export function LowStockWidget() {
 
     return (
         <div className="card overflow-hidden">
-            <div className="px-4 py-3 border-b border-surface-100 flex items-center justify-between">
+            <div className="px-4 py-3 border-b border-line flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-surface-900">
                     Low Stock Alerts
                 </h3>
@@ -53,7 +53,7 @@ export function LowStockWidget() {
             ) : (
                 <>
                     {/* Summary row */}
-                    <div className="grid grid-cols-2 divide-x divide-y divide-surface-100 border-b border-surface-100 sm:grid-cols-4 sm:divide-y-0">
+                    <div className="grid grid-cols-2 divide-x divide-y divide-line border-b border-line sm:grid-cols-4 sm:divide-y-0">
                         {[
                             {
                                 label: "Products Out",
@@ -97,7 +97,7 @@ export function LowStockWidget() {
 
                     {/* Critical items */}
                     {critical.length > 0 && (
-                        <div className="divide-y divide-surface-50">
+                        <div className="divide-y divide-line">
                             {critical.map((alert, i) => (
                                 <div
                                     key={i}
@@ -403,7 +403,7 @@ export default function LowStockAlertsPage() {
                     <div className="overflow-x-auto">
                     <table className="w-full min-w-[640px]">
                         <thead>
-                            <tr className="border-b border-surface-100 bg-surface-50/50">
+                            <tr className="border-b border-line bg-surface-50/50">
                                 <th className="px-4 py-3 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider">
                                     Item
                                 </th>
@@ -427,7 +427,7 @@ export default function LowStockAlertsPage() {
                                 </th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-surface-50">
+                        <tbody className="divide-y divide-line">
                             {filtered.map((alert, i) => (
                                 <tr
                                     key={i}

@@ -346,7 +346,7 @@ export default function PaymentTransactionsPage() {
 
                 {/* Amount filters */}
                 {showFilters && (
-                    <div className="border-b border-surface-100 px-4 py-3 bg-surface-50 flex items-center gap-3 flex-wrap">
+                    <div className="border-b border-line px-4 py-3 bg-surface-50 flex items-center gap-3 flex-wrap">
                         <label className="text-xs text-surface-500">Amount range</label>
                         <input type="number" placeholder="Min" value={minAmount}
                             onChange={e => setMinAmount(e.target.value)}
@@ -368,7 +368,7 @@ export default function PaymentTransactionsPage() {
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                         <thead>
-                            <tr className="border-b border-surface-100">
+                            <tr className="border-b border-line">
                                 {[
                                     { label: "Reference", align: "left"  },
                                     { label: "Order",     align: "left"  },
@@ -389,7 +389,7 @@ export default function PaymentTransactionsPage() {
                                 ))}
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-surface-50">
+                        <tbody className="divide-y divide-line">
                             {listLoading ? (
                                 Array.from({ length: 8 }).map((_, i) => (
                                     <tr key={i}>
@@ -519,7 +519,7 @@ export default function PaymentTransactionsPage() {
                     <div className="w-full max-w-md bg-white shadow-2xl overflow-y-auto animate-slide-in-right"
                         onClick={e => e.stopPropagation()}>
 
-                        <div className="sticky top-0 bg-white border-b border-surface-100 px-5 py-4 flex items-center justify-between">
+                        <div className="sticky top-0 bg-white border-b border-line px-5 py-4 flex items-center justify-between">
                             <h2 className="font-semibold text-surface-900">Transaction Detail</h2>
                             <button onClick={() => setSelectedId(null)}
                                 className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-100 transition-colors">
@@ -614,7 +614,7 @@ export default function PaymentTransactionsPage() {
 
                                     {/* Admin actions — Void & Reassign */}
                                     {p.status !== 'voided' && (can('payments.void') || can('payments.reassign')) && (
-                                        <div className="border-t border-surface-100 pt-4 space-y-2">
+                                        <div className="border-t border-line pt-4 space-y-2">
                                             <p className="text-2xs text-surface-400 font-semibold uppercase tracking-widest">Admin Actions</p>
                                             <div className="flex gap-2">
                                                 {can('payments.reassign') && (
@@ -637,7 +637,7 @@ export default function PaymentTransactionsPage() {
 
                                     {/* Voided notice */}
                                     {p.status === 'voided' && (
-                                        <div className="border-t border-surface-100 pt-4 bg-surface-50 rounded-xl p-3 space-y-1">
+                                        <div className="border-t border-line pt-4 bg-surface-50 rounded-xl p-3 space-y-1">
                                             <p className="text-xs font-semibold text-surface-500">Payment Voided</p>
                                             {p.void_reason && <p className="text-xs text-surface-400">{p.void_reason}</p>}
                                             {p.voided_at && <p className="text-2xs text-surface-400">{fmtDate(p.voided_at)}</p>}
@@ -722,7 +722,7 @@ export default function PaymentTransactionsPage() {
                             onChange={e => { setReassignOrderQuery(e.target.value); setReassignOrderId(null); setReassignOrderLabel(''); }}
                         />
                         {reassignOrderQuery.length >= 3 && !reassignOrderId && (
-                            <div className="border border-surface-200 rounded-xl divide-y divide-surface-100 max-h-48 overflow-y-auto mt-1">
+                            <div className="border border-surface-200 rounded-xl divide-y divide-line max-h-48 overflow-y-auto mt-1">
                                 {(orderSearchResults?.data ?? []).length === 0 ? (
                                     <p className="px-3 py-2 text-xs text-surface-400">No orders found</p>
                                 ) : (orderSearchResults?.data ?? []).map((o: any) => (

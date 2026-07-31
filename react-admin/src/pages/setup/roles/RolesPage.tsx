@@ -544,7 +544,7 @@ export default function RolesPage() {
                             return (
                                 <div
                                     key={group.group}
-                                    className="border border-surface-100 rounded-xl overflow-hidden"
+                                    className="border border-line rounded-xl overflow-hidden"
                                 >
                                     <button
                                         type="button"

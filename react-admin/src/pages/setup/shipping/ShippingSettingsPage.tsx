@@ -300,7 +300,7 @@ function MethodModal({
                     </Field>
                 </div>
 
-                <div className="border-t border-surface-100 pt-3">
+                <div className="border-t border-line pt-3">
                     <Toggle
                         checked={watch("is_active")}
                         onChange={(v) => setValue("is_active", v)}
@@ -556,7 +556,7 @@ export default function ShippingSettingsPage() {
                                             )}
 
                                             {/* Zone actions */}
-                                            <div className="border-t border-surface-100 px-3 py-2 flex items-center gap-1">
+                                            <div className="border-t border-line px-3 py-2 flex items-center gap-1">
                                                 <button
                                                     onClick={() => openEditZone(zone)}
                                                     className="btn-ghost btn-sm text-xs gap-1.5"
@@ -616,7 +616,7 @@ export default function ShippingSettingsPage() {
                                 }
                             />
                         ) : (
-                            <div className="divide-y divide-surface-50">
+                            <div className="divide-y divide-line">
                                 {methods.map((method) => {
                                     const zone = zones.find((z) => z.id === method.shipping_zone_id);
 
@@ -624,7 +624,7 @@ export default function ShippingSettingsPage() {
                                         <div key={method.id} className="py-3.5 first:pt-0 last:pb-0">
                                             <div className="flex items-start gap-3">
                                                 {/* Cost badge */}
-                                                <div className="w-16 shrink-0 h-14 rounded-xl bg-surface-50 border border-surface-100 flex flex-col items-center justify-center">
+                                                <div className="w-16 shrink-0 h-14 rounded-xl bg-surface-50 border border-line flex flex-col items-center justify-center">
                                                     {method.cost_type === "free" ? (
                                                         <span className="text-xs font-bold text-success">Free</span>
                                                     ) : method.cost_type === "percentage" ? (

@@ -165,7 +165,7 @@ function NewExpenseModal({
         <Modal open={open} onClose={onClose} title="New Expense" size="lg">
             <div className="space-y-4">
                 {/* Created by - read-only */}
-                <div className="flex items-center gap-2 px-3 py-2 bg-surface-50 rounded-lg border border-surface-100">
+                <div className="flex items-center gap-2 px-3 py-2 bg-surface-50 rounded-lg border border-line">
                     <svg
                         className="w-4 h-4 text-surface-400 shrink-0"
                         fill="none"
@@ -371,7 +371,7 @@ function NewExpenseModal({
                         </div>
                     </label>
                     {isRecurring && (
-                        <div className="px-4 pb-4 pt-1 border-t border-surface-100 grid grid-cols-1 gap-4 sm:grid-cols-2 bg-surface-50/50">
+                        <div className="px-4 pb-4 pt-1 border-t border-line grid grid-cols-1 gap-4 sm:grid-cols-2 bg-surface-50/50">
                             <Field label="Frequency">
                                 <FieldSelect
                                     id="exp-freq"
@@ -539,7 +539,7 @@ function ExpenseRowActions({
                     {expense.status === "pending_approval" &&
                         can("expenses.approve") && (
                             <>
-                                <div className="my-1 border-t border-surface-100" />
+                                <div className="my-1 border-t border-line" />
                                 <button
                                     className="dropdown-item text-success"
                                     onClick={() =>
@@ -584,7 +584,7 @@ function ExpenseRowActions({
                     ) &&
                         can("expenses.delete") && (
                         <>
-                            <div className="my-1 border-t border-surface-100" />
+                            <div className="my-1 border-t border-line" />
                             <button
                                 className="dropdown-item text-danger"
                                 onClick={() =>
@@ -851,7 +851,7 @@ export default function ExpensesPage() {
                 <div className="overflow-x-auto">
                 <table className="w-full min-w-[640px]">
                     <thead>
-                        <tr className="border-b border-surface-100 bg-surface-50/50">
+                        <tr className="border-b border-line bg-surface-50/50">
                             <th className="px-4 py-3 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider hidden sm:table-cell">
                                 Reference
                             </th>
@@ -879,7 +879,7 @@ export default function ExpensesPage() {
                             <th className="px-4 py-3 w-12" />
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-surface-50">
+                    <tbody className="divide-y divide-line">
                         {isLoading ? (
                             <tr>
                                 <td
@@ -1022,7 +1022,7 @@ export default function ExpensesPage() {
 
                 {/* Pagination */}
                 {pagination && pagination.last_page > 1 && (
-                    <div className="flex flex-col gap-2 px-4 py-3 border-t border-surface-100 bg-surface-50/50 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex flex-col gap-2 px-4 py-3 border-t border-line bg-surface-50/50 sm:flex-row sm:items-center sm:justify-between">
                         <p className="text-sm text-surface-500">
                             Showing {(state.page - 1) * state.perPage + 1}–
                             {Math.min(

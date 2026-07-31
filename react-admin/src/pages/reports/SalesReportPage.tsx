@@ -173,7 +173,7 @@ export default function SalesReportPage() {
             </div>
 
             {/* Tabs */}
-            <div className="border-b border-surface-100 overflow-x-auto no-scrollbar">
+            <div className="border-b border-line overflow-x-auto no-scrollbar">
                 <nav className="flex gap-1 -mb-px">
                     {(
                         [
@@ -464,7 +464,7 @@ export default function SalesReportPage() {
                         <TableWrapper>
                             <table className="w-full">
                                 <thead>
-                                    <tr className="border-y border-surface-100 bg-surface-50/50">
+                                    <tr className="border-y border-line bg-surface-50/50">
                                         <th className={clsx(TH, "w-8")}>#</th>
                                         <th className={TH}>Product</th>
                                         <th className={TH}>SKU</th>
@@ -481,7 +481,7 @@ export default function SalesReportPage() {
                                         </th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-surface-50">
+                                <tbody className="divide-y divide-line">
                                     {byProductQuery.isLoading ? (
                                         <tr>
                                             <td
@@ -561,7 +561,7 @@ export default function SalesReportPage() {
                             <TableWrapper>
                                 <table className="w-full">
                                     <thead>
-                                        <tr className="border-y border-surface-100 bg-surface-50/50">
+                                        <tr className="border-y border-line bg-surface-50/50">
                                             <th className={TH}>Category</th>
                                             <th className={TH_R}>Products</th>
                                             <th className={TH_R}>Units Sold</th>
@@ -570,7 +570,7 @@ export default function SalesReportPage() {
                                             <th className={TH_R}>Revenue</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-surface-50">
+                                    <tbody className="divide-y divide-line">
                                         {byCatQuery.data.categories.map(
                                             (c: any) => (
                                                 <tr
@@ -624,7 +624,7 @@ export default function SalesReportPage() {
                         <TableWrapper>
                             <table className="w-full">
                                 <thead>
-                                    <tr className="border-y border-surface-100 bg-surface-50/50">
+                                    <tr className="border-y border-line bg-surface-50/50">
                                         <th className={clsx(TH, "w-8")}>#</th>
                                         <th className={TH}>Customer</th>
                                         <th className={TH}>Email</th>
@@ -634,7 +634,7 @@ export default function SalesReportPage() {
                                         <th className={TH} style={{ width: 120 }}>Share</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-surface-50">
+                                <tbody className="divide-y divide-line">
                                     {byCustomerQuery.isLoading ? (
                                         <tr><td colSpan={7} className="px-4 py-8 text-center"><Spinner /></td></tr>
                                     ) : (byCustomerQuery.data?.customers ?? []).length === 0 ? (
@@ -821,7 +821,7 @@ function SalesByOutletTable({ params }: { params: Record<string, any> }) {
             <TableWrapper>
                 <table className="w-full">
                     <thead>
-                        <tr className="border-y border-surface-100 bg-surface-50/50">
+                        <tr className="border-y border-line bg-surface-50/50">
                             <th className={TH}>Outlet</th>
                             <th className={TH}>City</th>
                             <th className={TH_R}>Orders</th>
@@ -830,7 +830,7 @@ function SalesByOutletTable({ params }: { params: Record<string, any> }) {
                             <th className={TH_R}>Total Revenue</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-surface-50">
+                    <tbody className="divide-y divide-line">
                         {data.outlets.map((o: any) => (
                             <tr
                                 key={o.outlet_id}

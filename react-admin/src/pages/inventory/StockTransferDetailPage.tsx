@@ -115,7 +115,7 @@ function AuditTrail({ transferId }: { transferId: number }) {
     if (isLoading) return <div className="flex justify-center py-10"><Spinner /></div>;
     if (!logs.length) return <div className="text-center py-12 text-xs text-surface-400">No audit entries yet.</div>;
     return (
-        <div className="divide-y divide-surface-50">
+        <div className="divide-y divide-line">
             {logs.map((entry) => (
                 <div key={entry.id} className="flex gap-3 py-3.5">
                     <div className="w-7 h-7 rounded-full bg-brand-100 flex items-center justify-center shrink-0 mt-0.5">
@@ -240,7 +240,7 @@ export default function StockTransferDetailPage() {
 
                 {/* Action bar */}
                 {(canApprove || canDispatch || canReceive || canCancel) && (
-                    <div className="px-5 py-3 bg-slate-50 border-b border-surface-100 flex flex-wrap items-center gap-2 sm:px-8">
+                    <div className="px-5 py-3 bg-slate-50 border-b border-line flex flex-wrap items-center gap-2 sm:px-8">
                         {canApprove && (
                             <button onClick={() => actionMutation.mutate({ action: "approve" })}
                                 disabled={actionMutation.isPending}
@@ -276,16 +276,16 @@ export default function StockTransferDetailPage() {
                 )}
 
                 {/* PDF action bar — always visible */}
-                <div className="px-5 py-3 bg-white border-b border-surface-100 flex items-center gap-2 sm:px-8">
+                <div className="px-5 py-3 bg-white border-b border-line flex items-center gap-2 sm:px-8">
                     <PdfDownloadButton type="stock-transfers" id={transfer.id} label="Download PDF" />
                 </div>
 
                 {/* Body */}
-                <div className="px-5 py-5 grid grid-cols-1 lg:grid-cols-[1fr_240px] gap-6 lg:gap-8 sm:px-8 sm:py-6 lg:divide-x divide-surface-100">
+                <div className="px-5 py-5 grid grid-cols-1 lg:grid-cols-[1fr_240px] gap-6 lg:gap-8 sm:px-8 sm:py-6 lg:divide-x divide-line">
 
                     {/* Left */}
                     <div className="space-y-4 lg:pr-8">
-                        <div className="flex border-b border-surface-100 overflow-x-auto no-scrollbar">
+                        <div className="flex border-b border-line overflow-x-auto no-scrollbar">
                             {(["items", "audit"] as const).map((t) => (
                                 <button key={t} onClick={() => setTab(t)}
                                     className={clsx("px-4 py-2.5 text-xs font-semibold border-b-2 transition-all",
@@ -307,7 +307,7 @@ export default function StockTransferDetailPage() {
                                             <th className="text-center px-3 py-2.5 font-semibold text-surface-600">Status</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-surface-100">
+                                    <tbody className="divide-y divide-line">
                                         {transfer.items.map((item) => {
                                             const discrepancy = item.quantity_received - item.quantity_requested;
                                             const isComplete = transfer.status === "completed";
@@ -364,7 +364,7 @@ export default function StockTransferDetailPage() {
                         {tab === "audit" && <AuditTrail transferId={transfer.id} />}
 
                         {transfer.notes && (
-                            <div className="p-4 bg-surface-50 rounded-xl border border-surface-100">
+                            <div className="p-4 bg-surface-50 rounded-xl border border-line">
                                 <SectionLabel>Notes</SectionLabel>
                                 <p className="text-xs text-surface-700 whitespace-pre-wrap">{transfer.notes}</p>
                             </div>

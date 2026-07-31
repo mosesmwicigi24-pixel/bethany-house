@@ -69,7 +69,7 @@ function ChannelCard({
     return (
         <div className={clsx(
             "rounded-2xl border transition-all",
-            enabled ? "border-brand-200 bg-brand-50/30" : "border-surface-100 bg-surface-50",
+            enabled ? "border-brand-200 bg-brand-50/30" : "border-line bg-surface-50",
         )}>
             <div className="flex items-start gap-4 p-5">
                 <div className={clsx(

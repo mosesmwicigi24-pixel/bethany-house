@@ -160,13 +160,13 @@ export default function InsightsPage() {
                             <TableWrapper>
                                 <table className="w-full">
                                     <thead>
-                                        <tr className="border-y border-surface-100 bg-surface-50/50">
+                                        <tr className="border-y border-line bg-surface-50/50">
                                             <th className={TH}>Country</th>
                                             <th className={TH_R}>Visits</th>
                                             <th className={clsx(TH, "w-1/3")}>Share</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-surface-50">
+                                    <tbody className="divide-y divide-line">
                                         {visitors.length === 0 ? (
                                             <EmptyRow cols={3} text="No visits recorded yet." />
                                         ) : (
@@ -196,14 +196,14 @@ export default function InsightsPage() {
                             <TableWrapper>
                                 <table className="w-full">
                                     <thead>
-                                        <tr className="border-y border-surface-100 bg-surface-50/50">
+                                        <tr className="border-y border-line bg-surface-50/50">
                                             <th className={TH}>Country</th>
                                             <th className={TH_R}>Orders</th>
                                             <th className={TH_R}>Revenue</th>
                                             <th className={clsx(TH, "w-1/4")}>Share</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-surface-50">
+                                    <tbody className="divide-y divide-line">
                                         {buyers.length === 0 ? (
                                             <EmptyRow cols={4} text="No online orders in this range yet." />
                                         ) : (

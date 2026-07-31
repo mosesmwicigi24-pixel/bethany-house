@@ -232,7 +232,7 @@ function MovementModal({
                         No movements found.
                     </p>
                 ) : (
-                    <div className="space-y-0 max-h-96 overflow-y-auto border border-surface-100 rounded-xl overflow-hidden">
+                    <div className="space-y-0 max-h-96 overflow-y-auto border border-line rounded-xl overflow-hidden">
                         {transactions.map((tx, i) => (
                             <div
                                 key={tx.id}
@@ -414,7 +414,7 @@ function ProductSelectField({
                             style={{ top: coords.top, left: coords.left, width: coords.width, maxHeight: "20rem" }}
                         >
                             {/* Search */}
-                            <div className="p-2 border-b border-surface-100 shrink-0">
+                            <div className="p-2 border-b border-line shrink-0">
                                 <input
                                     autoFocus
                                     value={query}
@@ -489,7 +489,7 @@ function ProductSelectField({
                                 )}
                             </div>
 
-                            <div className="px-3 py-2 border-t border-surface-100 shrink-0 flex items-center justify-between gap-2">
+                            <div className="px-3 py-2 border-t border-line shrink-0 flex items-center justify-between gap-2">
                                 <span className="text-[11px] text-surface-400">
                                     Tick to add a row · untick to remove
                                 </span>
@@ -1114,7 +1114,7 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
                                                                 )}
                                                             </div>
 
-                                                            <div className="px-3 py-2 border-t border-surface-100 shrink-0 flex items-center justify-between gap-2">
+                                                            <div className="px-3 py-2 border-t border-line shrink-0 flex items-center justify-between gap-2">
                                                                 <span className="text-[11px] text-surface-400">
                                                                     Tick to add a row · untick to remove
                                                                 </span>
@@ -1266,11 +1266,11 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
                         Review the entries below. Saving will update existing
                         stock records or create new ones.
                     </p>
-                    <div className="border border-surface-100 rounded-xl overflow-hidden">
+                    <div className="border border-line rounded-xl overflow-hidden">
                         <div className="overflow-x-auto">
                         <table className="w-full text-sm min-w-[560px]">
                             <thead>
-                                <tr className="border-b border-surface-100 bg-surface-50 text-xs text-surface-500 uppercase">
+                                <tr className="border-b border-line bg-surface-50 text-xs text-surface-500 uppercase">
                                     <th className="px-4 py-2.5 text-left font-semibold">
                                         Product
                                     </th>
@@ -1285,7 +1285,7 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
                                     </th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-surface-50">
+                            <tbody className="divide-y divide-line">
                                 {validRows.map((r) => (
                                     <tr key={r._key}>
                                         <td className="px-4 py-2.5">
@@ -1626,7 +1626,7 @@ export default function StockLevelsPage() {
                         matters — is this line low or out of stock — ends up off
                         the right edge. Desktop keeps the table, where the columns
                         genuinely fit. */}
-                    <div className="md:hidden divide-y divide-surface-100">
+                    <div className="md:hidden divide-y divide-line">
                         {items.map((item) => {
                             const status = STATUS_CONFIG[item.status];
                             return (
@@ -1727,7 +1727,7 @@ export default function StockLevelsPage() {
                     <div className="hidden md:block overflow-x-auto">
                     <table className="w-full min-w-[640px]">
                         <thead>
-                            <tr className="border-b border-surface-100 bg-surface-50/50">
+                            <tr className="border-b border-line bg-surface-50/50">
                                 <th className="px-4 py-3 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider">
                                     Product
                                 </th>
@@ -1754,7 +1754,7 @@ export default function StockLevelsPage() {
                                 </th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-surface-50">
+                        <tbody className="divide-y divide-line">
                             {items.map((item) => {
                                 const status = STATUS_CONFIG[item.status];
                                 return (
@@ -1923,7 +1923,7 @@ export default function StockLevelsPage() {
 
                 {/* Pagination */}
                 {meta && meta.last_page > 1 && (
-                    <div className="px-4 py-3 border-t border-surface-100 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="px-4 py-3 border-t border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <p className="text-xs text-surface-500">
                             Showing {meta.from}–{meta.to} of {meta.total}
                         </p>

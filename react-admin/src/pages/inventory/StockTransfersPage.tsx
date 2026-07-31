@@ -281,11 +281,11 @@ function NewTransferModal({
                 {fromOutletId && (
                     <>
                         {items.length > 0 && (
-                            <div className="border border-surface-100 rounded-xl overflow-hidden">
+                            <div className="border border-line rounded-xl overflow-hidden">
                                 <div className="overflow-x-auto">
                                 <table className="w-full text-sm min-w-[560px]">
                                     <thead>
-                                        <tr className="bg-surface-50 border-b border-surface-100 text-xs text-surface-400 uppercase">
+                                        <tr className="bg-surface-50 border-b border-line text-xs text-surface-400 uppercase">
                                             <th className="px-3 py-2 text-left">
                                                 Product
                                             </th>
@@ -298,7 +298,7 @@ function NewTransferModal({
                                             <th className="px-3 py-2 w-8" />
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-surface-50">
+                                    <tbody className="divide-y divide-line">
                                         {items.map((item, i) => (
                                             <tr key={i}>
                                                 <td className="px-3 py-2.5">
@@ -691,11 +691,11 @@ function TransferDetailModal({
                     </div>
                 </div>
 
-                <div className="border border-surface-100 rounded-xl overflow-hidden">
+                <div className="border border-line rounded-xl overflow-hidden">
                     <div className="overflow-x-auto">
                     <table className="w-full text-sm min-w-[560px]">
                         <thead>
-                            <tr className="bg-surface-50 border-b border-surface-100 text-xs text-surface-500 uppercase">
+                            <tr className="bg-surface-50 border-b border-line text-xs text-surface-500 uppercase">
                                 <th className="px-3 py-2.5 text-left font-semibold">
                                     Product
                                 </th>
@@ -723,7 +723,7 @@ function TransferDetailModal({
                                 )}
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-surface-50">
+                        <tbody className="divide-y divide-line">
                             {transfer.items.map((item) => (
                                 <tr
                                     key={item.id}
@@ -1053,7 +1053,7 @@ export default function StockTransfersPage() {
                     <div className="overflow-x-auto">
                     <table className="w-full min-w-[560px]">
                         <thead>
-                            <tr className="border-b border-surface-100 bg-surface-50/50">
+                            <tr className="border-b border-line bg-surface-50/50">
                                 {[
                                     "Transfer #",
                                     "Route",
@@ -1075,7 +1075,7 @@ export default function StockTransfersPage() {
                                 ))}
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-surface-50">
+                        <tbody className="divide-y divide-line">
                             {transferGroups.map((group) => (
                                 <Fragment key={group.key}>
                                     <DateGroupHeaderRow label={group.label} colSpan={7} />
@@ -1194,7 +1194,7 @@ export default function StockTransfersPage() {
                     </div>
                 )}
                 {meta && meta.last_page > 1 && (
-                    <div className="px-4 py-3 border-t border-surface-100 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="px-4 py-3 border-t border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <p className="text-xs text-surface-500">
                             Showing {meta.from}–{meta.to} of {meta.total}
                         </p>

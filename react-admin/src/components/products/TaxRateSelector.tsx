@@ -89,7 +89,7 @@ export default function TaxRateSelector({
 
             {/* Rate checkboxes */}
             {!readOnly && (
-                <div className="divide-y divide-surface-50 border border-surface-100 rounded-xl overflow-hidden">
+                <div className="divide-y divide-line border border-line rounded-xl overflow-hidden">
                     {allRates.map((rate) => {
                         const checked = selectedIds.includes(rate.id);
                         return (
@@ -140,7 +140,7 @@ export default function TaxRateSelector({
 
             {/* Summary */}
             {selectedRates.length > 0 && (
-                <div className="flex items-center justify-between px-3 py-2 bg-surface-50 rounded-lg border border-surface-100">
+                <div className="flex items-center justify-between px-3 py-2 bg-surface-50 rounded-lg border border-line">
                     <span className="text-xs text-surface-500">
                         {selectedRates.map((r) => r.name).join(" + ")}
                     </span>

@@ -74,7 +74,7 @@ function BulkImportModal({
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
-                <div className="flex items-center justify-between px-6 py-4 border-b border-surface-100">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-line">
                     <h2 className="text-base font-semibold text-surface-900">
                         Bulk Import Products
                     </h2>
@@ -88,7 +88,7 @@ function BulkImportModal({
                 <div className="p-6 space-y-4">
                     {!result ? (
                         <>
-                            <div className="bg-surface-50 border border-surface-100 rounded-xl p-4 space-y-2">
+                            <div className="bg-surface-50 border border-line rounded-xl p-4 space-y-2">
                                 <p className="text-sm font-medium text-surface-700">
                                     Instructions
                                 </p>
@@ -472,7 +472,7 @@ export default function ProductsListPage() {
 
                 {/* Row 2 — extended filters (collapsible) */}
                 {showMoreFilters && (
-                    <div className="pt-3 border-t border-surface-100 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+                    <div className="pt-3 border-t border-line grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
                         {/* Category */}
                         <div className="flex flex-col gap-1">
                             <label className="text-2xs font-semibold text-surface-500 uppercase tracking-wide">
@@ -650,7 +650,7 @@ export default function ProductsListPage() {
                     <div className="overflow-x-auto">
                     <table className="w-full min-w-[640px]">
                         <thead>
-                            <tr className="border-b border-surface-100 bg-surface-50/50">
+                            <tr className="border-b border-line bg-surface-50/50">
                                 <th className="px-4 py-3 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider">
                                     Product
                                 </th>
@@ -674,7 +674,7 @@ export default function ProductsListPage() {
                                 </th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-surface-50">
+                        <tbody className="divide-y divide-line">
                             {products.map((product) => {
                                 const status =
                                     STATUS_CONFIG[
@@ -869,7 +869,7 @@ export default function ProductsListPage() {
 
                 {/* Pagination */}
                 {meta && meta.last_page > 1 && (
-                    <div className="px-4 py-3 border-t border-surface-100 flex items-center justify-between">
+                    <div className="px-4 py-3 border-t border-line flex items-center justify-between">
                         <p className="text-xs text-surface-500">
                             Showing {meta.from}–{meta.to} of {meta.total}
                         </p>

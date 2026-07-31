@@ -205,7 +205,7 @@ export default function EodReportsPage() {
             <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
 
                 {/* Header */}
-                <div className="px-4 sm:px-6 pt-5 pb-4 border-b border-surface-100">
+                <div className="px-4 sm:px-6 pt-5 pb-4 border-b border-line">
                     <div className="flex items-start justify-between gap-4 flex-wrap">
                         <div>
                             <h1 className="text-lg sm:text-xl font-bold text-surface-900">EoD Reports</h1>
@@ -287,7 +287,7 @@ export default function EodReportsPage() {
                     ) : (
                         <>
                             {/* ── Mobile: card list (hidden on sm+) ── */}
-                            <div className="sm:hidden divide-y divide-surface-100">
+                            <div className="sm:hidden divide-y divide-line">
                                 {reports.map((r) => (
                                     <button
                                         key={r.id}
@@ -339,7 +339,7 @@ export default function EodReportsPage() {
 
                             {/* ── Desktop: table (hidden below sm) ── */}
                             <table className="hidden sm:table w-full text-xs">
-                                <thead className="sticky top-0 bg-surface-50 border-b border-surface-100">
+                                <thead className="sticky top-0 bg-surface-50 border-b border-line">
                                     <tr>
                                         {[
                                             { label: "Date",        cls: "" },
@@ -357,7 +357,7 @@ export default function EodReportsPage() {
                                         ))}
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-surface-100">
+                                <tbody className="divide-y divide-line">
                                     {reportGroups.map((group) => (
                                         <Fragment key={group.key}>
                                             <DateGroupHeaderRow label={group.label} colSpan={8} />
@@ -434,7 +434,7 @@ export default function EodReportsPage() {
 
                             {/* Pagination */}
                             {meta && meta.last_page > 1 && (
-                                <div className="px-4 py-3 border-t border-surface-100 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="px-4 py-3 border-t border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                     <p className="text-xs text-surface-500">
                                         Showing {meta.from}–{meta.to} of {meta.total}
                                     </p>
@@ -466,10 +466,10 @@ export default function EodReportsPage() {
                 <div className="
                     fixed inset-0 z-40 flex flex-col bg-white
                     sm:static sm:inset-auto sm:z-auto
-                    sm:w-[420px] sm:shrink-0 sm:border-l sm:border-surface-100 sm:overflow-hidden
+                    sm:w-[420px] sm:shrink-0 sm:border-l sm:border-line sm:overflow-hidden
                 ">
                     {/* Drawer header */}
-                    <div className="px-5 py-4 border-b border-surface-100 shrink-0 flex items-start justify-between gap-3">
+                    <div className="px-5 py-4 border-b border-line shrink-0 flex items-start justify-between gap-3">
                         <div>
                             <h2 className="font-bold text-surface-900 text-sm">Report Detail</h2>
                             {detail && (
@@ -528,7 +528,7 @@ export default function EodReportsPage() {
                                             {detail.orders.map((order) => (
                                                 <div
                                                     key={order.id}
-                                                    className="rounded-xl border border-surface-100 bg-surface-50 px-4 py-3 space-y-2"
+                                                    className="rounded-xl border border-line bg-surface-50 px-4 py-3 space-y-2"
                                                 >
                                                     <div className="flex items-start justify-between gap-2">
                                                         <div>
@@ -545,7 +545,7 @@ export default function EodReportsPage() {
                                                         </div>
                                                     </div>
                                                     {order.eod_note && (
-                                                        <p className="text-xs text-surface-600 bg-white rounded-lg px-3 py-2 border border-surface-100 italic">
+                                                        <p className="text-xs text-surface-600 bg-white rounded-lg px-3 py-2 border border-line italic">
                                                             {order.eod_note}
                                                         </p>
                                                     )}
@@ -560,7 +560,7 @@ export default function EodReportsPage() {
                                     <div>
                                         <h3 className="text-xs font-semibold text-surface-700 mb-2">Daily Notes & Sentiments</h3>
                                         <div
-                                            className="text-xs text-surface-700 bg-surface-50 rounded-xl px-4 py-3 border border-surface-100 prose prose-sm max-w-none leading-relaxed [&_ul]:list-disc [&_ul]:pl-4 [&_li]:my-0.5"
+                                            className="text-xs text-surface-700 bg-surface-50 rounded-xl px-4 py-3 border border-line prose prose-sm max-w-none leading-relaxed [&_ul]:list-disc [&_ul]:pl-4 [&_li]:my-0.5"
                                             dangerouslySetInnerHTML={{ __html: detail.sentiments }}
                                         />
                                     </div>
@@ -570,7 +570,7 @@ export default function EodReportsPage() {
                                     Sits directly under the notes, because that is where
                                     the questions come from: this report asks for three
                                     receipts to be adjusted and one voided. */}
-                                <div className="pt-3 border-t border-surface-100 space-y-3">
+                                <div className="pt-3 border-t border-line space-y-3">
                                     <div className="flex items-center justify-between gap-2">
                                         <h3 className="text-xs font-semibold text-surface-700">Discussion</h3>
                                         {detail.acknowledged_at ? (
@@ -624,7 +624,7 @@ export default function EodReportsPage() {
                                 </div>
 
                                 {/* Meta */}
-                                <div className="text-2xs text-surface-400 space-y-1 pt-2 border-t border-surface-100">
+                                <div className="text-2xs text-surface-400 space-y-1 pt-2 border-t border-line">
                                     <p>Outlet: <span className="text-surface-600">{detail.outlet_name}</span></p>
                                     <p>Submitted: <span className="text-surface-600">{fmtDatetime(detail.submitted_at)}</span></p>
                                 </div>

@@ -843,7 +843,7 @@ function DetailPanel({
     return (
         <div className="flex flex-col h-full">
             {/* Header */}
-            <div className="p-5 border-b border-surface-100">
+            <div className="p-5 border-b border-line">
                 <div className="flex items-start justify-between gap-3">
                     <div>
                         <div className="flex items-center gap-2 flex-wrap">
@@ -942,7 +942,7 @@ function DetailPanel({
             </div>
 
             {/* Stats */}
-            <div className="grid grid-cols-3 divide-x divide-surface-100 border-b border-surface-100 shrink-0">
+            <div className="grid grid-cols-3 divide-x divide-line border-b border-line shrink-0">
                 {[
                     {
                         label: "Total Stock",
@@ -1087,7 +1087,7 @@ function DetailPanel({
                             No movements recorded.
                         </p>
                     ) : (
-                        <div className="space-y-0 border border-surface-100 rounded-xl overflow-hidden">
+                        <div className="space-y-0 border border-line rounded-xl overflow-hidden">
                             {filteredTxns.slice(0, 20).map((tx, i) => (
                                 <div
                                     key={tx.id}
@@ -1366,7 +1366,7 @@ export default function RawMaterialsPage() {
                             <div className="overflow-x-auto">
                             <table className="w-full min-w-[520px]">
                                 <thead>
-                                    <tr className="border-b border-surface-100 bg-surface-50/50">
+                                    <tr className="border-b border-line bg-surface-50/50">
                                         <th className="px-4 py-3 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider">
                                             Material
                                         </th>
@@ -1387,7 +1387,7 @@ export default function RawMaterialsPage() {
                                         </th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-surface-50">
+                                <tbody className="divide-y divide-line">
                                     {materials.map((m) => {
                                         const status =
                                             STATUS_CONFIG[m.stock_status];
@@ -1528,7 +1528,7 @@ export default function RawMaterialsPage() {
                             </div>
                         )}
                         {meta && meta.last_page > 1 && (
-                            <div className="px-4 py-3 border-t border-surface-100 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="px-4 py-3 border-t border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                 <p className="text-xs text-surface-500">
                                     Showing {meta.from}–{meta.to} of{" "}
                                     {meta.total}

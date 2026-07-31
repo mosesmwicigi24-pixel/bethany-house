@@ -212,7 +212,7 @@ export default function LanguagesPage() {
                         }
                     />
                 ) : (
-                    <div className="divide-y divide-surface-50">
+                    <div className="divide-y divide-line">
                         {languages.map((lang) => (
                             <div
                                 key={lang.id}
@@ -394,7 +394,7 @@ export default function LanguagesPage() {
                         </Field>
                     </div>
 
-                    <div className="space-y-3 pt-2 border-t border-surface-100">
+                    <div className="space-y-3 pt-2 border-t border-line">
                         <Toggle
                             checked={watch("is_active")}
                             onChange={(v) => setValue("is_active", v)}

@@ -40,7 +40,7 @@ export function PullRefreshIndicator({ progress, refreshing }: Props) {
         >
             <div
                 className={clsx(
-                    "rounded-full bg-white shadow-md flex items-center justify-center border border-surface-100",
+                    "rounded-full bg-white shadow-md flex items-center justify-center border border-line",
                     refreshing && "animate-spin",
                 )}
                 style={{ width: size, height: size }}

@@ -35,7 +35,7 @@ function SectionCard({ title, icon, badge, badgeColor, children, action }: {
     const [open, setOpen] = useState(true);
     return (
         <div className="card overflow-hidden">
-            <div className="flex items-center gap-3 px-5 py-4 border-b border-surface-100 cursor-pointer select-none"
+            <div className="flex items-center gap-3 px-5 py-4 border-b border-line cursor-pointer select-none"
                  onClick={() => setOpen(v => !v)}>
                 <div className="w-8 h-8 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center shrink-0">
                     {icon}
@@ -96,11 +96,11 @@ function ReorderSuggestions() {
         >
             {isLoading ? <div className="py-6 flex justify-center"><Spinner /></div> :
              suggestions.length === 0 ? <EmptyRow message="All stock levels healthy — no reorders needed." /> : (
-                <div className="divide-y divide-surface-50">
+                <div className="divide-y divide-line">
                     {suggestions.map((s: ReorderSuggestion) => (
                         <div key={s.inventory_item_id} className="flex items-center gap-3 px-5 py-3">
                             {s.product_image ? (
-                                <img src={s.product_image} alt={s.product_name} className="w-9 h-9 rounded-lg object-cover border border-surface-100 shrink-0"/>
+                                <img src={s.product_image} alt={s.product_name} className="w-9 h-9 rounded-lg object-cover border border-line shrink-0"/>
                             ) : (
                                 <div className="w-9 h-9 rounded-lg bg-surface-100 flex items-center justify-center shrink-0 text-surface-300">
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
@@ -227,7 +227,7 @@ function ChurnRiskCard() {
         >
             {isLoading ? <div className="py-6 flex justify-center"><Spinner /></div> :
              customers.length === 0 ? <EmptyRow message="No at-risk customers detected." /> : (
-                <div className="divide-y divide-surface-50">
+                <div className="divide-y divide-line">
                     {customers.slice(0, 10).map((c: ChurnRiskCustomer) => (
                         <div key={c.customer_id}
                              className="flex items-center gap-3 px-5 py-3 hover:bg-surface-50/50 cursor-pointer transition-colors"
@@ -349,7 +349,7 @@ function BudgetWarningsCard() {
         >
             {isLoading ? <div className="py-6 flex justify-center"><Spinner /></div> :
              warnings.length === 0 ? <EmptyRow message="All expense budgets within healthy limits." /> : (
-                <div className="divide-y divide-surface-50">
+                <div className="divide-y divide-line">
                     {warnings.map((w: BudgetWarning) => (
                         <div key={w.budget_id}
                              className="flex items-center gap-4 px-5 py-3 hover:bg-surface-50/50 cursor-pointer transition-colors"
@@ -426,7 +426,7 @@ function CustomerGeographyCard() {
             {isLoading ? <div className="py-6 flex justify-center"><Spinner /></div> :
              countries.length === 0 ? <EmptyRow message="No customer location data yet — it builds from order countries." /> : (
                 <>
-                    <div className="divide-y divide-surface-50">
+                    <div className="divide-y divide-line">
                         {countries.map((c: CountryStat) => (
                             <div key={c.country_code} className="flex items-center gap-3 px-5 py-3">
                                 <span className="text-xl shrink-0" aria-hidden>{flagOf(c.country_code)}</span>
@@ -447,7 +447,7 @@ function CustomerGeographyCard() {
                         ))}
                     </div>
                     {summary && (
-                        <div className="px-5 py-3 border-t border-surface-100 flex flex-wrap gap-x-5 gap-y-1 text-xs text-surface-500">
+                        <div className="px-5 py-3 border-t border-line flex flex-wrap gap-x-5 gap-y-1 text-xs text-surface-500">
                             <span><b className="text-surface-800">{fmtNum(summary.located_customers)}</b> located across <b className="text-surface-800">{summary.distinct_countries}</b> countries</span>
                             {summary.unlocated_customers > 0 &&
                                 <span><b className="text-surface-800">{fmtNum(summary.unlocated_customers)}</b> without a known country</span>}
@@ -491,7 +491,7 @@ function ChannelEngagementCard() {
         >
             {isLoading ? <div className="py-6 flex justify-center"><Spinner /></div> : (
                 <>
-                    <div className="divide-y divide-surface-50">
+                    <div className="divide-y divide-line">
                         {channels.map((c: ChannelStat) => {
                             const meta = CHANNEL_META[c.channel] ?? { label: c.channel, emoji: "•" };
                             return (
@@ -518,7 +518,7 @@ function ChannelEngagementCard() {
                         })}
                     </div>
                     {top.length > 0 && (
-                        <div className="border-t border-surface-100">
+                        <div className="border-t border-line">
                             <p className="px-5 pt-3 pb-1 text-2xs font-bold text-surface-400 uppercase tracking-widest">Most engaged</p>
                             {top.slice(0, 5).map(t => (
                                 <div key={t.customer_id}
@@ -533,7 +533,7 @@ function ChannelEngagementCard() {
                             ))}
                         </div>
                     )}
-                    <div className="px-5 py-2.5 border-t border-surface-100 text-2xs text-surface-400">
+                    <div className="px-5 py-2.5 border-t border-line text-2xs text-surface-400">
                         WhatsApp + web are live; Messenger, Instagram &amp; Facebook light up once Neema's Meta channels are switched on.
                     </div>
                 </>

@@ -404,7 +404,7 @@ function NewAdjustmentModal({
                                 "rounded-xl px-4 py-3 text-sm",
                                 wouldGoNeg
                                     ? "bg-danger-light border border-danger/20"
-                                    : "bg-surface-50 border border-surface-100",
+                                    : "bg-surface-50 border border-line",
                             )}
                         >
                             <div className="flex items-center justify-between">
@@ -583,8 +583,8 @@ function ApprovalModal({
         >
             <div className="space-y-4">
                 {/* Adjustment summary */}
-                <div className="border border-surface-100 rounded-xl overflow-hidden">
-                    <div className="px-4 py-3 bg-surface-50 border-b border-surface-100">
+                <div className="border border-line rounded-xl overflow-hidden">
+                    <div className="px-4 py-3 bg-surface-50 border-b border-line">
                         <p className="text-sm font-semibold text-surface-800">
                             {adjustment.reason_label}
                         </p>
@@ -633,7 +633,7 @@ function ApprovalModal({
                                 {adjustment.quantity_change}
                             </span>
                         </div>
-                        <div className="flex justify-between pt-1 border-t border-surface-100">
+                        <div className="flex justify-between pt-1 border-t border-line">
                             <span className="font-semibold text-surface-700">
                                 New stock
                             </span>
@@ -731,7 +731,7 @@ function PendingPanel({ onReview }: { onReview: (adj: Adjustment) => void }) {
                     </p>
                 </div>
             </div>
-            <div className="divide-y divide-surface-50">
+            <div className="divide-y divide-line">
                 {items.map((adj) => (
                     <div
                         key={adj.id}
@@ -853,8 +853,8 @@ function ReverseModal({
                     preserved for audit purposes.
                 </div>
 
-                <div className="border border-surface-100 rounded-xl overflow-hidden text-sm">
-                    <div className="px-4 py-2.5 bg-surface-50 border-b border-surface-100 font-medium text-surface-700">
+                <div className="border border-line rounded-xl overflow-hidden text-sm">
+                    <div className="px-4 py-2.5 bg-surface-50 border-b border-line font-medium text-surface-700">
                         Original: {adjustment.reason_label}
                     </div>
                     <div className="px-4 py-3 space-y-1.5">
@@ -892,7 +892,7 @@ function ReverseModal({
                                 {-adjustment.quantity_change}
                             </span>
                         </div>
-                        <div className="flex justify-between pt-1.5 border-t border-surface-100">
+                        <div className="flex justify-between pt-1.5 border-t border-line">
                             <span className="font-semibold text-surface-700">
                                 Stock after reversal
                             </span>
@@ -1180,7 +1180,7 @@ export default function StockAdjustmentsPage() {
                     <div className="overflow-x-auto">
                         <table className="w-full min-w-[640px]">
                             <thead>
-                                <tr className="border-b border-surface-100 bg-surface-50/50">
+                                <tr className="border-b border-line bg-surface-50/50">
                                     <th className="px-4 py-3 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider">
                                         Product
                                     </th>
@@ -1205,7 +1205,7 @@ export default function StockAdjustmentsPage() {
                                     <th className="px-4 py-3 w-20" />
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-surface-50">
+                            <tbody className="divide-y divide-line">
                                 {adjustmentGroups.map((group) => (
                                     <Fragment key={group.key}>
                                         <DateGroupHeaderRow
@@ -1485,7 +1485,7 @@ export default function StockAdjustmentsPage() {
 
                 {/* Pagination */}
                 {meta && meta.last_page > 1 && (
-                    <div className="px-4 py-3 border-t border-surface-100 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="px-4 py-3 border-t border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <p className="text-xs text-surface-500">
                             Showing {meta.from}–{meta.to} of {meta.total}
                         </p>

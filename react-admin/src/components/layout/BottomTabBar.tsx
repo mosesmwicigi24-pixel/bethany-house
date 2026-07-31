@@ -100,7 +100,7 @@ export function BottomTabBar({ onOpenMenu }: { onOpenMenu: () => void }) {
     return (
         <nav
             aria-label="Primary"
-            className="md:hidden shrink-0 bg-white border-t border-surface-100
+            className="md:hidden shrink-0 bg-white border-t border-line
                        pb-[env(safe-area-inset-bottom)] shadow-tabbar"
         >
             <ul className="flex items-stretch">

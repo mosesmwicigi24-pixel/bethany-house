@@ -93,7 +93,7 @@ export default function CustomerGeographyPage() {
                     </div>
 
                     <div className="bg-white rounded-2xl border border-surface-200 overflow-hidden">
-                        <div className="px-5 py-3 border-b border-surface-100 flex items-center justify-between gap-3">
+                        <div className="px-5 py-3 border-b border-line flex items-center justify-between gap-3">
                             <h2 className="font-semibold text-surface-900 text-sm">Countries</h2>
                             <span className="text-2xs text-surface-400">Tap a column to rank — highest first</span>
                         </div>
@@ -103,7 +103,7 @@ export default function CustomerGeographyPage() {
                             <div className="overflow-x-auto">
                                 <table className="w-full text-sm min-w-[760px]">
                                     <thead>
-                                        <tr className="bg-surface-50/70 border-b border-surface-100">
+                                        <tr className="bg-surface-50/70 border-b border-line">
                                             <th className="text-left px-5 py-3 text-2xs font-bold uppercase tracking-widest text-surface-400">Country</th>
                                             <ThMetric tone="bg-violet-50 text-violet-600"  icon={<LandedIcon />}  label="Landed"  active={sortKey === "visits"}  onSort={() => setSortKey("visits")} />
                                             <ThMetric tone="bg-sky-50 text-sky-600"         icon={<CartIcon />}    label="Carts"   active={sortKey === "carts"}   onSort={() => setSortKey("carts")} />
@@ -118,13 +118,13 @@ export default function CustomerGeographyPage() {
                                             </th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-surface-50">
+                                    <tbody className="divide-y divide-line">
                                         {rows.map((c: CountryStat) => (
                                             <tr key={c.country_code} className="hover:bg-surface-50/50 transition-colors">
                                                 {/* Identity — flag tile + country, like the member avatar + name */}
                                                 <td className="px-5 py-3.5">
                                                     <div className="flex items-center gap-3">
-                                                        <span className="w-10 h-10 rounded-xl bg-surface-50 border border-surface-100 flex items-center justify-center text-xl shrink-0" aria-hidden>{flagOf(c.country_code)}</span>
+                                                        <span className="w-10 h-10 rounded-xl bg-surface-50 border border-line flex items-center justify-center text-xl shrink-0" aria-hidden>{flagOf(c.country_code)}</span>
                                                         <div className="min-w-0">
                                                             <p className="font-semibold text-surface-900 truncate">{c.country_name}</p>
                                                             <p className="text-2xs text-surface-400 font-mono uppercase tracking-wide">{c.country_code}</p>

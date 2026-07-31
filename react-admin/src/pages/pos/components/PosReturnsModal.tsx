@@ -80,7 +80,7 @@ export default function PosReturnsModal({ outletId, outletName, onClose }: Props
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col animate-slide-up">
                 {/* Header */}
-                <div className="px-5 py-4 border-b border-surface-100 flex items-center gap-3 shrink-0">
+                <div className="px-5 py-4 border-b border-line flex items-center gap-3 shrink-0">
                     {step !== "search" && (
                         <button
                             onClick={() => {
@@ -139,7 +139,7 @@ aria-label="Close">
                                     <p className="text-sm">Enter at least 3 characters to search</p>
                                 </div>
                             ) : (
-                                <div className="divide-y divide-surface-50">
+                                <div className="divide-y divide-line">
                                     {sales.filter((s) => s.status !== "voided").map((sale) => (
                                         <button
                                             key={sale.id}
@@ -171,7 +171,7 @@ aria-label="Close">
                 {/* Step: Select items */}
                 {step === "select" && selectedSale && (
                     <div className="flex-1 flex flex-col overflow-hidden">
-                        <div className="px-4 py-3 bg-surface-50 border-b border-surface-100 text-xs text-surface-600 shrink-0">
+                        <div className="px-4 py-3 bg-surface-50 border-b border-line text-xs text-surface-600 shrink-0">
                             <p><strong>{selectedSale.order_number}</strong> · {new Date(selectedSale.created_at).toLocaleDateString("en-KE")}</p>
                             <p>{selectedSale.customer_name ?? "Walk-in"} · KES {fmt(selectedSale.total)}</p>
                         </div>
@@ -213,7 +213,7 @@ aria-label="Close">
                                 </div>
                             ))}
                         </div>
-                        <div className="p-4 border-t border-surface-100 shrink-0 flex gap-3">
+                        <div className="p-4 border-t border-line shrink-0 flex gap-3">
                             <button onClick={onClose} className="btn-secondary flex-1 btn-sm">Cancel</button>
                             <button
                                 onClick={() => setStep("confirm")}
@@ -298,7 +298,7 @@ aria-label="Close">
                                 </div>
                             </div>
                         </div>
-                        <div className="p-4 border-t border-surface-100 flex gap-3 shrink-0">
+                        <div className="p-4 border-t border-line flex gap-3 shrink-0">
                             <button onClick={() => setStep("select")} className="btn-secondary flex-1">Back</button>
                             <button
                                 onClick={() => returnMutation.mutate()}

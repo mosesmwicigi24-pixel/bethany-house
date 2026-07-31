@@ -197,7 +197,7 @@ function CountryFields({ form, activeCurrencies }: CountryFieldsProps) {
             </div>
 
             {/* Status toggles */}
-            <div className="border-t border-surface-100 pt-4 space-y-3">
+            <div className="border-t border-line pt-4 space-y-3">
                 <Toggle
                     checked={form.watch("is_active")}
                     onChange={(v: boolean) => form.setValue("is_active", v)}
@@ -216,7 +216,7 @@ function CountryFields({ form, activeCurrencies }: CountryFieldsProps) {
 
             {/* Shipping costs - only when shipping enabled */}
             {form.watch("is_shipping_enabled") && (
-                <div className="border-t border-surface-100 pt-4">
+                <div className="border-t border-line pt-4">
                     <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-3">
                         Shipping Costs
                     </p>
@@ -408,13 +408,13 @@ export default function CountriesPage() {
                     </p>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap shrink-0">
-                    <div className="text-center px-3 py-2 bg-surface-50 rounded-lg border border-surface-100">
+                    <div className="text-center px-3 py-2 bg-surface-50 rounded-lg border border-line">
                         <p className="text-lg font-bold text-surface-900">
                             {activeCount}
                         </p>
                         <p className="text-2xs text-surface-500">Active</p>
                     </div>
-                    <div className="text-center px-3 py-2 bg-surface-50 rounded-lg border border-surface-100">
+                    <div className="text-center px-3 py-2 bg-surface-50 rounded-lg border border-line">
                         <p className="text-lg font-bold text-surface-900">
                             {shippingCount}
                         </p>
@@ -637,7 +637,7 @@ export default function CountriesPage() {
                     emptyMessage="No countries found."
                 />
                 {countries.length > 0 && (
-                    <div className="px-4 py-2.5 border-t border-surface-100 text-xs text-surface-400">
+                    <div className="px-4 py-2.5 border-t border-line text-xs text-surface-400">
                         Showing {countries.length}{" "}
                         {countries.length === 1 ? "country" : "countries"}
                     </div>

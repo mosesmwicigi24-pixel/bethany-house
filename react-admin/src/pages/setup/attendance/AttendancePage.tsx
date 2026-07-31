@@ -266,7 +266,7 @@ export default function AttendancePage() {
                     <div className="overflow-x-auto">
                         <table className="w-full min-w-[720px]">
                             <thead>
-                                <tr className="border-b border-surface-100 bg-surface-50/50">
+                                <tr className="border-b border-line bg-surface-50/50">
                                     <th className="px-4 py-3 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider">Staff</th>
                                     <th className="px-4 py-3 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider hidden sm:table-cell">Outlet</th>
                                     <th className="px-4 py-3 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider">Clock in</th>
@@ -276,7 +276,7 @@ export default function AttendancePage() {
                                     <th className="px-4 py-3 w-16" />
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-surface-50">
+                            <tbody className="divide-y divide-line">
                                 {entries.map((entry) => {
                                     const status = STATUS_CONFIG[entry.status];
                                     return (
@@ -330,7 +330,7 @@ export default function AttendancePage() {
 
                 {/* Pagination */}
                 {meta && meta.last_page > 1 && (
-                    <div className="px-4 py-3 border-t border-surface-100 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="px-4 py-3 border-t border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <p className="text-xs text-surface-500">Showing {meta.from}–{meta.to} of {meta.total}</p>
                         <div className="flex gap-1">
                             <button disabled={meta.current_page === 1} onClick={() => table.setPage(meta.current_page - 1)} className="btn-ghost btn-sm text-xs disabled:opacity-40">← Prev</button>

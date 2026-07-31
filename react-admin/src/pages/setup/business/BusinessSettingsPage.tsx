@@ -404,7 +404,7 @@ export default function BusinessSettingsPage() {
                         label="Enable product reviews"
                         description="Customers who have purchased can leave star ratings and reviews."
                     />
-                    <div className="border-t border-surface-100 pt-4">
+                    <div className="border-t border-line pt-4">
                         <Toggle
                             checked={watch("maintenance_mode")}
                             onChange={(v) => setValue("maintenance_mode", v)}

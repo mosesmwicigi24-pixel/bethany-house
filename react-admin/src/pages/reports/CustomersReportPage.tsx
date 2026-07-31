@@ -169,7 +169,7 @@ export default function CustomersReportPage() {
             </div>
 
             {/* Tabs */}
-            <div className="border-b border-surface-100 overflow-x-auto no-scrollbar">
+            <div className="border-b border-line overflow-x-auto no-scrollbar">
                 <nav className="flex gap-1 -mb-px">
                     {(["overview", "ltv", "retention", "intelligence"] as const).map((tab) => (
                         <button
@@ -355,7 +355,7 @@ export default function CustomersReportPage() {
                     <TableWrapper>
                         <table className="w-full">
                             <thead>
-                                <tr className="border-y border-surface-100 bg-surface-50/50">
+                                <tr className="border-y border-line bg-surface-50/50">
                                     <th className={clsx(TH, "w-8")}>#</th>
                                     <th className={TH}>Customer</th>
                                     <th className={TH}>Email</th>
@@ -371,7 +371,7 @@ export default function CustomersReportPage() {
                                     </th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-surface-50">
+                            <tbody className="divide-y divide-line">
                                 {ltvQuery.isLoading ? (
                                     <tr>
                                         <td
@@ -471,7 +471,7 @@ export default function CustomersReportPage() {
                             <div className="overflow-x-auto">
                                 <table className="w-full text-sm">
                                     <thead>
-                                        <tr className="border-b border-surface-100">
+                                        <tr className="border-b border-line">
                                             <th className={TH}>Cohort</th>
                                             <th className={TH_R}>Size</th>
                                             {Array.from(
@@ -487,7 +487,7 @@ export default function CustomersReportPage() {
                                             )}
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-surface-50">
+                                    <tbody className="divide-y divide-line">
                                         {(
                                             retentionQuery.data.retention ?? []
                                         ).map((cohort: any) => {

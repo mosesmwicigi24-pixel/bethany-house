@@ -155,7 +155,7 @@ function SortableStageRow({
 
     if (editing) {
         return (
-            <div ref={setNodeRef} style={style} className="px-5 py-4 bg-brand-50/40 border-b border-surface-100">
+            <div ref={setNodeRef} style={style} className="px-5 py-4 bg-brand-50/40 border-b border-line">
                 <div className="space-y-3">
                     <div className="flex gap-3">
                         <div className="flex-1">
@@ -318,7 +318,7 @@ function AddStageForm({ onSaved }: { onSaved: () => void }) {
 
     if (!open) {
         return (
-            <div className="px-5 py-3 border-t border-surface-100">
+            <div className="px-5 py-3 border-t border-line">
                 <button onClick={() => setOpen(true)} className="btn-secondary btn-sm gap-1.5">
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
@@ -330,7 +330,7 @@ function AddStageForm({ onSaved }: { onSaved: () => void }) {
     }
 
     return (
-        <div className="px-5 py-4 border-t border-surface-100 bg-surface-50/50">
+        <div className="px-5 py-4 border-t border-line bg-surface-50/50">
             <p className="text-xs font-semibold text-surface-600 mb-3">New Stage</p>
             <div className="space-y-3">
                 <div className="flex gap-3">
@@ -481,7 +481,7 @@ export default function ProductionStagesPage() {
             <div className="card overflow-hidden p-0">
                 {/* Table header */}
                 <div className="overflow-x-auto">
-                    <div className="grid grid-cols-[auto_auto_1fr_auto] gap-4 items-center px-5 py-2.5 bg-surface-50 border-b border-surface-100 min-w-[400px]">
+                    <div className="grid grid-cols-[auto_auto_1fr_auto] gap-4 items-center px-5 py-2.5 bg-surface-50 border-b border-line min-w-[400px]">
                         <div className="w-7" /> {/* drag handle */}
                         <div className="w-9" /> {/* colour dot + number */}
                         <p className="text-2xs font-semibold text-surface-400 uppercase tracking-wide">Stage</p>

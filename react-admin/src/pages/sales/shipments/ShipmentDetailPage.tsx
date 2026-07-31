@@ -57,7 +57,7 @@ function AuditTrail({ shipmentId }: { shipmentId: number }) {
     if (isLoading) return <div className="flex justify-center py-10"><Spinner /></div>;
     if (!logs.length) return <div className="text-center py-12 text-xs text-surface-400">No audit entries yet.</div>;
     return (
-        <div className="divide-y divide-surface-50">
+        <div className="divide-y divide-line">
             {logs.map((entry) => (
                 <div key={entry.id} className="flex gap-3 py-3.5">
                     <div className="w-7 h-7 rounded-full bg-brand-100 flex items-center justify-center shrink-0 mt-0.5">
@@ -200,7 +200,7 @@ function AddTrackingModal({ shipmentId, onClose, onDone }: {
                     {files.length > 0 && (
                         <div className="mt-2 space-y-1.5">
                             {files.map((f, idx) => (
-                                <div key={idx} className="flex items-center gap-2 p-2 bg-surface-50 rounded-lg border border-surface-100">
+                                <div key={idx} className="flex items-center gap-2 p-2 bg-surface-50 rounded-lg border border-line">
                                     <span className="text-xs text-surface-700 truncate flex-1">{f.file.name}</span>
                                     <label className="flex items-center gap-1.5 text-2xs text-surface-500 shrink-0">
                                         <input type="checkbox" checked={f.isPublic}
@@ -556,7 +556,7 @@ export default function ShipmentDetailPage() {
                 </div>
 
                 {/* Action bar */}
-                <div className="px-5 py-3 bg-slate-50 border-b border-surface-100 flex flex-wrap items-center gap-2 sm:px-8">
+                <div className="px-5 py-3 bg-slate-50 border-b border-line flex flex-wrap items-center gap-2 sm:px-8">
                     <button onClick={() => setShowAddTracking(true)}
                         className="btn-sm bg-brand-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-brand-700">
                         + Add Tracking Event
@@ -592,11 +592,11 @@ export default function ShipmentDetailPage() {
                 </div>
 
                 {/* Body */}
-                <div className="px-5 py-5 grid grid-cols-1 lg:grid-cols-[1fr_240px] gap-6 lg:gap-8 sm:px-8 sm:py-6 lg:divide-x divide-surface-100">
+                <div className="px-5 py-5 grid grid-cols-1 lg:grid-cols-[1fr_240px] gap-6 lg:gap-8 sm:px-8 sm:py-6 lg:divide-x divide-line">
 
                     {/* Left */}
                     <div className="space-y-4 lg:pr-8">
-                        <div className="flex border-b border-surface-100">
+                        <div className="flex border-b border-line">
                             {(["tracking", "audit"] as const).map((t) => (
                                 <button key={t} onClick={() => setTab(t)}
                                     className={clsx("px-4 py-2.5 text-xs font-semibold border-b-2 transition-all",
@@ -610,7 +610,7 @@ export default function ShipmentDetailPage() {
                         {tab === "audit" && <AuditTrail shipmentId={s.id} />}
 
                         {s.notes && (
-                            <div className="p-4 bg-surface-50 rounded-xl border border-surface-100">
+                            <div className="p-4 bg-surface-50 rounded-xl border border-line">
                                 <SectionLabel>Notes</SectionLabel>
                                 <p className="text-xs text-surface-700 whitespace-pre-wrap">{s.notes}</p>
                             </div>
@@ -618,7 +618,7 @@ export default function ShipmentDetailPage() {
 
                         {/* Waybill / attachments */}
                         {((s as any).attachments ?? []).length > 0 && (
-                            <div className="p-4 bg-surface-50 rounded-xl border border-surface-100 space-y-1.5">
+                            <div className="p-4 bg-surface-50 rounded-xl border border-line space-y-1.5">
                                 <SectionLabel>Waybill / Documents</SectionLabel>
                                 {((s as any).attachments ?? []).map((a: any) => (
                                     <a key={a.id} href={a.url} target="_blank" rel="noopener noreferrer"

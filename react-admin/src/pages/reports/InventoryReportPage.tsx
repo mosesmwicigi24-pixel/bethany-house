@@ -224,7 +224,7 @@ export default function InventoryReportPage() {
             </div>
 
             {/* Tabs */}
-            <div className="border-b border-surface-100 overflow-x-auto no-scrollbar">
+            <div className="border-b border-line overflow-x-auto no-scrollbar">
                 <nav className="flex gap-1 -mb-px">
                     {(["overview", "stock", "movements", "intelligence"] as const).map(
                         (tab) => (
@@ -405,7 +405,7 @@ export default function InventoryReportPage() {
                             <TableWrapper>
                                 <table className="w-full">
                                     <thead>
-                                        <tr className="border-y border-surface-100 bg-surface-50/50">
+                                        <tr className="border-y border-line bg-surface-50/50">
                                             <th className={TH}>Product</th>
                                             <th className={TH}>SKU</th>
                                             <th className={TH}>Outlet</th>
@@ -421,7 +421,7 @@ export default function InventoryReportPage() {
                                             <th className={TH}>Status</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-surface-50">
+                                    <tbody className="divide-y divide-line">
                                         {urgentItems.map((item: any) => (
                                             <tr
                                                 key={`${item.variant_id}-${item.outlet_name}`}
@@ -543,7 +543,7 @@ export default function InventoryReportPage() {
                         <TableWrapper>
                             <table className="w-full">
                                 <thead>
-                                    <tr className="border-y border-surface-100 bg-surface-50/50">
+                                    <tr className="border-y border-line bg-surface-50/50">
                                         <th className={TH}>Product</th>
                                         <th className={TH}>Variant / SKU</th>
                                         <th className={TH}>Category</th>
@@ -561,7 +561,7 @@ export default function InventoryReportPage() {
                                         <th className={TH}>Status</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-surface-50">
+                                <tbody className="divide-y divide-line">
                                     {stockQuery.isLoading ? (
                                         <tr>
                                             <td
@@ -728,7 +728,7 @@ export default function InventoryReportPage() {
                             <TableWrapper>
                                 <table className="w-full">
                                     <thead>
-                                        <tr className="border-y border-surface-100 bg-surface-50/50">
+                                        <tr className="border-y border-line bg-surface-50/50">
                                             <th className={TH}>Outlet</th>
                                             <th className={TH_R}>SKUs</th>
                                             <th className={TH_R}>
@@ -737,7 +737,7 @@ export default function InventoryReportPage() {
                                             <th className={TH_R}>Est. Value</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-surface-50">
+                                    <tbody className="divide-y divide-line">
                                         {byOutlet.map((row: any, i: number) => (
                                             <tr
                                                 key={i}
@@ -919,7 +919,7 @@ export default function InventoryReportPage() {
                         <TableWrapper>
                             <table className="w-full">
                                 <thead>
-                                    <tr className="border-y border-surface-100 bg-surface-50/50">
+                                    <tr className="border-y border-line bg-surface-50/50">
                                         <th className={TH}>Date & Time</th>
                                         <th className={TH}>Product</th>
                                         <th className={TH}>SKU</th>
@@ -930,7 +930,7 @@ export default function InventoryReportPage() {
                                         <th className={TH_R}>Qty Change</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-surface-50">
+                                <tbody className="divide-y divide-line">
                                     {movementQuery.isLoading ? (
                                         <tr>
                                             <td
@@ -1067,7 +1067,7 @@ function InventoryIntelligence({ start, end }: { start: string; end: string }) {
                             <th className={TH_R}>Revenue</th><th className={TH_R}>Share</th>
                             <th className={TH_R}>Sold</th><th className={TH_R}>On Hand</th><th className={TH_R}>Cover</th>
                         </tr></thead>
-                        <tbody className="divide-y divide-surface-50">
+                        <tbody className="divide-y divide-line">
                             {abc.items.map((i: any) => (
                                 <tr key={i.product_id}>
                                     <td className="px-3 py-2 font-medium text-surface-800">{i.product}</td>

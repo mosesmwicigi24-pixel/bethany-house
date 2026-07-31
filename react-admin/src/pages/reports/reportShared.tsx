@@ -241,7 +241,7 @@ export function ScheduleModal({
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-                <div className="flex items-center justify-between px-6 py-4 border-b border-surface-100">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-line">
                     <h2 className="font-semibold text-surface-900">
                         Schedule Report
                     </h2>
@@ -330,7 +330,7 @@ export function ScheduleModal({
                     {error && <p className="text-sm text-danger">{error}</p>}
                 </div>
 
-                <div className="px-6 py-4 border-t border-surface-100 flex justify-end gap-3">
+                <div className="px-6 py-4 border-t border-line flex justify-end gap-3">
                     <button onClick={onClose} className="btn-ghost">
                         Cancel
                     </button>
@@ -381,7 +381,7 @@ export function SchedulesList({ reportType }: { reportType: ReportType }) {
             {schedules.map((s: any) => (
                 <div
                     key={s.id}
-                    className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between p-3 rounded-lg bg-surface-50 border border-surface-100"
+                    className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between p-3 rounded-lg bg-surface-50 border border-line"
                 >
                     <div>
                         <p className="text-sm font-medium text-surface-900">
@@ -506,7 +506,7 @@ export function ReportActionBar({
             </div>
 
             {showSchedules && (
-                <div className="mt-3 p-4 rounded-xl border border-surface-100 bg-surface-50">
+                <div className="mt-3 p-4 rounded-xl border border-line bg-surface-50">
                     <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-3">
                         Active Schedules
                     </p>
@@ -648,7 +648,7 @@ export function ReportPageHeader({
             </div>
 
             {/* ── Divider + action toolbar ── */}
-            <div className="border-t border-surface-100 px-4 py-2 flex items-center gap-0.5 flex-wrap">
+            <div className="border-t border-line px-4 py-2 flex items-center gap-0.5 flex-wrap">
                 {/* Export CSV */}
                 <ExportCsvButton
                     path={exportPath}
@@ -699,7 +699,7 @@ export function ReportPageHeader({
 
             {/* Schedules list (inline) */}
             {showSchedules && (
-                <div className="border-t border-surface-100 px-5 py-4 bg-surface-50/60">
+                <div className="border-t border-line px-5 py-4 bg-surface-50/60">
                     <p className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-3">Active Schedules</p>
                     <SchedulesList reportType={reportType} />
                 </div>
