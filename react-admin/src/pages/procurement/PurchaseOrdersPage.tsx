@@ -26,17 +26,17 @@ const PO_STATUSES: Record<
         badge: "badge-warning",
         dot: "bg-warning",
     },
-    approved: { label: "Approved", badge: "badge-info", dot: "bg-info" },
-    ordered: { label: "Ordered", badge: "badge-info", dot: "bg-blue-500" },
+    approved: { label: "Approved", badge: "badge-amber", dot: "bg-amber" },
+    ordered: { label: "Ordered", badge: "badge-amber", dot: "bg-amber" },
     partially_received: {
         label: "Partial Receipt",
-        badge: "badge-warning",
-        dot: "bg-amber-500",
+        badge: "badge-amber",
+        dot: "bg-amber",
     },
     received: {
         label: "Fully Received",
         badge: "badge-success",
-        dot: "bg-success",
+        dot: "bg-success-vivid",
     },
     cancelled: { label: "Cancelled", badge: "badge-danger", dot: "bg-danger" },
 };

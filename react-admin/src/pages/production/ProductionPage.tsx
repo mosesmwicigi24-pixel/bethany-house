@@ -174,12 +174,12 @@ interface QCRecord {
 const STATUS_CFG: Record<string, { label: string; bg: string; text: string; dot: string }> = {
     draft:       { label: "Draft",       bg: "bg-surface-50",      text: "text-surface-400",   dot: "bg-surface-300"  },
     pending:     { label: "Pending",     bg: "bg-surface-100",     text: "text-surface-600",   dot: "bg-surface-400"  },
-    in_progress: { label: "In Progress", bg: "bg-brand-50",        text: "text-brand-700",     dot: "bg-brand-500"    },
+    in_progress: { label: "In Progress", bg: "bg-amber-light",     text: "text-amber-dark",    dot: "bg-amber"        },
     on_hold:     { label: "On Hold",     bg: "bg-warning-light",   text: "text-warning-dark",  dot: "bg-warning"      },
     qc_pending:  { label: "QC Pending",  bg: "bg-purple-50",       text: "text-purple-700",    dot: "bg-purple-500"   },
-    qc_passed:   { label: "QC Passed",   bg: "bg-success-light",   text: "text-success-dark",  dot: "bg-success"      },
+    qc_passed:   { label: "QC Passed",   bg: "bg-success-light",   text: "text-success-dark",  dot: "bg-success-vivid" },
     qc_failed:   { label: "QC Failed",   bg: "bg-danger-light",    text: "text-danger",        dot: "bg-danger"       },
-    completed:   { label: "Completed",   bg: "bg-success-light",   text: "text-success-dark",  dot: "bg-success"      },
+    completed:   { label: "Completed",   bg: "bg-success-light",   text: "text-success-dark",  dot: "bg-success-vivid" },
     cancelled:   { label: "Cancelled",   bg: "bg-surface-100",     text: "text-surface-400",   dot: "bg-surface-300"  },
 };
 
