@@ -20,6 +20,9 @@ interface ProductionOrder {
     order_number: string;
     product_id: number;
     product_name: string;
+    /** Eager-loaded by ProductionController as product:id,sku — the garment's
+        own stock code, distinct from this job's order_number. */
+    product?: { id: number; sku?: string | null } | null;
     product_image?: string;
     quantity: number;
     status: "draft" | "pending" | "in_progress" | "on_hold" | "qc_pending" | "qc_passed" | "qc_failed" | "completed" | "cancelled";
@@ -1900,26 +1903,34 @@ function ProductionOrdersTab() {
                                                 onClick={() => navigate(`/production/orders/${o.id}`)}
                                                 className="w-full text-left px-3.5 py-3 active:bg-surface-50 transition-colors"
                                             >
-                                                {/* Line 1 — what it is, and how far along */}
+                                                {/* Line 1 — WHO the job is for. The floor asks this first,
+                                                    so the owner's name leads and carries the status. */}
                                                 <div className="flex items-start gap-2">
                                                     <span className={clsx('mt-1.5 w-1.5 h-1.5 rounded-full shrink-0', cfg.dot)} />
-                                                    <p className="flex-1 min-w-0 font-bold text-surface-900 text-[13.5px] leading-snug truncate">
-                                                        {o.product_name}
+                                                    <p className="flex-1 min-w-0 font-bold text-surface-900 text-[14px] leading-snug truncate">
+                                                        {o.customer_label ?? (o.customer_order_id ? 'Name missing' : 'For stock')}
                                                     </p>
                                                     <span className={clsx('shrink-0 text-2xs font-bold px-2 py-0.5 rounded-full', cfg.bg, cfg.text)}>
                                                         {cfg.label}
                                                     </span>
                                                 </div>
 
-                                                {/* Line 2 — whose job it is */}
-                                                <p className="mt-1 pl-3.5 text-[12.5px] text-surface-600 truncate">
-                                                    {o.customer_label ?? (o.customer_order_id ? 'Name missing' : 'For stock')}
-                                                    {o.customer_contact && (
-                                                        <span className="text-surface-400"> · {o.customer_contact}</span>
+                                                {/* Line 2 — how to reach them (omitted for stock jobs) */}
+                                                {o.customer_contact && (
+                                                    <p className="mt-0.5 pl-3.5 text-[12.5px] text-surface-500 tabular-nums truncate">
+                                                        {o.customer_contact}
+                                                    </p>
+                                                )}
+
+                                                {/* Line 3 — what is being made, and its stock code */}
+                                                <p className="mt-1 pl-3.5 text-[13px] text-surface-800 font-medium truncate">
+                                                    {o.product_name}
+                                                    {o.product?.sku && (
+                                                        <span className="font-mono font-normal text-surface-500"> · {o.product.sku}</span>
                                                     )}
                                                 </p>
 
-                                                {/* Line 3 — the reference numbers and the clock */}
+                                                {/* Line 4 — the job reference and the clock */}
                                                 <div className="mt-1 pl-3.5 flex items-center gap-2 text-2xs">
                                                     <span className="font-mono font-bold text-brand-700 truncate">{o.order_number}</span>
                                                     {o.quantity > 1 && (
