@@ -45,11 +45,14 @@
 
 @layer components {
     /* ─── Form inputs ─────────────────────────────────────────── */
+    /* Reference geometry: 12px radius, a hairline border and a pale fill that
+       sits a shade off the card's white, ~48px tall so the control reads as a
+       comfortable tap target rather than a dense form field. */
     .input {
-        @apply block w-full rounded-control border border-surface-300 bg-white px-3.5 py-2.5
-           text-base text-surface-900 placeholder:text-surface-400
-           transition-colors duration-150
-           focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500
+        @apply block w-full rounded-field border border-line bg-field px-4 py-3
+           text-[15px] leading-tight text-surface-900 placeholder:text-surface-400
+           min-h-[48px] transition-colors duration-150
+           focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-500
            disabled:cursor-not-allowed disabled:bg-surface-100 disabled:text-surface-400;
     }
 
@@ -58,7 +61,7 @@
     }
 
     .label {
-        @apply block text-xs font-medium text-surface-600 mb-1;
+        @apply block text-[14.5px] font-semibold text-surface-900 mb-2;
     }
 
     .field-error {
@@ -68,15 +71,20 @@
     /* ─── Buttons ─────────────────────────────────────────────── */
     .btn {
         @apply inline-flex items-center justify-center gap-2 rounded-full
-           px-5 py-2.5 text-sm font-semibold min-h-[40px]
+           px-6 py-3 text-[15px] font-bold min-h-[48px]
            transition-all duration-150 cursor-pointer
            disabled:cursor-not-allowed disabled:opacity-50
            focus-visible:ring-2 focus-visible:ring-offset-2;
     }
 
+    /* The reference's hero CTA: full width, 56px, fully rounded. */
+    .btn-block {
+        @apply w-full min-h-[56px] text-base;
+    }
+
     .btn-primary {
-        @apply btn bg-brand-500 text-surface-900 shadow-btn-brand
-           hover:bg-brand-400 active:bg-brand-600
+        @apply btn bg-brand-500 text-white
+           hover:bg-brand-600 active:bg-brand-700
            focus-visible:ring-surface-900;
     }
 
@@ -108,7 +116,14 @@
     }
 
     /* ─── Cards ───────────────────────────────────────────────── */
+    /* Flat white on the grey canvas — the reference cards carry NO shadow and
+       no border; separation comes from the canvas tint alone. */
     .card {
+        @apply bg-white rounded-card;
+    }
+
+    /* Opt back in where a card genuinely floats above content (menus, popovers). */
+    .card-raised {
         @apply bg-white rounded-card shadow-card;
     }
 
@@ -119,11 +134,11 @@
     }
 
     .card-header {
-        @apply px-4 py-3 md:px-5 md:py-4 border-b border-surface-100 flex items-center justify-between;
+        @apply px-5 py-4 md:px-7 md:py-5 border-b border-line flex items-center justify-between;
     }
 
     .card-body {
-        @apply px-4 py-4 md:px-6 md:py-6;
+        @apply px-5 py-5 md:px-7 md:py-7;
     }
 
     /* ─── Badges ──────────────────────────────────────────────── */
@@ -187,14 +202,20 @@
         @apply mb-4 md:mb-6;
     }
 
+    /* The reference leads with a large, confident title over quiet supporting
+       copy — the size contrast IS the hierarchy. Detail/form pages get the full
+       28px; dense list pages stay smaller via .page-title-sm. */
     .page-title {
-        /* 20px on a phone, 24px from md. A 24px title on a 430px screen eats
-           the fold before any data appears. */
+        @apply font-display text-[28px] md:text-3xl font-extrabold text-surface-900
+           tracking-[-0.02em] leading-tight;
+    }
+
+    .page-title-sm {
         @apply font-display text-xl md:text-2xl font-bold text-surface-900 tracking-tight;
     }
 
     .page-subtitle {
-        @apply mt-0.5 text-[13px] md:text-sm text-surface-500;
+        @apply mt-1 text-[15px] md:text-base text-surface-500 leading-snug;
     }
 }
 
