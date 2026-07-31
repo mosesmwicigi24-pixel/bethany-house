@@ -556,8 +556,15 @@ export default function CustomersPage() {
                             // `||` not `??`: the create form posts "" for an
                             // omitted email/phone, so a nullish check would keep
                             // the empty string and render a blank contact line.
-                            const email =
+                            // Customer::boot synthesises 'noemail+{number}@placeholder.local'
+                            // for walk-ins with no address. It is a database
+                            // placeholder, never a contact — OrdersListPage and
+                            // OrderController already suppress it; do the same here
+                            // rather than printing it at people.
+                            const rawEmail =
                                 customer.email || customer.user?.email || null;
+                            const email =
+                                rawEmail && !rawEmail.startsWith("noemail+") ? rawEmail : null;
                             const phone =
                                 customer.phone || customer.user?.phone || null;
                             const status =
