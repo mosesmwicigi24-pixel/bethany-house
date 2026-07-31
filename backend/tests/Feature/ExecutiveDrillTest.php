@@ -11,6 +11,7 @@ use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
+use Tests\Concerns\FreezesClockMidMonth;
 use Tests\TestCase;
 
 /**
@@ -23,6 +24,7 @@ use Tests\TestCase;
 class ExecutiveDrillTest extends TestCase
 {
     use RefreshDatabase;
+    use FreezesClockMidMonth;
 
     private function viewer(array $extraPerms = []): User
     {
