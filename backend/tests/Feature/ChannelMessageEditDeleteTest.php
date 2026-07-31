@@ -50,7 +50,9 @@ class ChannelMessageEditDeleteTest extends TestCase
         return ChannelMessage::create(array_merge([
             'channel_id' => $channel->id,
             'user_id'    => $author->id,
-            'type'       => 'space',
+            // channel_messages.type is ['text','system'] — NOT the channel's
+            // own ['dm','space','announcement'] enum.
+            'type'       => 'text',
             'body'       => 'Good morning all',
         ], $attrs));
     }
