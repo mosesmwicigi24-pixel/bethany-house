@@ -51,7 +51,13 @@ export default {
         field:  '#fafafa',
 
         // Semantic
-        success: { light: '#dcfce7', DEFAULT: '#16a34a', dark: '#14532d' },
+        // Work-state semantics (owner's rule): in flight = amber, finished = a
+        // vivid traffic-light green. `amber` is its own token, NOT the brand —
+        // the brand is now orange (#f0562a) and an in-progress chip must not be
+        // mistaken for a brand accent. `success.vivid` is the luminous green
+        // used for status dots, where saturation reads without a contrast cost.
+        amber:   { light: '#fef3c7', DEFAULT: '#f59e0b', dark: '#92400e' },
+        success: { light: '#dcfce7', DEFAULT: '#16a34a', dark: '#15803d', vivid: '#22c55e' },
         warning: { light: '#fef9c3', DEFAULT: '#ca8a04', dark: '#713f12' },
         danger:  { light: '#fee2e2', DEFAULT: '#dc2626', dark: '#7f1d1d' },
         info:    { light: '#dbeafe', DEFAULT: '#2563eb', dark: '#1e3a8a' },

@@ -12,16 +12,21 @@ import { groupRowsByDate, DateGroupHeaderRow } from "@/lib/dateGrouping";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
+// Traffic-light semantics: anything still in flight is AMBER, anything finished
+// is a vivid green, anything stopped is red/grey. `confirmed` was missing
+// entirely, so every POS sale fell through to the neutral grey chip — the most
+// common status in the system rendered as though it had no meaning.
 const STATUS_CONFIG: Record<string, { label: string; dot: string; badge: string }> = {
-    pending: { label: "Pending Payment", dot: "bg-warning",  badge: "badge-warning" },
-    paid:            { label: "Paid",             dot: "bg-info",     badge: "badge-info"    },
-    processing:      { label: "Processing",       dot: "bg-brand-500",badge: "badge-info"    },
-    shipped:         { label: "Shipped",          dot: "bg-brand-600",badge: "badge-info"    },
-    delivered:       { label: "Delivered",        dot: "bg-success",  badge: "badge-success" },
-    completed:       { label: "Completed",        dot: "bg-success",  badge: "badge-success" },
-    cancelled:       { label: "Cancelled",        dot: "bg-danger",   badge: "badge-danger"  },
-    refunded:        { label: "Refunded",         dot: "bg-surface-400", badge: "badge-neutral" },
-    voided:          { label: "Voided",           dot: "bg-surface-400", badge: "badge-neutral" },
+    pending:         { label: "Pending Payment", dot: "bg-warning",       badge: "badge-warning" },
+    paid:            { label: "Paid",            dot: "bg-success-vivid", badge: "badge-success" },
+    confirmed:       { label: "Confirmed",       dot: "bg-success-vivid", badge: "badge-success" },
+    processing:      { label: "Processing",      dot: "bg-amber",         badge: "badge-amber"   },
+    shipped:         { label: "Shipped",         dot: "bg-amber",         badge: "badge-amber"   },
+    delivered:       { label: "Delivered",       dot: "bg-success-vivid", badge: "badge-success" },
+    completed:       { label: "Completed",       dot: "bg-success-vivid", badge: "badge-success" },
+    cancelled:       { label: "Cancelled",       dot: "bg-danger",        badge: "badge-danger"  },
+    refunded:        { label: "Refunded",        dot: "bg-surface-400",   badge: "badge-neutral" },
+    voided:          { label: "Voided",          dot: "bg-surface-400",   badge: "badge-neutral" },
 };
 
 const CHANNEL_LABELS: Record<string, { label: string }> = {

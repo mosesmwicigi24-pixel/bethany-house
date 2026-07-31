@@ -149,6 +149,11 @@
     .badge-success {
         @apply badge bg-success-light text-success-dark;
     }
+    /* In-flight work. Distinct from .badge-warning (a caution) and from the
+       orange brand accent — this says "running", not "wrong" and not "primary". */
+    .badge-amber {
+        @apply badge bg-amber-light text-amber-dark;
+    }
     .badge-warning {
         @apply badge bg-warning-light text-warning-dark;
     }
