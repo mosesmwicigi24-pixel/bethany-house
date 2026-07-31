@@ -698,8 +698,15 @@ export default function CustomersPage() {
                             <tbody>
                                 {customers.map((customer) => {
                                     const fullName = `${customer.first_name} ${customer.last_name}`;
+                                    // Same placeholder suppression as the card list
+                                    // above — the desktop table printed all 25
+                                    // 'noemail+…@placeholder.local' addresses.
+                                    const rawTableEmail =
+                                        customer.email || customer.user?.email || null;
                                     const email =
-                                        customer.email ?? customer.user?.email;
+                                        rawTableEmail && !rawTableEmail.startsWith("noemail+")
+                                            ? rawTableEmail
+                                            : undefined;
                                     const phone =
                                         customer.phone ?? customer.user?.phone;
                                     const status =
