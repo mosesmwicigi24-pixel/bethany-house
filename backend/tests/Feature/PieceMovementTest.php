@@ -515,7 +515,7 @@ class PieceMovementTest extends TestCase
             ->where('production_stage_id', $this->stage($batch, 'CUTTING_M')->production_stage_id)
             ->first();
 
-        $this->assertSame('Waiting on buttons or trim', $cuttingTask->fresh()->blocked_reason);
+        $this->assertSame('Trim or buttons short', $cuttingTask->fresh()->blocked_reason);
 
         $this->move($batch, 'CUTTING_M', 4, $actor, PieceMovement::TYPE_RELEASE);
 
@@ -610,7 +610,7 @@ class PieceMovementTest extends TestCase
         $this->load($batch, 100, $actor);
         $this->move($batch, 'NOT_CUT', 60, $actor);
         $this->move($batch, 'CUTTING_M', 30, $actor);
-        $this->move($batch, 'CUTTING_M', 5, $actor, PieceMovement::TYPE_HOLD, reason: 'NO_MATERIAL');
+        $this->move($batch, 'CUTTING_M', 5, $actor, PieceMovement::TYPE_HOLD, reason: 'NO_FABRIC');
         $this->move($batch, 'CUTTING_M', 2, $actor, PieceMovement::TYPE_SCRAP, reason: 'CUT_ERROR');
         $this->move($batch, 'STITCHING_M', 20, $actor);
         $this->move($batch, 'QC_M', 4, $actor, PieceMovement::TYPE_REWORK, to: 'STITCHING_M', reason: 'SEAM_PUCKER');

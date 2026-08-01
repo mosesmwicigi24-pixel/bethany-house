@@ -39,6 +39,21 @@ class WorkflowProvisioner
     private const SCRAP_SEQ = 9999;
 
     /**
+     * The icon a station carries everywhere it appears — screen, stage rail,
+     * printed bundle ticket. Fixed in data so the mapping is learned once; a
+     * station nobody anticipated falls back to its kind rather than rendering
+     * an empty square.
+     */
+    private const ICONS = [
+        'CUTTING'   => 'scissors',
+        'SEWING'    => 'needle',
+        'STITCHING' => 'needle',
+        'BUTTONS'   => 'button',
+        'FINISHING' => 'iron',
+        'QC'        => 'eye',
+    ];
+
+    /**
      * The workflow this order's batches should pin, creating it if this
      * combination of stages has never been seen before.
      */
@@ -141,7 +156,7 @@ class WorkflowProvisioner
             'code' => 'NOT_CUT', 'name' => 'Not Cut', 'seq' => self::ENTRY_SEQ,
             'kind' => ProductionWorkflowStage::KIND_QUEUE,
             'allows_rework' => false, 'default_role' => 'cutter',
-            'color' => '#94a3b8', 'production_stage_id' => null,
+            'color' => '#94a3b8', 'icon' => 'fabric', 'production_stage_id' => null,
         ]];
 
         $seq = self::ENTRY_SEQ;
@@ -149,9 +164,10 @@ class WorkflowProvisioner
         foreach ($stages as $stage) {
             $seq += self::STEP;
             $isGate = $this->looksLikeQc($stage);
+            $code   = $this->codeFor($stage, $seq);
 
             $rows[] = [
-                'code' => $this->codeFor($stage, $seq),
+                'code' => $code,
                 'name' => $stage->name,
                 'seq'  => $seq,
                 'kind' => $isGate
@@ -160,6 +176,7 @@ class WorkflowProvisioner
                 'allows_rework'       => $isGate,
                 'default_role'        => $isGate ? 'supervisor' : null,
                 'color'               => $stage->color,
+                'icon'                => self::ICONS[$code] ?? ($isGate ? 'eye' : 'needle'),
                 'production_stage_id' => $stage->id,
             ];
         }
@@ -168,13 +185,13 @@ class WorkflowProvisioner
             'code' => 'FINISHED', 'name' => 'Finished', 'seq' => $seq + self::STEP,
             'kind' => ProductionWorkflowStage::KIND_DONE,
             'allows_rework' => false, 'default_role' => null,
-            'color' => '#22c55e', 'production_stage_id' => null,
+            'color' => '#22c55e', 'icon' => 'check-circle', 'production_stage_id' => null,
         ];
         $rows[] = [
             'code' => 'SCRAPPED', 'name' => 'Scrapped', 'seq' => self::SCRAP_SEQ,
             'kind' => ProductionWorkflowStage::KIND_SCRAP,
             'allows_rework' => false, 'default_role' => null,
-            'color' => '#dc2626', 'production_stage_id' => null,
+            'color' => '#dc2626', 'icon' => 'x-circle', 'production_stage_id' => null,
         ];
 
         foreach ($rows as $row) {

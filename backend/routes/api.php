@@ -1053,6 +1053,9 @@ Route::prefix('v1')->group(function () {
                 // distort yield reporting, so each needs its own grant.
                 Route::prefix('production-movement')->group(function () {
                     Route::get('/reasons',                 [PieceMovementController::class, 'reasons']);
+                    // One round trip renders a whole station screen: the line,
+                    // the shift, and the queue already grouped and sorted.
+                    Route::get('/stations/{stageCode}/queue', [PieceMovementController::class, 'station']);
                     Route::get('/orders/{id}',             [PieceMovementController::class, 'order']);
                     Route::get('/orders/{id}/defects',     [PieceMovementController::class, 'defects']);
                     Route::get('/batches/{batch}/history', [PieceMovementController::class, 'history']);

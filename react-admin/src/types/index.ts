@@ -87,6 +87,17 @@ export interface Outlet {
 export interface ApiError {
   message: string
   errors?: Record<string, string[]>
+  /**
+   * Machine-readable failure, where the endpoint provides one (the
+   * piece-movement API always does). A refused movement is an ordinary event on
+   * a shop floor — two tailors reaching for the same ten pieces — and the client
+   * has to tell those apart to decide between showing a message and rolling
+   * back an optimistic update. `detail` carries the correction, e.g.
+   * `{ available: 2 }`, so it can do that without a refetch.
+   */
+  code?: string
+  detail?: Record<string, unknown>
+  status?: number
 }
 
 export interface PaginatedResponse<T> {

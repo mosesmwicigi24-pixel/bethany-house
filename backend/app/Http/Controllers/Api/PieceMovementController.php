@@ -11,6 +11,8 @@ use App\Services\Production\MoveCommand;
 use App\Services\Production\MovementException;
 use App\Services\Production\MovementService;
 use App\Services\Production\ProductionReadModel;
+use App\Services\Production\StationQueueService;
+use App\Services\Production\TailorUiFlag;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -30,14 +32,45 @@ use Illuminate\Support\Facades\DB;
  */
 class PieceMovementController extends Controller
 {
+    /**
+     * How long a worker has to take a move back before it needs a supervisor.
+     * Long enough to notice a mis-tap, short enough that the pieces are still
+     * where the movement put them.
+     */
+    private const UNDO_SECONDS = 15;
+
     public function __construct(
         private readonly MovementService $movements,
         private readonly ProductionReadModel $read,
+        private readonly StationQueueService $stationQueue,
+        private readonly TailorUiFlag $flag,
     ) {}
 
     // ------------------------------------------------------------------
     // Reads
     // ------------------------------------------------------------------
+
+    /**
+     * One station's whole screen: who I am, what I have moved, the line, and
+     * the queue already grouped and sorted.
+     */
+    public function station(Request $request, string $stageCode): JsonResponse
+    {
+        $payload = $this->stationQueue->forStation($stageCode, $request->user());
+
+        if (!$payload['station']) {
+            return response()->json([
+                'message' => "No station called '{$stageCode}' exists on any production line.",
+                'code'    => 'UNKNOWN_STATION',
+            ], 404);
+        }
+
+        // The client needs to know which screen it is entitled to draw, and the
+        // answer is per user AND per station during the rollout.
+        $payload['ledger_ui'] = $this->flag->enabledFor($request->user(), $stageCode);
+
+        return response()->json($payload);
+    }
 
     /** The whole picture for one order: batches, stages, headline, alerts. */
     public function order(int $orderId): JsonResponse
@@ -93,14 +126,22 @@ class PieceMovementController extends Controller
         return response()->json($movements);
     }
 
-    /** The reason catalogue, grouped by the movement each reason explains. */
-    public function reasons(): JsonResponse
+    /**
+     * The reason catalogue, grouped by the movement each reason explains.
+     * Codes live in data so a supervisor can add one without shipping an app.
+     */
+    public function reasons(Request $request): JsonResponse
     {
+        $reasons = MovementReason::active()
+            ->when(
+                $request->filled('type'),
+                fn ($q) => $q->where('applies_to', strtoupper($request->query('type')))
+            )
+            ->orderBy('applies_to')->orderBy('sort_order')
+            ->get(['code', 'label', 'label_sw', 'applies_to', 'is_defect']);
+
         return response()->json(
-            MovementReason::active()
-                ->orderBy('applies_to')->orderBy('sort_order')
-                ->get(['code', 'label', 'applies_to', 'is_defect'])
-                ->groupBy('applies_to')
+            $request->filled('type') ? $reasons->values() : $reasons->groupBy('applies_to')
         );
     }
 
@@ -141,35 +182,81 @@ class PieceMovementController extends Controller
             reasonCode: $data['reason_code'] ?? null,
             note: $data['note'] ?? null,
             deviceId: $data['device_id'] ?? null,
-        ), $batchId);
+        ), $batchId, $data['client_ref']);
     }
 
-    /** Move pieces: forward, back for rework, to scrap, on hold, or released. */
+    /**
+     * Move pieces: forward, back for rework, to scrap, on hold, or released.
+     *
+     * Stages may be addressed by id or by code. Codes are what the floor screen
+     * and the printed bundle ticket both speak — a tailor's phone should not
+     * have to know a database key to say "hand these to Button Fixing".
+     */
     public function move(Request $request, int $batchId): JsonResponse
     {
         $data = $request->validate([
-            'client_ref'    => 'required|uuid',
-            'from_stage_id' => 'required|integer|exists:production_workflow_stages,id',
-            'to_stage_id'   => 'nullable|integer|exists:production_workflow_stages,id',
-            'quantity'      => 'required|integer|min:1',
-            'type'          => 'required|in:FORWARD,REWORK,SCRAP,HOLD,RELEASE',
-            'reason_code'   => 'nullable|string|exists:movement_reasons,code',
-            'note'          => 'nullable|string|max:500',
-            'device_id'     => 'nullable|string|max:120',
+            'client_ref'      => 'required|uuid',
+            'from_stage_id'   => 'required_without:from_stage_code|nullable|integer|exists:production_workflow_stages,id',
+            'from_stage_code' => 'required_without:from_stage_id|nullable|string|max:60',
+            'to_stage_id'     => 'nullable|integer|exists:production_workflow_stages,id',
+            'to_stage_code'   => 'nullable|string|max:60',
+            'quantity'        => 'required|integer|min:1',
+            'type'            => 'required|in:FORWARD,REWORK,SCRAP,HOLD,RELEASE',
+            'reason_code'     => 'nullable|string|exists:movement_reasons,code',
+            'note'            => 'nullable|string|max:500',
+            'device_id'       => 'nullable|string|max:120',
         ]);
+
+        $batch = ProductionOrderBatch::findOrFail($batchId);
+
+        try {
+            $from = $this->resolveStage($batch, $data['from_stage_id'] ?? null, $data['from_stage_code'] ?? null);
+            $to   = $this->resolveStage($batch, $data['to_stage_id'] ?? null, $data['to_stage_code'] ?? null);
+        } catch (MovementException $e) {
+            return response()->json($e->toArray(), $e->status());
+        }
 
         return $this->attempt(fn () => $this->movements->apply(new MoveCommand(
             clientRef: $data['client_ref'],
             batchId: $batchId,
-            fromStageId: (int) $data['from_stage_id'],
+            fromStageId: $from,
             quantity: (int) $data['quantity'],
             type: $data['type'],
             actor: $request->user(),
-            toStageId: isset($data['to_stage_id']) ? (int) $data['to_stage_id'] : null,
+            toStageId: $to,
             reasonCode: $data['reason_code'] ?? null,
             note: $data['note'] ?? null,
             deviceId: $data['device_id'] ?? null,
-        )), $batchId);
+        )), $batchId, $data['client_ref']);
+    }
+
+    /**
+     * A stage id, from whichever of the two the client sent. Codes are resolved
+     * against the batch's own pinned workflow, so a code can never select a
+     * stage from a line this batch is not running.
+     */
+    private function resolveStage(ProductionOrderBatch $batch, ?int $id, ?string $code): ?int
+    {
+        if ($id !== null) {
+            return $id;
+        }
+
+        if ($code === null || $code === '') {
+            return null;
+        }
+
+        $stage = $this->movements->graphForBatch($batch)->all()
+            ->first(fn ($s) => strcasecmp($s->code, $code) === 0);
+
+        if (!$stage) {
+            throw new MovementException(
+                MovementException::INVALID_TRANSITION,
+                "'{$code}' is not a station on this batch's production line.",
+                ['stage_code' => $code],
+            );
+        }
+
+        return (int) $stage->id;
     }
 
     /** Undo a movement by posting its inverse. The original stays in history. */
@@ -189,7 +276,7 @@ class PieceMovementController extends Controller
             actor: $request->user(),
             note: $data['note'] ?? null,
             deviceId: $data['device_id'] ?? null,
-        ), (int) $original->production_order_batch_id);
+        ), (int) $original->production_order_batch_id, $data['client_ref']);
     }
 
     /**
@@ -218,8 +305,15 @@ class PieceMovementController extends Controller
      * A refused movement is a coded 4xx, not a 500: the request was well-formed
      * and the floor simply said no.
      */
-    private function attempt(callable $work, int $batchId): JsonResponse
+    private function attempt(callable $work, int $batchId, ?string $clientRef = null): JsonResponse
     {
+        // Was this ref already on the ledger before we tried? That is the
+        // difference between "applied now" (201) and "you already sent this"
+        // (200) — the signal an offline client uses to tell a successful flush
+        // from a duplicate it can quietly drop.
+        $replay = $clientRef !== null
+            && PieceMovement::where('client_ref', $clientRef)->exists();
+
         try {
             $movement = $work();
         } catch (MovementException $e) {
@@ -229,7 +323,13 @@ class PieceMovementController extends Controller
         return response()->json([
             'movement'     => $movement,
             'distribution' => $this->distribution($batchId),
-        ], 201);
+            // Undo is a local grace period, not a lock: after it expires the
+            // correction is a supervisor reversal, which the ledger keeps
+            // forever. Sent as an absolute time so a phone with a wrong clock
+            // still counts down against the server's.
+            'undo_until'   => $replay ? null : now()->addSeconds(self::UNDO_SECONDS)->toIso8601String(),
+            'replayed'     => $replay,
+        ], $replay ? 200 : 201);
     }
 
     private function distribution(int $batchId): array

@@ -29,6 +29,7 @@ class ProductionWorkflowStage extends Model
     protected $fillable = [
         'production_workflow_id', 'production_stage_id', 'code', 'name', 'seq',
         'kind', 'wip_limit', 'target_minutes', 'allows_rework', 'default_role', 'color',
+        'icon', 'checklist', 'daily_target',
     ];
 
     protected $casts = [
@@ -36,6 +37,8 @@ class ProductionWorkflowStage extends Model
         'wip_limit'      => 'integer',
         'target_minutes' => 'integer',
         'allows_rework'  => 'boolean',
+        'checklist'      => 'array',
+        'daily_target'   => 'integer',
     ];
 
     public function workflow()

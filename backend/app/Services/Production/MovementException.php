@@ -27,6 +27,12 @@ class MovementException extends RuntimeException
     public const REASON_INVALID = 'REASON_INVALID';
     /** A movement may be reversed at most once. */
     public const ALREADY_REVERSED = 'ALREADY_REVERSED';
+    /**
+     * A legacy client tried to lower a stage counter. Going backwards is a
+     * correction, not progress, and corrections are supervisor reversals — the
+     * ledger has no way to un-move pieces that have already gone forward.
+     */
+    public const REQUIRES_REVERSAL = 'REQUIRES_REVERSAL';
     /** Finished and scrapped pieces do not move again. */
     public const TERMINAL_STAGE = 'TERMINAL_STAGE';
     /** End of the line, or no destination could be resolved. */
@@ -61,7 +67,11 @@ class MovementException extends RuntimeException
             self::NOT_AUTHORISED    => 403,
             self::BATCH_NOT_FOUND,
             self::MOVEMENT_NOT_FOUND => 404,
-            self::ALREADY_REVERSED  => 409,
+            // Conflicts: the request was valid, the world moved underneath it.
+            // The client corrects itself from `detail` rather than refetching.
+            self::INSUFFICIENT_QUANTITY,
+            self::ALREADY_REVERSED,
+            self::REQUIRES_REVERSAL => 409,
             default                 => 422,
         };
     }

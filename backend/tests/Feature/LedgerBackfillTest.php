@@ -93,10 +93,12 @@ class LedgerBackfillTest extends TestCase
 
         app(LedgerBackfiller::class)->run();
 
-        // Four were never cut; six were cut but only two stitched, so four
-        // stand at Stitching; those two stand at QC.
+        // Work has started, so every piece has left the queue. Six were cut but
+        // only two stitched, so four stand at Stitching and those two at QC —
+        // and the four not yet cut stand at Cutting, which is where the tailor
+        // holding them will look for them.
         $this->assertSame(
-            ['Not Cut' => 4, 'Cutting' => 0, 'Stitching' => 4, 'QC' => 2, 'Finished' => 0, 'Scrapped' => 0],
+            ['Not Cut' => 0, 'Cutting' => 4, 'Stitching' => 4, 'QC' => 2, 'Finished' => 0, 'Scrapped' => 0],
             $this->positions($order),
         );
 
@@ -104,6 +106,33 @@ class LedgerBackfillTest extends TestCase
         $this->assertSame(6, $this->derivedPassed($order, 'Cutting'));
         $this->assertSame(2, $this->derivedPassed($order, 'Stitching'));
         $this->assertSame(0, $this->derivedPassed($order, 'QC'));
+    }
+
+    /**
+     * The other half of the ambiguity: an order nobody has opened must not be
+     * reported as cutting in progress.
+     */
+    public function test_an_untouched_order_keeps_its_pieces_in_the_queue(): void
+    {
+        $order = $this->order(10, []);
+        $order->update(['status' => 'pending', 'started_at' => null]);
+
+        app(LedgerBackfiller::class)->run();
+
+        $this->assertSame(
+            ['Not Cut' => 10, 'Cutting' => 0, 'Stitching' => 0, 'QC' => 0, 'Finished' => 0, 'Scrapped' => 0],
+            $this->positions($order),
+        );
+    }
+
+    public function test_the_cutover_diff_is_empty_after_a_clean_backfill(): void
+    {
+        $this->order(10, ['cutting-bf' => 6, 'stitching-bf' => 2, 'qc-bf' => 0]);
+
+        $backfiller = app(LedgerBackfiller::class);
+        $backfiller->run();
+
+        $this->assertSame([], $backfiller->diff());
     }
 
     public function test_every_backfilled_batch_balances(): void

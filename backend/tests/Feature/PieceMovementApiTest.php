@@ -120,7 +120,11 @@ class PieceMovementApiTest extends TestCase
         $response->assertJsonPath('distribution.snapshot.in_production', 8);
     }
 
-    public function test_an_impossible_move_is_a_coded_422_not_a_server_error(): void
+    /**
+     * A refused move is a conflict, not a server error — and it carries the real
+     * number so the client corrects itself without a refetch.
+     */
+    public function test_an_impossible_move_is_a_conflict_carrying_the_available_quantity(): void
     {
         $this->supervisor();
         $batch = $this->batch(20);
@@ -132,8 +136,10 @@ class PieceMovementApiTest extends TestCase
             'quantity'      => 50,
             'type'          => 'FORWARD',
         ])
-            ->assertStatus(422)
-            ->assertJsonPath('code', 'INSUFFICIENT_QUANTITY');
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'INSUFFICIENT_QUANTITY')
+            ->assertJsonPath('detail.available', 20)
+            ->assertJsonPath('detail.requested', 50);
     }
 
     public function test_a_replayed_client_ref_does_not_move_pieces_twice(): void
@@ -149,9 +155,17 @@ class PieceMovementApiTest extends TestCase
             'type'          => 'FORWARD',
         ];
 
-        $this->postJson("/api/v1/admin/production-movement/batches/{$batch->id}/movements", $payload)->assertCreated();
-        $second = $this->postJson("/api/v1/admin/production-movement/batches/{$batch->id}/movements", $payload)->assertCreated();
+        $first = $this->postJson("/api/v1/admin/production-movement/batches/{$batch->id}/movements", $payload)
+            ->assertCreated();
 
+        // A replay is 200, not 201 — the signal an offline client uses to tell
+        // a successful flush from a duplicate it can quietly drop.
+        $second = $this->postJson("/api/v1/admin/production-movement/batches/{$batch->id}/movements", $payload)
+            ->assertOk();
+
+        $first->assertJsonPath('replayed', false);
+        $second->assertJsonPath('replayed', true);
+        $second->assertJsonPath('undo_until', null);
         $second->assertJsonPath('distribution.snapshot.in_production', 5);
         $this->assertSame(1, PieceMovement::where('client_ref', $payload['client_ref'])->count());
     }

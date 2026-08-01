@@ -39,6 +39,10 @@ class BackfillProductionLedger extends Command
             return self::FAILURE;
         }
 
+        // The cutover gate. Run before the rollback so a dry run still reports
+        // truthfully on what the backfill would have produced.
+        $diff = $backfiller->diff();
+
         if ($dry) {
             DB::rollBack();
             $this->warn('Dry run — nothing was kept.');
@@ -48,6 +52,20 @@ class BackfillProductionLedger extends Command
             ['Orders', 'Batches', 'Movements', 'Skipped'],
             [[$stats['orders'], $stats['batches'], $stats['movements'], $stats['skipped']]],
         );
+
+        if ($diff) {
+            $this->error(count($diff).' stage counter(s) disagree with the ledger:');
+            $this->table(
+                ['Batch', 'Order', 'Stage', 'Counter says', 'Ledger says', 'Diff'],
+                array_map(fn ($d) => array_values($d), $diff),
+            );
+            $this->line('Investigate each by hand. Do not force-match — a counter and a');
+            $this->line('ledger disagreeing means one of them is wrong about where garments are.');
+
+            return self::FAILURE;
+        }
+
+        $this->info('Counters and ledger agree on every backfilled batch.');
 
         return self::SUCCESS;
     }

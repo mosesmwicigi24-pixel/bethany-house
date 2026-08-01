@@ -45,6 +45,16 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('notifications:overdue-production')->dailyAt('08:00');
         $schedule->command('logs:purge-old')->weekly();
 
+        // Piece-movement conservation. Every batch must still hold exactly the
+        // pieces that were loaded onto it; a row that does not balance is an
+        // engine bug, not a business condition, so this runs like a failing
+        // test rather than a report. Deep mode also replays every ledger and
+        // compares, which catches a projection that is self-consistent and
+        // still wrong — the failure the balance check alone cannot see.
+        $schedule->command('production:check-integrity --deep')
+            ->dailyAt('03:00')
+            ->withoutOverlapping();
+
         // Scheduled database backups — runs every minute, the command itself
         // checks the backup_schedules config row and only actually performs a
         // backup once per configured slot (time of day + frequency), so this

@@ -171,7 +171,7 @@ class LedgerBackfiller
         }
 
         $passed  = $this->passedByStage($line, $tasks, $batch, $batchQty, $isOnlyBatch);
-        $moves   = $this->boundaryCrossings($line, $passed);
+        $moves   = $this->boundaryCrossings($line, $passed, $this->hasStarted($order, $tasks), $batchQty);
         $at      = Carbon::parse($order->started_at ?? $order->created_at ?? now());
         $written = 0;
 
@@ -258,22 +258,45 @@ class LedgerBackfiller
      * How many pieces have crossed each boundary.
      *
      * Leaving a working stage is what its counter records, so the boundary out
-     * of stage i carries passed(i). The queue is the exception: it has no
-     * counter, and a piece leaves it exactly when work begins — observable in
-     * legacy terms only as having passed the first working stage.
+     * of stage i carries passed(i).
+     *
+     * The queue is the exception, and it is the one genuinely ambiguous call in
+     * the whole migration: a single counter only ever recorded a stage being
+     * FINISHED, never started, so legacy data cannot separate "not yet cut"
+     * from "on the cutting table right now".
+     *
+     * Resolve it by whether the order has started at all:
+     *
+     *   started  → every piece has left the queue, so pieces not yet past the
+     *              first station are standing AT it. This is what the floor
+     *              means by a stage task: the work is allocated there.
+     *   untouched → nothing has left the queue, and claiming otherwise would
+     *              report cutting in progress on an order nobody has opened.
+     *
+     * The distinction is not cosmetic. Park an in-flight order's pieces in the
+     * queue and every tailor's first act on day one is a pointless extra move
+     * to pull work she is already holding — and the legacy translation layer
+     * (§0.3) would find its own stage empty and fail. Either reading is
+     * lossless for the counters, because pieces standing AT a stage have not
+     * passed it under either rule.
      *
      * @return list<array{from:int,to:int,qty:int}>
      */
-    private function boundaryCrossings(Collection $line, array $passed): array
-    {
+    private function boundaryCrossings(
+        Collection $line,
+        array $passed,
+        bool $hasStarted,
+        int $batchQty,
+    ): array {
         $moves = [];
 
         for ($i = 0; $i < $line->count() - 1; $i++) {
             $upstream   = $line[$i];
             $downstream = $line[$i + 1];
 
-            $counterStage = $i === 0 ? $line[1] : $upstream;
-            $crossing     = $passed[$counterStage->id] ?? 0;
+            $crossing = $i === 0
+                ? ($hasStarted ? $batchQty : ($passed[$line[1]->id] ?? 0))
+                : ($passed[$upstream->id] ?? 0);
 
             if ($crossing > 0) {
                 $moves[] = ['from' => $upstream->id, 'to' => $downstream->id, 'qty' => $crossing];
@@ -281,6 +304,26 @@ class LedgerBackfiller
         }
 
         return $moves;
+    }
+
+    /**
+     * Has anyone touched this order yet?
+     *
+     * Deliberately generous — any sign of work counts. A false negative parks
+     * live pieces in the queue and makes the floor do an extra move; a false
+     * positive only claims that an untouched order's pieces are standing at the
+     * first station, which is where they would go on the very next tap anyway.
+     */
+    private function hasStarted(ProductionOrder $order, Collection $tasks): bool
+    {
+        if ($order->started_at !== null) {
+            return true;
+        }
+
+        return $tasks->contains(
+            fn ($task) => (int) $task->quantity_done > 0
+                || !in_array($task->status, ['pending', 'cancelled'], true)
+        );
     }
 
     /**
@@ -312,6 +355,91 @@ class LedgerBackfiller
     private function write(array $row): void
     {
         DB::table('piece_movements')->insert($row + ['client_ref' => (string) Str::uuid()]);
+    }
+
+    /**
+     * The cutover gate: what the floor's counters say, against what the ledger
+     * would derive. Zero non-zero rows is the condition for switching the write
+     * path over; anything else is investigated by hand and never force-matched,
+     * because a counter and a ledger disagreeing means one of them is lying
+     * about where somebody's garments are.
+     *
+     * @return list<array{batch_id:int, order_number:string, stage:string, legacy:int, derived:int, diff:int}>
+     */
+    public function diff(): array
+    {
+        $rows = DB::table('v_batch_stage_distribution as d')
+            ->join('production_order_batches as b', 'b.id', '=', 'd.batch_id')
+            ->join('production_orders as o', 'o.id', '=', 'd.production_order_id')
+            ->whereExists(fn ($q) => $q->select(DB::raw(1))
+                ->from('piece_movements as m')
+                ->whereColumn('m.production_order_batch_id', 'd.batch_id'))
+            ->orderBy('d.batch_id')->orderBy('d.seq')
+            ->get([
+                'd.batch_id', 'd.production_order_id', 'd.stage_id', 'd.production_stage_id',
+                'd.stage_name', 'd.seq', 'd.kind', 'd.qty_total', 'o.order_number',
+            ])
+            ->groupBy('batch_id');
+
+        $out = [];
+
+        foreach ($rows as $batchId => $stages) {
+            $line = $stages->where('kind', '!=', 'SCRAP')->sortBy('seq')->values();
+
+            // Only one batch on the order means a bare task total refers to it
+            // unambiguously; with several it cannot be apportioned, so the
+            // per-batch row is the only honest comparison.
+            $batchCount = DB::table('production_order_batches')
+                ->where('production_order_id', $stages->first()->production_order_id)
+                ->count();
+
+            foreach ($line as $i => $stage) {
+                if (!$stage->production_stage_id) {
+                    continue;   // terminals have no task standing over them
+                }
+
+                $task = DB::table('production_tasks')
+                    ->where('production_order_id', $stage->production_order_id)
+                    ->where('production_stage_id', $stage->production_stage_id)
+                    ->first();
+
+                if (!$task) {
+                    continue;
+                }
+
+                $derived = (int) $line->slice($i + 1)->sum('qty_total');
+
+                $legacy = DB::table('production_task_batch_progress')
+                    ->where('production_task_id', $task->id)
+                    ->where('production_order_batch_id', $batchId)
+                    ->value('quantity_done');
+
+                $legacy = $legacy !== null
+                    ? (int) $legacy
+                    : ($batchCount === 1 ? (int) $task->quantity_done : $derived);
+
+                // A satisfied stage passed everything by definition, which is
+                // how the counters were always read.
+                if (in_array($task->status, ['completed', 'skipped'], true)) {
+                    $legacy = (int) $stages->first()->qty_total >= 0
+                        ? (int) DB::table('production_order_batches')->where('id', $batchId)->value('quantity')
+                        : $legacy;
+                }
+
+                if ($legacy !== $derived) {
+                    $out[] = [
+                        'batch_id'     => (int) $batchId,
+                        'order_number' => $stage->order_number,
+                        'stage'        => $stage->stage_name,
+                        'legacy'       => $legacy,
+                        'derived'      => $derived,
+                        'diff'         => $derived - $legacy,
+                    ];
+                }
+            }
+        }
+
+        return $out;
     }
 
     /** A backfill that leaves the floor unbalanced is worse than one that fails. */

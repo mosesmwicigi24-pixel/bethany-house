@@ -76,8 +76,30 @@ class MovementService
      */
     public function apply(MoveCommand $cmd): PieceMovement
     {
-        $this->assertQuantity($cmd->quantity);
         $this->assertAuthorised($cmd->actor, $cmd->type);
+
+        return $this->applyPreAuthorised($cmd);
+    }
+
+    /**
+     * Apply a movement whose actor the CALLER has already authorised by its own
+     * rule.
+     *
+     * Exactly one caller: the legacy-progress translator. The old tailor
+     * endpoint authorises by "you are assigned to this task, or you are an
+     * admin", which is a different and older rule than the movement
+     * permissions. Re-checking here would quietly revoke the ability to record
+     * progress from anyone whose role predates those permissions — a live
+     * tailor losing her screen mid-shift because of a migration is a worse
+     * outcome than the one this check defends against, and the action was
+     * already authorised a stack frame earlier.
+     *
+     * Not part of the HTTP surface. Any new caller needs a good answer to
+     * "who authorised this, and where".
+     */
+    public function applyPreAuthorised(MoveCommand $cmd): PieceMovement
+    {
+        $this->assertQuantity($cmd->quantity);
 
         // Fast path: this ref was already applied, so there is nothing to do.
         if ($existing = $this->findByClientRef($cmd->clientRef)) {
@@ -395,10 +417,23 @@ class MovementService
         );
 
         if ($affected === 0) {
+            // Tell the client exactly what is there. A worker who taps "move 8"
+            // a second after somebody else took them needs "Cutting now has 2",
+            // not a refetch and a guess — and the read is only paid for on the
+            // failure path.
+            $available = (int) DB::table('batch_stage_states')
+                ->where('production_order_batch_id', $batchId)
+                ->where('production_workflow_stage_id', $stageId)
+                ->value($col);
+
             throw new MovementException(
                 MovementException::INSUFFICIENT_QUANTITY,
                 $message ?? "{$stageName} does not have {$quantity} piece(s) available to move.",
-                ['stage_id' => $stageId, 'requested' => $quantity],
+                [
+                    'stage_id'  => $stageId,
+                    'requested' => $quantity,
+                    'available' => $available,
+                ],
             );
         }
     }
