@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\{
     InvoiceController,
     InventoryController,
     OutletController,
+    PieceMovementController,
     PosController,
     ProductionController,
     ProductSerialController,
@@ -1042,6 +1043,35 @@ Route::prefix('v1')->group(function () {
                         ->middleware('permission:production.manage_assignees,sanctum');
                     Route::delete('/{id}',                          [ProductionController::class, 'deleteAllocation'])
                         ->middleware('permission:production.manage_assignees,sanctum');
+                });
+
+                // ── Piece movement — where the pieces actually are ──────────
+                // Reads sit under the outer production.view. Writes are gated
+                // per movement type: anyone on the floor moves work forward and
+                // can stop it, but sending work backwards, writing it off,
+                // releasing someone else's hold and rewriting history each
+                // distort yield reporting, so each needs its own grant.
+                Route::prefix('production-movement')->group(function () {
+                    Route::get('/reasons',                 [PieceMovementController::class, 'reasons']);
+                    Route::get('/orders/{id}',             [PieceMovementController::class, 'order']);
+                    Route::get('/orders/{id}/defects',     [PieceMovementController::class, 'defects']);
+                    Route::get('/batches/{batch}/history', [PieceMovementController::class, 'history']);
+                    Route::get('/batches/{batch}/move-sheet/{stage}', [PieceMovementController::class, 'moveSheet']);
+
+                    // One endpoint for FORWARD/REWORK/SCRAP/HOLD/RELEASE: the
+                    // engine authorises by movement type, so splitting them into
+                    // separate routes would only duplicate that rule in the
+                    // router where it could drift out of step.
+                    Route::post('/batches/{batch}/movements', [PieceMovementController::class, 'move']);
+                    Route::post('/batches/{batch}/intake',    [PieceMovementController::class, 'intake'])
+                        ->middleware('permission:production.load_pieces,sanctum');
+                    Route::post('/movements/{id}/reverse',    [PieceMovementController::class, 'reverse'])
+                        ->middleware('permission:production.reverse_movement,sanctum');
+
+                    // Replaying the ledger can only restore the projection, but
+                    // it is still an operational act rather than a routine one.
+                    Route::post('/batches/{batch}/rebuild',   [PieceMovementController::class, 'rebuild'])
+                        ->middleware('permission:production.configure_auto_assignees,sanctum');
                 });
 
                 // reorder must be declared before apiResource so Laravel does not
