@@ -22,10 +22,12 @@ export type Lang = 'en' | 'sw'
 
 type Vars = Record<string, string | number>
 
+// Deliberately a split/join rather than `replaceAll`: the build targets a
+// lib below ES2021, and a copy helper is not a reason to move it.
 const fill = (template: string, vars?: Vars) =>
   vars
     ? Object.entries(vars).reduce(
-        (s, [k, v]) => s.replaceAll(`{${k}}`, String(v)),
+        (s, [k, v]) => s.split(`{${k}}`).join(String(v)),
         template,
       )
     : template
@@ -154,12 +156,28 @@ export function makeCopy(lang: Lang) {
 
 export type Copy = ReturnType<typeof makeCopy>
 
-/** Reason labels live in data; pick the right column for the reader. */
-export const reasonLabel = (
-  reason: { label?: string | null; label_sw?: string | null } | null | undefined,
-  lang: Lang,
-): string | null =>
-  (lang === 'sw' ? reason?.label_sw : undefined) ?? reason?.label ?? null
+/**
+ * Reason labels live in data; pick the right column for the reader.
+ *
+ * Accepts both shapes the API returns — a reason row (`label`/`label_sw`) and
+ * a reason embedded in a job (`reason_label`/`reason_sw`) — so a caller never
+ * has to reshape one just to render it.
+ */
+export interface Translatable {
+  label?: string | null
+  label_sw?: string | null
+  reason_label?: string | null
+  reason_sw?: string | null
+}
+
+export const reasonLabel = (reason: Translatable | null | undefined, lang: Lang): string | null => {
+  if (!reason) return null
+
+  const swahili = reason.label_sw ?? reason.reason_sw
+  const english = reason.label ?? reason.reason_label
+
+  return (lang === 'sw' ? swahili : null) ?? english ?? null
+}
 
 /**
  * Due dates read as urgency, not as a calendar. "due tomorrow" is actionable;

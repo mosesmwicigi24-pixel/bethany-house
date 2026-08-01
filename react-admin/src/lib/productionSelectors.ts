@@ -168,6 +168,33 @@ export interface MoveSheet {
 
 export const DEFAULT_CHIPS = [1, 5, 10];
 
+/**
+ * The quantity chips a station may offer, and the "All n" tap workers actually
+ * want.
+ *
+ * Shared deliberately. The quantity a chip offers and the quantity the server
+ * accepts have to be decided by one piece of code or they drift, and the way
+ * that drift shows up is a worker tapping a live button and being told no.
+ * A chip above what is available is rendered disabled — never enabled-then-
+ * rejected, which is how impossible totals get typed in.
+ */
+export function moveChips(
+  available: number,
+  presets: number[] = DEFAULT_CHIPS,
+  blocked = false,
+): { chips: MoveChip[]; allChip: MoveChip | null } {
+  const chips: MoveChip[] = presets.map(v => ({
+    value: v, enabled: !blocked && v <= available, label: String(v),
+  }));
+
+  const allChip: MoveChip | null =
+    !blocked && available > 0 && !presets.includes(available)
+      ? { value: available, enabled: true, label: `All ${available}` }
+      : null;
+
+  return { chips, allChip };
+}
+
 export function buildMoveSheet(
   stages: StageRow[], stageId: number, presets: number[] = DEFAULT_CHIPS,
 ): MoveSheet {
@@ -187,16 +214,9 @@ export function buildMoveSheet(
     blockedReason = `All ${held} piece(s) here are on hold. Release them first.`;
   else if (available === 0) blockedReason = 'Nothing at this stage yet.';
 
-  // Never offer a chip the worker cannot honour. A live 10 on a stage holding 6
-  // is how impossible totals get typed in.
-  const chips: MoveChip[] = presets.map(v => ({
-    value: v, enabled: !blockedReason && v <= available, label: String(v),
-  }));
-
-  const allChip: MoveChip | null =
-    !blockedReason && available > 0 && !presets.includes(available)
-      ? { value: available, enabled: true, label: `All ${available}` }
-      : null;
+  // Never offer a chip the worker cannot honour — same rule, same code, as the
+  // station screen uses.
+  const { chips, allChip } = moveChips(available, presets, Boolean(blockedReason));
 
   return {
     stageId,
