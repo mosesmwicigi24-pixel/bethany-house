@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 /**
  * TaxRateSelector.tsx
  *
@@ -63,9 +64,9 @@ export default function TaxRateSelector({
         return (
             <div className="text-xs text-surface-400 bg-surface-50 rounded-lg px-3 py-2">
                 No active tax rates configured.{" "}
-                <a href="/settings/taxes" className="text-brand-500 hover:underline">
+                <Link to="/settings/taxes" className="text-brand-500 hover:underline">
                     Set up tax rates →
-                </a>
+                </Link>
             </div>
         );
     }
