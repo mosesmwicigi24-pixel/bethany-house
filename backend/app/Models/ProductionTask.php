@@ -24,11 +24,14 @@ class ProductionTask extends Model
         'started_at',
         'completed_at',
         'notes',
+        'blocked_reason',
+        'blocked_at',
     ];
 
     protected $casts = [
         'sequence' => 'integer',
         'quantity_done' => 'integer',
+        'blocked_at' => 'datetime',
         'concurrent_allowed' => 'boolean',
         'unlocked_at' => 'datetime',
         'estimated_hours' => 'decimal:2',

@@ -22,6 +22,8 @@ use App\Models\User;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
 use App\Services\IntelligenceService;
+use App\Services\Production\LegacyProgressTranslator;
+use App\Services\Production\MovementException;
 use App\Services\ProductSerialService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -1218,7 +1220,14 @@ class ProductionController extends Controller
         // lifecycle — keeps working on the total untouched.
         $batches = $order->batches;
         if ($batches->isNotEmpty()) {
-            $batch = $batches->firstWhere('id', (int) ($validated['batch_id'] ?? 0));
+            // One batch needs no choosing. The ledger backfill gives every order
+            // a batch so its pieces have somewhere to stand, which would
+            // otherwise start demanding a batch_id from clients that have never
+            // sent one — a colourway picker on an order with a single colourway.
+            $batch = $batches->count() === 1
+                ? $batches->first()
+                : $batches->firstWhere('id', (int) ($validated['batch_id'] ?? 0));
+
             if (!$batch) {
                 return response()->json(['message' => 'This order counts per batch - pick which batch you are recording.'], 422);
             }
@@ -1403,6 +1412,36 @@ class ProductionController extends Controller
             return response()->json([
                 'message' => "\"{$batch->label}\" is a batch of {$batchQty} - you cannot record more than that.",
             ], 422);
+        }
+
+        // ── Ledger-backed batches: translate, never write the counter ────────
+        // Once a batch is on the piece-movement ledger the counter is a derived
+        // mirror, and writing it here would put the two out of step — the one
+        // failure mode that silently corrupts where garments are. So the tailor's
+        // absolute number becomes the transfer it always described, and the
+        // mirror is recomputed from the ledger inside that same transaction.
+        //
+        // Old clients keep working unchanged through the rollout; they simply
+        // stop being the thing that decides the number.
+        $translator = app(LegacyProgressTranslator::class);
+
+        if ($translator->isOnLedger($batch->id)) {
+            try {
+                $result = $translator->translate($task, $batch, $newQd, $request->user());
+            } catch (MovementException $e) {
+                return response()->json($e->toArray(), $e->status());
+            }
+
+            $task->refresh();
+
+            return response()->json([
+                'message' => $result['moved'] === 0
+                    ? "\"{$batch->label}\" is already at {$newQd}."
+                    : "{$result['moved']} moved to {$result['to']} - \"{$batch->label}\" {$newQd} of {$batchQty}.",
+                'moved'   => $result['moved'],
+                'task'    => $task->fresh(['stage', 'batchProgress', 'productionOrder:id,order_number,status,quantity']),
+                'batch'   => ['id' => $batch->id, 'label' => $batch->label, 'quantity' => $batchQty, 'quantity_done' => $newQd],
+            ]);
         }
 
         $siblings = ProductionTask::where('production_order_id', $order->id)

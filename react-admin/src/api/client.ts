@@ -66,6 +66,20 @@ function createApiClient(): AxiosInstance {
 
             const { status, data } = error.response;
 
+            // Carry the machine-readable failure through, where one exists.
+            // Additive: `message` and `errors` keep their existing shape, so no
+            // caller changes, but endpoints that name their failures (the
+            // piece-movement API) stay actionable instead of collapsing into a
+            // sentence a client cannot branch on.
+            const coded = {
+                code: typeof data?.code === "string" ? data.code : undefined,
+                detail:
+                    data?.detail && typeof data.detail === "object"
+                        ? data.detail
+                        : undefined,
+                status,
+            };
+
             if (status === 401) {
                 tokenStorage.remove();
                 // Redirect to login without hard reload to preserve SPA history
@@ -81,6 +95,7 @@ function createApiClient(): AxiosInstance {
                     message:
                         "You do not have permission to perform this action.",
                     errors: {},
+                    ...coded,
                 } satisfies ApiError);
             }
 
@@ -88,6 +103,7 @@ function createApiClient(): AxiosInstance {
                 return Promise.reject({
                     message: data.message ?? "Validation failed.",
                     errors: data.errors,
+                    ...coded,
                 } satisfies ApiError);
             }
 
@@ -102,6 +118,7 @@ function createApiClient(): AxiosInstance {
             return Promise.reject({
                 message: data?.message ?? "An unexpected error occurred.",
                 errors: data?.errors ?? {},
+                ...coded,
             } satisfies ApiError);
         },
     );
