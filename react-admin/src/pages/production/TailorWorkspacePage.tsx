@@ -789,8 +789,15 @@ function FocusCard({
         ? "bg-warning-light/40"
         : "bg-white";
 
-    const hasMeasurements =
-        order?.measurements && Object.keys(order.measurements).length > 0;
+    // Gender is an identity fact, not a body measurement — it belongs beside the
+    // garment name, and repeating it as a measurement tile wasted a slot in the
+    // grid. Pulled out here and excluded from the list below.
+    const genderEntry = Object.entries(order?.measurements ?? {}).find(
+        ([k, v]) => k.toLowerCase().replace(/[^a-z]/g, "") === "gender" && v);
+    const gender = genderEntry?.[1];
+    const bodyMeasurements = Object.entries(order?.measurements ?? {}).filter(
+        ([k]) => k.toLowerCase().replace(/[^a-z]/g, "") !== "gender");
+    const hasMeasurements = bodyMeasurements.length > 0;
 
     return (
         <div className="space-y-3">
@@ -812,18 +819,29 @@ function FocusCard({
                     )}
 
                     <div className="flex-1 min-w-0">
-                        <p className="font-bold text-surface-900 text-base leading-snug truncate">
-                            {group.productName}
-                        </p>
+                        {/* WHOSE it is leads when there is a customer — that is the
+                            question the floor asks first. The garment drops to a
+                            supporting line beneath. Stock orders have no customer,
+                            so there the garment stays the headline. */}
+                        {group.customerName ? (
+                            <>
+                                <p className="font-bold text-surface-900 text-base leading-snug truncate">
+                                    {group.customerName}
+                                </p>
+                                <p className="text-[13px] font-medium text-surface-600 leading-snug truncate">
+                                    {group.productName}
+                                    {gender && <span className="text-surface-400"> · {gender}</span>}
+                                </p>
+                            </>
+                        ) : (
+                            <p className="font-bold text-surface-900 text-base leading-snug truncate">
+                                {group.productName}
+                                {gender && <span className="text-surface-400 font-medium"> · {gender}</span>}
+                            </p>
+                        )}
                         <p className="font-mono text-2xs text-surface-400 mt-0.5">
                             {group.orderNumber}
                         </p>
-                        {group.customerName && (
-                            <p className="text-2xs text-surface-400 mt-0.5">
-                                <span className="text-surface-300">for</span>{" "}
-                                {group.customerName}
-                            </p>
-                        )}
                         <div className="flex items-center gap-2 flex-wrap mt-1.5">
                             <PriorityBadge priority={group.priority} />
                             <DueBadge date={group.dueDate} />
@@ -868,22 +886,28 @@ function FocusCard({
                             </svg>
                             Measurements
                         </p>
-                        <div className="grid grid-cols-3 gap-1.5">
-                            {Object.entries(order!.measurements!).map(
-                                ([k, v]) => (
+                        {/* ONE card, not one per measurement. Nine bordered tiles
+                            each stacking label over value burned roughly 220px of
+                            vertical space to carry nine short numbers. A single
+                            panel with label-left / value-right rows says the same
+                            thing in about a third of the height, and the values
+                            still line up in scannable columns. */}
+                        <div className="bg-white/80 border border-line rounded-xl px-3 py-2">
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-0.5">
+                                {bodyMeasurements.map(([k, v]) => (
                                     <div
                                         key={k}
-                                        className="bg-white/80 border border-line rounded-xl px-2 py-2 flex flex-col gap-0.5"
+                                        className="flex items-baseline justify-between gap-2 min-w-0 py-0.5"
                                     >
-                                        <span className="text-2xs text-surface-400 truncate">
+                                        <span className="text-2xs text-surface-500 truncate">
                                             {k}
                                         </span>
-                                        <span className="text-base font-bold text-surface-900 leading-none">
+                                        <span className="text-[13px] font-bold text-surface-900 tabular-nums shrink-0">
                                             {v}
                                         </span>
                                     </div>
-                                )
-                            )}
+                                ))}
+                            </div>
                         </div>
                     </div>
                 )}
@@ -932,35 +956,41 @@ function FocusCard({
                             <div
                                 key={task.id}
                                 className={clsx(
-                                    "flex items-center gap-3 px-3 py-2.5 transition-colors",
+                                    // Row content WRAPS. It used to be one rigid
+                                    // non-wrapping flex, so on a batched order the
+                                    // "0/40 +1 +5 +10 −1" stepper simply ran past
+                                    // the right edge of the card and was
+                                    // unreachable. Now it drops to a second line.
+                                    "flex items-center gap-2 flex-wrap px-3 py-2 transition-colors",
                                     isActive && !isDone
                                         ? "bg-brand-50/60"
                                         : ""
                                 )}
                             >
-                                {/* Stage status icon */}
+                                {/* Stage status icon — 20px, was 24px */}
                                 {isDone ? (
-                                    <div className="w-6 h-6 rounded-full bg-success-light border border-success flex items-center justify-center shrink-0">
-                                        <svg className="w-3 h-3 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                    <div className="w-5 h-5 rounded-full bg-success-light border border-success flex items-center justify-center shrink-0">
+                                        <svg className="w-2.5 h-2.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                                             <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                                         </svg>
                                     </div>
                                 ) : isInProgress ? (
-                                    <div className="w-6 h-6 rounded-full border-2 border-brand-500 bg-brand-50 flex items-center justify-center shrink-0">
-                                        <div className="w-2 h-2 rounded-full bg-brand-500 animate-pulse" />
+                                    <div className="w-5 h-5 rounded-full border-2 border-brand-500 bg-brand-50 flex items-center justify-center shrink-0">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-pulse" />
                                     </div>
                                 ) : isPaused ? (
-                                    <div className="w-6 h-6 rounded-full border-2 border-warning bg-warning-light/40 flex items-center justify-center shrink-0">
-                                        <div className="w-2 h-2 rounded-full bg-warning" />
+                                    <div className="w-5 h-5 rounded-full border-2 border-warning bg-warning-light/40 flex items-center justify-center shrink-0">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-warning" />
                                     </div>
                                 ) : (
-                                    <div className="w-6 h-6 rounded-full border-2 border-surface-200 bg-surface-50 shrink-0" />
+                                    <div className="w-5 h-5 rounded-full border-2 border-surface-200 bg-surface-50 shrink-0" />
                                 )}
 
-                                {/* Stage name */}
+                                {/* Stage name — min-w-0 so it yields space to the
+                                    badge instead of forcing it off the edge. */}
                                 <span
                                     className={clsx(
-                                        "flex-1 text-sm",
+                                        "flex-1 min-w-0 truncate text-[13px]",
                                         isDone
                                             ? "line-through text-surface-300"
                                             : isActive
@@ -973,11 +1003,11 @@ function FocusCard({
 
                                 {/* Locked: say why, instead of silently hiding Start */}
                                 {isBlocked && !isDone && !isInProgress && (
-                                    <span className="flex items-center gap-1 text-2xs font-semibold text-surface-400 bg-surface-100 border border-surface-200 rounded-full px-2 py-1 shrink-0">
-                                        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                    <span className="flex items-center gap-1 min-w-0 text-2xs font-semibold text-surface-500 bg-surface-100 border border-surface-200 rounded-full px-1.5 py-0.5 shrink">
+                                        <svg className="w-2.5 h-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                             <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
                                         </svg>
-                                        Waiting on {task.blocked_by_stage}
+                                        <span className="truncate">Waiting on {task.blocked_by_stage}</span>
                                     </span>
                                 )}
 
@@ -991,7 +1021,7 @@ function FocusCard({
                                                     onAction(task, "start");
                                                 }}
                                                 disabled={isActing}
-                                                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-brand-500 text-white text-xs font-bold active:bg-brand-600 transition-colors disabled:opacity-50"
+                                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-brand-500 text-white text-[11px] font-bold active:bg-brand-600 transition-colors disabled:opacity-50"
                                             >
                                                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
@@ -1026,7 +1056,7 @@ function FocusCard({
                                                                 return (
                                                                     <button key={b.id} onClick={() => setActiveBatchId(b.id)}
                                                                         className={clsx(
-                                                                            "text-2xs font-bold px-2 py-1 rounded-full border transition-colors",
+                                                                            "text-2xs font-bold px-1.5 py-0.5 rounded-full border transition-colors",
                                                                             on ? "bg-brand-600 text-white border-brand-600"
                                                                                : full ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                                                                                : "bg-white text-surface-600 border-surface-200",
@@ -1037,7 +1067,7 @@ function FocusCard({
                                                             })}
                                                         </div>
                                                     )}
-                                                    <div className="flex items-center gap-1.5">
+                                                    <div className="flex items-center gap-1 flex-wrap">
                                                         <span className="text-xs font-bold tabular-nums text-surface-700">
                                                             {done}<span className="text-surface-400 font-medium">/{cap}</span>
                                                             {batch && (
@@ -1050,7 +1080,7 @@ function FocusCard({
                                                             <button key={step}
                                                                 onClick={() => onProgress(task, Math.min(cap, done + step), batch?.id)}
                                                                 disabled={isActing || done >= cap}
-                                                                className="px-2 py-1.5 rounded-lg bg-brand-50 border border-brand-200 text-brand-700 text-xs font-bold active:bg-brand-100 transition-colors disabled:opacity-40">
+                                                                className="px-1.5 py-1 rounded-md bg-brand-50 border border-brand-200 text-brand-700 text-[11px] font-bold active:bg-brand-100 transition-colors disabled:opacity-40">
                                                                 +{step}
                                                             </button>
                                                         ))}
@@ -1058,7 +1088,7 @@ function FocusCard({
                                                             onClick={() => onProgress(task, Math.max(0, done - 1), batch?.id)}
                                                             disabled={isActing || done <= 0}
                                                             title="Correct the count down by one"
-                                                            className="px-2 py-1.5 rounded-lg bg-surface-100 border border-surface-200 text-surface-500 text-xs font-bold active:bg-surface-200 transition-colors disabled:opacity-40">
+                                                            className="px-1.5 py-1 rounded-md bg-surface-100 border border-surface-200 text-surface-500 text-[11px] font-bold active:bg-surface-200 transition-colors disabled:opacity-40">
                                                             −1
                                                         </button>
                                                     </div>
@@ -1072,7 +1102,7 @@ function FocusCard({
                                                     onAction(task, "complete");
                                                 }}
                                                 disabled={isActing}
-                                                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-success text-white text-xs font-bold active:bg-green-700 transition-colors disabled:opacity-50"
+                                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-success text-white text-[11px] font-bold active:bg-green-700 transition-colors disabled:opacity-50"
                                             >
                                                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
@@ -1102,7 +1132,7 @@ function FocusCard({
                 <div className="flex border-t border-line">
                     <button
                         onClick={onNoteOpen}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold text-surface-500 active:bg-surface-50 transition-colors border-r border-line"
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-semibold text-surface-500 active:bg-surface-50 transition-colors border-r border-line"
                     >
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
@@ -1111,7 +1141,7 @@ function FocusCard({
                     </button>
                     <button
                         onClick={onSpecsOpen}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold text-surface-500 active:bg-surface-50 transition-colors"
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-semibold text-surface-500 active:bg-surface-50 transition-colors"
                     >
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" />
