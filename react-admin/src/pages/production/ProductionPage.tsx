@@ -351,6 +351,14 @@ function StatusBadge({ status }: { status: string }) {
     );
 }
 
+// "25 Jul" — the WIP card shows a started -> due span in a 260px column, so the
+// medium format ("25 Jul 2026") would wrap. Year is omitted deliberately: a job
+// on the floor is always within weeks of now.
+function shortDate(d?: string | null) {
+    if (!d) return "—";
+    return new Date(d).toLocaleDateString("en-KE", { day: "numeric", month: "short" });
+}
+
 function PriorityBadge({ priority }: { priority: string }) {
     const c = PRIORITY_CFG[priority] ?? { label: priority, cls: "text-surface-400 bg-surface-50 border-surface-200" };
     return <span className={clsx("text-2xs font-bold px-1.5 py-0.5 rounded border uppercase tracking-wide", c.cls)}>{c.label}</span>;
@@ -364,7 +372,7 @@ function OrderTypePill({ isCustomer }: { isCustomer: boolean }) {
           </span>
         : <span className="inline-flex items-center gap-1 text-2xs font-semibold px-2 py-0.5 rounded-full bg-teal-50 text-teal-600 border border-teal-100">
             <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0h-1.5m1.5 0h1.5" /></svg>
-            For Stock
+            Production Order
           </span>;
 }
 
@@ -1848,9 +1856,11 @@ function ProductionOrdersTab() {
                         placeholder="Search…" className="input pl-8 text-sm" />
                 </div>
                 <select value={filters.type} onChange={e => setF("type", e.target.value)} className="input w-36 text-sm">
+                    {/* Wording tracks the card pill: filtering by what you can
+                        see on a card is the whole point of this control. */}
                     <option value="">All Types</option>
-                    <option value="stock">For Stock</option>
-                    <option value="customer">Customer Orders</option>
+                    <option value="stock">Production Orders</option>
+                    <option value="customer">Custom Orders</option>
                 </select>
                 <select value={filters.priority} onChange={e => setF("priority", e.target.value)} className="input w-32 text-sm">
                     <option value="">All Priorities</option>
@@ -2289,38 +2299,55 @@ function WIPTab({
                                                 <div key={o.id} onClick={() => setSelectedId(o.id === selectedId ? null : o.id)}
                                                     className={clsx("card p-3 cursor-pointer hover:shadow-md transition-all active:scale-[0.98]",
                                                         selectedId === o.id && "ring-2 ring-brand-400")}>
-                                                    {/* Identity block.
+                                                    {/* Card reads top-to-bottom in the order the floor asks its
+                                                        questions: whose, what, what kind, anything special, how
+                                                        many, how far, where exactly, and by when.
                                                         The name used to share a row with the type pill, which on a
                                                         260px card left it about 146px — "Pastor Johanna Bahrain"
                                                         truncated to "Pastor Johanna Bah…", and a truncated person
-                                                        is not an identifier. Reference and pills move to their own
-                                                        metadata line above, so the name gets the card's full
-                                                        width; the garment and its SKU sit directly beneath. */}
-                                                    <div className="flex items-center gap-1.5 flex-wrap mb-1">
-                                                        <span className="font-mono text-2xs font-bold text-surface-500">{o.order_number}</span>
+                                                        is not an identifier. The reference now sits alone above so
+                                                        the name owns the card's full width. */}
+                                                    <p className="font-mono text-2xs font-bold text-surface-500 mb-1">{o.order_number}</p>
+
+                                                    {/* 1 — customer, 2 — garment + SKU */}
+                                                    <p className="text-xs font-semibold text-surface-900 truncate"
+                                                       title={(o.customer_label ?? o.product_name) || undefined}>
+                                                        {o.customer_label ?? o.product_name}
+                                                    </p>
+                                                    <p className="text-2xs text-surface-500 truncate"
+                                                       title={`${o.product_name}${o.product?.sku ? ` · ${o.product.sku}` : ""}`}>
+                                                        {o.customer_label
+                                                            ? o.product_name
+                                                            : (isCustomer ? "Name missing" : "For stock")}
+                                                        {o.product?.sku && (
+                                                            <span className="font-mono text-surface-400"> · {o.product.sku}</span>
+                                                        )}
+                                                    </p>
+
+                                                    {/* 3 — type: urgency and kind of job */}
+                                                    <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
                                                         <PriorityBadge priority={o.priority} />
-                                                        <span className="ml-auto"><OrderTypePill isCustomer={isCustomer} /></span>
-                                                    </div>
-                                                    <div className="mb-2">
-                                                        {/* Whose job it is leads on a customer order. Stock work has
-                                                            no customer, so there the garment stays the headline. */}
-                                                        <p className="text-xs font-semibold text-surface-900 truncate"
-                                                           title={(o.customer_label ?? o.product_name) || undefined}>
-                                                            {o.customer_label ?? o.product_name}
-                                                        </p>
-                                                        <p className="text-2xs text-surface-500 truncate"
-                                                           title={`${o.product_name}${o.product?.sku ? ` · ${o.product.sku}` : ""}`}>
-                                                            {o.customer_label
-                                                                ? o.product_name
-                                                                : (isCustomer ? "Name missing" : "For stock")}
-                                                            {o.product?.sku && (
-                                                                <span className="font-mono text-surface-400"> · {o.product.sku}</span>
-                                                            )}
-                                                        </p>
+                                                        <OrderTypePill isCustomer={isCustomer} />
                                                     </div>
 
-                                                    {/* Stage mini-pipeline */}
-                                                    <div className="flex gap-1 mb-2">
+                                                    {/* 4 — brief. The order's own note, not the product's marketing
+                                                        copy: "navy, extra-long sleeves" is what the floor needs.
+                                                        Clamped to two lines so one chatty order cannot stretch a
+                                                        column of cards out of alignment. */}
+                                                    {o.notes && (
+                                                        <p className="text-2xs text-surface-600 mt-1.5 line-clamp-2 leading-snug" title={o.notes}>
+                                                            {o.notes}
+                                                        </p>
+                                                    )}
+
+                                                    {/* 5 — quantity, 6 — progress */}
+                                                    <div className="flex items-center justify-between text-2xs mt-2 mb-1">
+                                                        <span className="text-surface-500">Qty: <strong className="text-surface-700">{o.quantity}</strong></span>
+                                                        <span className="font-bold text-surface-700 tabular-nums">{o.completion_percentage ?? 0}%</span>
+                                                    </div>
+                                                    {/* Per-stage pips: the bar says how far, the pips say which
+                                                        stages are actually done. */}
+                                                    <div className="flex gap-1 mb-1.5">
                                                         {[...(o.tasks ?? [])].sort((a, b) => (a.stage?.sort_order ?? 0) - (b.stage?.sort_order ?? 0)).map(t => (
                                                             <div key={t.id} title={t.stage?.name}
                                                                 className={clsx("flex-1 h-1.5 rounded-full",
@@ -2331,19 +2358,23 @@ function WIPTab({
                                                         ))}
                                                     </div>
 
-                                                    <div className="flex items-center justify-between text-2xs">
-                                                        <span className="text-surface-500">Qty: {o.quantity}</span>
-                                                        <span className={clsx(days < 0 ? "text-danger font-medium" : days <= 2 ? "text-warning-dark" : "text-surface-400")}>
+                                                    {/* 7 — level of progress: the stage it is sitting in right now */}
+                                                    <p className="text-2xs font-medium text-surface-700 flex items-center gap-1 truncate">
+                                                        <StageIcon slug={(o.current_stage ?? "").toLowerCase().replace(" ", "_")} className="w-3 h-3 shrink-0" />
+                                                        {o.current_stage ?? "Not started"}
+                                                    </p>
+
+                                                    {/* 8 — started → due, with the countdown that was already here
+                                                        kept on the right because overdue is the one thing on this
+                                                        card that must shout. */}
+                                                    <div className="flex items-center justify-between gap-2 text-2xs mt-1">
+                                                        <span className="text-surface-400 truncate">
+                                                            {o.started_at ? shortDate(o.started_at) : "not started"} → {shortDate(o.due_date)}
+                                                        </span>
+                                                        <span className={clsx("shrink-0", days < 0 ? "text-danger font-bold" : days <= 2 ? "text-amber-dark font-semibold" : "text-surface-400")}>
                                                             {days < 0 ? `${Math.abs(days)}d overdue` : days === 0 ? "Today" : `${days}d`}
                                                         </span>
                                                     </div>
-
-                                                    {o.current_stage && (
-                                                        <p className="text-2xs text-surface-400 mt-1.5 flex items-center gap-1">
-                                                            <StageIcon slug={o.current_stage.toLowerCase().replace(" ", "_")} className="w-3 h-3" />
-                                                            {o.current_stage}
-                                                        </p>
-                                                    )}
                                                     <div className="flex justify-end mt-2">
                                                         <button
                                                             onClick={(e) => { e.stopPropagation(); navigate(`/production/orders/${o.id}`); }}
