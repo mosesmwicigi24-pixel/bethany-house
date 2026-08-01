@@ -2289,20 +2289,34 @@ function WIPTab({
                                                 <div key={o.id} onClick={() => setSelectedId(o.id === selectedId ? null : o.id)}
                                                     className={clsx("card p-3 cursor-pointer hover:shadow-md transition-all active:scale-[0.98]",
                                                         selectedId === o.id && "ring-2 ring-brand-400")}>
-                                                    <div className="flex items-start justify-between gap-2 mb-2">
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="flex items-center gap-1.5 flex-wrap">
-                                                                <span className="font-mono text-2xs font-bold text-surface-500">{o.order_number}</span>
-                                                                <PriorityBadge priority={o.priority} />
-                                                            </div>
-                                                            <p className="text-xs font-semibold text-surface-900 mt-0.5 truncate">{o.product_name}</p>
-                                                            {/* The board the floor actually works from — it named no
-                                                                customer at all before, which is the same gap as the list. */}
-                                                            <p className="text-2xs text-surface-500 truncate" title={o.customer_label ?? undefined}>
-                                                                {o.customer_label ?? (isCustomer ? "Name missing" : "For stock")}
-                                                            </p>
-                                                        </div>
-                                                        <OrderTypePill isCustomer={isCustomer} />
+                                                    {/* Identity block.
+                                                        The name used to share a row with the type pill, which on a
+                                                        260px card left it about 146px — "Pastor Johanna Bahrain"
+                                                        truncated to "Pastor Johanna Bah…", and a truncated person
+                                                        is not an identifier. Reference and pills move to their own
+                                                        metadata line above, so the name gets the card's full
+                                                        width; the garment and its SKU sit directly beneath. */}
+                                                    <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                                                        <span className="font-mono text-2xs font-bold text-surface-500">{o.order_number}</span>
+                                                        <PriorityBadge priority={o.priority} />
+                                                        <span className="ml-auto"><OrderTypePill isCustomer={isCustomer} /></span>
+                                                    </div>
+                                                    <div className="mb-2">
+                                                        {/* Whose job it is leads on a customer order. Stock work has
+                                                            no customer, so there the garment stays the headline. */}
+                                                        <p className="text-xs font-semibold text-surface-900 truncate"
+                                                           title={(o.customer_label ?? o.product_name) || undefined}>
+                                                            {o.customer_label ?? o.product_name}
+                                                        </p>
+                                                        <p className="text-2xs text-surface-500 truncate"
+                                                           title={`${o.product_name}${o.product?.sku ? ` · ${o.product.sku}` : ""}`}>
+                                                            {o.customer_label
+                                                                ? o.product_name
+                                                                : (isCustomer ? "Name missing" : "For stock")}
+                                                            {o.product?.sku && (
+                                                                <span className="font-mono text-surface-400"> · {o.product.sku}</span>
+                                                            )}
+                                                        </p>
                                                     </div>
 
                                                     {/* Stage mini-pipeline */}
