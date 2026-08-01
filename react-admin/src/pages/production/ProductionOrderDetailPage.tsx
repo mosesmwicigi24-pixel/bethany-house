@@ -1546,9 +1546,9 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
                 <div className="pb-2 shrink-0">
                     <p className="text-2xs text-surface-400">
                         Messages here also appear in{" "}
-                        <a href={`/comms/${channel.id}`} className="text-brand-500 hover:underline font-medium">
+                        <Link to={`/comms/${channel.id}`} className="text-brand-500 hover:underline font-medium">
                             CommsHub → {channel.name}
-                        </a>
+                        </Link>
                     </p>
                 </div>
             )}
