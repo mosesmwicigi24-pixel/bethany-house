@@ -227,20 +227,23 @@ class ReportController extends Controller
 
         $byPaymentMethod = $base()->selectRaw("
             COALESCE(pmt.payment_method, orders.payment_method) AS payment_method,
-            COALESCE(pmA.name, pmB.name, pmt.payment_method, orders.payment_method) AS method_name,
-            COALESCE(pmA.description, pmB.description)                              AS method_description,
+            COALESCE(pm_pay.name, pm_ord.name, COALESCE(pmt.payment_method, orders.payment_method)) AS method_name,
+            COALESCE(pm_pay.description, pm_ord.description)                              AS method_description,
             COUNT(*)                              AS count,
             (COALESCE(SUM(orders.total_amount), 0))::float8 AS total
         ")
             ->leftJoinSub($methodPerOrder, 'pmt', fn ($j) => $j->on('pmt.order_id', '=', 'orders.id'))
+            // Aliases are lowercase on purpose: Laravel QUOTES a join alias, so
+            // "pmA" keeps its capital while an unquoted pmA.name in the raw
+            // select folds to pma and Postgres cannot find the table.
             // TWO plain joins rather than one join whose right-hand side is a
             // DB::raw COALESCE. Laravel can bind a raw expression in a join
             // condition as a VALUE instead of rendering it as SQL, which makes
             // the match silently fail; two ordinary column joins cannot.
-            ->leftJoin('payment_methods as pmA', 'pmA.code', '=', 'pmt.payment_method')
-            ->leftJoin('payment_methods as pmB', 'pmB.code', '=', 'orders.payment_method')
+            ->leftJoin('payment_methods as pm_pay', 'pm_pay.code', '=', 'pmt.payment_method')
+            ->leftJoin('payment_methods as pm_ord', 'pm_ord.code', '=', 'orders.payment_method')
             ->whereRaw('COALESCE(pmt.payment_method, orders.payment_method) IS NOT NULL')
-            ->groupByRaw('COALESCE(pmt.payment_method, orders.payment_method), pmA.name, pmB.name, pmA.description, pmB.description')
+            ->groupByRaw('COALESCE(pmt.payment_method, orders.payment_method), pm_pay.name, pm_ord.name, pm_pay.description, pm_ord.description')
             ->orderByRaw('(COALESCE(SUM(orders.total_amount), 0))::float8 DESC')
             ->get();
 
