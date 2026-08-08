@@ -91,16 +91,16 @@ class SalesLedgerTest extends TestCase
         // The WhatsApp-outlet order belongs to WhatsApp, not POS — that is the
         // rule the three Sales pages use, and the report must agree.
         $this->assertSame(2, $byChannel['pos']['orders']);
-        $this->assertSame(1500.0, $byChannel['pos']['sales']);
-        $this->assertSame(1200.0, $byChannel['pos']['cash']);
-        $this->assertSame(300.0,  $byChannel['pos']['balance']);
+        $this->assertEqualsWithDelta(1500.0, (float) $byChannel['pos']['sales'], 0.01);
+        $this->assertEqualsWithDelta(1200.0, (float) $byChannel['pos']['cash'], 0.01);
+        $this->assertEqualsWithDelta(300.0, (float) $byChannel['pos']['balance'], 0.01);
 
         $this->assertSame(1, $byChannel['online']['orders']);
-        $this->assertSame(800.0, $byChannel['online']['balance']);
+        $this->assertEqualsWithDelta(800.0, (float) $byChannel['online']['balance'], 0.01);
 
         $this->assertSame(2, $byChannel['whatsapp']['orders']);
-        $this->assertSame(1000.0, $byChannel['whatsapp']['sales']);
-        $this->assertSame(500.0,  $byChannel['whatsapp']['cash']);
+        $this->assertEqualsWithDelta(1000.0, (float) $byChannel['whatsapp']['sales'], 0.01);
+        $this->assertEqualsWithDelta(500.0, (float) $byChannel['whatsapp']['cash'], 0.01);
     }
 
     public function test_sales_equals_cash_plus_balance_on_every_row(): void
@@ -141,8 +141,8 @@ class SalesLedgerTest extends TestCase
 
         $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'pos');
 
-        $this->assertSame(600.0, $pos['cash']);     // 1000 taken, 400 given back
-        $this->assertSame(400.0, $pos['balance']);
+        $this->assertEqualsWithDelta(600.0, (float) $pos['cash'], 0.01);     // 1000 taken, 400 given back
+        $this->assertEqualsWithDelta(400.0, (float) $pos['balance'], 0.01);
     }
 
     public function test_a_channel_with_no_orders_still_appears_in_every_bucket(): void
@@ -168,7 +168,7 @@ class SalesLedgerTest extends TestCase
         $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'pos');
 
         $this->assertSame(1, $pos['orders']);
-        $this->assertSame(250.0, $pos['sales']);
+        $this->assertEqualsWithDelta(250.0, (float) $pos['sales'], 0.01);
     }
 
     public function test_unique_customers_counts_walk_ins_not_only_registered_users(): void

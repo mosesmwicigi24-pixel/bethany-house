@@ -111,11 +111,13 @@ class ReportController extends Controller
         // Sales truth (docs/REPORTS_SPEC.md): a sale is any non-voided,
         // non-cancelled order. The old payment_status='paid' filter silently
         // erased every part-paid and deposit order from "revenue".
-        $base = fn () => Order::whereBetween('created_at', [$start, $end])
-            ->whereNotIn('status', ['voided', 'cancelled'])
-            ->whereRaw('UPPER(currency_code) = ?', [$currency])
-            ->when($outletId,  fn ($q) => $q->where('outlet_id',  $outletId))
-            ->when($orderType, fn ($q) => $q->where('order_type', $orderType));
+        // Columns are qualified because $base() is joined against
+        // payment_methods below; unqualified `created_at` is ambiguous there.
+        $base = fn () => Order::whereBetween('orders.created_at', [$start, $end])
+            ->whereNotIn('orders.status', ['voided', 'cancelled'])
+            ->whereRaw('UPPER(orders.currency_code) = ?', [$currency])
+            ->when($outletId,  fn ($q) => $q->where('orders.outlet_id',  $outletId))
+            ->when($orderType, fn ($q) => $q->where('orders.order_type', $orderType));
 
         // Money truth beside it: what actually settled in the same window.
         $collected = (float) DB::table('payments as p')

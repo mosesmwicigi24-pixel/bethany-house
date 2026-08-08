@@ -208,8 +208,13 @@ class Order extends Model
                 $q->whereIn('outlet_id', $whatsappOutletIds)
                   ->orWhere('order_type', 'whatsapp');
             }),
+            // whereNotIn alone would DROP orders with a NULL outlet_id: in SQL
+            // `NULL NOT IN (1)` evaluates to NULL, not true, so every POS order
+            // without an outlet silently vanished from the POS channel. The
+            // null branch is explicit.
             'pos'      => $query->where('order_type', 'pos')
-                                ->whereNotIn('outlet_id', $whatsappOutletIds),
+                                ->where(fn ($q) => $q->whereNull('outlet_id')
+                                                     ->orWhereNotIn('outlet_id', $whatsappOutletIds)),
         };
     }
 
