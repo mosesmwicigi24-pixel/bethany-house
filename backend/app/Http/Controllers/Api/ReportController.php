@@ -227,15 +227,20 @@ class ReportController extends Controller
 
         $byPaymentMethod = $base()->selectRaw("
             COALESCE(pmt.payment_method, orders.payment_method) AS payment_method,
-            COALESCE(pm.name, COALESCE(pmt.payment_method, orders.payment_method)) AS method_name,
-            pm.description                        AS method_description,
+            COALESCE(pmA.name, pmB.name, pmt.payment_method, orders.payment_method) AS method_name,
+            COALESCE(pmA.description, pmB.description)                              AS method_description,
             COUNT(*)                              AS count,
             (COALESCE(SUM(orders.total_amount), 0))::float8 AS total
         ")
             ->leftJoinSub($methodPerOrder, 'pmt', fn ($j) => $j->on('pmt.order_id', '=', 'orders.id'))
-            ->leftJoin('payment_methods as pm', 'pm.code', '=', DB::raw('COALESCE(pmt.payment_method, orders.payment_method)'))
+            // TWO plain joins rather than one join whose right-hand side is a
+            // DB::raw COALESCE. Laravel can bind a raw expression in a join
+            // condition as a VALUE instead of rendering it as SQL, which makes
+            // the match silently fail; two ordinary column joins cannot.
+            ->leftJoin('payment_methods as pmA', 'pmA.code', '=', 'pmt.payment_method')
+            ->leftJoin('payment_methods as pmB', 'pmB.code', '=', 'orders.payment_method')
             ->whereRaw('COALESCE(pmt.payment_method, orders.payment_method) IS NOT NULL')
-            ->groupByRaw('COALESCE(pmt.payment_method, orders.payment_method), pm.name, pm.description')
+            ->groupByRaw('COALESCE(pmt.payment_method, orders.payment_method), pmA.name, pmB.name, pmA.description, pmB.description')
             ->orderByRaw('(COALESCE(SUM(orders.total_amount), 0))::float8 DESC')
             ->get();
 
