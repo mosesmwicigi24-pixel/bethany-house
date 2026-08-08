@@ -51,24 +51,10 @@ class OrderController extends Controller
     private function applyChannelFilter($query, Request $request): void
     {
         if ($request->filled('sales_channel')) {
-            $channel           = $request->sales_channel;
-            $whatsappOutletIds = Outlet::where('sales_channel', 'whatsapp')->pluck('id');
-
-            if ($channel === 'online') {
-                $query->where('order_type', 'online');
-            } elseif ($channel === 'whatsapp') {
-                // A WhatsApp order is either taken at a WhatsApp-channel outlet OR
-                // tagged order_type='whatsapp' (placed at the fulfilling store but
-                // sold through WhatsApp — channel and outlet are orthogonal).
-                $query->where(function ($q) use ($whatsappOutletIds) {
-                    $q->whereIn('outlet_id', $whatsappOutletIds)
-                      ->orWhere('order_type', 'whatsapp');
-                });
-            } elseif ($channel === 'pos') {
-                // Physical POS only: exclude WhatsApp both by outlet and by type.
-                $query->where('order_type', 'pos')
-                      ->whereNotIn('outlet_id', $whatsappOutletIds);
-            }
+            // One copy of the channel rule, on the model — see
+            // Order::scopeSalesChannel. ReportController uses the same scope so
+            // the sales report and these pages can never disagree.
+            $query->salesChannel($request->sales_channel);
 
             return;
         }

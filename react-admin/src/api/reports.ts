@@ -61,6 +61,10 @@ export const reportsApi = {
     salesByProduct: (params: DateRangeParams & { limit?: number }) =>
         get<any>(`${BASE}/sales/by-product`, { params }),
 
+    /** Sales / cash / balance per channel, by day, week and month. */
+    salesLedger: (params: DateRangeParams) =>
+        get<SalesLedger>("/v1/admin/reports/sales/ledger", { params }),
+
     salesByCategory: (params: DateRangeParams) =>
         get<any>(`${BASE}/sales/by-category`, { params }),
 
@@ -407,3 +411,25 @@ export const DATE_PRESETS: { value: DatePreset; label: string }[] = [
     { value: "last_year", label: "Last Year" },
     { value: "custom", label: "Custom Range" },
 ];
+
+// ── Sales ledger ──────────────────────────────────────────────────────────────
+// sales = cash + balance on every row; see ReportController::salesLedger for why
+// cash is attributed to the order's period rather than the payment's.
+export interface LedgerFigures {
+    orders: number;
+    sales: number;
+    cash: number;
+    balance: number;
+}
+export interface LedgerBucket {
+    period: string;
+    total: LedgerFigures;
+    by_channel: Record<"pos" | "online" | "whatsapp", LedgerFigures>;
+}
+export interface SalesLedger {
+    period: { start: string; end: string; currency: string };
+    channels: (LedgerFigures & { channel: "pos" | "online" | "whatsapp"; label: string })[];
+    daily: { date: string; orders: number; sales: number; cash: number; credit: number }[];
+    weekly: LedgerBucket[];
+    monthly: LedgerBucket[];
+}

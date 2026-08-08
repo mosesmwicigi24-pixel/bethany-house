@@ -1203,6 +1203,7 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:reports.export,sanctum');
                 Route::prefix('sales')->group(function () {
                     Route::get('/summary',           [ReportController::class, 'salesSummary']);
+                    Route::get('/ledger',            [ReportController::class, 'salesLedger']);
                     Route::get('/by-product',        [ReportController::class, 'salesByProduct']);
                     Route::get('/by-category',       [ReportController::class, 'salesByCategory']);
                     Route::get('/by-customer',       [ReportController::class, 'salesByCustomer']);

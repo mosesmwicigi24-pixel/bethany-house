@@ -1,7 +1,7 @@
 // src/pages/reports/SalesReportPage.tsx
-import { useState } from "react";
+import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { reportsApi } from "@/api/reports";
+import { reportsApi, type SalesLedger, type LedgerBucket } from "@/api/reports";
 import { fmtKes } from "@/api/expenses";
 import { Spinner } from "@/components/ui/Spinner";
 import {
@@ -75,6 +75,15 @@ export default function SalesReportPage() {
         queryFn: () => reportsApi.salesByCustomer({ ...dr.params, limit: 25 }),
         enabled: !!dr.start && !!dr.end && activeTab === "customers",
     });
+    // Sales / cash / balance per channel and per day, week and month. Loaded
+    // only on the Channels tab — it is three grouped aggregations and there is
+    // no reason to pay for them while the user is reading Overview.
+    const ledgerQuery = useQuery({
+        queryKey: ["report-sales-ledger", dr.start, dr.end],
+        queryFn: () => reportsApi.salesLedger(dr.params),
+        enabled: !!dr.start && !!dr.end && activeTab === "channels",
+    });
+
     const returnsQuery = useQuery({
         queryKey: ["report-sales-returns", dr.start, dr.end],
         queryFn: () => reportsApi.salesReturns(dr.params),
@@ -334,10 +343,24 @@ export default function SalesReportPage() {
                                         return (
                                             <div key={pm.payment_method}>
                                                 <div className="flex justify-between text-sm mb-1">
-                                                    <span className="capitalize text-surface-700">
-                                                        {pm.payment_method?.replace(
-                                                            /_/g,
-                                                            " ",
+                                                    {/* method_name comes from the payment_methods
+                                                        table. Title-casing the raw code turned
+                                                        "inmpaybill" into "Inmpaybill" while the real
+                                                        name, "I&M Paybill", already existed in the
+                                                        database. No `capitalize` — it would lower the
+                                                        M in I&M. */}
+                                                    <span className="text-surface-700">
+                                                        {pm.method_name
+                                                            ?? pm.payment_method?.replace(/_/g, " ")}
+                                                        {/* The paybill and account number were
+                                                            already configured on the method in
+                                                            Setup -> Payment Methods; showing them
+                                                            here puts the reconciliation reference
+                                                            beside the figure you reconcile. */}
+                                                        {pm.method_description && (
+                                                            <span className="block text-2xs text-surface-500 font-normal">
+                                                                {pm.method_description}
+                                                            </span>
                                                         )}
                                                     </span>
                                                     <div className="flex items-center gap-2">
@@ -669,38 +692,7 @@ export default function SalesReportPage() {
             {/* ── CHANNELS TAB ── */}
             {activeTab === "channels" && (
                 <div className="space-y-6">
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                        <div className="card p-5">
-                            <p className="text-xs text-surface-500 mb-1">
-                                Online
-                            </p>
-                            <p className="text-2xl font-bold text-surface-900">
-                                {fmtKes(s.online_revenue)}
-                            </p>
-                            <p className="text-sm text-surface-500 mt-1">
-                                {s.online_count ?? 0} orders · avg{" "}
-                                {fmtKes(
-                                    (s.online_revenue ?? 0) /
-                                        Math.max(1, s.online_count ?? 1),
-                                )}
-                            </p>
-                        </div>
-                        <div className="card p-5">
-                            <p className="text-xs text-surface-500 mb-1">
-                                Point of Sale
-                            </p>
-                            <p className="text-2xl font-bold text-surface-900">
-                                {fmtKes(s.pos_revenue)}
-                            </p>
-                            <p className="text-sm text-surface-500 mt-1">
-                                {s.pos_count ?? 0} orders · avg{" "}
-                                {fmtKes(
-                                    (s.pos_revenue ?? 0) /
-                                        Math.max(1, s.pos_count ?? 1),
-                                )}
-                            </p>
-                        </div>
-                    </div>
+                    <LedgerTab query={ledgerQuery} />
                     <SalesByOutletTable params={dr.params} />
                 </div>
             )}
@@ -859,6 +851,187 @@ function SalesByOutletTable({ params }: { params: Record<string, any> }) {
                     </tbody>
                 </table>
             </TableWrapper>
+        </div>
+    );
+}
+// ── Sales ledger ──────────────────────────────────────────────────────────────
+// What we sold, what we actually collected, what we are still owed — per
+// channel, and by day, week and month.
+//
+// Every row satisfies sales = cash + balance. That holds because the API
+// attributes cash to the period the ORDER falls in, not the period the payment
+// landed in (see ReportController::salesLedger). Read "balance" as "still owed
+// on what we sold then", not "money that has not arrived yet".
+
+const CHANNEL_KEYS = ["pos", "online", "whatsapp"] as const;
+const CHANNEL_LABEL: Record<string, string> = { pos: "POS", online: "Online", whatsapp: "WhatsApp" };
+
+/** Balance is the number a manager is chasing, so it earns colour; zero does not. */
+function Owed({ value }: { value: number }) {
+    return (
+        <span className={clsx("tabular-nums", value > 0 ? "font-semibold text-danger-700" : "text-surface-500")}>
+            {fmtKes(value)}
+        </span>
+    );
+}
+
+function LedgerBucketTable({ title, rows, periodLabel }: {
+    title: string;
+    rows: LedgerBucket[];
+    periodLabel: string;
+}) {
+    if (!rows.length) {
+        return (
+            <div className="card p-5">
+                <p className="font-semibold text-surface-900 mb-1">{title}</p>
+                <p className="text-sm text-surface-500">No orders in this range.</p>
+            </div>
+        );
+    }
+    return (
+        <div className="card overflow-hidden">
+            <div className="px-5 pt-5 pb-3">
+                <p className="font-semibold text-surface-900">{title}</p>
+                <p className="text-xs text-surface-500 mt-0.5">
+                    Sales, cash collected and balance still owed — per channel.
+                </p>
+            </div>
+            <div className="table-wrapper rounded-none border-0">
+                <table className="table">
+                    <thead>
+                        <tr>
+                            <th className="sticky left-0 bg-surface-100">{periodLabel}</th>
+                            {CHANNEL_KEYS.map(c => (
+                                <th key={c} colSpan={3} className="text-center border-l border-line">
+                                    {CHANNEL_LABEL[c]}
+                                </th>
+                            ))}
+                            <th colSpan={3} className="text-center border-l border-line">Total</th>
+                        </tr>
+                        <tr>
+                            <th className="sticky left-0 bg-surface-100" />
+                            {[...CHANNEL_KEYS, "total"].map(c => (
+                                <React.Fragment key={c}>
+                                    <th className="text-right border-l border-line font-normal normal-case tracking-normal">Sales</th>
+                                    <th className="text-right font-normal normal-case tracking-normal">Cash</th>
+                                    <th className="text-right font-normal normal-case tracking-normal">Balance</th>
+                                </React.Fragment>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows.map(r => (
+                            <tr key={r.period}>
+                                <td className="sticky left-0 bg-white font-mono text-2xs font-bold text-surface-700">{r.period}</td>
+                                {CHANNEL_KEYS.map(c => {
+                                    const v = r.by_channel[c];
+                                    return (
+                                        <React.Fragment key={c}>
+                                            <td className="text-right border-l border-line tabular-nums">{fmtKes(v.sales)}</td>
+                                            <td className="text-right tabular-nums text-success-700">{fmtKes(v.cash)}</td>
+                                            <td className="text-right"><Owed value={v.balance} /></td>
+                                        </React.Fragment>
+                                    );
+                                })}
+                                <td className="text-right border-l border-line font-semibold tabular-nums">{fmtKes(r.total.sales)}</td>
+                                <td className="text-right font-semibold tabular-nums text-success-700">{fmtKes(r.total.cash)}</td>
+                                <td className="text-right font-semibold"><Owed value={r.total.balance} /></td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+}
+
+function LedgerTab({ query }: { query: { data?: SalesLedger; isLoading: boolean } }) {
+    const l = query.data;
+    if (query.isLoading) return <div className="card p-6 text-sm text-surface-500">Loading ledger…</div>;
+    if (!l) return null;
+
+    const grand = l.channels.reduce(
+        (a, c) => ({ orders: a.orders + c.orders, sales: a.sales + c.sales, cash: a.cash + c.cash, balance: a.balance + c.balance }),
+        { orders: 0, sales: 0, cash: 0, balance: 0 },
+    );
+
+    return (
+        <div className="space-y-6">
+            {/* Per channel, whole period */}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                {l.channels.map(c => (
+                    <div key={c.channel} className="card p-5">
+                        <p className="text-xs font-semibold text-surface-500 uppercase tracking-wide">{c.label}</p>
+                        <p className="text-2xl font-bold text-surface-900 mt-1 tabular-nums">{fmtKes(c.sales)}</p>
+                        <p className="text-xs text-surface-500 mt-0.5">{c.orders} orders</p>
+                        <div className="mt-3 pt-3 border-t border-line space-y-1 text-xs">
+                            <div className="flex justify-between">
+                                <span className="text-surface-500">Cash</span>
+                                <span className="font-semibold tabular-nums text-success-700">{fmtKes(c.cash)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-surface-500">Balance</span>
+                                <Owed value={c.balance} />
+                            </div>
+                        </div>
+                    </div>
+                ))}
+                <div className="card p-5 bg-surface-50">
+                    <p className="text-xs font-semibold text-surface-500 uppercase tracking-wide">All channels</p>
+                    <p className="text-2xl font-bold text-surface-900 mt-1 tabular-nums">{fmtKes(grand.sales)}</p>
+                    <p className="text-xs text-surface-500 mt-0.5">{grand.orders} orders</p>
+                    <div className="mt-3 pt-3 border-t border-line space-y-1 text-xs">
+                        <div className="flex justify-between">
+                            <span className="text-surface-500">Cash</span>
+                            <span className="font-semibold tabular-nums text-success-700">{fmtKes(grand.cash)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                            <span className="text-surface-500">Balance</span>
+                            <Owed value={grand.balance} />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Daily: sales, cash paid, credit */}
+            <div className="card overflow-hidden">
+                <div className="px-5 pt-5 pb-3">
+                    <p className="font-semibold text-surface-900">Daily sales, cash and credit</p>
+                    <p className="text-xs text-surface-500 mt-0.5">
+                        Credit is the unpaid balance on that day&rsquo;s orders.
+                    </p>
+                </div>
+                <div className="table-wrapper rounded-none border-0">
+                    <table className="table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th className="text-right">Orders</th>
+                                <th className="text-right">Sales</th>
+                                <th className="text-right">Cash paid</th>
+                                <th className="text-right">Credit</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {l.daily.length === 0 && (
+                                <tr><td colSpan={5} className="text-center text-surface-500 py-6">No orders in this range.</td></tr>
+                            )}
+                            {l.daily.map(d => (
+                                <tr key={d.date}>
+                                    <td className="font-mono text-2xs font-bold text-surface-700">{d.date}</td>
+                                    <td className="text-right tabular-nums">{d.orders}</td>
+                                    <td className="text-right tabular-nums">{fmtKes(d.sales)}</td>
+                                    <td className="text-right tabular-nums text-success-700">{fmtKes(d.cash)}</td>
+                                    <td className="text-right"><Owed value={d.credit} /></td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <LedgerBucketTable title="Weekly" rows={l.weekly} periodLabel="Week" />
+            <LedgerBucketTable title="Monthly" rows={l.monthly} periodLabel="Month" />
         </div>
     );
 }
