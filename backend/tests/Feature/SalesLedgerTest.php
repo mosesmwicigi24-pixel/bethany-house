@@ -20,11 +20,11 @@ use Tests\TestCase;
  *
  * The invariant these tests exist to protect is
  *
- *     sales = cash + balance
+ *     sales = paid + balance
  *
- * on EVERY row. It holds only because cash is attributed to the period the
+ * on EVERY row. It holds only because paid is attributed to the period the
  * ORDER falls in rather than the period the payment landed in. A future change
- * to bucket by payment date would silently break it — a row's cash could then
+ * to bucket by payment date would silently break it — a row's paid figure could then
  * exceed its own sales and "balance" would stop meaning "still owed".
  */
 class SalesLedgerTest extends TestCase
@@ -92,7 +92,7 @@ class SalesLedgerTest extends TestCase
         // rule the three Sales pages use, and the report must agree.
         $this->assertSame(2, $byChannel['pos']['orders']);
         $this->assertEqualsWithDelta(1500.0, (float) $byChannel['pos']['sales'], 0.01);
-        $this->assertEqualsWithDelta(1200.0, (float) $byChannel['pos']['cash'], 0.01);
+        $this->assertEqualsWithDelta(1200.0, (float) $byChannel['pos']['paid'], 0.01);
         $this->assertEqualsWithDelta(300.0, (float) $byChannel['pos']['balance'], 0.01);
 
         $this->assertSame(1, $byChannel['online']['orders']);
@@ -100,10 +100,10 @@ class SalesLedgerTest extends TestCase
 
         $this->assertSame(2, $byChannel['whatsapp']['orders']);
         $this->assertEqualsWithDelta(1000.0, (float) $byChannel['whatsapp']['sales'], 0.01);
-        $this->assertEqualsWithDelta(500.0, (float) $byChannel['whatsapp']['cash'], 0.01);
+        $this->assertEqualsWithDelta(500.0, (float) $byChannel['whatsapp']['paid'], 0.01);
     }
 
-    public function test_sales_equals_cash_plus_balance_on_every_row(): void
+    public function test_sales_equals_paid_plus_balance_on_every_row(): void
     {
         $this->viewer();
         $this->order('pos', 1000, 250);
@@ -113,27 +113,27 @@ class SalesLedgerTest extends TestCase
         $l = $this->ledger();
 
         foreach ($l['channels'] as $row) {
-            $this->assertEqualsWithDelta($row['sales'], $row['cash'] + $row['balance'], 0.01,
+            $this->assertEqualsWithDelta($row['sales'], $row['paid'] + $row['balance'], 0.01,
                 "channel {$row['channel']} does not reconcile");
         }
         foreach ($l['daily'] as $row) {
-            $this->assertEqualsWithDelta($row['sales'], $row['cash'] + $row['credit'], 0.01,
+            $this->assertEqualsWithDelta($row['sales'], $row['paid'] + $row['credit'], 0.01,
                 "day {$row['date']} does not reconcile");
         }
         foreach (['weekly', 'monthly'] as $grain) {
             foreach ($l[$grain] as $row) {
                 $this->assertEqualsWithDelta($row['total']['sales'],
-                    $row['total']['cash'] + $row['total']['balance'], 0.01,
+                    $row['total']['paid'] + $row['total']['balance'], 0.01,
                     "{$grain} {$row['period']} does not reconcile");
                 foreach ($row['by_channel'] as $c => $v) {
-                    $this->assertEqualsWithDelta($v['sales'], $v['cash'] + $v['balance'], 0.01,
+                    $this->assertEqualsWithDelta($v['sales'], $v['paid'] + $v['balance'], 0.01,
                         "{$grain} {$row['period']} / {$c} does not reconcile");
                 }
             }
         }
     }
 
-    public function test_refunds_are_netted_off_cash_not_added_to_it(): void
+    public function test_refunds_are_netted_off_the_paid_figure(): void
     {
         $this->viewer();
         $o = $this->order('pos', 1000, 1000);
@@ -141,7 +141,7 @@ class SalesLedgerTest extends TestCase
 
         $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'pos');
 
-        $this->assertEqualsWithDelta(600.0, (float) $pos['cash'], 0.01);     // 1000 taken, 400 given back
+        $this->assertEqualsWithDelta(600.0, (float) $pos['paid'], 0.01);     // 1000 taken, 400 given back
         $this->assertEqualsWithDelta(400.0, (float) $pos['balance'], 0.01);
     }
 
@@ -171,7 +171,7 @@ class SalesLedgerTest extends TestCase
         $this->assertEqualsWithDelta(250.0, (float) $pos['sales'], 0.01);
     }
 
-    public function test_cash_excludes_a_payment_awaiting_approval(): void
+    public function test_paid_excludes_a_payment_awaiting_approval(): void
     {
         // Mukuru / Western Union / M-Pesa Send Money are keyed in by a clerk from
         // the customer's word. Counting one before it is verified would report
@@ -185,11 +185,11 @@ class SalesLedgerTest extends TestCase
 
         $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'pos');
 
-        $this->assertEqualsWithDelta(0.0,    (float) $pos['cash'], 0.01);
+        $this->assertEqualsWithDelta(0.0,    (float) $pos['paid'], 0.01);
         $this->assertEqualsWithDelta(1000.0, (float) $pos['balance'], 0.01);
     }
 
-    public function test_cash_counts_it_once_approval_is_granted(): void
+    public function test_paid_counts_it_once_approval_is_granted(): void
     {
         $this->viewer();
         $o = $this->order('pos', 1000, 1000);
@@ -200,7 +200,7 @@ class SalesLedgerTest extends TestCase
 
         $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'pos');
 
-        $this->assertEqualsWithDelta(1000.0, (float) $pos['cash'], 0.01);
+        $this->assertEqualsWithDelta(1000.0, (float) $pos['paid'], 0.01);
         $this->assertEqualsWithDelta(0.0,    (float) $pos['balance'], 0.01);
     }
 
