@@ -174,10 +174,16 @@ export default function SalesReportPage() {
                     sub={`${s.pos_count ?? 0} orders`}
                 />
                 <KpiCard label="Tax Collected" value={fmtKes(s.total_tax)} />
+                {/* "Collected" and the ledger's "Paid" are DIFFERENT questions and
+                    are not meant to match: this is money that ARRIVED in the
+                    period whatever period its order belongs to (treasury), while
+                    Paid is how much of THIS period's sales has been settled
+                    (receivables). Presenting both without saying so is what made
+                    the page look self-contradictory. */}
                 <KpiCard
                     label="Collected"
                     value={fmtKes(s.total_collected)}
-                    sub="settled payments, net of refunds"
+                    sub="money received in this period, by payment date"
                 />
             </div>
 
@@ -694,6 +700,26 @@ export default function SalesReportPage() {
                 <div className="space-y-6">
                     <LedgerTab query={ledgerQuery} />
                     <SalesByOutletTable params={dr.params} />
+                </div>
+            )}
+
+            {(summaryQuery.data?.excluded_currencies ?? []).length > 0 && (
+                /* A total that quietly omits rows is worse than one that says
+                   what it omitted — nothing else on the page lets a reader
+                   notice that orders in another currency exist at all. */
+                <div className="card p-4 mb-6 border border-amber-200 bg-amber-50">
+                    <p className="text-sm font-semibold text-amber-dark">
+                        Not included in the totals above
+                    </p>
+                    <p className="text-xs text-surface-600 mt-1">
+                        This report is in {summaryQuery.data?.period?.currency ?? "KES"}.
+                        {" "}
+                        {(summaryQuery.data?.excluded_currencies ?? [])
+                            .map((c: any) => `${c.orders} order${c.orders === 1 ? "" : "s"} in ${c.currency_code}`)
+                            .join(", ")}
+                        {" "}
+                        {(summaryQuery.data?.excluded_currencies ?? []).length === 1 ? "is" : "are"} excluded.
+                    </p>
                 </div>
             )}
 

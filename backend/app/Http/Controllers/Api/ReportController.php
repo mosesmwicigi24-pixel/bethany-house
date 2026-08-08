@@ -231,31 +231,33 @@ class ReportController extends Controller
         // on). Grouping by the order column alone therefore dropped real,
         // collected money from the breakdown. Resolve from the payment first and
         // fall back to the order's own field.
-        $methodPerOrder = DB::table('payments')
-            ->selectRaw('DISTINCT ON (order_id) order_id, payment_method')
-            ->where('status', 'paid')
-            ->orderByRaw('order_id, paid_at DESC NULLS LAST, id DESC');
-
-        $byPaymentMethod = $base()->selectRaw("
-            COALESCE(pmt.payment_method, orders.payment_method) AS payment_method,
-            COALESCE(pm_pay.name, pm_ord.name, COALESCE(pmt.payment_method, orders.payment_method)) AS method_name,
-            COALESCE(pm_pay.description, pm_ord.description)                              AS method_description,
-            COUNT(*)                              AS count,
-            (COALESCE(SUM(orders.total_amount), 0))::float8 AS total
-        ")
-            ->leftJoinSub($methodPerOrder, 'pmt', fn ($j) => $j->on('pmt.order_id', '=', 'orders.id'))
-            // Aliases are lowercase on purpose: Laravel QUOTES a join alias, so
-            // "pmA" keeps its capital while an unquoted pmA.name in the raw
-            // select folds to pma and Postgres cannot find the table.
-            // TWO plain joins rather than one join whose right-hand side is a
-            // DB::raw COALESCE. Laravel can bind a raw expression in a join
-            // condition as a VALUE instead of rendering it as SQL, which makes
-            // the match silently fail; two ordinary column joins cannot.
-            ->leftJoin('payment_methods as pm_pay', 'pm_pay.code', '=', 'pmt.payment_method')
-            ->leftJoin('payment_methods as pm_ord', 'pm_ord.code', '=', 'orders.payment_method')
-            ->whereRaw('COALESCE(pmt.payment_method, orders.payment_method) IS NOT NULL')
-            ->groupByRaw('COALESCE(pmt.payment_method, orders.payment_method), pm_pay.name, pm_ord.name, pm_pay.description, pm_ord.description')
-            ->orderByRaw('(COALESCE(SUM(orders.total_amount), 0))::float8 DESC')
+        // Aggregated over PAYMENTS, not orders. Reporting the order total under
+        // an order's method overstated every part-paid order — 32 of them in a
+        // 30-day range — because the whole invoice was attributed to the method
+        // that paid part of it. This now answers "how much money arrived through
+        // each method", which is the question a paybill statement can answer
+        // back. `count` stays a count of ORDERS so the column keeps its meaning.
+        $byPaymentMethod = DB::table('payments as p')
+            ->join('orders as o', 'o.id', '=', 'p.order_id')
+            ->leftJoin('payment_methods as pm', 'pm.code', '=', 'p.payment_method')
+            ->whereBetween('o.created_at', [$start, $end])
+            ->whereNotIn('o.status', ['voided', 'cancelled'])
+            ->whereRaw('UPPER(o.currency_code) = ?', [$currency])
+            ->when($outletId,  fn ($q) => $q->where('o.outlet_id',  $outletId))
+            ->when($orderType, fn ($q) => $q->where('o.order_type', $orderType))
+            ->where('p.status', 'paid')
+            ->where(fn ($q) => $q->where('p.requires_approval', false)
+                                 ->orWhereNull('p.requires_approval')
+                                 ->orWhere('p.approval_status', 'approved'))
+            ->selectRaw("
+                p.payment_method,
+                COALESCE(pm.name, p.payment_method) AS method_name,
+                pm.description                      AS method_description,
+                COUNT(DISTINCT o.id)                AS count,
+                (COALESCE(SUM(p.amount - COALESCE(p.refund_amount, 0)), 0))::float8 AS total
+            ")
+            ->groupBy('p.payment_method', 'pm.name', 'pm.description')
+            ->orderByRaw('(COALESCE(SUM(p.amount - COALESCE(p.refund_amount, 0)), 0))::float8 DESC')
             ->get();
 
         // Hourly distribution - useful for staffing decisions
@@ -314,6 +316,17 @@ class ReportController extends Controller
             );
         }
 
+        // Orders in OTHER currencies are excluded by the currency filter above
+        // and were vanishing silently — 15 of them in a 30-day range. A total
+        // that quietly omits rows is worse than one that says what it omitted,
+        // because nothing on the page lets a reader notice.
+        $excluded = Order::whereBetween('orders.created_at', [$start, $end])
+            ->whereNotIn('orders.status', ['voided', 'cancelled'])
+            ->whereRaw('UPPER(orders.currency_code) <> ?', [$currency])
+            ->selectRaw('orders.currency_code, COUNT(*) AS orders, (COALESCE(SUM(orders.total_amount),0))::float8 AS total')
+            ->groupBy('orders.currency_code')
+            ->get();
+
         return response()->json($this->numify([
             'period'             => ['start' => $start, 'end' => $end],
             'currency'           => $currency,
@@ -321,6 +334,15 @@ class ReportController extends Controller
             'daily_breakdown'    => $daily,
             'weekly_breakdown'   => $weekly,
             'by_payment_method'  => $byPaymentMethod,
+            // Two DIFFERENT questions, deliberately both answered:
+            //   total_collected — money that ARRIVED in this period, bucketed by
+            //     payment date, whatever period the order belongs to (treasury).
+            //   ledger paid     — how much of THIS period's sales has been paid,
+            //     bucketed by order date (receivables).
+            // They are not meant to match; presenting them without saying so is
+            // what made the page look like it contradicted itself.
+            'collected_basis'    => 'payment_date',
+            'excluded_currencies' => $excluded,
             'by_hour'            => $byHour,
             'by_day_of_week'     => $byDayOfWeek,
             'comparison'         => $comparison,
@@ -381,7 +403,11 @@ class ReportController extends Controller
         $scoped = fn (?string $channel) => Order::query()
             ->salesChannel($channel)
             ->whereBetween('orders.created_at', [$start, $end])
-            ->whereNotIn('orders.status', ['cancelled'])
+            // 'voided' as well as 'cancelled' — the summary excludes both, and a
+            // report that shows two different sales totals on one screen is worse
+            // than one that is slightly wrong, because you cannot tell which to
+            // trust. One voided order (21,700) was the entire discrepancy.
+            ->whereNotIn('orders.status', ['voided', 'cancelled'])
             ->whereRaw('UPPER(orders.currency_code) = ?', [$currency])
             ->when($outletId, fn ($q) => $q->where('orders.outlet_id', $outletId))
             ->leftJoinSub($paidPerOrder, 'pay', fn ($j) => $j->on('pay.order_id', '=', 'orders.id'));
@@ -420,7 +446,25 @@ class ReportController extends Controller
                 'sales'  => (float) $r->sales,
                 'paid'   => (float) $r->paid,
                 'credit' => (float) $r->balance,
+            ])
+            ->keyBy('date');
+
+        // ZERO-FILL every calendar day in the range. The query returns only days
+        // that had orders — 27 of 30 here — and a line chart joins the points it
+        // is given, so it drew a straight line THROUGH the three silent days as
+        // though trade continued. A zero day is information; an absent day is a
+        // lie about the shape of the week.
+        $cursor  = \Carbon\Carbon::parse($start)->startOfDay();
+        $lastDay = \Carbon\Carbon::parse($end)->startOfDay();
+        $filled  = [];
+        while ($cursor->lte($lastDay)) {
+            $key = $cursor->toDateString();
+            $filled[] = $daily->get($key, [
+                'date' => $key, 'orders' => 0, 'sales' => 0.0, 'paid' => 0.0, 'credit' => 0.0,
             ]);
+            $cursor->addDay();
+        }
+        $daily = $filled;
 
         // ── Weekly and monthly, each split by channel ────────────────────────
         $bucketed = function (string $sqlBucket) use ($scoped, $agg, $channels) {

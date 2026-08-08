@@ -289,6 +289,91 @@ class SalesLedgerTest extends TestCase
         }
     }
 
+    public function test_the_ledger_and_the_summary_report_the_same_sales(): void
+    {
+        // The single most damaging defect a report can have is disagreeing with
+        // itself: a reader cannot tell which number to trust, so they trust
+        // neither. One voided order used to appear in the ledger and not the
+        // summary, and the two sales totals differed by exactly its value.
+        $this->viewer();
+        $this->order('pos', 1000, 1000);
+        $this->order('online', 500, 0);
+        $this->order('pos', 21700, 0)->update(['status' => 'voided']);
+
+        $params = '?start_date='.now()->subDays(7)->format('Y-m-d')
+                 .'&end_date='.now()->format('Y-m-d');
+
+        $summary = $this->getJson('/api/v1/admin/reports/sales/summary'.$params)->assertOk()->json();
+        $ledger  = $this->getJson('/api/v1/admin/reports/sales/ledger'.$params)->assertOk()->json();
+
+        $this->assertEqualsWithDelta(
+            (float) $summary['summary']['total_revenue'],
+            array_sum(array_column($ledger['channels'], 'sales')),
+            0.01,
+            'the ledger and the summary disagree about total sales',
+        );
+    }
+
+    public function test_every_calendar_day_appears_even_with_no_trade(): void
+    {
+        // A line chart joins the points it is given. Omitting a silent day makes
+        // it draw straight through, implying trade that did not happen.
+        $this->viewer();
+        $this->order('pos', 100, 100);
+
+        $days = $this->getJson('/api/v1/admin/reports/sales/ledger'
+            .'?start_date='.now()->subDays(6)->format('Y-m-d')
+            .'&end_date='.now()->format('Y-m-d'))
+            ->assertOk()->json('daily');
+
+        $this->assertCount(7, $days, 'the daily series skipped days with no orders');
+        $this->assertSame(now()->subDays(6)->toDateString(), $days[0]['date']);
+        $this->assertSame(now()->toDateString(), $days[6]['date']);
+    }
+
+    public function test_the_payment_breakdown_reports_money_received_not_order_value(): void
+    {
+        // A part-paid order used to put its WHOLE invoice under the method that
+        // paid part of it, so the breakdown could not be reconciled against a
+        // paybill statement — the only thing it is ever used for.
+        $this->viewer();
+        $o = $this->order('pos', 10000, 0);
+        Payment::factory()->create([
+            'order_id' => $o->id, 'payment_method' => 'cash',
+            'amount' => 2500, 'status' => 'paid',
+        ]);
+
+        $rows = $this->getJson('/api/v1/admin/reports/sales/summary'
+            .'?start_date='.now()->subDays(7)->format('Y-m-d')
+            .'&end_date='.now()->format('Y-m-d'))
+            ->assertOk()->json('by_payment_method');
+
+        $cash = collect($rows)->firstWhere('payment_method', 'cash');
+
+        $this->assertNotNull($cash);
+        $this->assertEqualsWithDelta(2500.0, (float) $cash['total'], 0.01,
+            'the breakdown reported the order value instead of the amount paid');
+    }
+
+    public function test_orders_in_another_currency_are_reported_not_silently_dropped(): void
+    {
+        $this->viewer();
+        $this->order('pos', 1000, 1000);
+        Order::factory()->create([
+            'currency_code' => 'USD', 'total_amount' => 400,
+            'status' => 'confirmed', 'created_at' => now(),
+        ]);
+
+        $excluded = $this->getJson('/api/v1/admin/reports/sales/summary'
+            .'?start_date='.now()->subDays(7)->format('Y-m-d')
+            .'&end_date='.now()->format('Y-m-d'))
+            ->assertOk()->json('excluded_currencies');
+
+        $usd = collect($excluded)->firstWhere('currency_code', 'USD');
+        $this->assertNotNull($usd, 'a non-reporting-currency order vanished with no trace');
+        $this->assertSame(1, (int) $usd['orders']);
+    }
+
     public function test_unique_customers_counts_walk_ins_not_only_registered_users(): void
     {
         // Every order in production has a NULL user_id — POS and WhatsApp
