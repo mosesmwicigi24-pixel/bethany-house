@@ -195,7 +195,7 @@ class ReportController extends Controller
             (COALESCE(SUM(CASE WHEN order_type = 'pos'    THEN total_amount ELSE 0 END), 0))::float8 AS pos_revenue,
             COUNT(CASE WHEN order_type = 'online' THEN 1 END)                 AS online_count,
             COUNT(CASE WHEN order_type = 'pos'    THEN 1 END)                 AS pos_count,
-            COUNT(DISTINCT COALESCE(user_id::text, customer_phone, customer_email))                                            AS unique_customers,
+            COUNT(DISTINCT COALESCE(user_id::text, normalize_phone(customer_phone), NULLIF(lower(btrim(customer_email)), '')))                                            AS unique_customers,
             (COALESCE(SUM(discount_amount) / NULLIF(SUM(total_amount + discount_amount), 0) * 100, 0))::float8 AS discount_rate_percent
         ")->first();
 
@@ -203,7 +203,7 @@ class ReportController extends Controller
             DATE(created_at)               AS date,
             COUNT(*)                       AS orders,
             (COALESCE(SUM(total_amount), 0))::float8 AS revenue,
-            COUNT(DISTINCT COALESCE(user_id::text, customer_phone, customer_email))        AS unique_customers
+            COUNT(DISTINCT COALESCE(user_id::text, normalize_phone(customer_phone), NULLIF(lower(btrim(customer_email)), '')))        AS unique_customers
         ")
             ->groupBy(DB::raw('DATE(created_at)'))
             ->orderBy('date')
@@ -1004,7 +1004,7 @@ class ReportController extends Controller
                 ->whereRaw("TO_CHAR(created_at, 'YYYY-MM') >= ?", [$cohortMonth])
                 ->selectRaw("
                     TO_CHAR(created_at, 'YYYY-MM') AS month,
-                    COUNT(DISTINCT COALESCE(user_id::text, customer_phone, customer_email)) AS retained
+                    COUNT(DISTINCT COALESCE(user_id::text, normalize_phone(customer_phone), NULLIF(lower(btrim(customer_email)), ''))) AS retained
                 ")
                 ->groupBy(DB::raw("TO_CHAR(created_at, 'YYYY-MM')"))
                 ->orderBy('month')
