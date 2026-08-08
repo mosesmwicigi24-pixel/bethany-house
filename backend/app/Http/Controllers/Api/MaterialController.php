@@ -8,9 +8,21 @@ use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use App\Support\SortResolver;
 
 class MaterialController extends Controller
 {
+    /**
+     * Columns a client may sort the materials list by. Values are fully
+     * qualified (or select aliases) because the query joins material_inventory.
+     */
+    private const SORTABLE_COLUMNS = [
+        'materials.name', 'materials.code', 'materials.category',
+        'materials.unit_cost', 'materials.reorder_point', 'materials.is_active',
+        'materials.created_at', 'materials.updated_at',
+        'stock_quantity', 'current_cost',
+    ];
+
     /**
      * Get all materials
      */
@@ -57,8 +69,12 @@ class MaterialController extends Controller
             });
         }
 
-        $sortBy = $request->get('sort_by', 'materials.name');
-        $sortOrder = $request->get('sort_order', 'asc');
+        [$sortBy, $sortOrder] = SortResolver::resolve(
+            $request->get('sort_by'),
+            $request->get('sort_order', 'asc'),
+            self::SORTABLE_COLUMNS,
+            'materials.name'
+        );
         $query->orderBy($sortBy, $sortOrder);
 
         $perPage = $request->get('per_page', 50);

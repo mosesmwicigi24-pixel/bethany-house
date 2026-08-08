@@ -6,9 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Support\SortResolver;
 
 class ProductReviewController extends Controller
 {
+    /** Columns a client may sort review lists by (columns on product_reviews). */
+    private const SORTABLE_COLUMNS = ['created_at', 'updated_at', 'rating', 'helpful_count'];
+
     /**
      * Get product reviews (Public)
      */
@@ -29,8 +33,12 @@ class ProductReviewController extends Controller
         }
 
         // Sort
-        $sortBy = $request->get('sort_by', 'created_at');
-        $sortOrder = $request->get('sort_order', 'desc');
+        [$sortBy, $sortOrder] = SortResolver::resolve(
+            $request->get('sort_by'),
+            $request->get('sort_order', 'desc'),
+            self::SORTABLE_COLUMNS,
+            'created_at'
+        );
         $query->orderBy("product_reviews.{$sortBy}", $sortOrder);
 
         $perPage = $request->get('per_page', 10);
@@ -295,8 +303,12 @@ class ProductReviewController extends Controller
             });
         }
 
-        $sortBy = $request->get('sort_by', 'created_at');
-        $sortOrder = $request->get('sort_order', 'desc');
+        [$sortBy, $sortOrder] = SortResolver::resolve(
+            $request->get('sort_by'),
+            $request->get('sort_order', 'desc'),
+            self::SORTABLE_COLUMNS,
+            'created_at'
+        );
         $query->orderBy("product_reviews.{$sortBy}", $sortOrder);
 
         $perPage = $request->get('per_page', 20);

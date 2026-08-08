@@ -13,9 +13,19 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
+use App\Support\SortResolver;
 
 class CustomerController extends Controller
 {
+    /**
+     * Columns a client may sort the customers list by. 'name' is handled
+     * specially below — it maps to the linked user's first/last name.
+     */
+    private const SORTABLE_COLUMNS = [
+        'name', 'created_at', 'updated_at', 'customer_number', 'customer_type',
+        'loyalty_points', 'outstanding_balance', 'credit_limit', 'last_purchase_at',
+    ];
+
     /**
      * Get all customers (Admin)
      */
@@ -57,9 +67,13 @@ class CustomerController extends Controller
         }
 
         // Sort by various criteria
-        $sortBy = $request->get('sort_by', 'created_at');
-        $sortOrder = $request->get('sort_order', 'desc');
-        
+        [$sortBy, $sortOrder] = SortResolver::resolve(
+            $request->get('sort_by'),
+            $request->get('sort_order', 'desc'),
+            self::SORTABLE_COLUMNS,
+            'created_at'
+        );
+
         if ($sortBy === 'name') {
             $query->join('users', 'customers.user_id', '=', 'users.id')
                 ->orderBy('users.first_name', $sortOrder)
