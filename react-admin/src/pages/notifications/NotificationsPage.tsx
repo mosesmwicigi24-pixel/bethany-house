@@ -52,7 +52,7 @@ const ICON_BG: Record<string, string> = {
     production: "bg-brand-100",
     tasks:      "bg-brand-50",
     payment:    "bg-warning-light",
-    shipment:   "bg-purple-50",
+    shipment:   "bg-accent-50",
     qc:         "bg-info-light",
     orders:     "bg-success-light",
     stock:      "bg-danger-light",

@@ -53,7 +53,7 @@ function DeltaChip({ current, previous, downIsGood = false }: {
     const up = pct > 0;
     const good = downIsGood ? !up : up;
     return (
-        <span className={clsx("text-2xs font-bold tabular-nums", good ? "text-emerald-600" : "text-red-600")}>
+        <span className={clsx("text-2xs font-bold tabular-nums", good ? "text-success-600" : "text-danger-600")}>
             {up ? "▲" : "▼"} {Math.abs(pct).toFixed(1)}%
         </span>
     );
@@ -106,9 +106,9 @@ const ATTN_ICON: Record<string, string> = {
 function AttentionPanel({ items }: { items: any[] }) {
     const navigate = useNavigate();
     if (!items.length) return (
-        <div className="card card-body flex items-center gap-3 border-emerald-100 bg-emerald-50/40 py-2.5">
+        <div className="card card-body flex items-center gap-3 border-success-100 bg-success-50/40 py-2.5">
             <span aria-hidden="true">✅</span>
-            <p className="text-xs text-emerald-800 font-medium">Nothing needs your attention right now.</p>
+            <p className="text-xs text-success-800 font-medium">Nothing needs your attention right now.</p>
         </div>
     );
     return (
@@ -125,12 +125,12 @@ function AttentionPanel({ items }: { items: any[] }) {
                         <button key={it.key} onClick={() => navigate(it.link)}
                             className={clsx(
                                 "text-left rounded-xl border-l-4 border border-line p-3 flex flex-col gap-1 transition-shadow hover:shadow-md",
-                                high ? "border-l-red-500 bg-red-50/50" : "border-l-amber-400 bg-amber-50/40",
+                                high ? "border-l-red-500 bg-danger-50/50" : "border-l-amber-400 bg-amber-50/40",
                             )}>
                             <div className="flex items-center justify-between gap-2">
                                 <span className="text-base leading-none" aria-hidden="true">{ATTN_ICON[it.key] ?? "⚠️"}</span>
                                 <span className={clsx("text-2xs font-bold uppercase tracking-wide",
-                                    high ? "text-red-600" : "text-amber-600")}>
+                                    high ? "text-danger-600" : "text-amber-600")}>
                                     {high ? "urgent" : "watch"}
                                 </span>
                             </div>
@@ -256,7 +256,7 @@ function AgingCard({ aging, onBucket }: { aging: any; onBucket: (bucket: string,
                         <span className="text-2xs text-surface-400 w-11 text-left shrink-0">{b.label}</span>
                         <div className="flex-1 h-2 bg-surface-100 rounded-full overflow-hidden">
                             <div className={clsx("h-full rounded-full",
-                                b.key === "90_plus" ? "bg-red-500" : b.key === "61_90" ? "bg-amber-500" : "bg-brand-400")}
+                                b.key === "90_plus" ? "bg-danger-500" : b.key === "61_90" ? "bg-amber-500" : "bg-brand-400")}
                                 style={{ width: `${(Number(b.amount) / max) * 100}%` }} />
                         </div>
                         <span className={clsx("text-2xs font-bold tabular-nums w-16 text-right shrink-0",
@@ -443,7 +443,7 @@ const CATEGORIES: ReportCategory[] = [
         label: "Sales",
         description: "Revenue, orders, products, channels, patterns & returns",
         path: "/reports/sales",
-        color: "text-indigo-600 bg-indigo-50",
+        color: "text-info-600 bg-info-50",
         icon: (
             <svg
                 className="w-5 h-5"
@@ -465,7 +465,7 @@ const CATEGORIES: ReportCategory[] = [
         label: "Customers",
         description: "Growth, segments, lifetime value, retention cohorts",
         path: "/reports/customers",
-        color: "text-violet-600 bg-violet-50",
+        color: "text-accent-600 bg-accent-50",
         icon: (
             <svg
                 className="w-5 h-5"
@@ -511,7 +511,7 @@ const CATEGORIES: ReportCategory[] = [
         description:
             "Completion, on-time rate, tailor performance, QC failures",
         path: "/reports/production",
-        color: "text-pink-600 bg-pink-50",
+        color: "text-accent-600 bg-accent-50",
         icon: (
             <svg
                 className="w-5 h-5"
@@ -534,7 +534,7 @@ const CATEGORIES: ReportCategory[] = [
         description:
             "Purchase orders, supplier spend, top items, fulfilment status",
         path: "/reports/procurement",
-        color: "text-emerald-600 bg-emerald-50",
+        color: "text-success-600 bg-success-50",
         icon: (
             <svg
                 className="w-5 h-5"
@@ -556,7 +556,7 @@ const CATEGORIES: ReportCategory[] = [
         label: "Financial",
         description: "P&L statement, revenue vs expenses, tax, discounts",
         path: "/reports/financial",
-        color: "text-blue-600 bg-blue-50",
+        color: "text-info-600 bg-info-50",
         icon: (
             <svg
                 className="w-5 h-5"

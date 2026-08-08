@@ -22,10 +22,10 @@ import { groupRowsByDate, DateGroupHeaderRow } from "@/lib/dateGrouping";
 // ── Status colour map ─────────────────────────────────────────────────────────
 
 const STATUS_BADGE: Record<string, string> = {
-    order_confirmed:    "bg-blue-50 text-blue-700",
-    processing:         "bg-blue-50 text-blue-700",
-    ready_to_ship:      "bg-purple-50 text-purple-700",
-    picked_up:          "bg-purple-50 text-purple-700",
+    order_confirmed:    "bg-info-50 text-info-700",
+    processing:         "bg-info-50 text-info-700",
+    ready_to_ship:      "bg-accent-50 text-accent-700",
+    picked_up:          "bg-accent-50 text-accent-700",
     in_transit:         "badge-warning",
     out_for_delivery:   "badge-warning",
     delivery_attempted: "badge-danger",

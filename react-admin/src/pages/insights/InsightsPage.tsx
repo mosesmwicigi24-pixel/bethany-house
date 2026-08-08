@@ -282,7 +282,7 @@ export default function InsightsPage() {
                             ) : (
                                 <ResponsiveContainer width="100%" height={220}>
                                     <BarChart data={osData} layout="vertical">
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" horizontal={false} />
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#f2f3f2" horizontal={false} />
                                         <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
                                         <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={72} />
                                         <Tooltip />

@@ -46,9 +46,9 @@ const fmtDateTime = (d: string | null | undefined) =>
     d ? new Date(d).toLocaleString("en-KE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
 
 const STATUS_CFG: Record<string, { label: string; color: string; bg: string }> = {
-    approved:         { label: "Approved",          color: "text-emerald-700", bg: "bg-emerald-50" },
+    approved:         { label: "Approved",          color: "text-success-700", bg: "bg-success-50" },
     pending_approval: { label: "Pending Approval",  color: "text-amber-700",   bg: "bg-amber-50" },
-    rejected:         { label: "Rejected",          color: "text-red-700",     bg: "bg-red-50" },
+    rejected:         { label: "Rejected",          color: "text-danger-700",     bg: "bg-danger-50" },
 };
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -79,8 +79,8 @@ function AuditTrail({ adjId }: { adjId: number }) {
         <div className="divide-y divide-line">
             {logs.map((entry) => (
                 <div key={entry.id} className="flex gap-3 py-3.5">
-                    <div className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center shrink-0 mt-0.5">
-                        <svg className="w-3 h-3 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <div className="w-7 h-7 rounded-full bg-surface-100 flex items-center justify-center shrink-0 mt-0.5">
+                        <svg className="w-3 h-3 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
                     </div>
@@ -171,10 +171,10 @@ export default function StockAdjustmentDetailPage() {
             <div className="bg-white rounded-2xl shadow-sm border border-surface-200 overflow-hidden">
 
                 {/* Header band */}
-                <div className={clsx("px-5 py-5 sm:px-8 sm:py-6", isPositive ? "bg-gradient-to-r from-emerald-800 to-emerald-700" : "bg-gradient-to-r from-red-800 to-red-700")}>
+                <div className={clsx("px-5 py-5 sm:px-8 sm:py-6", isPositive ? "bg-gradient-to-r from-success-800 to-success-700" : "bg-gradient-to-r from-danger-800 to-danger-700")}>
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:flex-wrap">
                         <div>
-                            <p className={clsx("text-xs font-semibold uppercase tracking-widest mb-1", isPositive ? "text-emerald-300" : "text-red-300")}>
+                            <p className={clsx("text-xs font-semibold uppercase tracking-widest mb-1", isPositive ? "text-success-300" : "text-danger-300")}>
                                 Stock Adjustment #{adj.id}
                             </p>
                             <h1 className="text-xl font-bold text-white sm:text-2xl">
@@ -188,13 +188,13 @@ export default function StockAdjustmentDetailPage() {
                                     {statusCfg.label}
                                 </span>
                                 <span className={clsx("px-2.5 py-1 rounded-full text-xs font-semibold",
-                                    isPositive ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800")}>
+                                    isPositive ? "bg-success-100 text-success-800" : "bg-danger-100 text-danger-800")}>
                                     {adj.reason_label}
                                 </span>
                             </div>
                         </div>
                         <div className="sm:text-right">
-                            <p className={clsx("text-xs uppercase tracking-widest mb-1", isPositive ? "text-emerald-300" : "text-red-300")}>
+                            <p className={clsx("text-xs uppercase tracking-widest mb-1", isPositive ? "text-success-300" : "text-danger-300")}>
                                 Quantity Change
                             </p>
                             <p className="text-4xl font-bold text-white tabular-nums">
@@ -216,7 +216,7 @@ export default function StockAdjustmentDetailPage() {
                             const notes = window.prompt("Approval notes (optional):") ?? "";
                             approveMutation.mutate(notes);
                         }} disabled={approveMutation.isPending}
-                            className="btn-sm bg-emerald-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-emerald-700">
+                            className="btn-sm bg-success-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-success-700">
                             ✓ Approve
                         </button>
                         <button onClick={() => {
@@ -230,7 +230,7 @@ export default function StockAdjustmentDetailPage() {
                     </div>
                 )}
                 {canReverse && (
-                    <div className="px-5 py-3 bg-slate-50 border-b border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
+                    <div className="px-5 py-3 bg-surface-50 border-b border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
                         <button onClick={() => {
                             const notes = window.prompt("Reason for reversal (required):");
                             if (notes) reverseMutation.mutate(notes);
@@ -270,8 +270,8 @@ export default function StockAdjustmentDetailPage() {
                                 <div className="grid grid-cols-3 gap-3">
                                     {[
                                         { label: "Before", value: adj.quantity_before, color: "bg-surface-100 text-surface-700" },
-                                        { label: "Change", value: (isPositive ? "+" : "") + delta, color: isPositive ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800" },
-                                        { label: "After",  value: adj.quantity_after,  color: isPositive ? "bg-emerald-100 text-emerald-900 font-bold" : "bg-red-100 text-red-900 font-bold" },
+                                        { label: "Change", value: (isPositive ? "+" : "") + delta, color: isPositive ? "bg-success-50 text-success-800" : "bg-danger-50 text-danger-800" },
+                                        { label: "After",  value: adj.quantity_after,  color: isPositive ? "bg-success-100 text-success-900 font-bold" : "bg-danger-100 text-danger-900 font-bold" },
                                     ].map((cell) => (
                                         <div key={cell.label} className={clsx("rounded-xl p-4 text-center", cell.color)}>
                                             <p className="text-2xs uppercase tracking-widest opacity-60 mb-1">{cell.label}</p>
@@ -289,7 +289,7 @@ export default function StockAdjustmentDetailPage() {
                                     </div>
                                 )}
                                 {adj.approval_notes && (
-                                    <div className={clsx("p-4 rounded-xl", adj.status === "rejected" ? "bg-red-50" : "bg-emerald-50")}>
+                                    <div className={clsx("p-4 rounded-xl", adj.status === "rejected" ? "bg-danger-50" : "bg-success-50")}>
                                         <SectionLabel>Approval Notes</SectionLabel>
                                         <p className="text-xs text-surface-700 whitespace-pre-wrap">{adj.approval_notes}</p>
                                     </div>

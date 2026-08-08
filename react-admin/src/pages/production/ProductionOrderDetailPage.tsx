@@ -116,19 +116,19 @@ const STATUS_CFG: Record<string, { label: string; color: string; bg: string; dot
     draft:       { label: "Draft",        color: "text-surface-600",  bg: "bg-surface-100", dot: "bg-surface-400" },
     pending:     { label: "Pending",      color: "text-amber-700",    bg: "bg-amber-50",    dot: "bg-amber-500" },
     in_progress: { label: "In Progress",  color: "text-brand-700",    bg: "bg-brand-50",    dot: "bg-brand-500" },
-    on_hold:     { label: "On Hold",      color: "text-orange-700",   bg: "bg-orange-50",   dot: "bg-orange-500" },
-    qc_pending:  { label: "QC Pending",   color: "text-purple-700",   bg: "bg-purple-50",   dot: "bg-purple-500" },
-    qc_passed:   { label: "QC Passed",    color: "text-emerald-700",  bg: "bg-emerald-50",  dot: "bg-emerald-500" },
-    qc_failed:   { label: "QC Failed",    color: "text-red-700",      bg: "bg-red-50",      dot: "bg-red-500" },
-    completed:   { label: "Completed",    color: "text-emerald-700",  bg: "bg-emerald-100", dot: "bg-emerald-600" },
+    on_hold:     { label: "On Hold",      color: "text-warning-800",  bg: "bg-warning-100", dot: "bg-warning-600" },
+    qc_pending:  { label: "QC Pending",   color: "text-accent-700",   bg: "bg-accent-50",   dot: "bg-accent-500" },
+    qc_passed:   { label: "QC Passed",    color: "text-success-700",  bg: "bg-success-50",  dot: "bg-success-500" },
+    qc_failed:   { label: "QC Failed",    color: "text-danger-700",      bg: "bg-danger-50",      dot: "bg-danger-500" },
+    completed:   { label: "Completed",    color: "text-success-700",  bg: "bg-success-100", dot: "bg-success-600" },
     cancelled:   { label: "Cancelled",    color: "text-surface-500",  bg: "bg-surface-100", dot: "bg-surface-400" },
 };
 
 const PRIORITY_CFG: Record<string, { label: string; color: string; bg: string; cls: string }> = {
     low:    { label: "Low",    color: "text-surface-500",  bg: "bg-surface-100", cls: "text-surface-400 bg-surface-50 border-surface-200" },
-    normal: { label: "Normal", color: "text-blue-700",     bg: "bg-blue-50",     cls: "text-brand-600 bg-brand-50 border-brand-200" },
-    high:   { label: "High",   color: "text-orange-700",   bg: "bg-orange-50",   cls: "text-warning-dark bg-warning-light border-warning/30" },
-    urgent: { label: "Urgent", color: "text-red-700",      bg: "bg-red-50",      cls: "text-danger bg-danger-light border-danger/30" },
+    normal: { label: "Normal", color: "text-info-700",     bg: "bg-info-50",     cls: "text-brand-600 bg-brand-50 border-brand-200" },
+    high:   { label: "High",   color: "text-brand-700",   bg: "bg-brand-50",   cls: "text-warning-dark bg-warning-light border-warning/30" },
+    urgent: { label: "Urgent", color: "text-danger-700",      bg: "bg-danger-50",      cls: "text-danger bg-danger-light border-danger/30" },
 };
 
 const STAGE_ICONS: Record<string, string> = {
@@ -451,7 +451,7 @@ function BatchesModal({ order, onClose, onSaved }: { order: ProductionOrder; onC
                     + Add batch
                 </button>
                 <div className={clsx("rounded-xl px-3 py-2 text-xs font-semibold",
-                    remainder === 0 ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")}>
+                    remainder === 0 ? "bg-success-50 text-success-700" : "bg-amber-50 text-amber-700")}>
                     {remainder === 0
                         ? `✓ ${sum} of ${order.quantity} pieces allocated — the arithmetic holds.`
                         : remainder > 0
@@ -663,21 +663,21 @@ function IssueMaterialsModal({ order, onClose, onSaved }: { order: ProductionOrd
                     const rem = Math.max(0, a.quantity_required - a.quantity_allocated);
                     const pct = a.quantity_required > 0 ? (a.quantity_allocated / a.quantity_required * 100) : 0;
                     return (
-                        <div key={a.id} className={clsx("rounded-xl p-3 space-y-2", rem <= 0 ? "bg-emerald-50/40" : "bg-surface-50")}>
+                        <div key={a.id} className={clsx("rounded-xl p-3 space-y-2", rem <= 0 ? "bg-success-50/40" : "bg-surface-50")}>
                             <div className="grid grid-cols-12 gap-2 items-center text-xs">
                                 <div className="col-span-4">
                                     <p className="font-semibold text-surface-900">{a.material.name}</p>
                                     <p className="text-2xs text-surface-400">{a.material.code} · {a.material.unit_of_measure}</p>
                                 </div>
                                 <span className="col-span-2 text-right tabular-nums text-surface-600">{fmtNum(a.quantity_required)}</span>
-                                <span className={clsx("col-span-2 text-right tabular-nums font-semibold", pct >= 100 ? "text-emerald-600" : "text-amber-700")}>{fmtNum(a.quantity_allocated)}</span>
+                                <span className={clsx("col-span-2 text-right tabular-nums font-semibold", pct >= 100 ? "text-success-600" : "text-amber-700")}>{fmtNum(a.quantity_allocated)}</span>
                                 <span className="col-span-2 text-right tabular-nums text-surface-600">{fmtNum(rem)}</span>
                                 <input type="number" min={0} max={rem} step={0.001}
                                     value={qtys[a.id] ?? "0"} disabled={rem <= 0}
                                     onChange={e => setQtys(p => ({ ...p, [a.id]: e.target.value }))}
                                     className="col-span-2 input text-right text-xs py-1.5 disabled:opacity-40" />
                             </div>
-                            <ProgressBar pct={pct} colorClass={pct >= 100 ? "bg-emerald-500" : "bg-brand-500"} />
+                            <ProgressBar pct={pct} colorClass={pct >= 100 ? "bg-success-500" : "bg-brand-500"} />
                         </div>
                     );
                 })}
@@ -712,7 +712,7 @@ function QCModal({ order, onClose, onDone }: { order: ProductionOrder; onClose: 
                 <div className="flex rounded-xl overflow-hidden border border-surface-200">
                     <button onClick={() => setForm(p => ({ ...p, passed: true }))}
                         className={clsx("flex-1 py-3 text-sm font-semibold flex items-center justify-center gap-2 transition-colors",
-                            form.passed ? "bg-emerald-500 text-white" : "bg-white text-surface-500 hover:bg-surface-50")}>
+                            form.passed ? "bg-success-500 text-white" : "bg-white text-surface-500 hover:bg-surface-50")}>
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
                         Pass
                     </button>
@@ -758,7 +758,7 @@ function QCModal({ order, onClose, onDone }: { order: ProductionOrder; onClose: 
                 <div className="flex gap-3">
                     <button onClick={onClose} className="btn-secondary flex-1">Cancel</button>
                     <button onClick={() => mutation.mutate()} disabled={mutation.isPending}
-                        className={clsx("flex-1 font-semibold rounded-xl px-4 py-2 text-sm text-white transition-colors", form.passed ? "bg-emerald-500 hover:bg-emerald-600" : "bg-danger hover:bg-danger/90")}>
+                        className={clsx("flex-1 font-semibold rounded-xl px-4 py-2 text-sm text-white transition-colors", form.passed ? "bg-success-500 hover:bg-success-600" : "bg-danger hover:bg-danger/90")}>
                         {mutation.isPending ? "Recording…" : form.passed ? "Mark as Passed" : "Mark as Failed"}
                     </button>
                 </div>
@@ -790,9 +790,9 @@ function CompleteModal({ order, onClose, onDone }: { order: ProductionOrder; onC
     return (
         <Modal open title="Complete Production & Stock" onClose={onClose}>
             <div className="p-5 space-y-4">
-                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-                    <p className="text-sm font-semibold text-emerald-800">Ready for inventory</p>
-                    <p className="text-xs text-emerald-700 mt-0.5">QC has passed. Finished goods will be added to the selected location.</p>
+                <div className="bg-success-50 border border-success-200 rounded-xl p-4">
+                    <p className="text-sm font-semibold text-success-800">Ready for inventory</p>
+                    <p className="text-xs text-success-700 mt-0.5">QC has passed. Finished goods will be added to the selected location.</p>
                 </div>
                 <div>
                     <label className="label">Final Quantity Produced</label>
@@ -933,7 +933,7 @@ function StagesPipeline({
         <div className="space-y-2">
             {distribution && (
                 <div className="flex flex-wrap items-center gap-1.5 px-1 pb-1">
-                    <span className="text-2xs font-bold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <span className="text-2xs font-bold px-2 py-1 rounded-full bg-success-50 text-success-700 border border-success-200">
                         ✓ {distribution.finished} finished
                     </span>
                     {distribution.held.map(h => (
@@ -982,29 +982,29 @@ function StagesPipeline({
                 const canPause    = isMyTask && task.status === "in_progress";
 
                 const statusColor = isDone && !isFailed
-                    ? "bg-emerald-50 border-emerald-200"
+                    ? "bg-success-50 border-success-200"
                     : isActive
                         ? "bg-brand-50 border-brand-200"
                         : isFailed
-                            ? "bg-red-50 border-red-200"
+                            ? "bg-danger-50 border-danger-200"
                             : isMyTask
                                 ? "bg-white border-brand-100"
                                 : "bg-surface-50 border-line";
 
                 const dotColor = isDone && !isFailed
-                    ? "bg-emerald-500"
+                    ? "bg-success-500"
                     : isActive
                         ? "bg-brand-500 animate-pulse"
                         : isFailed
-                            ? "bg-red-500"
+                            ? "bg-danger-500"
                             : "bg-surface-300";
 
                 const badgeColor = isDone && !isFailed
-                    ? "bg-emerald-100 text-emerald-700"
+                    ? "bg-success-100 text-success-700"
                     : isActive
                         ? "bg-brand-100 text-brand-700"
                         : isFailed
-                            ? "bg-red-100 text-red-700"
+                            ? "bg-danger-100 text-danger-700"
                             : task.status === "cancelled"
                                 ? "bg-surface-100 text-surface-400"
                                 : "bg-amber-50 text-amber-700";
@@ -1041,7 +1041,7 @@ function StagesPipeline({
                                 )}
                             </div>
                             {idx < tasks.length - 1 && (
-                                <div className={clsx("w-0.5 flex-1 mt-1", isDone ? "bg-emerald-300" : "bg-surface-200")}
+                                <div className={clsx("w-0.5 flex-1 mt-1", isDone ? "bg-success-300" : "bg-surface-200")}
                                     style={{ minHeight: 12 }} />
                             )}
                         </div>
@@ -1055,7 +1055,7 @@ function StagesPipeline({
                                         {task.stage?.name ?? `Stage ${task.production_stage_id}`}
                                     </p>
                                     {task.concurrent_allowed && !isDone && (
-                                        <span className="text-sky-600 font-bold text-xs" title="May run in parallel — allowed by a production manager">∥</span>
+                                        <span className="text-info-600 font-bold text-xs" title="May run in parallel — allowed by a production manager">∥</span>
                                     )}
                                     {orderQuantity > 1 && (
                                         <span className="text-2xs font-bold tabular-nums text-surface-500 bg-surface-100 rounded-full px-1.5 py-0.5">
@@ -1077,7 +1077,7 @@ function StagesPipeline({
                                     → meta row, parallel → ∥ mark by the name). */}
                                 <div className="shrink-0">
                                     {isDone && !isFailed ? (
-                                        <span className="text-2xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">✓ Done</span>
+                                        <span className="text-2xs font-semibold px-2 py-0.5 rounded-full bg-success-100 text-success-700">✓ Done</span>
                                     ) : isFailed || task.status === "cancelled" ? (
                                         <span className={clsx("text-2xs font-semibold px-2 py-0.5 rounded-full", badgeColor)}>{badgeLabel}</span>
                                     ) : isActive ? (
@@ -1091,7 +1091,7 @@ function StagesPipeline({
                                             <span className="truncate max-w-[110px] sm:max-w-none">Waiting on {blocker?.stage?.name}</span>
                                         </span>
                                     ) : (
-                                        <span className="text-2xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Ready</span>
+                                        <span className="text-2xs font-semibold px-2 py-0.5 rounded-full bg-success-50 text-success-700 border border-success-200">Ready</span>
                                     )}
                                 </div>
                             </div>
@@ -1132,7 +1132,7 @@ function StagesPipeline({
                                         return (
                                             <span key={b.id}
                                                 className={clsx("text-2xs font-semibold px-1.5 py-0.5 rounded-md tabular-nums border",
-                                                    full ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                                    full ? "bg-success-50 text-success-700 border-success-200"
                                                     : p > 0 ? "bg-brand-50 text-brand-700 border-brand-200"
                                                     : "bg-surface-50 text-surface-400 border-surface-200")}>
                                                 {full ? "✓ " : ""}{b.label} {p}/{b.quantity}
@@ -1167,7 +1167,7 @@ function StagesPipeline({
                                         <button
                                             onClick={() => onTaskAction(task.id, "complete")}
                                             disabled={taskActionPending}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50"
+                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-success-600 text-white text-xs font-semibold hover:bg-success-700 transition-colors disabled:opacity-50"
                                         >
                                             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
@@ -1254,14 +1254,14 @@ function ThreadMentionPopup({ query, onSelect }: { query: string; onSelect: (u: 
 const ENTITY_STATUS_COLOURS: Record<string, string> = {
     pending:      "bg-surface-100 text-surface-500",
     processing:   "bg-brand-50 text-brand-700",
-    completed:    "bg-emerald-50 text-emerald-700",
-    shipped:      "bg-blue-50 text-blue-700",
-    delivered:    "bg-emerald-50 text-emerald-700",
-    cancelled:    "bg-red-50 text-red-700",
+    completed:    "bg-success-50 text-success-700",
+    shipped:      "bg-info-50 text-info-700",
+    delivered:    "bg-success-50 text-success-700",
+    cancelled:    "bg-danger-50 text-danger-700",
     draft:        "bg-surface-100 text-surface-500",
     in_progress:  "bg-brand-50 text-brand-700",
-    approved:     "bg-emerald-50 text-emerald-700",
-    urgent:       "bg-red-50 text-red-700",
+    approved:     "bg-success-50 text-success-700",
+    urgent:       "bg-danger-50 text-danger-700",
 };
 const entityStatusCls = (s: string) => ENTITY_STATUS_COLOURS[s] ?? "bg-surface-100 text-surface-500";
 
@@ -1289,13 +1289,13 @@ function ThreadEntityPopup({ query, onSelect, onDismiss }: {
                     onMouseDown={e => { e.preventDefault(); onSelect(r); }}
                     className="w-full flex items-start gap-2.5 px-3 py-2 hover:bg-surface-50 text-left transition-colors">
                     <div className={clsx("mt-0.5 w-6 h-6 rounded-md flex items-center justify-center shrink-0",
-                        r.type === "order" ? "bg-brand-50" : "bg-purple-50")}>
+                        r.type === "order" ? "bg-brand-50" : "bg-accent-50")}>
                         {r.type === "order" ? (
                             <svg className="w-3.5 h-3.5 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
                             </svg>
                         ) : (
-                            <svg className="w-3.5 h-3.5 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <svg className="w-3.5 h-3.5 text-accent-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/>
                             </svg>
                         )}
@@ -1351,7 +1351,7 @@ function ThreadMessageBody({ body, linkedEntities, isOwn }: {
                                     ? "bg-white/15 border-white/30 text-white hover:bg-white/25"
                                     : e.type === "order"
                                         ? "bg-brand-50 border-brand-200 text-brand-700 hover:bg-brand-100"
-                                        : "bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100"
+                                        : "bg-accent-50 border-accent-200 text-accent-700 hover:bg-accent-100"
                             )}>
                             {e.type === "order" ? (
                                 <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -1397,7 +1397,7 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
 
     const currentUserId = (auth.user as any)?.id;
 
-    const AVATAR_COLORS = ["bg-blue-500","bg-purple-500","bg-pink-500","bg-orange-500","bg-teal-500","bg-indigo-500","bg-rose-500","bg-amber-500"];
+    const AVATAR_COLORS = ["bg-brand-500","bg-info-600","bg-success-600","bg-accent-600","bg-amber-600","bg-danger-500","bg-info-800","bg-accent-800"];
     const avatarColor = (id: number) => AVATAR_COLORS[id % AVATAR_COLORS.length];
     const fmtTime = (ts: string) => new Date(ts).toLocaleString("en-KE", { dateStyle: "short", timeStyle: "short" });
     const scrollBottom = (behavior: ScrollBehavior = "smooth") =>
@@ -1824,7 +1824,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
 
     return (
         <div className={clsx("rounded-xl border overflow-hidden",
-            complete ? "border-emerald-200 bg-emerald-50/40" : "border-surface-200 bg-white")}>
+            complete ? "border-success-200 bg-success-50/40" : "border-surface-200 bg-white")}>
 
             {/* Identity: thumbnail + name + one status */}
             <div className="p-3 sm:p-4">
@@ -1847,7 +1847,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                                 </p>
                             </div>
                             <span className={clsx("shrink-0 text-2xs font-semibold px-2 py-0.5 rounded-full",
-                                complete ? "bg-emerald-100 text-emerald-700"
+                                complete ? "bg-success-100 text-success-700"
                                 : inProduction ? "bg-brand-100 text-brand-700"
                                 : "bg-surface-100 text-surface-500")}>
                                 {complete ? "✓ Complete" : inProduction ? "In production" : "Not started"}
@@ -1888,7 +1888,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                             return (
                                 <span key={t.id} title={t.stage?.name}
                                     className={clsx("shrink-0 text-2xs font-semibold px-1.5 py-0.5 rounded-md tabular-nums border",
-                                        full ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                        full ? "bg-success-50 text-success-700 border-success-200"
                                         : p > 0 ? "bg-brand-50 text-brand-700 border-brand-200"
                                         : "bg-surface-50 text-surface-400 border-surface-200")}>
                                     {t.stage?.name} {p}/{batch.quantity}
@@ -1901,10 +1901,10 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                 {/* Progress: measured across every stage, not just the last */}
                 <div className="flex items-center gap-2 mt-3">
                     <div className="flex-1 h-1.5 bg-surface-100 rounded-full overflow-hidden">
-                        <div className={clsx("h-full rounded-full transition-all", complete ? "bg-emerald-500" : "bg-brand-500")}
+                        <div className={clsx("h-full rounded-full transition-all", complete ? "bg-success-500" : "bg-brand-500")}
                             style={{ width: `${pct}%` }} />
                     </div>
-                    <span className={clsx("text-2xs font-bold tabular-nums shrink-0", complete ? "text-emerald-700" : "text-surface-500")}>
+                    <span className={clsx("text-2xs font-bold tabular-nums shrink-0", complete ? "text-success-700" : "text-surface-500")}>
                         {complete ? "✓ " : ""}{finished}/{batch.quantity} · {pct}%
                     </span>
                 </div>
@@ -1968,7 +1968,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                                         </div>
                                         <span className="col-span-2 text-right tabular-nums text-surface-600">{fmtNum(req)}</span>
                                         <span className="col-span-2 text-right tabular-nums text-surface-600">{fmtNum(used)}</span>
-                                        <span className={clsx("col-span-3 text-right tabular-nums font-semibold", rem <= 0 ? "text-emerald-600" : "text-surface-800")}>
+                                        <span className={clsx("col-span-3 text-right tabular-nums font-semibold", rem <= 0 ? "text-success-600" : "text-surface-800")}>
                                             {rem <= 0 ? "✓ fully used" : fmtNum(rem)}
                                         </span>
                                     </div>
@@ -2249,14 +2249,14 @@ export default function ProductionOrderDetailPage() {
                         needed to make the garment. */}
                     {isCustomer && (
                         <div className="flex items-center gap-1.5 mb-1.5 text-2xs">
-                            <span className="font-bold uppercase tracking-widest text-indigo-500">Sales order</span>
+                            <span className="font-bold uppercase tracking-widest text-info-500">Sales order</span>
                             {order.customer_order ? (
                                 <Link to={`/sales/orders/${order.customer_order_id}`}
-                                    className="font-mono font-bold text-indigo-700 hover:underline truncate">
+                                    className="font-mono font-bold text-info-700 hover:underline truncate">
                                     {order.customer_order.order_number}
                                 </Link>
                             ) : (
-                                <span className="font-bold text-indigo-700">#{order.customer_order_id}</span>
+                                <span className="font-bold text-info-700">#{order.customer_order_id}</span>
                             )}
                         </div>
                     )}
@@ -2383,13 +2383,13 @@ export default function ProductionOrderDetailPage() {
                     )}
                     {canQC && (
                         <button onClick={() => setModal("qc")}
-                            className="bg-purple-600 text-white border border-purple-600 rounded-lg px-2.5 h-[30px] sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-purple-700 transition-colors flex items-center gap-1">
+                            className="bg-accent-600 text-white border border-accent-600 rounded-lg px-2.5 h-[30px] sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-accent-700 transition-colors flex items-center gap-1">
                             <span className="hidden sm:inline">🔍 Quality Check</span><span className="sm:hidden">QC</span>
                         </button>
                     )}
                     {canComplete && (
                         <button onClick={() => setModal("complete")}
-                            className="bg-emerald-600 text-white border border-emerald-600 rounded-lg px-2.5 h-[30px] sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-emerald-700 transition-colors flex items-center gap-1">
+                            className="bg-success-600 text-white border border-success-600 rounded-lg px-2.5 h-[30px] sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-success-700 transition-colors flex items-center gap-1">
                             <span className="hidden sm:inline">✅ Complete &amp; Stock</span><span className="sm:hidden">Complete</span>
                         </button>
                     )}
@@ -2401,7 +2401,7 @@ export default function ProductionOrderDetailPage() {
                         className="!rounded-lg !px-2.5 !h-[30px] !min-h-[30px] sm:!h-9 sm:!min-h-[36px] !text-[11px] sm:!text-xs" />
                     <button
                         onClick={() => navigate(`/reports/production/costing/${order.id}`)}
-                        className={clsx(ACT_BTN, "hover:!border-emerald-300 hover:!text-emerald-700")}
+                        className={clsx(ACT_BTN, "hover:!border-success-300 hover:!text-success-700")}
                     >
                         <span className="hidden sm:inline">📊 </span>Costing<span className="hidden sm:inline">&nbsp;Report</span>
                     </button>
@@ -2536,12 +2536,12 @@ export default function ProductionOrderDetailPage() {
                                                             <p className="text-2xs text-surface-400 font-mono">{a.material.code} · {a.material.unit_of_measure}</p>
                                                         </td>
                                                         <td className="px-3 py-2.5 text-right tabular-nums">{a.quantity_required}</td>
-                                                        <td className={clsx("px-3 py-2.5 text-right tabular-nums font-semibold", pct >= 100 ? "text-emerald-700" : "text-amber-700")}>{a.quantity_allocated}</td>
+                                                        <td className={clsx("px-3 py-2.5 text-right tabular-nums font-semibold", pct >= 100 ? "text-success-700" : "text-amber-700")}>{a.quantity_allocated}</td>
                                                         <td className="px-3 py-2.5 text-right tabular-nums text-surface-600">{a.quantity_used}</td>
                                                         <td className="px-3 py-2.5">
                                                             <div className="flex items-center gap-2">
-                                                                <div className="w-16"><ProgressBar pct={pct} colorClass={pct >= 100 ? "bg-emerald-500" : "bg-amber-400"} /></div>
-                                                                <span className={clsx("text-2xs font-semibold", pct >= 100 ? "text-emerald-600" : "text-amber-600")}>{Math.round(pct)}%</span>
+                                                                <div className="w-16"><ProgressBar pct={pct} colorClass={pct >= 100 ? "bg-success-500" : "bg-amber-400"} /></div>
+                                                                <span className={clsx("text-2xs font-semibold", pct >= 100 ? "text-success-600" : "text-amber-600")}>{Math.round(pct)}%</span>
                                                             </div>
                                                         </td>
                                                     </tr>
@@ -2555,19 +2555,19 @@ export default function ProductionOrderDetailPage() {
                         {tab === "specs" && (
                             <div className="space-y-4">
                                 {specGender && (
-                                    <div className="flex items-center gap-3 rounded-xl bg-slate-800 px-4 py-3">
-                                        <span className="text-2xs font-semibold uppercase tracking-widest text-slate-400">Gender</span>
+                                    <div className="flex items-center gap-3 rounded-xl bg-surface-800 px-4 py-3">
+                                        <span className="text-2xs font-semibold uppercase tracking-widest text-surface-400">Gender</span>
                                         <span className="text-sm font-bold text-white capitalize">{specGender}</span>
                                     </div>
                                 )}
                                 {orderMeasurements && Object.keys(orderMeasurements).length > 0 && (
-                                    <div><SectionLabel>Measurements</SectionLabel><SpecGrid data={orderMeasurements} accentClass="bg-blue-50/70 border-blue-100" /></div>
+                                    <div><SectionLabel>Measurements</SectionLabel><SpecGrid data={orderMeasurements} accentClass="bg-info-50/70 border-info-100" /></div>
                                 )}
                                 {orderSpecifications && Object.keys(orderSpecifications).length > 0 && (
                                     <div><SectionLabel>Specifications</SectionLabel><SpecGrid data={orderSpecifications} accentClass="bg-surface-50 border-line" /></div>
                                 )}
                                 {orderPreferences && Object.keys(orderPreferences).length > 0 && (
-                                    <div><SectionLabel>Customer Preferences</SectionLabel><SpecGrid data={orderPreferences} accentClass="bg-indigo-50/70 border-indigo-100" /></div>
+                                    <div><SectionLabel>Customer Preferences</SectionLabel><SpecGrid data={orderPreferences} accentClass="bg-info-50/70 border-info-100" /></div>
                                 )}
                                 {order.notes && (
                                     <div><SectionLabel>Notes</SectionLabel>
@@ -2601,12 +2601,12 @@ export default function ProductionOrderDetailPage() {
                                 {sortedTasks.map(t => (
                                     <div key={t.id} title={t.stage?.name}
                                         className={clsx("flex-1 h-2 rounded-full",
-                                            t.status === "completed" ? "bg-emerald-500" :
+                                            t.status === "completed" ? "bg-success-500" :
                                             t.status === "in_progress" ? "bg-brand-500 animate-pulse" :
-                                            t.status === "failed" ? "bg-red-500" : "bg-surface-200")} />
+                                            t.status === "failed" ? "bg-danger-500" : "bg-surface-200")} />
                                 ))}
                             </div>
-                            <ProgressBar pct={order.completion_percentage} colorClass={order.status === "completed" ? "bg-emerald-500" : "bg-brand-500"} />
+                            <ProgressBar pct={order.completion_percentage} colorClass={order.status === "completed" ? "bg-success-500" : "bg-brand-500"} />
                             <p className="text-2xs text-surface-400 mt-1 text-right">{order.completion_percentage}%</p>
                         </div>
 
@@ -2649,10 +2649,10 @@ export default function ProductionOrderDetailPage() {
                                 <>
                                     <SectionLabel>Key Dates</SectionLabel>
                                     {(order as any).fitting_date && (
-                                        <InfoRow label="Fitting" value={<span className="font-semibold text-violet-700">{fmtDate((order as any).fitting_date)}</span>} />
+                                        <InfoRow label="Fitting" value={<span className="font-semibold text-accent-700">{fmtDate((order as any).fitting_date)}</span>} />
                                     )}
                                     {(order as any).collection_date && (
-                                        <InfoRow label="Collection" value={<span className="font-semibold text-emerald-700">{fmtDate((order as any).collection_date)}</span>} />
+                                        <InfoRow label="Collection" value={<span className="font-semibold text-success-700">{fmtDate((order as any).collection_date)}</span>} />
                                     )}
                                     {order.started_at && <InfoRow label="Started" value={fmtDate(order.started_at)} />}
                                     {order.completed_at && <InfoRow label="Completed" value={fmtDate(order.completed_at)} />}

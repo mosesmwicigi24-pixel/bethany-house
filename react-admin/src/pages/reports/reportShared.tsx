@@ -28,16 +28,21 @@ import {
 export const KPI_GRID = "grid grid-cols-2 md:grid-cols-4 2xl:grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-3";
 
 export const CHART_COLORS = [
-    "#6366F1",
-    "#8B5CF6",
-    "#EC4899",
-    "#F59E0B",
-    "#10B981",
-    "#3B82F6",
-    "#EF4444",
-    "#06B6D4",
-    "#84CC16",
-    "#F97316",
+    // Derived from the design tokens rather than stock Tailwind hexes, so a
+    // palette change happens in tailwind.config.js and not here. Ordered
+    // brand-first, then alternating family and rung so adjacent series stay
+    // distinguishable — a categorical scale's whole job is telling series
+    // apart, so this deliberately does NOT collapse to one accent.
+    "#f05423", // brand 500
+    "#2563eb", // info 600
+    "#16a34a", // success 600
+    "#9333ea", // accent 600
+    "#f59e0b", // amber 500
+    "#dc2626", // danger 600
+    "#1e40af", // info 800
+    "#15803d", // success 700
+    "#7e22ce", // accent 700
+    "#b45309", // amber 700
 ];
 
 export const TH =
@@ -1057,7 +1062,7 @@ tr:last-child td{border-bottom:none}
 .badge-amber{background:#fef9c3;color:#a16207}
 .badge-red{background:#fee2e2;color:#b91c1c}
 .badge-blue{background:#dbeafe;color:#1d4ed8}
-.badge-grey{background:#f3f4f6;color:#6b7280}
+.badge-grey{background:#f2f3f2;color:#757d72}
 @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{padding:16px}}
 </style>
 </head>

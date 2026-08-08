@@ -124,9 +124,9 @@ function paymentStatusBadge(status: string, approvalStatus?: string | null) {
     if (approvalStatus === "pending_review")
         return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-2xs font-semibold bg-amber-100 text-amber-800">⏳ Pending Approval</span>;
     if (approvalStatus === "rejected")
-        return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-2xs font-semibold bg-red-100 text-red-800">✕ Rejected</span>;
+        return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-2xs font-semibold bg-danger-100 text-danger-800">✕ Rejected</span>;
     if (status === "paid" || approvalStatus === "approved")
-        return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-2xs font-semibold bg-green-100 text-green-800">✓ Paid</span>;
+        return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-2xs font-semibold bg-success-100 text-success-800">✓ Paid</span>;
     if (status === "pending")
         return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-2xs font-semibold bg-surface-100 text-surface-600">Pending</span>;
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-2xs font-semibold bg-surface-100 text-surface-500">{status}</span>;

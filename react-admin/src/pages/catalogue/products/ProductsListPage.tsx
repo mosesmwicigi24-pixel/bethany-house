@@ -741,7 +741,7 @@ export default function ProductsListPage() {
                                                             </span>
                                                         )}
                                                         {product.is_producible && (
-                                                            <span className="text-2xs bg-purple-50 text-purple-600 px-1.5 rounded">
+                                                            <span className="text-2xs bg-accent-50 text-accent-600 px-1.5 rounded">
                                                                 Production
                                                             </span>
                                                         )}

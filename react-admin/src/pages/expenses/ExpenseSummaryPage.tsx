@@ -11,7 +11,7 @@ import {
 import { clsx } from 'clsx'
 import dayjs from 'dayjs'
 
-const CHART_COLORS = ['#6366F1', '#8B5CF6', '#EC4899', '#F59E0B', '#10B981', '#3B82F6', '#EF4444', '#64748B']
+const CHART_COLORS = ['#6366F1', '#8B5CF6', '#EC4899', '#F59E0B', '#10B981', '#3B82F6', '#EF4444', '#757d72']
 
 type Preset = 'this_month' | 'last_month' | 'this_quarter' | 'this_year' | 'custom'
 
@@ -137,7 +137,7 @@ export default function ExpenseSummaryPage() {
               ) : (
                 <ResponsiveContainer width="100%" height={220}>
                   <BarChart data={trend} barSize={18}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f2f3f2" />
                     <XAxis dataKey="month" tick={{ fontSize: 10 }} />
                     <YAxis tickFormatter={(v: number) => `${(v / 1000).toFixed(0)}K`} tick={{ fontSize: 10 }} width={40} />
                     <Tooltip formatter={(v) => fmtKes(v as number)} />

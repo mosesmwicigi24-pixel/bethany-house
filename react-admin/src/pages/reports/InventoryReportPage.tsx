@@ -327,7 +327,7 @@ export default function InventoryReportPage() {
                                     >
                                         <CartesianGrid
                                             strokeDasharray="3 3"
-                                            stroke="#F1F5F9"
+                                            stroke="#f2f3f2"
                                             horizontal={false}
                                         />
                                         <XAxis
@@ -361,7 +361,7 @@ export default function InventoryReportPage() {
                                 <BarChart data={outletQtyData}>
                                     <CartesianGrid
                                         strokeDasharray="3 3"
-                                        stroke="#F1F5F9"
+                                        stroke="#f2f3f2"
                                     />
                                     <XAxis
                                         dataKey="name"
@@ -708,7 +708,7 @@ export default function InventoryReportPage() {
                                 <SectionHeader title="Stock Value by Category" />
                                 <ResponsiveContainer width="100%" height={240}>
                                     <BarChart data={byCat.sort((a: any, b: any) => b.value - a.value).slice(0, 12)} layout="vertical">
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" horizontal={false} />
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#f2f3f2" horizontal={false} />
                                         <XAxis type="number" tickFormatter={(v: number) => `${(v/1000).toFixed(0)}K`} tick={{ fontSize: 11 }} />
                                         <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={120} />
                                         <Tooltip formatter={(v) => fmtKes(v as number)} />
@@ -852,7 +852,7 @@ export default function InventoryReportPage() {
                                         <LineChart data={movTrendData}>
                                             <CartesianGrid
                                                 strokeDasharray="3 3"
-                                                stroke="#F1F5F9"
+                                                stroke="#f2f3f2"
                                             />
                                             <XAxis
                                                 dataKey="date"
@@ -1025,7 +1025,7 @@ function InventoryIntelligence({ start, end }: { start: string; end: string }) {
     });
     if (isLoading || !data) return <div className="flex justify-center py-16"><Spinner /></div>;
     const { health, abc, stockout_risks, dead_stock, shrinkage, materials } = data;
-    const CLASS_CLR: Record<string, string> = { A: "bg-emerald-100 text-emerald-700", B: "bg-amber-100 text-amber-700", C: "bg-surface-100 text-surface-500" };
+    const CLASS_CLR: Record<string, string> = { A: "bg-success-100 text-success-700", B: "bg-amber-100 text-amber-700", C: "bg-surface-100 text-surface-500" };
 
     return (
         <div className="space-y-6">
@@ -1037,14 +1037,14 @@ function InventoryIntelligence({ start, end }: { start: string; end: string }) {
             </div>
 
             {stockout_risks.length > 0 && (
-                <div className="card card-body border border-red-200 bg-red-50/40">
+                <div className="card card-body border border-danger-200 bg-danger-50/40">
                     <SectionHeader title="⚠ Stockout risk — best sellers running dry" />
                     <div className="space-y-1.5 mt-1">
                         {stockout_risks.map((r: any) => (
                             <div key={r.product_id} className="flex items-center gap-3 text-xs">
                                 <span className="font-medium text-surface-800 flex-1 truncate">{r.product}</span>
                                 <span className="text-surface-500">{r.on_hand} left</span>
-                                <span className="font-bold text-red-700 tabular-nums">~{r.cover_days}d cover</span>
+                                <span className="font-bold text-danger-700 tabular-nums">~{r.cover_days}d cover</span>
                             </div>
                         ))}
                     </div>

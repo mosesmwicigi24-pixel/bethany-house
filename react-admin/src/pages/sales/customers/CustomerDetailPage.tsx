@@ -12,7 +12,7 @@ import type { ApiError } from "@/types";
 
 function Avatar({ name, size = "lg" }: { name: string; size?: "sm" | "lg" }) {
     const initials = name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
-    const colors = ["bg-brand-100 text-brand-700", "bg-success-light text-success-dark", "bg-purple-100 text-purple-700", "bg-warning-light text-warning-dark", "bg-info-light text-info"];
+    const colors = ["bg-brand-100 text-brand-700", "bg-success-light text-success-dark", "bg-accent-100 text-accent-700", "bg-warning-light text-warning-dark", "bg-info-light text-info"];
     const color = colors[name.charCodeAt(0) % colors.length];
     return (
         <div className={clsx("rounded-full flex items-center justify-center font-bold shrink-0", color,

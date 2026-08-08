@@ -3773,11 +3773,11 @@ export default function ProductFormPage() {
                                             </Field>
                                             {(metaTitle || enName) && (
                                                 <div className="border border-line rounded-xl p-3 bg-surface-50 text-xs">
-                                                    <p className="text-blue-600 font-medium">
+                                                    <p className="text-info-600 font-medium">
                                                         {metaTitle || enName} |
                                                         Bethany House
                                                     </p>
-                                                    <p className="text-green-700">
+                                                    <p className="text-success-700">
                                                         bethanyhouse.co.ke/products/
                                                         {watch("slug") ||
                                                             "product-slug"}

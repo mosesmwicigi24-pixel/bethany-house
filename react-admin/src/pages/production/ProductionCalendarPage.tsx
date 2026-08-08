@@ -113,7 +113,7 @@ const STATUS_COLORS: Record<string, string> = {
     pending:     "bg-surface-200 text-surface-600",
     in_progress: "bg-brand-500/20 text-brand-700",
     on_hold:     "bg-warning-light text-warning-dark",
-    qc_pending:  "bg-purple-50 text-purple-700",
+    qc_pending:  "bg-accent-50 text-accent-700",
     qc_passed:   "bg-success-light text-success",
     qc_failed:   "bg-danger-light text-danger",
 };
@@ -122,7 +122,7 @@ const STATUS_DOT: Record<string, string> = {
     pending:     "bg-surface-400",
     in_progress: "bg-brand-500",
     on_hold:     "bg-warning",
-    qc_pending:  "bg-purple-500",
+    qc_pending:  "bg-accent-500",
     qc_passed:   "bg-success",
     qc_failed:   "bg-danger",
 };
@@ -384,7 +384,7 @@ function MonthGrid({
                                 <div className="mt-0.5 flex items-center gap-0.5 px-0.5">
                                     {appointmentsByDate!.get(cell.date!)!.slice(0, 4).map((a, i) => (
                                         <span key={i} title={`${a.type === "fitting" ? "Fitting" : "Collection"} · ${a.order.order_number}`}
-                                            className={clsx("w-1.5 h-1.5 rounded-full", a.type === "fitting" ? "bg-violet-500" : "bg-emerald-500")} />
+                                            className={clsx("w-1.5 h-1.5 rounded-full", a.type === "fitting" ? "bg-accent-500" : "bg-success-500")} />
                                     ))}
                                 </div>
                             )}
@@ -561,8 +561,8 @@ function DayPanel({
                             {appointments.map((a, i) => (
                                 <button key={i} onClick={() => a.order.id && onOrderClick(a.order.id)}
                                     className="w-full flex items-center gap-2 text-left text-xs hover:bg-surface-50 rounded-lg px-2 py-1.5 transition-colors">
-                                    <span className={clsx("w-2 h-2 rounded-full shrink-0", a.type === "fitting" ? "bg-violet-500" : "bg-emerald-500")} />
-                                    <span className={clsx("font-bold", a.type === "fitting" ? "text-violet-700" : "text-emerald-700")}>
+                                    <span className={clsx("w-2 h-2 rounded-full shrink-0", a.type === "fitting" ? "bg-accent-500" : "bg-success-500")} />
+                                    <span className={clsx("font-bold", a.type === "fitting" ? "text-accent-700" : "text-success-700")}>
                                         {a.type === "fitting" ? "Fitting" : "Collection"}
                                     </span>
                                     <span className="font-mono text-surface-500 truncate">{a.order.order_number}</span>
@@ -628,7 +628,7 @@ function DayPanel({
                                                     {o.status.replace("_", " ")}
                                                 </span>
                                                 {o.customer_order_id && (
-                                                    <span className="text-2xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 font-medium">MTO</span>
+                                                    <span className="text-2xs px-2 py-0.5 rounded-full bg-accent-50 text-accent-700 font-medium">MTO</span>
                                                 )}
                                             </div>
                                             <p className="text-xs text-surface-600 mt-0.5 truncate">{o.product_name}</p>

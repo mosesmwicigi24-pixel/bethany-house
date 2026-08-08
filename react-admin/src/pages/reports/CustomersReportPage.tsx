@@ -284,7 +284,7 @@ export default function CustomersReportPage() {
                                     >
                                         <CartesianGrid
                                             strokeDasharray="3 3"
-                                            stroke="#F1F5F9"
+                                            stroke="#f2f3f2"
                                             horizontal={false}
                                         />
                                         <XAxis
@@ -318,7 +318,7 @@ export default function CustomersReportPage() {
                                 <LineChart data={acquisitionTrend}>
                                     <CartesianGrid
                                         strokeDasharray="3 3"
-                                        stroke="#F1F5F9"
+                                        stroke="#f2f3f2"
                                     />
                                     <XAxis
                                         dataKey="month"

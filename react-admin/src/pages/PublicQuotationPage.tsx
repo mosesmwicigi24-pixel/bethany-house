@@ -78,14 +78,14 @@ export default function PublicQuotationPage() {
     }
 
     if (loading) {
-        return <div className="flex min-h-screen items-center justify-center text-gray-500">Loading…</div>;
+        return <div className="flex min-h-screen items-center justify-center text-surface-500">Loading…</div>;
     }
     if (!quote) {
         return (
-            <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+            <div className="flex min-h-screen items-center justify-center bg-surface-50 px-4">
                 <div className="max-w-md rounded-lg bg-white p-8 text-center shadow">
-                    <h1 className="mb-2 text-lg font-semibold text-gray-900">Quotation unavailable</h1>
-                    <p className="text-sm text-gray-500">{error || "This quotation link is invalid or has expired."}</p>
+                    <h1 className="mb-2 text-lg font-semibold text-surface-900">Quotation unavailable</h1>
+                    <p className="text-sm text-surface-500">{error || "This quotation link is invalid or has expired."}</p>
                 </div>
             </div>
         );
@@ -96,33 +96,33 @@ export default function PublicQuotationPage() {
     const canAccept = quote.status === "sent" && !quote.is_expired && !quote.is_accepted;
 
     return (
-        <div className="min-h-screen bg-gray-50 py-8 px-4">
+        <div className="min-h-screen bg-surface-50 py-8 px-4">
             <div className="mx-auto max-w-2xl space-y-4">
                 <div className="rounded-lg bg-white p-6 shadow">
                     {/* Header */}
                     <div className="flex items-start justify-between border-b pb-4">
                         <div>
-                            <div className="text-lg font-bold text-gray-900">{quote.business.name}</div>
-                            {quote.business.email && <div className="text-xs text-gray-500">{quote.business.email}</div>}
-                            {quote.business.phone && <div className="text-xs text-gray-500">{quote.business.phone}</div>}
+                            <div className="text-lg font-bold text-surface-900">{quote.business.name}</div>
+                            {quote.business.email && <div className="text-xs text-surface-500">{quote.business.email}</div>}
+                            {quote.business.phone && <div className="text-xs text-surface-500">{quote.business.phone}</div>}
                         </div>
                         <div className="text-right">
-                            <div className="text-xl font-bold text-gray-900">Quotation</div>
-                            <div className="text-sm text-gray-600">{quote.quote_number}</div>
-                            {quote.valid_until && <div className="mt-1 text-xs text-gray-500">Valid until {quote.valid_until}</div>}
+                            <div className="text-xl font-bold text-surface-900">Quotation</div>
+                            <div className="text-sm text-surface-600">{quote.quote_number}</div>
+                            {quote.valid_until && <div className="mt-1 text-xs text-surface-500">Valid until {quote.valid_until}</div>}
                         </div>
                     </div>
 
-                    <div className="flex items-center justify-between py-3 text-sm text-gray-600">
-                        <span>Prepared for <span className="font-medium text-gray-900">{custName}</span></span>
-                        {quote.served_by && <span className="text-xs text-gray-500">Served by {quote.served_by}</span>}
+                    <div className="flex items-center justify-between py-3 text-sm text-surface-600">
+                        <span>Prepared for <span className="font-medium text-surface-900">{custName}</span></span>
+                        {quote.served_by && <span className="text-xs text-surface-500">Served by {quote.served_by}</span>}
                     </div>
 
                     {/* Items */}
                     <div className="overflow-x-auto">
                     <table className="w-full text-sm min-w-[520px]">
                         <thead>
-                            <tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500">
+                            <tr className="border-b text-left text-xs uppercase tracking-wide text-surface-500">
                                 <th className="py-2">Description</th>
                                 <th className="py-2 text-right">Qty</th>
                                 <th className="py-2 text-right">Unit Price</th>
@@ -131,10 +131,10 @@ export default function PublicQuotationPage() {
                         </thead>
                         <tbody>
                             {quote.items.map((it, i) => (
-                                <tr key={i} className="border-b border-gray-100">
+                                <tr key={i} className="border-b border-surface-100">
                                     <td className="py-2">
                                         {it.product_name}
-                                        {it.variant_name && <span className="text-xs text-gray-400"> — {it.variant_name}</span>}
+                                        {it.variant_name && <span className="text-xs text-surface-400"> — {it.variant_name}</span>}
                                     </td>
                                     <td className="py-2 text-right tabular-nums">{it.quantity}</td>
                                     <td className="py-2 text-right tabular-nums">{fmt(it.unit_price, cc)}</td>
@@ -147,35 +147,35 @@ export default function PublicQuotationPage() {
 
                     {/* Totals */}
                     <div className="mt-4 ml-auto w-64 space-y-1 text-sm">
-                        <div className="flex justify-between text-gray-600"><span>Subtotal</span><span className="tabular-nums">{fmt(quote.totals.subtotal, cc)}</span></div>
-                        <div className="flex justify-between text-gray-600"><span>Tax</span><span className="tabular-nums">{fmt(quote.totals.tax_amount, cc)}</span></div>
+                        <div className="flex justify-between text-surface-600"><span>Subtotal</span><span className="tabular-nums">{fmt(quote.totals.subtotal, cc)}</span></div>
+                        <div className="flex justify-between text-surface-600"><span>Tax</span><span className="tabular-nums">{fmt(quote.totals.tax_amount, cc)}</span></div>
                         {quote.totals.shipping_amount > 0 && (
-                            <div className="flex justify-between text-gray-600"><span>Shipping</span><span className="tabular-nums">{fmt(quote.totals.shipping_amount, cc)}</span></div>
+                            <div className="flex justify-between text-surface-600"><span>Shipping</span><span className="tabular-nums">{fmt(quote.totals.shipping_amount, cc)}</span></div>
                         )}
-                        <div className="flex justify-between border-t pt-1 text-base font-bold text-gray-900"><span>Total</span><span className="tabular-nums">{fmt(quote.totals.total_amount, cc)}</span></div>
+                        <div className="flex justify-between border-t pt-1 text-base font-bold text-surface-900"><span>Total</span><span className="tabular-nums">{fmt(quote.totals.total_amount, cc)}</span></div>
                     </div>
 
-                    {quote.notes && <div className="mt-4 text-xs text-gray-500"><span className="font-medium">Notes:</span> {quote.notes}</div>}
-                    {quote.terms && <div className="mt-1 text-xs text-gray-500"><span className="font-medium">Terms:</span> {quote.terms}</div>}
+                    {quote.notes && <div className="mt-4 text-xs text-surface-500"><span className="font-medium">Notes:</span> {quote.notes}</div>}
+                    {quote.terms && <div className="mt-1 text-xs text-surface-500"><span className="font-medium">Terms:</span> {quote.terms}</div>}
                 </div>
 
                 {/* Action */}
                 <div className="rounded-lg bg-white p-6 shadow">
-                    {error && <div className="mb-3 rounded bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+                    {error && <div className="mb-3 rounded bg-danger-50 px-3 py-2 text-sm text-danger-700">{error}</div>}
                     {quote.is_accepted ? (
-                        <div className="text-center text-sm text-green-700">This quotation has already been accepted. Please check your invoice / pay-link.</div>
+                        <div className="text-center text-sm text-success-700">This quotation has already been accepted. Please check your invoice / pay-link.</div>
                     ) : quote.is_expired ? (
                         <div className="text-center text-sm text-amber-700">This quotation has expired. Please contact us for an updated quote.</div>
                     ) : (
                         <button
-                            className="w-full rounded-lg bg-gray-900 py-3 text-sm font-semibold text-white hover:bg-black disabled:opacity-50"
+                            className="w-full rounded-lg bg-surface-900 py-3 text-sm font-semibold text-white hover:bg-black disabled:opacity-50"
                             disabled={!canAccept || accepting}
                             onClick={accept}
                         >
                             {accepting ? "Processing…" : "Accept & proceed to payment"}
                         </button>
                     )}
-                    <p className="mt-2 text-center text-xs text-gray-400">Accepting confirms this order and takes you to secure payment.</p>
+                    <p className="mt-2 text-center text-xs text-surface-400">Accepting confirms this order and takes you to secure payment.</p>
                 </div>
             </div>
         </div>

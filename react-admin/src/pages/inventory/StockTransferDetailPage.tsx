@@ -48,10 +48,10 @@ const fmtDateTime = (d: string | null | undefined) =>
 
 const STATUS_CFG: Record<string, { label: string; color: string; bg: string; dot: string }> = {
     pending:    { label: "Pending",    color: "text-amber-700",   bg: "bg-amber-50",   dot: "bg-amber-500" },
-    approved:   { label: "Approved",   color: "text-blue-700",    bg: "bg-blue-50",    dot: "bg-blue-500" },
-    in_transit: { label: "In Transit", color: "text-indigo-700",  bg: "bg-indigo-50",  dot: "bg-indigo-500" },
-    completed:  { label: "Completed",  color: "text-emerald-700", bg: "bg-emerald-50", dot: "bg-emerald-500" },
-    cancelled:  { label: "Cancelled",  color: "text-red-700",     bg: "bg-red-50",     dot: "bg-red-500" },
+    approved:   { label: "Approved",   color: "text-info-700",    bg: "bg-info-50",    dot: "bg-info-500" },
+    in_transit: { label: "In Transit", color: "text-info-900",  bg: "bg-info-200", dot: "bg-info-700" },
+    completed:  { label: "Completed",  color: "text-success-700", bg: "bg-success-50", dot: "bg-success-500" },
+    cancelled:  { label: "Cancelled",  color: "text-danger-700",     bg: "bg-danger-50",     dot: "bg-danger-500" },
 };
 
 const TIMELINE_STEPS = ["pending", "approved", "in_transit", "completed"];
@@ -84,8 +84,8 @@ function StatusTimeline({ status }: { status: string }) {
                     <div key={step} className="flex items-center flex-1 last:flex-none">
                         <div className={clsx("w-6 h-6 rounded-full flex items-center justify-center shrink-0 border-2 transition-all",
                             current  ? "border-brand-500 bg-brand-500" :
-                            passed   ? "border-emerald-500 bg-emerald-500" :
-                            isCancelled ? "border-red-300 bg-red-100" :
+                            passed   ? "border-success-500 bg-success-500" :
+                            isCancelled ? "border-danger-300 bg-danger-100" :
                             "border-surface-200 bg-white")}>
                             {passed && !current ? (
                                 <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
@@ -95,7 +95,7 @@ function StatusTimeline({ status }: { status: string }) {
                                 <div className="w-2 h-2 rounded-full bg-white" />
                             ) : null}
                         </div>
-                        <div className={clsx("flex-1 h-0.5 last:hidden", passed ? "bg-emerald-400" : "bg-surface-200")} />
+                        <div className={clsx("flex-1 h-0.5 last:hidden", passed ? "bg-success-400" : "bg-surface-200")} />
                     </div>
                 );
             })}
@@ -202,10 +202,10 @@ export default function StockTransferDetailPage() {
             <div className="bg-white rounded-2xl shadow-sm border border-surface-200 overflow-hidden">
 
                 {/* Header band */}
-                <div className="bg-gradient-to-r from-indigo-800 to-indigo-700 px-5 py-5 sm:px-8 sm:py-6">
+                <div className="bg-gradient-to-r from-info-800 to-info-700 px-5 py-5 sm:px-8 sm:py-6">
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:flex-wrap">
                         <div>
-                            <p className="text-indigo-300 text-xs font-semibold uppercase tracking-widest mb-1">Stock Transfer</p>
+                            <p className="text-info-300 text-xs font-semibold uppercase tracking-widest mb-1">Stock Transfer</p>
                             <h1 className="text-xl font-bold text-white font-mono sm:text-2xl">{transfer.transfer_number}</h1>
                             <div className="flex items-center gap-3 mt-2 flex-wrap">
                                 <span className={clsx("px-2.5 py-1 rounded-full text-xs font-semibold", cfg.bg, cfg.color)}>
@@ -213,7 +213,7 @@ export default function StockTransferDetailPage() {
                                 </span>
                                 <div className="flex items-center gap-1.5 text-white/80 text-xs flex-wrap">
                                     <span className="font-semibold">{transfer.from_outlet?.name ?? "?"}</span>
-                                    <svg className="w-3.5 h-3.5 text-indigo-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                    <svg className="w-3.5 h-3.5 text-info-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 8.25L21 12m0 0l-3.75 3.75M21 12H3" />
                                     </svg>
                                     <span className="font-semibold">{transfer.to_outlet?.name ?? "?"}</span>
@@ -221,37 +221,37 @@ export default function StockTransferDetailPage() {
                             </div>
                         </div>
                         <div className="sm:text-right">
-                            <p className="text-indigo-300 text-2xs uppercase tracking-widest mb-1">Items</p>
+                            <p className="text-info-300 text-2xs uppercase tracking-widest mb-1">Items</p>
                             <p className="text-3xl font-bold text-white tabular-nums">{transfer.items.length}</p>
-                            <p className="text-indigo-300 text-xs mt-1">{totalItems} units total</p>
+                            <p className="text-info-300 text-xs mt-1">{totalItems} units total</p>
                         </div>
                     </div>
                 </div>
 
                 {/* Status timeline */}
-                <div className="px-5 py-4 bg-indigo-50 border-b border-indigo-100 sm:px-8">
+                <div className="px-5 py-4 bg-info-50 border-b border-info-100 sm:px-8">
                     <StatusTimeline status={transfer.status} />
                     <div className="flex justify-between mt-1">
                         {TIMELINE_STEPS.map((s) => (
-                            <span key={s} className="text-2xs text-indigo-500 capitalize">{s.replace("_", " ")}</span>
+                            <span key={s} className="text-2xs text-info-500 capitalize">{s.replace("_", " ")}</span>
                         ))}
                     </div>
                 </div>
 
                 {/* Action bar */}
                 {(canApprove || canDispatch || canReceive || canCancel) && (
-                    <div className="px-5 py-3 bg-slate-50 border-b border-line flex flex-wrap items-center gap-2 sm:px-8">
+                    <div className="px-5 py-3 bg-surface-50 border-b border-line flex flex-wrap items-center gap-2 sm:px-8">
                         {canApprove && (
                             <button onClick={() => actionMutation.mutate({ action: "approve" })}
                                 disabled={actionMutation.isPending}
-                                className="btn-sm bg-emerald-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-emerald-700">
+                                className="btn-sm bg-success-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-success-700">
                                 ✓ Approve Transfer
                             </button>
                         )}
                         {canDispatch && (
                             <button onClick={() => actionMutation.mutate({ action: "dispatch" })}
                                 disabled={actionMutation.isPending}
-                                className="btn-sm bg-indigo-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-indigo-700">
+                                className="btn-sm bg-info-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-info-700">
                                 📤 Mark as Dispatched
                             </button>
                         )}
@@ -328,7 +328,7 @@ export default function StockTransferDetailPage() {
                                                     </td>
                                                     <td className="px-3 py-2.5 text-center tabular-nums">
                                                         {isComplete ? (
-                                                            <span className={clsx("font-semibold", discrepancy === 0 ? "text-emerald-700" : "text-amber-700")}>
+                                                            <span className={clsx("font-semibold", discrepancy === 0 ? "text-success-700" : "text-amber-700")}>
                                                                 {item.quantity_received}
                                                             </span>
                                                         ) : "-"}
@@ -336,7 +336,7 @@ export default function StockTransferDetailPage() {
                                                     <td className="px-3 py-2.5 text-center">
                                                         {isComplete ? (
                                                             discrepancy === 0
-                                                                ? <span className="text-emerald-700 font-semibold">✓ Full</span>
+                                                                ? <span className="text-success-700 font-semibold">✓ Full</span>
                                                                 : <span className="text-amber-700 font-semibold">{discrepancy > 0 ? `+${discrepancy}` : discrepancy} discrepancy</span>
                                                         ) : (
                                                             <span className="text-surface-400">Pending</span>
@@ -351,7 +351,7 @@ export default function StockTransferDetailPage() {
                                             <td className="px-3 py-2 text-xs font-semibold text-surface-700">{transfer.items.length} item(s)</td>
                                             <td />
                                             <td className="px-3 py-2 text-center text-xs font-bold tabular-nums">{totalItems}</td>
-                                            <td className="px-3 py-2 text-center text-xs font-bold tabular-nums text-emerald-700">
+                                            <td className="px-3 py-2 text-center text-xs font-bold tabular-nums text-success-700">
                                                 {transfer.status === "completed" ? totalReceived : "-"}
                                             </td>
                                             <td />
@@ -385,9 +385,9 @@ export default function StockTransferDetailPage() {
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 13.5L12 21m0 0l-7.5-7.5M12 21V3" />
                                     </svg>
                                 </div>
-                                <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-100">
-                                    <p className="text-2xs text-indigo-500 uppercase tracking-widest mb-0.5">To</p>
-                                    <p className="text-sm font-semibold text-indigo-800">{transfer.to_outlet?.name ?? "-"}</p>
+                                <div className="p-3 bg-info-50 rounded-xl border border-info-100">
+                                    <p className="text-2xs text-info-500 uppercase tracking-widest mb-0.5">To</p>
+                                    <p className="text-sm font-semibold text-info-800">{transfer.to_outlet?.name ?? "-"}</p>
                                 </div>
                             </div>
                         </div>

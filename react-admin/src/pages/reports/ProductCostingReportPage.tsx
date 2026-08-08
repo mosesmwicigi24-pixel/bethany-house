@@ -154,12 +154,12 @@ function Field({ label, value, onChange }: {
 }) {
     return (
         <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">{label}</label>
+            <label className="block text-xs font-medium text-surface-500 mb-1">{label}</label>
             <input
                 type="number" min="0" step="any" value={value}
                 onChange={e => onChange(e.target.value)}
                 placeholder="0"
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder:text-slate-300"
+                className="w-full rounded-lg border border-surface-200 bg-white px-3 py-2 text-sm text-surface-800 focus:outline-none focus:ring-2 focus:ring-info-400 placeholder:text-surface-300"
             />
         </div>
     );
@@ -207,15 +207,15 @@ export default function ProductCostingReportPage() {
 
     if (isError || !data?.report) return (
         <div className="max-w-md mx-auto mt-24 text-center space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-red-50 flex items-center justify-center mx-auto">
-                <svg className="w-6 h-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="w-12 h-12 rounded-2xl bg-danger-50 flex items-center justify-center mx-auto">
+                <svg className="w-6 h-6 text-danger-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                         d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" />
                 </svg>
             </div>
-            <p className="text-sm text-slate-500">Could not load report for production order #{id}.</p>
+            <p className="text-sm text-surface-500">Could not load report for production order #{id}.</p>
             <button onClick={() => navigate(-1)}
-                className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">← Go back</button>
+                className="text-xs text-info-600 hover:text-info-700 font-medium">← Go back</button>
         </div>
     );
 
@@ -239,7 +239,7 @@ export default function ProductCostingReportPage() {
             {/* ── Topbar ── */}
             <div className="flex items-center justify-between py-4 px-1 mb-1">
                 <button onClick={() => navigate(-1)}
-                    className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-700 font-medium transition-colors">
+                    className="flex items-center gap-1.5 text-xs text-surface-400 hover:text-surface-700 font-medium transition-colors">
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
                     </svg>
@@ -247,14 +247,14 @@ export default function ProductCostingReportPage() {
                 </button>
                 <div className="flex items-center gap-2">
                     <button onClick={() => setPanel(v => !v)}
-                        className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-indigo-300 hover:text-indigo-600 transition-all">
+                        className="flex items-center gap-1.5 rounded-lg border border-surface-200 bg-white px-3 py-1.5 text-xs font-medium text-surface-600 hover:border-info-300 hover:text-info-600 transition-all">
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
                         </svg>
                         {panel ? "Close" : "Adjust Values"}
                     </button>
                     <button onClick={() => window.print()}
-                        className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700 transition-all">
+                        className="flex items-center gap-1.5 rounded-lg bg-surface-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-surface-700 transition-all">
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0110.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0l.229 2.523a1.125 1.125 0 01-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0021 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 00-1.913-.247M6.34 18H5.25A2.25 2.25 0 013 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.056 48.056 0 011.913-.247m10.5 0a48.536 48.536 0 00-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659M18 10.5h.008v.008H18V10.5zm-3 0h.008v.008H15V10.5z" />
                         </svg>
@@ -265,8 +265,8 @@ export default function ProductCostingReportPage() {
 
             {/* ── Adjust Values panel ── */}
             {panel && (
-                <div className="mb-4 rounded-2xl border border-indigo-100 p-5 space-y-4" style={{ backgroundColor: "rgba(238,242,255,0.5)" }}>
-                    <p className="text-xs font-bold text-indigo-700 uppercase tracking-widest">Manual Overrides</p>
+                <div className="mb-4 rounded-2xl border border-info-100 p-5 space-y-4" style={{ backgroundColor: "rgba(238,242,255,0.5)" }}>
+                    <p className="text-xs font-bold text-info-700 uppercase tracking-widest">Manual Overrides</p>
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
                         <Field label="Selling Price / Unit" value={overrides.selling_price} onChange={set("selling_price")} />
                         <Field label="Quantity Sold"        value={overrides.quantity_sold}  onChange={set("quantity_sold")} />
@@ -275,7 +275,7 @@ export default function ProductCostingReportPage() {
                         <Field label="Other Costs"          value={overrides.other_costs}    onChange={set("other_costs")} />
                     </div>
                     <div>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Selling Expenses</p>
+                        <p className="text-xs font-bold text-surface-400 uppercase tracking-widest mb-2">Selling Expenses</p>
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                             <Field label="Delivery"      value={overrides.delivery_cost}   onChange={set("delivery_cost")} />
                             <Field label="Commission"    value={overrides.commission}       onChange={set("commission")} />
@@ -285,14 +285,14 @@ export default function ProductCostingReportPage() {
                     </div>
                     <div className="flex items-end gap-3">
                         <div className="flex-1">
-                            <label className="block text-xs font-medium text-slate-500 mb-1">Management Comment</label>
+                            <label className="block text-xs font-medium text-surface-500 mb-1">Management Comment</label>
                             <textarea rows={1} value={overrides.management_comment}
                                 onChange={e => set("management_comment")(e.target.value)}
                                 placeholder="Optional note…"
-                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none" />
+                                className="w-full rounded-lg border border-surface-200 bg-white px-3 py-2 text-sm text-surface-800 focus:outline-none focus:ring-2 focus:ring-info-400 resize-none" />
                         </div>
                         <button onClick={() => refetch()}
-                            className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700 transition-colors shrink-0">
+                            className="rounded-lg bg-info-600 px-4 py-2 text-xs font-bold text-white hover:bg-info-700 transition-colors shrink-0">
                             Recalculate
                         </button>
                     </div>
@@ -361,7 +361,7 @@ export default function ProductCostingReportPage() {
             {/* ══════════════════════════════════════════════
                 BATCH STRIP
             ══════════════════════════════════════════════ */}
-            <div className="mt-3 rounded-2xl border border-slate-100 bg-white px-6 py-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="mt-3 rounded-2xl border border-surface-100 bg-white px-6 py-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {[
                     { label: "Qty Produced",  value: `${fmt(r.header.quantity_produced)} pcs` },
                     { label: "Cost / Unit",   value: `KES ${fmt(r.cost_summary.cost_per_unit)}` },
@@ -369,8 +369,8 @@ export default function ProductCostingReportPage() {
                     { label: "Prepared By",   value: r.header.prepared_by },
                 ].map(item => (
                     <div key={item.label}>
-                        <p className="text-xs text-slate-400 font-medium">{item.label}</p>
-                        <p className="text-sm font-semibold text-slate-800 mt-0.5">{item.value}</p>
+                        <p className="text-xs text-surface-400 font-medium">{item.label}</p>
+                        <p className="text-sm font-semibold text-surface-800 mt-0.5">{item.value}</p>
                     </div>
                 ))}
             </div>
@@ -384,11 +384,11 @@ export default function ProductCostingReportPage() {
                 <div className="lg:col-span-3 space-y-4">
 
                     {/* Production Costs */}
-                    <section className="rounded-2xl border border-slate-100 bg-white overflow-hidden">
-                        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-50">
+                    <section className="rounded-2xl border border-surface-100 bg-white overflow-hidden">
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-surface-50">
                             <div>
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Step 1</p>
-                                <h2 className="text-sm font-bold text-slate-800 mt-0.5">Production Costs</h2>
+                                <p className="text-xs font-bold text-surface-400 uppercase tracking-widest">Step 1</p>
+                                <h2 className="text-sm font-bold text-surface-800 mt-0.5">Production Costs</h2>
                             </div>
                             <span className="rounded-lg bg-amber-50 border border-amber-100 px-3 py-1 text-xs font-bold text-amber-700">
                                 KES {fmt(r.cost_breakdown.total_production_cost)}
@@ -397,46 +397,46 @@ export default function ProductCostingReportPage() {
 
                         {r.cost_breakdown.lines.length === 0 ? (
                             <div className="px-5 py-8 text-center">
-                                <p className="text-sm text-slate-400">No materials recorded.</p>
-                                <p className="text-xs text-slate-300 mt-1">Use "Adjust Values" to add labour, packaging, and other costs.</p>
+                                <p className="text-sm text-surface-400">No materials recorded.</p>
+                                <p className="text-xs text-surface-300 mt-1">Use "Adjust Values" to add labour, packaging, and other costs.</p>
                             </div>
                         ) : (
                             <div className="overflow-x-auto">
                             <table className="w-full min-w-[640px]">
                                 <thead>
-                                    <tr className="border-b border-slate-50">
-                                        <th className="px-5 py-2.5 text-left text-xs font-bold text-slate-400 uppercase tracking-widest">Item</th>
-                                        <th className="px-3 py-2.5 text-right text-xs font-bold text-slate-400 uppercase tracking-widest">Qty</th>
-                                        <th className="px-3 py-2.5 text-right text-xs font-bold text-slate-400 uppercase tracking-widest">Unit Cost</th>
-                                        <th className="px-5 py-2.5 text-right text-xs font-bold text-slate-400 uppercase tracking-widest">Total</th>
+                                    <tr className="border-b border-surface-50">
+                                        <th className="px-5 py-2.5 text-left text-xs font-bold text-surface-400 uppercase tracking-widest">Item</th>
+                                        <th className="px-3 py-2.5 text-right text-xs font-bold text-surface-400 uppercase tracking-widest">Qty</th>
+                                        <th className="px-3 py-2.5 text-right text-xs font-bold text-surface-400 uppercase tracking-widest">Unit Cost</th>
+                                        <th className="px-5 py-2.5 text-right text-xs font-bold text-surface-400 uppercase tracking-widest">Total</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-slate-50">
+                                <tbody className="divide-y divide-surface-50">
                                     {r.cost_breakdown.lines.map((line, i) => {
                                         const pct = r.cost_breakdown.total_production_cost > 0
                                             ? Math.round((line.total_cost / r.cost_breakdown.total_production_cost) * 100) : 0;
                                         return (
-                                            <tr key={i} className="hover:bg-slate-50 transition-colors">
+                                            <tr key={i} className="hover:bg-surface-50 transition-colors">
                                                 <td className="px-5 py-3">
-                                                    <p className="text-sm font-semibold text-slate-800">{line.cost_item}</p>
+                                                    <p className="text-sm font-semibold text-surface-800">{line.cost_item}</p>
                                                     {line.description !== line.cost_item && (
-                                                        <p className="text-xs text-slate-400 mt-0.5">{line.description}</p>
+                                                        <p className="text-xs text-surface-400 mt-0.5">{line.description}</p>
                                                     )}
                                                 </td>
-                                                <td className="px-3 py-3 text-right text-sm text-slate-500 tabular-nums">
+                                                <td className="px-3 py-3 text-right text-sm text-surface-500 tabular-nums">
                                                     {line.quantity !== null ? `${fmt(line.quantity)} ${line.unit ?? ""}` : "—"}
                                                 </td>
-                                                <td className="px-3 py-3 text-right text-sm text-slate-500 tabular-nums">
+                                                <td className="px-3 py-3 text-right text-sm text-surface-500 tabular-nums">
                                                     {line.unit_cost !== null ? fmt(line.unit_cost) : "—"}
                                                 </td>
                                                 <td className="px-5 py-3 text-right">
                                                     <div className="flex items-center justify-end gap-2">
-                                                        <div className="w-10 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                                                        <div className="w-10 bg-surface-100 rounded-full h-1.5 overflow-hidden">
                                                             <div className="h-full bg-amber-400 rounded-full"
                                                                 style={{ width: `${pct}%` }} />
                                                         </div>
-                                                        <span className="text-xs text-slate-300 tabular-nums w-7 text-right">{pct}%</span>
-                                                        <span className="text-sm font-bold text-slate-800 tabular-nums">
+                                                        <span className="text-xs text-surface-300 tabular-nums w-7 text-right">{pct}%</span>
+                                                        <span className="text-sm font-bold text-surface-800 tabular-nums">
                                                             {fmt(line.total_cost)}
                                                         </span>
                                                     </div>
@@ -446,14 +446,14 @@ export default function ProductCostingReportPage() {
                                     })}
                                 </tbody>
                                 <tfoot>
-                                    <tr className="border-t-2 border-slate-100 bg-slate-50">
-                                        <td colSpan={3} className="px-5 py-3 text-sm font-bold text-slate-700">
+                                    <tr className="border-t-2 border-surface-100 bg-surface-50">
+                                        <td colSpan={3} className="px-5 py-3 text-sm font-bold text-surface-700">
                                             Total &nbsp;·&nbsp;
-                                            <span className="font-normal text-slate-400">
+                                            <span className="font-normal text-surface-400">
                                                 KES {fmt(r.cost_summary.cost_per_unit)} per unit
                                             </span>
                                         </td>
-                                        <td className="px-5 py-3 text-right text-sm font-bold text-slate-900 tabular-nums">
+                                        <td className="px-5 py-3 text-right text-sm font-bold text-surface-900 tabular-nums">
                                             KES {fmt(r.cost_breakdown.total_production_cost)}
                                         </td>
                                     </tr>
@@ -464,13 +464,13 @@ export default function ProductCostingReportPage() {
                     </section>
 
                     {/* Sales */}
-                    <section className="rounded-2xl border border-slate-100 bg-white overflow-hidden">
-                        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-50">
+                    <section className="rounded-2xl border border-surface-100 bg-white overflow-hidden">
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-surface-50">
                             <div>
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Step 2</p>
-                                <h2 className="text-sm font-bold text-slate-800 mt-0.5">Sales</h2>
+                                <p className="text-xs font-bold text-surface-400 uppercase tracking-widest">Step 2</p>
+                                <h2 className="text-sm font-bold text-surface-800 mt-0.5">Sales</h2>
                             </div>
-                            <span className="rounded-lg bg-indigo-50 border border-indigo-100 px-3 py-1 text-xs font-bold text-indigo-700">
+                            <span className="rounded-lg bg-info-50 border border-info-100 px-3 py-1 text-xs font-bold text-info-700">
                                 KES {fmt(r.sales_summary.total_sales)}
                             </span>
                         </div>
@@ -489,18 +489,18 @@ export default function ProductCostingReportPage() {
                                     </p>
                                 </div>
                             )}
-                            <div className="flex items-center justify-between text-xs text-slate-500 mb-1.5">
+                            <div className="flex items-center justify-between text-xs text-surface-500 mb-1.5">
                                 <span className="font-medium">Batch sell-through</span>
-                                <span className="font-bold text-slate-700">{soldPct}%</span>
+                                <span className="font-bold text-surface-700">{soldPct}%</span>
                             </div>
-                            <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                            <div className="h-2.5 bg-surface-100 rounded-full overflow-hidden">
                                 <div className="h-full rounded-full transition-all duration-700"
                                     style={{
                                         width: `${soldPct}%`,
                                         backgroundColor: soldPct >= 80 ? "#059669" : soldPct >= 50 ? "#6366F1" : "#D97706",
                                     }} />
                             </div>
-                            <div className="flex justify-between text-xs text-slate-400 mt-1.5">
+                            <div className="flex justify-between text-xs text-surface-400 mt-1.5">
                                 <span>{fmt(r.sales_summary.quantity_sold)} sold</span>
                                 {r.sales_summary.remaining_stock > 0 && (
                                     <span className="font-semibold text-amber-500">
@@ -517,10 +517,10 @@ export default function ProductCostingReportPage() {
                                 { label: "Price / Unit",  value: `KES ${fmt(r.sales_summary.selling_price)}`, bold: false },
                                 { label: "Total Revenue", value: `KES ${fmt(r.sales_summary.total_sales)}`,   bold: true  },
                             ].map(item => (
-                                <div key={item.label} className="rounded-xl bg-slate-50 px-3 py-2.5">
-                                    <p className="text-xs text-slate-400">{item.label}</p>
+                                <div key={item.label} className="rounded-xl bg-surface-50 px-3 py-2.5">
+                                    <p className="text-xs text-surface-400">{item.label}</p>
                                     <p className={clsx("text-sm mt-0.5 tabular-nums",
-                                        item.bold ? "font-bold text-slate-900" : "font-semibold text-slate-700")}>
+                                        item.bold ? "font-bold text-surface-900" : "font-semibold text-surface-700")}>
                                         {item.value}
                                     </p>
                                 </div>
@@ -529,41 +529,41 @@ export default function ProductCostingReportPage() {
                     </section>
 
                     {/* Selling Expenses */}
-                    <section className="rounded-2xl border border-slate-100 bg-white overflow-hidden">
-                        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-50">
+                    <section className="rounded-2xl border border-surface-100 bg-white overflow-hidden">
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-surface-50">
                             <div>
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Step 3</p>
-                                <h2 className="text-sm font-bold text-slate-800 mt-0.5">Selling Expenses</h2>
+                                <p className="text-xs font-bold text-surface-400 uppercase tracking-widest">Step 3</p>
+                                <h2 className="text-sm font-bold text-surface-800 mt-0.5">Selling Expenses</h2>
                             </div>
-                            <span className="rounded-lg bg-red-50 border border-red-100 px-3 py-1 text-xs font-bold text-red-600">
+                            <span className="rounded-lg bg-danger-50 border border-danger-100 px-3 py-1 text-xs font-bold text-danger-600">
                                 −KES {fmt(r.net_profit.total_selling_expenses)}
                             </span>
                         </div>
 
                         {r.net_profit.selling_expenses.every(e => e.amount === 0) ? (
-                            <p className="px-5 py-5 text-sm text-slate-400">
+                            <p className="px-5 py-5 text-sm text-surface-400">
                                 No selling expenses recorded.{" "}
                                 <button onClick={() => setPanel(true)}
-                                    className="text-indigo-500 hover:text-indigo-700 underline underline-offset-2">
+                                    className="text-info-500 hover:text-info-700 underline underline-offset-2">
                                     Adjust Values
                                 </button>{" "}to add them.
                             </p>
                         ) : (
-                            <div className="divide-y divide-slate-50">
+                            <div className="divide-y divide-surface-50">
                                 {r.net_profit.selling_expenses.filter(e => e.amount > 0).map(exp => {
                                     const pct = r.net_profit.total_selling_expenses > 0
                                         ? Math.round((exp.amount / r.net_profit.total_selling_expenses) * 100) : 0;
                                     return (
                                         <div key={exp.label}
-                                            className="flex items-center justify-between px-5 py-3 hover:bg-slate-50 transition-colors">
+                                            className="flex items-center justify-between px-5 py-3 hover:bg-surface-50 transition-colors">
                                             <div className="flex items-center gap-3 flex-1 min-w-0">
-                                                <span className="text-sm text-slate-600">{exp.label}</span>
-                                                <div className="flex-1 max-w-20 bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                                                    <div className="h-full bg-red-300 rounded-full" style={{ width: `${pct}%` }} />
+                                                <span className="text-sm text-surface-600">{exp.label}</span>
+                                                <div className="flex-1 max-w-20 bg-surface-100 rounded-full h-1.5 overflow-hidden">
+                                                    <div className="h-full bg-danger-300 rounded-full" style={{ width: `${pct}%` }} />
                                                 </div>
-                                                <span className="text-xs text-slate-300 tabular-nums">{pct}%</span>
+                                                <span className="text-xs text-surface-300 tabular-nums">{pct}%</span>
                                             </div>
-                                            <span className="text-sm font-bold text-slate-800 tabular-nums ml-4">
+                                            <span className="text-sm font-bold text-surface-800 tabular-nums ml-4">
                                                 {fmt(exp.amount)}
                                             </span>
                                         </div>
@@ -580,25 +580,25 @@ export default function ProductCostingReportPage() {
 
 
                     {/* Profit Bridge */}
-                    <section className="rounded-2xl border border-slate-100 bg-white overflow-hidden">
-                        <div className="px-5 py-4 border-b border-slate-50">
-                            <h2 className="text-sm font-bold text-slate-800">Profit Bridge</h2>
+                    <section className="rounded-2xl border border-surface-100 bg-white overflow-hidden">
+                        <div className="px-5 py-4 border-b border-surface-50">
+                            <h2 className="text-sm font-bold text-surface-800">Profit Bridge</h2>
                         </div>
-                        <div className="divide-y divide-slate-50">
+                        <div className="divide-y divide-surface-50">
                             {[
-                                { label: "Revenue",            value:  r.gross_profit.total_sales,           textColor: "text-slate-800", sign: ""  },
+                                { label: "Revenue",            value:  r.gross_profit.total_sales,           textColor: "text-surface-800", sign: ""  },
                                 { label: "Cost of Goods Sold", value: -r.gross_profit.cogs,                  textColor: "text-amber-600", sign: "−" },
-                                { label: "Gross Profit",       value:  r.gross_profit.gross_profit,          textColor: "text-emerald-700", sign: "", bold: true, border: true },
-                                { label: "Selling Expenses",   value: -r.net_profit.total_selling_expenses,  textColor: "text-red-500",  sign: "−" },
-                                { label: "Net Profit",         value:  r.net_profit.net_profit,              textColor: r.net_profit.net_profit >= 0 ? "text-emerald-700" : "text-red-600", sign: "", bold: true, shaded: true },
+                                { label: "Gross Profit",       value:  r.gross_profit.gross_profit,          textColor: "text-success-700", sign: "", bold: true, border: true },
+                                { label: "Selling Expenses",   value: -r.net_profit.total_selling_expenses,  textColor: "text-danger-500",  sign: "−" },
+                                { label: "Net Profit",         value:  r.net_profit.net_profit,              textColor: r.net_profit.net_profit >= 0 ? "text-success-700" : "text-danger-600", sign: "", bold: true, shaded: true },
                             ].map(row => (
                                 <div key={row.label}
                                     className={clsx(
                                         "flex items-center justify-between px-5 py-3",
-                                        row.shaded && "bg-slate-50",
-                                        row.border && "border-t border-dashed border-slate-200",
+                                        row.shaded && "bg-surface-50",
+                                        row.border && "border-t border-dashed border-surface-200",
                                     )}>
-                                    <span className={clsx("text-sm", row.bold ? "font-bold text-slate-900" : "text-slate-500")}>
+                                    <span className={clsx("text-sm", row.bold ? "font-bold text-surface-900" : "text-surface-500")}>
                                         {row.label}
                                     </span>
                                     <span className={clsx("text-sm tabular-nums font-semibold", row.textColor, row.bold && "font-bold")}>
@@ -610,31 +610,31 @@ export default function ProductCostingReportPage() {
                     </section>
 
                     {/* Recommendations */}
-                    <section className="rounded-2xl border border-slate-100 bg-white overflow-hidden">
-                        <div className="px-5 py-4 border-b border-slate-50">
-                            <h2 className="text-sm font-bold text-slate-800">Recommendations</h2>
+                    <section className="rounded-2xl border border-surface-100 bg-white overflow-hidden">
+                        <div className="px-5 py-4 border-b border-surface-50">
+                            <h2 className="text-sm font-bold text-surface-800">Recommendations</h2>
                         </div>
                         <div className="p-4 space-y-2.5">
                             {[
-                                { icon: "💰", label: "Pricing",      value: r.recommendation.pricing_recommendation, cls: "bg-indigo-50 border-indigo-100" },
+                                { icon: "💰", label: "Pricing",      value: r.recommendation.pricing_recommendation, cls: "bg-info-50 border-info-100" },
                                 { icon: "⚙️", label: "Cost Control", value: r.recommendation.cost_control_note,      cls: "bg-amber-50 border-amber-100"   },
-                                { icon: "📦", label: "Stock",        value: r.recommendation.stock_action,           cls: "bg-slate-50 border-slate-100"   },
-                                { icon: "✅", label: "Decision",     value: r.recommendation.management_decision,    cls: "bg-emerald-50 border-emerald-100" },
+                                { icon: "📦", label: "Stock",        value: r.recommendation.stock_action,           cls: "bg-surface-50 border-surface-100"   },
+                                { icon: "✅", label: "Decision",     value: r.recommendation.management_decision,    cls: "bg-success-50 border-success-100" },
                             ].map(item => (
                                 <div key={item.label}
                                     className={clsx("rounded-xl border px-3.5 py-3 flex items-start gap-2.5", item.cls)}>
                                     <span className="text-sm leading-none mt-0.5 shrink-0">{item.icon}</span>
                                     <div className="min-w-0">
-                                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{item.label}</p>
-                                        <p className="text-sm font-medium text-slate-800 mt-0.5 leading-snug">{item.value}</p>
+                                        <p className="text-xs font-bold text-surface-400 uppercase tracking-widest">{item.label}</p>
+                                        <p className="text-sm font-medium text-surface-800 mt-0.5 leading-snug">{item.value}</p>
                                     </div>
                                 </div>
                             ))}
 
                             {r.recommendation.management_comment && (
-                                <div className="rounded-xl border border-slate-200 bg-white px-3.5 py-3">
-                                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Comment</p>
-                                    <p className="text-sm text-slate-600 italic leading-relaxed">
+                                <div className="rounded-xl border border-surface-200 bg-white px-3.5 py-3">
+                                    <p className="text-xs font-bold text-surface-400 uppercase tracking-widest mb-1">Comment</p>
+                                    <p className="text-sm text-surface-600 italic leading-relaxed">
                                         "{r.recommendation.management_comment}"
                                     </p>
                                 </div>
@@ -645,7 +645,7 @@ export default function ProductCostingReportPage() {
             </div>
 
             {/* Footer */}
-            <p className="text-center text-xs text-slate-300 pt-6">
+            <p className="text-center text-xs text-surface-300 pt-6">
                 Generated {r.header.generated_at} · Bethany House
             </p>
         </div>

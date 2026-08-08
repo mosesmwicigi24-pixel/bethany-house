@@ -70,8 +70,8 @@ interface PickerGroup { name: string; color: string | null; icon: string | null;
 
 const isHex = (c?: string | null): c is string => !!c && /^#[0-9a-fA-F]{6}$/.test(c);
 const accentOf = (c: string | null) => (isHex(c) ? c : "#4f46e5");
-const tintOf = (c: string | null) => (isHex(c) ? `${c}14` : "#f1f5f9");
-const hairlineOf = (c: string | null) => (isHex(c) ? `${c}33` : "#e2e8f0");
+const tintOf = (c: string | null) => (isHex(c) ? `${c}14` : "#f2f3f2");
+const hairlineOf = (c: string | null) => (isHex(c) ? `${c}33` : "#e7eae6");
 
 function ProductPicker({
     value,

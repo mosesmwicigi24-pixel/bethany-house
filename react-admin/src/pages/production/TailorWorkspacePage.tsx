@@ -194,9 +194,9 @@ type WorkflowState = "in_progress" | "ready" | "waiting" | "qc" | "done";
 
 const WORKFLOW_SECTIONS: { id: WorkflowState; label: string; tone: string; hint: string }[] = [
     { id: "in_progress", label: "In progress",       tone: "text-brand-700 bg-brand-50 border-brand-200",     hint: "Pick up where you left off" },
-    { id: "ready",       label: "Ready to start",    tone: "text-emerald-700 bg-emerald-50 border-emerald-200", hint: "Nothing is blocking these" },
+    { id: "ready",       label: "Ready to start",    tone: "text-success-700 bg-success-50 border-success-200", hint: "Nothing is blocking these" },
     { id: "waiting",     label: "Waiting",           tone: "text-amber-700 bg-amber-50 border-amber-200",     hint: "Blocked by an earlier stage or missing materials" },
-    { id: "qc",          label: "Ready for QC",      tone: "text-purple-700 bg-purple-50 border-purple-200",  hint: "Your part is done — awaiting quality check" },
+    { id: "qc",          label: "Ready for QC",      tone: "text-accent-700 bg-accent-50 border-accent-200",  hint: "Your part is done — awaiting quality check" },
     { id: "done",        label: "Completed",         tone: "text-surface-500 bg-surface-100 border-surface-200", hint: "" },
 ];
 
@@ -1058,7 +1058,7 @@ function FocusCard({
                                                                         className={clsx(
                                                                             "text-2xs font-bold px-1.5 py-0.5 rounded-full border transition-colors",
                                                                             on ? "bg-brand-600 text-white border-brand-600"
-                                                                               : full ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                                                               : full ? "bg-success-50 text-success-700 border-success-200"
                                                                                : "bg-white text-surface-600 border-surface-200",
                                                                         )}>
                                                                         {full && !on ? "✓ " : ""}{b.label} {d}/{b.quantity}
@@ -1102,7 +1102,7 @@ function FocusCard({
                                                     onAction(task, "complete");
                                                 }}
                                                 disabled={isActing}
-                                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-success text-white text-[11px] font-bold active:bg-green-700 transition-colors disabled:opacity-50"
+                                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-success text-white text-[11px] font-bold active:bg-success-700 transition-colors disabled:opacity-50"
                                             >
                                                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
@@ -1421,7 +1421,7 @@ function QueueOrderGroup({
                                                 onQuickAction(task, "complete");
                                             }}
                                             disabled={isActing}
-                                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-success text-white text-xs font-bold active:bg-green-700 transition-colors disabled:opacity-50"
+                                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-success text-white text-xs font-bold active:bg-success-700 transition-colors disabled:opacity-50"
                                         >
                                             Done
                                         </button>
@@ -1746,7 +1746,7 @@ export default function TailorWorkspacePage() {
                                                                 i ===
                                                                 clampedFocusIndex
                                                                     ? "#818cf8"
-                                                                    : "#e2e8f0",
+                                                                    : "#e7eae6",
                                                         }}
                                                     />
                                                 </button>

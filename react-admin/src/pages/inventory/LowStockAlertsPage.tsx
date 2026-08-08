@@ -507,7 +507,7 @@ export default function LowStockAlertsPage() {
                                                 "text-xs font-medium px-2 py-0.5 rounded-full",
                                                 alert.type === "product"
                                                     ? "bg-brand-50 text-brand-600"
-                                                    : "bg-purple-50 text-purple-600",
+                                                    : "bg-accent-50 text-accent-600",
                                             )}
                                         >
                                             {alert.type === "product"

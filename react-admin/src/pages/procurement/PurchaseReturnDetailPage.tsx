@@ -60,9 +60,9 @@ interface AuditEntry {
 
 const STATUS_CFG: Record<string, { label: string; color: string; bg: string; border: string }> = {
     pending:   { label: "Pending",   color: "text-amber-700",   bg: "bg-amber-50",   border: "border-amber-200" },
-    approved:  { label: "Approved",  color: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200" },
-    completed: { label: "Completed", color: "text-blue-700",    bg: "bg-blue-50",    border: "border-blue-200" },
-    rejected:  { label: "Rejected",  color: "text-red-700",     bg: "bg-red-50",     border: "border-red-200" },
+    approved:  { label: "Approved",  color: "text-success-700", bg: "bg-success-50", border: "border-success-200" },
+    completed: { label: "Completed", color: "text-info-700",    bg: "bg-info-50",    border: "border-info-200" },
+    rejected:  { label: "Rejected",  color: "text-danger-700",     bg: "bg-danger-50",     border: "border-danger-200" },
     cancelled: { label: "Cancelled", color: "text-surface-500", bg: "bg-surface-100",border: "border-surface-200" },
 };
 
@@ -109,8 +109,8 @@ function AuditTrail({ returnId }: { returnId: number }) {
         <div className="divide-y divide-line">
             {logs.map((e) => (
                 <div key={e.id} className="flex gap-3 py-3.5">
-                    <div className="w-7 h-7 rounded-full bg-red-100 flex items-center justify-center shrink-0 mt-0.5">
-                        <svg className="w-3 h-3 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <div className="w-7 h-7 rounded-full bg-danger-100 flex items-center justify-center shrink-0 mt-0.5">
+                        <svg className="w-3 h-3 text-danger-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
                     </div>
@@ -211,10 +211,10 @@ export default function PurchaseReturnDetailPage() {
             <div className="bg-white rounded-2xl shadow-sm border border-surface-200 overflow-hidden">
 
                 {/* Header band */}
-                <div className="bg-gradient-to-r from-red-800 to-red-700 px-5 py-5 sm:px-8 sm:py-6">
+                <div className="bg-gradient-to-r from-danger-800 to-danger-700 px-5 py-5 sm:px-8 sm:py-6">
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:flex-wrap">
                         <div>
-                            <p className="text-red-300 text-xs font-semibold uppercase tracking-widest mb-1">
+                            <p className="text-danger-300 text-xs font-semibold uppercase tracking-widest mb-1">
                                 Purchase Return
                             </p>
                             <h1 className="text-2xl font-bold text-white font-mono">{pr.return_number}</h1>
@@ -224,7 +224,7 @@ export default function PurchaseReturnDetailPage() {
                                 </span>
                                 <Link
                                     to={`/procurement/purchase-orders/${poId}`}
-                                    className="text-xs text-red-200 hover:text-white font-mono underline-offset-2 hover:underline"
+                                    className="text-xs text-danger-200 hover:text-white font-mono underline-offset-2 hover:underline"
                                     onClick={(e) => e.stopPropagation()}
                                 >
                                     PO: {poNumber}
@@ -232,9 +232,9 @@ export default function PurchaseReturnDetailPage() {
                             </div>
                         </div>
                         <div className="sm:text-right">
-                            <p className="text-red-300 text-2xs uppercase tracking-widest mb-1">Return Value</p>
+                            <p className="text-danger-300 text-2xs uppercase tracking-widest mb-1">Return Value</p>
                             <p className="text-3xl font-bold text-white tabular-nums">{fmtMoney(totalValue)}</p>
-                            <p className="text-red-300 text-xs mt-1">{fmtDate(pr.return_date ?? pr.created_at)}</p>
+                            <p className="text-danger-300 text-xs mt-1">{fmtDate(pr.return_date ?? pr.created_at)}</p>
                         </div>
                     </div>
                 </div>
@@ -243,7 +243,7 @@ export default function PurchaseReturnDetailPage() {
                 {(canApprove || canReject || canComplete) && (
                     <div className={clsx(
                         "px-5 py-3 border-b flex flex-col gap-2 sm:px-8 sm:flex-row sm:items-center sm:flex-wrap",
-                        canApprove ? "bg-amber-50 border-amber-100" : "bg-slate-50 border-line"
+                        canApprove ? "bg-amber-50 border-amber-100" : "bg-surface-50 border-line"
                     )}>
                         {canApprove && (
                             <span className="text-xs text-amber-700 font-semibold flex-1">
@@ -251,7 +251,7 @@ export default function PurchaseReturnDetailPage() {
                             </span>
                         )}
                         {canComplete && (
-                            <span className="text-xs text-blue-700 font-semibold flex-1">
+                            <span className="text-xs text-info-700 font-semibold flex-1">
                                 Return approved - mark complete once the supplier has credited or replaced items
                             </span>
                         )}
@@ -259,7 +259,7 @@ export default function PurchaseReturnDetailPage() {
                             <button
                                 onClick={() => approveMutation.mutate()}
                                 disabled={approveMutation.isPending}
-                                className="btn-sm bg-emerald-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-emerald-700"
+                                className="btn-sm bg-success-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-success-700"
                             >
                                 ✓ Approve Return
                             </button>
@@ -283,7 +283,7 @@ export default function PurchaseReturnDetailPage() {
                                     completeMutation.mutate(notes);
                                 }}
                                 disabled={completeMutation.isPending}
-                                className="btn-sm bg-blue-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-blue-700"
+                                className="btn-sm bg-info-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-info-700"
                             >
                                 ✓ Mark Completed
                             </button>
@@ -307,7 +307,7 @@ export default function PurchaseReturnDetailPage() {
                             {(["items", "audit"] as const).map((t) => (
                                 <button key={t} onClick={() => setTab(t)}
                                     className={clsx("px-4 py-2.5 text-xs font-semibold border-b-2 transition-all whitespace-nowrap shrink-0",
-                                        tab === t ? "border-red-500 text-red-600" : "border-transparent text-surface-400 hover:text-surface-700")}>
+                                        tab === t ? "border-danger-500 text-danger-600" : "border-transparent text-surface-400 hover:text-surface-700")}>
                                     {t === "items" ? `📦 Returned Items (${items.length})` : "🕐 Audit Trail"}
                                 </button>
                             ))}
@@ -342,11 +342,11 @@ export default function PurchaseReturnDetailPage() {
                                                         </td>
                                                         <td className="px-3 py-2.5">
                                                             <span className={clsx("px-2 py-0.5 rounded-full text-2xs font-semibold capitalize",
-                                                                poi?.item_type === "product" ? "bg-blue-50 text-blue-700" : "bg-purple-50 text-purple-700")}>
+                                                                poi?.item_type === "product" ? "bg-info-50 text-info-700" : "bg-accent-50 text-accent-700")}>
                                                                 {poi?.item_type ?? "-"}
                                                             </span>
                                                         </td>
-                                                        <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-red-700">
+                                                        <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-danger-700">
                                                             -{item.quantity}
                                                         </td>
                                                         <td className="px-3 py-2.5 text-right tabular-nums text-surface-600">
@@ -360,12 +360,12 @@ export default function PurchaseReturnDetailPage() {
                                                 );
                                             })}
                                         </tbody>
-                                        <tfoot className="border-t-2 border-surface-200 bg-red-50">
+                                        <tfoot className="border-t-2 border-surface-200 bg-danger-50">
                                             <tr>
                                                 <td colSpan={4} className="px-3 py-2.5 text-sm font-bold text-surface-800">
                                                     Total Return Value
                                                 </td>
-                                                <td className="px-3 py-2.5 text-right text-base font-bold tabular-nums text-red-700">
+                                                <td className="px-3 py-2.5 text-right text-base font-bold tabular-nums text-danger-700">
                                                     {fmtMoney(totalValue)}
                                                 </td>
                                                 <td />

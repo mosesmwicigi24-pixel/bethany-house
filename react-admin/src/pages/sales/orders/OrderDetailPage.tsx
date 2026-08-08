@@ -63,19 +63,19 @@ const STATUS_FLOW: Record<string, { label: string; next: OrderStatus[]; color: s
     confirmed:  {
         label:       "Confirmed",
         next:        ["shipped", "completed", "cancelled"],
-        color:       "text-blue-600",
+        color:       "text-info-600",
         description: "Fully paid - ready to ship or hand over",
     },
     shipped:    {
         label:       "Shipped",
         next:        ["delivered", "completed"],
-        color:       "text-purple-600",
+        color:       "text-accent-600",
         description: "Goods dispatched to customer",
     },
     delivered:  {
         label:       "Delivered",
         next:        ["completed"],
-        color:       "text-teal-600",
+        color:       "text-info-600",
         description: "Customer received the order",
     },
     completed:  {
@@ -96,9 +96,9 @@ const SHIPPABLE_STATUSES = ["confirmed", "shipped"];
 const STATUS_COLORS: Record<string, string> = {
     pending:    "bg-warning-light text-warning-dark",
     processing: "bg-brand-50 text-brand-700",
-    confirmed:  "bg-blue-50 text-blue-700",
-    shipped:    "bg-purple-50 text-purple-700",
-    delivered:  "bg-teal-50 text-teal-700",
+    confirmed:  "bg-info-50 text-info-700",
+    shipped:    "bg-accent-50 text-accent-700",
+    delivered:  "bg-info-50 text-info-700",
     completed:  "bg-success-light text-success-dark",
     cancelled:  "bg-danger-light text-danger",
     refunded:   "bg-surface-100 text-surface-500",
@@ -783,8 +783,8 @@ function ChangeCurrencyModal({ order, onClose, onDone }: {
                     automatically based on that country's default, and the order will be flagged
                     as international if the country differs from the store's home country.
                 </p>
-                <div className="flex items-start gap-2 bg-teal-50 border border-teal-200 rounded-xl px-3 py-2.5 text-2xs text-teal-800">
-                    <svg className="w-3.5 h-3.5 text-teal-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <div className="flex items-start gap-2 bg-info-50 border border-info-200 rounded-xl px-3 py-2.5 text-2xs text-info-800">
+                    <svg className="w-3.5 h-3.5 text-info-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"/>
                     </svg>
                     <span>All item prices will be <strong>repriced</strong> to the new currency - either from a direct price entry or by converting from the base currency rate. The order total will be recalculated and logged in the audit trail.</span>
@@ -810,7 +810,7 @@ function ChangeCurrencyModal({ order, onClose, onDone }: {
                                 <p className="font-semibold text-surface-900">
                                     {selectedCountryObj?.name ?? countryCode} · {previewCurrency}
                                     {willBeInternational && (
-                                        <span className="ml-1.5 text-blue-600">🌐</span>
+                                        <span className="ml-1.5 text-info-600">🌐</span>
                                     )}
                                 </p>
                             </div>
@@ -1386,20 +1386,20 @@ function AddPaymentModal({ order, onClose, onDone }: {
                     <div className="space-y-0">
 
                         {/* Section 1: STK Push */}
-                        <div className="rounded-xl border border-green-200 bg-green-50/60 overflow-hidden">
-                            <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-green-200/70 bg-green-100/50">
-                                <div className="w-6 h-6 rounded-lg bg-green-600 flex items-center justify-center shrink-0">
+                        <div className="rounded-xl border border-success-200 bg-success-50/60 overflow-hidden">
+                            <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-success-200/70 bg-success-100/50">
+                                <div className="w-6 h-6 rounded-lg bg-success-600 flex items-center justify-center shrink-0">
                                     <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 8.25h3m-3 4.5h3"/>
                                     </svg>
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-xs font-bold text-green-900">STK Push</p>
-                                    <p className="text-2xs text-green-700">Send a payment prompt directly to the customer's phone</p>
+                                    <p className="text-xs font-bold text-success-900">STK Push</p>
+                                    <p className="text-2xs text-success-700">Send a payment prompt directly to the customer's phone</p>
                                 </div>
                                 {stkStep === "waiting" && (
-                                    <span className="flex items-center gap-1 text-2xs text-green-700 font-semibold shrink-0">
-                                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />Waiting…
+                                    <span className="flex items-center gap-1 text-2xs text-success-700 font-semibold shrink-0">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-success-500 animate-pulse" />Waiting…
                                     </span>
                                 )}
                                 {stkStep === "confirmed" && (
@@ -1424,11 +1424,11 @@ function AddPaymentModal({ order, onClose, onDone }: {
                                 )}
                                 {stkStep === "waiting" && (
                                     <div className="space-y-2.5">
-                                        <div className="flex items-center gap-3 bg-green-100 rounded-xl px-3 py-2.5">
-                                            <div className="w-7 h-7 border-[2.5px] border-green-500 border-t-transparent rounded-full animate-spin shrink-0" />
+                                        <div className="flex items-center gap-3 bg-success-100 rounded-xl px-3 py-2.5">
+                                            <div className="w-7 h-7 border-[2.5px] border-success-500 border-t-transparent rounded-full animate-spin shrink-0" />
                                             <div className="flex-1 min-w-0">
-                                                <p className="text-xs font-semibold text-green-800">Prompt sent to {phone}</p>
-                                                <p className="text-2xs text-green-600">Ask the customer to enter their M-Pesa PIN now.</p>
+                                                <p className="text-xs font-semibold text-success-800">Prompt sent to {phone}</p>
+                                                <p className="text-2xs text-success-600">Ask the customer to enter their M-Pesa PIN now.</p>
                                             </div>
                                         </div>
                                         <button onClick={() => { stopPolling(); setStkStep("idle"); setStkError(""); }}
@@ -1447,7 +1447,7 @@ function AddPaymentModal({ order, onClose, onDone }: {
                                                 placeholder="+254 700 000 000"
                                                 className="input text-sm font-mono flex-1 min-w-0" />
                                             <button onClick={initiateStkPush} disabled={pushing || !phone.trim()}
-                                                className="shrink-0 px-4 py-2 rounded-xl text-xs font-bold text-white bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 whitespace-nowrap">
+                                                className="shrink-0 px-4 py-2 rounded-xl text-xs font-bold text-white bg-success-600 hover:bg-success-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 whitespace-nowrap">
                                                 {pushing
                                                     ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                                                     : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
@@ -1455,7 +1455,7 @@ function AddPaymentModal({ order, onClose, onDone }: {
                                                 {pushing ? "Sending…" : "Send Push"}
                                             </button>
                                         </div>
-                                        <p className="text-2xs text-green-700/70">Customer will receive a prompt on their phone to enter their PIN.</p>
+                                        <p className="text-2xs text-success-700/70">Customer will receive a prompt on their phone to enter their PIN.</p>
                                     </>
                                 )}
                             </div>
@@ -1515,7 +1515,7 @@ function AddPaymentModal({ order, onClose, onDone }: {
                     <div className="space-y-3">
                         {!paystackUrl ? (
                             <>
-                                <div className="bg-blue-50 border border-blue-200 rounded-xl px-3 py-2.5 text-xs text-blue-700">
+                                <div className="bg-info-50 border border-info-200 rounded-xl px-3 py-2.5 text-xs text-info-700">
                                     <p className="font-semibold">Paystack card payment</p>
                                     <p className="mt-0.5 opacity-80">Enter the customer's email to open a secure Paystack payment page. The customer completes payment there - no card details pass through this system.</p>
                                 </div>
@@ -2382,8 +2382,8 @@ function ThreadMentionPopup({ query, onSelect }: { query: string; onSelect: (u: 
 
 const ENTITY_STATUS_COLOURS: Record<string, string> = {
     pending: "bg-surface-100 text-surface-500", processing: "bg-brand-50 text-brand-700",
-    completed: "bg-emerald-50 text-emerald-700", shipped: "bg-blue-50 text-blue-700",
-    delivered: "bg-emerald-50 text-emerald-700", cancelled: "bg-red-50 text-red-700",
+    completed: "bg-success-50 text-success-700", shipped: "bg-info-50 text-info-700",
+    delivered: "bg-success-50 text-success-700", cancelled: "bg-danger-50 text-danger-700",
     draft: "bg-surface-100 text-surface-500", in_progress: "bg-brand-50 text-brand-700",
 };
 const entityStatusCls = (s: string) => ENTITY_STATUS_COLOURS[s] ?? "bg-surface-100 text-surface-500";
@@ -2411,10 +2411,10 @@ function ThreadEntityPopup({ query, onSelect, onDismiss }: {
                     onMouseDown={e => { e.preventDefault(); onSelect(r); }}
                     className="w-full flex items-start gap-2.5 px-3 py-2 hover:bg-surface-50 text-left transition-colors">
                     <div className={clsx("mt-0.5 w-6 h-6 rounded-md flex items-center justify-center shrink-0",
-                        r.type === "order" ? "bg-brand-50" : "bg-purple-50")}>
+                        r.type === "order" ? "bg-brand-50" : "bg-accent-50")}>
                         {r.type === "order"
                             ? <svg className="w-3.5 h-3.5 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-                            : <svg className="w-3.5 h-3.5 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/></svg>
+                            : <svg className="w-3.5 h-3.5 text-accent-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/></svg>
                         }
                     </div>
                     <div className="flex-1 min-w-0">
@@ -2453,7 +2453,7 @@ function ThreadMessageBody({ body, linkedEntities, isOwn }: {
             const href   = entity?.type === "order" ? `/sales/orders/${entity.id}` : entity ? `/production/orders/${entity.id}` : undefined;
             const chip = (
                 <span key={m.index} className={clsx("inline-flex items-center gap-1 text-2xs font-semibold rounded-full px-1.5 py-0.5 border",
-                    isOwn ? "bg-white/20 border-white/30 text-white" : "bg-purple-50 border-purple-200 text-purple-700")}>
+                    isOwn ? "bg-white/20 border-white/30 text-white" : "bg-accent-50 border-accent-200 text-accent-700")}>
                     #{label}
                     {href && <svg className="w-2.5 h-2.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>}
                 </span>
@@ -2488,7 +2488,7 @@ function ProductionOrderChannelThread({ poId }: { poId: number }) {
     const bottomRef   = useRef<HTMLDivElement>(null);
 
     const currentUserId = (auth.user as any)?.id;
-    const AVATAR_COLORS = ["bg-blue-500","bg-purple-500","bg-pink-500","bg-orange-500","bg-teal-500","bg-indigo-500","bg-rose-500","bg-amber-500"];
+    const AVATAR_COLORS = ["bg-brand-500","bg-info-600","bg-success-600","bg-accent-600","bg-amber-600","bg-danger-500","bg-info-800","bg-accent-800"];
     const avatarColor = (id: number) => AVATAR_COLORS[id % AVATAR_COLORS.length];
     const fmtTime = (ts: string) => new Date(ts).toLocaleString("en-KE", { dateStyle: "short", timeStyle: "short" });
     const scrollBottom = (behavior: ScrollBehavior = "smooth") =>
@@ -2830,11 +2830,11 @@ aria-label="Close">
                             {po.measurements && Object.keys(po.measurements).length > 0 && (
                                 <div>
                                     <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2">Measurements</p>
-                                    <div className="bg-purple-50 rounded-xl p-3 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1.5">
+                                    <div className="bg-accent-50 rounded-xl p-3 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1.5">
                                         {Object.entries(po.measurements).map(([k, v]) => (
                                             <div key={k} className="text-xs">
-                                                <span className="text-purple-400 capitalize block text-2xs">{k.replace(/_/g, " ")}</span>
-                                                <span className="font-bold text-purple-900">{v as string}</span>
+                                                <span className="text-accent-400 capitalize block text-2xs">{k.replace(/_/g, " ")}</span>
+                                                <span className="font-bold text-accent-900">{v as string}</span>
                                             </div>
                                         ))}
                                     </div>
@@ -2856,11 +2856,11 @@ aria-label="Close">
                             {po.customer_preferences && Object.keys(po.customer_preferences).length > 0 && (
                                 <div>
                                     <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2">Customer Preferences</p>
-                                    <div className="bg-indigo-50 rounded-xl p-3 space-y-1.5">
+                                    <div className="bg-info-50 rounded-xl p-3 space-y-1.5">
                                         {Object.entries(po.customer_preferences).map(([k, v]) => (
                                             <div key={k} className="flex gap-3 text-xs">
-                                                <span className="text-indigo-400 w-32 shrink-0 capitalize">{k.replace(/_/g, " ")}</span>
-                                                <span className="font-medium text-indigo-900">{v as string}</span>
+                                                <span className="text-info-400 w-32 shrink-0 capitalize">{k.replace(/_/g, " ")}</span>
+                                                <span className="font-medium text-info-900">{v as string}</span>
                                             </div>
                                         ))}
                                     </div>
@@ -3124,10 +3124,10 @@ function OrderAuditLog({ orderId, onClose }: { orderId: number; onClose: () => v
         if (event.includes("approved"))                  return "bg-success-light text-success";
         if (event.includes("payment") || event.includes("mpesa") || event.includes("paystack") || event.includes("flutterwave"))
                                                           return "bg-brand-50 text-brand-600";
-        if (event.includes("currency"))                  return "bg-teal-50 text-teal-600";
-        if (event.includes("status"))                    return "bg-blue-50 text-blue-600";
-        if (event.includes("ship"))                      return "bg-purple-50 text-purple-600";
-        if (event.includes("production"))                return "bg-indigo-50 text-indigo-600";
+        if (event.includes("currency"))                  return "bg-info-50 text-info-600";
+        if (event.includes("status"))                    return "bg-info-50 text-info-600";
+        if (event.includes("ship"))                      return "bg-accent-50 text-accent-600";
+        if (event.includes("production"))                return "bg-info-50 text-info-600";
         if (event.includes("cancel") || event.includes("refund") || event.includes("rejected"))
                                                           return "bg-danger-light text-danger";
         if (event.includes("note"))                      return "bg-amber-50 text-amber-600";
@@ -3423,10 +3423,10 @@ export default function OrderDetailPage() {
 
             {/* ── Dispatch authorization ────────────────────────────────────── */}
             {awaitingDispatch && (
-                <div className="flex flex-col sm:flex-row sm:items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-2xl px-5 py-4">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3 bg-info-50 border border-info-200 rounded-2xl px-5 py-4">
                     <div className="flex-1">
-                        <p className="font-semibold text-indigo-900 text-sm">Awaiting dispatch authorization</p>
-                        <p className="text-xs text-indigo-700 mt-0.5">
+                        <p className="font-semibold text-info-900 text-sm">Awaiting dispatch authorization</p>
+                        <p className="text-xs text-info-700 mt-0.5">
                             An authorized person must check the goods against this receipt before hand-over.
                             {!canAuthorizeDispatch && " You are not authorized to release goods — please get it confirmed."}
                         </p>
@@ -3443,9 +3443,9 @@ export default function OrderDetailPage() {
                 </div>
             )}
             {isDispatched && (
-                <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-2xl px-5 py-3">
-                    <span className="text-emerald-700 font-semibold text-sm">✓ Dispatched</span>
-                    <span className="text-xs text-emerald-600">
+                <div className="flex items-center gap-2 bg-success-50 border border-success-200 rounded-2xl px-5 py-3">
+                    <span className="text-success-700 font-semibold text-sm">✓ Dispatched</span>
+                    <span className="text-xs text-success-600">
                         Goods released for hand-over{order.dispatched_at ? ` on ${new Date(order.dispatched_at).toLocaleString("en-KE")}` : ""}.
                     </span>
                 </div>
@@ -3485,7 +3485,7 @@ export default function OrderDetailPage() {
                             All Orders
                         </button>
                         {(order as any).is_international && (
-                            <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 shrink-0">
+                            <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-info-50 text-info-700 border border-info-200 shrink-0">
                                 🌐 International ({order.currency_code})
                             </span>
                         )}
@@ -3535,11 +3535,11 @@ export default function OrderDetailPage() {
 
                 {/* ── Payment link banner ───────────────────────────────────── */}
                 {paymentLink && outstanding > 0 && (
-                    <div className="mx-6 mt-4 flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
-                        <svg className="w-4 h-4 text-blue-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                    <div className="mx-6 mt-4 flex items-center gap-3 bg-info-50 border border-info-200 rounded-xl px-4 py-3">
+                        <svg className="w-4 h-4 text-info-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
                         <div className="flex-1 min-w-0">
-                            <p className="text-xs font-semibold text-blue-900">Customer payment link</p>
-                            <a href={paymentLink} target="_blank" rel="noopener noreferrer" className="text-2xs text-blue-600 hover:underline truncate block font-mono">{paymentLink}</a>
+                            <p className="text-xs font-semibold text-info-900">Customer payment link</p>
+                            <a href={paymentLink} target="_blank" rel="noopener noreferrer" className="text-2xs text-info-600 hover:underline truncate block font-mono">{paymentLink}</a>
                         </div>
                         <button onClick={() => { navigator.clipboard.writeText(paymentLink).catch(() => {}); toast.success("Copied!"); }} className="btn-secondary btn-sm text-2xs gap-1 shrink-0">
                             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>Copy
@@ -3573,16 +3573,16 @@ export default function OrderDetailPage() {
                             <div className="flex flex-wrap items-center gap-2 mt-3">
                                 <span className={clsx("inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border",
                                     order.status === "completed"  ? "bg-success-light text-success-dark border-success/20" :
-                                    order.status === "shipped"    ? "bg-purple-50 text-purple-700 border-purple-200" :
-                                    order.status === "confirmed"  ? "bg-blue-50 text-blue-700 border-blue-200" :
+                                    order.status === "shipped"    ? "bg-accent-50 text-accent-700 border-accent-200" :
+                                    order.status === "confirmed"  ? "bg-info-50 text-info-700 border-info-200" :
                                     order.status === "processing" ? "bg-brand-50 text-brand-700 border-brand-200" :
                                     order.status === "pending"    ? "bg-warning-light text-warning-dark border-warning/20" :
                                     order.status === "cancelled"  ? "bg-danger-light text-danger border-danger/20" :
                                     "bg-surface-100 text-surface-500 border-surface-200")}>
                                     <span className={clsx("w-1.5 h-1.5 rounded-full",
                                         order.status === "completed"  ? "bg-success" :
-                                        order.status === "shipped"    ? "bg-purple-500" :
-                                        order.status === "confirmed"  ? "bg-blue-500" :
+                                        order.status === "shipped"    ? "bg-accent-500" :
+                                        order.status === "confirmed"  ? "bg-info-500" :
                                         order.status === "processing" ? "bg-brand-500" :
                                         order.status === "pending"    ? "bg-warning" :
                                         order.status === "cancelled"  ? "bg-danger" : "bg-surface-400")} />
@@ -3597,7 +3597,7 @@ export default function OrderDetailPage() {
                                     {order.outlet_name && <><span className="text-surface-300">·</span><span>{order.outlet_name}</span></>}
                                 </span>
                                 {order.production_orders && order.production_orders.length > 0 && (
-                                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full bg-accent-50 text-accent-700 border border-accent-200">
                                         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/></svg>
                                         {order.production_orders.length} production order{order.production_orders.length !== 1 ? "s" : ""}
                                     </span>
@@ -3626,7 +3626,7 @@ export default function OrderDetailPage() {
                             <div className="flex items-center gap-2 mt-2.5 sm:justify-end flex-wrap">
                                 <span className={clsx("text-xs font-semibold px-3 py-1 rounded-full",
                                     order.payment_status === "paid"    ? "bg-success-light text-success-dark" :
-                                    order.payment_status === "deposit" ? "bg-blue-50 text-blue-700" :
+                                    order.payment_status === "deposit" ? "bg-info-50 text-info-700" :
                                     order.payment_status === "partial" ? "bg-warning-light text-warning-dark" :
                                     "bg-surface-100 text-surface-500")}>
                                     {order.payment_status === "deposit" ? "Deposit paid" :
@@ -3676,7 +3676,7 @@ export default function OrderDetailPage() {
                                                     </a>
                                                     {waNumber(order.customer_phone) && (
                                                         <a href={`https://wa.me/${waNumber(order.customer_phone)}`} target="_blank" rel="noopener noreferrer"
-                                                            className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 hover:underline">
+                                                            className="inline-flex items-center gap-1 text-xs font-medium text-success-600 hover:underline">
                                                             <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 6.3A7.9 7.9 0 0012 4a8 8 0 00-6.9 12l-1 3.6 3.7-1a8 8 0 003.2.7h.1a8 8 0 006.6-12.9zM12 18.5a6.6 6.6 0 01-3.4-.9l-.2-.1-2.2.6.6-2.1-.2-.3a6.6 6.6 0 1112.1-3.7 6.6 6.6 0 01-6.7 6.5zm3.6-4.9c-.2-.1-1.2-.6-1.3-.6-.2-.1-.3-.1-.4.1l-.6.7c-.1.1-.2.2-.4.1a5.4 5.4 0 01-2.7-2.3c-.2-.3.2-.3.5-1 0-.1 0-.2 0-.3l-.6-1.4c-.1-.3-.3-.3-.4-.3h-.4a.7.7 0 00-.5.2 2 2 0 00-.6 1.5c0 .9.6 1.7.7 1.8.1.2 1.3 2 3.1 2.8 1.2.5 1.6.5 2.2.4.4 0 1.2-.5 1.3-.9.2-.5.2-.9.1-.9 0-.1-.1-.1-.3-.2z"/></svg>
                                                             WhatsApp
                                                         </a>
@@ -3770,7 +3770,7 @@ export default function OrderDetailPage() {
                                                                     </span>
                                                                 )}
                                                                 {(item as any).price_adjusted && (
-                                                                    <span className="inline-flex items-center text-2xs font-medium text-orange-700 bg-orange-100 px-1.5 py-0.5 rounded" title={`Original: ${fmt((item as any).original_price ?? 0, "")}`}>
+                                                                    <span className="inline-flex items-center text-2xs font-medium text-brand-700 bg-brand-100 px-1.5 py-0.5 rounded" title={`Original: ${fmt((item as any).original_price ?? 0, "")}`}>
                                                                         ✎ Adjusted
                                                                     </span>
                                                                 )}
@@ -3783,7 +3783,7 @@ export default function OrderDetailPage() {
                                                             {/* Made-to-Order: already in production → chip; else a per-row toggle. */}
                                                             {item.production_order_id ? (
                                                                 <Link to={`/production/orders/${item.production_order_id}`}
-                                                                    className="inline-flex items-center gap-1 mt-1.5 text-2xs font-semibold text-purple-700 bg-purple-50 border border-purple-200 rounded-full px-2 py-0.5 hover:bg-purple-100 transition-colors">
+                                                                    className="inline-flex items-center gap-1 mt-1.5 text-2xs font-semibold text-accent-700 bg-accent-50 border border-accent-200 rounded-full px-2 py-0.5 hover:bg-accent-100 transition-colors">
                                                                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 4h2m-1 0v4m0 0a4 4 0 100 8 4 4 0 000-8zm-6.5 8H4m16 0h-1.5"/></svg>
                                                                     In production →
                                                                 </Link>
@@ -3818,9 +3818,9 @@ export default function OrderDetailPage() {
                                                                     if (e.key === "Escape") setAdjustingItemId(null);
                                                                 }}
                                                                 autoFocus
-                                                                className="w-24 text-xs border border-orange-300 rounded px-2 py-1 focus:outline-none focus:border-orange-500 bg-orange-50 text-right tabular-nums"
+                                                                className="w-24 text-xs border border-brand-300 rounded px-2 py-1 focus:outline-none focus:border-brand-500 bg-brand-50 text-right tabular-nums"
                                                             />
-                                                            <button onClick={() => { const p = parseFloat(priceInput); if (!isNaN(p)) adjustPriceMutation.mutate({ itemId: item.id, price: p }); }} disabled={adjustPriceMutation.isPending} className="text-xs font-semibold text-orange-700 hover:text-orange-900">{adjustPriceMutation.isPending ? "…" : "Set"}</button>
+                                                            <button onClick={() => { const p = parseFloat(priceInput); if (!isNaN(p)) adjustPriceMutation.mutate({ itemId: item.id, price: p }); }} disabled={adjustPriceMutation.isPending} className="text-xs font-semibold text-brand-700 hover:text-brand-900">{adjustPriceMutation.isPending ? "…" : "Set"}</button>
                                                             <button onClick={() => setAdjustingItemId(null)} className="text-xs text-surface-400 hover:text-surface-600">✕</button>
                                                         </div>
                                                     ) : (
@@ -3828,13 +3828,13 @@ export default function OrderDetailPage() {
                                                             <div className="text-right">
                                                                 <span className="tabular-nums text-surface-600">{fmt(item.unit_price, "")}</span>
                                                                 {(item as any).price_adjusted && (item as any).original_price && (
-                                                                    <p className="text-2xs text-orange-500" title="Price was manually adjusted">
+                                                                    <p className="text-2xs text-brand-500" title="Price was manually adjusted">
                                                                         was {fmt((item as any).original_price, "")}
                                                                     </p>
                                                                 )}
                                                             </div>
                                                             {order.payment_status === "pending" && (
-                                                                <button onClick={() => { setAdjustingItemId(item.id); setPriceInput(String(item.unit_price)); }} title="Adjust price (upward only)" className="opacity-0 group-hover:opacity-100 transition-opacity text-orange-400 hover:text-orange-600 ml-1">
+                                                                <button onClick={() => { setAdjustingItemId(item.id); setPriceInput(String(item.unit_price)); }} title="Adjust price (upward only)" className="opacity-0 group-hover:opacity-100 transition-opacity text-brand-400 hover:text-brand-600 ml-1">
                                                                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                                                         <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" />
                                                                     </svg>
@@ -3901,7 +3901,7 @@ export default function OrderDetailPage() {
                                         <span>Total</span><span className="tabular-nums text-surface-900">{fmt(order.total_amount, cc)}</span>
                                     </div>
                                     {(order.discount_amount ?? 0) > 0 && (
-                                        <div className="flex items-center justify-center gap-1.5 mt-2 rounded-lg bg-emerald-50 border border-emerald-200 px-2 py-1.5 text-2xs font-semibold text-emerald-700">
+                                        <div className="flex items-center justify-center gap-1.5 mt-2 rounded-lg bg-success-50 border border-success-200 px-2 py-1.5 text-2xs font-semibold text-success-700">
                                             <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" /><path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6z" /></svg>
                                             You saved {fmt(order.discount_amount, cc)}{savingsPct > 0 ? ` · ${savingsPct}%` : ""}
                                         </div>
@@ -3928,22 +3928,22 @@ export default function OrderDetailPage() {
                         {order.production_orders && order.production_orders.length > 0 && (() => {
                             const PROD_CFG: Record<string, {label:string; cls:string; dot:string}> = {
                                 draft:       {label:"Draft",       cls:"bg-surface-100 text-surface-500",    dot:"bg-surface-400"},
-                                pending:     {label:"Queued",      cls:"bg-blue-50 text-blue-700",           dot:"bg-blue-500"},
+                                pending:     {label:"Queued",      cls:"bg-info-50 text-info-700",           dot:"bg-info-500"},
                                 in_progress: {label:"In Progress", cls:"bg-brand-50 text-brand-700",         dot:"bg-brand-500"},
-                                qc_pending:  {label:"QC Check",    cls:"bg-purple-50 text-purple-700",       dot:"bg-purple-500"},
+                                qc_pending:  {label:"QC Check",    cls:"bg-accent-50 text-accent-700",       dot:"bg-accent-500"},
                                 qc_passed:   {label:"QC Passed",   cls:"bg-success-light text-success-dark", dot:"bg-success"},
                                 qc_failed:   {label:"QC Failed",   cls:"bg-danger-light text-danger",        dot:"bg-danger"},
                                 completed:   {label:"Completed",   cls:"bg-success-light text-success-dark", dot:"bg-success"},
                                 cancelled:   {label:"Cancelled",   cls:"bg-surface-100 text-surface-400",    dot:"bg-surface-300"},
                             };
                             return (
-                                <div className="-mx-6 sm:-mx-8 px-6 sm:px-8 py-6 bg-purple-50/40 border-y border-purple-100/60">
+                                <div className="-mx-6 sm:-mx-8 px-6 sm:px-8 py-6 bg-accent-50/40 border-y border-accent-100/60">
                                     <div className="flex items-center gap-2 mb-4">
-                                        <div className="w-6 h-6 rounded-lg bg-purple-50 flex items-center justify-center">
-                                            <svg className="w-3.5 h-3.5 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/></svg>
+                                        <div className="w-6 h-6 rounded-lg bg-accent-50 flex items-center justify-center">
+                                            <svg className="w-3.5 h-3.5 text-accent-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/></svg>
                                         </div>
                                         <p className="text-xs font-bold text-surface-700 uppercase tracking-widest">Production Orders</p>
-                                        <span className="text-2xs font-bold bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full">{order.production_orders.length}</span>
+                                        <span className="text-2xs font-bold bg-accent-100 text-accent-700 px-1.5 py-0.5 rounded-full">{order.production_orders.length}</span>
                                     </div>
                                     <ProductionOrdersSection productionOrders={order.production_orders} PROD_CFG={PROD_CFG} />
                                 </div>
@@ -3951,7 +3951,7 @@ export default function OrderDetailPage() {
                         })()}
 
                         {/* Payments — green tinted band */}
-                        <div className="-mx-6 sm:-mx-8 px-6 sm:px-8 py-6 bg-emerald-50/50 border-y border-emerald-100/80">
+                        <div className="-mx-6 sm:-mx-8 px-6 sm:px-8 py-6 bg-success-50/50 border-y border-success-100/80">
                             <div className="flex items-center justify-between mb-4">
                                 <div className="flex items-center gap-2">
                                     <div className="w-6 h-6 rounded-lg bg-success-light flex items-center justify-center">
@@ -4021,7 +4021,7 @@ export default function OrderDetailPage() {
                                                             <button onClick={() => setVerifyingPaymentId(p.id)} className="mt-1 block text-2xs text-brand-600 hover:underline font-medium">Verify with Daraja →</button>
                                                         )}
                                                         {p.status === "pending" && (p.payment_method === "card_paystack" || p.payment_method === "paystack") && (
-                                                            <button onClick={() => { setVerifyingPaystackPaymentId(p.id); setPaystackVerifyRef(""); }} className="mt-1 block text-2xs text-blue-600 hover:underline font-medium">Verify with Paystack →</button>
+                                                            <button onClick={() => { setVerifyingPaystackPaymentId(p.id); setPaystackVerifyRef(""); }} className="mt-1 block text-2xs text-info-600 hover:underline font-medium">Verify with Paystack →</button>
                                                         )}
                                                     </td>
                                                     <td className="px-4 py-3 align-top text-right font-bold text-surface-900 tabular-nums">{fmt(p.amount, cc)}</td>
@@ -4051,10 +4051,10 @@ export default function OrderDetailPage() {
                         </div>
 
                         {/* Shipping & Tracking — blue tinted band */}
-                        <div className="-mx-6 sm:-mx-8 px-6 sm:px-8 py-6 bg-sky-50/50 border-b border-sky-100/80">
+                        <div className="-mx-6 sm:-mx-8 px-6 sm:px-8 py-6 bg-info-50/50 border-b border-info-100/80">
                             <div className="flex items-center gap-2 mb-4">
-                                <div className="w-6 h-6 rounded-lg bg-blue-50 flex items-center justify-center">
-                                    <svg className="w-3.5 h-3.5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 00-3.213-9.193 2.056 2.056 0 00-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 00-10.026 0 1.106 1.106 0 00-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12"/></svg>
+                                <div className="w-6 h-6 rounded-lg bg-info-50 flex items-center justify-center">
+                                    <svg className="w-3.5 h-3.5 text-info-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 00-3.213-9.193 2.056 2.056 0 00-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 00-10.026 0 1.106 1.106 0 00-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12"/></svg>
                                 </div>
                                 <p className="text-xs font-bold text-surface-700 uppercase tracking-widest">Shipping & Tracking</p>
                             </div>
@@ -4080,7 +4080,7 @@ export default function OrderDetailPage() {
 
                         {/* Order History — subtle slate band */}
                         {order.status_history && order.status_history.length > 0 && (
-                            <div className="-mx-6 sm:-mx-8 px-6 sm:px-8 py-6 bg-slate-50/60 border-b border-slate-100/80">
+                            <div className="-mx-6 sm:-mx-8 px-6 sm:px-8 py-6 bg-surface-50/60 border-b border-surface-100/80">
                                 <div className="flex items-center gap-2 mb-4">
                                     <div className="w-6 h-6 rounded-lg bg-surface-100 flex items-center justify-center">
                                         <svg className="w-3.5 h-3.5 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -4208,19 +4208,19 @@ export default function OrderDetailPage() {
                                 </div>
                                 <div className="flex justify-between gap-2">
                                     <span className="text-surface-400 shrink-0">Currency</span>
-                                    <span className="font-mono font-bold text-surface-700 flex items-center gap-1">{cc}{(order as any).is_international && <span className="text-blue-500">🌐</span>}</span>
+                                    <span className="font-mono font-bold text-surface-700 flex items-center gap-1">{cc}{(order as any).is_international && <span className="text-info-500">🌐</span>}</span>
                                 </div>
                                 {(order as any).customer_country_code && (
                                     <div className="flex justify-between gap-2">
                                         <span className="text-surface-400 shrink-0">Country</span>
-                                        <span className="text-surface-700 font-medium">{(order as any).customer_country_code}{(order as any).is_international && <span className="ml-1 text-2xs text-blue-500">· International</span>}</span>
+                                        <span className="text-surface-700 font-medium">{(order as any).customer_country_code}{(order as any).is_international && <span className="ml-1 text-2xs text-info-500">· International</span>}</span>
                                     </div>
                                 )}
                             </div>
                             <div className="px-4 pb-4 pt-2 space-y-2 border-t border-surface-50">
                                 {canChangeCurrency && (
                                     <button onClick={() => setShowCurrencyModal(true)}
-                                        className="w-full text-xs py-2 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium transition-colors flex items-center justify-center gap-1.5">
+                                        className="w-full text-xs py-2 rounded-lg border border-info-200 bg-info-50 text-info-700 hover:bg-info-100 font-medium transition-colors flex items-center justify-center gap-1.5">
                                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253M3 12a8.96 8.96 0 01.284-2.253"/></svg>
                                         Set Country / Currency
                                     </button>
@@ -4254,8 +4254,8 @@ export default function OrderDetailPage() {
                                     <div className="mb-3 flex items-center gap-2">
                                         <span className={clsx("w-2 h-2 rounded-full shrink-0",
                                             order.status === "completed"  ? "bg-success" :
-                                            order.status === "shipped"    ? "bg-purple-500" :
-                                            order.status === "confirmed"  ? "bg-blue-500" :
+                                            order.status === "shipped"    ? "bg-accent-500" :
+                                            order.status === "confirmed"  ? "bg-info-500" :
                                             order.status === "processing" ? "bg-brand-500" :
                                             order.status === "pending"    ? "bg-warning" :
                                             order.status === "cancelled"  ? "bg-danger" : "bg-surface-400")} />
@@ -4332,7 +4332,7 @@ export default function OrderDetailPage() {
                 <Modal open title="Verify Paystack Payment" onClose={() => { setVerifyingPaystackPaymentId(null); setPaystackVerifyRef(""); }}>
                     <div className="p-5 space-y-4">
                         <p className="text-sm text-surface-600">Enter the Paystack reference code from the Paystack dashboard or the customer's confirmation email.</p>
-                        <div className="bg-blue-50 border border-blue-100 rounded-xl px-3 py-2.5 text-xs text-blue-700">
+                        <div className="bg-info-50 border border-info-100 rounded-xl px-3 py-2.5 text-xs text-info-700">
                             Find the reference in: <strong>Paystack Dashboard → Transactions</strong>. It looks like <span className="font-mono">POS-260601-XXXXX-0000000000</span>.
                         </div>
                         <div>

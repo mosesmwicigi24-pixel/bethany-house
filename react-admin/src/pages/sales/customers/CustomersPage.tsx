@@ -50,7 +50,7 @@ function Avatar({ name, size = "sm" }: { name: string; size?: "sm" | "md" }) {
         "bg-success-light text-success-dark",
         "bg-warning-light text-warning-dark",
         "bg-info-light text-info",
-        "bg-purple-100 text-purple-700",
+        "bg-accent-100 text-accent-700",
     ];
     const color = colors[name.charCodeAt(0) % colors.length];
     return (

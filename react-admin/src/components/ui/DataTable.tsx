@@ -131,7 +131,7 @@ function BulkActionBar({ count, actions, onClear }: {
                         className={clsx(
                             "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
                             action.danger
-                                ? "bg-danger-light text-danger hover:bg-red-100 border border-danger/20"
+                                ? "bg-danger-light text-danger hover:bg-danger-100 border border-danger/20"
                                 : "bg-white text-surface-700 hover:bg-surface-50 border border-surface-200",
                         )}
                     >

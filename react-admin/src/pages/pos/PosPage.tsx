@@ -461,13 +461,13 @@ function CountryPickerPanel({
                 <div className={clsx(
                     "flex items-center gap-2 px-3 py-1.5 rounded-lg border text-2xs",
                     isInternational
-                        ? "border-blue-200 bg-blue-50 text-blue-800"
+                        ? "border-info-200 bg-info-50 text-info-800"
                         : "border-surface-200 bg-surface-50 text-surface-600"
                 )}>
                     {selected?.flag && <span className="text-sm shrink-0">{selected.flag}</span>}
                     <span className="flex-1 font-semibold truncate">{selected?.name ?? value}</span>
                     {isInternational && (
-                        <span className="shrink-0 text-2xs font-bold text-blue-600 flex items-center gap-0.5">
+                        <span className="shrink-0 text-2xs font-bold text-info-600 flex items-center gap-0.5">
                             🌐 {previewCurrency}
                         </span>
                     )}
@@ -913,7 +913,7 @@ function VariantPicker({
                                     oos && !mto
                                         ? "border-line bg-surface-50 opacity-50 cursor-not-allowed"
                                         : mto && oos
-                                          ? "border-purple-200 bg-purple-50 cursor-pointer hover:border-purple-400"
+                                          ? "border-accent-200 bg-accent-50 cursor-pointer hover:border-accent-400"
                                           : "border-surface-200 hover:border-brand-400 hover:bg-brand-50 cursor-pointer",
                                 )}
                                 disabled={oos && !mto}
@@ -941,7 +941,7 @@ function VariantPicker({
                                         className={clsx(
                                             "text-2xs mt-0.5",
                                             oos && mto
-                                                ? "text-purple-600"
+                                                ? "text-accent-600"
                                                 : oos
                                                   ? "text-danger"
                                                   : v.stock <= 5
@@ -1001,7 +1001,7 @@ function ProductCard({
                 blocked
                     ? "border-line opacity-60 cursor-not-allowed"
                     : mto && oos
-                      ? "border-purple-200 cursor-pointer hover:border-purple-400 hover:shadow-lg active:scale-[0.97]"
+                      ? "border-accent-200 cursor-pointer hover:border-accent-400 hover:shadow-lg active:scale-[0.97]"
                       : "border-surface-200 cursor-pointer hover:border-brand-400 hover:shadow-lg active:scale-[0.97]",
             )}
         >
@@ -1042,8 +1042,8 @@ function ProductCard({
                     </div>
                 )}
                 {oos && mto && (
-                    <div className="absolute inset-0 bg-purple-900/10 flex items-end justify-center pb-2">
-                        <span className="bg-purple-600 text-white text-2xs font-bold px-2 py-1 rounded-full tracking-wide">
+                    <div className="absolute inset-0 bg-accent-900/10 flex items-end justify-center pb-2">
+                        <span className="bg-accent-600 text-white text-2xs font-bold px-2 py-1 rounded-full tracking-wide">
                             Made to Order
                         </span>
                     </div>
@@ -1062,7 +1062,7 @@ function ProductCard({
                     <div
                         className={clsx(
                             "absolute top-2 left-2 w-6 h-6 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all scale-75 group-hover:scale-100 shadow-md",
-                            mto && oos ? "bg-purple-500" : "bg-brand-500",
+                            mto && oos ? "bg-accent-500" : "bg-brand-500",
                         )}
                     >
                         <svg
@@ -1090,7 +1090,7 @@ function ProductCard({
                 <p
                     className={clsx(
                         "mt-1.5 text-sm font-bold",
-                        mto && oos ? "text-purple-600" : "text-brand-600",
+                        mto && oos ? "text-accent-600" : "text-brand-600",
                     )}
                 >
                     {currency} {fmt(defaultVariant.price)}
@@ -1130,7 +1130,7 @@ function MeasurementSheet({
                 <div className="flex items-center justify-between px-5 py-4 border-b border-line">
                     <div>
                         <h3 className="font-bold text-surface-900 text-sm">{item.product_name}</h3>
-                        <p className="text-2xs text-purple-600 font-medium mt-0.5">Made-to-Order details</p>
+                        <p className="text-2xs text-accent-600 font-medium mt-0.5">Made-to-Order details</p>
                     </div>
                     <button onClick={onClose} className="w-8 h-8 rounded-full bg-surface-100 flex items-center justify-center text-surface-500 hover:bg-surface-200 transition-colors"
 aria-label="Close">
@@ -1292,7 +1292,7 @@ function CartRow({
                 onPointerUp={onSwipePointerUp}
                 className={clsx(
                     "px-3 py-2 bg-white transition-colors",
-                    hasMto ? "bg-purple-50/40" : "",
+                    hasMto ? "bg-accent-50/40" : "",
                 )}
                 style={{ touchAction: "pan-y" } as React.CSSProperties}
             >
@@ -1335,7 +1335,7 @@ function CartRow({
                     <div className="flex items-center gap-1">
                         <p className="text-xs font-semibold text-surface-900 truncate leading-tight">{item.product_name}</p>
                         {hasMto && (
-                            <span className="shrink-0 text-2xs font-bold text-purple-600 bg-purple-100 px-1 py-0.5 rounded leading-none">MTO</span>
+                            <span className="shrink-0 text-2xs font-bold text-accent-600 bg-accent-100 px-1 py-0.5 rounded leading-none">MTO</span>
                         )}
                     </div>
                     <div className="flex items-center gap-1 min-w-0">
@@ -1343,7 +1343,7 @@ function CartRow({
                             {item.variant_name} · @ {fmt(item.price)}
                         </p>
                         {item.price_adjusted && (
-                            <span className="shrink-0 text-2xs font-bold text-orange-600 bg-orange-100 px-1 py-0.5 rounded leading-none" title={`Original: ${fmt(cataloguePrice)}`}>
+                            <span className="shrink-0 text-2xs font-bold text-brand-600 bg-brand-100 px-1 py-0.5 rounded leading-none" title={`Original: ${fmt(cataloguePrice)}`}>
                                 ✎
                             </span>
                         )}
@@ -1389,8 +1389,8 @@ function CartRow({
                     className={clsx(
                         "flex items-center gap-0.5 text-2xs px-1.5 py-0.5 rounded font-medium transition-colors leading-none",
                         item.price_adjusted
-                            ? "bg-orange-100 text-orange-700"
-                            : "text-surface-300 hover:text-orange-600 hover:bg-orange-50",
+                            ? "bg-brand-100 text-brand-700"
+                            : "text-surface-300 hover:text-brand-600 hover:bg-brand-50",
                     )}
                 >
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -1406,8 +1406,8 @@ function CartRow({
                     className={clsx(
                         "flex items-center gap-0.5 text-2xs px-1.5 py-0.5 rounded font-medium transition-colors leading-none",
                         hasMto
-                            ? "bg-purple-100 text-purple-700"
-                            : "text-surface-300 hover:text-purple-600 hover:bg-purple-50",
+                            ? "bg-accent-100 text-accent-700"
+                            : "text-surface-300 hover:text-accent-600 hover:bg-accent-50",
                     )}
                 >
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/></svg>
@@ -1421,8 +1421,8 @@ function CartRow({
                         className={clsx(
                             "flex items-center gap-0.5 text-2xs px-1.5 py-0.5 rounded font-medium transition-colors leading-none",
                             (measurementsFilled || hasNotes)
-                                ? "bg-purple-100 text-purple-700"
-                                : "bg-purple-50 text-purple-500 border border-purple-200",
+                                ? "bg-accent-100 text-accent-700"
+                                : "bg-accent-50 text-accent-500 border border-accent-200",
                         )}
                     >
                         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"/></svg>
@@ -1475,14 +1475,14 @@ function CartRow({
                             if (e.key === "Escape") setShowPriceEdit(false);
                         }}
                         autoFocus
-                        className="w-20 text-2xs border border-orange-300 rounded px-2 py-1 focus:outline-none focus:border-orange-500 bg-orange-50"
+                        className="w-20 text-2xs border border-brand-300 rounded px-2 py-1 focus:outline-none focus:border-brand-500 bg-brand-50"
                     />
                     <button
                         onClick={() => {
                             const p = parseFloat(priceInput);
                             if (!isNaN(p) && p >= cataloguePrice) { onPriceOverride(index, p); setShowPriceEdit(false); }
                         }}
-                        className="text-2xs font-semibold text-orange-700 hover:text-orange-900"
+                        className="text-2xs font-semibold text-brand-700 hover:text-brand-900"
                     >Set</button>
                     {item.price_adjusted && (
                         <button onClick={() => { onPriceOverride(index, cataloguePrice); setShowPriceEdit(false); }} className="text-2xs text-danger ml-auto">Reset</button>
@@ -3144,7 +3144,7 @@ export default function PosPage() {
                                     <span className="bg-brand-500 text-white text-2xs font-bold rounded-full w-4 h-4 flex items-center justify-center">{cartQty > 99 ? "99+" : cartQty}</span>
                                 )}
                                 {hasMto && (
-                                    <span className="flex items-center gap-0.5 text-2xs bg-purple-100 text-purple-700 font-bold px-1.5 py-0.5 rounded-full">
+                                    <span className="flex items-center gap-0.5 text-2xs bg-accent-100 text-accent-700 font-bold px-1.5 py-0.5 rounded-full">
                                         <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/></svg>
                                         MTO
                                     </span>
@@ -3404,7 +3404,7 @@ export default function PosPage() {
                                         <span className="text-lg font-bold text-brand-600 tabular-nums">{effectiveCurrency} {fmt(totals.total)}</span>
                                         {isInternationalPosOrder && (
                                             <div className="flex items-center gap-1 justify-end mt-0.5">
-                                                <span className="text-2xs font-semibold text-blue-600 flex items-center gap-0.5">
+                                                <span className="text-2xs font-semibold text-info-600 flex items-center gap-0.5">
                                                     🌐 International order
                                                 </span>
                                             </div>

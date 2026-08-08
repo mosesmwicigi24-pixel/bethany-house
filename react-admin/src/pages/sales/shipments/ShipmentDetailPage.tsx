@@ -20,15 +20,15 @@ import { PdfDownloadButton } from "@/hooks/usePdfDownload";
 // ── Status config ─────────────────────────────────────────────────────────────
 
 const STATUS_BADGE: Record<string, string> = {
-    order_confirmed:    "bg-blue-50 text-blue-700",
-    processing:         "bg-blue-50 text-blue-700",
-    ready_to_ship:      "bg-purple-50 text-purple-700",
-    picked_up:          "bg-purple-50 text-purple-700",
+    order_confirmed:    "bg-info-50 text-info-700",
+    processing:         "bg-info-50 text-info-700",
+    ready_to_ship:      "bg-accent-50 text-accent-700",
+    picked_up:          "bg-accent-50 text-accent-700",
     in_transit:         "bg-amber-50 text-amber-700",
     out_for_delivery:   "bg-amber-50 text-amber-700",
-    delivery_attempted: "bg-red-50 text-red-700",
-    delivered:          "bg-emerald-50 text-emerald-700",
-    exception:          "bg-red-50 text-red-700",
+    delivery_attempted: "bg-danger-50 text-danger-700",
+    delivered:          "bg-success-50 text-success-700",
+    exception:          "bg-danger-50 text-danger-700",
     cancelled:          "bg-surface-100 text-surface-500",
 };
 
@@ -312,7 +312,7 @@ function MilestoneBar({ currentStatus, milestoneIndex }: { currentStatus: string
     if (currentStatus === "cancelled" || currentStatus === "exception") {
         return (
             <div className={clsx("inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold",
-                currentStatus === "cancelled" ? "bg-surface-200 text-surface-600" : "bg-red-100 text-red-700")}>
+                currentStatus === "cancelled" ? "bg-surface-200 text-surface-600" : "bg-danger-100 text-danger-700")}>
                 {currentStatus === "cancelled" ? "🚫 Cancelled" : "⚠️ Exception"}
             </div>
         );
@@ -328,7 +328,7 @@ function MilestoneBar({ currentStatus, milestoneIndex }: { currentStatus: string
                     <div key={status} className="flex items-center flex-1 last:flex-none">
                         <div title={SHIPMENT_STATUS_LABELS[status]}
                             className={clsx("w-5 h-5 rounded-full shrink-0 flex items-center justify-center border-2 transition-all",
-                                done    ? "bg-emerald-500 border-emerald-500" :
+                                done    ? "bg-success-500 border-success-500" :
                                 current ? "bg-white border-brand-500" :
                                 "bg-white border-surface-200")}>
                             {done ? (
@@ -339,7 +339,7 @@ function MilestoneBar({ currentStatus, milestoneIndex }: { currentStatus: string
                                 <div className="w-2 h-2 rounded-full bg-brand-500" />
                             ) : null}
                         </div>
-                        <div className={clsx("flex-1 h-0.5 last:hidden transition-all", done ? "bg-emerald-400" : "bg-surface-200")} />
+                        <div className={clsx("flex-1 h-0.5 last:hidden transition-all", done ? "bg-success-400" : "bg-surface-200")} />
                     </div>
                 );
             })}
@@ -370,7 +370,7 @@ function TrackingTimeline({ events }: { events: TrackingEvent[] }) {
                         <div key={idx} className="flex gap-4 relative">
                             <div className={clsx(
                                 "w-7 h-7 rounded-full flex items-center justify-center shrink-0 z-10 border-2",
-                                isDelivered ? "bg-emerald-500 border-emerald-500" :
+                                isDelivered ? "bg-success-500 border-success-500" :
                                 isLatest    ? "bg-brand-500 border-brand-500" :
                                 "bg-white border-surface-300"
                             )}>
@@ -387,7 +387,7 @@ function TrackingTimeline({ events }: { events: TrackingEvent[] }) {
                                 <div className="flex items-start justify-between gap-2">
                                     <div>
                                         <span className={clsx("text-xs font-semibold",
-                                            isDelivered ? "text-emerald-700" : isLatest ? "text-brand-700" : "text-surface-700")}>
+                                            isDelivered ? "text-success-700" : isLatest ? "text-brand-700" : "text-surface-700")}>
                                             {SHIPMENT_STATUS_LABELS[event.status] ?? event.status}
                                         </span>
                                         {event.location && (
@@ -520,9 +520,9 @@ export default function ShipmentDetailPage() {
 
                 {/* Header band */}
                 <div className={clsx("px-5 py-5 sm:px-8 sm:py-6 bg-gradient-to-r",
-                    isDelivered  ? "from-emerald-800 to-emerald-700" :
-                    isCancelled  ? "from-slate-700 to-slate-600" :
-                    "from-purple-800 to-purple-700")}>
+                    isDelivered  ? "from-success-800 to-success-700" :
+                    isCancelled  ? "from-surface-700 to-surface-600" :
+                    "from-accent-800 to-accent-700")}>
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:flex-wrap">
                         <div>
                             <p className="text-white/60 text-xs font-semibold uppercase tracking-widest mb-1">Shipment</p>
@@ -556,7 +556,7 @@ export default function ShipmentDetailPage() {
                 </div>
 
                 {/* Action bar */}
-                <div className="px-5 py-3 bg-slate-50 border-b border-line flex flex-wrap items-center gap-2 sm:px-8">
+                <div className="px-5 py-3 bg-surface-50 border-b border-line flex flex-wrap items-center gap-2 sm:px-8">
                     <button onClick={() => setShowAddTracking(true)}
                         className="btn-sm bg-brand-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-brand-700">
                         + Add Tracking Event
@@ -569,7 +569,7 @@ export default function ShipmentDetailPage() {
                     )}
                     {canDeliver && (
                         <button onClick={() => deliverMutation.mutate()} disabled={deliverMutation.isPending}
-                            className="btn-sm bg-emerald-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-emerald-700">
+                            className="btn-sm bg-success-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-success-700">
                             Mark Delivered
                         </button>
                     )}
