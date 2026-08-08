@@ -20,11 +20,11 @@ use Tests\TestCase;
  *
  * The invariant these tests exist to protect is
  *
- *     sales = cash + balance
+ *     sales = paid + balance
  *
- * on EVERY row. It holds only because cash is attributed to the period the
+ * on EVERY row. It holds only because paid is attributed to the period the
  * ORDER falls in rather than the period the payment landed in. A future change
- * to bucket by payment date would silently break it — a row's cash could then
+ * to bucket by payment date would silently break it — a row's paid figure could then
  * exceed its own sales and "balance" would stop meaning "still owed".
  */
 class SalesLedgerTest extends TestCase
@@ -92,7 +92,7 @@ class SalesLedgerTest extends TestCase
         // rule the three Sales pages use, and the report must agree.
         $this->assertSame(2, $byChannel['pos']['orders']);
         $this->assertEqualsWithDelta(1500.0, (float) $byChannel['pos']['sales'], 0.01);
-        $this->assertEqualsWithDelta(1200.0, (float) $byChannel['pos']['cash'], 0.01);
+        $this->assertEqualsWithDelta(1200.0, (float) $byChannel['pos']['paid'], 0.01);
         $this->assertEqualsWithDelta(300.0, (float) $byChannel['pos']['balance'], 0.01);
 
         $this->assertSame(1, $byChannel['online']['orders']);
@@ -100,10 +100,10 @@ class SalesLedgerTest extends TestCase
 
         $this->assertSame(2, $byChannel['whatsapp']['orders']);
         $this->assertEqualsWithDelta(1000.0, (float) $byChannel['whatsapp']['sales'], 0.01);
-        $this->assertEqualsWithDelta(500.0, (float) $byChannel['whatsapp']['cash'], 0.01);
+        $this->assertEqualsWithDelta(500.0, (float) $byChannel['whatsapp']['paid'], 0.01);
     }
 
-    public function test_sales_equals_cash_plus_balance_on_every_row(): void
+    public function test_sales_equals_paid_plus_balance_on_every_row(): void
     {
         $this->viewer();
         $this->order('pos', 1000, 250);
@@ -113,27 +113,27 @@ class SalesLedgerTest extends TestCase
         $l = $this->ledger();
 
         foreach ($l['channels'] as $row) {
-            $this->assertEqualsWithDelta($row['sales'], $row['cash'] + $row['balance'], 0.01,
+            $this->assertEqualsWithDelta($row['sales'], $row['paid'] + $row['balance'], 0.01,
                 "channel {$row['channel']} does not reconcile");
         }
         foreach ($l['daily'] as $row) {
-            $this->assertEqualsWithDelta($row['sales'], $row['cash'] + $row['credit'], 0.01,
+            $this->assertEqualsWithDelta($row['sales'], $row['paid'] + $row['credit'], 0.01,
                 "day {$row['date']} does not reconcile");
         }
         foreach (['weekly', 'monthly'] as $grain) {
             foreach ($l[$grain] as $row) {
                 $this->assertEqualsWithDelta($row['total']['sales'],
-                    $row['total']['cash'] + $row['total']['balance'], 0.01,
+                    $row['total']['paid'] + $row['total']['balance'], 0.01,
                     "{$grain} {$row['period']} does not reconcile");
                 foreach ($row['by_channel'] as $c => $v) {
-                    $this->assertEqualsWithDelta($v['sales'], $v['cash'] + $v['balance'], 0.01,
+                    $this->assertEqualsWithDelta($v['sales'], $v['paid'] + $v['balance'], 0.01,
                         "{$grain} {$row['period']} / {$c} does not reconcile");
                 }
             }
         }
     }
 
-    public function test_refunds_are_netted_off_cash_not_added_to_it(): void
+    public function test_refunds_are_netted_off_the_paid_figure(): void
     {
         $this->viewer();
         $o = $this->order('pos', 1000, 1000);
@@ -141,7 +141,7 @@ class SalesLedgerTest extends TestCase
 
         $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'pos');
 
-        $this->assertEqualsWithDelta(600.0, (float) $pos['cash'], 0.01);     // 1000 taken, 400 given back
+        $this->assertEqualsWithDelta(600.0, (float) $pos['paid'], 0.01);     // 1000 taken, 400 given back
         $this->assertEqualsWithDelta(400.0, (float) $pos['balance'], 0.01);
     }
 
@@ -169,6 +169,83 @@ class SalesLedgerTest extends TestCase
 
         $this->assertSame(1, $pos['orders']);
         $this->assertEqualsWithDelta(250.0, (float) $pos['sales'], 0.01);
+    }
+
+    public function test_paid_excludes_a_payment_awaiting_approval(): void
+    {
+        // Mukuru / Western Union / M-Pesa Send Money are keyed in by a clerk from
+        // the customer's word. Counting one before it is verified would report
+        // money we do not yet know we have.
+        $this->viewer();
+        $o = $this->order('pos', 1000, 1000);
+        Payment::where('order_id', $o->id)->update([
+            'requires_approval' => true,
+            'approval_status'   => 'pending',
+        ]);
+
+        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'pos');
+
+        $this->assertEqualsWithDelta(0.0,    (float) $pos['paid'], 0.01);
+        $this->assertEqualsWithDelta(1000.0, (float) $pos['balance'], 0.01);
+    }
+
+    public function test_paid_counts_it_once_approval_is_granted(): void
+    {
+        $this->viewer();
+        $o = $this->order('pos', 1000, 1000);
+        Payment::where('order_id', $o->id)->update([
+            'requires_approval' => true,
+            'approval_status'   => 'approved',
+        ]);
+
+        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'pos');
+
+        $this->assertEqualsWithDelta(1000.0, (float) $pos['paid'], 0.01);
+        $this->assertEqualsWithDelta(0.0,    (float) $pos['balance'], 0.01);
+    }
+
+    public function test_payment_method_is_resolved_from_the_payment_when_the_order_has_none(): void
+    {
+        // orders.payment_method is a denormalised convenience field and is NULL
+        // on 144 of 381 production orders — but 95 of those DO have a settled
+        // payment carrying the method. Grouping by the order column alone
+        // dropped that collected money out of the breakdown entirely.
+        $this->viewer();
+        $o = Order::factory()->create([
+            'payment_method' => null,
+            'order_type'     => 'pos',
+            'total_amount'   => 5000,
+            'currency_code'  => 'KES',
+            'status'         => 'confirmed',
+            'created_at'     => now(),
+        ]);
+        Payment::factory()->create([
+            'order_id'       => $o->id,
+            'payment_method' => 'inmpaybill',
+            'amount'         => 5000,
+            'status'         => 'paid',
+        ]);
+        // The display name lives in payment_methods; there is no seeder for it,
+        // so the row is created here rather than asserting against a code.
+        \DB::table('payment_methods')->insert([
+            'code'       => 'inmpaybill',
+            'name'       => 'I&M Paybill',
+            'is_active'  => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $summary = $this->getJson('/api/v1/admin/reports/sales/summary'
+            .'?start_date='.now()->subDays(7)->format('Y-m-d')
+            .'&end_date='.now()->format('Y-m-d'))
+            ->assertOk()->json();
+
+        $row = collect($summary['by_payment_method'])->firstWhere('payment_method', 'inmpaybill');
+
+        $this->assertNotNull($row, 'the order was dropped from the breakdown');
+        $this->assertSame(1, (int) $row['count']);
+        // and it carries the configured display name, not the raw code
+        $this->assertSame('I&M Paybill', $row['method_name']);
     }
 
     public function test_unique_customers_counts_walk_ins_not_only_registered_users(): void

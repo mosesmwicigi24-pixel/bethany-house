@@ -413,12 +413,12 @@ export const DATE_PRESETS: { value: DatePreset; label: string }[] = [
 ];
 
 // ── Sales ledger ──────────────────────────────────────────────────────────────
-// sales = cash + balance on every row; see ReportController::salesLedger for why
-// cash is attributed to the order's period rather than the payment's.
+// sales = paid + balance on every row; see ReportController::salesLedger for why
+// paid is attributed to the order's period rather than the payment's.
 export interface LedgerFigures {
     orders: number;
     sales: number;
-    cash: number;
+    paid: number;
     balance: number;
 }
 export interface LedgerBucket {
@@ -429,7 +429,7 @@ export interface LedgerBucket {
 export interface SalesLedger {
     period: { start: string; end: string; currency: string };
     channels: (LedgerFigures & { channel: "pos" | "online" | "whatsapp"; label: string })[];
-    daily: { date: string; orders: number; sales: number; cash: number; credit: number }[];
+    daily: { date: string; orders: number; sales: number; paid: number; credit: number }[];
     weekly: LedgerBucket[];
     monthly: LedgerBucket[];
 }

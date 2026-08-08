@@ -75,7 +75,7 @@ export default function SalesReportPage() {
         queryFn: () => reportsApi.salesByCustomer({ ...dr.params, limit: 25 }),
         enabled: !!dr.start && !!dr.end && activeTab === "customers",
     });
-    // Sales / cash / balance per channel and per day, week and month. Loaded
+    // Sales / paid / balance per channel and per day, week and month. Loaded
     // only on the Channels tab — it is three grouped aggregations and there is
     // no reason to pay for them while the user is reading Overview.
     const ledgerQuery = useQuery({
@@ -858,8 +858,8 @@ function SalesByOutletTable({ params }: { params: Record<string, any> }) {
 // What we sold, what we actually collected, what we are still owed — per
 // channel, and by day, week and month.
 //
-// Every row satisfies sales = cash + balance. That holds because the API
-// attributes cash to the period the ORDER falls in, not the period the payment
+// Every row satisfies sales = paid + balance. That holds because the API
+// attributes paid to the period the ORDER falls in, not the period the payment
 // landed in (see ReportController::salesLedger). Read "balance" as "still owed
 // on what we sold then", not "money that has not arrived yet".
 
@@ -893,7 +893,7 @@ function LedgerBucketTable({ title, rows, periodLabel }: {
             <div className="px-5 pt-5 pb-3">
                 <p className="font-semibold text-surface-900">{title}</p>
                 <p className="text-xs text-surface-500 mt-0.5">
-                    Sales, cash collected and balance still owed — per channel.
+                    Sales, amount paid and balance still owed — per channel.
                 </p>
             </div>
             <div className="table-wrapper rounded-none border-0">
@@ -913,7 +913,7 @@ function LedgerBucketTable({ title, rows, periodLabel }: {
                             {[...CHANNEL_KEYS, "total"].map(c => (
                                 <React.Fragment key={c}>
                                     <th className="text-right border-l border-line font-normal normal-case tracking-normal">Sales</th>
-                                    <th className="text-right font-normal normal-case tracking-normal">Cash</th>
+                                    <th className="text-right font-normal normal-case tracking-normal">Paid</th>
                                     <th className="text-right font-normal normal-case tracking-normal">Balance</th>
                                 </React.Fragment>
                             ))}
@@ -928,13 +928,13 @@ function LedgerBucketTable({ title, rows, periodLabel }: {
                                     return (
                                         <React.Fragment key={c}>
                                             <td className="text-right border-l border-line tabular-nums">{fmtKes(v.sales)}</td>
-                                            <td className="text-right tabular-nums text-success-700">{fmtKes(v.cash)}</td>
+                                            <td className="text-right tabular-nums text-success-700">{fmtKes(v.paid)}</td>
                                             <td className="text-right"><Owed value={v.balance} /></td>
                                         </React.Fragment>
                                     );
                                 })}
                                 <td className="text-right border-l border-line font-semibold tabular-nums">{fmtKes(r.total.sales)}</td>
-                                <td className="text-right font-semibold tabular-nums text-success-700">{fmtKes(r.total.cash)}</td>
+                                <td className="text-right font-semibold tabular-nums text-success-700">{fmtKes(r.total.paid)}</td>
                                 <td className="text-right font-semibold"><Owed value={r.total.balance} /></td>
                             </tr>
                         ))}
@@ -951,8 +951,8 @@ function LedgerTab({ query }: { query: { data?: SalesLedger; isLoading: boolean 
     if (!l) return null;
 
     const grand = l.channels.reduce(
-        (a, c) => ({ orders: a.orders + c.orders, sales: a.sales + c.sales, cash: a.cash + c.cash, balance: a.balance + c.balance }),
-        { orders: 0, sales: 0, cash: 0, balance: 0 },
+        (a, c) => ({ orders: a.orders + c.orders, sales: a.sales + c.sales, paid: a.paid + c.paid, balance: a.balance + c.balance }),
+        { orders: 0, sales: 0, paid: 0, balance: 0 },
     );
 
     return (
@@ -966,8 +966,8 @@ function LedgerTab({ query }: { query: { data?: SalesLedger; isLoading: boolean 
                         <p className="text-xs text-surface-500 mt-0.5">{c.orders} orders</p>
                         <div className="mt-3 pt-3 border-t border-line space-y-1 text-xs">
                             <div className="flex justify-between">
-                                <span className="text-surface-500">Cash</span>
-                                <span className="font-semibold tabular-nums text-success-700">{fmtKes(c.cash)}</span>
+                                <span className="text-surface-500">Paid</span>
+                                <span className="font-semibold tabular-nums text-success-700">{fmtKes(c.paid)}</span>
                             </div>
                             <div className="flex justify-between">
                                 <span className="text-surface-500">Balance</span>
@@ -982,8 +982,8 @@ function LedgerTab({ query }: { query: { data?: SalesLedger; isLoading: boolean 
                     <p className="text-xs text-surface-500 mt-0.5">{grand.orders} orders</p>
                     <div className="mt-3 pt-3 border-t border-line space-y-1 text-xs">
                         <div className="flex justify-between">
-                            <span className="text-surface-500">Cash</span>
-                            <span className="font-semibold tabular-nums text-success-700">{fmtKes(grand.cash)}</span>
+                            <span className="text-surface-500">Paid</span>
+                            <span className="font-semibold tabular-nums text-success-700">{fmtKes(grand.paid)}</span>
                         </div>
                         <div className="flex justify-between">
                             <span className="text-surface-500">Balance</span>
@@ -993,10 +993,10 @@ function LedgerTab({ query }: { query: { data?: SalesLedger; isLoading: boolean 
                 </div>
             </div>
 
-            {/* Daily: sales, cash paid, credit */}
+            {/* Daily: sales, paid, credit */}
             <div className="card overflow-hidden">
                 <div className="px-5 pt-5 pb-3">
-                    <p className="font-semibold text-surface-900">Daily sales, cash and credit</p>
+                    <p className="font-semibold text-surface-900">Daily sales, paid and credit</p>
                     <p className="text-xs text-surface-500 mt-0.5">
                         Credit is the unpaid balance on that day&rsquo;s orders.
                     </p>
@@ -1008,7 +1008,7 @@ function LedgerTab({ query }: { query: { data?: SalesLedger; isLoading: boolean 
                                 <th>Date</th>
                                 <th className="text-right">Orders</th>
                                 <th className="text-right">Sales</th>
-                                <th className="text-right">Cash paid</th>
+                                <th className="text-right">Paid</th>
                                 <th className="text-right">Credit</th>
                             </tr>
                         </thead>
@@ -1021,7 +1021,7 @@ function LedgerTab({ query }: { query: { data?: SalesLedger; isLoading: boolean 
                                     <td className="font-mono text-2xs font-bold text-surface-700">{d.date}</td>
                                     <td className="text-right tabular-nums">{d.orders}</td>
                                     <td className="text-right tabular-nums">{fmtKes(d.sales)}</td>
-                                    <td className="text-right tabular-nums text-success-700">{fmtKes(d.cash)}</td>
+                                    <td className="text-right tabular-nums text-success-700">{fmtKes(d.paid)}</td>
                                     <td className="text-right"><Owed value={d.credit} /></td>
                                 </tr>
                             ))}
