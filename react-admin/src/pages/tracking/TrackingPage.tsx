@@ -48,7 +48,7 @@ const PIPELINE = [
 
 function Spinner({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
     const s = { sm: "w-4 h-4 border-2", md: "w-6 h-6 border-2", lg: "w-10 h-10 border-[3px]" }[size];
-    return <div className={clsx("rounded-full animate-spin border-surface-200 border-t-blue-600", s)} />;
+    return <div className={clsx("rounded-full animate-spin border-surface-200 border-t-info-600", s)} />;
 }
 
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
@@ -671,7 +671,7 @@ function StatusBanner({
                     )}
                     {showEta && (
                         <>
-                            <p className="text-[10px] font-bold tracking-widest uppercase text-info-500">Estimated delivery</p>
+                            <p className="text-[10px] font-bold tracking-widest uppercase text-info-600">Estimated delivery</p>
                             <p className="text-sm font-semibold text-info-800 mt-0.5">{eta}</p>
                         </>
                     )}

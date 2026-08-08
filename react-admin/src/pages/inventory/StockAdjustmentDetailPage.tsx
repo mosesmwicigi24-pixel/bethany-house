@@ -216,7 +216,7 @@ export default function StockAdjustmentDetailPage() {
                             const notes = window.prompt("Approval notes (optional):") ?? "";
                             approveMutation.mutate(notes);
                         }} disabled={approveMutation.isPending}
-                            className="btn-sm bg-success-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-success-700">
+                            className="btn-sm bg-success-700 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-success-700">
                             ✓ Approve
                         </button>
                         <button onClick={() => {

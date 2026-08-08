@@ -28,21 +28,24 @@ import {
 export const KPI_GRID = "grid grid-cols-2 md:grid-cols-4 2xl:grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-3";
 
 export const CHART_COLORS = [
-    // Derived from the design tokens rather than stock Tailwind hexes, so a
-    // palette change happens in tailwind.config.js and not here. Ordered
-    // brand-first, then alternating family and rung so adjacent series stay
-    // distinguishable — a categorical scale's whole job is telling series
-    // apart, so this deliberately does NOT collapse to one accent.
-    "#f05423", // brand 500
-    "#2563eb", // info 600
-    "#16a34a", // success 600
-    "#9333ea", // accent 600
-    "#f59e0b", // amber 500
-    "#dc2626", // danger 600
-    "#1e40af", // info 800
-    "#15803d", // success 700
-    "#7e22ce", // accent 700
-    "#b45309", // amber 700
+    // Derived from the design tokens, so a palette change happens in
+    // tailwind.config.js and not here.
+    // Ordered for MAXIMUM ADJACENT SEPARATION: six saturated hues first, then
+    // light tints, then neutral. An earlier version paired 600 and 700 rungs of
+    // the same family (success-600 vs success-700) — adjacent series in a chart
+    // then differed by a couple of CIELAB units and were effectively the same
+    // colour, which defeats the only job a categorical scale has.
+    "#f05423", // brand 500    — orange
+    "#2563eb", // info 600     — blue
+    "#16a34a", // success 600  — green
+    "#9333ea", // accent 600   — purple
+    "#f59e0b", // amber 500    — amber
+    "#b91c1c", // danger 700   — deep red (700 not 600: at 600 it sat
+               //                ΔE 16.8 from the brand orange above)
+    "#93c5fd", // info 300     — light blue
+    "#86efac", // success 300  — light green
+    "#d8b4fe", // accent 300   — light purple
+    "#565c54", // surface 600  — neutral
 ];
 
 export const TH =

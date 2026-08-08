@@ -117,7 +117,7 @@ const isManual   = (m: PaymentMethod) => m.type === "manual";
 
 function Spinner({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
     const s = { sm: "w-4 h-4 border-2", md: "w-6 h-6 border-2", lg: "w-10 h-10 border-[3px]" }[size];
-    return <div className={clsx("rounded-full animate-spin border-surface-200 border-t-blue-600", s)} />;
+    return <div className={clsx("rounded-full animate-spin border-surface-200 border-t-info-600", s)} />;
 }
 
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
@@ -556,7 +556,7 @@ function MpesaPanel({
                                 <button
                                     onClick={sendPush}
                                     disabled={pushing || !phone.trim()}
-                                    className="shrink-0 px-4 py-2 rounded-xl text-xs font-bold text-white bg-success-600 hover:bg-success-700 disabled:opacity-40 transition-colors flex items-center gap-1.5 whitespace-nowrap"
+                                    className="shrink-0 px-4 py-2 rounded-xl text-xs font-bold text-white bg-success-700 hover:bg-success-700 disabled:opacity-40 transition-colors flex items-center gap-1.5 whitespace-nowrap"
                                 >
                                     {pushing
                                         ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -1163,7 +1163,7 @@ function OrderCard({ order }: { order: OrderInfo }) {
                         </p>
                     )}
                     {order.is_international && (
-                        <p className="text-xs text-info-500 font-medium text-right mt-0.5">🌐 International order</p>
+                        <p className="text-xs text-info-600 font-medium text-right mt-0.5">🌐 International order</p>
                     )}
                 </div>
             </div>

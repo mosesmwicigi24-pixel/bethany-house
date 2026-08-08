@@ -712,7 +712,7 @@ function QCModal({ order, onClose, onDone }: { order: ProductionOrder; onClose: 
                 <div className="flex rounded-xl overflow-hidden border border-surface-200">
                     <button onClick={() => setForm(p => ({ ...p, passed: true }))}
                         className={clsx("flex-1 py-3 text-sm font-semibold flex items-center justify-center gap-2 transition-colors",
-                            form.passed ? "bg-success-500 text-white" : "bg-white text-surface-500 hover:bg-surface-50")}>
+                            form.passed ? "bg-success-700 text-white" : "bg-white text-surface-500 hover:bg-surface-50")}>
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
                         Pass
                     </button>
@@ -1167,7 +1167,7 @@ function StagesPipeline({
                                         <button
                                             onClick={() => onTaskAction(task.id, "complete")}
                                             disabled={taskActionPending}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-success-600 text-white text-xs font-semibold hover:bg-success-700 transition-colors disabled:opacity-50"
+                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-success-700 text-white text-xs font-semibold hover:bg-success-700 transition-colors disabled:opacity-50"
                                         >
                                             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
@@ -2249,7 +2249,7 @@ export default function ProductionOrderDetailPage() {
                         needed to make the garment. */}
                     {isCustomer && (
                         <div className="flex items-center gap-1.5 mb-1.5 text-2xs">
-                            <span className="font-bold uppercase tracking-widest text-info-500">Sales order</span>
+                            <span className="font-bold uppercase tracking-widest text-info-600">Sales order</span>
                             {order.customer_order ? (
                                 <Link to={`/sales/orders/${order.customer_order_id}`}
                                     className="font-mono font-bold text-info-700 hover:underline truncate">
@@ -2389,7 +2389,7 @@ export default function ProductionOrderDetailPage() {
                     )}
                     {canComplete && (
                         <button onClick={() => setModal("complete")}
-                            className="bg-success-600 text-white border border-success-600 rounded-lg px-2.5 h-[30px] sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-success-700 transition-colors flex items-center gap-1">
+                            className="bg-success-700 text-white border border-success-600 rounded-lg px-2.5 h-[30px] sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-success-700 transition-colors flex items-center gap-1">
                             <span className="hidden sm:inline">✅ Complete &amp; Stock</span><span className="sm:hidden">Complete</span>
                         </button>
                     )}

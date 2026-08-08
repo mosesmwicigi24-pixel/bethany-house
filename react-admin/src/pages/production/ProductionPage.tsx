@@ -611,9 +611,9 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
                             return (
                                 <div className="rounded-xl bg-info-50 border border-info-200 px-3 py-2.5 space-y-1">
                                     <div className="flex items-center gap-2">
-                                        <svg className="w-3.5 h-3.5 text-info-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+                                        <svg className="w-3.5 h-3.5 text-info-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
                                         <span className="text-xs font-semibold text-info-800">{o.order_number}</span>
-                                        <span className="text-2xs text-info-500 capitalize">{o.status}</span>
+                                        <span className="text-2xs text-info-600 capitalize">{o.status}</span>
                                     </div>
                                     <div className="text-2xs text-info-600 space-y-0.5">
                                         {o.customer_first_name && (
@@ -1480,7 +1480,7 @@ aria-label="Close">
                                         <p className="text-xs text-info-700 mt-0.5 font-medium">{order.customer_label ?? [order.customer_order.customer_first_name, order.customer_order.customer_last_name].filter(Boolean).join(" ")}</p>
                                     )}
                                     {(order.customer_contact || order.customer_order.customer_phone) && (
-                                        <p className="text-2xs text-info-500">{order.customer_contact ?? order.customer_order.customer_phone}</p>
+                                        <p className="text-2xs text-info-600">{order.customer_contact ?? order.customer_order.customer_phone}</p>
                                     )}
                                     <p className="text-2xs text-info-400 mt-0.5">Click to view the full sales order →</p>
                                 </div>
@@ -2021,7 +2021,7 @@ function ProductionOrdersTab() {
                                             <td className="px-3 py-3 max-w-44">
                                                 <p className="font-medium text-surface-900 truncate text-xs">{o.product_name}</p>
                                                 {isCustomer && o.customer_order && (
-                                                    <p className="text-2xs text-info-500">{o.customer_order.order_number}</p>
+                                                    <p className="text-2xs text-info-600">{o.customer_order.order_number}</p>
                                                 )}
                                             </td>
                                             {/* Whose job is this — the question the floor asks first. Name is

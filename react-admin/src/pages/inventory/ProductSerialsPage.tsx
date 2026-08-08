@@ -188,7 +188,7 @@ export default function ProductSerialsPage() {
                                                     <p className="font-mono text-surface-400">{s.order_number}</p>
                                                 )}
                                                 {fmtDate(s.dispatched_at) && (
-                                                    <p className="text-info-500 whitespace-nowrap">
+                                                    <p className="text-info-600 whitespace-nowrap">
                                                         Dispatched {fmtDate(s.dispatched_at)}
                                                     </p>
                                                 )}

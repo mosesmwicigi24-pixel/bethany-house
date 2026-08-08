@@ -47,7 +47,11 @@ export default {
           // used ~1178x, much of it on text, and 2.40:1 fails AA outright.
           // 3.13:1 clears the 3:1 bar for UI and large text.
           400: '#8c9489',
-          500: '#757d72',
+          // 4.57:1 on white. This is the secondary-text token and it must clear
+          // AA: at #757d72 it measured 4.26:1, and the palette sweep moved ~31
+          // body-text sites here from stock gray-500 (4.83:1), so leaving it
+          // would have been a real regression rather than a neutral rename.
+          500: '#70786d',
           600: '#565c54',
           700: '#434741',
           800: '#2c2e2b',

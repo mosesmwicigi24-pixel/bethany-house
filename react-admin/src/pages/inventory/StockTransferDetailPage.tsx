@@ -233,7 +233,7 @@ export default function StockTransferDetailPage() {
                     <StatusTimeline status={transfer.status} />
                     <div className="flex justify-between mt-1">
                         {TIMELINE_STEPS.map((s) => (
-                            <span key={s} className="text-2xs text-info-500 capitalize">{s.replace("_", " ")}</span>
+                            <span key={s} className="text-2xs text-info-600 capitalize">{s.replace("_", " ")}</span>
                         ))}
                     </div>
                 </div>
@@ -244,7 +244,7 @@ export default function StockTransferDetailPage() {
                         {canApprove && (
                             <button onClick={() => actionMutation.mutate({ action: "approve" })}
                                 disabled={actionMutation.isPending}
-                                className="btn-sm bg-success-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-success-700">
+                                className="btn-sm bg-success-700 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-success-700">
                                 ✓ Approve Transfer
                             </button>
                         )}
@@ -386,7 +386,7 @@ export default function StockTransferDetailPage() {
                                     </svg>
                                 </div>
                                 <div className="p-3 bg-info-50 rounded-xl border border-info-100">
-                                    <p className="text-2xs text-info-500 uppercase tracking-widest mb-0.5">To</p>
+                                    <p className="text-2xs text-info-600 uppercase tracking-widest mb-0.5">To</p>
                                     <p className="text-sm font-semibold text-info-800">{transfer.to_outlet?.name ?? "-"}</p>
                                 </div>
                             </div>

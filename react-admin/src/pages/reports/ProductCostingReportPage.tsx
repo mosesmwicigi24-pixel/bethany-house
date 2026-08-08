@@ -544,7 +544,7 @@ export default function ProductCostingReportPage() {
                             <p className="px-5 py-5 text-sm text-surface-400">
                                 No selling expenses recorded.{" "}
                                 <button onClick={() => setPanel(true)}
-                                    className="text-info-500 hover:text-info-700 underline underline-offset-2">
+                                    className="text-info-600 hover:text-info-700 underline underline-offset-2">
                                     Adjust Values
                                 </button>{" "}to add them.
                             </p>

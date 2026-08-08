@@ -403,7 +403,7 @@ export default function PurchaseOrderDetailPage() {
                     {canApprove && (
                         <button onClick={() => actionMutation.mutate({ action: "approve" })}
                             disabled={actionMutation.isPending}
-                            className="btn-sm bg-success-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-success-700 transition-colors">
+                            className="btn-sm bg-success-700 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-success-700 transition-colors">
                             ✓ Approve PO
                         </button>
                     )}

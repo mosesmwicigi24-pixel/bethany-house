@@ -98,7 +98,7 @@ const STATUS_COLORS: Record<string, string> = {
     processing: "bg-brand-50 text-brand-700",
     confirmed:  "bg-info-50 text-info-700",
     shipped:    "bg-accent-50 text-accent-700",
-    delivered:  "bg-info-50 text-info-700",
+    delivered:  "bg-success-200 text-success-900",
     completed:  "bg-success-light text-success-dark",
     cancelled:  "bg-danger-light text-danger",
     refunded:   "bg-surface-100 text-surface-500",
@@ -1447,7 +1447,7 @@ function AddPaymentModal({ order, onClose, onDone }: {
                                                 placeholder="+254 700 000 000"
                                                 className="input text-sm font-mono flex-1 min-w-0" />
                                             <button onClick={initiateStkPush} disabled={pushing || !phone.trim()}
-                                                className="shrink-0 px-4 py-2 rounded-xl text-xs font-bold text-white bg-success-600 hover:bg-success-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 whitespace-nowrap">
+                                                className="shrink-0 px-4 py-2 rounded-xl text-xs font-bold text-white bg-success-700 hover:bg-success-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 whitespace-nowrap">
                                                 {pushing
                                                     ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                                                     : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
@@ -3121,13 +3121,13 @@ function OrderAuditLog({ orderId, onClose }: { orderId: number; onClose: () => v
 
     const actionColor = (event: string) => {
         if (event === "created")                          return "bg-success-light text-success";
-        if (event.includes("approved"))                  return "bg-success-light text-success";
+        if (event.includes("approved"))                  return "bg-success-200 text-success-900";
         if (event.includes("payment") || event.includes("mpesa") || event.includes("paystack") || event.includes("flutterwave"))
                                                           return "bg-brand-50 text-brand-600";
-        if (event.includes("currency"))                  return "bg-info-50 text-info-600";
-        if (event.includes("status"))                    return "bg-info-50 text-info-600";
+        if (event.includes("currency"))                  return "bg-info-50 text-info-700";
+        if (event.includes("status"))                    return "bg-info-200 text-info-900";
         if (event.includes("ship"))                      return "bg-accent-50 text-accent-600";
-        if (event.includes("production"))                return "bg-info-50 text-info-600";
+        if (event.includes("production"))                return "bg-brand-100 text-brand-800";
         if (event.includes("cancel") || event.includes("refund") || event.includes("rejected"))
                                                           return "bg-danger-light text-danger";
         if (event.includes("note"))                      return "bg-amber-50 text-amber-600";
@@ -3536,7 +3536,7 @@ export default function OrderDetailPage() {
                 {/* ── Payment link banner ───────────────────────────────────── */}
                 {paymentLink && outstanding > 0 && (
                     <div className="mx-6 mt-4 flex items-center gap-3 bg-info-50 border border-info-200 rounded-xl px-4 py-3">
-                        <svg className="w-4 h-4 text-info-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                        <svg className="w-4 h-4 text-info-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
                         <div className="flex-1 min-w-0">
                             <p className="text-xs font-semibold text-info-900">Customer payment link</p>
                             <a href={paymentLink} target="_blank" rel="noopener noreferrer" className="text-2xs text-info-600 hover:underline truncate block font-mono">{paymentLink}</a>
@@ -4054,7 +4054,7 @@ export default function OrderDetailPage() {
                         <div className="-mx-6 sm:-mx-8 px-6 sm:px-8 py-6 bg-info-50/50 border-b border-info-100/80">
                             <div className="flex items-center gap-2 mb-4">
                                 <div className="w-6 h-6 rounded-lg bg-info-50 flex items-center justify-center">
-                                    <svg className="w-3.5 h-3.5 text-info-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 00-3.213-9.193 2.056 2.056 0 00-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 00-10.026 0 1.106 1.106 0 00-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12"/></svg>
+                                    <svg className="w-3.5 h-3.5 text-info-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 00-3.213-9.193 2.056 2.056 0 00-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 00-10.026 0 1.106 1.106 0 00-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12"/></svg>
                                 </div>
                                 <p className="text-xs font-bold text-surface-700 uppercase tracking-widest">Shipping & Tracking</p>
                             </div>
@@ -4208,12 +4208,12 @@ export default function OrderDetailPage() {
                                 </div>
                                 <div className="flex justify-between gap-2">
                                     <span className="text-surface-400 shrink-0">Currency</span>
-                                    <span className="font-mono font-bold text-surface-700 flex items-center gap-1">{cc}{(order as any).is_international && <span className="text-info-500">🌐</span>}</span>
+                                    <span className="font-mono font-bold text-surface-700 flex items-center gap-1">{cc}{(order as any).is_international && <span className="text-info-600">🌐</span>}</span>
                                 </div>
                                 {(order as any).customer_country_code && (
                                     <div className="flex justify-between gap-2">
                                         <span className="text-surface-400 shrink-0">Country</span>
-                                        <span className="text-surface-700 font-medium">{(order as any).customer_country_code}{(order as any).is_international && <span className="ml-1 text-2xs text-info-500">· International</span>}</span>
+                                        <span className="text-surface-700 font-medium">{(order as any).customer_country_code}{(order as any).is_international && <span className="ml-1 text-2xs text-info-600">· International</span>}</span>
                                     </div>
                                 )}
                             </div>

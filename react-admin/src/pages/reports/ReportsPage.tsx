@@ -125,7 +125,7 @@ function AttentionPanel({ items }: { items: any[] }) {
                         <button key={it.key} onClick={() => navigate(it.link)}
                             className={clsx(
                                 "text-left rounded-xl border-l-4 border border-line p-3 flex flex-col gap-1 transition-shadow hover:shadow-md",
-                                high ? "border-l-red-500 bg-danger-50/50" : "border-l-amber-400 bg-amber-50/40",
+                                high ? "border-l-danger-500 bg-danger-50/50" : "border-l-amber-400 bg-amber-50/40",
                             )}>
                             <div className="flex items-center justify-between gap-2">
                                 <span className="text-base leading-none" aria-hidden="true">{ATTN_ICON[it.key] ?? "⚠️"}</span>
