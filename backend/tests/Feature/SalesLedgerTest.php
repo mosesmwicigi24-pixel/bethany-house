@@ -242,7 +242,8 @@ class SalesLedgerTest extends TestCase
 
         $row = collect($summary['by_payment_method'])->firstWhere('payment_method', 'inmpaybill');
 
-        $this->assertNotNull($row, 'the order was dropped from the breakdown');
+        $this->assertNotNull($row, 'the order was dropped from the breakdown. Actual rows: '
+            .json_encode($summary['by_payment_method']));
         $this->assertSame(1, (int) $row['count']);
         // and it carries the configured display name, not the raw code
         $this->assertSame('I&M Paybill', $row['method_name']);
