@@ -94,7 +94,7 @@ function PaymentLinkButton({ order }: { order: Order }) {
             className={clsx(
                 "inline-flex items-center justify-center w-7 h-7 rounded-lg border transition-all",
                 link
-                    ? "border-blue-300 bg-blue-50 text-blue-600 hover:bg-blue-100"
+                    ? "border-info-300 bg-info-50 text-info-600 hover:bg-info-100"
                     : "border-surface-200 bg-white text-surface-400 hover:border-brand-300 hover:text-brand-600"
             )}
         >
@@ -359,7 +359,7 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                                                     <span className="ml-auto shrink-0 tabular-nums font-bold text-surface-900">
                                                         {order.currency_code} {fmt(order.total_amount)}
                                                         {order.is_international && (
-                                                            <span className="ml-1 text-blue-600" title="International order">🌐</span>
+                                                            <span className="ml-1 text-info-600" title="International order">🌐</span>
                                                         )}
                                                     </span>
                                                 </div>
@@ -457,7 +457,7 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                                                 {order.currency_code} {fmt(order.total_amount)}
                                             </span>
                                             {(order as any).is_international && (
-                                                <span className="ml-1.5 text-2xs font-semibold text-blue-600" title="International order">🌐</span>
+                                                <span className="ml-1.5 text-2xs font-semibold text-info-600" title="International order">🌐</span>
                                             )}
                                         </td>
                                         <td>

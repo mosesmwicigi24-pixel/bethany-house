@@ -903,11 +903,11 @@ function DetailPanel({
                             SEO Preview
                         </p>
                         <div className="border border-line rounded-xl p-3 bg-surface-50 space-y-1">
-                            <p className="text-sm text-blue-600 font-medium truncate">
+                            <p className="text-sm text-info-600 font-medium truncate">
                                 {category.meta_title || category.name_en} |
                                 Bethany House
                             </p>
-                            <p className="text-xs text-green-700">
+                            <p className="text-xs text-success-700">
                                 bethanyhouse.co.ke/categories/{category.slug}
                             </p>
                             {category.meta_description && (
@@ -1703,11 +1703,11 @@ export default function CategoriesPage() {
                                 <p className="text-2xs text-surface-400 mb-2 font-semibold uppercase tracking-wider">
                                     Preview
                                 </p>
-                                <p className="text-sm text-blue-600 font-medium truncate">
+                                <p className="text-sm text-info-600 font-medium truncate">
                                     {watch("meta_title") || watch("name_en")} |
                                     Bethany House
                                 </p>
-                                <p className="text-xs text-green-700 mt-0.5">
+                                <p className="text-xs text-success-700 mt-0.5">
                                     bethanyhouse.co.ke/categories/
                                     {watch("slug") || "slug"}
                                 </p>

@@ -77,7 +77,7 @@ export default function ChannelEngagementPage() {
                                                 </div>
                                                 {c.connected && (
                                                     <div className="mt-1.5 h-2 rounded-full bg-surface-100 overflow-hidden">
-                                                        <div className="h-full rounded-full bg-emerald-500" style={{ width: `${(c.messages / maxMsg) * 100}%` }} />
+                                                        <div className="h-full rounded-full bg-success-500" style={{ width: `${(c.messages / maxMsg) * 100}%` }} />
                                                     </div>
                                                 )}
                                                 {c.connected && c.channel !== "web" && (

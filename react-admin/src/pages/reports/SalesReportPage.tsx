@@ -213,7 +213,7 @@ export default function SalesReportPage() {
                                 <LineChart data={daily}>
                                     <CartesianGrid
                                         strokeDasharray="3 3"
-                                        stroke="#F1F5F9"
+                                        stroke="#f2f3f2"
                                     />
                                     <XAxis
                                         dataKey="date"
@@ -774,7 +774,7 @@ export default function SalesReportPage() {
                                 >
                                     <CartesianGrid
                                         strokeDasharray="3 3"
-                                        stroke="#F1F5F9"
+                                        stroke="#f2f3f2"
                                     />
                                     <XAxis
                                         dataKey="day"

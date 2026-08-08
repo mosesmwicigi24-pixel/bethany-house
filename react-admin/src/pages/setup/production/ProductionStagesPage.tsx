@@ -50,7 +50,7 @@ interface ProductionStage {
 // ── Colour palette ────────────────────────────────────────────────────────────
 
 const COLOURS = [
-    { label: "Slate",   value: "#64748b" },
+    { label: "Slate",   value: "#757d72" },
     { label: "Blue",    value: "#3b82f6" },
     { label: "Indigo",  value: "#6366f1" },
     { label: "Purple",  value: "#a855f7" },
@@ -223,7 +223,7 @@ function SortableStageRow({
 
                 {/* Colour dot + order number */}
                 <div className="flex items-center gap-2 shrink-0">
-                    <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: stage.color ?? "#64748b" }} />
+                    <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: stage.color ?? "#757d72" }} />
                     <span className="text-2xs font-mono text-surface-300 w-4 text-center">{index + 1}</span>
                 </div>
 

@@ -294,7 +294,7 @@ export default function ProductionReportPage() {
                                 <BarChart data={dailyTrend}>
                                     <CartesianGrid
                                         strokeDasharray="3 3"
-                                        stroke="#F1F5F9"
+                                        stroke="#f2f3f2"
                                     />
                                     <XAxis
                                         dataKey="date"
@@ -387,7 +387,7 @@ export default function ProductionReportPage() {
                                 <BarChart data={chartData}>
                                     <CartesianGrid
                                         strokeDasharray="3 3"
-                                        stroke="#F1F5F9"
+                                        stroke="#f2f3f2"
                                     />
                                     <XAxis
                                         dataKey="name"
@@ -873,7 +873,7 @@ function CostingTab({ data, isLoading, params }: {
                                             <span className={clsx(
                                                 "text-2xs font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide",
                                                 row.is_customer_order
-                                                    ? "bg-indigo-50 text-indigo-600"
+                                                    ? "bg-info-50 text-info-600"
                                                     : "bg-surface-100 text-surface-500",
                                             )}>
                                                 {row.is_customer_order ? "Make-to-Order" : "Stock"}
@@ -921,7 +921,7 @@ function IntelligenceTab({ start, end }: { start: string; end: string }) {
     return (
         <div className="space-y-6">
             {/* Capacity: the one sentence that plans next week */}
-            <div className={clsx("card card-body border", short ? "border-red-200 bg-red-50/40" : "border-emerald-200 bg-emerald-50/30")}>
+            <div className={clsx("card card-body border", short ? "border-danger-200 bg-danger-50/40" : "border-success-200 bg-success-50/30")}>
                 <SectionHeader title="Capacity — next 7 days" />
                 <div className={clsx(KPI_GRID, "mt-1")}>
                     <KpiCard label="Pieces Due" value={capacity.due_pieces} sub={`${capacity.due_orders} orders`} />
@@ -946,7 +946,7 @@ function IntelligenceTab({ start, end }: { start: string; end: string }) {
                                 <span className="text-xs font-medium text-surface-700 w-28 truncate shrink-0">{b.stage}</span>
                                 <div className="flex-1 h-3 bg-surface-100 rounded-full overflow-hidden">
                                     <div className={clsx("h-full rounded-full",
-                                        Number(b.held_pieces) === maxHeld ? "bg-red-500" : "bg-amber-400")}
+                                        Number(b.held_pieces) === maxHeld ? "bg-danger-500" : "bg-amber-400")}
                                         style={{ width: `${(Number(b.held_pieces) / maxHeld) * 100}%` }} />
                                 </div>
                                 <span className="text-xs font-bold tabular-nums text-surface-800 w-20 text-right shrink-0">

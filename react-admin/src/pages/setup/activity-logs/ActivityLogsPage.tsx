@@ -24,7 +24,7 @@ function actionMeta(action?: string | null): { bg: string; text: string } {
     if (action.includes("password"))
         return { bg: "bg-warning-light", text: "text-warning" };
     if (action.includes("role"))
-        return { bg: "bg-purple-50", text: "text-purple-600" };
+        return { bg: "bg-accent-50", text: "text-accent-600" };
     return { bg: "bg-surface-100", text: "text-surface-500" };
 }
 

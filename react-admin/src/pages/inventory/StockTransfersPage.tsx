@@ -31,8 +31,8 @@ const STATUS_CONFIG = {
     },
     in_transit: {
         label: "In Transit",
-        bg: "bg-purple-50",
-        text: "text-purple-600",
+        bg: "bg-accent-50",
+        text: "text-accent-600",
         step: 3,
     },
     completed: {
@@ -951,7 +951,7 @@ export default function StockTransfersPage() {
                             {
                                 label: "In Transit",
                                 value: stats.in_transit,
-                                color: "text-purple-600",
+                                color: "text-accent-600",
                                 filter: "in_transit",
                             },
                             {

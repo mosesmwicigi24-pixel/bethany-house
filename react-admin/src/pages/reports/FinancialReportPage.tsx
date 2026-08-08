@@ -577,7 +577,7 @@ export default function FinancialReportPage() {
                                 <BarChart data={chartData}>
                                     <CartesianGrid
                                         strokeDasharray="3 3"
-                                        stroke="#F1F5F9"
+                                        stroke="#f2f3f2"
                                     />
                                     <XAxis
                                         dataKey="month"
@@ -624,7 +624,7 @@ export default function FinancialReportPage() {
                                 >
                                     <CartesianGrid
                                         strokeDasharray="3 3"
-                                        stroke="#F1F5F9"
+                                        stroke="#f2f3f2"
                                     />
                                     <XAxis
                                         dataKey="month"
@@ -751,7 +751,7 @@ export default function FinancialReportPage() {
                                         <SectionHeader title="Monthly Cash Flow" />
                                         <ResponsiveContainer width="100%" height={280}>
                                             <BarChart data={cfData}>
-                                                <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                                                <CartesianGrid strokeDasharray="3 3" stroke="#f2f3f2" />
                                                 <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                                                 <YAxis tickFormatter={(v: number) => `${(v/1000).toFixed(0)}K`} tick={{ fontSize: 11 }} width={48} />
                                                 <Tooltip formatter={(v) => fmtKes(v as number)} />
@@ -768,7 +768,7 @@ export default function FinancialReportPage() {
                                         <SectionHeader title="Net Cash Flow Trend" />
                                         <ResponsiveContainer width="100%" height={200}>
                                             <LineChart data={cfData}>
-                                                <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                                                <CartesianGrid strokeDasharray="3 3" stroke="#f2f3f2" />
                                                 <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                                                 <YAxis tickFormatter={(v: number) => `${(v/1000).toFixed(0)}K`} tick={{ fontSize: 11 }} width={48} />
                                                 <Tooltip formatter={(v) => fmtKes(v as number)} />
@@ -859,14 +859,14 @@ function FinancialIntelligence({ start, end }: { start: string; end: string }) {
                                 </span>
                                 <div className="flex-1 space-y-0.5">
                                     <div className="h-2 bg-surface-100 rounded-full overflow-hidden">
-                                        <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${(Number(w.in) / maxFlow) * 100}%` }} />
+                                        <div className="h-full bg-success-500 rounded-full" style={{ width: `${(Number(w.in) / maxFlow) * 100}%` }} />
                                     </div>
                                     <div className="h-2 bg-surface-100 rounded-full overflow-hidden">
-                                        <div className="h-full bg-red-400 rounded-full" style={{ width: `${(Number(w.out) / maxFlow) * 100}%` }} />
+                                        <div className="h-full bg-danger-400 rounded-full" style={{ width: `${(Number(w.out) / maxFlow) * 100}%` }} />
                                     </div>
                                 </div>
                                 <span className={clsx("w-24 text-right tabular-nums font-bold shrink-0",
-                                    Number(w.net) >= 0 ? "text-emerald-700" : "text-red-600")}>
+                                    Number(w.net) >= 0 ? "text-success-700" : "text-danger-600")}>
                                     {Number(w.net) >= 0 ? "+" : ""}{fmtKes(w.net)}
                                 </span>
                             </div>

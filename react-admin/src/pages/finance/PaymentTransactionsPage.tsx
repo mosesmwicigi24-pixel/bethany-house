@@ -41,7 +41,7 @@ const METHOD_LABELS: Record<string, string> = {
 
 const METHOD_COLORS: Record<string, string> = {
     mpesa: "#00B300", card_paystack: "#6366F1", card_flutterwave: "#F59E0B",
-    cash: "#10B981", bank_transfer: "#3B82F6", cheque: "#8B5CF6", manual: "#64748B",
+    cash: "#10B981", bank_transfer: "#3B82F6", cheque: "#8B5CF6", manual: "#757d72",
 };
 
 const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
@@ -49,7 +49,7 @@ const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
     pending:            { label: "Pending",        cls: "bg-warning-light text-warning-dark" },
     failed:             { label: "Failed",         cls: "bg-danger-light text-danger"        },
     refunded:           { label: "Refunded",       cls: "bg-surface-100 text-surface-500"    },
-    partially_refunded: { label: "Part. Refunded", cls: "bg-purple-50 text-purple-600"       },
+    partially_refunded: { label: "Part. Refunded", cls: "bg-accent-50 text-accent-600"       },
     voided:             { label: "Voided",         cls: "bg-surface-200 text-surface-400 line-through" },
 };
 
@@ -240,15 +240,15 @@ export default function PaymentTransactionsPage() {
                                             <stop offset="100%" stopColor="#6366F1" stopOpacity={0}    />
                                         </linearGradient>
                                     </defs>
-                                    <CartesianGrid strokeDasharray="4 4" stroke="#f1f5f9" vertical={false} />
+                                    <CartesianGrid strokeDasharray="4 4" stroke="#f2f3f2" vertical={false} />
                                     <XAxis dataKey="date" tickFormatter={d => dayjs(d).format("DD MMM")}
-                                        tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                                        tick={{ fontSize: 10, fill: "#8c9489" }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                                     <YAxis tickFormatter={v => `${Math.round(v / 1000)}k`}
-                                        tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                                        tick={{ fontSize: 10, fill: "#8c9489" }} axisLine={false} tickLine={false} />
                                     <Tooltip
                                         formatter={(v) => [fmtCurrency(Number(v ?? 0)), "Volume"]}
                                         labelFormatter={l => dayjs(l).format("DD MMM YYYY")}
-                                        contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }} />
+                                        contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e7eae6" }} />
                                     <Area type="monotone" dataKey="volume" stroke="#6366F1" strokeWidth={2} fill="url(#txnGrad)" dot={false} />
                                 </AreaChart>
                             </ResponsiveContainer>
@@ -265,7 +265,7 @@ export default function PaymentTransactionsPage() {
                                 analytics?.by_method?.slice(0, 6).map(m => {
                                     const maxVol = Math.max(...(analytics.by_method?.map(x => x.volume) ?? [1]));
                                     const pct    = maxVol > 0 ? (m.volume / maxVol) * 100 : 0;
-                                    const color  = METHOD_COLORS[m.payment_method] ?? "#94A3B8";
+                                    const color  = METHOD_COLORS[m.payment_method] ?? "#8c9489";
                                     return (
                                         <div key={m.payment_method} className="space-y-1">
                                             <div className="flex items-center justify-between">
@@ -447,7 +447,7 @@ export default function PaymentTransactionsPage() {
                                             {/* Method */}
                                             <td className="px-4 py-3">
                                                 <span className="inline-flex items-center gap-1.5 text-xs font-medium text-surface-700">
-                                                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: mColor ?? "#94a3b8" }} />
+                                                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: mColor ?? "#8c9489" }} />
                                                     {METHOD_LABELS[txn.payment_method] ?? txn.payment_method}
                                                 </span>
                                             </td>
@@ -550,7 +550,7 @@ export default function PaymentTransactionsPage() {
                                                 {sc.label}
                                             </span>
                                             <span className="inline-flex items-center gap-1.5 text-xs font-medium text-surface-600">
-                                                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: METHOD_COLORS[p.payment_method] ?? "#94a3b8" }} />
+                                                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: METHOD_COLORS[p.payment_method] ?? "#8c9489" }} />
                                                 {METHOD_LABELS[p.payment_method] ?? p.payment_method}
                                             </span>
                                         </div>
@@ -700,8 +700,8 @@ export default function PaymentTransactionsPage() {
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
-                            <svg className="w-5 h-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <div className="w-10 h-10 rounded-full bg-info-100 flex items-center justify-center shrink-0">
+                            <svg className="w-5 h-5 text-info-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 3M21 7.5H7.5" />
                             </svg>
                         </div>
@@ -738,10 +738,10 @@ export default function PaymentTransactionsPage() {
                             </div>
                         )}
                         {reassignOrderId && (
-                            <div className="flex items-center justify-between bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2 mt-1">
-                                <p className="text-xs font-medium text-indigo-800">{reassignOrderLabel}</p>
+                            <div className="flex items-center justify-between bg-info-50 border border-info-200 rounded-lg px-3 py-2 mt-1">
+                                <p className="text-xs font-medium text-info-800">{reassignOrderLabel}</p>
                                 <button onClick={() => { setReassignOrderId(null); setReassignOrderLabel(''); }}
-                                    className="text-indigo-400 hover:text-indigo-600 ml-2">
+                                    className="text-info-400 hover:text-info-600 ml-2">
                                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                                     </svg>

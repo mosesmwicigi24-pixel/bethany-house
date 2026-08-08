@@ -74,7 +74,7 @@ const TYPE_COLORS = {
     store: "bg-brand-50 text-brand-700",
     warehouse: "bg-info-light text-info",
     outlet: "bg-success-light text-success",
-    workshop: "bg-purple-50 text-purple-700",
+    workshop: "bg-accent-50 text-accent-700",
 };
 
 export default function OutletsPage() {

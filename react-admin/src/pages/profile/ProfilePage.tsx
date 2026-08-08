@@ -44,7 +44,7 @@ function actionMeta(action: string): { color: string; icon: string } {
   if (action.includes('deleted'))  return { color: 'text-danger bg-danger-light',   icon: '×' }
   if (action.includes('updated') || action.includes('settings')) return { color: 'text-info bg-info-light', icon: '✎' }
   if (action.includes('password')) return { color: 'text-warning bg-warning-light', icon: '⚿' }
-  if (action.includes('role'))     return { color: 'text-purple-600 bg-purple-50',  icon: '◈' }
+  if (action.includes('role'))     return { color: 'text-accent-600 bg-accent-50',  icon: '◈' }
   return { color: 'text-surface-500 bg-surface-100', icon: '·' }
 }
 

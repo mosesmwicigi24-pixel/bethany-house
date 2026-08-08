@@ -274,14 +274,14 @@ function getFileKind(name: string, mime?: string): FileKind {
 
 // Colour + icon per kind, used in file cards and composer chips
 const KIND_META: Record<FileKind, { label: string; bg: string; text: string; icon: React.ReactNode }> = {
-    image:  { label: "Image",       bg: "bg-violet-50",  text: "text-violet-600", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/> },
-    video:  { label: "Video",       bg: "bg-pink-50",    text: "text-pink-600",   icon: <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/> },
-    audio:  { label: "Audio",       bg: "bg-sky-50",     text: "text-sky-600",    icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/> },
-    pdf:    { label: "PDF",         bg: "bg-red-50",     text: "text-red-600",    icon: <><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></> },
-    text:   { label: "Text",        bg: "bg-slate-50",   text: "text-slate-600",  icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/> },
-    csv:    { label: "CSV",         bg: "bg-emerald-50", text: "text-emerald-600",icon: <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M3 14h18M10 4v16M6 4v16M14 4v16M18 4v16M3 8a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/> },
-    word:   { label: "Word",        bg: "bg-blue-50",    text: "text-blue-600",   icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/> },
-    excel:  { label: "Spreadsheet", bg: "bg-green-50",   text: "text-green-600",  icon: <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M3 14h18M10 4v16M6 4v16M14 4v16M18 4v16M3 8a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/> },
+    image:  { label: "Image",       bg: "bg-accent-50",  text: "text-accent-600", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/> },
+    video:  { label: "Video",       bg: "bg-accent-50",    text: "text-accent-600",   icon: <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/> },
+    audio:  { label: "Audio",       bg: "bg-info-50",     text: "text-info-600",    icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/> },
+    pdf:    { label: "PDF",         bg: "bg-danger-50",     text: "text-danger-600",    icon: <><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></> },
+    text:   { label: "Text",        bg: "bg-surface-50",   text: "text-surface-600",  icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/> },
+    csv:    { label: "CSV",         bg: "bg-success-50", text: "text-success-600",icon: <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M3 14h18M10 4v16M6 4v16M14 4v16M18 4v16M3 8a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/> },
+    word:   { label: "Word",        bg: "bg-info-50",    text: "text-info-600",   icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/> },
+    excel:  { label: "Spreadsheet", bg: "bg-success-50",   text: "text-success-600",  icon: <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M3 14h18M10 4v16M6 4v16M14 4v16M18 4v16M3 8a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/> },
     other:  { label: "File",        bg: "bg-surface-50", text: "text-surface-500",icon: <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/> },
 };
 
@@ -495,7 +495,7 @@ function AuthAudio({ url, name, isOwn }: { url: string; name: string; isOwn: boo
     if (error) return <AuthFileLink url={url} name={name} isOwn={isOwn} />;
     return (
         <div className="flex items-center gap-2.5 rounded-xl px-3 py-2 bg-surface-50 border border-surface-200 w-64 sm:w-72">
-            <div className="w-9 h-9 rounded-lg bg-sky-50 flex items-center justify-center shrink-0">
+            <div className="w-9 h-9 rounded-lg bg-info-50 flex items-center justify-center shrink-0">
                 <FileKindIcon kind="audio" className="w-4.5 h-4.5" />
             </div>
             <div className="flex-1 min-w-0">
@@ -680,14 +680,14 @@ function EntityPickerPopup({
                 >
                     {/* Type icon */}
                     <div className={`mt-0.5 w-6 h-6 rounded-md flex items-center justify-center shrink-0 ${
-                        r.type === "order" ? "bg-brand-50" : "bg-purple-50"
+                        r.type === "order" ? "bg-brand-50" : "bg-accent-50"
                     }`}>
                         {r.type === "order" ? (
                             <svg className="w-3.5 h-3.5 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
                             </svg>
                         ) : (
-                            <svg className="w-3.5 h-3.5 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <svg className="w-3.5 h-3.5 text-accent-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/>
                             </svg>
                         )}
@@ -862,7 +862,7 @@ export function parseBodyToNodes(body: string): React.ReactNode[] {
                 <span key={"e" + i}
                     className={"rounded " + (isOrder
                         ? "bg-brand-50 text-brand-700"
-                        : "bg-purple-50 text-purple-700")}>
+                        : "bg-accent-50 text-accent-700")}>
                     {hidden("#[", "eo" + i)}
                     {label}
                     {hidden(close, "ec" + i)}
@@ -2010,15 +2010,15 @@ const PROD_STATUS_COLOURS: Record<string, { text: string; bg: string }> = {
     draft:       { text: "text-surface-500",  bg: "bg-surface-100" },
     pending:     { text: "text-amber-700",    bg: "bg-amber-50"    },
     in_progress: { text: "text-brand-700",    bg: "bg-brand-50"    },
-    on_hold:     { text: "text-orange-700",   bg: "bg-orange-50"   },
-    qc_pending:  { text: "text-purple-700",   bg: "bg-purple-50"   },
-    qc_passed:   { text: "text-emerald-700",  bg: "bg-emerald-50"  },
-    qc_failed:   { text: "text-red-700",      bg: "bg-red-50"      },
-    completed:   { text: "text-emerald-700",  bg: "bg-emerald-100" },
+    on_hold:     { text: "text-brand-700",   bg: "bg-brand-50"   },
+    qc_pending:  { text: "text-accent-700",   bg: "bg-accent-50"   },
+    qc_passed:   { text: "text-success-700",  bg: "bg-success-50"  },
+    qc_failed:   { text: "text-danger-700",      bg: "bg-danger-50"      },
+    completed:   { text: "text-success-700",  bg: "bg-success-100" },
     cancelled:   { text: "text-surface-400",  bg: "bg-surface-100" },
     processing:  { text: "text-brand-700",    bg: "bg-brand-50"    },
-    shipped:     { text: "text-blue-700",     bg: "bg-blue-50"     },
-    delivered:   { text: "text-emerald-700",  bg: "bg-emerald-50"  },
+    shipped:     { text: "text-info-700",     bg: "bg-info-50"     },
+    delivered:   { text: "text-success-900",  bg: "bg-success-200" },
 };
 
 const PRIORITY_COLOURS: Record<string, string> = {
@@ -2036,7 +2036,7 @@ function fmtDueDate(iso: string): { label: string; cls: string } {
     if (days < 0)   return { label: `${date} · ${Math.abs(days)}d overdue`, cls: "text-danger font-semibold" };
     if (days === 0) return { label: `${date} · due today`,                  cls: "text-warning-dark font-semibold" };
     if (days <= 3)  return { label: `${date} · in ${days}d`,                cls: "text-warning-dark font-medium" };
-    return { label: date, cls: "text-emerald-600 font-medium" };
+    return { label: date, cls: "text-success-600 font-medium" };
 }
 
 // ─── Space settings panel ─────────────────────────────────────────────────────
@@ -2384,7 +2384,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                     <span className={clsx(
                                         "text-2xs font-bold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0",
                                         orderCtx.type === "production_order"
-                                            ? "bg-purple-50 text-purple-600"
+                                            ? "bg-accent-50 text-accent-600"
                                             : "bg-brand-50 text-brand-600"
                                     )}>
                                         {orderCtx.type === "production_order" ? "Production" : "Order"}
@@ -2427,7 +2427,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                     {orderCtx.completion != null && (
                                         <>
                                             <span className="text-surface-300">·</span>
-                                            <span className={clsx(orderCtx.completion >= 100 ? "text-emerald-600 font-medium" : undefined)}>
+                                            <span className={clsx(orderCtx.completion >= 100 ? "text-success-600 font-medium" : undefined)}>
                                                 {orderCtx.completion}% done
                                             </span>
                                         </>
@@ -2443,7 +2443,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                 <p className="text-2xs text-surface-400">
                                     {channel.type === "dm"
                                         ? onlineIds.length > 0
-                                            ? <span className="text-emerald-600 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" /> Online</span>
+                                            ? <span className="text-success-600 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-success-500 inline-block" /> Online</span>
                                             : "Offline"
                                         : `${memberCount} member${memberCount !== 1 ? "s" : ""}${onlineIds.length > 0 ? ` · ${onlineIds.length} online` : ""}`
                                     }
@@ -2784,7 +2784,7 @@ function OrderThreadItem({ channel, active, onClick, onDismiss }: {
                 <div className={clsx(
                     "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5",
                     isProd
-                        ? active ? "bg-purple-100 text-purple-700" : "bg-purple-50 text-purple-600"
+                        ? active ? "bg-accent-100 text-accent-700" : "bg-accent-50 text-accent-600"
                         : active ? "bg-brand-100 text-brand-700"  : "bg-brand-50 text-brand-600"
                 )}>
                     {isProd ? (
@@ -2803,7 +2803,7 @@ function OrderThreadItem({ channel, active, onClick, onDismiss }: {
                     <div className="flex items-center gap-1.5 flex-wrap">
                         <span className={clsx(
                             "text-2xs font-bold uppercase tracking-wide shrink-0",
-                            active ? (isProd ? "text-purple-600" : "text-brand-600") : "text-surface-400"
+                            active ? (isProd ? "text-accent-600" : "text-brand-600") : "text-surface-400"
                         )}>
                             {isProd ? "Prod" : "Order"}
                         </span>
@@ -3017,14 +3017,14 @@ function OrderThreadsSection({ channels, activeId, onSelect, onDismiss, recently
 // badge on the next. Unread rows carry visual weight; read rows recede.
 
 const AVATAR_GRADIENTS = [
-    "from-sky-500 to-blue-600",
-    "from-emerald-500 to-teal-600",
-    "from-violet-500 to-purple-600",
-    "from-rose-500 to-pink-600",
-    "from-amber-500 to-orange-600",
-    "from-indigo-500 to-blue-700",
-    "from-cyan-500 to-sky-600",
-    "from-fuchsia-500 to-purple-600",
+    "from-info-500 to-info-600",
+    "from-success-500 to-info-600",
+    "from-accent-500 to-accent-600",
+    "from-danger-500 to-accent-600",
+    "from-amber-500 to-brand-600",
+    "from-info-500 to-info-700",
+    "from-info-500 to-info-600",
+    "from-accent-500 to-accent-600",
 ];
 // Deterministic: the same person is always the same colour, everywhere.
 const avatarGradient = (seed: string) =>
@@ -3065,7 +3065,7 @@ function ChannelItem({ channel, active, onClick, currentUserName }: {
                     {initialsOf(channel.name)}
                 </div>
             ) : (
-                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 flex items-center justify-center shrink-0 text-white shadow-sm">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-surface-700 to-surface-900 flex items-center justify-center shrink-0 text-white shadow-sm">
                     {channel.is_private ? <LockIcon /> : <span className="text-xs font-bold">#</span>}
                 </div>
             )}
@@ -3293,13 +3293,13 @@ export default function CommsHub() {
                             bubble language as the chat it's inviting you into. */}
                         <div className="w-full max-w-[260px] space-y-2 select-none" aria-hidden="true">
                             <div className="flex items-end gap-1.5">
-                                <div className="w-6 h-6 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-[9px] font-bold text-white shrink-0">PN</div>
+                                <div className="w-6 h-6 rounded-full bg-gradient-to-br from-success-500 to-info-600 flex items-center justify-center text-[9px] font-bold text-white shrink-0">PN</div>
                                 <div className="rounded-2xl rounded-bl-md bg-white border border-surface-200 px-3.5 py-2 text-2xs text-surface-600 shadow-sm">
                                     The cassock batch is through QC 🎉
                                 </div>
                             </div>
                             <div className="flex justify-end">
-                                <div className="rounded-2xl rounded-br-md bg-slate-800 px-3.5 py-2 text-2xs text-white shadow-sm">
+                                <div className="rounded-2xl rounded-br-md bg-surface-800 px-3.5 py-2 text-2xs text-white shadow-sm">
                                     Well done team — dispatch at 2pm.
                                 </div>
                             </div>

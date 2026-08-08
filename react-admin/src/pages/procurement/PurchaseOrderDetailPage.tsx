@@ -15,11 +15,11 @@ import { PdfDownloadButton } from "@/hooks/usePdfDownload";
 const STATUS_CFG: Record<POStatus, { label: string; color: string; bg: string }> = {
     draft:               { label: "Draft",              color: "text-surface-600",  bg: "bg-surface-100" },
     pending_approval:    { label: "Pending Approval",   color: "text-amber-700",    bg: "bg-amber-50" },
-    approved:            { label: "Approved",           color: "text-blue-700",     bg: "bg-blue-50" },
-    ordered:             { label: "Ordered",            color: "text-indigo-700",   bg: "bg-indigo-50" },
-    partially_received:  { label: "Partial Receipt",    color: "text-orange-700",   bg: "bg-orange-50" },
-    received:            { label: "Fully Received",     color: "text-emerald-700",  bg: "bg-emerald-50" },
-    cancelled:           { label: "Cancelled",          color: "text-red-700",      bg: "bg-red-50" },
+    approved:            { label: "Approved",           color: "text-info-700",     bg: "bg-info-50" },
+    ordered:             { label: "Ordered",            color: "text-info-900",   bg: "bg-info-200" },
+    partially_received:  { label: "Partial Receipt",    color: "text-brand-700",   bg: "bg-brand-50" },
+    received:            { label: "Fully Received",     color: "text-success-700",  bg: "bg-success-50" },
+    cancelled:           { label: "Cancelled",          color: "text-danger-700",      bg: "bg-danger-50" },
 };
 
 const fmt = (n: number | string | null | undefined, currency = "KES") => {
@@ -362,29 +362,29 @@ export default function PurchaseOrderDetailPage() {
             <div className="bg-white rounded-2xl shadow-sm border border-surface-200 overflow-hidden">
 
                 {/* ── Header band ── */}
-                <div className="bg-gradient-to-r from-slate-800 to-slate-700 px-5 py-5 sm:px-8 sm:py-6">
+                <div className="bg-gradient-to-r from-surface-800 to-surface-700 px-5 py-5 sm:px-8 sm:py-6">
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:flex-wrap">
                         <div>
-                            <p className="text-slate-400 text-xs font-semibold uppercase tracking-widest mb-1">Purchase Order</p>
+                            <p className="text-surface-400 text-xs font-semibold uppercase tracking-widest mb-1">Purchase Order</p>
                             <h1 className="text-2xl font-bold text-white font-mono">{po.po_number}</h1>
                             <div className="flex items-center gap-2 mt-2 flex-wrap">
                                 <StatusBadge status={po.status} />
                                 {po.invoice_number && (
-                                    <span className="text-xs bg-white/10 text-slate-300 px-2 py-0.5 rounded-full">
+                                    <span className="text-xs bg-white/10 text-surface-300 px-2 py-0.5 rounded-full">
                                         Invoice: {po.invoice_number}
                                     </span>
                                 )}
                             </div>
                         </div>
                         <div className="sm:text-right">
-                            <p className="text-slate-400 text-2xs uppercase tracking-widest mb-1">Order Value</p>
+                            <p className="text-surface-400 text-2xs uppercase tracking-widest mb-1">Order Value</p>
                             <p className="text-3xl font-bold text-white tabular-nums">
                                 {fmt(po.total_amount, currency)}
                             </p>
-                            <p className="text-slate-400 text-xs mt-1">
+                            <p className="text-surface-400 text-xs mt-1">
                                 Order date: {fmtDate(po.order_date)}
                             </p>
-                            <p className="text-slate-400 text-xs">
+                            <p className="text-surface-400 text-xs">
                                 Expected: {fmtDate(po.expected_delivery_date)}
                             </p>
                         </div>
@@ -392,7 +392,7 @@ export default function PurchaseOrderDetailPage() {
                 </div>
 
                 {/* ── Action bar ── */}
-                <div className="px-5 py-3 bg-slate-50 border-b border-line flex flex-wrap items-center gap-2 sm:px-8">
+                <div className="px-5 py-3 bg-surface-50 border-b border-line flex flex-wrap items-center gap-2 sm:px-8">
                     {canSubmit && (
                         <button onClick={() => actionMutation.mutate({ action: "submit" })}
                             disabled={actionMutation.isPending}
@@ -403,7 +403,7 @@ export default function PurchaseOrderDetailPage() {
                     {canApprove && (
                         <button onClick={() => actionMutation.mutate({ action: "approve" })}
                             disabled={actionMutation.isPending}
-                            className="btn-sm bg-emerald-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-emerald-700 transition-colors">
+                            className="btn-sm bg-success-700 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-success-700 transition-colors">
                             ✓ Approve PO
                         </button>
                     )}
@@ -420,7 +420,7 @@ export default function PurchaseOrderDetailPage() {
                     {canMarkOrdered && (
                         <button onClick={() => markOrderedMutation.mutate()}
                             disabled={markOrderedMutation.isPending}
-                            className="btn-sm bg-blue-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-blue-700 transition-colors">
+                            className="btn-sm bg-info-600 text-white rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-info-700 transition-colors">
                             📤 Mark as Ordered
                         </button>
                     )}
@@ -488,12 +488,12 @@ export default function PurchaseOrderDetailPage() {
                                                         </td>
                                                         <td className="px-3 py-2.5">
                                                             <span className={clsx("px-2 py-0.5 rounded-full text-2xs font-semibold",
-                                                                item.item_type === "product" ? "bg-blue-50 text-blue-700" : "bg-purple-50 text-purple-700")}>
+                                                                item.item_type === "product" ? "bg-info-50 text-info-700" : "bg-accent-50 text-accent-700")}>
                                                                 {item.item_type}
                                                             </span>
                                                         </td>
                                                         <td className="px-3 py-2.5 text-right tabular-nums">{item.quantity}</td>
-                                                        <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700">{item.quantity_received}</td>
+                                                        <td className="px-3 py-2.5 text-right tabular-nums text-success-700">{item.quantity_received}</td>
                                                         <td className={clsx("px-3 py-2.5 text-right tabular-nums font-semibold", outstanding > 0 ? "text-amber-700" : "text-surface-400")}>
                                                             {outstanding > 0 ? outstanding : "✓"}
                                                         </td>
@@ -594,7 +594,7 @@ export default function PurchaseOrderDetailPage() {
                                 <InfoRow label="Currency" value={currency} />
                                 <InfoRow label="Payment Terms" value={po.payment_terms} />
                                 <InfoRow label="Payment Status" value={
-                                    <span className={clsx("capitalize", po.payment_status === "paid" ? "text-emerald-600 font-semibold" : "text-amber-600")}>
+                                    <span className={clsx("capitalize", po.payment_status === "paid" ? "text-success-600 font-semibold" : "text-amber-600")}>
                                         {po.payment_status ?? "unpaid"}
                                     </span>
                                 } />

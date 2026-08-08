@@ -183,7 +183,7 @@ export default function ProcurementReportPage() {
                                 <LineChart data={monthlyTrend}>
                                     <CartesianGrid
                                         strokeDasharray="3 3"
-                                        stroke="#F1F5F9"
+                                        stroke="#f2f3f2"
                                     />
                                     <XAxis
                                         dataKey="month"
@@ -287,7 +287,7 @@ export default function ProcurementReportPage() {
                                 <BarChart data={chartData} layout="vertical">
                                     <CartesianGrid
                                         strokeDasharray="3 3"
-                                        stroke="#F1F5F9"
+                                        stroke="#f2f3f2"
                                         horizontal={false}
                                     />
                                     <XAxis

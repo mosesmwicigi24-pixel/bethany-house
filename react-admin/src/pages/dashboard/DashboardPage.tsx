@@ -306,7 +306,7 @@ function CashTodayCard({ compact = false }: { compact?: boolean }) {
     if (compact) {
         return (
             <KpiTile label="Cash today" value={fmtCompact(totalCash)}
-                tone="text-emerald-700" bg="bg-emerald-100/70"
+                tone="text-success-700" bg="bg-success-100/70"
                 href="/approvals" loading={isLoading} />
         );
     }
@@ -432,7 +432,7 @@ function TailorHome({ stats, isLoading, can }: {
                 <TailorStatTile label="In queue" value={stats?.production_queue}       tone="text-info"       href="/production/my-tasks" loading={isLoading} />
                 <TailorStatTile label="Overdue"  value={stats?.production_overdue}     tone="text-danger"     href="/production/my-tasks" loading={isLoading} />
                 {isQc
-                    ? <TailorStatTile label="QC pending" value={stats?.production_qc_pending} tone="text-purple-600" href="/production/qc" loading={isLoading} />
+                    ? <TailorStatTile label="QC pending" value={stats?.production_qc_pending} tone="text-accent-600" href="/production/qc" loading={isLoading} />
                     : <TailorStatTile label="Alerts"     value={stats?.unread_notifications}  tone="text-warning-dark" href="/notifications" loading={isLoading} />}
             </div>
 
@@ -547,7 +547,7 @@ function ProductionSummaryCard({ stats, loading }: { stats?: DashboardStats; loa
         { key: "production_draft",       label: "Draft",       color: "text-surface-400", bg: "bg-surface-50",      href: "/production?status=draft"       },
         { key: "production_queue",       label: "In Queue",    color: "text-brand-600",   bg: "bg-brand-50",         href: "/production?status=pending"     },
         { key: "production_in_progress", label: "In Progress", color: "text-info",        bg: "bg-info-light",       href: "/production?status=in_progress" },
-        { key: "production_qc_pending",  label: "QC",          color: "text-purple-600",  bg: "bg-purple-50",        href: "/production?status=qc_pending"  },
+        { key: "production_qc_pending",  label: "QC",          color: "text-accent-600",  bg: "bg-accent-50",        href: "/production?status=qc_pending"  },
     ] as const;
 
     return (
@@ -666,7 +666,7 @@ function RoleStatGrid({
                     loading={isLoading} color="bg-danger-light text-danger"
                     href="/inventory/low-stock" icon={<AlertIcon />} />
                 <StatCard label="Shipments In Transit" value={stats?.shipments_in_transit}
-                    loading={isLoading} color="bg-purple-50 text-purple-600"
+                    loading={isLoading} color="bg-accent-50 text-accent-600"
                     href="/sales/shipments" icon={<TruckIcon />} />
                 <StatCard label="Pending Approvals"   value={stats?.pending_payment_approvals}
                     loading={isLoading} color="bg-warning-light text-warning-dark"
@@ -685,7 +685,7 @@ function RoleStatGrid({
             <div className="grid grid-cols-3 lg:grid-cols-6 gap-2">
                 <CashTodayCard compact />
                 <KpiTile label="Today's Sales"   value={fmtCompact(stats?.today_sales)}
-                    tone="text-emerald-700" bg="bg-emerald-50"
+                    tone="text-success-700" bg="bg-success-50"
                     loading={isLoading} href="/sales/orders" />
                 <KpiTile label="Today's Orders"  value={stats?.today_orders}
                     tone="text-brand-700" bg="bg-brand-50"
@@ -694,10 +694,10 @@ function RoleStatGrid({
                     tone="text-warning-dark" bg="bg-warning-light"
                     loading={isLoading} href="/sales/orders?status=pending" />
                 <KpiTile label="Customers"       value={stats?.customers}
-                    tone="text-sky-700" bg="bg-sky-50"
+                    tone="text-info-700" bg="bg-info-50"
                     loading={isLoading} href="/sales/customers" />
                 <KpiTile label="Active Products" value={stats?.total_products}
-                    tone="text-purple-700" bg="bg-purple-50"
+                    tone="text-accent-700" bg="bg-accent-50"
                     loading={isLoading} href="/catalogue/products" />
             </div>
             {/* The watch-list — four across, one row, so it reads as a band
@@ -707,14 +707,14 @@ function RoleStatGrid({
                     tone="text-danger" bg="bg-danger-light"
                     loading={isLoading} href="/inventory/low-stock" />
                 <KpiTile label="In Transit"       value={stats?.shipments_in_transit}
-                    tone="text-indigo-700" bg="bg-indigo-50"
+                    tone="text-info-700" bg="bg-info-50"
                     loading={isLoading} href="/sales/shipments" />
                 <KpiTile label="Approvals"        value={stats?.pending_payment_approvals}
                     tone="text-warning-dark" bg="bg-warning-light"
                     loading={isLoading} href="/approvals"
                     badge={stats?.pending_payment_approvals} />
                 <KpiTile label="Open POs"         value={kpis.procurement?.open_pos}
-                    tone="text-teal-700" bg="bg-teal-50"
+                    tone="text-info-700" bg="bg-info-50"
                     loading={kpiLoading} href="/procurement/purchase-orders" />
             </div>
         </div>

@@ -59,8 +59,8 @@ function AuditTrail({ grnId }: { grnId: number }) {
         <div className="divide-y divide-line">
             {logs.map((entry) => (
                 <div key={entry.id} className="flex gap-3 py-3.5">
-                    <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 mt-0.5">
-                        <svg className="w-3 h-3 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <div className="w-7 h-7 rounded-full bg-success-100 flex items-center justify-center shrink-0 mt-0.5">
+                        <svg className="w-3 h-3 text-success-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
                     </div>
@@ -133,30 +133,30 @@ export default function GoodsReceiptDetailPage() {
             <div className="bg-white rounded-2xl shadow-sm border border-surface-200 overflow-hidden">
 
                 {/* Header band */}
-                <div className="bg-gradient-to-r from-emerald-800 to-teal-700 px-5 py-5 sm:px-8 sm:py-6">
+                <div className="bg-gradient-to-r from-success-800 to-info-700 px-5 py-5 sm:px-8 sm:py-6">
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:flex-wrap">
                         <div>
-                            <p className="text-emerald-300 text-xs font-semibold uppercase tracking-widest mb-1">
+                            <p className="text-success-300 text-xs font-semibold uppercase tracking-widest mb-1">
                                 Goods Received Note
                             </p>
                             <h1 className="text-2xl font-bold text-white font-mono">{grn.grn_number}</h1>
                             <div className="flex items-center gap-2 mt-2 flex-wrap">
-                                <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                                <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-success-100 text-success-800">
                                     Received
                                 </span>
                                 {grn.purchase_order && (
                                     <Link
                                         to={`/procurement/purchase-orders/${grn.purchase_order.id}`}
-                                        className="text-xs text-emerald-200 hover:text-white font-mono underline-offset-2 hover:underline">
+                                        className="text-xs text-success-200 hover:text-white font-mono underline-offset-2 hover:underline">
                                         PO: {grn.purchase_order.po_number}
                                     </Link>
                                 )}
                             </div>
                         </div>
                         <div className="sm:text-right">
-                            <p className="text-emerald-300 text-2xs uppercase tracking-widest mb-1">Total Value Received</p>
+                            <p className="text-success-300 text-2xs uppercase tracking-widest mb-1">Total Value Received</p>
                             <p className="text-3xl font-bold text-white tabular-nums">{fmt(totalValue)}</p>
-                            <p className="text-emerald-300 text-xs mt-1">
+                            <p className="text-success-300 text-xs mt-1">
                                 {fmtDate(grn.received_date)}
                             </p>
                         </div>
@@ -164,21 +164,21 @@ export default function GoodsReceiptDetailPage() {
                 </div>
 
                 {/* Stats row */}
-                <div className="px-5 py-4 bg-emerald-50 border-b border-emerald-100 grid grid-cols-1 gap-4 sm:px-8 sm:grid-cols-3">
+                <div className="px-5 py-4 bg-success-50 border-b border-success-100 grid grid-cols-1 gap-4 sm:px-8 sm:grid-cols-3">
                     {[
                         { label: "Items", value: items.length, color: "text-surface-800" },
-                        { label: "Accepted Units", value: totalAccepted, color: "text-emerald-700" },
-                        { label: "Rejected Units", value: totalRejected, color: totalRejected > 0 ? "text-red-700" : "text-surface-400" },
+                        { label: "Accepted Units", value: totalAccepted, color: "text-success-700" },
+                        { label: "Rejected Units", value: totalRejected, color: totalRejected > 0 ? "text-danger-700" : "text-surface-400" },
                     ].map((stat) => (
                         <div key={stat.label} className="text-center">
                             <p className={clsx("text-2xl font-bold tabular-nums", stat.color)}>{stat.value}</p>
-                            <p className="text-2xs text-emerald-600 uppercase tracking-widest">{stat.label}</p>
+                            <p className="text-2xs text-success-600 uppercase tracking-widest">{stat.label}</p>
                         </div>
                     ))}
                 </div>
 
                 {/* Action bar */}
-                <div className="px-5 py-3 bg-slate-50 border-b border-line flex flex-wrap items-center gap-2 sm:px-8">
+                <div className="px-5 py-3 bg-surface-50 border-b border-line flex flex-wrap items-center gap-2 sm:px-8">
                     {canReceive && (
                     <button onClick={() => printMutation.mutate()} disabled={printMutation.isPending}
                         className="btn-sm bg-white border border-surface-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-surface-700 hover:border-surface-300">
@@ -194,7 +194,7 @@ export default function GoodsReceiptDetailPage() {
                     )}
                     {totalRejected > 0 && (
                         <Link to="/procurement/returns"
-                            className="btn-sm bg-red-50 border border-red-200 text-red-700 rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-red-100 ml-auto">
+                            className="btn-sm bg-danger-50 border border-danger-200 text-danger-700 rounded-xl px-3 py-1.5 text-xs font-semibold hover:bg-danger-100 ml-auto">
                             ↩ Create Purchase Return for Rejected Items
                         </Link>
                     )}
@@ -209,7 +209,7 @@ export default function GoodsReceiptDetailPage() {
                             {(["items", "audit"] as const).map((t) => (
                                 <button key={t} onClick={() => setTab(t)}
                                     className={clsx("px-4 py-2.5 text-xs font-semibold border-b-2 transition-all whitespace-nowrap shrink-0",
-                                        tab === t ? "border-emerald-500 text-emerald-600" : "border-transparent text-surface-400 hover:text-surface-700")}>
+                                        tab === t ? "border-success-500 text-success-600" : "border-transparent text-surface-400 hover:text-surface-700")}>
                                     {t === "items" ? `📦 Items Received (${items.length})` : "🕐 Audit Trail"}
                                 </button>
                             ))}
@@ -236,7 +236,7 @@ export default function GoodsReceiptDetailPage() {
                                             const lineValue = accepted * (item.purchase_order_item?.unit_price ?? 0);
                                             const hasRejection = item.quantity_rejected > 0;
                                             return (
-                                                <tr key={item.id} className={clsx(hasRejection && "bg-red-50/30")}>
+                                                <tr key={item.id} className={clsx(hasRejection && "bg-danger-50/30")}>
                                                     <td className="px-3 py-2.5">
                                                         <p className="font-medium text-surface-800">
                                                             {item.purchase_order_item?.description}
@@ -253,23 +253,23 @@ export default function GoodsReceiptDetailPage() {
                                                     <td className="px-3 py-2.5">
                                                         <span className={clsx("px-2 py-0.5 rounded-full text-2xs font-semibold",
                                                             item.purchase_order_item?.item_type === "product"
-                                                                ? "bg-blue-50 text-blue-700"
-                                                                : "bg-purple-50 text-purple-700")}>
+                                                                ? "bg-info-50 text-info-700"
+                                                                : "bg-accent-50 text-accent-700")}>
                                                             {item.purchase_order_item?.item_type ?? "-"}
                                                         </span>
                                                     </td>
                                                     <td className="px-3 py-2.5 text-right tabular-nums">{item.quantity_received}</td>
                                                     <td className="px-3 py-2.5 text-right tabular-nums">
                                                         {hasRejection ? (
-                                                            <span className="text-red-700 font-semibold">{item.quantity_rejected}</span>
+                                                            <span className="text-danger-700 font-semibold">{item.quantity_rejected}</span>
                                                         ) : (
                                                             <span className="text-surface-300">-</span>
                                                         )}
                                                     </td>
-                                                    <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-emerald-700">{accepted}</td>
+                                                    <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-success-700">{accepted}</td>
                                                     <td className="px-3 py-2.5 text-center">
                                                         <span className={clsx("px-2 py-0.5 rounded-full text-2xs font-semibold",
-                                                            item.condition === "passed" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700")}>
+                                                            item.condition === "passed" ? "bg-success-50 text-success-700" : "bg-danger-50 text-danger-700")}>
                                                             {item.condition === "passed" ? "✅ Passed" : "❌ Rejected"}
                                                         </span>
                                                     </td>
@@ -305,15 +305,15 @@ export default function GoodsReceiptDetailPage() {
                         )}
 
                         {totalRejected > 0 && (
-                            <div className="p-4 bg-red-50 rounded-xl border border-red-100">
-                                <p className="text-xs font-semibold text-red-800">
+                            <div className="p-4 bg-danger-50 rounded-xl border border-danger-100">
+                                <p className="text-xs font-semibold text-danger-800">
                                     ⚠️ {totalRejected} unit(s) were rejected during this receipt.
                                     Consider creating a Purchase Return to send them back to the supplier.
                                 </p>
                                 {grn.purchase_order && (
                                     <Link
                                         to={`/procurement/purchase-orders/${grn.purchase_order.id}`}
-                                        className="text-xs text-red-700 hover:underline mt-1 block">
+                                        className="text-xs text-danger-700 hover:underline mt-1 block">
                                         Open PO to process return →
                                     </Link>
                                 )}
@@ -371,10 +371,10 @@ export default function GoodsReceiptDetailPage() {
                                 </span>
                             } />
                             <InfoRow label="Units Accepted" value={
-                                <span className="text-emerald-700 font-semibold tabular-nums">{totalAccepted}</span>
+                                <span className="text-success-700 font-semibold tabular-nums">{totalAccepted}</span>
                             } />
                             <InfoRow label="Units Rejected" value={
-                                <span className={clsx("tabular-nums font-semibold", totalRejected > 0 ? "text-red-700" : "text-surface-400")}>
+                                <span className={clsx("tabular-nums font-semibold", totalRejected > 0 ? "text-danger-700" : "text-surface-400")}>
                                     {totalRejected}
                                 </span>
                             } />

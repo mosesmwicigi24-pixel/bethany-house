@@ -47,7 +47,11 @@ export default {
           // used ~1178x, much of it on text, and 2.40:1 fails AA outright.
           // 3.13:1 clears the 3:1 bar for UI and large text.
           400: '#8c9489',
-          500: '#757d72',
+          // 4.57:1 on white. This is the secondary-text token and it must clear
+          // AA: at #757d72 it measured 4.26:1, and the palette sweep moved ~31
+          // body-text sites here from stock gray-500 (4.83:1), so leaving it
+          // would have been a real regression rather than a neutral rename.
+          500: '#70786d',
           600: '#565c54',
           700: '#434741',
           800: '#2c2e2b',
@@ -92,11 +96,58 @@ export default {
         // the brand is now orange (#f0562a) and an in-progress chip must not be
         // mistaken for a brand accent. `success.vivid` is the luminous green
         // used for status dots, where saturation reads without a contrast cost.
-        amber:   { light: '#fef3c7', DEFAULT: '#f59e0b', dark: '#92400e' },
-        success: { light: '#dcfce7', DEFAULT: '#16a34a', dark: '#15803d', vivid: '#22c55e' },
-        warning: { light: '#fef9c3', DEFAULT: '#ca8a04', dark: '#713f12' },
-        danger:  { light: '#fee2e2', DEFAULT: '#dc2626', dark: '#7f1d1d' },
-        info:    { light: '#dbeafe', DEFAULT: '#2563eb', dark: '#1e3a8a' },
+        // FULL RAMPS, not just light/DEFAULT/dark.
+        //
+        // These carried three steps each while the UI needed ten, which is
+        // precisely why 1,510 raw Tailwind utilities (slate-, red-, emerald-,
+        // purple- …) accumulated across 53 files: there was no token to reach
+        // for, so people reached past the design system. Those usages then sat
+        // outside it — the warm retune moved everything else and left them cool.
+        //
+        // The named keys below are UNCHANGED and every one of them is an exact
+        // Tailwind rung, so adding the numeric siblings is a zero-visual-change
+        // edit that simply brings the scale under our control. Retuning a hue
+        // now happens here instead of in 53 files.
+        //
+        // A useful side effect: `amber-500` and friends previously fell through
+        // to stock Tailwind because our `amber` object had no numeric keys.
+        // They now resolve to these, so 254 amber usages become tokenised
+        // without a single edit.
+        amber: {
+          light: '#fef3c7', DEFAULT: '#f59e0b', dark: '#92400e',
+          50: '#fffbeb', 100: '#fef3c7', 200: '#fde68a', 300: '#fcd34d', 400: '#fbbf24',
+          500: '#f59e0b', 600: '#d97706', 700: '#b45309', 800: '#92400e', 900: '#78350f',
+        },
+        success: {
+          light: '#dcfce7', DEFAULT: '#16a34a', dark: '#15803d', vivid: '#22c55e',
+          50: '#f0fdf4', 100: '#dcfce7', 200: '#bbf7d0', 300: '#86efac', 400: '#4ade80',
+          500: '#22c55e', 600: '#16a34a', 700: '#15803d', 800: '#166534', 900: '#14532d',
+        },
+        warning: {
+          light: '#fef9c3', DEFAULT: '#ca8a04', dark: '#713f12',
+          50: '#fefce8', 100: '#fef9c3', 200: '#fef08a', 300: '#fde047', 400: '#facc15',
+          500: '#eab308', 600: '#ca8a04', 700: '#a16207', 800: '#854d0e', 900: '#713f12',
+        },
+        danger: {
+          light: '#fee2e2', DEFAULT: '#dc2626', dark: '#7f1d1d',
+          50: '#fef2f2', 100: '#fee2e2', 200: '#fecaca', 300: '#fca5a5', 400: '#f87171',
+          500: '#ef4444', 600: '#dc2626', 700: '#b91c1c', 800: '#991b1b', 900: '#7f1d1d',
+        },
+        info: {
+          light: '#dbeafe', DEFAULT: '#2563eb', dark: '#1e3a8a',
+          50: '#eff6ff', 100: '#dbeafe', 200: '#bfdbfe', 300: '#93c5fd', 400: '#60a5fa',
+          500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8', 800: '#1e40af', 900: '#1e3a8a',
+        },
+        // The fourth state family. Shipment progress uses four distinct stages
+        // (ready to ship / picked up / in transit / delivered) and collapsing
+        // them onto one accent would erase the distinction the floor reads them
+        // by — so this is consolidation, not elimination: purple, violet,
+        // fuchsia and pink all resolve here.
+        accent: {
+          light: '#f3e8ff', DEFAULT: '#9333ea', dark: '#581c87',
+          50: '#faf5ff', 100: '#f3e8ff', 200: '#e9d5ff', 300: '#d8b4fe', 400: '#c084fc',
+          500: '#a855f7', 600: '#9333ea', 700: '#7e22ce', 800: '#6b21a8', 900: '#581c87',
+        },
       },
       fontFamily: {
         // One typeface across the hub AND the storefront. `display` stays as a

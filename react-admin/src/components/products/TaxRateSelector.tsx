@@ -77,7 +77,7 @@ export default function TaxRateSelector({
             <div className={clsx(
                 "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium",
                 taxInclusive
-                    ? "bg-blue-50 text-blue-700 border border-blue-200"
+                    ? "bg-info-50 text-info-700 border border-info-200"
                     : "bg-amber-50 text-amber-700 border border-amber-200",
             )}>
                 <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

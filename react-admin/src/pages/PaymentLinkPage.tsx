@@ -117,12 +117,12 @@ const isManual   = (m: PaymentMethod) => m.type === "manual";
 
 function Spinner({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
     const s = { sm: "w-4 h-4 border-2", md: "w-6 h-6 border-2", lg: "w-10 h-10 border-[3px]" }[size];
-    return <div className={clsx("rounded-full animate-spin border-gray-200 border-t-blue-600", s)} />;
+    return <div className={clsx("rounded-full animate-spin border-surface-200 border-t-info-600", s)} />;
 }
 
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
     return (
-        <div className={clsx("bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden", className)}>
+        <div className={clsx("bg-white rounded-2xl shadow-sm border border-surface-100 overflow-hidden", className)}>
             {children}
         </div>
     );
@@ -139,9 +139,9 @@ function Btn({
 }) {
     const base = "py-3 px-5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed";
     const v = {
-        primary:   "bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800",
-        secondary: "bg-gray-100 text-gray-700 hover:bg-gray-200",
-        ghost:     "text-gray-500 hover:text-gray-700 hover:bg-gray-100",
+        primary:   "bg-info-600 text-white hover:bg-info-700 active:bg-info-800",
+        secondary: "bg-surface-100 text-surface-700 hover:bg-surface-200",
+        ghost:     "text-surface-500 hover:text-surface-700 hover:bg-surface-100",
     }[variant];
     return (
         <button onClick={onClick} disabled={disabled} className={clsx(base, v, className)}>
@@ -163,23 +163,23 @@ function Field({
 }) {
     return (
         <div className="space-y-1.5">
-            <label className="block text-xs font-semibold text-gray-700">{label}</label>
+            <label className="block text-xs font-semibold text-surface-700">{label}</label>
             <input
                 type={type}
                 value={value}
                 onChange={e => onChange(e.target.value)}
                 placeholder={placeholder}
                 autoFocus={autoFocus}
-                className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full border border-surface-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-info-500 focus:border-transparent"
             />
-            {hint && <p className="text-xs text-gray-400">{hint}</p>}
+            {hint && <p className="text-xs text-surface-400">{hint}</p>}
         </div>
     );
 }
 
 function ErrMsg({ msg }: { msg: string }) {
     return msg ? (
-        <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{msg}</p>
+        <p className="text-xs text-danger-600 bg-danger-50 border border-danger-100 rounded-lg px-3 py-2">{msg}</p>
     ) : null;
 }
 
@@ -187,7 +187,7 @@ function ErrMsg({ msg }: { msg: string }) {
 
 function LoadingScreen() {
     return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="min-h-screen bg-surface-50 flex items-center justify-center">
             <Spinner size="lg" />
         </div>
     );
@@ -195,15 +195,15 @@ function LoadingScreen() {
 
 function ErrorScreen({ message, onRetry }: { message: string; onRetry?: () => void }) {
     return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="min-h-screen bg-surface-50 flex items-center justify-center p-4">
             <Card className="max-w-sm w-full p-8 text-center">
-                <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-7 h-7 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <div className="w-14 h-14 rounded-full bg-danger-50 flex items-center justify-center mx-auto mb-4">
+                    <svg className="w-7 h-7 text-danger-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
                     </svg>
                 </div>
-                <h2 className="text-lg font-semibold text-gray-900 mb-2">Payment Unavailable</h2>
-                <p className="text-sm text-gray-500 mb-6">{message}</p>
+                <h2 className="text-lg font-semibold text-surface-900 mb-2">Payment Unavailable</h2>
+                <p className="text-sm text-surface-500 mb-6">{message}</p>
                 {onRetry && <Btn onClick={onRetry} className="w-full">Try Again</Btn>}
             </Card>
         </div>
@@ -218,25 +218,25 @@ function PaidScreen({ orderNumber, businessName, continueUrl }: { orderNumber: s
         return () => clearTimeout(t);
     }, [continueUrl]);
     return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="min-h-screen bg-surface-50 flex items-center justify-center p-4">
             <Card className="max-w-sm w-full p-8 text-center">
-                <div className="w-16 h-16 rounded-full bg-green-50 flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-8 h-8 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <div className="w-16 h-16 rounded-full bg-success-50 flex items-center justify-center mx-auto mb-4">
+                    <svg className="w-8 h-8 text-success-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                     </svg>
                 </div>
-                <h2 className="text-xl font-bold text-gray-900 mb-1">Payment Confirmed!</h2>
-                <p className="text-sm text-gray-500 mb-2">
-                    Order <span className="font-mono font-semibold text-gray-800">{orderNumber}</span> is paid.
+                <h2 className="text-xl font-bold text-surface-900 mb-1">Payment Confirmed!</h2>
+                <p className="text-sm text-surface-500 mb-2">
+                    Order <span className="font-mono font-semibold text-surface-800">{orderNumber}</span> is paid.
                 </p>
-                <p className="text-xs text-gray-400">{businessName} will be in touch shortly. Thank you!</p>
+                <p className="text-xs text-surface-400">{businessName} will be in touch shortly. Thank you!</p>
                 {continueUrl && (
                     <>
                         <a href={continueUrl}
-                           className="mt-5 inline-block w-full rounded-full bg-gray-900 text-white text-sm font-semibold py-3 hover:bg-gray-700 transition-colors">
+                           className="mt-5 inline-block w-full rounded-full bg-surface-900 text-white text-sm font-semibold py-3 hover:bg-surface-700 transition-colors">
                             View your order →
                         </a>
-                        <p className="text-[11px] text-gray-400 mt-2">Taking you back to your order…</p>
+                        <p className="text-[11px] text-surface-400 mt-2">Taking you back to your order…</p>
                     </>
                 )}
             </Card>
@@ -251,51 +251,51 @@ const METHOD_META: Record<string, { label: string; sub: string; icon: React.Reac
         label: "M-Pesa",
         sub:   "Instant STK push to your phone",
         icon: (
-            <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center shrink-0">
-                <svg className="w-5 h-5 text-green-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <div className="w-10 h-10 rounded-xl bg-success-50 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-success-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <rect x="5" y="2" width="14" height="20" rx="2"/>
                     <line x1="12" y1="18" x2="12.01" y2="18"/>
                 </svg>
             </div>
         ),
-        accent: "hover:border-green-200 hover:bg-green-50/40",
+        accent: "hover:border-success-200 hover:bg-success-50/40",
     },
     card_paystack: {
         label: "Card (Visa / Mastercard)",
         sub:   "Secure payment via Paystack",
         icon: (
-            <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
-                <svg className="w-5 h-5 text-blue-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <div className="w-10 h-10 rounded-xl bg-info-50 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-info-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <rect x="1" y="4" width="22" height="16" rx="2"/>
                     <line x1="1" y1="10" x2="23" y2="10"/>
                 </svg>
             </div>
         ),
-        accent: "hover:border-blue-200 hover:bg-blue-50/40",
+        accent: "hover:border-info-200 hover:bg-info-50/40",
     },
     bank_transfer: {
         label: "Bank Transfer",
         sub:   "Transfer then upload proof for verification",
         icon: (
-            <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center shrink-0">
-                <svg className="w-5 h-5 text-purple-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <div className="w-10 h-10 rounded-xl bg-accent-50 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-accent-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path d="M3 22v-8m6 8V10m6 12V8m6 14V4"/><path d="M2 22h20"/>
                 </svg>
             </div>
         ),
-        accent: "hover:border-purple-200 hover:bg-purple-50/40",
+        accent: "hover:border-accent-200 hover:bg-accent-50/40",
     },
     mukuru: {
         label: "Mukuru App",
         sub:   "Send via Mukuru, then upload proof",
         icon: (
-            <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center shrink-0">
-                <svg className="w-5 h-5 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <div className="w-10 h-10 rounded-xl bg-brand-50 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33"/>
                 </svg>
             </div>
         ),
-        accent: "hover:border-orange-200 hover:bg-orange-50/40",
+        accent: "hover:border-brand-200 hover:bg-brand-50/40",
     },
     wu_moneygram: {
         label: "Western Union / MoneyGram",
@@ -313,14 +313,14 @@ const METHOD_META: Record<string, { label: string; sub: string; icon: React.Reac
         label: "M-Pesa (Send Money)",
         sub:   "Send money on M-Pesa, then upload confirmation",
         icon: (
-            <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center shrink-0">
-                <svg className="w-5 h-5 text-green-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <div className="w-10 h-10 rounded-xl bg-success-50 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-success-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <rect x="5" y="2" width="14" height="20" rx="2"/>
                     <line x1="12" y1="18" x2="12.01" y2="18"/>
                 </svg>
             </div>
         ),
-        accent: "hover:border-green-200 hover:bg-green-50/40",
+        accent: "hover:border-success-200 hover:bg-success-50/40",
     },
 };
 
@@ -333,7 +333,7 @@ function MethodList({
 }) {
     if (methods.length === 0) {
         return (
-            <p className="text-sm text-gray-400 py-6 text-center">
+            <p className="text-sm text-surface-400 py-6 text-center">
                 No payment methods available. Please contact the business.
             </p>
         );
@@ -345,29 +345,29 @@ function MethodList({
                     label: m.name,
                     sub: "",
                     icon: (
-                        <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
-                            <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <div className="w-10 h-10 rounded-xl bg-surface-100 flex items-center justify-center shrink-0">
+                            <svg className="w-5 h-5 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z"/>
                             </svg>
                         </div>
                     ),
-                    accent: "hover:border-gray-200 hover:bg-gray-50",
+                    accent: "hover:border-surface-200 hover:bg-surface-50",
                 };
                 return (
                     <button
                         key={m.id}
                         onClick={() => onSelect(m)}
                         className={clsx(
-                            "w-full flex items-center gap-4 p-4 rounded-2xl border border-gray-100 transition-all text-left group",
+                            "w-full flex items-center gap-4 p-4 rounded-2xl border border-surface-100 transition-all text-left group",
                             meta.accent,
                         )}
                     >
                         {meta.icon}
                         <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-gray-800">{meta.label}</p>
-                            {meta.sub && <p className="text-xs text-gray-400 mt-0.5">{meta.sub}</p>}
+                            <p className="text-sm font-semibold text-surface-800">{meta.label}</p>
+                            {meta.sub && <p className="text-xs text-surface-400 mt-0.5">{meta.sub}</p>}
                         </div>
-                        <svg className="w-4 h-4 text-gray-300 group-hover:text-gray-500 transition-colors shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <svg className="w-4 h-4 text-surface-300 group-hover:text-surface-500 transition-colors shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
                         </svg>
                     </button>
@@ -480,26 +480,26 @@ function MpesaPanel({
         <div className="space-y-0">
 
             {/* ── Section 1: STK Push ────────────────────────────────────────── */}
-            <div className="rounded-xl border border-green-200 bg-green-50/60 overflow-hidden">
-                <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-green-200/70 bg-green-100/50">
-                    <div className="w-6 h-6 rounded-lg bg-green-600 flex items-center justify-center shrink-0">
+            <div className="rounded-xl border border-success-200 bg-success-50/60 overflow-hidden">
+                <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-success-200/70 bg-success-100/50">
+                    <div className="w-6 h-6 rounded-lg bg-success-600 flex items-center justify-center shrink-0">
                         <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <rect x="5" y="2" width="14" height="20" rx="2"/>
                             <line x1="12" y1="18" x2="12.01" y2="18"/>
                         </svg>
                     </div>
                     <div className="flex-1 min-w-0">
-                        <p className="text-xs font-bold text-green-900">STK Push</p>
-                        <p className="text-2xs text-green-700">Get a payment prompt sent directly to your phone</p>
+                        <p className="text-xs font-bold text-success-900">STK Push</p>
+                        <p className="text-2xs text-success-700">Get a payment prompt sent directly to your phone</p>
                     </div>
                     {stkStep === "waiting" && (
-                        <span className="flex items-center gap-1 text-2xs text-green-700 font-semibold shrink-0">
-                            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                        <span className="flex items-center gap-1 text-2xs text-success-700 font-semibold shrink-0">
+                            <span className="w-1.5 h-1.5 rounded-full bg-success-500 animate-pulse" />
                             Waiting…
                         </span>
                     )}
                     {stkStep === "confirmed" && (
-                        <span className="flex items-center gap-1 text-2xs text-green-700 font-semibold shrink-0">
+                        <span className="flex items-center gap-1 text-2xs text-success-700 font-semibold shrink-0">
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5"/>
                             </svg>
@@ -511,30 +511,30 @@ function MpesaPanel({
                 <div className="px-4 py-3 space-y-3">
                     {stkStep === "confirmed" && (
                         <div className="flex items-center gap-3 py-2">
-                            <div className="w-9 h-9 rounded-full bg-green-600 flex items-center justify-center shrink-0">
+                            <div className="w-9 h-9 rounded-full bg-success-600 flex items-center justify-center shrink-0">
                                 <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5"/>
                                 </svg>
                             </div>
                             <div>
-                                <p className="text-sm font-bold text-green-800">M-Pesa Confirmed!</p>
-                                <p className="text-2xs text-green-600">Processing your payment…</p>
+                                <p className="text-sm font-bold text-success-800">M-Pesa Confirmed!</p>
+                                <p className="text-2xs text-success-600">Processing your payment…</p>
                             </div>
                         </div>
                     )}
 
                     {stkStep === "waiting" && (
                         <div className="space-y-2.5">
-                            <div className="flex items-center gap-3 bg-green-100 rounded-xl px-3 py-2.5">
-                                <div className="w-6 h-6 border-2 border-green-500 border-t-transparent rounded-full animate-spin shrink-0" />
+                            <div className="flex items-center gap-3 bg-success-100 rounded-xl px-3 py-2.5">
+                                <div className="w-6 h-6 border-2 border-success-500 border-t-transparent rounded-full animate-spin shrink-0" />
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-xs font-semibold text-green-800">Prompt sent to {phone}</p>
-                                    <p className="text-2xs text-green-600">Enter your M-Pesa PIN to confirm {fmt(amountDue, currency)}.</p>
+                                    <p className="text-xs font-semibold text-success-800">Prompt sent to {phone}</p>
+                                    <p className="text-2xs text-success-600">Enter your M-Pesa PIN to confirm {fmt(amountDue, currency)}.</p>
                                 </div>
                             </div>
-                            <p className="text-2xs text-green-600/70 text-center">Checking status… ({pollsLeft} attempts remaining)</p>
+                            <p className="text-2xs text-success-600/70 text-center">Checking status… ({pollsLeft} attempts remaining)</p>
                             <button onClick={cancelStk}
-                                className="w-full text-2xs text-gray-400 hover:text-gray-600 underline underline-offset-2 py-1">
+                                className="w-full text-2xs text-surface-400 hover:text-surface-600 underline underline-offset-2 py-1">
                                 Cancel / try again
                             </button>
                         </div>
@@ -550,13 +550,13 @@ function MpesaPanel({
                                     onChange={e => setPhone(e.target.value)}
                                     onKeyDown={e => e.key === "Enter" && sendPush()}
                                     placeholder="e.g. 0712 345 678"
-                                    className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                                    className="flex-1 border border-surface-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-success-500 focus:border-transparent"
                                     autoFocus
                                 />
                                 <button
                                     onClick={sendPush}
                                     disabled={pushing || !phone.trim()}
-                                    className="shrink-0 px-4 py-2 rounded-xl text-xs font-bold text-white bg-green-600 hover:bg-green-700 disabled:opacity-40 transition-colors flex items-center gap-1.5 whitespace-nowrap"
+                                    className="shrink-0 px-4 py-2 rounded-xl text-xs font-bold text-white bg-success-700 hover:bg-success-700 disabled:opacity-40 transition-colors flex items-center gap-1.5 whitespace-nowrap"
                                 >
                                     {pushing
                                         ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -565,7 +565,7 @@ function MpesaPanel({
                                     {pushing ? "Sending…" : "Send Push"}
                                 </button>
                             </div>
-                            <p className="text-2xs text-green-700/70">You'll receive a prompt on your phone. Enter your PIN to confirm.</p>
+                            <p className="text-2xs text-success-700/70">You'll receive a prompt on your phone. Enter your PIN to confirm.</p>
                         </div>
                     )}
                 </div>
@@ -573,27 +573,27 @@ function MpesaPanel({
 
             {/* ── Divider ──────────────────────────────────────────────────────── */}
             <div className="relative flex items-center py-3">
-                <div className="flex-1 border-t border-gray-100" />
-                <span className="mx-3 text-2xs font-semibold text-gray-400 uppercase tracking-widest bg-white px-1">
+                <div className="flex-1 border-t border-surface-100" />
+                <span className="mx-3 text-2xs font-semibold text-surface-400 uppercase tracking-widest bg-white px-1">
                     or confirm with transaction code
                 </span>
-                <div className="flex-1 border-t border-gray-100" />
+                <div className="flex-1 border-t border-surface-100" />
             </div>
 
             {/* ── Section 2: Already paid - transaction code ───────────────────── */}
-            <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-                <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-gray-100 bg-gray-50">
-                    <div className="w-6 h-6 rounded-lg bg-gray-700 flex items-center justify-center shrink-0">
+            <div className="rounded-xl border border-surface-200 bg-white overflow-hidden">
+                <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-surface-100 bg-surface-50">
+                    <div className="w-6 h-6 rounded-lg bg-surface-700 flex items-center justify-center shrink-0">
                         <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                         </svg>
                     </div>
                     <div className="flex-1 min-w-0">
-                        <p className="text-xs font-bold text-gray-800">Already Paid via M-Pesa?</p>
-                        <p className="text-2xs text-gray-500">Enter the confirmation code from your M-Pesa SMS</p>
+                        <p className="text-xs font-bold text-surface-800">Already Paid via M-Pesa?</p>
+                        <p className="text-2xs text-surface-500">Enter the confirmation code from your M-Pesa SMS</p>
                     </div>
                     {confirmStep === "confirmed" && (
-                        <span className="flex items-center gap-1 text-2xs text-green-700 font-semibold shrink-0">
+                        <span className="flex items-center gap-1 text-2xs text-success-700 font-semibold shrink-0">
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5"/>
                             </svg>
@@ -604,13 +604,13 @@ function MpesaPanel({
 
                 <div className="px-4 py-3 space-y-3">
                     {confirmStep === "confirmed" && (
-                        <div className="bg-green-50 border border-green-100 rounded-lg px-3 py-2 text-xs font-medium text-green-800">
+                        <div className="bg-success-50 border border-success-100 rounded-lg px-3 py-2 text-xs font-medium text-success-800">
                             ✓ {confirmMsg}
                         </div>
                     )}
 
                     {confirmStep === "pending_approval" && (
-                        <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-xs text-blue-800 leading-relaxed">
+                        <div className="bg-info-50 border border-info-100 rounded-lg px-3 py-2 text-xs text-info-800 leading-relaxed">
                             <p className="font-semibold mb-0.5">Payment recorded</p>
                             <p>{confirmMsg}</p>
                         </div>
@@ -626,12 +626,12 @@ function MpesaPanel({
                                     onChange={e => setCode(e.target.value.toUpperCase())}
                                     onKeyDown={e => e.key === "Enter" && submitCode()}
                                     placeholder="e.g. QHK7ABC1XY"
-                                    className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent uppercase"
+                                    className="flex-1 border border-surface-200 rounded-xl px-3 py-2 text-sm font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-surface-400 focus:border-transparent uppercase"
                                 />
                                 <button
                                     onClick={submitCode}
                                     disabled={confirmStep === "verifying" || !code.trim()}
-                                    className="shrink-0 px-4 py-2 rounded-xl text-xs font-bold text-white bg-gray-700 hover:bg-gray-800 disabled:opacity-40 transition-colors flex items-center gap-1.5 whitespace-nowrap"
+                                    className="shrink-0 px-4 py-2 rounded-xl text-xs font-bold text-white bg-surface-700 hover:bg-surface-800 disabled:opacity-40 transition-colors flex items-center gap-1.5 whitespace-nowrap"
                                 >
                                     {confirmStep === "verifying"
                                         ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -640,7 +640,7 @@ function MpesaPanel({
                                     {confirmStep === "verifying" ? "Checking…" : "Confirm"}
                                 </button>
                             </div>
-                            <p className="text-2xs text-gray-400">
+                            <p className="text-2xs text-surface-400">
                                 Use this if you paid via paybill or till number and have the SMS confirmation code.
                             </p>
                         </div>
@@ -650,7 +650,7 @@ function MpesaPanel({
 
             {/* Back button */}
             <div className="pt-2">
-                <Btn variant="ghost" onClick={onBack} className="w-full text-xs text-gray-400">
+                <Btn variant="ghost" onClick={onBack} className="w-full text-xs text-surface-400">
                     ← Back to payment methods
                 </Btn>
             </div>
@@ -686,7 +686,7 @@ function PaystackEmailPanel({
 
     return (
         <div className="space-y-4">
-            <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-xs text-blue-700">
+            <div className="bg-info-50 border border-info-100 rounded-xl px-4 py-3 text-xs text-info-700">
                 You'll be redirected to Paystack to complete payment of{" "}
                 <strong>{fmt(amountDue, currency)}</strong> securely.
             </div>
@@ -790,12 +790,12 @@ function PaystackReturnPanel({
         <div className="text-center py-8 space-y-4">
             {err ? (
                 <>
-                    <div className="w-12 h-12 rounded-full bg-yellow-50 flex items-center justify-center mx-auto">
-                        <svg className="w-6 h-6 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <div className="w-12 h-12 rounded-full bg-amber-50 flex items-center justify-center mx-auto">
+                        <svg className="w-6 h-6 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
                         </svg>
                     </div>
-                    <p className="text-sm text-gray-600">{err}</p>
+                    <p className="text-sm text-surface-600">{err}</p>
                     <Btn onClick={manualCheck} disabled={checking} className="w-full">
                         {checking && <Spinner size="sm" />}
                         {checking ? "Checking…" : "Check Again"}
@@ -805,8 +805,8 @@ function PaystackReturnPanel({
                 <>
                     <Spinner size="lg" />
                     <div>
-                        <p className="text-sm font-semibold text-gray-800">Confirming your payment…</p>
-                        <p className="text-xs text-gray-400 mt-1">This usually takes just a moment.</p>
+                        <p className="text-sm font-semibold text-surface-800">Confirming your payment…</p>
+                        <p className="text-xs text-surface-400 mt-1">This usually takes just a moment.</p>
                     </div>
                 </>
             )}
@@ -882,13 +882,13 @@ function BankTransferPanel({
     if (step === "instructions") {
         return (
             <div className="space-y-4">
-                <div className="bg-purple-50 border border-purple-100 rounded-xl p-4 space-y-2 text-sm text-purple-800">
+                <div className="bg-accent-50 border border-accent-100 rounded-xl p-4 space-y-2 text-sm text-accent-800">
                     <p className="font-semibold">Bank Transfer Instructions</p>
                     <p>
                         Transfer <strong>{fmt(amountDue, currency)}</strong> to{" "}
                         <strong>{businessName}</strong>.
                     </p>
-                    <p className="text-xs text-purple-600">
+                    <p className="text-xs text-accent-600">
                         Use your order number as the payment reference. Once you've made
                         the transfer, click below and upload your receipt so our team can verify it.
                     </p>
@@ -908,13 +908,13 @@ function BankTransferPanel({
     // Upload step
     return (
         <div className="space-y-4">
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-surface-600">
                 Upload a screenshot or PDF of your bank transfer confirmation.
             </p>
             <label className="block cursor-pointer">
                 <div className={clsx(
                     "border-2 border-dashed rounded-xl p-6 text-center transition-colors",
-                    file ? "border-purple-400 bg-purple-50" : "border-gray-200 hover:border-purple-300",
+                    file ? "border-accent-400 bg-accent-50" : "border-surface-200 hover:border-accent-300",
                 )}>
                     <input
                         type="file"
@@ -924,24 +924,24 @@ function BankTransferPanel({
                     />
                     {compressing ? (
                         <div className="flex items-center justify-center gap-2 py-1">
-                            <svg className="w-3.5 h-3.5 animate-spin text-purple-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-                            <p className="text-xs text-purple-600">Compressing image…</p>
+                            <svg className="w-3.5 h-3.5 animate-spin text-accent-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                            <p className="text-xs text-accent-600">Compressing image…</p>
                         </div>
                     ) : file ? (
                         <div className="space-y-0.5">
-                            <p className="text-sm text-purple-700 font-medium truncate">{file.name}</p>
+                            <p className="text-sm text-accent-700 font-medium truncate">{file.name}</p>
                             {origSize > file.size && (
-                                <p className="text-xs text-gray-400">
+                                <p className="text-xs text-surface-400">
                                     Compressed: {Math.round(origSize / 1024)}KB → {Math.round(file.size / 1024)}KB
                                 </p>
                             )}
                         </div>
                     ) : (
                         <>
-                            <svg className="w-8 h-8 text-gray-300 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <svg className="w-8 h-8 text-surface-300 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
                             </svg>
-                            <p className="text-xs text-gray-400">Tap to choose image or PDF</p>
+                            <p className="text-xs text-surface-400">Tap to choose image or PDF</p>
                         </>
                     )}
                 </div>
@@ -1060,13 +1060,13 @@ function ManualTransferPanel({
 
     return (
         <div className="space-y-4">
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-surface-600">
                 Upload a screenshot or PDF of your payment confirmation.
             </p>
             <label className="block cursor-pointer">
                 <div className={clsx(
                     "border-2 border-dashed rounded-xl p-6 text-center transition-colors",
-                    file ? "border-amber-400 bg-amber-50" : "border-gray-200 hover:border-amber-300",
+                    file ? "border-amber-400 bg-amber-50" : "border-surface-200 hover:border-amber-300",
                 )}>
                     <input
                         type="file"
@@ -1077,23 +1077,23 @@ function ManualTransferPanel({
                     {compressing ? (
                         <div className="flex items-center justify-center gap-2 py-1">
                             <Spinner size="sm" />
-                            <span className="text-xs text-gray-400">Compressing…</span>
+                            <span className="text-xs text-surface-400">Compressing…</span>
                         </div>
                     ) : file ? (
                         <div className="space-y-0.5">
                             <p className="text-sm text-amber-700 font-medium truncate">{file.name}</p>
                             {origSize > file.size && (
-                                <p className="text-xs text-gray-400">
+                                <p className="text-xs text-surface-400">
                                     Compressed: {Math.round(origSize / 1024)}KB → {Math.round(file.size / 1024)}KB
                                 </p>
                             )}
                         </div>
                     ) : (
                         <>
-                            <svg className="w-8 h-8 text-gray-300 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <svg className="w-8 h-8 text-surface-300 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
                             </svg>
-                            <p className="text-xs text-gray-400">Tap to choose image or PDF</p>
+                            <p className="text-xs text-surface-400">Tap to choose image or PDF</p>
                         </>
                     )}
                 </div>
@@ -1111,14 +1111,14 @@ function ManualTransferPanel({
 
 function OrderCard({ order }: { order: OrderInfo }) {
     const statusMap: Record<string, { label: string; cls: string }> = {
-        paid:             { label: "Paid",              cls: "bg-green-100  text-green-800  border-green-200"  },
-        partial:          { label: "Partially Paid",    cls: "bg-yellow-100 text-yellow-800 border-yellow-200" },
-        deposit:          { label: "Deposit Received",  cls: "bg-blue-100   text-blue-800   border-blue-200"   },
-        pending:          { label: "Awaiting Payment",  cls: "bg-orange-100 text-orange-800 border-orange-200" },
-        pending_approval: { label: "Proof Under Review",cls: "bg-purple-100 text-purple-800 border-purple-200" },
-        failed:           { label: "Payment Failed",    cls: "bg-red-100    text-red-800    border-red-200"    },
+        paid:             { label: "Paid",              cls: "bg-success-100  text-success-800  border-success-200"  },
+        partial:          { label: "Partially Paid",    cls: "bg-amber-100 text-amber-800 border-amber-200" },
+        deposit:          { label: "Deposit Received",  cls: "bg-info-100   text-info-800   border-info-200"   },
+        pending:          { label: "Awaiting Payment",  cls: "bg-brand-100 text-brand-800 border-brand-200" },
+        pending_approval: { label: "Proof Under Review",cls: "bg-accent-100 text-accent-800 border-accent-200" },
+        failed:           { label: "Payment Failed",    cls: "bg-danger-100    text-danger-800    border-danger-200"    },
     };
-    const badge = statusMap[order.payment_status] ?? { label: order.payment_status, cls: "bg-gray-100 text-gray-700 border-gray-200" };
+    const badge = statusMap[order.payment_status] ?? { label: order.payment_status, cls: "bg-surface-100 text-surface-700 border-surface-200" };
     const showBalance = ["partial", "deposit"].includes(order.payment_status) && order.amount_due < order.total_amount;
 
     return (
@@ -1126,10 +1126,10 @@ function OrderCard({ order }: { order: OrderInfo }) {
             <div className="p-5 space-y-4">
                 <div className="flex items-start justify-between gap-2">
                     <div>
-                        <p className="text-2xs text-gray-400 uppercase tracking-wide font-medium">Order</p>
-                        <p className="text-xl font-bold font-mono text-gray-900">{order.order_number}</p>
+                        <p className="text-2xs text-surface-400 uppercase tracking-wide font-medium">Order</p>
+                        <p className="text-xl font-bold font-mono text-surface-900">{order.order_number}</p>
                         {order.customer_first_name && (
-                            <p className="text-xs text-gray-500 mt-0.5">Hi, {order.customer_first_name} 👋</p>
+                            <p className="text-xs text-surface-500 mt-0.5">Hi, {order.customer_first_name} 👋</p>
                         )}
                     </div>
                     <span className={clsx("inline-flex items-center gap-1.5 text-2xs font-semibold px-2.5 py-1.5 rounded-full border whitespace-nowrap", badge.cls)}>
@@ -1137,33 +1137,33 @@ function OrderCard({ order }: { order: OrderInfo }) {
                     </span>
                 </div>
 
-                <div className="border-t border-gray-50 pt-3 space-y-1">
+                <div className="border-t border-surface-50 pt-3 space-y-1">
                     {showBalance ? (
                         <>
                             <div className="flex items-baseline justify-between">
-                                <span className="text-sm text-gray-500">Total</span>
-                                <span className="text-sm font-semibold text-gray-400 line-through">{fmt(order.total_amount, order.currency_code)}</span>
+                                <span className="text-sm text-surface-500">Total</span>
+                                <span className="text-sm font-semibold text-surface-400 line-through">{fmt(order.total_amount, order.currency_code)}</span>
                             </div>
                             <div className="flex items-baseline justify-between">
-                                <span className="text-sm text-gray-800 font-medium">Amount Due</span>
-                                <span className="text-3xl font-bold tabular-nums text-gray-900">{fmt(order.amount_due, order.currency_code)}</span>
+                                <span className="text-sm text-surface-800 font-medium">Amount Due</span>
+                                <span className="text-3xl font-bold tabular-nums text-surface-900">{fmt(order.amount_due, order.currency_code)}</span>
                             </div>
                         </>
                     ) : (
                         <div className="flex items-baseline justify-between">
-                            <span className="text-sm text-gray-500">Amount Due</span>
-                            <span className="text-3xl font-bold tabular-nums text-gray-900">{fmt(order.amount_due, order.currency_code)}</span>
+                            <span className="text-sm text-surface-500">Amount Due</span>
+                            <span className="text-3xl font-bold tabular-nums text-surface-900">{fmt(order.amount_due, order.currency_code)}</span>
                         </div>
                     )}
                     {order.tax_amount > 0 && (
-                        <p className="text-xs text-gray-400 text-right">
+                        <p className="text-xs text-surface-400 text-right">
                             {order.prices_include_tax
                                 ? `Includes tax of ${fmt(order.tax_amount, order.currency_code)}`
                                 : `+ tax ${fmt(order.tax_amount, order.currency_code)}`}
                         </p>
                     )}
                     {order.is_international && (
-                        <p className="text-xs text-blue-500 font-medium text-right mt-0.5">🌐 International order</p>
+                        <p className="text-xs text-info-600 font-medium text-right mt-0.5">🌐 International order</p>
                     )}
                 </div>
             </div>
@@ -1280,7 +1280,7 @@ export default function PaymentLinkPage() {
     };
 
     return (
-        <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-start py-4 px-4 sm:py-8">
+        <div className="min-h-screen bg-surface-50 flex flex-col items-center justify-start py-4 px-4 sm:py-8">
             <div className="w-full max-w-md space-y-4">
 
                 {/* Business header */}
@@ -1289,10 +1289,10 @@ export default function PaymentLinkPage() {
                         <img src={order.business_logo} alt={order.business_name}
                             className="h-10 mx-auto mb-2 object-contain" />
                     ) : (
-                        <h1 className="text-xl font-bold text-gray-900">{order.business_name}</h1>
+                        <h1 className="text-xl font-bold text-surface-900">{order.business_name}</h1>
                     )}
                     {order.business_tagline && (
-                        <p className="text-xs text-gray-400">{order.business_tagline}</p>
+                        <p className="text-xs text-surface-400">{order.business_tagline}</p>
                     )}
                 </div>
 
@@ -1303,7 +1303,7 @@ export default function PaymentLinkPage() {
                 {order.continue_url && (
                     <div className="text-center -mt-1">
                         <a href={order.continue_url}
-                           className="text-xs font-semibold text-gray-500 hover:text-gray-800 transition-colors">
+                           className="text-xs font-semibold text-surface-500 hover:text-surface-800 transition-colors">
                             ← Back to your order
                         </a>
                     </div>
@@ -1319,20 +1319,20 @@ export default function PaymentLinkPage() {
                             <div className="flex items-center gap-2 mb-4">
                                 <button
                                     onClick={() => updateStage("select_method")}
-                                    className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
+                                    className="p-1 rounded-lg hover:bg-surface-100 transition-colors"
                                 >
-                                    <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <svg className="w-4 h-4 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/>
                                     </svg>
                                 </button>
-                                <h2 className="text-sm font-semibold text-gray-800">{panelTitle[stage]}</h2>
+                                <h2 className="text-sm font-semibold text-surface-800">{panelTitle[stage]}</h2>
                             </div>
                         )}
 
                         {/* Select method */}
                         {stage === "select_method" && (
                             <>
-                                <h2 className="text-sm font-semibold text-gray-800 mb-3">Choose payment method</h2>
+                                <h2 className="text-sm font-semibold text-surface-800 mb-3">Choose payment method</h2>
                                 <MethodList methods={order.available_methods} onSelect={handleMethodSelect} />
                             </>
                         )}
@@ -1393,19 +1393,19 @@ export default function PaymentLinkPage() {
                         {/* Bank transfer - proof submitted */}
                         {stage === "bank_pending" && (
                             <div className="text-center py-8 space-y-3">
-                                <div className="w-12 h-12 rounded-full bg-purple-50 flex items-center justify-center mx-auto">
-                                    <svg className="w-6 h-6 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <div className="w-12 h-12 rounded-full bg-accent-50 flex items-center justify-center mx-auto">
+                                    <svg className="w-6 h-6 text-accent-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                                     </svg>
                                 </div>
-                                <p className="text-sm font-semibold text-gray-800">Proof submitted!</p>
-                                <p className="text-xs text-gray-500 max-w-xs mx-auto">
+                                <p className="text-sm font-semibold text-surface-800">Proof submitted!</p>
+                                <p className="text-xs text-surface-500 max-w-xs mx-auto">
                                     {order.business_name} will review your transfer receipt and confirm your order.
                                     You'll be notified once approved.
                                 </p>
                                 {order.continue_url && (
                                     <a href={order.continue_url}
-                                       className="mt-4 inline-block rounded-full bg-gray-900 text-white text-sm font-semibold px-6 py-2.5 hover:bg-gray-700 transition-colors">
+                                       className="mt-4 inline-block rounded-full bg-surface-900 text-white text-sm font-semibold px-6 py-2.5 hover:bg-surface-700 transition-colors">
                                         Back to your order →
                                     </a>
                                 )}
@@ -1415,7 +1415,7 @@ export default function PaymentLinkPage() {
                 </Card>
 
                 {/* Security footer */}
-                <p className="text-center text-2xs text-gray-300 flex items-center justify-center gap-1.5">
+                <p className="text-center text-2xs text-surface-300 flex items-center justify-center gap-1.5">
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/>
                     </svg>

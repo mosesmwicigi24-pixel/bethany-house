@@ -9,9 +9,9 @@ import type { ApiError } from "@/types";
 
 const STATUS_META: Record<SerialStatus, { label: string; badge: string }> = {
     in_production: { label: "In Production", badge: "bg-amber-100 text-amber-700" },
-    in_stock:     { label: "In Stock",      badge: "bg-emerald-100 text-emerald-700" },
+    in_stock:     { label: "In Stock",      badge: "bg-success-100 text-success-700" },
     sold:         { label: "Sold",          badge: "bg-brand-100 text-brand-700" },
-    dispatched:   { label: "Dispatched",    badge: "bg-indigo-100 text-indigo-700" },
+    dispatched:   { label: "Dispatched",    badge: "bg-info-100 text-info-700" },
     returned:     { label: "Returned",      badge: "bg-surface-200 text-surface-600" },
     cancelled:    { label: "Cancelled",     badge: "bg-danger-light text-danger" },
     missing:      { label: "Missing",       badge: "bg-danger text-white" },
@@ -188,7 +188,7 @@ export default function ProductSerialsPage() {
                                                     <p className="font-mono text-surface-400">{s.order_number}</p>
                                                 )}
                                                 {fmtDate(s.dispatched_at) && (
-                                                    <p className="text-indigo-500 whitespace-nowrap">
+                                                    <p className="text-info-600 whitespace-nowrap">
                                                         Dispatched {fmtDate(s.dispatched_at)}
                                                     </p>
                                                 )}
@@ -280,7 +280,7 @@ function ReconcileModal({ onClose }: { onClose: () => void }) {
 
                 {result && (
                     <div className="rounded-xl border border-surface-200 p-3 space-y-2 text-xs">
-                        <p className="text-emerald-700">✓ {result.matched_count} accounted for</p>
+                        <p className="text-success-700">✓ {result.matched_count} accounted for</p>
                         {result.missing.length > 0 && (
                             <div>
                                 <p className="font-semibold text-danger">{result.missing.length} missing{result.flagged_missing ? " (flagged lost)" : ""}:</p>

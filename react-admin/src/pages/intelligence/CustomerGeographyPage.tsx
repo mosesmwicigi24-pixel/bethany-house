@@ -105,9 +105,9 @@ export default function CustomerGeographyPage() {
                                     <thead>
                                         <tr className="bg-surface-50/70 border-b border-line">
                                             <th className="text-left px-5 py-3 text-2xs font-bold uppercase tracking-widest text-surface-400">Country</th>
-                                            <ThMetric tone="bg-violet-50 text-violet-600"  icon={<LandedIcon />}  label="Landed"  active={sortKey === "visits"}  onSort={() => setSortKey("visits")} />
-                                            <ThMetric tone="bg-sky-50 text-sky-600"         icon={<CartIcon />}    label="Carts"   active={sortKey === "carts"}   onSort={() => setSortKey("carts")} />
-                                            <ThMetric tone="bg-emerald-50 text-emerald-600" icon={<OrdersIcon />}  label="Orders"  active={sortKey === "orders"}  onSort={() => setSortKey("orders")} />
+                                            <ThMetric tone="bg-accent-50 text-accent-600"  icon={<LandedIcon />}  label="Landed"  active={sortKey === "visits"}  onSort={() => setSortKey("visits")} />
+                                            <ThMetric tone="bg-info-50 text-info-600"         icon={<CartIcon />}    label="Carts"   active={sortKey === "carts"}   onSort={() => setSortKey("carts")} />
+                                            <ThMetric tone="bg-success-50 text-success-600" icon={<OrdersIcon />}  label="Orders"  active={sortKey === "orders"}  onSort={() => setSortKey("orders")} />
                                             <ThMetric tone="bg-amber-50 text-amber-600"     icon={<RevenueIcon />} label="Revenue" active={sortKey === "revenue"} onSort={() => setSortKey("revenue")} />
                                             <th className="text-right px-5 py-3 whitespace-nowrap">
                                                 <button type="button" onClick={() => setSortKey("customers")}

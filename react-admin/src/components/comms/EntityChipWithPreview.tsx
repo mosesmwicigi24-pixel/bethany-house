@@ -59,7 +59,7 @@ export const ENTITY_CHIP: Record<string, {
     production_order: {
         href: (id) => `/production/orders/${id}`,
         noun: "production order",
-        tone: "bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100",
+        tone: "bg-accent-50 border-accent-200 text-accent-700 hover:bg-accent-100",
         icon: "M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18",
     },
     eod_report: {
