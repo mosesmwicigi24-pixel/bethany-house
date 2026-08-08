@@ -30,6 +30,47 @@ class ReportController extends Controller
 {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    /**
+     * Force metric values to JSON numbers.
+     *
+     * The ::float8 casts on the aggregates are correct SQL but NOT sufficient:
+     * PDO_PGSQL hands numeric and float8 back to PHP as STRINGS regardless, so
+     * "419600.00" still reached the client and Recharts could not compute a pie
+     * angle from it. The guarantee has to be made in PHP.
+     *
+     * CAST BY KEY, NEVER BY VALUE SHAPE. A "looks numeric -> cast" walker would
+     * destroy data: customer_phone "0798238300" becomes 798238300 the moment it
+     * is a number, and order numbers and SKUs are the same shape. Only keys that
+     * NAME a metric are converted, so an identifier is never a candidate however
+     * numeric it looks.
+     */
+    private const METRIC_KEY = '/(revenue|amount|total|sales|paid|balance|cash|price|value|avg|average|rate|percent|discount|tax|shipping|refund|credit|hours|units|profit|margin|cost|collected|owed)/i';
+
+    private function numify(mixed $data): mixed
+    {
+        if ($data instanceof \Illuminate\Support\Collection) {
+            return $data->map(fn ($v) => $this->numify($v))->all();
+        }
+        if (is_object($data)) {
+            return $this->numify((array) $data);
+        }
+        if (! is_array($data)) {
+            return $data;
+        }
+
+        foreach ($data as $k => $v) {
+            if (is_array($v) || is_object($v) || $v instanceof \Illuminate\Support\Collection) {
+                $data[$k] = $this->numify($v);
+                continue;
+            }
+            if (is_string($k) && is_string($v) && preg_match(self::METRIC_KEY, $k) && is_numeric($v)) {
+                $data[$k] = (float) $v;
+            }
+        }
+
+        return $data;
+    }
+
     private function dateRange(Request $request): array
     {
         $start = $request->get('start_date', now()->subDays(29)->format('Y-m-d'));
@@ -254,7 +295,7 @@ class ReportController extends Controller
             );
         }
 
-        return response()->json([
+        return response()->json($this->numify([
             'period'             => ['start' => $start, 'end' => $end],
             'currency'           => $currency,
             'summary'            => array_merge((array) $summary->toArray() ?: (array) $summary, ['total_collected' => round($collected, 2)]),
@@ -264,7 +305,7 @@ class ReportController extends Controller
             'by_hour'            => $byHour,
             'by_day_of_week'     => $byDayOfWeek,
             'comparison'         => $comparison,
-        ]);
+        ]));
     }
 
     /**
@@ -394,13 +435,13 @@ class ReportController extends Controller
             return array_values($rows);
         };
 
-        return response()->json([
+        return response()->json($this->numify([
             'period'   => ['start' => $start, 'end' => $end, 'currency' => $currency],
             'channels' => $byChannel,
             'daily'    => $daily,
             'weekly'   => $bucketed("TO_CHAR(DATE_TRUNC('week',  orders.created_at), 'IYYY-\"W\"IW')"),
             'monthly'  => $bucketed("TO_CHAR(DATE_TRUNC('month', orders.created_at), 'YYYY-MM')"),
-        ]);
+        ]));
     }
 
     public function salesByProduct(Request $request)
@@ -442,11 +483,11 @@ class ReportController extends Controller
             );
         }
 
-        return response()->json([
+        return response()->json($this->numify([
             'period'   => ['start' => $start, 'end' => $end],
             'currency' => $currency,
             'products' => $products,
-        ]);
+        ]));
     }
 
     /**
@@ -485,10 +526,10 @@ class ReportController extends Controller
             );
         }
 
-        return response()->json([
+        return response()->json($this->numify([
             'period'     => ['start' => $start, 'end' => $end],
             'categories' => $categories,
-        ]);
+        ]));
     }
 
     /**
@@ -532,10 +573,10 @@ class ReportController extends Controller
             ->limit($limit)
             ->get();
 
-        return response()->json([
+        return response()->json($this->numify([
             'period'    => ['start' => $start, 'end' => $end],
             'customers' => $customers,
-        ]);
+        ]));
     }
 
     /**
@@ -573,10 +614,10 @@ class ReportController extends Controller
             );
         }
 
-        return response()->json([
+        return response()->json($this->numify([
             'period'  => ['start' => $start, 'end' => $end],
             'outlets' => $outlets,
-        ]);
+        ]));
     }
 
     /**
@@ -655,12 +696,12 @@ class ReportController extends Controller
             ->orderByRaw('COUNT(*) DESC')
             ->get();
 
-        return response()->json([
+        return response()->json($this->numify([
             'period'         => ['start' => $start, 'end' => $end],
             'summary'        => $returns,
             'by_reason'      => $byReason,
             'by_item_reason' => $byItemReason,
-        ]);
+        ]));
     }
 
     // =========================================================================
