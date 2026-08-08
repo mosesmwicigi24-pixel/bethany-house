@@ -172,16 +172,29 @@ class ReportController extends Controller
         // client was title-casing it into "Inmpaybill" — the correct name,
         // "I&M Paybill", was already sitting in the payment_methods table. Left
         // joined so a code with no row still reports, under its own code.
+        // The method an order was paid by lives in TWO places: a denormalised
+        // orders.payment_method, and the authoritative payments.payment_method.
+        // The order column is NULL on 144 of 381 orders — but 95 of those have a
+        // settled payment whose method IS known (53 I&M Paybill, 50 cash, and so
+        // on). Grouping by the order column alone therefore dropped real,
+        // collected money from the breakdown. Resolve from the payment first and
+        // fall back to the order's own field.
+        $methodPerOrder = DB::table('payments')
+            ->selectRaw('DISTINCT ON (order_id) order_id, payment_method')
+            ->where('status', 'paid')
+            ->orderByRaw('order_id, paid_at DESC NULLS LAST, id DESC');
+
         $byPaymentMethod = $base()->selectRaw("
-            orders.payment_method,
-            COALESCE(pm.name, orders.payment_method) AS method_name,
-            pm.description                           AS method_description,
-            COUNT(*) AS count,
+            COALESCE(pmt.payment_method, orders.payment_method) AS payment_method,
+            COALESCE(pm.name, COALESCE(pmt.payment_method, orders.payment_method)) AS method_name,
+            pm.description                        AS method_description,
+            COUNT(*)                              AS count,
             COALESCE(SUM(orders.total_amount), 0) AS total
         ")
-            ->leftJoin('payment_methods as pm', 'pm.code', '=', 'orders.payment_method')
-            ->whereNotNull('orders.payment_method')
-            ->groupBy('orders.payment_method', 'pm.name', 'pm.description')
+            ->leftJoinSub($methodPerOrder, 'pmt', fn ($j) => $j->on('pmt.order_id', '=', 'orders.id'))
+            ->leftJoin('payment_methods as pm', 'pm.code', '=', DB::raw('COALESCE(pmt.payment_method, orders.payment_method)'))
+            ->whereRaw('COALESCE(pmt.payment_method, orders.payment_method) IS NOT NULL')
+            ->groupByRaw('COALESCE(pmt.payment_method, orders.payment_method), pm.name, pm.description')
             ->orderByRaw('COALESCE(SUM(orders.total_amount), 0) DESC')
             ->get();
 
@@ -288,9 +301,21 @@ class ReportController extends Controller
 
         // Cash per order: settled payments net of refunds. Computed once as a
         // sub-select so every aggregate below reuses it instead of re-joining.
+        // CASH = settled AND confirmed. A payment counts only when it is
+        // status='paid' AND either its method needs no approval or the approval
+        // has been granted. Mukuru, Western Union/MoneyGram and M-Pesa (Send
+        // Money) are recorded by a clerk from a customer's word and require
+        // approval; counting one before it is verified would report money we do
+        // not yet know we have.
+        // Today this changes nothing — all 15 approval-requiring payments are
+        // already approved — so it is a guard for the first unverified entry,
+        // not a restatement of current figures.
         $cashPerOrder = DB::table('payments')
             ->selectRaw('order_id, COALESCE(SUM(amount - COALESCE(refund_amount, 0)), 0) AS cash')
             ->where('status', 'paid')
+            ->where(fn ($q) => $q->where('requires_approval', false)
+                                 ->orWhereNull('requires_approval')
+                                 ->orWhere('approval_status', 'approved'))
             ->groupBy('order_id');
 
         $scoped = fn (?string $channel) => Order::query()

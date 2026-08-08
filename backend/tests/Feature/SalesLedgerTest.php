@@ -171,6 +171,83 @@ class SalesLedgerTest extends TestCase
         $this->assertEqualsWithDelta(250.0, (float) $pos['sales'], 0.01);
     }
 
+    public function test_cash_excludes_a_payment_awaiting_approval(): void
+    {
+        // Mukuru / Western Union / M-Pesa Send Money are keyed in by a clerk from
+        // the customer's word. Counting one before it is verified would report
+        // money we do not yet know we have.
+        $this->viewer();
+        $o = $this->order('pos', 1000, 1000);
+        Payment::where('order_id', $o->id)->update([
+            'requires_approval' => true,
+            'approval_status'   => 'pending',
+        ]);
+
+        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'pos');
+
+        $this->assertEqualsWithDelta(0.0,    (float) $pos['cash'], 0.01);
+        $this->assertEqualsWithDelta(1000.0, (float) $pos['balance'], 0.01);
+    }
+
+    public function test_cash_counts_it_once_approval_is_granted(): void
+    {
+        $this->viewer();
+        $o = $this->order('pos', 1000, 1000);
+        Payment::where('order_id', $o->id)->update([
+            'requires_approval' => true,
+            'approval_status'   => 'approved',
+        ]);
+
+        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'pos');
+
+        $this->assertEqualsWithDelta(1000.0, (float) $pos['cash'], 0.01);
+        $this->assertEqualsWithDelta(0.0,    (float) $pos['balance'], 0.01);
+    }
+
+    public function test_payment_method_is_resolved_from_the_payment_when_the_order_has_none(): void
+    {
+        // orders.payment_method is a denormalised convenience field and is NULL
+        // on 144 of 381 production orders — but 95 of those DO have a settled
+        // payment carrying the method. Grouping by the order column alone
+        // dropped that collected money out of the breakdown entirely.
+        $this->viewer();
+        $o = Order::factory()->create([
+            'payment_method' => null,
+            'order_type'     => 'pos',
+            'total_amount'   => 5000,
+            'currency_code'  => 'KES',
+            'status'         => 'confirmed',
+            'created_at'     => now(),
+        ]);
+        Payment::factory()->create([
+            'order_id'       => $o->id,
+            'payment_method' => 'inmpaybill',
+            'amount'         => 5000,
+            'status'         => 'paid',
+        ]);
+        // The display name lives in payment_methods; there is no seeder for it,
+        // so the row is created here rather than asserting against a code.
+        \DB::table('payment_methods')->insert([
+            'code'       => 'inmpaybill',
+            'name'       => 'I&M Paybill',
+            'is_active'  => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $summary = $this->getJson('/api/v1/admin/reports/sales/summary'
+            .'?start_date='.now()->subDays(7)->format('Y-m-d')
+            .'&end_date='.now()->format('Y-m-d'))
+            ->assertOk()->json();
+
+        $row = collect($summary['by_payment_method'])->firstWhere('payment_method', 'inmpaybill');
+
+        $this->assertNotNull($row, 'the order was dropped from the breakdown');
+        $this->assertSame(1, (int) $row['count']);
+        // and it carries the configured display name, not the raw code
+        $this->assertSame('I&M Paybill', $row['method_name']);
+    }
+
     public function test_unique_customers_counts_walk_ins_not_only_registered_users(): void
     {
         // Every order in production has a NULL user_id — POS and WhatsApp
