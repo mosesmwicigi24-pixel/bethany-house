@@ -94,7 +94,13 @@ class PublicPaymentController extends Controller
                                         $order->customer_first_name ?? $order->user?->first_name,
                                         $order->customer_last_name ?? $order->user?->last_name,
                                     ]))) ?: null,
-            'customer_phone'    => $this->maskPhone($order->customer_phone ?? $order->user?->phone),
+            // Returned IN FULL. Masking was added here and then removed at the
+            // owner's explicit direction (2026-08-08): the page is the customer's
+            // own receipt and they want to see their own number on it. Recorded
+            // so a later pass does not 'helpfully' re-mask it — the trade-off is
+            // known and accepted, namely that a forwarded /pay/{token} link
+            // carries a complete number.
+            'customer_phone'    => $order->customer_phone ?? $order->user?->phone,
             'is_international'  => (bool) ($order->is_international ?? false),
             'expires_at'        => $order->payment_token_expires_at?->toISOString(),
             'is_expired'        => $this->isExpired($order),
@@ -764,39 +770,6 @@ class PublicPaymentController extends Controller
         if ($this->isExpired($order)) return null;
 
         return $order;
-    }
-
-    /**
-     * Partially mask a phone number for the PUBLIC pay page.
-     *
-     * MASKED SERVER-SIDE, deliberately. Doing this in the React component would
-     * be cosmetic only: the endpoint would still return the full number and
-     * anyone holding the link could read it straight out of the network tab.
-     * The unmasked value never leaves the API. Staff endpoints are untouched —
-     * this is only the unauthenticated /pay/{token} payload.
-     *
-     * Keeps the first 4 and last 3 characters, which is enough for the owner to
-     * recognise their own number while a forwarded link no longer carries a
-     * complete, dialable one:
-     *     0798238300     -> 0798***300     (3 masked)
-     *     +254798238300  -> +254******300  (6 masked)
-     *
-     * Short or malformed values are masked entirely rather than passed through:
-     * a number too short to mask safely is one we should not be echoing at all.
-     */
-    private function maskPhone(?string $phone): ?string
-    {
-        $phone = trim((string) $phone);
-        if ($phone === '') {
-            return null;
-        }
-        if (mb_strlen($phone) < 8) {
-            return str_repeat('*', mb_strlen($phone));
-        }
-
-        return mb_substr($phone, 0, 4)
-            . str_repeat('*', mb_strlen($phone) - 7)
-            . mb_substr($phone, -3);
     }
 
     private function isExpired(Order $order): bool
