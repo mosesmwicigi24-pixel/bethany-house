@@ -33,10 +33,23 @@ const STATUS_CONFIG: Record<string, { label: string; tw: string; bar: string }> 
 };
 
 // Dot fill for pipeline — index-based tailwind won't work with dynamic; use hex fallback
+// MUST mirror STATUS_CONFIG[x].bar above, entry for entry. This map exists only
+// because Tailwind cannot compile a dynamic class name — it is the same palette
+// expressed as hex, NOT a second one. When the two drifted, a single shipment
+// state rendered in different colours in the badge, the progress track and the
+// timeline on the same public page, and ready_to_ship/picked_up shared one hex
+// so the dot never changed at the moment a parcel was actually collected.
 const STATUS_HEX: Record<string, string> = {
-    order_confirmed: "#2563eb", processing: "#7c3aed", ready_to_ship: "#0891b2",
-    picked_up: "#0891b2", in_transit: "#d97706", out_for_delivery: "#ea580c",
-    delivery_attempted: "#dc2626", delivered: "#16a34a", exception: "#dc2626", cancelled: "#8c9489",
+    order_confirmed:    "#2563eb", // info-600
+    processing:         "#9333ea", // accent-600
+    ready_to_ship:      "#1d4ed8", // info-700
+    picked_up:          "#1e40af", // info-800
+    in_transit:         "#f59e0b", // amber-500
+    out_for_delivery:   "#f05423", // brand-500
+    delivery_attempted: "#ef4444", // danger-500
+    delivered:          "#16a34a", // success-600
+    exception:          "#b91c1c", // danger-700
+    cancelled:          "#8c9489", // surface-400
 };
 
 const PIPELINE = [

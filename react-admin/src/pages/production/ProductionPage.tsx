@@ -1228,9 +1228,12 @@ function ActivityLog({ orderId, currentUserId }: { orderId: number; currentUserI
             : d.toLocaleString("en-KE", { dateStyle: "short", timeStyle: "short" });
     };
 
+    // 8 DISTINCT rungs. The naive sweep left this at 5 of 8 — info three times,
+    // accent twice — while avatarColor() still indexes modulo 8, so three staff
+    // in every eight shared a colour in the activity log.
     const AVATAR_COLORS = [
-        "bg-info-500", "bg-accent-500", "bg-accent-500", "bg-brand-500",
-        "bg-info-500", "bg-info-500", "bg-danger-500", "bg-amber-500",
+        "bg-brand-500", "bg-info-600", "bg-success-600", "bg-accent-600",
+        "bg-amber-600", "bg-danger-500", "bg-info-800", "bg-accent-800",
     ];
     const avatarColor = (userId: number) => AVATAR_COLORS[userId % AVATAR_COLORS.length];
 
