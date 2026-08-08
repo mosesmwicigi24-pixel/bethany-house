@@ -89,6 +89,12 @@ class PublicPaymentController extends Controller
             'business_logo'     => $settings['app_logo_url'] ?? null,
             'business_tagline'  => $settings['app_tagline'] ?? null,
             'customer_first_name' => $order->customer_first_name ?? $order->user?->first_name,
+            // The page doubles as the customer's receipt — it must say WHO paid.
+            'customer_name'     => trim(implode(' ', array_filter([
+                                        $order->customer_first_name ?? $order->user?->first_name,
+                                        $order->customer_last_name ?? $order->user?->last_name,
+                                    ]))) ?: null,
+            'customer_phone'    => $order->customer_phone ?? $order->user?->phone,
             'is_international'  => (bool) ($order->is_international ?? false),
             'expires_at'        => $order->payment_token_expires_at?->toISOString(),
             'is_expired'        => $this->isExpired($order),
