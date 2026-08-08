@@ -98,15 +98,6 @@ export default {
         danger:  { light: '#fee2e2', DEFAULT: '#dc2626', dark: '#7f1d1d' },
         info:    { light: '#dbeafe', DEFAULT: '#2563eb', dark: '#1e3a8a' },
       },
-      // The reference centres its content in a 1200px column. Our <main> had no
-      // max-width at all: on a 1920px display with the sidebar expanded the
-      // column rendered 1616px, and 2256px on a 2560px display — tables and form
-      // grids stretched edge-to-edge and the reading measure collapsed. One
-      // token owns the measure so pages stop disagreeing (they previously used
-      // max-w-4xl/5xl/6xl/7xl, none of which is 1200px).
-      maxWidth: {
-        content: '1200px',
-      },
       fontFamily: {
         // One typeface across the hub AND the storefront. `display` stays as a
         // named role (headings) so existing font-display usages keep working —

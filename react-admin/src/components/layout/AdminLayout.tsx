@@ -255,15 +255,26 @@ export function AdminLayout() {
                     reserves its height (56px) plus the home-indicator inset —
                     otherwise the last row of every list sits underneath it. */}
                 <main className="flex-1 overflow-y-auto">
-                    {/* The measure. <main> previously carried the gutter and no
-                        max-width, so the content column was simply "whatever the
-                        monitor is" — 1616px on a 1920px display, 2256px on a
-                        2560px one. The reference centres content at 1200px; that
-                        is now a single token (max-w-content) owned here, so every
-                        page inherits one consistent measure instead of the four
-                        different max-w-*xl values pages used to pick for
-                        themselves. Phones are unaffected: 1200px never binds. */}
-                    <div className="mx-auto w-full max-w-content px-3 py-3 md:px-8 md:py-8">
+                    {/* The shell FILLS the window. It briefly capped content at
+                        1200px to match the Mukuru reference, and that was a
+                        mistake: 1200px is a READING measure, correct for a
+                        marketing page of prose and wrong for a console whose main
+                        job is nine-column tables and a kanban board. On a 2560px
+                        display it stranded ~1300px of empty canvas either side
+                        while the orders table clipped columns inside it.
+
+                        Width is not owned globally any more, because the right
+                        measure depends on what a page contains:
+                          • data pages (lists, tables, WIP board) take the window
+                          • the 17 form and detail pages that need a reading
+                            measure already set their own max-w-3xl..7xl, and are
+                            unaffected by this — they were never relying on the
+                            shell to constrain them.
+                        Gutters still scale with the viewport so content never
+                        touches the bezel on a large monitor, and phones and
+                        tablets are untouched: the cap never bound below 1200px,
+                        so nothing about their layout changes. */}
+                    <div className="w-full px-3 py-3 md:px-8 md:py-8 2xl:px-10">
                         {/* key: a crash on one page must not follow you to the next */}
                         <PageErrorBoundary key={location.pathname}>
                             <Outlet />
