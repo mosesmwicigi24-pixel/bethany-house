@@ -242,8 +242,15 @@ class SalesLedgerTest extends TestCase
 
         $row = collect($summary['by_payment_method'])->firstWhere('payment_method', 'inmpaybill');
 
-        $this->assertNotNull($row, 'the order was dropped from the breakdown. Actual rows: '
-            .json_encode($summary['by_payment_method']));
+        $this->assertNotNull($row, 'the order was dropped from the breakdown');
+        // Guards the numify() bug that made this fail: casting an Eloquent model
+        // with (array) leaks "\0*\0attributes" and friends instead of the
+        // attributes, so the payload still "had" the data but under unusable keys.
+        $this->assertSame(
+            ['payment_method', 'method_name', 'method_description', 'count', 'total'],
+            array_keys($row),
+            'the row serialised with internal model keys instead of its attributes',
+        );
         $this->assertSame(1, (int) $row['count']);
         // and it carries the configured display name, not the raw code
         $this->assertSame('I&M Paybill', $row['method_name']);

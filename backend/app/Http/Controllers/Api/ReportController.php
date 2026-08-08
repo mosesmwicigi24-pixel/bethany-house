@@ -48,11 +48,22 @@ class ReportController extends Controller
 
     private function numify(mixed $data): mixed
     {
-        if ($data instanceof \Illuminate\Support\Collection) {
-            return $data->map(fn ($v) => $this->numify($v))->all();
+        // (array) on an Eloquent model exposes its PROTECTED internals —
+        // "\0*\0attributes", "\0*\0casts", the fillable list — instead of the
+        // attributes, which silently mangles every model-backed payload. Ask the
+        // object how it wants to be an array; only a plain stdClass (what
+        // DB::table returns) is safe to cast.
+        if ($data instanceof \Illuminate\Contracts\Support\Arrayable) {
+            return $this->numify($data->toArray());
+        }
+        if ($data instanceof \JsonSerializable) {
+            return $this->numify($data->jsonSerialize());
+        }
+        if ($data instanceof \stdClass) {
+            return $this->numify(get_object_vars($data));
         }
         if (is_object($data)) {
-            return $this->numify((array) $data);
+            return $data;
         }
         if (! is_array($data)) {
             return $data;
