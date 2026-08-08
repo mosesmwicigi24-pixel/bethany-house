@@ -243,9 +243,50 @@ class SalesLedgerTest extends TestCase
         $row = collect($summary['by_payment_method'])->firstWhere('payment_method', 'inmpaybill');
 
         $this->assertNotNull($row, 'the order was dropped from the breakdown');
+        // Guards the numify() bug that made this fail: casting an Eloquent model
+        // with (array) leaks "\0*\0attributes" and friends instead of the
+        // attributes, so the payload still "had" the data but under unusable keys.
+        // Not an exact key list: $base() returns Order MODELS, so toArray() also
+        // emits the model's $appends (customer_name). What matters is that the
+        // selected aliases are present under their own names rather than under
+        // "\0*\0attributes".
+        foreach (['payment_method', 'method_name', 'count', 'total'] as $key) {
+            $this->assertArrayHasKey($key, $row,
+                'the row serialised with internal model keys instead of its attributes');
+        }
+        $this->assertArrayNotHasKey("\0*\0attributes", $row);
         $this->assertSame(1, (int) $row['count']);
         // and it carries the configured display name, not the raw code
         $this->assertSame('I&M Paybill', $row['method_name']);
+    }
+
+    public function test_report_money_fields_are_json_numbers_not_strings(): void
+    {
+        // Postgres returns SUM/AVG of a decimal as a STRING through PDO, and
+        // Laravel encodes it as one. Recharts cannot compute pie angles from
+        // "419600.00", which is why Revenue by Category rendered an empty card
+        // with a title and no chart while its query was returning 11 rows.
+        // Strings also sort wrong: "9" > "100".
+        $this->viewer();
+        $this->order('pos', 1234.56, 1000);
+
+        $summary = $this->getJson('/api/v1/admin/reports/sales/summary'
+            .'?start_date='.now()->subDays(7)->format('Y-m-d')
+            .'&end_date='.now()->format('Y-m-d'))
+            ->assertOk()->json();
+
+        foreach (['total_revenue', 'average_order_value', 'total_tax', 'total_discounts'] as $field) {
+            $this->assertIsNumeric($summary['summary'][$field], "{$field} is missing");
+            $this->assertIsNotString($summary['summary'][$field],
+                "summary.{$field} came back as a string — a chart cannot do arithmetic on it");
+        }
+
+        foreach ($this->ledger()['channels'] as $row) {
+            foreach (['sales', 'paid', 'balance'] as $field) {
+                $this->assertIsNotString($row[$field],
+                    "channels[{$row['channel']}].{$field} came back as a string");
+            }
+        }
     }
 
     public function test_unique_customers_counts_walk_ins_not_only_registered_users(): void

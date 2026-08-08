@@ -30,6 +30,58 @@ class ReportController extends Controller
 {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    /**
+     * Force metric values to JSON numbers.
+     *
+     * The ::float8 casts on the aggregates are correct SQL but NOT sufficient:
+     * PDO_PGSQL hands numeric and float8 back to PHP as STRINGS regardless, so
+     * "419600.00" still reached the client and Recharts could not compute a pie
+     * angle from it. The guarantee has to be made in PHP.
+     *
+     * CAST BY KEY, NEVER BY VALUE SHAPE. A "looks numeric -> cast" walker would
+     * destroy data: customer_phone "0798238300" becomes 798238300 the moment it
+     * is a number, and order numbers and SKUs are the same shape. Only keys that
+     * NAME a metric are converted, so an identifier is never a candidate however
+     * numeric it looks.
+     */
+    private const METRIC_KEY = '/(revenue|amount|total|sales|paid|balance|cash|price|value|avg|average|rate|percent|discount|tax|shipping|refund|credit|hours|units|profit|margin|cost|collected|owed)/i';
+
+    private function numify(mixed $data): mixed
+    {
+        // (array) on an Eloquent model exposes its PROTECTED internals —
+        // "\0*\0attributes", "\0*\0casts", the fillable list — instead of the
+        // attributes, which silently mangles every model-backed payload. Ask the
+        // object how it wants to be an array; only a plain stdClass (what
+        // DB::table returns) is safe to cast.
+        if ($data instanceof \Illuminate\Contracts\Support\Arrayable) {
+            return $this->numify($data->toArray());
+        }
+        if ($data instanceof \JsonSerializable) {
+            return $this->numify($data->jsonSerialize());
+        }
+        if ($data instanceof \stdClass) {
+            return $this->numify(get_object_vars($data));
+        }
+        if (is_object($data)) {
+            return $data;
+        }
+        if (! is_array($data)) {
+            return $data;
+        }
+
+        foreach ($data as $k => $v) {
+            if (is_array($v) || is_object($v) || $v instanceof \Illuminate\Support\Collection) {
+                $data[$k] = $this->numify($v);
+                continue;
+            }
+            if (is_string($k) && is_string($v) && preg_match(self::METRIC_KEY, $k) && is_numeric($v)) {
+                $data[$k] = (float) $v;
+            }
+        }
+
+        return $data;
+    }
+
     private function dateRange(Request $request): array
     {
         $start = $request->get('start_date', now()->subDays(29)->format('Y-m-d'));
@@ -127,30 +179,30 @@ class ReportController extends Controller
             ->when($outletId,  fn ($q) => $q->where('o.outlet_id',  $outletId))
             ->when($orderType, fn ($q) => $q->where('o.order_type', $orderType))
             ->whereBetween(DB::raw('COALESCE(p.paid_at, p.created_at)'), [$start, $end])
-            ->selectRaw('COALESCE(SUM(p.amount - COALESCE(p.refund_amount,0)),0) AS v')
+            ->selectRaw('(COALESCE(SUM(p.amount - COALESCE(p.refund_amount,0)),0))::float8 AS v')
             ->value('v');
 
         $summary = $base()->selectRaw("
             COUNT(*)                                                          AS total_orders,
-            COALESCE(SUM(total_amount), 0)                                    AS total_revenue,
-            COALESCE(SUM(shipping_amount), 0)                                 AS total_shipping,
-            COALESCE(SUM(tax_amount), 0)                                      AS total_tax,
-            COALESCE(SUM(discount_amount), 0)                                 AS total_discounts,
-            COALESCE(AVG(total_amount), 0)                                    AS average_order_value,
+            (COALESCE(SUM(total_amount), 0))::float8                                    AS total_revenue,
+            (COALESCE(SUM(shipping_amount), 0))::float8                                 AS total_shipping,
+            (COALESCE(SUM(tax_amount), 0))::float8                                      AS total_tax,
+            (COALESCE(SUM(discount_amount), 0))::float8                                 AS total_discounts,
+            (COALESCE(AVG(total_amount), 0))::float8                                    AS average_order_value,
             COALESCE(MIN(total_amount), 0)                                    AS min_order_value,
             COALESCE(MAX(total_amount), 0)                                    AS max_order_value,
-            COALESCE(SUM(CASE WHEN order_type = 'online' THEN total_amount ELSE 0 END), 0) AS online_revenue,
-            COALESCE(SUM(CASE WHEN order_type = 'pos'    THEN total_amount ELSE 0 END), 0) AS pos_revenue,
+            (COALESCE(SUM(CASE WHEN order_type = 'online' THEN total_amount ELSE 0 END), 0))::float8 AS online_revenue,
+            (COALESCE(SUM(CASE WHEN order_type = 'pos'    THEN total_amount ELSE 0 END), 0))::float8 AS pos_revenue,
             COUNT(CASE WHEN order_type = 'online' THEN 1 END)                 AS online_count,
             COUNT(CASE WHEN order_type = 'pos'    THEN 1 END)                 AS pos_count,
             COUNT(DISTINCT COALESCE(user_id::text, customer_phone, customer_email))                                            AS unique_customers,
-            COALESCE(SUM(discount_amount) / NULLIF(SUM(total_amount + discount_amount), 0) * 100, 0) AS discount_rate_percent
+            (COALESCE(SUM(discount_amount) / NULLIF(SUM(total_amount + discount_amount), 0) * 100, 0))::float8 AS discount_rate_percent
         ")->first();
 
         $daily = $base()->selectRaw("
             DATE(created_at)               AS date,
             COUNT(*)                       AS orders,
-            COALESCE(SUM(total_amount), 0) AS revenue,
+            (COALESCE(SUM(total_amount), 0))::float8 AS revenue,
             COUNT(DISTINCT COALESCE(user_id::text, customer_phone, customer_email))        AS unique_customers
         ")
             ->groupBy(DB::raw('DATE(created_at)'))
@@ -161,7 +213,7 @@ class ReportController extends Controller
         $weekly = $base()->selectRaw("
             DATE_TRUNC('week', created_at)::date AS week_start,
             COUNT(*)                             AS orders,
-            COALESCE(SUM(total_amount), 0)       AS revenue
+            (COALESCE(SUM(total_amount), 0))::float8       AS revenue
         ")
             ->groupBy(DB::raw("DATE_TRUNC('week', created_at)"))
             ->orderBy('week_start')
@@ -186,23 +238,31 @@ class ReportController extends Controller
 
         $byPaymentMethod = $base()->selectRaw("
             COALESCE(pmt.payment_method, orders.payment_method) AS payment_method,
-            COALESCE(pm.name, COALESCE(pmt.payment_method, orders.payment_method)) AS method_name,
-            pm.description                        AS method_description,
+            COALESCE(pm_pay.name, pm_ord.name, COALESCE(pmt.payment_method, orders.payment_method)) AS method_name,
+            COALESCE(pm_pay.description, pm_ord.description)                              AS method_description,
             COUNT(*)                              AS count,
-            COALESCE(SUM(orders.total_amount), 0) AS total
+            (COALESCE(SUM(orders.total_amount), 0))::float8 AS total
         ")
             ->leftJoinSub($methodPerOrder, 'pmt', fn ($j) => $j->on('pmt.order_id', '=', 'orders.id'))
-            ->leftJoin('payment_methods as pm', 'pm.code', '=', DB::raw('COALESCE(pmt.payment_method, orders.payment_method)'))
+            // Aliases are lowercase on purpose: Laravel QUOTES a join alias, so
+            // "pmA" keeps its capital while an unquoted pmA.name in the raw
+            // select folds to pma and Postgres cannot find the table.
+            // TWO plain joins rather than one join whose right-hand side is a
+            // DB::raw COALESCE. Laravel can bind a raw expression in a join
+            // condition as a VALUE instead of rendering it as SQL, which makes
+            // the match silently fail; two ordinary column joins cannot.
+            ->leftJoin('payment_methods as pm_pay', 'pm_pay.code', '=', 'pmt.payment_method')
+            ->leftJoin('payment_methods as pm_ord', 'pm_ord.code', '=', 'orders.payment_method')
             ->whereRaw('COALESCE(pmt.payment_method, orders.payment_method) IS NOT NULL')
-            ->groupByRaw('COALESCE(pmt.payment_method, orders.payment_method), pm.name, pm.description')
-            ->orderByRaw('COALESCE(SUM(orders.total_amount), 0) DESC')
+            ->groupByRaw('COALESCE(pmt.payment_method, orders.payment_method), pm_pay.name, pm_ord.name, pm_pay.description, pm_ord.description')
+            ->orderByRaw('(COALESCE(SUM(orders.total_amount), 0))::float8 DESC')
             ->get();
 
         // Hourly distribution - useful for staffing decisions
         $byHour = $base()->selectRaw("
             EXTRACT(HOUR FROM created_at)::int AS hour,
             COUNT(*)                           AS orders,
-            COALESCE(SUM(total_amount), 0)     AS revenue
+            (COALESCE(SUM(total_amount), 0))::float8     AS revenue
         ")
             ->groupBy(DB::raw("EXTRACT(HOUR FROM created_at)"))
             ->orderBy('hour')
@@ -213,7 +273,7 @@ class ReportController extends Controller
             EXTRACT(DOW FROM created_at)::int AS dow,
             TO_CHAR(created_at, 'Day')        AS day_name,
             COUNT(*)                          AS orders,
-            COALESCE(SUM(total_amount), 0)    AS revenue
+            (COALESCE(SUM(total_amount), 0))::float8    AS revenue
         ")
             ->groupBy(DB::raw("EXTRACT(DOW FROM created_at)"), DB::raw("TO_CHAR(created_at, 'Day')"))
             ->orderBy('dow')
@@ -230,8 +290,8 @@ class ReportController extends Controller
                 ->when($orderType, fn ($q) => $q->where('order_type', $orderType))
                 ->selectRaw("
                     COUNT(*) AS total_orders,
-                    COALESCE(SUM(total_amount), 0) AS total_revenue,
-                    COALESCE(AVG(total_amount), 0) AS average_order_value
+                    (COALESCE(SUM(total_amount), 0))::float8 AS total_revenue,
+                    (COALESCE(AVG(total_amount), 0))::float8 AS average_order_value
                 ")->first();
 
             $comparison = [
@@ -254,7 +314,7 @@ class ReportController extends Controller
             );
         }
 
-        return response()->json([
+        return response()->json($this->numify([
             'period'             => ['start' => $start, 'end' => $end],
             'currency'           => $currency,
             'summary'            => array_merge((array) $summary->toArray() ?: (array) $summary, ['total_collected' => round($collected, 2)]),
@@ -264,7 +324,7 @@ class ReportController extends Controller
             'by_hour'            => $byHour,
             'by_day_of_week'     => $byDayOfWeek,
             'comparison'         => $comparison,
-        ]);
+        ]));
     }
 
     /**
@@ -311,7 +371,7 @@ class ReportController extends Controller
         // already approved — so it is a guard for the first unverified entry,
         // not a restatement of current figures.
         $paidPerOrder = DB::table('payments')
-            ->selectRaw('order_id, COALESCE(SUM(amount - COALESCE(refund_amount, 0)), 0) AS paid')
+            ->selectRaw('order_id, (COALESCE(SUM(amount - COALESCE(refund_amount, 0)), 0))::float8 AS paid')
             ->where('status', 'paid')
             ->where(fn ($q) => $q->where('requires_approval', false)
                                  ->orWhereNull('requires_approval')
@@ -328,10 +388,10 @@ class ReportController extends Controller
 
         $agg = "
             COUNT(*)                                              AS orders,
-            COALESCE(SUM(orders.total_amount), 0)                 AS sales,
-            COALESCE(SUM(COALESCE(pay.paid, 0)), 0)               AS paid,
-            GREATEST(COALESCE(SUM(orders.total_amount), 0)
-                   - COALESCE(SUM(COALESCE(pay.paid, 0)), 0), 0)  AS balance
+            (COALESCE(SUM(orders.total_amount), 0))::float8                 AS sales,
+            (COALESCE(SUM(COALESCE(pay.paid, 0)), 0))::float8               AS paid,
+            GREATEST((COALESCE(SUM(orders.total_amount), 0))::float8
+                   - (COALESCE(SUM(COALESCE(pay.paid, 0)), 0))::float8, 0)  AS balance
         ";
 
         // ── Per channel, whole period ────────────────────────────────────────
@@ -394,13 +454,13 @@ class ReportController extends Controller
             return array_values($rows);
         };
 
-        return response()->json([
+        return response()->json($this->numify([
             'period'   => ['start' => $start, 'end' => $end, 'currency' => $currency],
             'channels' => $byChannel,
             'daily'    => $daily,
             'weekly'   => $bucketed("TO_CHAR(DATE_TRUNC('week',  orders.created_at), 'IYYY-\"W\"IW')"),
             'monthly'  => $bucketed("TO_CHAR(DATE_TRUNC('month', orders.created_at), 'YYYY-MM')"),
-        ]);
+        ]));
     }
 
     public function salesByProduct(Request $request)
@@ -420,17 +480,17 @@ class ReportController extends Controller
                 order_items.product_id                                             AS id,
                 order_items.product_name                                           AS name_en,
                 order_items.sku,
-                SUM(order_items.quantity)                                          AS units_sold,
-                COALESCE(SUM(order_items.total_price), 0)                          AS total_revenue,
-                COALESCE(AVG(order_items.unit_price), 0)                           AS avg_selling_price,
+                (SUM(order_items.quantity))::float8                                          AS units_sold,
+                (COALESCE(SUM(order_items.total_price), 0))::float8                          AS total_revenue,
+                (COALESCE(AVG(order_items.unit_price), 0))::float8                           AS avg_selling_price,
                 COALESCE(MIN(order_items.unit_price), 0)                           AS min_price,
                 COALESCE(MAX(order_items.unit_price), 0)                           AS max_price,
-                COALESCE(SUM(order_items.discount_amount), 0)                      AS total_discounts,
+                (COALESCE(SUM(order_items.discount_amount), 0))::float8                      AS total_discounts,
                 COUNT(DISTINCT orders.id)                                          AS order_count,
                 COUNT(DISTINCT orders.user_id)                                     AS unique_customers,
-                COALESCE(SUM(order_items.total_price) / NULLIF(SUM(order_items.quantity), 0), 0) AS revenue_per_unit
+                (COALESCE(SUM(order_items.total_price) / NULLIF(SUM(order_items.quantity), 0), 0))::float8 AS revenue_per_unit
             ")
-            ->orderByRaw('COALESCE(SUM(order_items.total_price), 0) DESC')
+            ->orderByRaw('(COALESCE(SUM(order_items.total_price), 0))::float8 DESC')
             ->limit($limit)
             ->get();
 
@@ -442,11 +502,11 @@ class ReportController extends Controller
             );
         }
 
-        return response()->json([
+        return response()->json($this->numify([
             'period'   => ['start' => $start, 'end' => $end],
             'currency' => $currency,
             'products' => $products,
-        ]);
+        ]));
     }
 
     /**
@@ -468,13 +528,13 @@ class ReportController extends Controller
             ->selectRaw("
                 categories.id,
                 categories.name_en                                          AS category_name,
-                SUM(order_items.quantity)                                   AS units_sold,
-                COALESCE(SUM(order_items.total_price), 0)                   AS total_revenue,
-                COALESCE(AVG(order_items.unit_price), 0)                    AS avg_price,
+                (SUM(order_items.quantity))::float8                                   AS units_sold,
+                (COALESCE(SUM(order_items.total_price), 0))::float8                   AS total_revenue,
+                (COALESCE(AVG(order_items.unit_price), 0))::float8                    AS avg_price,
                 COUNT(DISTINCT orders.id)                                   AS order_count,
                 COUNT(DISTINCT order_items.product_id)                      AS product_count
             ")
-            ->orderByRaw('COALESCE(SUM(order_items.total_price), 0) DESC')
+            ->orderByRaw('(COALESCE(SUM(order_items.total_price), 0))::float8 DESC')
             ->get();
 
         if ($this->wantsExport($request)) {
@@ -485,10 +545,10 @@ class ReportController extends Controller
             );
         }
 
-        return response()->json([
+        return response()->json($this->numify([
             'period'     => ['start' => $start, 'end' => $end],
             'categories' => $categories,
-        ]);
+        ]));
     }
 
     /**
@@ -524,18 +584,18 @@ class ReportController extends Controller
                 orders.customer_email                           AS email,
                 orders.customer_phone                           AS phone,
                 COUNT(orders.id)                                AS order_count,
-                COALESCE(SUM(orders.total_amount), 0)           AS total_spent,
-                COALESCE(AVG(orders.total_amount), 0)           AS avg_order_value,
+                (COALESCE(SUM(orders.total_amount), 0))::float8           AS total_spent,
+                (COALESCE(AVG(orders.total_amount), 0))::float8           AS avg_order_value,
                 MAX(orders.created_at)                          AS last_order_date
             ")
-            ->orderByRaw('COALESCE(SUM(orders.total_amount), 0) DESC')
+            ->orderByRaw('(COALESCE(SUM(orders.total_amount), 0))::float8 DESC')
             ->limit($limit)
             ->get();
 
-        return response()->json([
+        return response()->json($this->numify([
             'period'    => ['start' => $start, 'end' => $end],
             'customers' => $customers,
-        ]);
+        ]));
     }
 
     /**
@@ -557,12 +617,12 @@ class ReportController extends Controller
                 outlets.name                                  AS outlet_name,
                 outlets.city,
                 COUNT(orders.id)                              AS order_count,
-                COALESCE(SUM(orders.total_amount), 0)         AS total_revenue,
-                COALESCE(AVG(orders.total_amount), 0)         AS avg_order_value,
-                COALESCE(SUM(orders.total_amount) / NULLIF(COUNT(DISTINCT DATE(orders.created_at)), 0), 0) AS avg_daily_revenue,
+                (COALESCE(SUM(orders.total_amount), 0))::float8         AS total_revenue,
+                (COALESCE(AVG(orders.total_amount), 0))::float8         AS avg_order_value,
+                (COALESCE(SUM(orders.total_amount) / NULLIF(COUNT(DISTINCT DATE(orders.created_at)), 0), 0))::float8 AS avg_daily_revenue,
                 MAX(orders.created_at)                        AS last_sale_date
             ")
-            ->orderByRaw('COALESCE(SUM(orders.total_amount), 0) DESC')
+            ->orderByRaw('(COALESCE(SUM(orders.total_amount), 0))::float8 DESC')
             ->get();
 
         if ($this->wantsExport($request)) {
@@ -573,10 +633,10 @@ class ReportController extends Controller
             );
         }
 
-        return response()->json([
+        return response()->json($this->numify([
             'period'  => ['start' => $start, 'end' => $end],
             'outlets' => $outlets,
-        ]);
+        ]));
     }
 
     /**
@@ -595,10 +655,10 @@ class ReportController extends Controller
             ->selectRaw("
                 payment_method,
                 COUNT(*) AS count,
-                COALESCE(SUM(total_amount), 0) AS total
+                (COALESCE(SUM(total_amount), 0))::float8 AS total
             ")
             ->groupBy('payment_method')
-            ->orderByRaw('COALESCE(SUM(total_amount), 0) DESC')
+            ->orderByRaw('(COALESCE(SUM(total_amount), 0))::float8 DESC')
             ->get();
 
         return response()->json([
@@ -622,8 +682,8 @@ class ReportController extends Controller
             ->whereBetween('order_returns.created_at', [$start, $end])
             ->selectRaw("
                 COUNT(*)                                        AS total_returns,
-                COALESCE(SUM(order_returns.refund_amount), 0)   AS total_refunded,
-                COALESCE(AVG(order_returns.refund_amount), 0)   AS avg_refund,
+                (COALESCE(SUM(order_returns.refund_amount), 0))::float8   AS total_refunded,
+                (COALESCE(AVG(order_returns.refund_amount), 0))::float8   AS avg_refund,
                 COUNT(DISTINCT orders.user_id)                  AS unique_customers
             ")
             ->first();
@@ -635,7 +695,7 @@ class ReportController extends Controller
             ->selectRaw("
                 return_reason AS reason,
                 COUNT(*) AS count,
-                COALESCE(SUM(refund_amount), 0) AS total_refunded
+                (COALESCE(SUM(refund_amount), 0))::float8 AS total_refunded
             ")
             ->groupBy('return_reason')
             ->orderByRaw('COUNT(*) DESC')
@@ -649,18 +709,18 @@ class ReportController extends Controller
             ->selectRaw("
                 return_items.reason,
                 COUNT(*) AS count,
-                SUM(return_items.quantity) AS total_quantity
+                (SUM(return_items.quantity))::float8 AS total_quantity
             ")
             ->groupBy('return_items.reason')
             ->orderByRaw('COUNT(*) DESC')
             ->get();
 
-        return response()->json([
+        return response()->json($this->numify([
             'period'         => ['start' => $start, 'end' => $end],
             'summary'        => $returns,
             'by_reason'      => $byReason,
             'by_item_reason' => $byItemReason,
-        ]);
+        ]));
     }
 
     // =========================================================================
@@ -780,12 +840,12 @@ class ReportController extends Controller
             ->groupBy('user_id')
             ->selectRaw("
                 user_id,
-                SUM(total_amount) AS lifetime_value,
+                (SUM(total_amount))::float8 AS lifetime_value,
                 CASE
-                    WHEN SUM(total_amount) >= 100000 THEN '100k+'
-                    WHEN SUM(total_amount) >= 50000  THEN '50k-100k'
-                    WHEN SUM(total_amount) >= 10000  THEN '10k-50k'
-                    WHEN SUM(total_amount) >= 5000   THEN '5k-10k'
+                    WHEN (SUM(total_amount))::float8 >= 100000 THEN '100k+'
+                    WHEN (SUM(total_amount))::float8 >= 50000  THEN '50k-100k'
+                    WHEN (SUM(total_amount))::float8 >= 10000  THEN '10k-50k'
+                    WHEN (SUM(total_amount))::float8 >= 5000   THEN '5k-10k'
                     ELSE 'Under 5k'
                 END AS bracket
             ")
@@ -827,14 +887,14 @@ class ReportController extends Controller
                 orders.customer_email                                AS email,
                 orders.customer_phone                                AS phone,
                 COUNT(orders.id)                                     AS order_count,
-                COALESCE(SUM(orders.total_amount), 0)                AS total_spent,
-                COALESCE(AVG(orders.total_amount), 0)                AS avg_order_value,
+                (COALESCE(SUM(orders.total_amount), 0))::float8                AS total_spent,
+                (COALESCE(AVG(orders.total_amount), 0))::float8                AS avg_order_value,
                 COALESCE(MAX(orders.total_amount), 0)                AS max_order_value,
                 MIN(orders.created_at)                               AS first_order_date,
                 MAX(orders.created_at)                               AS last_order_date,
                 EXTRACT(DAY FROM (MAX(orders.created_at) - MIN(orders.created_at))) AS customer_lifespan_days
             ")
-            ->orderByRaw('COALESCE(SUM(orders.total_amount), 0) DESC')
+            ->orderByRaw('(COALESCE(SUM(orders.total_amount), 0))::float8 DESC')
             ->limit($limit)
             ->get();
 
@@ -1115,7 +1175,7 @@ class ReportController extends Controller
             ->selectRaw("
                 transaction_type AS type,
                 COUNT(*) AS count,
-                SUM(ABS(quantity_change)) AS total_units
+                (SUM(ABS(quantity_change)))::float8 AS total_units
             ")
             ->groupBy('transaction_type')
             ->orderByRaw('COUNT(*) DESC')
@@ -1175,9 +1235,9 @@ class ReportController extends Controller
             ->selectRaw("
                 COALESCE(expense_categories.name, 'Uncategorized') AS category,
                 COUNT(*) AS count,
-                COALESCE(SUM(expenses.amount_kes), 0) AS total
+                (COALESCE(SUM(expenses.amount_kes), 0))::float8 AS total
             ")
-            ->orderByRaw('COALESCE(SUM(expenses.amount_kes), 0) DESC')
+            ->orderByRaw('(COALESCE(SUM(expenses.amount_kes), 0))::float8 DESC')
             ->get();
 
         // Tax collected
@@ -1275,7 +1335,7 @@ class ReportController extends Controller
             ->whereBetween('created_at', [$start, $end])
             ->where('payment_status', 'paid')
             ->whereRaw('UPPER(currency_code) = ?', [strtoupper($currency)])
-            ->selectRaw("TO_CHAR(created_at, 'YYYY-MM') AS month, COALESCE(SUM(total_amount), 0) AS total, COUNT(*) AS orders")
+            ->selectRaw("TO_CHAR(created_at, 'YYYY-MM') AS month, (COALESCE(SUM(total_amount), 0))::float8 AS total, COUNT(*) AS orders")
             ->groupBy(DB::raw("TO_CHAR(created_at, 'YYYY-MM')"))
             ->orderBy('month')
             ->get();
@@ -1322,14 +1382,14 @@ class ReportController extends Controller
         $monthly = DB::table('expenses')
             ->whereBetween('expense_date', [$startDate, $endDate])
             ->whereIn('status', ['approved', 'paid'])
-            ->selectRaw("TO_CHAR(expense_date::date, 'YYYY-MM') AS month, COALESCE(SUM(amount_kes), 0) AS total, COUNT(*) AS count")
+            ->selectRaw("TO_CHAR(expense_date::date, 'YYYY-MM') AS month, (COALESCE(SUM(amount_kes), 0))::float8 AS total, COUNT(*) AS count")
             ->groupBy(DB::raw("TO_CHAR(expense_date::date, 'YYYY-MM')"))
             ->orderBy('month')
             ->get();
 
         $byStatus = DB::table('expenses')
             ->whereBetween('expense_date', [$startDate, $endDate])
-            ->selectRaw("status, COUNT(*) AS count, COALESCE(SUM(amount_kes), 0) AS total")
+            ->selectRaw("status, COUNT(*) AS count, (COALESCE(SUM(amount_kes), 0))::float8 AS total")
             ->groupBy('status')
             ->get();
 
@@ -1365,16 +1425,16 @@ class ReportController extends Controller
             ->whereBetween('created_at', [$start, $end])
             ->selectRaw("
                 COUNT(*)                                                                           AS total_orders,
-                COALESCE(SUM(quantity), 0)                                                         AS total_units_planned,
-                COALESCE(SUM(CASE WHEN status = 'completed' THEN quantity ELSE 0 END), 0)          AS total_units_produced,
+                (COALESCE(SUM(quantity), 0))::float8                                                         AS total_units_planned,
+                (COALESCE(SUM(CASE WHEN status = 'completed' THEN quantity ELSE 0 END), 0))::float8          AS total_units_produced,
                 COUNT(CASE WHEN status = 'completed' THEN 1 END)                                   AS completed_count,
                 COUNT(CASE WHEN status IN ('pending','assigned','in_progress') THEN 1 END)         AS active_count,
                 COUNT(CASE WHEN status = 'qc_failed' THEN 1 END)                                   AS failed_count,
                 COUNT(CASE WHEN status = 'cancelled' THEN 1 END)                                   AS cancelled_count,
-                COALESCE(AVG(CASE WHEN status = 'completed' AND completed_at IS NOT NULL
-                    THEN EXTRACT(EPOCH FROM (completed_at - created_at)) / 3600 END), 0)           AS avg_completion_hours,
-                COALESCE(AVG(CASE WHEN due_date IS NOT NULL AND completed_at IS NOT NULL
-                    THEN EXTRACT(EPOCH FROM (due_date::timestamp - completed_at)) / 3600 END), 0)  AS avg_hours_before_deadline
+                (COALESCE(AVG(CASE WHEN status = 'completed' AND completed_at IS NOT NULL
+                    THEN EXTRACT(EPOCH FROM (completed_at - created_at)) / 3600 END), 0))::float8  AS avg_completion_hours,
+                (COALESCE(AVG(CASE WHEN due_date IS NOT NULL AND completed_at IS NOT NULL
+                    THEN EXTRACT(EPOCH FROM (due_date::timestamp - completed_at)) / 3600 END), 0))::float8 AS avg_hours_before_deadline
             ")
             ->first();
 
@@ -1408,11 +1468,11 @@ class ReportController extends Controller
                 COALESCE(product_translations.name, products.sku) AS name_en,
                 products.sku,
                 COUNT(*)                                                                         AS order_count,
-                COALESCE(SUM(production_orders.quantity), 0)                                    AS units_planned,
-                COALESCE(SUM(CASE WHEN production_orders.status = 'completed' THEN production_orders.quantity ELSE 0 END), 0) AS units_produced,
+                (COALESCE(SUM(production_orders.quantity), 0))::float8                                    AS units_planned,
+                (COALESCE(SUM(CASE WHEN production_orders.status = 'completed' THEN production_orders.quantity ELSE 0 END), 0))::float8 AS units_produced,
                 COUNT(CASE WHEN production_orders.status = 'qc_failed' THEN 1 END)              AS qc_failures,
-                COALESCE(AVG(CASE WHEN production_orders.status = 'completed' AND production_orders.completed_at IS NOT NULL
-                    THEN EXTRACT(EPOCH FROM (production_orders.completed_at - production_orders.created_at)) / 3600 END), 0) AS avg_hours
+                (COALESCE(AVG(CASE WHEN production_orders.status = 'completed' AND production_orders.completed_at IS NOT NULL
+                    THEN EXTRACT(EPOCH FROM (production_orders.completed_at - production_orders.created_at)) / 3600 END), 0))::float8 AS avg_hours
             ")
             ->orderByRaw('COUNT(*) DESC')
             ->get();
@@ -1428,8 +1488,8 @@ class ReportController extends Controller
                 users.id,
                 CONCAT(users.first_name, ' ', users.last_name)          AS tailor_name,
                 COUNT(DISTINCT production_orders.id)                     AS completed_orders,
-                COALESCE(SUM(production_orders.quantity), 0)             AS units_produced,
-                AVG(EXTRACT(EPOCH FROM (production_orders.completed_at - production_orders.created_at)) / 3600) AS avg_hours_per_order
+                (COALESCE(SUM(production_orders.quantity), 0))::float8             AS units_produced,
+                (AVG(EXTRACT(EPOCH FROM (production_orders.completed_at - production_orders.created_at)) / 3600))::float8 AS avg_hours_per_order
             ")
             ->orderByRaw('COUNT(DISTINCT production_orders.id) DESC')
             ->get();
@@ -1449,7 +1509,7 @@ class ReportController extends Controller
         // Status distribution
         $byStatus = DB::table('production_orders')
             ->whereBetween('created_at', [$start, $end])
-            ->selectRaw("status, COUNT(*) AS count, COALESCE(SUM(quantity), 0) AS units")
+            ->selectRaw("status, COUNT(*) AS count, (COALESCE(SUM(quantity), 0))::float8 AS units")
             ->groupBy('status')
             ->get();
 
@@ -1488,9 +1548,9 @@ class ReportController extends Controller
                 COUNT(*) AS total,
                 COUNT(CASE WHEN status = 'completed' THEN 1 END) AS completed,
                 COUNT(CASE WHEN status = 'qc_failed' THEN 1 END) AS qc_failed,
-                AVG(CASE WHEN status = 'completed' AND completed_at IS NOT NULL
+                (AVG(CASE WHEN status = 'completed' AND completed_at IS NOT NULL
                     THEN EXTRACT(EPOCH FROM (completed_at - created_at)) / 3600
-                    ELSE NULL END) AS avg_completion_hours
+                    ELSE NULL END))::float8 AS avg_completion_hours
             ")
             ->first();
 
@@ -1517,7 +1577,7 @@ class ReportController extends Controller
                 users.id,
                 CONCAT(users.first_name, ' ', users.last_name)   AS tailor_name,
                 COUNT(DISTINCT production_orders.id)              AS completed_orders,
-                COALESCE(SUM(production_orders.quantity), 0)      AS units_produced,
+                (COALESCE(SUM(production_orders.quantity), 0))::float8      AS units_produced,
                 AVG(EXTRACT(EPOCH FROM (production_orders.completed_at - production_orders.created_at)) / 3600) AS avg_hours_per_order
             ")
             ->orderByRaw('COUNT(DISTINCT production_orders.id) DESC')
@@ -1552,13 +1612,13 @@ class ReportController extends Controller
             ->whereBetween('created_at', [$start, $end])
             ->selectRaw("
                 COUNT(*)                                                                           AS total_orders,
-                COALESCE(SUM(total_amount), 0)                                                     AS total_value,
-                COALESCE(SUM(CASE WHEN status = 'received' THEN total_amount ELSE 0 END), 0)       AS received_value,
-                COALESCE(SUM(CASE WHEN status = 'partial'  THEN total_amount ELSE 0 END), 0)       AS partial_value,
+                (COALESCE(SUM(total_amount), 0))::float8                                                     AS total_value,
+                (COALESCE(SUM(CASE WHEN status = 'received' THEN total_amount ELSE 0 END), 0))::float8       AS received_value,
+                (COALESCE(SUM(CASE WHEN status = 'partial'  THEN total_amount ELSE 0 END), 0))::float8       AS partial_value,
                 COUNT(CASE WHEN status IN ('pending','approved','ordered') THEN 1 END)             AS pending_count,
                 COUNT(CASE WHEN status = 'received' THEN 1 END)                                    AS received_count,
                 COUNT(CASE WHEN status = 'cancelled' THEN 1 END)                                   AS cancelled_count,
-                COALESCE(AVG(total_amount), 0)                                                     AS avg_po_value,
+                (COALESCE(AVG(total_amount), 0))::float8                                                     AS avg_po_value,
                 COALESCE(AVG(CASE WHEN status = 'received' AND expected_delivery_date IS NOT NULL
                     THEN EXTRACT(DAY FROM (updated_at - created_at)) END), 0)                      AS avg_lead_days
             ")
@@ -1573,12 +1633,12 @@ class ReportController extends Controller
                 suppliers.name,
                 suppliers.email,
                 COUNT(*)                                         AS order_count,
-                COALESCE(SUM(purchase_orders.total_amount), 0)  AS total_value,
-                COALESCE(AVG(purchase_orders.total_amount), 0)  AS avg_value,
+                (COALESCE(SUM(purchase_orders.total_amount), 0))::float8  AS total_value,
+                (COALESCE(AVG(purchase_orders.total_amount), 0))::float8  AS avg_value,
                 COUNT(CASE WHEN purchase_orders.status = 'received' THEN 1 END) AS received_count,
                 COUNT(CASE WHEN purchase_orders.status IN ('pending','ordered') THEN 1 END) AS pending_count
             ")
-            ->orderByRaw('COALESCE(SUM(purchase_orders.total_amount), 0) DESC')
+            ->orderByRaw('(COALESCE(SUM(purchase_orders.total_amount), 0))::float8 DESC')
             ->get();
 
         // Monthly spend trend
@@ -1587,7 +1647,7 @@ class ReportController extends Controller
             ->selectRaw("
                 TO_CHAR(created_at, 'YYYY-MM') AS month,
                 COUNT(*) AS orders,
-                COALESCE(SUM(total_amount), 0) AS total_value
+                (COALESCE(SUM(total_amount), 0))::float8 AS total_value
             ")
             ->groupBy(DB::raw("TO_CHAR(created_at, 'YYYY-MM')"))
             ->orderBy('month')
@@ -1596,7 +1656,7 @@ class ReportController extends Controller
         // Status breakdown
         $byStatus = DB::table('purchase_orders')
             ->whereBetween('created_at', [$start, $end])
-            ->selectRaw("status, COUNT(*) AS count, COALESCE(SUM(total_amount), 0) AS total")
+            ->selectRaw("status, COUNT(*) AS count, (COALESCE(SUM(total_amount), 0))::float8 AS total")
             ->groupBy('status')
             ->get();
 
@@ -1613,11 +1673,11 @@ class ReportController extends Controller
             ->selectRaw("
                 COALESCE(product_translations.name, products.sku, 'Unknown') AS product_name,
                 products.sku,
-                SUM(purchase_order_items.quantity) AS total_quantity,
-                COALESCE(SUM(purchase_order_items.total_price), 0) AS total_spend,
+                (SUM(purchase_order_items.quantity))::float8 AS total_quantity,
+                (COALESCE(SUM(purchase_order_items.total_price), 0))::float8 AS total_spend,
                 COUNT(DISTINCT purchase_orders.id) AS po_count
             ")
-            ->orderByRaw('COALESCE(SUM(purchase_order_items.total_price), 0) DESC')
+            ->orderByRaw('(COALESCE(SUM(purchase_order_items.total_price), 0))::float8 DESC')
             ->limit(15)
             ->get();
 
@@ -1925,9 +1985,9 @@ class ReportController extends Controller
                     ->when($order->product_variant_id, fn ($q) =>
                         $q->where('order_items.product_variant_id', $order->product_variant_id))
                     ->selectRaw("
-                        SUM(order_items.quantity)         AS quantity_sold,
-                        AVG(order_items.unit_price)       AS avg_selling_price,
-                        SUM(order_items.total_price)      AS total_sales_value
+                        (SUM(order_items.quantity))::float8         AS quantity_sold,
+                        (AVG(order_items.unit_price))::float8       AS avg_selling_price,
+                        (SUM(order_items.total_price))::float8      AS total_sales_value
                     ")
                     ->first();
             }
@@ -2155,19 +2215,19 @@ class ReportController extends Controller
                 out.name                                                         AS outlet_name,
 
                 -- Material cost: allocated qty × material unit_cost
-                COALESCE(SUM(
+                (COALESCE(SUM(
                     COALESCE(ma.quantity_allocated, ma.quantity_required, 0)
                     * COALESCE(m.unit_cost, 0)
-                ), 0)                                                            AS material_cost,
+                ), 0))::float8                                                            AS material_cost,
 
                 -- Revenue: from linked order item(s)
-                COALESCE(SUM(oi.total_price), 0)                                AS revenue,
+                (COALESCE(SUM(oi.total_price), 0))::float8                                AS revenue,
 
                 -- Selling price per unit (avg)
-                COALESCE(AVG(oi.unit_price), 0)                                 AS selling_price_per_unit,
+                (COALESCE(AVG(oi.unit_price), 0))::float8                                 AS selling_price_per_unit,
 
                 -- Qty sold (from linked order)
-                COALESCE(SUM(oi.quantity), 0)                                   AS qty_sold
+                (COALESCE(SUM(oi.quantity), 0))::float8                                   AS qty_sold
             ")
             ->orderByDesc('po.created_at')
             ->get();
