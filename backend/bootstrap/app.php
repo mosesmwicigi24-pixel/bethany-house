@@ -3,6 +3,7 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Request;
 use App\Http\Middleware\EnsureTwoFactorIsSetup;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -14,6 +15,39 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Trust the reverse proxy, so $request->ip() is the REAL client.
+        //
+        // Without this, Laravel reports the immediate peer — the Docker bridge
+        // gateway nginx connects from — for every single request on the box.
+        // Twelve places depend on that value, and all of them were wrong:
+        //
+        //   • SEVEN rate limiters key ->by($request->ip()), including
+        //     'auth' at Limit::perMinute(5). One shared bucket meant ANY five
+        //     failed logins anywhere in the company locked out EVERYONE for
+        //     the rest of that minute. Five attempts is a sane per-person
+        //     limit and a crippling per-company one.
+        //   • AuditLog::ip_address recorded the gateway, so the audit trail
+        //     could not attribute an action to where it came from.
+        //   • ValidateApiKey and RestrictToIPs compare $request->ip() against
+        //     an allowlist. Both were matching on the gateway address, so an
+        //     IP allowlist either admitted every client or none — it could
+        //     never do the job it exists for.
+        //   • RoleMiddleware and LogApiRequests logged the gateway on every
+        //     security event.
+        //
+        // Trusting the proxy is safe here specifically because the container
+        // publishes to 127.0.0.1:8010 — loopback only. Nothing off the box can
+        // reach Laravel directly, so X-Forwarded-For cannot be spoofed from
+        // outside. Private ranges are listed explicitly rather than using '*',
+        // so this stays correct if the app is ever exposed more widely.
+        $middleware->trustProxies(
+            at: ['127.0.0.1', '::1', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'],
+            headers: Request::HEADER_X_FORWARDED_FOR
+                | Request::HEADER_X_FORWARDED_HOST
+                | Request::HEADER_X_FORWARDED_PORT
+                | Request::HEADER_X_FORWARDED_PROTO,
+        );
+
         $middleware->alias([
             'api.key'    => \App\Http\Middleware\ValidateApiKey::class,
             'role'       => \App\Http\Middleware\RoleMiddleware::class,
