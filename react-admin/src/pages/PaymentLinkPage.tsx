@@ -52,6 +52,8 @@ interface OrderInfo {
     business_tagline:   string | null;
     continue_url?:      string | null;
     customer_first_name?: string | null;
+    customer_name?:       string | null;
+    customer_phone?:      string | null;
     is_international:   boolean;
     expires_at?:        string | null;
 }
@@ -1128,8 +1130,17 @@ function OrderCard({ order }: { order: OrderInfo }) {
                     <div>
                         <p className="text-2xs text-surface-400 uppercase tracking-wide font-medium">Order</p>
                         <p className="text-xl font-bold font-mono text-surface-900">{order.order_number}</p>
-                        {order.customer_first_name && (
-                            <p className="text-xs text-surface-500 mt-0.5">Hi, {order.customer_first_name} 👋</p>
+                        {/* The page doubles as the customer's receipt, so it names
+                            who paid rather than only greeting them. surface-500
+                            (4.57:1) not surface-400 (3.13:1): a phone number is a
+                            value someone reads, not decoration. */}
+                        {(order.customer_name || order.customer_first_name) && (
+                            <p className="text-xs font-medium text-surface-700 mt-0.5">
+                                {order.customer_name || order.customer_first_name}
+                            </p>
+                        )}
+                        {order.customer_phone && (
+                            <p className="text-2xs text-surface-500">{order.customer_phone}</p>
                         )}
                     </div>
                     <span className={clsx("inline-flex items-center gap-1.5 text-2xs font-semibold px-2.5 py-1.5 rounded-full border whitespace-nowrap", badge.cls)}>
