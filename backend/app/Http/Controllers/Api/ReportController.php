@@ -111,11 +111,13 @@ class ReportController extends Controller
         // Sales truth (docs/REPORTS_SPEC.md): a sale is any non-voided,
         // non-cancelled order. The old payment_status='paid' filter silently
         // erased every part-paid and deposit order from "revenue".
-        $base = fn () => Order::whereBetween('created_at', [$start, $end])
-            ->whereNotIn('status', ['voided', 'cancelled'])
-            ->whereRaw('UPPER(currency_code) = ?', [$currency])
-            ->when($outletId,  fn ($q) => $q->where('outlet_id',  $outletId))
-            ->when($orderType, fn ($q) => $q->where('order_type', $orderType));
+        // Columns are qualified because $base() is joined against
+        // payment_methods below; unqualified `created_at` is ambiguous there.
+        $base = fn () => Order::whereBetween('orders.created_at', [$start, $end])
+            ->whereNotIn('orders.status', ['voided', 'cancelled'])
+            ->whereRaw('UPPER(orders.currency_code) = ?', [$currency])
+            ->when($outletId,  fn ($q) => $q->where('orders.outlet_id',  $outletId))
+            ->when($orderType, fn ($q) => $q->where('orders.order_type', $orderType));
 
         // Money truth beside it: what actually settled in the same window.
         $collected = (float) DB::table('payments as p')
@@ -141,7 +143,7 @@ class ReportController extends Controller
             COALESCE(SUM(CASE WHEN order_type = 'pos'    THEN total_amount ELSE 0 END), 0) AS pos_revenue,
             COUNT(CASE WHEN order_type = 'online' THEN 1 END)                 AS online_count,
             COUNT(CASE WHEN order_type = 'pos'    THEN 1 END)                 AS pos_count,
-            COUNT(DISTINCT user_id)                                            AS unique_customers,
+            COUNT(DISTINCT COALESCE(user_id::text, customer_phone, customer_email))                                            AS unique_customers,
             COALESCE(SUM(discount_amount) / NULLIF(SUM(total_amount + discount_amount), 0) * 100, 0) AS discount_rate_percent
         ")->first();
 
@@ -149,7 +151,7 @@ class ReportController extends Controller
             DATE(created_at)               AS date,
             COUNT(*)                       AS orders,
             COALESCE(SUM(total_amount), 0) AS revenue,
-            COUNT(DISTINCT user_id)        AS unique_customers
+            COUNT(DISTINCT COALESCE(user_id::text, customer_phone, customer_email))        AS unique_customers
         ")
             ->groupBy(DB::raw('DATE(created_at)'))
             ->orderBy('date')
@@ -165,14 +167,22 @@ class ReportController extends Controller
             ->orderBy('week_start')
             ->get();
 
+        // Resolve the DISPLAY NAME from payment_methods rather than shipping the
+        // raw code. orders.payment_method stores a code ('inmpaybill'), and the
+        // client was title-casing it into "Inmpaybill" — the correct name,
+        // "I&M Paybill", was already sitting in the payment_methods table. Left
+        // joined so a code with no row still reports, under its own code.
         $byPaymentMethod = $base()->selectRaw("
-            payment_method,
+            orders.payment_method,
+            COALESCE(pm.name, orders.payment_method) AS method_name,
+            pm.description                           AS method_description,
             COUNT(*) AS count,
-            COALESCE(SUM(total_amount), 0) AS total
+            COALESCE(SUM(orders.total_amount), 0) AS total
         ")
-            ->whereNotNull('payment_method')
-            ->groupBy('payment_method')
-            ->orderByRaw('COALESCE(SUM(total_amount), 0) DESC')
+            ->leftJoin('payment_methods as pm', 'pm.code', '=', 'orders.payment_method')
+            ->whereNotNull('orders.payment_method')
+            ->groupBy('orders.payment_method', 'pm.name', 'pm.description')
+            ->orderByRaw('COALESCE(SUM(orders.total_amount), 0) DESC')
             ->get();
 
         // Hourly distribution - useful for staffing decisions
@@ -247,6 +257,127 @@ class ReportController extends Controller
     /**
      * GET /admin/reports/sales/by-product
      */
+    /**
+     * Sales ledger — GET /reports/sales/ledger
+     *
+     * Answers "what did we sell, what did we actually collect, and what are we
+     * still owed" for each channel, at day / week / month granularity.
+     *
+     * THE COHORT DECISION, stated because it changes the numbers:
+     * cash is attributed to the period the ORDER falls in, not the period the
+     * payment landed in. A payment taken today against last week's order counts
+     * toward last week. This is deliberate — it is the only attribution under
+     * which the three figures reconcile, so every row satisfies
+     *
+     *     sales = cash + balance
+     *
+     * and "balance" means what it says: still owed on what we sold then. The
+     * alternative (bucket by payment date) answers a treasury question — how
+     * much money moved today — and would make balance meaningless per row,
+     * since a row's cash could exceed its own sales.
+     *
+     * Refunds are netted off cash (amount - refund_amount) and only settled
+     * payments count, matching the "Collected" tile on the summary.
+     */
+    public function salesLedger(Request $request)
+    {
+        [$start, $end] = $this->dateRange($request);
+        $outletId  = $request->get('outlet_id');
+        $currency  = strtoupper($request->get('currency_code', 'KES'));
+        $channels  = ['pos', 'online', 'whatsapp'];
+
+        // Cash per order: settled payments net of refunds. Computed once as a
+        // sub-select so every aggregate below reuses it instead of re-joining.
+        $cashPerOrder = DB::table('payments')
+            ->selectRaw('order_id, COALESCE(SUM(amount - COALESCE(refund_amount, 0)), 0) AS cash')
+            ->where('status', 'paid')
+            ->groupBy('order_id');
+
+        $scoped = fn (?string $channel) => Order::query()
+            ->salesChannel($channel)
+            ->whereBetween('orders.created_at', [$start, $end])
+            ->whereNotIn('orders.status', ['cancelled'])
+            ->whereRaw('UPPER(orders.currency_code) = ?', [$currency])
+            ->when($outletId, fn ($q) => $q->where('orders.outlet_id', $outletId))
+            ->leftJoinSub($cashPerOrder, 'pay', fn ($j) => $j->on('pay.order_id', '=', 'orders.id'));
+
+        $agg = "
+            COUNT(*)                                              AS orders,
+            COALESCE(SUM(orders.total_amount), 0)                 AS sales,
+            COALESCE(SUM(COALESCE(pay.cash, 0)), 0)               AS cash,
+            GREATEST(COALESCE(SUM(orders.total_amount), 0)
+                   - COALESCE(SUM(COALESCE(pay.cash, 0)), 0), 0)  AS balance
+        ";
+
+        // ── Per channel, whole period ────────────────────────────────────────
+        $byChannel = [];
+        foreach ($channels as $c) {
+            $r = $scoped($c)->selectRaw($agg)->first();
+            $byChannel[] = [
+                'channel' => $c,
+                'label'   => ['pos' => 'POS', 'online' => 'Online', 'whatsapp' => 'WhatsApp'][$c],
+                'orders'  => (int)   ($r->orders  ?? 0),
+                'sales'   => (float) ($r->sales   ?? 0),
+                'cash'    => (float) ($r->cash    ?? 0),
+                'balance' => (float) ($r->balance ?? 0),
+            ];
+        }
+
+        // ── Daily: sales, cash paid, credit ──────────────────────────────────
+        $daily = $scoped(null)
+            ->selectRaw("DATE(orders.created_at) AS date, {$agg}")
+            ->groupByRaw('DATE(orders.created_at)')
+            ->orderByRaw('DATE(orders.created_at)')
+            ->get()
+            ->map(fn ($r) => [
+                'date'   => (string) $r->date,
+                'orders' => (int)   $r->orders,
+                'sales'  => (float) $r->sales,
+                'cash'   => (float) $r->cash,
+                'credit' => (float) $r->balance,
+            ]);
+
+        // ── Weekly and monthly, each split by channel ────────────────────────
+        $bucketed = function (string $sqlBucket) use ($scoped, $agg, $channels) {
+            $rows = [];
+            foreach ($channels as $c) {
+                foreach ($scoped($c)->selectRaw("{$sqlBucket} AS bucket, {$agg}")
+                            ->groupByRaw($sqlBucket)->orderByRaw($sqlBucket)->get() as $r) {
+                    $k = (string) $r->bucket;
+                    $rows[$k] ??= ['period' => $k, 'total' => ['orders' => 0, 'sales' => 0.0, 'cash' => 0.0, 'balance' => 0.0], 'by_channel' => []];
+                    $rows[$k]['by_channel'][$c] = [
+                        'orders'  => (int)   $r->orders,
+                        'sales'   => (float) $r->sales,
+                        'cash'    => (float) $r->cash,
+                        'balance' => (float) $r->balance,
+                    ];
+                    $rows[$k]['total']['orders']  += (int)   $r->orders;
+                    $rows[$k]['total']['sales']   += (float) $r->sales;
+                    $rows[$k]['total']['cash']    += (float) $r->cash;
+                    $rows[$k]['total']['balance'] += (float) $r->balance;
+                }
+            }
+            // A channel with no orders in a bucket must still appear, or the
+            // table renders a ragged row and reads as missing data.
+            foreach ($rows as $k => $row) {
+                foreach ($channels as $c) {
+                    $rows[$k]['by_channel'][$c] ??= ['orders' => 0, 'sales' => 0.0, 'cash' => 0.0, 'balance' => 0.0];
+                }
+            }
+            ksort($rows);
+
+            return array_values($rows);
+        };
+
+        return response()->json([
+            'period'   => ['start' => $start, 'end' => $end, 'currency' => $currency],
+            'channels' => $byChannel,
+            'daily'    => $daily,
+            'weekly'   => $bucketed("TO_CHAR(DATE_TRUNC('week',  orders.created_at), 'IYYY-\"W\"IW')"),
+            'monthly'  => $bucketed("TO_CHAR(DATE_TRUNC('month', orders.created_at), 'YYYY-MM')"),
+        ]);
+    }
+
     public function salesByProduct(Request $request)
     {
         [$start, $end] = $this->dateRange($request);
@@ -744,7 +875,7 @@ class ReportController extends Controller
                 ->whereRaw("TO_CHAR(created_at, 'YYYY-MM') >= ?", [$cohortMonth])
                 ->selectRaw("
                     TO_CHAR(created_at, 'YYYY-MM') AS month,
-                    COUNT(DISTINCT user_id) AS retained
+                    COUNT(DISTINCT COALESCE(user_id::text, customer_phone, customer_email)) AS retained
                 ")
                 ->groupBy(DB::raw("TO_CHAR(created_at, 'YYYY-MM')"))
                 ->orderBy('month')

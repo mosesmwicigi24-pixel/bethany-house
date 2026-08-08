@@ -180,6 +180,44 @@ class Order extends Model
         return $query->where('status', 'pending');
     }
 
+    /**
+     * Scope to a SALES CHANNEL — pos / online / whatsapp.
+     *
+     * Channel is DERIVED, not a column: WhatsApp is either an order taken at a
+     * WhatsApp-channel outlet or one tagged order_type='whatsapp' (sold through
+     * WhatsApp but fulfilled at a physical store — channel and outlet are
+     * orthogonal), and POS is everything else of type 'pos'.
+     *
+     * This lives on the model because both OrderController (the three Sales
+     * pages) and ReportController (the sales report) must split orders the SAME
+     * way. Two copies of this rule would drift, and the first symptom would be
+     * a report whose channel totals disagree with the order list it is supposed
+     * to summarise — the kind of discrepancy that destroys trust in a report.
+     */
+    public function scopeSalesChannel($query, ?string $channel)
+    {
+        if (! in_array($channel, ['pos', 'online', 'whatsapp'], true)) {
+            return $query;
+        }
+
+        $whatsappOutletIds = \App\Models\Outlet::where('sales_channel', 'whatsapp')->pluck('id');
+
+        return match ($channel) {
+            'online'   => $query->where('order_type', 'online'),
+            'whatsapp' => $query->where(function ($q) use ($whatsappOutletIds) {
+                $q->whereIn('outlet_id', $whatsappOutletIds)
+                  ->orWhere('order_type', 'whatsapp');
+            }),
+            // whereNotIn alone would DROP orders with a NULL outlet_id: in SQL
+            // `NULL NOT IN (1)` evaluates to NULL, not true, so every POS order
+            // without an outlet silently vanished from the POS channel. The
+            // null branch is explicit.
+            'pos'      => $query->where('order_type', 'pos')
+                                ->where(fn ($q) => $q->whereNull('outlet_id')
+                                                     ->orWhereNotIn('outlet_id', $whatsappOutletIds)),
+        };
+    }
+
     public function scopePaid($query)
     {
         return $query->where('payment_status', 'paid');
