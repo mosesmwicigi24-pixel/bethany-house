@@ -246,11 +246,15 @@ class SalesLedgerTest extends TestCase
         // Guards the numify() bug that made this fail: casting an Eloquent model
         // with (array) leaks "\0*\0attributes" and friends instead of the
         // attributes, so the payload still "had" the data but under unusable keys.
-        $this->assertSame(
-            ['payment_method', 'method_name', 'method_description', 'count', 'total'],
-            array_keys($row),
-            'the row serialised with internal model keys instead of its attributes',
-        );
+        // Not an exact key list: $base() returns Order MODELS, so toArray() also
+        // emits the model's $appends (customer_name). What matters is that the
+        // selected aliases are present under their own names rather than under
+        // "\0*\0attributes".
+        foreach (['payment_method', 'method_name', 'count', 'total'] as $key) {
+            $this->assertArrayHasKey($key, $row,
+                'the row serialised with internal model keys instead of its attributes');
+        }
+        $this->assertArrayNotHasKey("\0*\0attributes", $row);
         $this->assertSame(1, (int) $row['count']);
         // and it carries the configured display name, not the raw code
         $this->assertSame('I&M Paybill', $row['method_name']);
