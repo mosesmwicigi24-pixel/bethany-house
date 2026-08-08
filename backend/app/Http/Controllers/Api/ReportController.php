@@ -136,7 +136,7 @@ class ReportController extends Controller
             (COALESCE(SUM(shipping_amount), 0))::float8                                 AS total_shipping,
             (COALESCE(SUM(tax_amount), 0))::float8                                      AS total_tax,
             (COALESCE(SUM(discount_amount), 0))::float8                                 AS total_discounts,
-            COALESCE(AVG(total_amount), 0)                                    AS average_order_value,
+            (COALESCE(AVG(total_amount), 0))::float8                                    AS average_order_value,
             COALESCE(MIN(total_amount), 0)                                    AS min_order_value,
             COALESCE(MAX(total_amount), 0)                                    AS max_order_value,
             (COALESCE(SUM(CASE WHEN order_type = 'online' THEN total_amount ELSE 0 END), 0))::float8 AS online_revenue,
@@ -144,7 +144,7 @@ class ReportController extends Controller
             COUNT(CASE WHEN order_type = 'online' THEN 1 END)                 AS online_count,
             COUNT(CASE WHEN order_type = 'pos'    THEN 1 END)                 AS pos_count,
             COUNT(DISTINCT COALESCE(user_id::text, customer_phone, customer_email))                                            AS unique_customers,
-            COALESCE(SUM(discount_amount) / NULLIF(SUM(total_amount + discount_amount), 0) * 100, 0) AS discount_rate_percent
+            (COALESCE(SUM(discount_amount) / NULLIF(SUM(total_amount + discount_amount), 0) * 100, 0))::float8 AS discount_rate_percent
         ")->first();
 
         $daily = $base()->selectRaw("
@@ -231,7 +231,7 @@ class ReportController extends Controller
                 ->selectRaw("
                     COUNT(*) AS total_orders,
                     (COALESCE(SUM(total_amount), 0))::float8 AS total_revenue,
-                    COALESCE(AVG(total_amount), 0) AS average_order_value
+                    (COALESCE(AVG(total_amount), 0))::float8 AS average_order_value
                 ")->first();
 
             $comparison = [
@@ -422,13 +422,13 @@ class ReportController extends Controller
                 order_items.sku,
                 (SUM(order_items.quantity))::float8                                          AS units_sold,
                 (COALESCE(SUM(order_items.total_price), 0))::float8                          AS total_revenue,
-                COALESCE(AVG(order_items.unit_price), 0)                           AS avg_selling_price,
+                (COALESCE(AVG(order_items.unit_price), 0))::float8                           AS avg_selling_price,
                 COALESCE(MIN(order_items.unit_price), 0)                           AS min_price,
                 COALESCE(MAX(order_items.unit_price), 0)                           AS max_price,
                 (COALESCE(SUM(order_items.discount_amount), 0))::float8                      AS total_discounts,
                 COUNT(DISTINCT orders.id)                                          AS order_count,
                 COUNT(DISTINCT orders.user_id)                                     AS unique_customers,
-                COALESCE(SUM(order_items.total_price) / NULLIF(SUM(order_items.quantity), 0), 0) AS revenue_per_unit
+                (COALESCE(SUM(order_items.total_price) / NULLIF(SUM(order_items.quantity), 0), 0))::float8 AS revenue_per_unit
             ")
             ->orderByRaw('(COALESCE(SUM(order_items.total_price), 0))::float8 DESC')
             ->limit($limit)
@@ -470,7 +470,7 @@ class ReportController extends Controller
                 categories.name_en                                          AS category_name,
                 (SUM(order_items.quantity))::float8                                   AS units_sold,
                 (COALESCE(SUM(order_items.total_price), 0))::float8                   AS total_revenue,
-                COALESCE(AVG(order_items.unit_price), 0)                    AS avg_price,
+                (COALESCE(AVG(order_items.unit_price), 0))::float8                    AS avg_price,
                 COUNT(DISTINCT orders.id)                                   AS order_count,
                 COUNT(DISTINCT order_items.product_id)                      AS product_count
             ")
@@ -525,7 +525,7 @@ class ReportController extends Controller
                 orders.customer_phone                           AS phone,
                 COUNT(orders.id)                                AS order_count,
                 (COALESCE(SUM(orders.total_amount), 0))::float8           AS total_spent,
-                COALESCE(AVG(orders.total_amount), 0)           AS avg_order_value,
+                (COALESCE(AVG(orders.total_amount), 0))::float8           AS avg_order_value,
                 MAX(orders.created_at)                          AS last_order_date
             ")
             ->orderByRaw('(COALESCE(SUM(orders.total_amount), 0))::float8 DESC')
@@ -558,8 +558,8 @@ class ReportController extends Controller
                 outlets.city,
                 COUNT(orders.id)                              AS order_count,
                 (COALESCE(SUM(orders.total_amount), 0))::float8         AS total_revenue,
-                COALESCE(AVG(orders.total_amount), 0)         AS avg_order_value,
-                COALESCE(SUM(orders.total_amount) / NULLIF(COUNT(DISTINCT DATE(orders.created_at)), 0), 0) AS avg_daily_revenue,
+                (COALESCE(AVG(orders.total_amount), 0))::float8         AS avg_order_value,
+                (COALESCE(SUM(orders.total_amount) / NULLIF(COUNT(DISTINCT DATE(orders.created_at)), 0), 0))::float8 AS avg_daily_revenue,
                 MAX(orders.created_at)                        AS last_sale_date
             ")
             ->orderByRaw('(COALESCE(SUM(orders.total_amount), 0))::float8 DESC')
@@ -623,7 +623,7 @@ class ReportController extends Controller
             ->selectRaw("
                 COUNT(*)                                        AS total_returns,
                 (COALESCE(SUM(order_returns.refund_amount), 0))::float8   AS total_refunded,
-                COALESCE(AVG(order_returns.refund_amount), 0)   AS avg_refund,
+                (COALESCE(AVG(order_returns.refund_amount), 0))::float8   AS avg_refund,
                 COUNT(DISTINCT orders.user_id)                  AS unique_customers
             ")
             ->first();
@@ -828,7 +828,7 @@ class ReportController extends Controller
                 orders.customer_phone                                AS phone,
                 COUNT(orders.id)                                     AS order_count,
                 (COALESCE(SUM(orders.total_amount), 0))::float8                AS total_spent,
-                COALESCE(AVG(orders.total_amount), 0)                AS avg_order_value,
+                (COALESCE(AVG(orders.total_amount), 0))::float8                AS avg_order_value,
                 COALESCE(MAX(orders.total_amount), 0)                AS max_order_value,
                 MIN(orders.created_at)                               AS first_order_date,
                 MAX(orders.created_at)                               AS last_order_date,
@@ -1371,10 +1371,10 @@ class ReportController extends Controller
                 COUNT(CASE WHEN status IN ('pending','assigned','in_progress') THEN 1 END)         AS active_count,
                 COUNT(CASE WHEN status = 'qc_failed' THEN 1 END)                                   AS failed_count,
                 COUNT(CASE WHEN status = 'cancelled' THEN 1 END)                                   AS cancelled_count,
-                COALESCE(AVG(CASE WHEN status = 'completed' AND completed_at IS NOT NULL
-                    THEN EXTRACT(EPOCH FROM (completed_at - created_at)) / 3600 END), 0)           AS avg_completion_hours,
-                COALESCE(AVG(CASE WHEN due_date IS NOT NULL AND completed_at IS NOT NULL
-                    THEN EXTRACT(EPOCH FROM (due_date::timestamp - completed_at)) / 3600 END), 0)  AS avg_hours_before_deadline
+                (COALESCE(AVG(CASE WHEN status = 'completed' AND completed_at IS NOT NULL
+                    THEN EXTRACT(EPOCH FROM (completed_at - created_at)) / 3600 END), 0))::float8  AS avg_completion_hours,
+                (COALESCE(AVG(CASE WHEN due_date IS NOT NULL AND completed_at IS NOT NULL
+                    THEN EXTRACT(EPOCH FROM (due_date::timestamp - completed_at)) / 3600 END), 0))::float8 AS avg_hours_before_deadline
             ")
             ->first();
 
@@ -1411,8 +1411,8 @@ class ReportController extends Controller
                 (COALESCE(SUM(production_orders.quantity), 0))::float8                                    AS units_planned,
                 (COALESCE(SUM(CASE WHEN production_orders.status = 'completed' THEN production_orders.quantity ELSE 0 END), 0))::float8 AS units_produced,
                 COUNT(CASE WHEN production_orders.status = 'qc_failed' THEN 1 END)              AS qc_failures,
-                COALESCE(AVG(CASE WHEN production_orders.status = 'completed' AND production_orders.completed_at IS NOT NULL
-                    THEN EXTRACT(EPOCH FROM (production_orders.completed_at - production_orders.created_at)) / 3600 END), 0) AS avg_hours
+                (COALESCE(AVG(CASE WHEN production_orders.status = 'completed' AND production_orders.completed_at IS NOT NULL
+                    THEN EXTRACT(EPOCH FROM (production_orders.completed_at - production_orders.created_at)) / 3600 END), 0))::float8 AS avg_hours
             ")
             ->orderByRaw('COUNT(*) DESC')
             ->get();
@@ -1429,7 +1429,7 @@ class ReportController extends Controller
                 CONCAT(users.first_name, ' ', users.last_name)          AS tailor_name,
                 COUNT(DISTINCT production_orders.id)                     AS completed_orders,
                 (COALESCE(SUM(production_orders.quantity), 0))::float8             AS units_produced,
-                AVG(EXTRACT(EPOCH FROM (production_orders.completed_at - production_orders.created_at)) / 3600) AS avg_hours_per_order
+                (AVG(EXTRACT(EPOCH FROM (production_orders.completed_at - production_orders.created_at)) / 3600))::float8 AS avg_hours_per_order
             ")
             ->orderByRaw('COUNT(DISTINCT production_orders.id) DESC')
             ->get();
@@ -1488,9 +1488,9 @@ class ReportController extends Controller
                 COUNT(*) AS total,
                 COUNT(CASE WHEN status = 'completed' THEN 1 END) AS completed,
                 COUNT(CASE WHEN status = 'qc_failed' THEN 1 END) AS qc_failed,
-                AVG(CASE WHEN status = 'completed' AND completed_at IS NOT NULL
+                (AVG(CASE WHEN status = 'completed' AND completed_at IS NOT NULL
                     THEN EXTRACT(EPOCH FROM (completed_at - created_at)) / 3600
-                    ELSE NULL END) AS avg_completion_hours
+                    ELSE NULL END))::float8 AS avg_completion_hours
             ")
             ->first();
 
@@ -1558,7 +1558,7 @@ class ReportController extends Controller
                 COUNT(CASE WHEN status IN ('pending','approved','ordered') THEN 1 END)             AS pending_count,
                 COUNT(CASE WHEN status = 'received' THEN 1 END)                                    AS received_count,
                 COUNT(CASE WHEN status = 'cancelled' THEN 1 END)                                   AS cancelled_count,
-                COALESCE(AVG(total_amount), 0)                                                     AS avg_po_value,
+                (COALESCE(AVG(total_amount), 0))::float8                                                     AS avg_po_value,
                 COALESCE(AVG(CASE WHEN status = 'received' AND expected_delivery_date IS NOT NULL
                     THEN EXTRACT(DAY FROM (updated_at - created_at)) END), 0)                      AS avg_lead_days
             ")
@@ -1574,7 +1574,7 @@ class ReportController extends Controller
                 suppliers.email,
                 COUNT(*)                                         AS order_count,
                 (COALESCE(SUM(purchase_orders.total_amount), 0))::float8  AS total_value,
-                COALESCE(AVG(purchase_orders.total_amount), 0)  AS avg_value,
+                (COALESCE(AVG(purchase_orders.total_amount), 0))::float8  AS avg_value,
                 COUNT(CASE WHEN purchase_orders.status = 'received' THEN 1 END) AS received_count,
                 COUNT(CASE WHEN purchase_orders.status IN ('pending','ordered') THEN 1 END) AS pending_count
             ")
@@ -2164,7 +2164,7 @@ class ReportController extends Controller
                 (COALESCE(SUM(oi.total_price), 0))::float8                                AS revenue,
 
                 -- Selling price per unit (avg)
-                COALESCE(AVG(oi.unit_price), 0)                                 AS selling_price_per_unit,
+                (COALESCE(AVG(oi.unit_price), 0))::float8                                 AS selling_price_per_unit,
 
                 -- Qty sold (from linked order)
                 (COALESCE(SUM(oi.quantity), 0))::float8                                   AS qty_sold
