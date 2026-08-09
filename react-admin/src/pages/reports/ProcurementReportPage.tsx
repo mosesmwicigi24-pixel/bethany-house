@@ -1,7 +1,11 @@
 // src/pages/reports/ProcurementReportPage.tsx
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { reportsApi } from "@/api/reports";
+import {
+    reportsApi,
+    type SeasonalDemandProductRow,
+} from "@/api/reports";
 import { fmtKes } from "@/api/expenses";
 import { Spinner } from "@/components/ui/Spinner";
 import { clsx } from "clsx";
@@ -40,11 +44,32 @@ import {
     TH_R,
 } from "./reportShared";
 
+type ProcurementTab =
+    | "overview"
+    | "suppliers"
+    | "items"
+    | "intelligence"
+    | "seasonal";
+const PROCUREMENT_TABS: readonly ProcurementTab[] = [
+    "overview",
+    "suppliers",
+    "items",
+    "intelligence",
+    "seasonal",
+];
+
 export default function ProcurementReportPage() {
     const dr = useDateRange("this_month");
-    const [activeTab, setActiveTab] = useState<
-        "overview" | "suppliers" | "items" | "intelligence"
-    >("overview");
+    // Honour deep-links like /reports/procurement?tab=seasonal (the attention
+    // feed sends users here) — read once on mount, same pattern as
+    // CustomersReportPage; after that the tab buttons own the state.
+    const [searchParams] = useSearchParams();
+    const [activeTab, setActiveTab] = useState<ProcurementTab>(() => {
+        const t = searchParams.get("tab");
+        return PROCUREMENT_TABS.includes(t as ProcurementTab)
+            ? (t as ProcurementTab)
+            : "overview";
+    });
 
     const { data, isLoading } = useQuery({
         queryKey: ["report-procurement", dr.start, dr.end],
@@ -149,7 +174,7 @@ export default function ProcurementReportPage() {
             {/* Tabs */}
             <div className="border-b border-line overflow-x-auto no-scrollbar">
                 <nav className="flex gap-1 -mb-px">
-                    {(["overview", "suppliers", "items", "intelligence"] as const).map(
+                    {PROCUREMENT_TABS.map(
                         (tab) => (
                             <button
                                 key={tab}
@@ -171,6 +196,8 @@ export default function ProcurementReportPage() {
             {activeTab === "intelligence" && (
                 <ProcurementIntelligence start={dr.start} end={dr.end} />
             )}
+
+            {activeTab === "seasonal" && <SeasonalDemandTab />}
 
             {/* ── OVERVIEW ── */}
             {activeTab === "overview" && (
@@ -457,6 +484,246 @@ export default function ProcurementReportPage() {
 // Supplier scorecard from POs + goods-received notes (actual delivery days vs
 // the promise, rejections at the door) and a grounded buy list: reorder
 // buffer + open production demand − available, priced at the last real price.
+
+// ─── Seasonal demand tab ──────────────────────────────────────────────────────
+// The liturgical year as a demand plan: upcoming seasons (Advent, Lent, Holy
+// Week…), each product's historical seasonal lift, the projected units vs
+// stock on hand, and the date every PO must leave by given supplier lead
+// times. Pre-import (no history) it invites the legacy import instead.
+
+function SeasonalDemandTab() {
+    const { data, isLoading } = useQuery({
+        queryKey: ["seasonal-demand"],
+        queryFn: () => reportsApi.seasonalDemand(),
+        staleTime: 60_000,
+    });
+    if (isLoading || !data)
+        return (
+            <div className="flex justify-center py-16">
+                <Spinner />
+            </div>
+        );
+
+    const { seasons, summary } = data;
+
+    if (summary.history_depth_days === 0) {
+        return (
+            <div className="card p-8 text-center space-y-3">
+                <p className="text-base font-semibold text-surface-800">
+                    Import legacy history to unlock projections
+                </p>
+                <p className="text-sm text-surface-500 max-w-xl mx-auto">
+                    Seasonal demand planning learns each product's Advent,
+                    Lent and Holy Week surge from past liturgical years — and
+                    the hub's own orders are still too young to have seen one.
+                    Export daily sales from the legacy POS and run{" "}
+                    <code className="font-mono text-xs bg-surface-100 px-1.5 py-0.5 rounded">
+                        php artisan seasonal:import-legacy export.json
+                    </code>{" "}
+                    to light this tab up.
+                </p>
+                {seasons.length > 0 && (
+                    <p className="text-xs text-surface-400">
+                        Coming up:{" "}
+                        {seasons
+                            .map(
+                                (s) =>
+                                    `${s.label} (${dayjs(s.start).format("D MMM")})`,
+                            )
+                            .join(" · ")}
+                    </p>
+                )}
+            </div>
+        );
+    }
+
+    const urgencyClass = (days: number) =>
+        days <= 7
+            ? "text-danger font-semibold"
+            : days <= 14
+              ? "text-warning font-semibold"
+              : "text-surface-600";
+
+    return (
+        <div className="space-y-6">
+            {/* Season timeline strip */}
+            <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1">
+                {seasons.map((s) => (
+                    <div
+                        key={`${s.key}-${s.start}`}
+                        className={clsx(
+                            "card px-4 py-3 min-w-[170px] shrink-0",
+                            s.sub_of && "border-dashed",
+                        )}
+                    >
+                        <p className="text-sm font-semibold text-surface-800">
+                            {s.label}
+                        </p>
+                        <p className="text-xs text-surface-500">
+                            {dayjs(s.start).format("D MMM")} –{" "}
+                            {dayjs(s.end).format("D MMM YYYY")}
+                        </p>
+                        <p className="text-xs mt-1">
+                            {s.days_until_start === 0 ? (
+                                <span className="text-success font-medium">
+                                    underway
+                                </span>
+                            ) : (
+                                <span className="text-surface-500">
+                                    in{" "}
+                                    <span className="font-semibold text-surface-700 tabular-nums">
+                                        {s.days_until_start}d
+                                    </span>
+                                </span>
+                            )}
+                            {s.sub_of && (
+                                <span className="text-surface-400">
+                                    {" "}
+                                    · within Lent
+                                </span>
+                            )}
+                        </p>
+                    </div>
+                ))}
+            </div>
+
+            {/* KPI row */}
+            <div className={KPI_GRID}>
+                <KpiCard
+                    label="Next Season"
+                    value={summary.next_season?.label ?? "—"}
+                    sub={
+                        summary.next_season
+                            ? `starts ${dayjs(summary.next_season.start).format("D MMM YYYY")}`
+                            : undefined
+                    }
+                />
+                <KpiCard
+                    label="Gap Value (est.)"
+                    value={fmtKes(summary.total_gap_value)}
+                    color={
+                        summary.total_gap_value > 0
+                            ? "text-warning"
+                            : "text-success"
+                    }
+                />
+                <KpiCard
+                    label="Urgent Order-bys"
+                    value={summary.urgent_orders}
+                    color={
+                        summary.urgent_orders > 0
+                            ? "text-danger"
+                            : "text-success"
+                    }
+                    sub="order window within 14 days"
+                />
+            </div>
+
+            {/* Per-season product tables */}
+            {seasons.map((s) => (
+                <div key={`${s.key}-${s.start}-table`} className="card card-body">
+                    <SectionHeader
+                        title={`${s.label} — ${dayjs(s.start).format("D MMM")} to ${dayjs(s.end).format("D MMM YYYY")}`}
+                    />
+                    {s.products.length === 0 ? (
+                        <p className="text-xs text-surface-400 py-4">
+                            No seasonal sales history for {s.label} yet —
+                            projections appear once a prior {s.label} exists in
+                            hub or imported legacy history.
+                        </p>
+                    ) : (
+                        <TableWrapper>
+                            <table className="w-full text-xs">
+                                <thead>
+                                    <tr>
+                                        <th className={TH}>Product</th>
+                                        <th className={TH_R}>Lift</th>
+                                        <th className={TH_R}>Projected</th>
+                                        <th className={TH_R}>Stock</th>
+                                        <th className={TH_R}>Gap</th>
+                                        <th className={TH}>Order By</th>
+                                        <th className={TH_R}>Est. Gap KES</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-line">
+                                    {s.products.map(
+                                        (r: SeasonalDemandProductRow) => (
+                                            <tr key={r.product_id}>
+                                                <td className="px-3 py-2">
+                                                    <p className="font-medium text-surface-800">
+                                                        {r.name}
+                                                    </p>
+                                                    {r.basis ===
+                                                        "historical" && (
+                                                        <p className="text-2xs text-surface-400">
+                                                            from legacy rate —
+                                                            no recent hub sales
+                                                        </p>
+                                                    )}
+                                                </td>
+                                                <td className="px-3 py-2 text-right tabular-nums font-semibold text-brand-700">
+                                                    {Number(r.lift).toFixed(1)}
+                                                    ×
+                                                </td>
+                                                <td className="px-3 py-2 text-right tabular-nums">
+                                                    {r.projected_units.toLocaleString()}
+                                                </td>
+                                                <td className="px-3 py-2 text-right tabular-nums text-surface-500">
+                                                    {r.stock.toLocaleString()}
+                                                </td>
+                                                <td
+                                                    className={clsx(
+                                                        "px-3 py-2 text-right tabular-nums",
+                                                        r.gap > 0
+                                                            ? "font-bold text-warning"
+                                                            : "text-surface-400",
+                                                    )}
+                                                >
+                                                    {r.gap.toLocaleString()}
+                                                </td>
+                                                <td className="px-3 py-2">
+                                                    {r.gap > 0 ? (
+                                                        <span
+                                                            className={urgencyClass(
+                                                                r.days_until_order_by,
+                                                            )}
+                                                        >
+                                                            {dayjs(
+                                                                r.order_by,
+                                                            ).format("D MMM")}
+                                                            {r.days_until_order_by <
+                                                            0
+                                                                ? " · overdue"
+                                                                : ` · ${r.days_until_order_by}d`}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-surface-300">
+                                                            covered
+                                                        </span>
+                                                    )}
+                                                    <p className="text-2xs text-surface-400">
+                                                        lead {r.lead_days}d
+                                                    </p>
+                                                </td>
+                                                <td className="px-3 py-2 text-right tabular-nums font-semibold">
+                                                    {r.gap > 0
+                                                        ? fmtKes(
+                                                              r.est_gap_value,
+                                                          )
+                                                        : "—"}
+                                                </td>
+                                            </tr>
+                                        ),
+                                    )}
+                                </tbody>
+                            </table>
+                        </TableWrapper>
+                    )}
+                </div>
+            ))}
+        </div>
+    );
+}
 
 function ProcurementIntelligence({ start, end }: { start: string; end: string }) {
     const { data, isLoading } = useQuery({
