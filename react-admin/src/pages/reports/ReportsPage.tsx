@@ -5,7 +5,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { reportsApi } from "@/api/reports";
+import { reportsApi, type EngineRoomSummaries } from "@/api/reports";
 import { purchaseOrderApi } from "@/api/procurement";
 import { fmtKes } from "@/api/expenses";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -207,6 +207,161 @@ function AttentionPanel({ items }: { items: any[] }) {
     );
 }
 
+// ─── Engine room strip ────────────────────────────────────────────────────────
+// The revenue engines, always on the Overview: one compact card per engine
+// with its headline KES number and a click-through to the tab that explains
+// it. Data comes from GET /reports/engine-room — six summaries in one call;
+// an engine that failed server-side arrives as null and renders a "—" card.
+
+/** "KES 1.2M" instead of fmtKes's full "KES 1,234,567.00" — strip cards are small. */
+function kesCompact(amount: number | null | undefined): string {
+    if (amount == null) return "—";
+    return (
+        "KES " +
+        new Intl.NumberFormat("en-KE", {
+            notation: "compact",
+            maximumFractionDigits: 1,
+        }).format(Number(amount))
+    );
+}
+
+function daysUntil(date: string): number {
+    return Math.max(
+        0,
+        Math.ceil((new Date(date).getTime() - Date.now()) / 86_400_000),
+    );
+}
+
+function EngineCard({ icon, label, value, sub, to, zero = false }: {
+    icon: string; label: string; value: string; sub: string; to: string; zero?: boolean;
+}) {
+    const navigate = useNavigate();
+    return (
+        <button
+            onClick={() => navigate(to)}
+            className="card card-body text-left transition-shadow hover:shadow-md cursor-pointer"
+        >
+            <div className="flex items-center gap-1.5">
+                <span className="text-base leading-none" aria-hidden="true">{icon}</span>
+                <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest truncate">{label}</p>
+            </div>
+            <p className={clsx(
+                "text-lg font-bold tabular-nums mt-1 truncate",
+                zero || value === "—" ? "text-surface-400" : "text-surface-900",
+            )}>
+                {value}
+            </p>
+            <p className="text-2xs text-surface-400 truncate mt-0.5">{sub}</p>
+        </button>
+    );
+}
+
+function EngineRoomStrip() {
+    const { data, isLoading } = useQuery<EngineRoomSummaries>({
+        queryKey: ["engine-room"],
+        queryFn: () => reportsApi.engineRoom(),
+        staleTime: 5 * 60_000,
+    });
+
+    const collections = data?.collections ?? null;
+    const stockout = data?.stockout ?? null;
+    const winback = data?.winback ?? null;
+    const attach = data?.attach ?? null;
+    const radar = data?.replenishment ?? null;
+    const seasonal = data?.seasonal ?? null;
+
+    return (
+        <div>
+            <div className="flex items-center gap-2 mb-2">
+                <span aria-hidden="true">⚙️</span>
+                <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest">Revenue engines</p>
+            </div>
+            {isLoading || !data ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                        <div key={i} className="card card-body animate-pulse">
+                            <div className="h-3 w-2/3 bg-surface-100 rounded" />
+                            <div className="h-5 w-1/2 bg-surface-100 rounded mt-2" />
+                            <div className="h-3 w-full bg-surface-100 rounded mt-1.5" />
+                        </div>
+                    ))}
+                </div>
+            ) : (
+                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+                    <EngineCard
+                        icon="💰"
+                        label="Money on the Table"
+                        value={collections ? kesCompact(collections.money_on_table) : "—"}
+                        sub={collections
+                            ? `${collections.open_quotes.count} quotes · ${collections.unpaid_balances.count} unpaid balances`
+                            : "unavailable right now"}
+                        zero={!collections || collections.money_on_table <= 0}
+                        to="/reports/sales?tab=collections"
+                    />
+                    <EngineCard
+                        icon="📉"
+                        label="Bleeding Now"
+                        value={stockout ? `${kesCompact(stockout.est_daily_loss_now)}/day` : "—"}
+                        sub={stockout
+                            ? `${stockout.products_currently_out} product${stockout.products_currently_out === 1 ? "" : "s"} out now`
+                            : "unavailable right now"}
+                        zero={!stockout || stockout.est_daily_loss_now <= 0}
+                        to="/reports/inventory?tab=intelligence"
+                    />
+                    <EngineCard
+                        icon="🔄"
+                        label="Value at Risk"
+                        value={winback ? kesCompact(winback.annual_value_at_risk) : "—"}
+                        sub={winback
+                            ? `${winback.customers_at_risk} customers · ${kesCompact(winback.recovered_revenue_90d)} recovered 90d`
+                            : "unavailable right now"}
+                        zero={!winback || winback.annual_value_at_risk <= 0}
+                        to="/reports/customers?tab=winback"
+                    />
+                    <EngineCard
+                        icon="🛒"
+                        label="Missed Attach"
+                        value={attach ? kesCompact(attach.missed_revenue_estimate_total) : "—"}
+                        sub={attach?.top_pair
+                            ? `best pair: ${attach.top_pair.anchor} → ${attach.top_pair.companion} ${attach.top_pair.attach_rate}%`
+                            : attach ? "not enough basket history yet" : "unavailable right now"}
+                        zero={!attach || attach.missed_revenue_estimate_total <= 0}
+                        to="/reports/sales?tab=basket"
+                    />
+                    <EngineCard
+                        icon="🎯"
+                        label="Radar"
+                        value={radar ? kesCompact(radar.expected_revenue) : "—"}
+                        sub={radar
+                            ? `${radar.due_pairs} due · pings 30d: ${radar.pings_30d}`
+                            : "unavailable right now"}
+                        zero={!radar || radar.expected_revenue <= 0}
+                        to="/reports/customers?tab=replenishment"
+                    />
+                    <EngineCard
+                        icon="⛪"
+                        label="Seasonal"
+                        value={seasonal
+                            ? seasonal.history_depth_days === 0
+                                ? "—"
+                                : kesCompact(seasonal.total_gap_value)
+                            : "—"}
+                        sub={seasonal
+                            ? seasonal.history_depth_days === 0
+                                ? "import legacy history to unlock"
+                                : seasonal.next_season
+                                  ? `${seasonal.next_season.label} in ${daysUntil(seasonal.next_season.start)}d · stock gap`
+                                  : "no season in the next 120 days"
+                            : "unavailable right now"}
+                        zero={!seasonal || seasonal.history_depth_days === 0 || seasonal.total_gap_value <= 0}
+                        to="/reports/procurement?tab=seasonal"
+                    />
+                </div>
+            )}
+        </div>
+    );
+}
+
 // ─── Drill-down modal: the rows behind the number ─────────────────────────────
 // Spec rule 3: a figure with no drill-down is a rumour. The modal lists the
 // exact source rows the KPI summed, paginated; tapping a row opens the record.
@@ -364,6 +519,8 @@ function ExecutiveOverview() {
             ) : (
                 <>
                     <AttentionPanel items={data.attention ?? []} />
+
+                    <EngineRoomStrip />
 
                     {/* One continuous grid: the whole screen is the dashboard.
                         2-up on phones, 4-up on laptops, 8-up on big displays. */}

@@ -806,6 +806,10 @@ function ReplenishmentRadarTab() {
 
     return (
         <div className="space-y-6">
+            <div className="flex justify-end">
+                <ExportCsvButton path="replenishment" params={{}} />
+            </div>
+
             <div className={KPI_GRID}>
                 <KpiCard
                     label="Customers Due"
@@ -1039,6 +1043,10 @@ function WinBackTab() {
 
     return (
         <div className="space-y-6">
+            <div className="flex justify-end">
+                <ExportCsvButton path="win-back" params={{}} />
+            </div>
+
             <div className={KPI_GRID}>
                 <KpiCard
                     label="Value at Risk"
@@ -1275,6 +1283,10 @@ function InstitutionsTab() {
 
     return (
         <div className="space-y-6">
+            <div className="flex justify-end">
+                <ExportCsvButton path="institutions" params={{}} />
+            </div>
+
             <div className={KPI_GRID}>
                 <KpiCard
                     label="Institutions"

@@ -119,6 +119,15 @@ export const reportsApi = {
     logWinBackOutreach: (payload: WinBackOutreachPayload) =>
         post<WinBackOutreachResult>(`${BASE}/win-back/outreach`, payload),
 
+    // Engine Room — the Overview strip: the six revenue-engine summaries in
+    // one lightweight call (each engine is cached or summary-sized on the
+    // server; an engine that fails arrives as null and renders a "—" card
+    // instead of breaking the Overview).
+    engineRoom: (outletId?: number) =>
+        get<EngineRoomSummaries>(`${BASE}/engine-room`, {
+            params: { ...(outletId ? { outlet_id: outletId } : {}) },
+        }),
+
     // Financial intelligence (reports.financial): earned P&L, budgets, cash flow, rails.
     financialIntelligence: (from: string, to: string) =>
         get<any>(`${BASE}/financial-intelligence`, { params: { period: "custom", from, to } }),
@@ -920,6 +929,20 @@ export interface WinBackReport {
         win_back_rate_pct: number;
     };
     customers: WinBackCustomerRow[];
+}
+
+// ── Engine room ───────────────────────────────────────────────────────────────
+// The six revenue-engine summaries the Overview strip renders. Each key is the
+// engine's own summary shape, or null when that engine failed server-side —
+// one broken engine degrades to a "—" card, never a broken Overview.
+
+export interface EngineRoomSummaries {
+    collections: CollectionsFunnel["summary"] | null;
+    stockout: StockoutLossReport["summary"] | null;
+    winback: WinBackReport["summary"] | null;
+    attach: AttachRatesReport["summary"] | null;
+    replenishment: ReplenishmentRadar["summary"] | null;
+    seasonal: SeasonalDemandReport["summary"] | null;
 }
 
 export interface WinBackOutreachPayload {

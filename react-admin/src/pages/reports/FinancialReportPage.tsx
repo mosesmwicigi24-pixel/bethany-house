@@ -1,5 +1,6 @@
 // src/pages/reports/FinancialReportPage.tsx
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { reportsApi } from "@/api/reports";
 import { fmtKes } from "@/api/expenses";
@@ -266,8 +267,8 @@ export default function FinancialReportPage() {
                         </SectionHeader>
                         <div className="divide-y divide-line">
                             {plRows.map((row, i) => (
+                                <div key={i}>
                                 <div
-                                    key={i}
                                     className={clsx(
                                         "flex justify-between items-center py-3",
                                         row.indent === 1 ? "pl-6" : "",
@@ -332,6 +333,29 @@ export default function FinancialReportPage() {
                                                 : fmtKes(row.value)}
                                         </span>
                                     </div>
+                                </div>
+                                {/* Honesty note: COGS can only be as complete
+                                    as the price book — lines sold without a
+                                    cost price contribute zero COGS, which
+                                    silently overstates the margin. */}
+                                {row.label === "(–) Cost of Goods Sold" &&
+                                    Number(pl.unpriced_lines ?? 0) > 0 && (
+                                        <div className="flex items-start gap-2 mb-3 ml-6 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+                                            <span aria-hidden="true">⚠️</span>
+                                            <p className="text-xs text-amber-800">
+                                                {Number(pl.unpriced_lines).toLocaleString()}{" "}
+                                                sold line{Number(pl.unpriced_lines) === 1 ? " has" : "s have"}{" "}
+                                                no cost price — margin is overstated.{" "}
+                                                <Link
+                                                    to="/catalogue/products"
+                                                    className="font-semibold underline hover:text-amber-900"
+                                                >
+                                                    Add costs in Catalogue → Pricing
+                                                </Link>
+                                                .
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                         </div>
