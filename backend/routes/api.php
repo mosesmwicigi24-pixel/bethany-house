@@ -1210,6 +1210,9 @@ Route::prefix('v1')->group(function () {
                     Route::get('/by-outlet',         [ReportController::class, 'salesByOutlet']);
                     Route::get('/by-payment-method', [ReportController::class, 'salesByPaymentMethod']);
                     Route::get('/returns',           [ReportController::class, 'salesReturns']);
+                    // Neema (AI agent) performance: leads funnel, lead→order
+                    // conversion, WhatsApp revenue, contacts, message volume.
+                    Route::get('/neema',             [ReportController::class, 'salesNeema']);
                 });
                 Route::prefix('customers')->group(function () {
                     Route::get('/analytics',      [ReportController::class, 'customerAnalytics']);

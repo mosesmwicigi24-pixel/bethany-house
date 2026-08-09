@@ -507,6 +507,187 @@ class ReportController extends Controller
         ]));
     }
 
+    /**
+     * Neema performance — GET /reports/sales/neema
+     *
+     * The AI agent's sales funnel for the period: leads captured, how many
+     * turned into an order within 14 days, WhatsApp-channel revenue, contact
+     * growth per messaging platform, and message volume.
+     *
+     * DATA HONESTY, stated because it changes how the numbers read:
+     *  - Message volume for the PERIOD comes from channel_touchpoint_daily,
+     *    which collects deltas from the day it deployed. Anything earlier is
+     *    only available as the cumulative all-time totals in
+     *    channel_touchpoints, returned separately and labeled all_time.
+     *  - Lead→order conversion joins on normalize_phone(): a lead whose order
+     *    was recorded under a different number (or none) will not be counted.
+     *    Treat conversion as a floor, not an exact figure.
+     *  - WhatsApp revenue uses Order::scopeSalesChannel('whatsapp'), the same
+     *    rule as the sales ledger and the Sales pages, so the numbers agree
+     *    across screens.
+     */
+    public function salesNeema(Request $request)
+    {
+        [$start, $end] = $this->dateRange($request);
+        $currency  = strtoupper($request->get('currency_code', $request->get('currency', 'KES')));
+        $startDate = substr($start, 0, 10);
+        $endDate   = substr($end, 0, 10);
+
+        // ── Leads funnel ─────────────────────────────────────────────────────
+        $leadBase = fn () => DB::table('leads')->whereBetween('created_at', [$start, $end]);
+
+        $totalLeads = (int) $leadBase()->count();
+
+        // Every pipeline stage always appears, zero or not — a missing stage
+        // reads as missing data, not as an empty one.
+        $byStatus = array_fill_keys(['new', 'assigned', 'quoted', 'won', 'lost'], 0);
+        foreach ($leadBase()->selectRaw('status, COUNT(*) AS n')->groupBy('status')->get() as $r) {
+            $byStatus[$r->status] = (int) $r->n;
+        }
+
+        $byIntent = $leadBase()
+            ->selectRaw('intent, COUNT(*) AS count')
+            ->groupBy('intent')
+            ->orderByDesc(DB::raw('COUNT(*)'))
+            ->limit(5)
+            ->get()
+            ->map(fn ($r) => ['intent' => $r->intent, 'count' => (int) $r->count]);
+
+        // ── Lead → order conversion (14-day window, phone join) ─────────────
+        $matchSql = "normalize_phone(l.phone) = normalize_phone(o.customer_phone)
+                     AND o.created_at >= l.created_at
+                     AND o.created_at <= l.created_at + interval '14 days'";
+
+        $converted = (int) DB::table('leads as l')
+            ->whereBetween('l.created_at', [$start, $end])
+            ->whereExists(fn ($q) => $q->select(DB::raw(1))->from('orders as o')
+                ->whereNotIn('o.status', ['voided', 'cancelled'])
+                ->whereRaw($matchSql))
+            ->count();
+
+        // Revenue over DISTINCT matched orders — a join-then-SUM would count an
+        // order once per lead it matches, and one person can send two leads.
+        $convOrders = DB::table('orders as o')
+            ->whereNotIn('o.status', ['voided', 'cancelled'])
+            ->whereExists(fn ($q) => $q->select(DB::raw(1))->from('leads as l')
+                ->whereBetween('l.created_at', [$start, $end])
+                ->whereRaw($matchSql))
+            ->selectRaw('COUNT(*) AS orders, (COALESCE(SUM(o.total_amount), 0))::float8 AS revenue')
+            ->first();
+
+        // ── WhatsApp-channel sales (same rule as the ledger) ─────────────────
+        $paidPerOrder = DB::table('payments')
+            ->selectRaw('order_id, (COALESCE(SUM(amount - COALESCE(refund_amount, 0)), 0))::float8 AS paid')
+            ->where('status', 'paid')
+            ->where(fn ($q) => $q->where('requires_approval', false)
+                                 ->orWhereNull('requires_approval')
+                                 ->orWhere('approval_status', 'approved'))
+            ->groupBy('order_id');
+
+        $wa = Order::query()
+            ->salesChannel('whatsapp')
+            ->whereBetween('orders.created_at', [$start, $end])
+            ->whereNotIn('orders.status', ['voided', 'cancelled'])
+            ->whereRaw('UPPER(orders.currency_code) = ?', [$currency])
+            ->leftJoinSub($paidPerOrder, 'pay', fn ($j) => $j->on('pay.order_id', '=', 'orders.id'))
+            ->selectRaw('
+                COUNT(*)                                                        AS orders,
+                (COALESCE(SUM(orders.total_amount), 0))::float8                 AS revenue,
+                (COALESCE(SUM(COALESCE(pay.paid, 0)), 0))::float8               AS paid,
+                GREATEST((COALESCE(SUM(orders.total_amount), 0))::float8
+                       - (COALESCE(SUM(COALESCE(pay.paid, 0)), 0))::float8, 0)  AS balance
+            ')
+            ->first();
+
+        // ── Contacts per messaging platform ──────────────────────────────────
+        $messagingChannels = ['whatsapp', 'messenger', 'instagram', 'facebook'];
+        $contactRows = DB::table('channel_touchpoints')
+            ->selectRaw('
+                channel,
+                COUNT(*)                                                    AS contacts,
+                COUNT(customer_id)                                          AS matched,
+                COUNT(*) FILTER (WHERE first_seen >= ? AND first_seen <= ?) AS new_contacts,
+                COUNT(*) FILTER (WHERE last_seen  >= ? AND last_seen  <= ?) AS active_contacts
+            ', [$start, $end, $start, $end])
+            ->groupBy('channel')
+            ->get()
+            ->keyBy('channel');
+
+        $contacts = [];
+        foreach ($messagingChannels as $ch) {
+            $r = $contactRows->get($ch);
+            $all = (int) ($r->contacts ?? 0);
+            $contacts[] = [
+                'channel'         => $ch,
+                'new_contacts'    => (int) ($r->new_contacts ?? 0),
+                'active_contacts' => (int) ($r->active_contacts ?? 0),
+                'contacts'        => $all,     // all-time contact base on this channel
+                'matched'         => (int) ($r->matched ?? 0),
+                'match_rate'      => $all > 0 ? round((int) $r->matched / $all * 100, 1) : null,
+            ];
+        }
+
+        // ── Message volume ───────────────────────────────────────────────────
+        // Period figures come from the daily snapshots and only exist from the
+        // day channel_touchpoint_daily deployed; daily_since tells the client
+        // where the sliceable history actually starts.
+        $periodVolumeRows = DB::table('channel_touchpoint_daily')
+            ->whereBetween('date', [$startDate, $endDate])
+            ->selectRaw('channel, (COALESCE(SUM(messages),0))::int AS messages, (COALESCE(SUM(inbound),0))::int AS inbound')
+            ->groupBy('channel')
+            ->get()
+            ->keyBy('channel');
+
+        $allTimeRows = DB::table('channel_touchpoints')
+            ->selectRaw('channel, (COALESCE(SUM(messages),0))::int AS messages, (COALESCE(SUM(inbound),0))::int AS inbound')
+            ->groupBy('channel')
+            ->get()
+            ->keyBy('channel');
+
+        $messageVolume = [];
+        foreach ($messagingChannels as $ch) {
+            $p = $periodVolumeRows->get($ch);
+            $a = $allTimeRows->get($ch);
+            $messageVolume[] = [
+                'channel'  => $ch,
+                'period'   => ['messages' => (int) ($p->messages ?? 0), 'inbound' => (int) ($p->inbound ?? 0)],
+                'all_time' => ['messages' => (int) ($a->messages ?? 0), 'inbound' => (int) ($a->inbound ?? 0)],
+            ];
+        }
+
+        $dailySince = DB::table('channel_touchpoint_daily')->min('date');
+
+        return response()->json($this->numify([
+            'period'   => ['start' => $start, 'end' => $end, 'currency' => $currency],
+            'leads'    => [
+                'total'     => $totalLeads,
+                'by_status' => $byStatus,
+                'by_intent' => $byIntent,
+                'won_rate'  => $totalLeads > 0 ? round($byStatus['won'] / $totalLeads * 100, 1) : null,
+            ],
+            'lead_conversion' => [
+                'converted'       => $converted,
+                'conversion_rate' => $totalLeads > 0 ? round($converted / $totalLeads * 100, 1) : null,
+                'orders'          => (int)   ($convOrders->orders ?? 0),
+                'revenue'         => (float) ($convOrders->revenue ?? 0),
+                'window_days'     => 14,
+            ],
+            'whatsapp_sales' => [
+                'orders'  => (int)   ($wa->orders  ?? 0),
+                'revenue' => (float) ($wa->revenue ?? 0),
+                'paid'    => (float) ($wa->paid    ?? 0),
+                'balance' => (float) ($wa->balance ?? 0),
+            ],
+            'contacts'       => $contacts,
+            'message_volume' => [
+                'channels'    => $messageVolume,
+                // The date daily snapshots began — period figures before this
+                // are structurally zero, not evidence of silence.
+                'daily_since' => $dailySince,
+            ],
+        ]));
+    }
+
     public function salesByProduct(Request $request)
     {
         [$start, $end] = $this->dateRange($request);
