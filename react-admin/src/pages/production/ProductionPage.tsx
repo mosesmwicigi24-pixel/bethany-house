@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect, Fragment } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { clsx } from "clsx";
 import { get, post, put } from "@/api/client";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -1781,7 +1781,14 @@ function ProductionOrdersTab() {
     const canRaiseOrder = can("production.raise_order");
     const [showCreate, setShowCreate] = useState(false);
     const [selectedId, setSelectedId] = useState<number | null>(null);
-    const [filters, setFilters] = useState({ status: "", priority: "", type: "", search: "" });
+    // Honour deep-links like /production/orders?status=overdue (the reports
+    // attention feed sends users here) — read the URL filter once on mount;
+    // after that the in-page chips own the state as before.
+    const [searchParams] = useSearchParams();
+    const [filters, setFilters] = useState(() => ({
+        status: searchParams.get("status") ?? "",
+        priority: "", type: "", search: "",
+    }));
     const [page, setPage] = useState(1);
     const perPage = 25;
     const setF = (k: string, v: string) => {

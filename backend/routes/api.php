@@ -920,6 +920,8 @@ Route::prefix('v1')->group(function () {
                     Route::get('/{id}/audit-log',[PurchaseOrderController::class, 'auditLog']);
                     Route::post('/',             [PurchaseOrderController::class, 'store'])
                         ->middleware('permission:procurement.create,sanctum');
+                    Route::post('/from-suggestions', [PurchaseOrderController::class, 'storeFromSuggestions'])
+                        ->middleware('permission:procurement.create,sanctum');
                     Route::put('/{id}',          [PurchaseOrderController::class, 'update'])
                         ->middleware('permission:procurement.create,sanctum');
                     Route::delete('/{id}',       [PurchaseOrderController::class, 'destroy'])
