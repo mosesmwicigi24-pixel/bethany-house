@@ -902,6 +902,11 @@ class PosController extends Controller
                     'sku'                => $item['variant']?->sku ?? ($item['product_id'] ? Product::find($item['product_id'])?->sku : null),
                     'quantity'           => $item['quantity'],
                     'unit_price'         => $item['unit_price'],
+                    // COGS: snapshot per-unit cost (KES) at time of sale.
+                    ...app(\App\Services\CostResolver::class)->columns(
+                        $item['product_id'] ?: ($item['variant']?->product_id),
+                        $item['variant_id']
+                    ),
                     // FIX 1: persist raw discount type + value for lossless restore
                     'discount_type'      => $item['discount_type'],
                     'discount_value'     => $item['discount_value'],
@@ -2996,6 +3001,13 @@ class PosController extends Controller
             }
 
             // ── 2. Delete old order items ─────────────────────────────────────
+            // COGS: keep each old line's cost snapshot so editing a pending
+            // order doesn't silently re-cost it at today's prices. Keyed by
+            // product+variant; lines added in this edit resolve fresh below.
+            $oldLineCosts = OrderItem::where('order_id', $order->id)
+                ->whereNotNull('cost_price')
+                ->get(['product_id', 'product_variant_id', 'cost_price', 'cost_source'])
+                ->keyBy(fn ($i) => $i->product_id . ':' . ($i->product_variant_id ?? ''));
             OrderItem::where('order_id', $order->id)->delete();
 
             // ── 3. Validate stock + build new items ───────────────────────────
@@ -3206,6 +3218,16 @@ class PosController extends Controller
                     'sku'                => $item['variant']?->sku ?? ($item['product_id'] ? Product::find($item['product_id'])?->sku : null),
                     'quantity'           => $item['quantity'],
                     'unit_price'         => $item['unit_price'],
+                    // COGS: reuse the original line's cost snapshot when the same
+                    // product+variant survives the edit; resolve fresh for new lines.
+                    ...(function () use ($oldLineCosts, $item) {
+                        $pid = $item['product_id'] ?: ($item['variant']?->product_id);
+                        $old = $oldLineCosts->get($pid . ':' . ($item['variant_id'] ?? ''));
+                        if ($old) {
+                            return ['cost_price' => $old->cost_price, 'cost_source' => $old->cost_source];
+                        }
+                        return app(\App\Services\CostResolver::class)->columns($pid, $item['variant_id']);
+                    })(),
                     // FIX 1: persist raw discount type + value for lossless restore
                     'discount_type'      => $item['discount_type'],
                     'discount_value'     => $item['discount_value'],
@@ -3603,6 +3625,11 @@ class PosController extends Controller
                     'sku'                => $item['variant']?->sku ?? ($item['product_id'] ? Product::find($item['product_id'])?->sku : null),
                     'quantity'           => $item['quantity'],
                     'unit_price'         => $item['unit_price'],
+                    // COGS: snapshot per-unit cost (KES) at time of sale.
+                    ...app(\App\Services\CostResolver::class)->columns(
+                        $item['product_id'] ?: ($item['variant']?->product_id),
+                        $item['variant_id']
+                    ),
                     // FIX 1: persist raw discount type + value for lossless restore
                     'discount_type'      => $item['discount_type'],
                     'discount_value'     => $item['discount_value'],

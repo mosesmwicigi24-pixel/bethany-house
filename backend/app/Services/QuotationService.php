@@ -171,6 +171,9 @@ class QuotationService
                     'variant_name'       => $qi->variant_name,
                     'quantity'           => (int) $qi->quantity,
                     'unit_price'         => $qi->unit_price,
+                    // COGS: snapshot per-unit cost (KES) at invoice creation.
+                    // Ad-hoc quotation lines (null product) simply store NULL.
+                    ...app(\App\Services\CostResolver::class)->columns($qi->product_id, $qi->product_variant_id),
                     'discount_amount'    => $qi->discount_amount,
                     'tax_amount'         => $qi->tax_amount,
                     'total_price'        => $qi->total_price,

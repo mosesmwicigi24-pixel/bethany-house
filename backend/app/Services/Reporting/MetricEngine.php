@@ -1113,8 +1113,10 @@ class MetricEngine
                        MAX(COALESCE(paid_at, created_at)) AS settled_at
                 FROM payments WHERE status = 'paid' GROUP BY order_id
             )
-            SELECT COALESCE(SUM(oi.quantity * pr.cost_price), 0) AS cogs,
-                   COUNT(*) FILTER (WHERE pr.cost_price IS NULL) AS unpriced_lines
+            -- Prefer the cost snapshotted on the line at sale time; fall back to
+            -- the current product cost for historical lines that predate it.
+            SELECT COALESCE(SUM(oi.quantity * COALESCE(oi.cost_price, pr.cost_price)), 0) AS cogs,
+                   COUNT(*) FILTER (WHERE COALESCE(oi.cost_price, pr.cost_price) IS NULL) AS unpriced_lines
             FROM orders o
             JOIN paid p ON p.order_id = o.id
             JOIN order_items oi ON oi.order_id = o.id

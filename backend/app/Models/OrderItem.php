@@ -18,6 +18,8 @@ class OrderItem extends Model
         'sku',
         'quantity',
         'unit_price',
+        'cost_price',          // Per-unit cost (KES) snapshotted at sale time — COGS
+        'cost_source',         // Where cost_price came from ('product_price', …)
         'original_price',      // Catalogue price before any manual adjustment
         'price_adjusted',      // True when unit_price was manually overridden upward
         'discount_amount',

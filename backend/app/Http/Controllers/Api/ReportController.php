@@ -1286,7 +1286,37 @@ class ReportController extends Controller
             ->whereRaw('UPPER(currency_code) = ?', [strtoupper($currency)])
             ->sum('total_amount');
 
-        $cogs = 0; // No cost_price column on order_items yet
+        // COGS: prefer the per-line cost snapshot captured at sale time
+        // (order_items.cost_price); for historical lines that predate the
+        // snapshot column, fall back to the CURRENT product cost via the same
+        // lateral lookup MetricEngine::earnedPnl uses (variant-level
+        // product_prices row first, product-level row second, KES cost basis).
+        // Lines with no resolvable cost contribute 0 and are counted in
+        // unpriced_lines so the margin isn't silently overstated.
+        $cogsRow = DB::selectOne("
+            SELECT
+                COALESCE(SUM(oi.quantity * COALESCE(oi.cost_price, pr.cost_price)), 0)::float8 AS cogs,
+                COUNT(*) FILTER (WHERE COALESCE(oi.cost_price, pr.cost_price) IS NULL)         AS unpriced_lines
+            FROM order_items oi
+            JOIN orders o ON o.id = oi.order_id
+            LEFT JOIN LATERAL (
+                SELECT pp.cost_price
+                FROM product_prices pp
+                WHERE UPPER(pp.currency_code) = 'KES'
+                  AND pp.cost_price IS NOT NULL
+                  AND (
+                        (oi.product_variant_id IS NOT NULL AND pp.product_variant_id = oi.product_variant_id)
+                     OR (pp.product_id = oi.product_id AND pp.product_variant_id IS NULL)
+                  )
+                ORDER BY pp.product_variant_id IS NULL
+                LIMIT 1
+            ) pr ON TRUE
+            WHERE o.created_at BETWEEN ? AND ?
+              AND o.payment_status = 'paid'
+              AND UPPER(o.currency_code) = ?
+        ", [$start, $end, strtoupper($currency)]);
+        $cogs          = (float) ($cogsRow->cogs ?? 0);
+        $unpricedLines = (int) ($cogsRow->unpriced_lines ?? 0);
 
         $grossProfit = $revenue - $cogs;
         $grossMargin = $revenue > 0 ? round(($grossProfit / $revenue) * 100, 2) : 0;
@@ -1372,6 +1402,7 @@ class ReportController extends Controller
             'period'                     => ['start' => $start, 'end' => $end],
             'revenue'                    => round($revenue, 2),
             'cost_of_goods_sold'         => round($cogs, 2),
+            'unpriced_lines'             => $unpricedLines,
             'gross_profit'               => round($grossProfit, 2),
             'gross_profit_margin_percent'=> $grossMargin,
             'operating_expenses'         => round($opex, 2),

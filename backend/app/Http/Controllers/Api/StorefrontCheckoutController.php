@@ -311,6 +311,8 @@ class StorefrontCheckoutController extends Controller
                     'sku'                => $variant?->sku ?? $product->sku,
                     'quantity'        => $line['quantity'],
                     'unit_price'      => $line['unit_price'],
+                    // COGS: snapshot per-unit cost (KES) at time of sale.
+                    ...app(\App\Services\CostResolver::class)->columns($product->id, $variant?->id),
                     'discount_amount' => $line['discount_amount'],
                     'tax_amount'      => $lineTax['tax_amount'],
                     'total_price'     => $lineTax['subtotal_gross'],
