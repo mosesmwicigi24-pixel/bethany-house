@@ -193,6 +193,7 @@ class ExecutiveReportController extends Controller
             'new_vs_returning' => $engine->newVsReturning($s, $e),
             'top_customers'    => $engine->topCustomers($s, $e),
             'dormant'          => $engine->dormantTopCustomers(),
+            'rfm'              => $engine->rfmSegments(),
         ]);
     }
 

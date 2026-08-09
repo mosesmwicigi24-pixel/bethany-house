@@ -1082,6 +1082,131 @@ class MetricEngine
             ])->values();
     }
 
+    /**
+     * RFM segmentation over the trailing 365 days (docs/REPORTS_SPEC).
+     *
+     * Identity is the CANONICAL key: customer_id, else normalize_phone(phone)
+     * — so 0722… and +254722… stop being two different "customers" — else
+     * lowercased email. Keyless orders are reported honestly as anonymous.
+     *
+     * R/F/M are scored 1–5 by NTILE over the cohort (self-calibrating; no
+     * magic KES thresholds) and mapped to named segments a shop can act on:
+     *
+     *   champions        recent + frequent (r≥4, f≥4)          — protect them
+     *   loyal            steady repeaters  (r≥3, f≥3)          — nurture
+     *   promising        recent but new    (r≥4, f≤2)          — convert to loyal
+     *   cant_lose        high-value gone quiet (r≤2, f≥4|m≥4)  — call TODAY
+     *   at_risk          were regulars, fading (r≤2, f≥3)      — win back
+     *   hibernating      low value, long quiet (r≤2, f≤2)      — cheap re-ping
+     *   needs_attention  everyone in the middle                — watch
+     *
+     * Returns segment rollups, a phone-ready action list (cant_lose + at_risk,
+     * biggest money first), and the anonymous walk-in remainder.
+     */
+    public function rfmSegments(): array
+    {
+        $key = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
+        $now = CarbonImmutable::now(self::TZ);
+        $since = $now->subDays(365);
+        $outletSql = $this->outletIds
+            ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')'
+            : '';
+
+        $scored = "
+            WITH keyed AS (
+                SELECT {$key} AS ckey, o.total_amount, o.created_at,
+                       TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,''))) AS name,
+                       o.customer_phone AS phone
+                FROM orders o
+                WHERE o.status NOT IN ('voided','cancelled')
+                  AND UPPER(o.currency_code) = 'KES'
+                  AND o.created_at >= ?
+                  {$outletSql}
+            ), per_customer AS (
+                SELECT ckey, MAX(name) AS name, MAX(phone) AS phone,
+                       COUNT(*)                    AS frequency,
+                       COALESCE(SUM(total_amount), 0) AS monetary,
+                       MAX(created_at)             AS last_order_at
+                FROM keyed WHERE ckey IS NOT NULL GROUP BY ckey
+            ), scored AS (
+                SELECT *,
+                       NTILE(5) OVER (ORDER BY last_order_at ASC) AS r_score,
+                       NTILE(5) OVER (ORDER BY frequency ASC)     AS f_score,
+                       NTILE(5) OVER (ORDER BY monetary ASC)      AS m_score
+                FROM per_customer
+            )
+            SELECT *,
+                   CASE
+                       WHEN r_score >= 4 AND f_score >= 4                     THEN 'champions'
+                       WHEN r_score <= 2 AND (f_score >= 4 OR m_score >= 4)   THEN 'cant_lose'
+                       WHEN r_score <= 2 AND f_score >= 3                     THEN 'at_risk'
+                       WHEN r_score >= 3 AND f_score >= 3                     THEN 'loyal'
+                       WHEN r_score >= 4 AND f_score <= 2                     THEN 'promising'
+                       WHEN r_score <= 2 AND f_score <= 2                     THEN 'hibernating'
+                       ELSE 'needs_attention'
+                   END AS segment
+            FROM scored
+        ";
+
+        $segments = collect(DB::select("
+            SELECT segment, COUNT(*) AS customers,
+                   COALESCE(SUM(monetary), 0) AS revenue_365,
+                   ROUND(AVG(EXTRACT(EPOCH FROM (NOW() - last_order_at)) / 86400)) AS avg_days_quiet
+            FROM ({$scored}) s
+            GROUP BY segment
+        ", [$since]))->keyBy('segment');
+
+        $order = ['champions', 'loyal', 'promising', 'needs_attention', 'at_risk', 'cant_lose', 'hibernating'];
+        $totalRevenue = (float) $segments->sum('revenue_365');
+        $segmentRows = collect($order)->map(function ($seg) use ($segments, $totalRevenue) {
+            $row = $segments->get($seg);
+            return [
+                'segment'        => $seg,
+                'customers'      => (int) ($row->customers ?? 0),
+                'revenue_365'    => round((float) ($row->revenue_365 ?? 0), 2),
+                'revenue_share'  => $totalRevenue > 0 ? round((float) ($row->revenue_365 ?? 0) / $totalRevenue * 100, 1) : 0.0,
+                'avg_days_quiet' => (int) ($row->avg_days_quiet ?? 0),
+            ];
+        })->values();
+
+        // The call list: money walking out of the door, biggest first.
+        $actionList = collect(DB::select("
+            SELECT name, phone, segment, frequency, monetary, last_order_at
+            FROM ({$scored}) s
+            WHERE segment IN ('cant_lose', 'at_risk')
+            ORDER BY monetary DESC
+            LIMIT 15
+        ", [$since]))->map(fn ($r) => [
+            'name'          => $r->name !== '' ? $r->name : ($r->phone ?? 'Unknown'),
+            'phone'         => $r->phone,
+            'segment'       => $r->segment,
+            'orders_365'    => (int) $r->frequency,
+            'revenue_365'   => round((float) $r->monetary, 2),
+            'last_order_at' => $r->last_order_at,
+            'days_quiet'    => (int) CarbonImmutable::parse($r->last_order_at)->diffInDays($now),
+        ])->values();
+
+        $anonymous = DB::selectOne("
+            SELECT COUNT(*) AS orders, COALESCE(SUM(o.total_amount), 0) AS revenue
+            FROM orders o
+            WHERE o.status NOT IN ('voided','cancelled')
+              AND UPPER(o.currency_code) = 'KES'
+              AND o.created_at >= ?
+              AND {$key} IS NULL
+              {$outletSql}
+        ", [$since]);
+
+        return [
+            'window_days' => 365,
+            'segments'    => $segmentRows,
+            'action_list' => $actionList,
+            'anonymous'   => [
+                'orders'  => (int) ($anonymous->orders ?? 0),
+                'revenue' => round((float) ($anonymous->revenue ?? 0), 2),
+            ],
+        ];
+    }
+
     // ── Financial intelligence (Phase 5) ──────────────────────────────────────
 
     /**
