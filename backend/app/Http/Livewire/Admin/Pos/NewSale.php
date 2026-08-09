@@ -280,6 +280,8 @@ class NewSale extends Component
                     'sku'                => $item['sku'],
                     'quantity'           => $item['qty'],
                     'unit_price'         => $item['unit_price'],
+                    // COGS: snapshot per-unit cost (KES) at time of sale.
+                    ...app(\App\Services\CostResolver::class)->columns($item['product_id'], $item['variant_id']),
                     'discount_amount'    => $item['discount'],
                     'tax_amount'         => 0,
                     'total_price'        => $item['subtotal'],

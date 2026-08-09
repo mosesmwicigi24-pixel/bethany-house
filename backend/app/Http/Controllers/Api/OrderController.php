@@ -521,6 +521,11 @@ class OrderController extends Controller
                     'sku'                => $item->variant->sku,
                     'quantity'           => $item->quantity,
                     'unit_price'         => $unitPrice,
+                    // COGS: snapshot per-unit cost (KES) at time of sale.
+                    ...app(\App\Services\CostResolver::class)->columns(
+                        $item->variant->product_id,
+                        $item->variant_id
+                    ),
                     'discount_amount'    => 0,
                     'tax_amount'         => $lineTax['tax_amount'],
                     'total_price'        => $lineTax['subtotal_gross'],
