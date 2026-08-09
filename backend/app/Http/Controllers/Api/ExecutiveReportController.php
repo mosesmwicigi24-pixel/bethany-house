@@ -214,6 +214,23 @@ class ExecutiveReportController extends Controller
         return response()->json($engine->replenishmentRadar());
     }
 
+    /**
+     * Collections funnel — quote/deposit/balance: every shilling promised but
+     * not collected, staged with per-row follow-up lists. "As of now" like the
+     * replenishment radar (owed only means anything against today).
+     * reports.view via the route group; outlet scoping via MetricEngine::for.
+     */
+    public function collections(Request $request)
+    {
+        $validated = $request->validate([
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+        ]);
+
+        $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+
+        return response()->json($engine->collectionsFunnel());
+    }
+
     /** CFO block: earned P&L, budget-aware expenses, cash flow, rails. */
     public function financialIntelligence(Request $request)
     {

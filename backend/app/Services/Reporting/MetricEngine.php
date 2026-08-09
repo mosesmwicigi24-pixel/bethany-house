@@ -1636,6 +1636,214 @@ class MetricEngine
         ", [$now->subDays(90)->format('Y-m-d'), $thresholdPct]));
     }
 
+    // ── Collections funnel ────────────────────────────────────────────────────
+    //
+    // Money on the table, staged: quotations that never became orders, orders
+    // where a deposit landed and then nothing moved, and confirmed balances
+    // aging out. Balances reuse openBalances()/outstandingAging() so this
+    // report can never disagree with the Overview's outstanding numbers.
+
+    /** How many days without payment movement makes a deposit "stalled". */
+    private const STALL_DAYS = 7;
+
+    /** Open quotations: on offer, not yet an order (KES, scoped). */
+    private function openQuotes()
+    {
+        return DB::table('quotations')
+            ->whereNotIn('status', ['converted', 'declined', 'expired'])
+            ->whereNull('converted_order_id')
+            ->whereRaw("UPPER(currency_code) = 'KES'")
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds));
+    }
+
+    /** openBalances() plus WHEN money last moved on each order. */
+    private function openBalancesWithLastPayment()
+    {
+        return $this->openBalances()->leftJoinSub(
+            DB::table('payments')->where('status', 'paid')
+                ->selectRaw('order_id, MAX(COALESCE(paid_at, created_at)) AS last_paid_at')
+                ->groupBy('order_id'),
+            'lp', 'lp.order_id', '=', 'orders.id',
+        );
+    }
+
+    /**
+     * The collections funnel — every shilling promised but not collected, in
+     * three stages with per-row action lists (top 25 each by value):
+     *
+     *  1. open_quotes      — issued offers that never became orders.
+     *  2. stalled_deposits — deposit/partial orders with no payment movement
+     *                        for STALL_DAYS+ days (the warmest money there is:
+     *                        the customer already paid once).
+     *  3. unpaid_balances  — every open balance, aging-bucketed.
+     *
+     * "As of now" by design, like the replenishment radar: owed/stalled only
+     * means anything against today. Quote age runs from issue (issued_at,
+     * else created_at); balance age from the order date, matching
+     * outstandingAging() so the buckets here ARE the Overview's buckets.
+     */
+    public function collectionsFunnel(): array
+    {
+        $now      = CarbonImmutable::now(self::TZ);
+        $today    = $now->format('Y-m-d');
+        $owed     = self::OWED;
+        $custName = "TRIM(CONCAT(COALESCE(customer_first_name,''),' ',COALESCE(customer_last_name,'')))";
+
+        // Stage 1 — open quotes.
+        $quoteRows = $this->openQuotes()
+            ->selectRaw("id, COALESCE(quote_number, CONCAT('#', id)) AS number,
+                {$custName} AS customer, customer_phone AS phone,
+                total_amount AS value, status, valid_until AS expires_at,
+                (?::date - COALESCE(issued_at, created_at)::date) AS age_days", [$today])
+            ->orderByDesc('total_amount')
+            ->limit(25)
+            ->get()
+            ->map(fn ($r) => [
+                'id'         => (int) $r->id,
+                'number'     => $r->number,
+                'customer'   => $r->customer,
+                'phone'      => $r->phone,
+                'value'      => round((float) $r->value, 2),
+                'age_days'   => (int) $r->age_days,
+                'status'     => $r->status,
+                'expires_at' => $r->expires_at,
+            ])->values()->all();
+
+        $quoteSummary = $this->openQuotes()
+            ->selectRaw("COUNT(*) AS n, COALESCE(SUM(total_amount),0) AS value,
+                COALESCE(AVG(?::date - COALESCE(issued_at, created_at)::date),0) AS avg_age", [$today])
+            ->first();
+
+        // Stage 2 — stalled deposits: money already down, then silence.
+        $stallCutoff = $now->subDays(self::STALL_DAYS)->toMutable();
+        $stalledBase = fn () => $this->openBalancesWithLastPayment()
+            ->whereIn('payment_status', ['deposit', 'partial'])
+            ->whereRaw('COALESCE(lp.last_paid_at, orders.created_at) < ?', [$stallCutoff]);
+
+        $stalledRows = $stalledBase()
+            ->selectRaw("orders.id, order_number AS number, {$custName} AS customer,
+                customer_phone AS phone, total_amount AS total,
+                LEAST(COALESCE(pp.paid,0), total_amount) AS deposit_paid,
+                {$owed} AS balance_due,
+                (?::date - COALESCE(lp.last_paid_at, orders.created_at)::date) AS days_since_last_payment", [$today])
+            ->orderByDesc(DB::raw($owed))
+            ->limit(25)
+            ->get()
+            ->map(fn ($r) => [
+                'id'                      => (int) $r->id,
+                'number'                  => $r->number,
+                'customer'                => $r->customer,
+                'phone'                   => $r->phone,
+                'total'                   => round((float) $r->total, 2),
+                'deposit_paid'            => round((float) $r->deposit_paid, 2),
+                'balance_due'             => round((float) $r->balance_due, 2),
+                'days_since_last_payment' => (int) $r->days_since_last_payment,
+            ])->values()->all();
+
+        $stalledSummary = $stalledBase()
+            ->selectRaw("COUNT(*) AS n,
+                COALESCE(SUM(LEAST(COALESCE(pp.paid,0), total_amount)),0) AS held,
+                COALESCE(SUM({$owed}),0) AS due")
+            ->first();
+
+        // Stage 3 — every open balance, aging-bucketed.
+        [$d30, $d60, $d90] = $this->agingCutoffs();
+        $unpaidRows = $this->openBalances()
+            ->selectRaw("orders.id, order_number AS number, {$custName} AS customer,
+                customer_phone AS phone, total_amount AS total,
+                COALESCE(pp.paid,0) AS paid, {$owed} AS balance,
+                (?::date - orders.created_at::date) AS days_outstanding,
+                CASE WHEN orders.created_at >= ? THEN '0_30'
+                     WHEN orders.created_at >= ? THEN '31_60'
+                     WHEN orders.created_at >= ? THEN '61_90'
+                     ELSE '90_plus' END AS bucket", [$today, $d30, $d60, $d90])
+            ->orderByDesc(DB::raw($owed))
+            ->limit(25)
+            ->get()
+            ->map(fn ($r) => [
+                'id'               => (int) $r->id,
+                'number'           => $r->number,
+                'customer'         => $r->customer,
+                'phone'            => $r->phone,
+                'total'            => round((float) $r->total, 2),
+                'paid'             => round((float) $r->paid, 2),
+                'balance'          => round((float) $r->balance, 2),
+                'days_outstanding' => (int) $r->days_outstanding,
+                'bucket'           => $r->bucket,
+            ])->values()->all();
+
+        $outstanding = $this->outstandingBalance();
+
+        // Funnel speed: how quotes convert and how deposits complete (90d).
+        $since90 = $now->subDays(90)->toMutable();
+
+        $convRow = DB::table('quotations')
+            ->where('created_at', '>=', $since90)
+            ->whereRaw("UPPER(currency_code) = 'KES'")
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+            ->selectRaw("COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE status = 'converted' OR converted_order_id IS NOT NULL) AS converted")
+            ->first();
+
+        $avgQuoteToOrder = DB::table('quotations as q')
+            ->join('orders as o', 'o.id', '=', 'q.converted_order_id')
+            ->where('q.created_at', '>=', $since90)
+            ->when($this->outletIds, fn ($q) => $q->whereIn('q.outlet_id', $this->outletIds))
+            ->selectRaw('AVG(o.created_at::date - q.created_at::date) AS d')
+            ->value('d');
+
+        // Of orders fully settled in the last 90 days via 2+ payments: days
+        // from the first payment (the deposit) to the last (paid in full).
+        $avgDepositToPaid = DB::table('orders')
+            ->whereNotIn('status', self::SALE_EXCLUDED_STATUSES)
+            ->whereRaw("UPPER(currency_code) = 'KES'")
+            ->where('payment_status', 'paid')
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+            ->joinSub(
+                DB::table('payments')->where('status', 'paid')
+                    ->selectRaw('order_id, COUNT(*) AS n,
+                        MIN(COALESCE(paid_at, created_at)) AS first_pay,
+                        MAX(COALESCE(paid_at, created_at)) AS last_pay')
+                    ->groupBy('order_id'),
+                'ps', 'ps.order_id', '=', 'orders.id',
+            )
+            ->where('ps.n', '>=', 2)
+            ->where('ps.last_pay', '>=', $since90)
+            ->selectRaw('AVG(ps.last_pay::date - ps.first_pay::date) AS d')
+            ->value('d');
+
+        return [
+            'summary' => [
+                // One headline: everything promised but not collected.
+                'money_on_table' => round((float) $quoteSummary->value + $outstanding['amount'], 2),
+                'open_quotes' => [
+                    'count'        => (int) $quoteSummary->n,
+                    'value'        => round((float) $quoteSummary->value, 2),
+                    'avg_age_days' => round((float) $quoteSummary->avg_age, 1),
+                ],
+                'stalled_deposits' => [
+                    'count'        => (int) $stalledSummary->n,
+                    'deposit_held' => round((float) $stalledSummary->held, 2),
+                    'balance_due'  => round((float) $stalledSummary->due, 2),
+                ],
+                'unpaid_balances' => [
+                    'count' => $outstanding['orders'],
+                    'value' => $outstanding['amount'],
+                ],
+                'aging' => $this->outstandingAging(),
+                'conversion' => [
+                    'quotes_converted_rate_90d' => $convRow->total > 0
+                        ? round($convRow->converted / $convRow->total * 100, 1) : null,
+                    'avg_days_quote_to_order'   => $avgQuoteToOrder !== null ? round((float) $avgQuoteToOrder, 1) : null,
+                    'avg_days_deposit_to_paid'  => $avgDepositToPaid !== null ? round((float) $avgDepositToPaid, 1) : null,
+                ],
+            ],
+            'open_quotes'      => $quoteRows,
+            'stalled_deposits' => $stalledRows,
+            'unpaid_balances'  => $unpaidRows,
+        ];
+    }
+
     // ── Attention feed ────────────────────────────────────────────────────────
 
     /**
@@ -1689,6 +1897,40 @@ class MetricEngine
                 'count' => (int) $aging->n, 'link' => '/pos/outstanding-balances',
                 'actions' => [
                     ['type' => 'navigate', 'label' => 'Chase balances', 'to' => '/pos/outstanding-balances'],
+                ],
+            ];
+        }
+
+        // 2b. Quotes stalling — sizeable offers a week+ old that never became
+        // orders. The collections funnel's front stage, advertised here so
+        // the money is chased while the customer still remembers asking.
+        $stallingQuotes = $this->openQuotes()
+            ->whereRaw('COALESCE(issued_at, created_at) < ?', [CarbonImmutable::now(self::TZ)->subDays(7)->toMutable()])
+            ->where('total_amount', '>=', 5000)
+            ->selectRaw("id, COALESCE(quote_number, CONCAT('#', id)) AS number,
+                TRIM(CONCAT(COALESCE(customer_first_name,''),' ',COALESCE(customer_last_name,''))) AS customer,
+                total_amount AS value,
+                (?::date - COALESCE(issued_at, created_at)::date) AS age_days", [$todayEat])
+            ->orderByDesc('total_amount')
+            ->get();
+        if ($stallingQuotes->isNotEmpty()) {
+            $stallingValue = $stallingQuotes->sum(fn ($q) => (float) $q->value);
+            $worst = $stallingQuotes->first();
+            $items[] = [
+                'key' => 'quotes_stalling', 'severity' => $stallingValue >= 50000 ? 'high' : 'medium',
+                'title' => 'KES ' . number_format($stallingValue) . ' quoted but never ordered ('
+                    . $stallingQuotes->count() . ' quote' . ($stallingQuotes->count() > 1 ? 's' : '') . ' 7+ days old)',
+                'detail' => "Biggest is {$worst->number} — KES " . number_format((float) $worst->value)
+                    . " sitting {$worst->age_days} day" . ((int) $worst->age_days === 1 ? '' : 's') . ' without an order.',
+                'count' => $stallingQuotes->count(), 'link' => '/reports/sales?tab=collections',
+                'entities' => $stallingQuotes->take(3)->map(fn ($q) => [
+                    'number'   => $q->number,
+                    'customer' => $q->customer,
+                    'value'    => round((float) $q->value, 2),
+                    'age_days' => (int) $q->age_days,
+                ])->values()->all(),
+                'actions' => [
+                    ['type' => 'navigate', 'label' => 'Open collections funnel', 'to' => '/reports/sales?tab=collections'],
                 ],
             ];
         }

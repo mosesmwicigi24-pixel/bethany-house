@@ -1,12 +1,17 @@
 // src/pages/reports/SalesReportPage.tsx
 import React, { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
     reportsApi,
     type SalesLedger,
     type LedgerBucket,
     type NeemaSalesReport,
+    type OpenQuoteRow,
 } from "@/api/reports";
+import { ordersApi } from "@/api/orders";
+import { openWhatsApp } from "@/lib/whatsapp";
+import { useToastStore } from "@/store/toast.store";
 import { fmtKes } from "@/api/expenses";
 import { Spinner } from "@/components/ui/Spinner";
 import {
@@ -49,12 +54,29 @@ import {
 
 const DOW_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+type SalesTab =
+    | "overview"
+    | "products"
+    | "customers"
+    | "channels"
+    | "patterns"
+    | "neema"
+    | "collections";
+const SALES_TABS: readonly SalesTab[] = [
+    "overview", "products", "customers", "channels", "patterns", "neema", "collections",
+];
+
 export default function SalesReportPage() {
     const dr = useDateRange("last_30_days");
     const [compare, setCompare] = useState(false);
-    const [activeTab, setActiveTab] = useState<
-        "overview" | "products" | "customers" | "channels" | "patterns" | "neema"
-    >("overview");
+    // Honour deep-links like /reports/sales?tab=collections (the attention
+    // feed sends users here) — read once on mount, same pattern as
+    // CustomersReportPage's ?tab=; after that the tab buttons own the state.
+    const [searchParams] = useSearchParams();
+    const [activeTab, setActiveTab] = useState<SalesTab>(() => {
+        const t = searchParams.get("tab");
+        return SALES_TABS.includes(t as SalesTab) ? (t as SalesTab) : "overview";
+    });
 
     const summaryQuery = useQuery({
         queryKey: ["report-sales-summary", dr.start, dr.end, compare],
@@ -210,6 +232,7 @@ export default function SalesReportPage() {
                             ["channels", "Channels"],
                             ["patterns", "Patterns"],
                             ["neema", "Neema (AI agent)"],
+                            ["collections", "Collections"],
                         ] as const
                     ).map(([tab, label]) => (
                         <button
@@ -718,6 +741,9 @@ export default function SalesReportPage() {
 
             {/* ── NEEMA (AI AGENT) TAB ── */}
             {activeTab === "neema" && <NeemaTab query={neemaQuery} />}
+
+            {/* ── COLLECTIONS TAB ── */}
+            {activeTab === "collections" && <CollectionsTab />}
 
             {(summaryQuery.data?.excluded_currencies ?? []).length > 0 && (
                 /* A total that quietly omits rows is worse than one that says
@@ -1334,6 +1360,454 @@ function NeemaTab({
                 different number is not counted. WhatsApp revenue follows the
                 same channel rule as the Channels tab, so the numbers agree.
             </p>
+        </div>
+    );
+}
+
+// ─── Collections tab ──────────────────────────────────────────────────────────
+// The collections funnel: every shilling promised but not collected, staged —
+// open quotes, stalled deposits (money already down, then silence — the
+// warmest calls in the business), and unpaid balances. Balance figures come
+// from the same MetricEngine base as the executive Overview, so the two
+// surfaces always agree. Each row carries a one-click WhatsApp follow-up;
+// order rows fetch the order's public payment link first so the customer can
+// settle straight from the chat.
+
+function CollectionsTab() {
+    const toast = useToastStore();
+    const { data, isLoading } = useQuery({
+        queryKey: ["collections-funnel"],
+        queryFn: () => reportsApi.collectionsFunnel(),
+        staleTime: 60_000,
+    });
+    // Which order row is currently fetching its payment link ("stalled-12").
+    const [linkPending, setLinkPending] = useState<string | null>(null);
+
+    if (isLoading || !data)
+        return (
+            <div className="flex justify-center py-16">
+                <Spinner />
+            </div>
+        );
+
+    const { summary, open_quotes, stalled_deposits, unpaid_balances } = data;
+    const firstName = (full: string) =>
+        (full || "").trim().split(/\s+/)[0] || "there";
+
+    const quoteFollowUp = (row: OpenQuoteRow) => {
+        openWhatsApp(
+            row.phone,
+            `Hello ${firstName(row.customer)}, following up on your quotation ` +
+                `${row.number} (KES ${Number(row.value).toLocaleString()}) — ` +
+                `shall we proceed with your order?`,
+        );
+    };
+
+    const orderFollowUp = async (
+        key: string,
+        orderId: number,
+        number: string,
+        customer: string,
+        phone: string | null,
+        balance: number,
+    ) => {
+        setLinkPending(key);
+        try {
+            const res = await ordersApi.getPaymentLink(orderId);
+            const url = res.payment_url ?? res.url;
+            openWhatsApp(
+                phone,
+                `Hello ${firstName(customer)}, greetings from Bethany House! ` +
+                    `Your order ${number} has KES ${Number(balance).toLocaleString()} ` +
+                    `outstanding — you can complete payment securely here: ${url}. Thank you!`,
+            );
+        } catch (e: any) {
+            toast.error(e?.message ?? "Could not generate the payment link");
+        } finally {
+            setLinkPending(null);
+        }
+    };
+
+    const waButton = (
+        disabled: boolean,
+        pending: boolean,
+        onClick: () => void,
+    ) => (
+        <button
+            onClick={onClick}
+            disabled={disabled || pending}
+            className={clsx(
+                "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-opacity",
+                disabled
+                    ? "bg-surface-100 text-surface-400 cursor-not-allowed"
+                    : "bg-success-light text-success hover:opacity-80",
+            )}
+            title={
+                disabled
+                    ? "No phone number on this record"
+                    : "Open WhatsApp with a prefilled follow-up"
+            }
+        >
+            {pending ? "…" : "WhatsApp"}
+        </button>
+    );
+
+    const aging = summary.aging.buckets;
+    const agingTotal = aging.reduce((a, b) => a + b.amount, 0);
+    const conv = summary.conversion;
+
+    return (
+        <div className="space-y-6">
+            {/* Headline: the money */}
+            <div className={KPI_GRID}>
+                <KpiCard
+                    label="Money on the Table"
+                    value={fmtKes(summary.money_on_table)}
+                    sub="Open quotes + all unpaid balances"
+                    color="text-brand-600"
+                />
+                <KpiCard
+                    label="Open Quotes"
+                    value={fmtKes(summary.open_quotes.value)}
+                    sub={`${summary.open_quotes.count} quote${summary.open_quotes.count === 1 ? "" : "s"} · avg ${Math.round(summary.open_quotes.avg_age_days)}d old`}
+                />
+                <KpiCard
+                    label="Stalled Deposits"
+                    value={fmtKes(summary.stalled_deposits.balance_due)}
+                    sub={`${summary.stalled_deposits.count} order${summary.stalled_deposits.count === 1 ? "" : "s"} · ${fmtKes(summary.stalled_deposits.deposit_held)} already paid`}
+                    color={
+                        summary.stalled_deposits.count > 0
+                            ? "text-danger"
+                            : "text-success"
+                    }
+                />
+                <KpiCard
+                    label="Unpaid Balances"
+                    value={fmtKes(summary.unpaid_balances.value)}
+                    sub={`${summary.unpaid_balances.count} open order${summary.unpaid_balances.count === 1 ? "" : "s"}`}
+                />
+            </div>
+
+            {/* Funnel speed strip */}
+            <div className={KPI_GRID}>
+                <KpiCard
+                    label="Quote → Order (90d)"
+                    value={
+                        conv.quotes_converted_rate_90d == null
+                            ? "—"
+                            : `${conv.quotes_converted_rate_90d}%`
+                    }
+                    sub="Of quotes raised in the last 90 days"
+                />
+                <KpiCard
+                    label="Avg Days Quote → Order"
+                    value={
+                        conv.avg_days_quote_to_order == null
+                            ? "—"
+                            : `${conv.avg_days_quote_to_order}d`
+                    }
+                    sub="Quote raised to order placed"
+                />
+                <KpiCard
+                    label="Avg Days Deposit → Paid"
+                    value={
+                        conv.avg_days_deposit_to_paid == null
+                            ? "—"
+                            : `${conv.avg_days_deposit_to_paid}d`
+                    }
+                    sub="First payment to fully settled (90d)"
+                />
+            </div>
+
+            {/* Aging mini-bar — the same buckets as the Overview */}
+            {agingTotal > 0 && (
+                <div className="card p-5">
+                    <SectionHeader title="Balance aging" />
+                    <div className="flex h-3 rounded-full overflow-hidden mt-3">
+                        {aging.map(
+                            (b, i) =>
+                                b.amount > 0 && (
+                                    <div
+                                        key={b.key}
+                                        style={{
+                                            width: `${(b.amount / agingTotal) * 100}%`,
+                                            background: CHART_COLORS[i],
+                                        }}
+                                        title={`${b.label}: ${fmtKes(b.amount)} (${b.orders} orders)`}
+                                    />
+                                ),
+                        )}
+                    </div>
+                    <div className="flex flex-wrap gap-x-5 gap-y-1 mt-3">
+                        {aging.map((b, i) => (
+                            <span
+                                key={b.key}
+                                className="inline-flex items-center gap-1.5 text-xs text-surface-600"
+                            >
+                                <span
+                                    className="w-2.5 h-2.5 rounded-sm inline-block"
+                                    style={{ background: CHART_COLORS[i] }}
+                                />
+                                {b.label}: {fmtKes(b.amount)} ({b.orders})
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* 1 — Open quotes */}
+            <div className="card overflow-hidden">
+                <div className="px-5 pt-5 pb-4">
+                    <SectionHeader title="Open quotes — issued but never ordered" />
+                    <p className="text-sm text-surface-500 mt-1">
+                        Priced offers with no order behind them yet. Top 25 by
+                        value; a nudge while the customer still remembers
+                        asking is the cheapest sale in the shop.
+                    </p>
+                </div>
+                <TableWrapper>
+                    <table className="w-full">
+                        <thead>
+                            <tr className="border-y border-line bg-surface-50/50">
+                                <th className={TH}>Quote</th>
+                                <th className={TH}>Customer</th>
+                                <th className={TH}>Status</th>
+                                <th className={TH}>Age</th>
+                                <th className={TH}>Expires</th>
+                                <th className={TH_R}>Value</th>
+                                <th className={TH}></th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-line">
+                            {open_quotes.length === 0 ? (
+                                <EmptyRow cols={7} />
+                            ) : (
+                                open_quotes.map((row) => (
+                                    <tr
+                                        key={row.id}
+                                        className="hover:bg-surface-50/50 transition-colors"
+                                    >
+                                        <td className="px-4 py-3 font-medium text-surface-900 whitespace-nowrap">
+                                            {row.number}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-surface-700">
+                                            {row.customer || "—"}
+                                            {row.phone && (
+                                                <span className="text-2xs text-surface-400 block font-mono">
+                                                    {row.phone}
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-surface-100 text-surface-600 whitespace-nowrap">
+                                                {row.status}
+                                            </span>
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-surface-600 whitespace-nowrap">
+                                            {row.age_days}d
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-surface-500 whitespace-nowrap">
+                                            {row.expires_at
+                                                ? dayjs(row.expires_at).format(
+                                                      "D MMM YY",
+                                                  )
+                                                : "—"}
+                                        </td>
+                                        <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                                            {fmtKes(row.value)}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            {waButton(!row.phone, false, () =>
+                                                quoteFollowUp(row),
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </TableWrapper>
+            </div>
+
+            {/* 2 — Stalled deposits */}
+            <div className="card overflow-hidden">
+                <div className="px-5 pt-5 pb-4">
+                    <SectionHeader title="Stalled deposits — paid something, then went quiet" />
+                    <p className="text-sm text-surface-500 mt-1">
+                        Orders with a deposit or part-payment and no payment
+                        movement for 7+ days. These customers already
+                        committed money — the warmest follow-ups on this page.
+                        The WhatsApp button attaches a secure payment link.
+                    </p>
+                </div>
+                <TableWrapper>
+                    <table className="w-full">
+                        <thead>
+                            <tr className="border-y border-line bg-surface-50/50">
+                                <th className={TH}>Order</th>
+                                <th className={TH}>Customer</th>
+                                <th className={TH_R}>Total</th>
+                                <th className={TH_R}>Paid</th>
+                                <th className={TH_R}>Balance Due</th>
+                                <th className={TH}>Last Payment</th>
+                                <th className={TH}></th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-line">
+                            {stalled_deposits.length === 0 ? (
+                                <EmptyRow cols={7} />
+                            ) : (
+                                stalled_deposits.map((row) => (
+                                    <tr
+                                        key={row.id}
+                                        className="hover:bg-surface-50/50 transition-colors"
+                                    >
+                                        <td className="px-4 py-3 font-medium text-surface-900 whitespace-nowrap">
+                                            {row.number}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-surface-700">
+                                            {row.customer || "—"}
+                                            {row.phone && (
+                                                <span className="text-2xs text-surface-400 block font-mono">
+                                                    {row.phone}
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-3 text-right tabular-nums text-surface-600">
+                                            {fmtKes(row.total)}
+                                        </td>
+                                        <td className="px-4 py-3 text-right tabular-nums text-surface-600">
+                                            {fmtKes(row.deposit_paid)}
+                                        </td>
+                                        <td className="px-4 py-3 text-right font-semibold tabular-nums text-danger">
+                                            {fmtKes(row.balance_due)}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-surface-500 whitespace-nowrap">
+                                            {row.days_since_last_payment}d ago
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            {waButton(
+                                                !row.phone,
+                                                linkPending ===
+                                                    `stalled-${row.id}`,
+                                                () =>
+                                                    orderFollowUp(
+                                                        `stalled-${row.id}`,
+                                                        row.id,
+                                                        row.number,
+                                                        row.customer,
+                                                        row.phone,
+                                                        row.balance_due,
+                                                    ),
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </TableWrapper>
+            </div>
+
+            {/* 3 — Unpaid balances */}
+            <div className="card overflow-hidden">
+                <div className="px-5 pt-5 pb-4">
+                    <SectionHeader title="Unpaid balances — all open orders, oldest money flagged" />
+                    <p className="text-sm text-surface-500 mt-1">
+                        Every order still owing, top 25 by balance. The bucket
+                        matches the Overview's aging exactly. The WhatsApp
+                        button attaches a secure payment link.
+                    </p>
+                </div>
+                <TableWrapper>
+                    <table className="w-full">
+                        <thead>
+                            <tr className="border-y border-line bg-surface-50/50">
+                                <th className={TH}>Order</th>
+                                <th className={TH}>Customer</th>
+                                <th className={TH_R}>Total</th>
+                                <th className={TH_R}>Paid</th>
+                                <th className={TH_R}>Balance</th>
+                                <th className={TH}>Outstanding</th>
+                                <th className={TH}>Bucket</th>
+                                <th className={TH}></th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-line">
+                            {unpaid_balances.length === 0 ? (
+                                <EmptyRow cols={8} />
+                            ) : (
+                                unpaid_balances.map((row) => (
+                                    <tr
+                                        key={row.id}
+                                        className="hover:bg-surface-50/50 transition-colors"
+                                    >
+                                        <td className="px-4 py-3 font-medium text-surface-900 whitespace-nowrap">
+                                            {row.number}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-surface-700">
+                                            {row.customer || "—"}
+                                            {row.phone && (
+                                                <span className="text-2xs text-surface-400 block font-mono">
+                                                    {row.phone}
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-3 text-right tabular-nums text-surface-600">
+                                            {fmtKes(row.total)}
+                                        </td>
+                                        <td className="px-4 py-3 text-right tabular-nums text-surface-600">
+                                            {fmtKes(row.paid)}
+                                        </td>
+                                        <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                                            {fmtKes(row.balance)}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-surface-600 whitespace-nowrap">
+                                            {row.days_outstanding}d
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <span
+                                                className={clsx(
+                                                    "px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap",
+                                                    row.bucket === "0_30"
+                                                        ? "bg-surface-100 text-surface-600"
+                                                        : row.bucket === "31_60"
+                                                          ? "bg-warning-light text-warning"
+                                                          : "bg-danger-light text-danger",
+                                                )}
+                                            >
+                                                {row.bucket === "0_30"
+                                                    ? "0–30d"
+                                                    : row.bucket === "31_60"
+                                                      ? "31–60d"
+                                                      : row.bucket === "61_90"
+                                                        ? "61–90d"
+                                                        : "90d+"}
+                                            </span>
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            {waButton(
+                                                !row.phone,
+                                                linkPending ===
+                                                    `unpaid-${row.id}`,
+                                                () =>
+                                                    orderFollowUp(
+                                                        `unpaid-${row.id}`,
+                                                        row.id,
+                                                        row.number,
+                                                        row.customer,
+                                                        row.phone,
+                                                        row.balance,
+                                                    ),
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </TableWrapper>
+            </div>
         </div>
     );
 }
