@@ -139,6 +139,25 @@ class ReplenishmentPingTest extends TestCase
         $this->assertSame(['sent', 'skipped_cooldown'], $statuses);
     }
 
+    public function test_provisional_due_rows_are_never_pinged(): void
+    {
+        $this->configureWhatsApp();
+        Http::fake();
+        // Two purchases 30 days apart, the last 35 days ago: on the radar as
+        // tier 'provisional' (due now), but automation only acts on
+        // ESTABLISHED rhythms — a provisional-only due list sends nothing
+        // and leaves no ping trail at all.
+        $wine = $this->product('Altar Wine');
+        foreach ([65, 35] as $daysAgo) {
+            $this->sell('0755000444', 'Miriam', $wine, 6000, $daysAgo);
+        }
+
+        $this->artisan('replenishment:send-pings')->assertSuccessful();
+
+        Http::assertNothingSent();
+        $this->assertSame(0, ReplenishmentPing::count());
+    }
+
     public function test_opted_out_customer_is_never_pinged(): void
     {
         $this->configureWhatsApp();

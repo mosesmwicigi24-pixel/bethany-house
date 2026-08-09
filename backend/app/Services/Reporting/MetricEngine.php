@@ -1235,14 +1235,27 @@ class MetricEngine
      * distinct purchase date per pair (same-day orders collapse); its value
      * is that day's total line spend on the product.
      *
-     * A pair is RHYTHMIC when it has >= 3 events, the coefficient of
-     * variation of its consecutive-date gaps is <= 0.6, and the median gap
-     * (the cycle) is a believable 5–120 days. next_due = last purchase +
-     * cycle. Status:
+     * Two tiers of rhythm:
+     *   established — >= 3 events, the coefficient of variation of the
+     *     consecutive-date gaps is <= 0.6, and the median gap (the cycle)
+     *     is a believable 5–120 days. Unchanged from day one.
+     *   provisional — EXACTLY 2 events whose single gap is a believable
+     *     5–120 days; the cycle IS that gap. One repeat purchase is a
+     *     hypothesis, not a confirmed rhythm — these rows surface for the
+     *     humans (young datasets have real signal here) but automation
+     *     (ReplenishmentPingService) only ever acts on established rows.
+     *     The 3rd order either confirms the pair into established or the
+     *     CV gate quietly drops it.
+     *
+     * next_due = last purchase + cycle, same due logic for both tiers:
      *   overdue  — today is past next_due by more than 25% of the cycle
      *   due_soon — today is within 7 days of next_due (or past it)
      * Pairs more than 3 cycles past their last purchase are LAPSED — that is
      * win-back territory (rfmSegments), not radar material — and excluded.
+     *
+     * Established rows always sort before provisional; within a tier it is
+     * overdue-first, then expected value desc. summary.maturing_pairs counts
+     * ALL 2-event pairs regardless of due status — the pipeline metric.
      */
     public function replenishmentRadar(int $limit = 50): array
     {
@@ -1287,20 +1300,23 @@ class MetricEngine
                        STDDEV_SAMP(gap_days) AS sd_gap
                 FROM gapped
                 GROUP BY ckey, product_id
-                HAVING COUNT(*) >= 3
+                HAVING COUNT(*) >= 2
             ), rhythmic AS (
-                -- Steady rhythms only: interval CV <= 0.6, believable cycle.
+                -- established: 3+ events, interval CV <= 0.6, believable cycle.
+                -- provisional: exactly 2 events, single believable gap = cycle.
                 SELECT p.*,
+                       CASE WHEN p.purchase_events >= 3 THEN 'established' ELSE 'provisional' END AS tier,
                        ROUND(p.median_gap)::int AS cycle_days,
                        p.last_purchase_at + ROUND(p.median_gap)::int AS next_due_at
                 FROM pairs p
                 WHERE p.avg_gap > 0
-                  AND COALESCE(p.sd_gap / NULLIF(p.avg_gap, 0), 0) <= 0.6
                   AND p.median_gap BETWEEN 5 AND 120
+                  AND (p.purchase_events = 2
+                       OR COALESCE(p.sd_gap / NULLIF(p.avg_gap, 0), 0) <= 0.6)
             )
             SELECT r.ckey, r.name, r.phone, r.product_id,
                    COALESCE(pt.name, pr.slug, pr.sku) AS product_name,
-                   r.cycle_days, r.purchase_events, r.last_purchase_at, r.next_due_at,
+                   r.tier, r.cycle_days, r.purchase_events, r.last_purchase_at, r.next_due_at,
                    (?::date - r.next_due_at) AS days_over,
                    r.avg_value,
                    CASE WHEN ?::date > r.next_due_at + ROUND(r.cycle_days * 0.25)::int
@@ -1311,7 +1327,8 @@ class MetricEngine
                    ON pt.product_id = pr.id AND pt.language_code = 'en'
             WHERE ?::date <= r.last_purchase_at + r.cycle_days * 3   -- lapsed = win-back, not radar
               AND ?::date >= r.next_due_at - 7                       -- the due window has opened
-            ORDER BY CASE WHEN ?::date > r.next_due_at + ROUND(r.cycle_days * 0.25)::int THEN 0 ELSE 1 END,
+            ORDER BY CASE WHEN r.tier = 'established' THEN 0 ELSE 1 END,
+                     CASE WHEN ?::date > r.next_due_at + ROUND(r.cycle_days * 0.25)::int THEN 0 ELSE 1 END,
                      r.avg_value DESC
         ", [$since, $today, $today, $today, $today, $today]);
 
@@ -1334,6 +1351,7 @@ class MetricEngine
                 'phone'            => $r->phone,
                 'product_id'       => (int) $r->product_id,
                 'product_name'     => $r->product_name,
+                'tier'             => $r->tier,
                 'cycle_days'       => (int) $r->cycle_days,
                 'purchase_events'  => (int) $r->purchase_events,
                 'last_purchase_at' => $r->last_purchase_at,
@@ -1351,12 +1369,33 @@ class MetricEngine
             ->where('created_at', '>=', $now->subDays(30))
             ->count();
 
+        // The pipeline metric: every pair sitting at exactly 2 purchase dates,
+        // due or not — one more order confirms (or kills) each cycle.
+        $maturingPairs = (int) (DB::selectOne("
+            WITH events AS (
+                SELECT {$key} AS ckey, oi.product_id
+                FROM orders o
+                JOIN order_items oi ON oi.order_id = o.id
+                WHERE o.status NOT IN ('voided','cancelled')
+                  AND UPPER(o.currency_code) = 'KES'
+                  AND oi.product_id IS NOT NULL
+                  AND o.created_at >= ?
+                  AND {$key} IS NOT NULL
+                  {$outletSql}
+                GROUP BY 1, 2, DATE(o.created_at)
+            )
+            SELECT COUNT(*) AS maturing
+            FROM (SELECT 1 FROM events GROUP BY ckey, product_id HAVING COUNT(*) = 2) m
+        ", [$since])->maturing ?? 0);
+
         return [
             'summary' => [
-                'due_customers'    => $due->pluck('ckey')->unique()->count(),
-                'due_pairs'        => $due->count(),
-                'expected_revenue' => round((float) $due->sum('avg_value'), 2),
-                'pings_30d'        => $pings30d,
+                'due_customers'     => $due->pluck('ckey')->unique()->count(),
+                'due_pairs'         => $due->count(),
+                'provisional_pairs' => $due->where('tier', 'provisional')->count(),
+                'maturing_pairs'    => $maturingPairs,
+                'expected_revenue'  => round((float) $due->sum('avg_value'), 2),
+                'pings_30d'         => $pings30d,
             ],
             'due' => $due->take($limit)->values()->all(),
         ];

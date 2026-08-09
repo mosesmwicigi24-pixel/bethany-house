@@ -20,6 +20,10 @@ use Illuminate\Support\Facades\Log;
  * handles the order from there. The Hub only sends.
  *
  * Safety rails, in order of evaluation per due row:
+ *   - established only   → provisional rows (tier != 'established' — a single
+ *     repeat purchase, an unconfirmed rhythm) are filtered out before the loop;
+ *     automation never messages a customer on a 2-event hypothesis. Those rows
+ *     stay on the radar UI for a human-judged manual WhatsApp nudge.
  *   - no phone           → skipped_no_phone (email-only identities)
  *   - customer opted out → skipped_optout (customers.wa_marketing_opt_out)
  *   - recently pinged    → skipped_cooldown: a SENT ping for the same
@@ -50,6 +54,14 @@ class ReplenishmentPingService
     {
         $radar = MetricEngine::unscoped()->replenishmentRadar(self::RADAR_DEPTH);
 
+        // Automation acts on ESTABLISHED rhythms only (3+ purchases, steady
+        // gaps). Provisional rows are a single repeat purchase — real enough
+        // to show a human, not enough to auto-message a customer over.
+        $dueRows = array_values(array_filter(
+            $radar['due'],
+            static fn (array $row): bool => ($row['tier'] ?? 'established') === 'established',
+        ));
+
         $counts = [
             'scanned'          => 0,
             'sent'             => 0,
@@ -65,7 +77,7 @@ class ReplenishmentPingService
         $attempts = 0;
         $now      = CarbonImmutable::now();
 
-        foreach ($radar['due'] as $row) {
+        foreach ($dueRows as $row) {
             $counts['scanned']++;
             $canonical = Phone::canonical($row['phone'] ?? null);
 
