@@ -1129,10 +1129,21 @@ class MetricEngine
                        MAX(created_at)             AS last_order_at
                 FROM keyed WHERE ckey IS NOT NULL GROUP BY ckey
             ), scored AS (
+                -- R is scored on ABSOLUTE days-quiet thresholds (stable and
+                -- explainable; matches the shop's existing 60-day convention).
+                -- F and M are scored relative to the cohort via CUME_DIST so
+                -- the best customer always scores 5 — NTILE(5) over a small
+                -- cohort caps at score=N and makes top segments unreachable.
                 SELECT *,
-                       NTILE(5) OVER (ORDER BY last_order_at ASC) AS r_score,
-                       NTILE(5) OVER (ORDER BY frequency ASC)     AS f_score,
-                       NTILE(5) OVER (ORDER BY monetary ASC)      AS m_score
+                       CASE
+                           WHEN last_order_at >= NOW() - INTERVAL '30 days'  THEN 5
+                           WHEN last_order_at >= NOW() - INTERVAL '60 days'  THEN 4
+                           WHEN last_order_at >= NOW() - INTERVAL '90 days'  THEN 3
+                           WHEN last_order_at >= NOW() - INTERVAL '180 days' THEN 2
+                           ELSE 1
+                       END AS r_score,
+                       CEIL(CUME_DIST() OVER (ORDER BY frequency ASC) * 5)::int AS f_score,
+                       CEIL(CUME_DIST() OVER (ORDER BY monetary  ASC) * 5)::int AS m_score
                 FROM per_customer
             )
             SELECT *,
