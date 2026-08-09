@@ -40,6 +40,13 @@ export const reportsApi = {
     customerIntelligence: (from: string, to: string) =>
         get<any>(`${BASE}/customer-intelligence`, { params: { period: "custom", from, to } }),
 
+    // Replenishment radar — per-customer product reorder cycles, "as of now"
+    // (no date range: due/overdue only means anything against today).
+    replenishmentRadar: (outletId?: number) =>
+        get<ReplenishmentRadar>(`${BASE}/replenishment`, {
+            params: { ...(outletId ? { outlet_id: outletId } : {}) },
+        }),
+
     // Financial intelligence (reports.financial): earned P&L, budgets, cash flow, rails.
     financialIntelligence: (from: string, to: string) =>
         get<any>(`${BASE}/financial-intelligence`, { params: { period: "custom", from, to } }),
@@ -441,6 +448,38 @@ export interface SalesLedger {
     daily: { date: string; orders: number; sales: number; paid: number; credit: number }[];
     weekly: LedgerBucket[];
     monthly: LedgerBucket[];
+}
+
+// ── Replenishment radar ───────────────────────────────────────────────────────
+// One row per (customer, product) pair with a detected reorder rhythm whose
+// due window has opened. Sorted overdue-first, then expected value desc.
+
+export interface ReplenishmentDueRow {
+    /** Canonical customer key (customer_id, else normalized phone, else email). */
+    ckey: string;
+    name: string;
+    phone: string | null;
+    product_id: number;
+    product_name: string;
+    /** Median days between this customer's purchases of this product. */
+    cycle_days: number;
+    purchase_events: number;
+    last_purchase_at: string;
+    next_due_at: string;
+    /** Days past next_due_at; negative = due in N days. */
+    days_over: number;
+    status: "overdue" | "due_soon";
+    /** Average KES spent on this product per purchase event. */
+    avg_value: number;
+}
+
+export interface ReplenishmentRadar {
+    summary: {
+        due_customers: number;
+        due_pairs: number;
+        expected_revenue: number;
+    };
+    due: ReplenishmentDueRow[];
 }
 
 // ── Neema performance ─────────────────────────────────────────────────────────

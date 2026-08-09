@@ -1,8 +1,10 @@
 // src/pages/reports/CustomersReportPage.tsx
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { reportsApi } from "@/api/reports";
+import { reportsApi, type ReplenishmentDueRow } from "@/api/reports";
 import { fmtKes } from "@/api/expenses";
+import { openWhatsApp } from "@/lib/whatsapp";
 import { Spinner } from "@/components/ui/Spinner";
 import {
     BarChart,
@@ -38,9 +40,19 @@ import {
     TH_R,
 } from "./reportShared";
 
+type CustomersTab = "overview" | "ltv" | "retention" | "intelligence" | "replenishment";
+const CUSTOMERS_TABS: readonly CustomersTab[] = ["overview", "ltv", "retention", "intelligence", "replenishment"];
+
 export default function CustomersReportPage() {
     const dr = useDateRange("this_month");
-    const [activeTab, setActiveTab] = useState<"overview" | "ltv" | "retention" | "intelligence">("overview");
+    // Honour deep-links like /reports/customers?tab=replenishment (the
+    // attention feed sends users here) — read once on mount, same pattern as
+    // ProductionPage's ?status=; after that the tab buttons own the state.
+    const [searchParams] = useSearchParams();
+    const [activeTab, setActiveTab] = useState<CustomersTab>(() => {
+        const t = searchParams.get("tab");
+        return CUSTOMERS_TABS.includes(t as CustomersTab) ? (t as CustomersTab) : "overview";
+    });
 
     const periodDays = Math.max(
         1,
@@ -171,7 +183,7 @@ export default function CustomersReportPage() {
             {/* Tabs */}
             <div className="border-b border-line overflow-x-auto no-scrollbar">
                 <nav className="flex gap-1 -mb-px">
-                    {(["overview", "ltv", "retention", "intelligence"] as const).map((tab) => (
+                    {CUSTOMERS_TABS.map((tab) => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
@@ -184,9 +196,13 @@ export default function CustomersReportPage() {
                         >
                             {tab === "ltv"
                                 ? "Lifetime Value"
-                                : tab === "retention"
-                                  ? "Retention"
-                                  : "Overview"}
+                                : tab === "replenishment"
+                                  ? "Replenishment"
+                                  : tab === "retention"
+                                    ? "Retention"
+                                    : tab === "intelligence"
+                                      ? "Intelligence"
+                                      : "Overview"}
                         </button>
                     ))}
                 </nav>
@@ -196,6 +212,11 @@ export default function CustomersReportPage() {
             {activeTab === "intelligence" && (
                 <CustomerIntelligence start={dr.start} end={dr.end} />
             )}
+
+            {/* ── REPLENISHMENT — "as of now", deliberately ignores the date
+                   range (like Inventory's stock tab): due/overdue only means
+                   anything against today. ── */}
+            {activeTab === "replenishment" && <ReplenishmentRadarTab />}
 
             {activeTab === "overview" && (
                 <div className="space-y-6">
@@ -704,6 +725,169 @@ function CustomerIntelligence({ start, end }: { start: string; end: string }) {
                         </div>
                     )}
                 </div>
+            </div>
+        </div>
+    );
+}
+
+// ─── Replenishment Radar tab ──────────────────────────────────────────────────
+// Consumables churches rebuy on a rhythm (communion bread, altar wine,
+// prefilled cups): each row is a (customer, product) pair whose detected
+// reorder cycle says they are due or overdue to rebuy — with a one-click
+// WhatsApp ping so the shop reaches out BEFORE the customer remembers.
+
+function ReplenishmentRadarTab() {
+    const { data, isLoading } = useQuery({
+        queryKey: ["replenishment-radar"],
+        queryFn: () => reportsApi.replenishmentRadar(),
+        staleTime: 60_000,
+    });
+
+    if (isLoading || !data)
+        return (
+            <div className="flex justify-center py-16">
+                <Spinner />
+            </div>
+        );
+
+    const { summary, due } = data;
+    const overdueCount = due.filter((d) => d.status === "overdue").length;
+
+    const pingMessage = (row: ReplenishmentDueRow) => {
+        const firstName = (row.name || "").trim().split(/\s+/)[0] || "there";
+        const days = Math.max(
+            1,
+            dayjs().diff(dayjs(row.last_purchase_at), "day"),
+        );
+        return (
+            `Hello ${firstName}, greetings from Bethany House! ` +
+            `It's been about ${days} days since your last ${row.product_name} order — ` +
+            `shall we prepare your usual for you? We deliver.`
+        );
+    };
+
+    return (
+        <div className="space-y-6">
+            <div className={KPI_GRID}>
+                <KpiCard
+                    label="Customers Due"
+                    value={summary.due_customers}
+                    sub="Reorder window open now"
+                />
+                <KpiCard
+                    label="Expected Revenue"
+                    value={fmtKes(summary.expected_revenue)}
+                    sub={`Across ${summary.due_pairs} product reorder${summary.due_pairs === 1 ? "" : "s"}`}
+                    color="text-brand-600"
+                />
+                <KpiCard
+                    label="Overdue"
+                    value={overdueCount}
+                    sub="Past the usual cycle + grace"
+                    color={overdueCount > 0 ? "text-danger" : "text-success"}
+                />
+            </div>
+
+            <div className="card overflow-hidden">
+                <div className="px-5 pt-5 pb-4">
+                    <SectionHeader title="Due & overdue reorders — overdue first, biggest money next" />
+                    <p className="text-sm text-surface-500 mt-1">
+                        Detected from each customer's own purchase rhythm over
+                        the last 18 months (3+ purchases at steady intervals).
+                        Lapsed customers (3+ cycles quiet) live on the win-back
+                        list instead.
+                    </p>
+                </div>
+                <TableWrapper>
+                    <table className="w-full">
+                        <thead>
+                            <tr className="border-y border-line bg-surface-50/50">
+                                <th className={TH}>Customer</th>
+                                <th className={TH}>Phone</th>
+                                <th className={TH}>Product</th>
+                                <th className={TH}>Cycle</th>
+                                <th className={TH}>Last Order</th>
+                                <th className={TH}>Due</th>
+                                <th className={TH}>Status</th>
+                                <th className={TH_R}>Expected</th>
+                                <th className={TH}></th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-line">
+                            {due.length === 0 ? (
+                                <EmptyRow cols={9} />
+                            ) : (
+                                due.map((row) => (
+                                    <tr
+                                        key={`${row.ckey}-${row.product_id}`}
+                                        className="hover:bg-surface-50/50 transition-colors"
+                                    >
+                                        <td className="px-4 py-3 font-medium text-surface-900">
+                                            {row.name}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-surface-500 font-mono">
+                                            {row.phone ?? "-"}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-surface-700">
+                                            {row.product_name}
+                                            <span className="text-2xs text-surface-400 block">
+                                                {row.purchase_events} purchases
+                                            </span>
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-surface-600 whitespace-nowrap">
+                                            every ~{row.cycle_days} days
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-surface-500 whitespace-nowrap">
+                                            {dayjs(row.last_purchase_at).format(
+                                                "D MMM YY",
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-surface-500 whitespace-nowrap">
+                                            {dayjs(row.next_due_at).format(
+                                                "D MMM YY",
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <span
+                                                className={clsx(
+                                                    "px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap",
+                                                    row.status === "overdue"
+                                                        ? "bg-danger-light text-danger"
+                                                        : "bg-warning-light text-warning",
+                                                )}
+                                            >
+                                                {row.status === "overdue"
+                                                    ? `Overdue ${row.days_over}d`
+                                                    : row.days_over >= 0
+                                                      ? "Due now"
+                                                      : `Due in ${-row.days_over}d`}
+                                            </span>
+                                        </td>
+                                        <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                                            {fmtKes(row.avg_value)}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            {row.phone && (
+                                                <button
+                                                    onClick={() =>
+                                                        openWhatsApp(
+                                                            row.phone,
+                                                            pingMessage(row),
+                                                        )
+                                                    }
+                                                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-success-light text-success hover:opacity-80 transition-opacity whitespace-nowrap"
+                                                    title="Open WhatsApp with a prefilled reorder message"
+                                                >
+                                                    WhatsApp
+                                                </button>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </TableWrapper>
             </div>
         </div>
     );

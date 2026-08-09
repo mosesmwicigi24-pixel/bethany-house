@@ -1221,6 +1221,124 @@ class MetricEngine
         ];
     }
 
+    /**
+     * Replenishment Radar — proactive revenue on consumables.
+     *
+     * Churches rebuy communion bread, altar wine and prefilled cups on a
+     * rhythm. Per (customer, product) pair this detects that rhythm from the
+     * trailing 540 days of sales truth and surfaces who is DUE or OVERDUE to
+     * reorder, with the expected value of the reorder.
+     *
+     * Identity is the CANONICAL key (customer_id, else normalize_phone, else
+     * lowercased email — same as rfmSegments). A purchase EVENT is one
+     * distinct purchase date per pair (same-day orders collapse); its value
+     * is that day's total line spend on the product.
+     *
+     * A pair is RHYTHMIC when it has >= 3 events, the coefficient of
+     * variation of its consecutive-date gaps is <= 0.6, and the median gap
+     * (the cycle) is a believable 5–120 days. next_due = last purchase +
+     * cycle. Status:
+     *   overdue  — today is past next_due by more than 25% of the cycle
+     *   due_soon — today is within 7 days of next_due (or past it)
+     * Pairs more than 3 cycles past their last purchase are LAPSED — that is
+     * win-back territory (rfmSegments), not radar material — and excluded.
+     */
+    public function replenishmentRadar(int $limit = 50): array
+    {
+        $key = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
+        $now   = CarbonImmutable::now(self::TZ);
+        $today = $now->format('Y-m-d');
+        $since = $now->subDays(540);
+        $outletSql = $this->outletIds
+            ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')'
+            : '';
+
+        $rows = DB::select("
+            WITH events AS (
+                -- One purchase EVENT per (customer, product, day); the event's
+                -- value is that day's total line spend on the product.
+                SELECT {$key} AS ckey, oi.product_id,
+                       DATE(o.created_at) AS buy_date,
+                       SUM(oi.total_price) AS event_value,
+                       MAX(TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,'')))) AS name,
+                       MAX(o.customer_phone) AS phone
+                FROM orders o
+                JOIN order_items oi ON oi.order_id = o.id
+                WHERE o.status NOT IN ('voided','cancelled')
+                  AND UPPER(o.currency_code) = 'KES'
+                  AND oi.product_id IS NOT NULL
+                  AND o.created_at >= ?
+                  AND {$key} IS NOT NULL
+                  {$outletSql}
+                GROUP BY 1, 2, 3
+            ), gapped AS (
+                SELECT *,
+                       buy_date - LAG(buy_date) OVER (PARTITION BY ckey, product_id ORDER BY buy_date) AS gap_days
+                FROM events
+            ), pairs AS (
+                SELECT ckey, product_id,
+                       MAX(name) AS name, MAX(phone) AS phone,
+                       COUNT(*) AS purchase_events,
+                       MAX(buy_date) AS last_purchase_at,
+                       ROUND(AVG(event_value)::numeric, 2) AS avg_value,
+                       PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gap_days) AS median_gap,
+                       AVG(gap_days) AS avg_gap,
+                       STDDEV_SAMP(gap_days) AS sd_gap
+                FROM gapped
+                GROUP BY ckey, product_id
+                HAVING COUNT(*) >= 3
+            ), rhythmic AS (
+                -- Steady rhythms only: interval CV <= 0.6, believable cycle.
+                SELECT p.*,
+                       ROUND(p.median_gap)::int AS cycle_days,
+                       p.last_purchase_at + ROUND(p.median_gap)::int AS next_due_at
+                FROM pairs p
+                WHERE p.avg_gap > 0
+                  AND COALESCE(p.sd_gap / NULLIF(p.avg_gap, 0), 0) <= 0.6
+                  AND p.median_gap BETWEEN 5 AND 120
+            )
+            SELECT r.ckey, r.name, r.phone, r.product_id,
+                   COALESCE(pt.name, pr.slug, pr.sku) AS product_name,
+                   r.cycle_days, r.purchase_events, r.last_purchase_at, r.next_due_at,
+                   (?::date - r.next_due_at) AS days_over,
+                   r.avg_value,
+                   CASE WHEN ?::date > r.next_due_at + ROUND(r.cycle_days * 0.25)::int
+                        THEN 'overdue' ELSE 'due_soon' END AS status
+            FROM rhythmic r
+            JOIN products pr ON pr.id = r.product_id
+            LEFT JOIN product_translations pt
+                   ON pt.product_id = pr.id AND pt.language_code = 'en'
+            WHERE ?::date <= r.last_purchase_at + r.cycle_days * 3   -- lapsed = win-back, not radar
+              AND ?::date >= r.next_due_at - 7                       -- the due window has opened
+            ORDER BY CASE WHEN ?::date > r.next_due_at + ROUND(r.cycle_days * 0.25)::int THEN 0 ELSE 1 END,
+                     r.avg_value DESC
+        ", [$since, $today, $today, $today, $today, $today]);
+
+        $due = collect($rows)->map(fn ($r) => [
+            'ckey'             => $r->ckey,
+            'name'             => ($r->name !== null && $r->name !== '') ? $r->name : ($r->phone ?? 'Unknown'),
+            'phone'            => $r->phone,
+            'product_id'       => (int) $r->product_id,
+            'product_name'     => $r->product_name,
+            'cycle_days'       => (int) $r->cycle_days,
+            'purchase_events'  => (int) $r->purchase_events,
+            'last_purchase_at' => $r->last_purchase_at,
+            'next_due_at'      => $r->next_due_at,
+            'days_over'        => (int) $r->days_over,
+            'status'           => $r->status,
+            'avg_value'        => round((float) $r->avg_value, 2),
+        ])->values();
+
+        return [
+            'summary' => [
+                'due_customers'    => $due->pluck('ckey')->unique()->count(),
+                'due_pairs'        => $due->count(),
+                'expected_revenue' => round((float) $due->sum('avg_value'), 2),
+            ],
+            'due' => $due->take($limit)->values()->all(),
+        ];
+    }
+
     // ── Financial intelligence (Phase 5) ──────────────────────────────────────
 
     /**
@@ -1583,6 +1701,37 @@ class MetricEngine
                 ])->values()->all(),
                 'actions' => [
                     ['type' => 'navigate', 'label' => 'Open customer report', 'to' => '/reports/customers'],
+                ],
+            ];
+        }
+
+        // 6b. Replenishment radar: consumables due for their usual reorder —
+        // proactive revenue instead of waiting for the church to remember.
+        $radar = $this->replenishmentRadar();
+        if ($radar['summary']['due_pairs'] > 0) {
+            $due = collect($radar['due']);
+            $top = $due->first();
+            $pairs = $radar['summary']['due_pairs'];
+            $bigOverdue = $due->contains(fn ($d) => $d['status'] === 'overdue' && $d['avg_value'] >= 5000);
+            $topWhen = $top['days_over'] > 0
+                ? "{$top['days_over']} day" . ($top['days_over'] === 1 ? '' : 's') . ' past'
+                : 'coming up on';
+            $items[] = [
+                'key' => 'replenishment_due', 'severity' => $bigOverdue ? 'high' : 'medium',
+                'title' => "{$pairs} usual reorder" . ($pairs > 1 ? 's' : '') . ' due — ~KES '
+                    . number_format($radar['summary']['expected_revenue']) . ' waiting',
+                'detail' => "{$top['name']} is {$topWhen} the ~{$top['cycle_days']}-day \"{$top['product_name']}\" cycle"
+                    . " (usually KES " . number_format($top['avg_value']) . ').',
+                'count' => $pairs, 'link' => '/reports/customers',
+                'entities' => $due->take(3)->map(fn ($d) => [
+                    'name'      => $d['name'],
+                    'phone'     => $d['phone'],
+                    'product'   => $d['product_name'],
+                    'days_over' => $d['days_over'],
+                    'avg_value' => $d['avg_value'],
+                ])->values()->all(),
+                'actions' => [
+                    ['type' => 'navigate', 'label' => 'Open radar', 'to' => '/reports/customers?tab=replenishment'],
                 ],
             ];
         }
