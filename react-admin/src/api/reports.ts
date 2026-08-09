@@ -92,6 +92,19 @@ export const reportsApi = {
             params: { ...(outletId ? { outlet_id: outletId } : {}) },
         }),
 
+    // International corridor — diaspora & regional orders (non-KES currency OR
+    // is_international) over a trailing window (default 180 days). Native
+    // per-currency rollups, country grouping, corridor top products, 6-month
+    // trend. KES equivalents only when real rates are configured. Cached 10
+    // min server-side.
+    internationalCorridor: (outletId?: number, days?: number) =>
+        get<InternationalCorridorReport>(`${BASE}/international`, {
+            params: {
+                ...(outletId ? { outlet_id: outletId } : {}),
+                ...(days ? { days } : {}),
+            },
+        }),
+
     // Win-back economics — dormant customers scored against their own purchase
     // rhythm: KES at risk, urgency, outreach history, 30-day recovery
     // attribution. "As of now" like the radar (no date range).
@@ -797,6 +810,67 @@ export interface InstitutionalAccountsReport {
         at_risk_value: number;
     };
     accounts: InstitutionalAccountRow[];
+}
+
+// ── International corridor ────────────────────────────────────────────────────
+// Diaspora & regional orders: non-KES currency OR is_international. Native
+// currencies are never silently summed — kes_equivalent fields are null
+// whenever the currencies table lacks a real configured rate.
+
+export interface CorridorCurrencyRow {
+    currency: string;
+    orders: number;
+    revenue_native: number;
+    /** Settled payments net of refunds, only where payment currency == order currency. */
+    paid_native: number;
+    customers: number;
+    avg_order_native: number;
+    /** null when no usable configured rate exists for this currency. */
+    kes_equivalent: number | null;
+}
+
+export interface CorridorCountryRow {
+    /** ISO-2 country code, or 'unknown' when the order carried none. */
+    country: string;
+    country_name: string;
+    orders: number;
+    customers: number;
+    /** Per-currency native revenue map, e.g. { USD: 1200, ZMW: 5400 }. */
+    revenue: Record<string, number>;
+}
+
+export interface CorridorProductRow {
+    product_id: number;
+    name: string;
+    /** Corridor orders this product appears in. */
+    orders: number;
+    units: number;
+}
+
+export interface CorridorTrendPoint {
+    /** YYYY-MM, trailing 6 calendar months, zero-filled. */
+    month: string;
+    orders: number;
+    /** null when rates are unavailable — never a partial conversion. */
+    kes_equivalent: number | null;
+}
+
+export interface InternationalCorridorReport {
+    summary: {
+        corridor_orders: number;
+        corridor_customers: number;
+        currencies_active: number;
+        /** Corridor orders as % of ALL sales-truth orders in the window. */
+        share_of_all_orders_pct: number;
+        /** null when any active corridor currency has no configured rate. */
+        kes_equivalent_total: number | null;
+        rates_unavailable: boolean;
+    };
+    currencies: CorridorCurrencyRow[];
+    countries: CorridorCountryRow[];
+    top_products: CorridorProductRow[];
+    trend: CorridorTrendPoint[];
+    window_days: number;
 }
 
 // ── Win-back economics ────────────────────────────────────────────────────────

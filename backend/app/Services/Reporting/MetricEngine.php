@@ -3496,4 +3496,255 @@ class MetricEngine
             'accounts' => $accounts->all(),
         ];
     }
+
+    // ── International corridor ────────────────────────────────────────────────
+
+    /**
+     * International corridor — the diaspora/regional business the KES-only
+     * reports deliberately exclude (see the salesBase() currency filter and
+     * the excluded-currency warning on the Sales page). A corridor order is
+     * SALES TRUTH (non-voided/cancelled) that is either not in KES or is
+     * flagged is_international (a KES order shipped abroad counts too).
+     *
+     * Native currencies are NEVER silently summed together. Per-currency
+     * rollups stay native; a KES equivalent is reported only where the
+     * currencies table carries a usable configured rate, and the corridor
+     * total only when EVERY active corridor currency converts — otherwise
+     * kes_equivalent_total is null and rates_unavailable says why.
+     *
+     * Cached 10 minutes, keyed by scope + days (same idiom as attachRates).
+     */
+    public function internationalCorridor(int $days = 180): array
+    {
+        $scopeKey = $this->outletIds !== null
+            ? implode('-', collect($this->outletIds)->map(fn ($id) => (int) $id)->sort()->values()->all())
+            : 'all';
+
+        return \Illuminate\Support\Facades\Cache::remember(
+            "metrics:international_corridor:{$scopeKey}:{$days}",
+            600,
+            fn () => $this->computeInternationalCorridor($days),
+        );
+    }
+
+    /** Corridor membership, shared by every query in the rollup pass. */
+    private const CORRIDOR_WHERE = "(UPPER(o.currency_code) <> 'KES' OR o.is_international = true)";
+
+    /** The uncached rollup pass behind internationalCorridor(). */
+    private function computeInternationalCorridor(int $days): array
+    {
+        $key   = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
+        $since = CarbonImmutable::now(self::TZ)->subDays($days)->startOfDay();
+        $outletSql = $this->outletIds
+            ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')'
+            : '';
+        $corridor = self::CORRIDOR_WHERE;
+
+        // 1. Per-currency rollup (sales truth: what was sold, natively).
+        $currencies = DB::select("
+            SELECT UPPER(o.currency_code) AS currency,
+                   COUNT(DISTINCT o.id)   AS orders,
+                   COALESCE(SUM(o.total_amount), 0) AS revenue_native,
+                   COUNT(DISTINCT {$key}) AS customers
+            FROM orders o
+            WHERE o.status NOT IN ('voided','cancelled')
+              AND {$corridor}
+              AND o.created_at >= ?
+              {$outletSql}
+            GROUP BY UPPER(o.currency_code)
+            ORDER BY orders DESC, currency
+        ", [$since]);
+
+        // 1b. Money truth per currency: settled payments net of refunds on
+        //     corridor orders. Only payments whose OWN currency matches the
+        //     order's count — a USD order settled with a KES payment row must
+        //     not leak into a "USD paid" figure.
+        $paidByCurrency = collect(DB::select("
+            SELECT UPPER(p.currency_code) AS currency,
+                   SUM(p.amount - p.refund_amount) AS paid
+            FROM payments p
+            JOIN orders o ON o.id = p.order_id
+            WHERE p.status = 'paid'
+              AND UPPER(p.currency_code) = UPPER(o.currency_code)
+              AND o.status NOT IN ('voided','cancelled')
+              AND {$corridor}
+              AND o.created_at >= ?
+              {$outletSql}
+            GROUP BY 1
+        ", [$since]))->pluck('paid', 'currency');
+
+        // 2. Per-country rollup. Revenue stays a per-currency map — a country
+        //    can legitimately order in more than one currency (a Lusaka church
+        //    paying USD one month and ZMW the next) and summing them would be
+        //    fiction.
+        $countryRows = DB::select("
+            SELECT COALESCE(NULLIF(UPPER(o.customer_country_code), ''), 'unknown') AS country,
+                   UPPER(o.currency_code) AS currency,
+                   COUNT(DISTINCT o.id)   AS orders,
+                   COALESCE(SUM(o.total_amount), 0) AS revenue_native,
+                   COUNT(DISTINCT {$key}) AS customers
+            FROM orders o
+            WHERE o.status NOT IN ('voided','cancelled')
+              AND {$corridor}
+              AND o.created_at >= ?
+              {$outletSql}
+            GROUP BY 1, 2
+        ", [$since]);
+
+        $countryNames = DB::table('countries')->pluck('name', 'code')
+            ->mapWithKeys(fn ($name, $code) => [strtoupper($code) => $name]);
+
+        $countries = collect($countryRows)
+            ->groupBy('country')
+            ->map(function ($rows, $country) use ($countryNames) {
+                // customers per currency can overlap across currencies; take
+                // the max as the honest floor rather than a double-counted sum.
+                return [
+                    'country'      => $country,
+                    'country_name' => $country === 'unknown' ? 'Unknown' : ($countryNames[$country] ?? $country),
+                    'orders'       => (int) $rows->sum(fn ($r) => (int) $r->orders),
+                    'customers'    => (int) $rows->max(fn ($r) => (int) $r->customers),
+                    'revenue'      => $rows->mapWithKeys(fn ($r) => [$r->currency => round((float) $r->revenue_native, 2)])->all(),
+                ];
+            })
+            ->sortByDesc('orders')
+            ->values();
+
+        // 3. Top products across the corridor, by the number of corridor
+        //    orders they appear in (order count, not revenue — revenue would
+        //    mix currencies).
+        $topProducts = DB::select("
+            SELECT oi.product_id,
+                   COALESCE(MAX(pt.name), MAX(pr.slug), MAX(pr.sku)) AS name,
+                   COUNT(DISTINCT o.id) AS orders,
+                   COALESCE(SUM(oi.quantity), 0) AS units
+            FROM orders o
+            JOIN order_items oi ON oi.order_id = o.id AND oi.product_id IS NOT NULL
+            JOIN products pr    ON pr.id = oi.product_id
+            LEFT JOIN product_translations pt
+                   ON pt.product_id = pr.id AND pt.language_code = 'en'
+            WHERE o.status NOT IN ('voided','cancelled')
+              AND {$corridor}
+              AND o.created_at >= ?
+              {$outletSql}
+            GROUP BY oi.product_id
+            ORDER BY orders DESC, units DESC
+            LIMIT 10
+        ", [$since]);
+
+        // 4. Monthly trend — a fixed trailing 6 calendar months (zero-filled),
+        //    independent of ?days: the mini-chart answers "is the corridor
+        //    growing", which needs stable buckets.
+        $trendSince = CarbonImmutable::now(self::TZ)->subMonthsNoOverflow(5)->startOfMonth();
+        $trendRows = DB::select("
+            SELECT TO_CHAR(o.created_at, 'YYYY-MM') AS month,
+                   UPPER(o.currency_code) AS currency,
+                   COUNT(DISTINCT o.id)   AS orders,
+                   COALESCE(SUM(o.total_amount), 0) AS revenue_native
+            FROM orders o
+            WHERE o.status NOT IN ('voided','cancelled')
+              AND {$corridor}
+              AND o.created_at >= ?
+              {$outletSql}
+            GROUP BY 1, 2
+        ", [$trendSince]);
+
+        // 5. Denominators + distinct corridor customers in one pass.
+        $totals = DB::selectOne("
+            SELECT COUNT(DISTINCT o.id) FILTER (WHERE {$corridor}) AS corridor_orders,
+                   COUNT(DISTINCT {$key}) FILTER (WHERE {$corridor}) AS corridor_customers,
+                   COUNT(DISTINCT o.id) AS all_orders
+            FROM orders o
+            WHERE o.status NOT IN ('voided','cancelled')
+              AND o.created_at >= ?
+              {$outletSql}
+        ", [$since]);
+
+        // ── KES equivalence, only where a real configured rate exists. ───────
+        // currencies.exchange_rate is base-relative (Currency::convert: base
+        // amount = amount / rate; KES is the base at 1.0). The schema DEFAULTs
+        // exchange_rate to 1.0, so a NON-base currency sitting at exactly 1.0
+        // is an unconfigured row, not a peg — parity with KES is not a rate
+        // anyone set on purpose, and inventing 1:1 USD→KES would be worse
+        // than reporting native totals only.
+        $rateRows = DB::table('currencies')->get(['code', 'exchange_rate', 'is_base']);
+        $rates    = [];
+        foreach ($rateRows as $r) {
+            $code = strtoupper($r->code);
+            $rate = (float) $r->exchange_rate;
+            if ($rate <= 0) {
+                continue;
+            }
+            if ($code === 'KES' || $r->is_base) {
+                $rates[$code] = $rate; // base row (1.0 by convention)
+            } elseif (abs($rate - 1.0) > 1e-9) {
+                $rates[$code] = $rate;
+            }
+        }
+        $rates['KES'] = $rates['KES'] ?? 1.0;
+
+        $toKes = function (string $currency, float $amount) use ($rates): ?float {
+            $rate = $rates[strtoupper($currency)] ?? null;
+
+            return $rate !== null ? round($amount / $rate, 2) : null;
+        };
+
+        $currencyOut = collect($currencies)->map(fn ($c) => [
+            'currency'         => $c->currency,
+            'orders'           => (int) $c->orders,
+            'revenue_native'   => round((float) $c->revenue_native, 2),
+            'paid_native'      => round((float) ($paidByCurrency[$c->currency] ?? 0), 2),
+            'customers'        => (int) $c->customers,
+            'avg_order_native' => (int) $c->orders > 0
+                ? round((float) $c->revenue_native / (int) $c->orders, 2)
+                : 0.0,
+            'kes_equivalent'   => $toKes($c->currency, (float) $c->revenue_native),
+        ])->values();
+
+        $ratesUnavailable = $currencyOut->contains(fn ($c) => $c['kes_equivalent'] === null);
+        $kesTotal = (! $ratesUnavailable && $currencyOut->isNotEmpty())
+            ? round((float) $currencyOut->sum(fn ($c) => (float) $c['kes_equivalent']), 2)
+            : null;
+
+        // Zero-filled 6-month trend; revenue converts only when every rate is
+        // known (a partially-converted line would silently understate months).
+        $byMonth = collect($trendRows)->groupBy('month');
+        $trend   = collect(range(5, 0))->map(function ($back) use ($byMonth, $toKes, $ratesUnavailable) {
+            $month = CarbonImmutable::now(self::TZ)->subMonthsNoOverflow($back)->format('Y-m');
+            $rows  = $byMonth->get($month, collect());
+            $kes   = null;
+            if (! $ratesUnavailable) {
+                $kes = round((float) $rows->sum(fn ($r) => $toKes($r->currency, (float) $r->revenue_native) ?? 0.0), 2);
+            }
+
+            return [
+                'month'          => $month,
+                'orders'         => (int) $rows->sum(fn ($r) => (int) $r->orders),
+                'kes_equivalent' => $kes,
+            ];
+        })->values();
+
+        return [
+            'summary' => [
+                'corridor_orders'         => (int) $totals->corridor_orders,
+                'corridor_customers'      => (int) $totals->corridor_customers,
+                'currencies_active'       => $currencyOut->count(),
+                'share_of_all_orders_pct' => (int) $totals->all_orders > 0
+                    ? round((int) $totals->corridor_orders / (int) $totals->all_orders * 100, 1)
+                    : 0.0,
+                'kes_equivalent_total'    => $kesTotal,
+                'rates_unavailable'       => $ratesUnavailable,
+            ],
+            'currencies'   => $currencyOut->all(),
+            'countries'    => $countries->all(),
+            'top_products' => collect($topProducts)->map(fn ($p) => [
+                'product_id' => (int) $p->product_id,
+                'name'       => $p->name,
+                'orders'     => (int) $p->orders,
+                'units'      => (int) $p->units,
+            ])->all(),
+            'trend'        => $trend->all(),
+            'window_days'  => $days,
+        ];
+    }
 }

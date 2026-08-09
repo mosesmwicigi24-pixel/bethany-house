@@ -298,6 +298,27 @@ class ExecutiveReportController extends Controller
     }
 
     /**
+     * International corridor — diaspora & regional orders (non-KES currency
+     * OR is_international) over a trailing window (default 180 days): native
+     * per-currency rollups, per-country grouping, corridor top products and
+     * a 6-month trend. KES equivalents appear only where the currencies
+     * table carries a real configured rate — never invented conversions.
+     * reports.view via the route group; outlet scoping via MetricEngine::for;
+     * cached 10 minutes inside the engine (keyed by scope + days).
+     */
+    public function international(Request $request)
+    {
+        $validated = $request->validate([
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+            'days'      => 'nullable|integer|min:30|max:365',
+        ]);
+
+        $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+
+        return response()->json($engine->internationalCorridor((int) ($validated['days'] ?? 180)));
+    }
+
+    /**
      * Win-back economics — dormant customers scored against their OWN
      * purchase rhythm, with the KES at risk, outreach history and 30-day
      * recovery attribution. "As of now" like the radar (dormancy only means
