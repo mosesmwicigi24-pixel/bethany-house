@@ -83,6 +83,15 @@ export const reportsApi = {
             params: { ...(outletId ? { outlet_id: outletId } : {}) },
         }),
 
+    // Institutional accounts — churches/institutions as accounts: rollups,
+    // buyer-turnover risk, cohort cross-sell. Heuristic identification
+    // (customer_type='business' or an institution keyword in the name).
+    // "As of now" (no date range). Cached 10 min server-side.
+    institutionalAccounts: (outletId?: number) =>
+        get<InstitutionalAccountsReport>(`${BASE}/institutions`, {
+            params: { ...(outletId ? { outlet_id: outletId } : {}) },
+        }),
+
     // Win-back economics — dormant customers scored against their own purchase
     // rhythm: KES at risk, urgency, outreach history, 30-day recovery
     // attribution. "As of now" like the radar (no date range).
@@ -744,6 +753,50 @@ export interface SeasonalDemandReport {
         /** 0 until legacy history is imported (drives the unlock empty state). */
         history_depth_days: number;
     };
+}
+
+// ── Institutional accounts ────────────────────────────────────────────────────
+// Churches/institutions identified heuristically (customer_type='business' or
+// an institution keyword — PCEA/AIC/CHAPEL/CHURCH/… — in the name), rolled up
+// on the canonical customer key over the trailing 365 days.
+
+export interface InstitutionCrossSell {
+    product_id: number;
+    name: string;
+    /** % of ALL identified institutions that buy this product. */
+    adoption_pct: number;
+}
+
+export interface InstitutionalAccountRow {
+    /** Canonical customer key (customer_id, else normalized phone, else email). */
+    ckey: string;
+    name: string;
+    phone: string | null;
+    revenue_365: number;
+    orders_365: number;
+    last_order_at: string;
+    days_quiet: number;
+    /** Quiet 60+ days AND >= KES 10,000 trailing-365 revenue. */
+    risk: boolean;
+    /** Distinct phone/email combos seen on this account's orders — >1 means the buyer changed. */
+    buyer_contacts: number;
+    products_bought: number;
+    top_product: string | null;
+    /** Top 3 cohort-popular products this institution has never bought. */
+    cross_sell: InstitutionCrossSell[];
+}
+
+export interface InstitutionalAccountsReport {
+    summary: {
+        /** Whole identified cohort (the accounts list is capped at 30). */
+        institutions: number;
+        revenue_365_total: number;
+        /** Institution revenue as % of ALL trailing-365 sales revenue. */
+        share_of_total_revenue_pct: number;
+        at_risk_count: number;
+        at_risk_value: number;
+    };
+    accounts: InstitutionalAccountRow[];
 }
 
 // ── Win-back economics ────────────────────────────────────────────────────────

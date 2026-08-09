@@ -1,9 +1,10 @@
 // src/pages/reports/CustomersReportPage.tsx
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
     reportsApi,
+    type InstitutionalAccountRow,
     type ReplenishmentDueRow,
     type WinBackCustomerRow,
 } from "@/api/reports";
@@ -44,8 +45,8 @@ import {
     TH_R,
 } from "./reportShared";
 
-type CustomersTab = "overview" | "ltv" | "retention" | "intelligence" | "replenishment" | "winback";
-const CUSTOMERS_TABS: readonly CustomersTab[] = ["overview", "ltv", "retention", "intelligence", "replenishment", "winback"];
+type CustomersTab = "overview" | "ltv" | "retention" | "intelligence" | "replenishment" | "winback" | "institutions";
+const CUSTOMERS_TABS: readonly CustomersTab[] = ["overview", "ltv", "retention", "intelligence", "replenishment", "winback", "institutions"];
 
 export default function CustomersReportPage() {
     const dr = useDateRange("this_month");
@@ -204,11 +205,13 @@ export default function CustomersReportPage() {
                                   ? "Replenishment"
                                   : tab === "winback"
                                     ? "Win-back"
-                                    : tab === "retention"
-                                      ? "Retention"
-                                      : tab === "intelligence"
-                                        ? "Intelligence"
-                                        : "Overview"}
+                                    : tab === "institutions"
+                                      ? "Institutions"
+                                      : tab === "retention"
+                                        ? "Retention"
+                                        : tab === "intelligence"
+                                          ? "Intelligence"
+                                          : "Overview"}
                         </button>
                     ))}
                 </nav>
@@ -231,6 +234,11 @@ export default function CustomersReportPage() {
             {/* ── WIN-BACK — "as of now" like the radar: dormancy is measured
                    against today, not the report date range. ── */}
             {activeTab === "winback" && <WinBackTab />}
+
+            {/* ── INSTITUTIONS — churches/institutions as accounts, "as of
+                   now" like the radar (a quiet church only means anything
+                   against today). ── */}
+            {activeTab === "institutions" && <InstitutionsTab />}
 
             {activeTab === "overview" && (
                 <div className="space-y-6">
@@ -1228,6 +1236,262 @@ function WinBackTab() {
                                         </td>
                                     </tr>
                                 ))
+                            )}
+                        </tbody>
+                    </table>
+                </TableWrapper>
+            </div>
+        </div>
+    );
+}
+
+// ─── Institutional accounts tab ───────────────────────────────────────────────
+// Churches and institutions as ACCOUNTS: trailing-365 rollups, buyer-turnover
+// risk (the person who orders for the church changes; the church remains), and
+// cohort cross-sell ("6 of 9 churches buy prefilled cups"). Identification is
+// heuristic — customer_type='business' or an institution keyword in the name.
+
+function InstitutionsTab() {
+    const [expandedKey, setExpandedKey] = useState<string | null>(null);
+
+    const { data, isLoading } = useQuery({
+        queryKey: ["institutional-accounts"],
+        queryFn: () => reportsApi.institutionalAccounts(),
+        staleTime: 60_000,
+    });
+
+    if (isLoading || !data)
+        return (
+            <div className="flex justify-center py-16">
+                <Spinner />
+            </div>
+        );
+
+    const { summary, accounts } = data;
+
+    const institutionMessage = (row: InstitutionalAccountRow) =>
+        `Hello! Greetings from Bethany House 🙏 We value serving ${row.name}. ` +
+        `May we share what other congregations are finding useful this season?`;
+
+    return (
+        <div className="space-y-6">
+            <div className={KPI_GRID}>
+                <KpiCard
+                    label="Institutions"
+                    value={summary.institutions}
+                    sub="Churches & business accounts"
+                />
+                <KpiCard
+                    label="Their Revenue Share"
+                    value={`${summary.share_of_total_revenue_pct}%`}
+                    sub={`${fmtKes(summary.revenue_365_total)} of the last 365d`}
+                    color="text-brand-600"
+                />
+                <KpiCard
+                    label="At Risk"
+                    value={summary.at_risk_count}
+                    sub="Quiet 60+ days, KES 10k+ value"
+                    color={
+                        summary.at_risk_count > 0
+                            ? "text-danger"
+                            : "text-success"
+                    }
+                />
+                <KpiCard
+                    label="At-risk Value"
+                    value={fmtKes(summary.at_risk_value)}
+                    sub="Annual revenue gone quiet"
+                    color={
+                        summary.at_risk_value > 0
+                            ? "text-danger"
+                            : "text-success"
+                    }
+                />
+            </div>
+
+            <div className="card overflow-hidden">
+                <div className="px-5 pt-5 pb-4">
+                    <SectionHeader title="Institutional accounts — biggest annual value first" />
+                    <p className="text-sm text-surface-500 mt-1">
+                        Identified from the customer type and church/institution
+                        keywords in the name (PCEA, AIC, chapel, ministries, …).
+                        More than one buyer contact means a different person has
+                        ordered for this institution before — when it goes
+                        quiet, the buyer may have changed, not the need. Expand
+                        a row for what other congregations buy that this one
+                        never has.
+                    </p>
+                </div>
+                <TableWrapper>
+                    <table className="w-full">
+                        <thead>
+                            <tr className="border-y border-line bg-surface-50/50">
+                                <th className={clsx(TH, "w-8")}></th>
+                                <th className={TH}>Institution</th>
+                                <th className={TH}>Phone</th>
+                                <th className={TH_R}>Annual Value</th>
+                                <th className={TH_R}>Orders</th>
+                                <th className={TH}>Last Order</th>
+                                <th className={TH_R}>Buyers</th>
+                                <th className={TH}>Top Product</th>
+                                <th className={TH}></th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-line">
+                            {accounts.length === 0 ? (
+                                <EmptyRow cols={9} />
+                            ) : (
+                                accounts.map((row) => {
+                                    const expanded = expandedKey === row.ckey;
+                                    return (
+                                        <Fragment key={row.ckey}>
+                                            <tr
+                                                className="hover:bg-surface-50/50 transition-colors cursor-pointer"
+                                                onClick={() =>
+                                                    setExpandedKey(
+                                                        expanded
+                                                            ? null
+                                                            : row.ckey,
+                                                    )
+                                                }
+                                            >
+                                                <td className="px-4 py-3 text-surface-400 text-xs">
+                                                    {expanded ? "▾" : "▸"}
+                                                </td>
+                                                <td className="px-4 py-3 font-medium text-surface-900">
+                                                    {row.name}
+                                                    <span className="text-2xs text-surface-400 block">
+                                                        {row.products_bought}{" "}
+                                                        product
+                                                        {row.products_bought ===
+                                                        1
+                                                            ? ""
+                                                            : "s"}{" "}
+                                                        bought
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-surface-500 font-mono">
+                                                    {row.phone ?? "-"}
+                                                </td>
+                                                <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                                                    {fmtKes(row.revenue_365)}
+                                                </td>
+                                                <td className="px-4 py-3 text-right tabular-nums text-surface-600">
+                                                    {row.orders_365}
+                                                </td>
+                                                <td className="px-4 py-3 text-sm whitespace-nowrap">
+                                                    <span className="text-surface-500">
+                                                        {dayjs(
+                                                            row.last_order_at,
+                                                        ).format("D MMM YY")}
+                                                    </span>{" "}
+                                                    <span
+                                                        className={clsx(
+                                                            "ml-1 px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap",
+                                                            row.risk
+                                                                ? "bg-danger-light text-danger"
+                                                                : "bg-surface-100 text-surface-500",
+                                                        )}
+                                                        title={
+                                                            row.risk
+                                                                ? "Quiet 60+ days with KES 10,000+ annual value"
+                                                                : undefined
+                                                        }
+                                                    >
+                                                        {row.days_quiet}d quiet
+                                                        {row.risk
+                                                            ? " · at risk"
+                                                            : ""}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-right whitespace-nowrap">
+                                                    <span className="tabular-nums text-surface-600">
+                                                        {row.buyer_contacts}
+                                                    </span>
+                                                    {row.buyer_contacts > 1 && (
+                                                        <span
+                                                            className="ml-1.5 px-1.5 py-0.5 rounded text-2xs font-medium bg-warning-light text-warning align-middle"
+                                                            title="More than one phone/email has ordered for this institution — the buyer may have changed"
+                                                        >
+                                                            buyer changed?
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-surface-700">
+                                                    {row.top_product ?? "-"}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    {row.phone && (
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                openWhatsApp(
+                                                                    row.phone,
+                                                                    institutionMessage(
+                                                                        row,
+                                                                    ),
+                                                                );
+                                                            }}
+                                                            className="inline-flex items-center px-2.5 py-1.5 rounded-lg text-xs font-medium bg-success-light text-success hover:opacity-80 transition-opacity whitespace-nowrap"
+                                                            title="Open WhatsApp with a prefilled account-care message"
+                                                        >
+                                                            WhatsApp
+                                                        </button>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                            {expanded && (
+                                                <tr className="bg-surface-50/50">
+                                                    <td
+                                                        colSpan={9}
+                                                        className="px-4 py-3"
+                                                    >
+                                                        {row.cross_sell
+                                                            .length === 0 ? (
+                                                            <p className="text-xs text-surface-400">
+                                                                No cross-sell
+                                                                gaps — this
+                                                                institution
+                                                                already buys
+                                                                everything
+                                                                popular with the
+                                                                cohort.
+                                                            </p>
+                                                        ) : (
+                                                            <div className="flex items-center gap-2 flex-wrap">
+                                                                <span className="text-xs font-medium text-surface-500">
+                                                                    Also popular
+                                                                    with
+                                                                    churches:
+                                                                </span>
+                                                                {row.cross_sell.map(
+                                                                    (p) => (
+                                                                        <span
+                                                                            key={
+                                                                                p.product_id
+                                                                            }
+                                                                            className="px-2.5 py-1 rounded-full text-xs font-medium bg-brand-50 text-brand-700 border border-brand-200 whitespace-nowrap"
+                                                                            title={`${p.adoption_pct}% of identified institutions buy this`}
+                                                                        >
+                                                                            {
+                                                                                p.name
+                                                                            }{" "}
+                                                                            (
+                                                                            {
+                                                                                p.adoption_pct
+                                                                            }
+                                                                            %)
+                                                                        </span>
+                                                                    ),
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </Fragment>
+                                    );
+                                })
                             )}
                         </tbody>
                     </table>
