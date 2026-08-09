@@ -3155,6 +3155,37 @@ class MetricEngine
             ];
         }
 
+        // 6c. Institutional accounts at risk: churches with real annual value
+        // gone quiet — buyer turnover often hides behind the silence (the
+        // person who ordered left; the church still needs communion supplies).
+        $inst = $this->institutionalAccounts();
+        if ($inst['summary']['at_risk_count'] > 0) {
+            $atRiskValue = (float) $inst['summary']['at_risk_value'];
+            $riskyAccounts = collect($inst['accounts'])->filter(fn ($a) => $a['risk'])->values();
+            $topRisk = $riskyAccounts->first();
+            $n = (int) $inst['summary']['at_risk_count'];
+            $items[] = [
+                'key' => 'institution_risk', 'severity' => $atRiskValue >= 50000 ? 'high' : 'medium',
+                'title' => 'KES ' . number_format($atRiskValue) . ' of church/institution revenue at risk — '
+                    . $n . ' account' . ($n === 1 ? '' : 's') . ' quiet 60+ days',
+                'detail' => $topRisk !== null
+                    ? "Biggest is {$topRisk['name']} — KES " . number_format($topRisk['revenue_365'])
+                        . " a year, silent {$topRisk['days_quiet']} days"
+                        . ($topRisk['buyer_contacts'] > 1 ? ' (buyer contact has changed before — the person may have moved on).' : '.')
+                    : 'Institutions with 60+ quiet days and KES 10,000+ annual value.',
+                'count' => $n, 'link' => '/reports/customers?tab=institutions',
+                'entities' => $riskyAccounts->take(3)->map(fn ($a) => [
+                    'name'        => $a['name'],
+                    'phone'       => $a['phone'],
+                    'revenue_365' => $a['revenue_365'],
+                    'days_quiet'  => $a['days_quiet'],
+                ])->values()->all(),
+                'actions' => [
+                    ['type' => 'navigate', 'label' => 'Open institutional accounts', 'to' => '/reports/customers?tab=institutions'],
+                ],
+            ];
+        }
+
         // 7. Material runway: fabric that runs out mid-batch stops the floor.
         $runway = $this->materialRunway();
         if ($runway->isNotEmpty()) {
@@ -3238,5 +3269,231 @@ class MetricEngine
             [$a['severity'] === 'high' ? 0 : 1, -$a['count']] <=> [$b['severity'] === 'high' ? 0 : 1, -$b['count']]);
 
         return $items;
+    }
+
+    // ── Institutional accounts ────────────────────────────────────────────────
+
+    /**
+     * HEURISTIC institution detector. A canonical-key identity counts as an
+     * institution when its linked customers row says customer_type='business'
+     * OR any of its display names (the order-snapshot first/last concat, the
+     * customers first/last concat, or customers.company) contains a church /
+     * institution keyword.
+     *
+     * The keyword list is a heuristic tuned to THIS customer base (PCEA
+     * ST.LUKE, KARURA COMMUNITY CHAPEL, AIC KASINA, RGC RUIRU, …) — it will
+     * miss institutions with plain-person names and could catch an individual
+     * with an unlucky surname. Short acronyms (PCEA/ACK/AIC/SDA/RGC/GFI) are
+     * word-bounded (\y) so "Jackson" never matches ACK; longer stems are
+     * left-bounded only so MINISTR catches Ministry/Ministries and MISSION
+     * catches Missions.
+     */
+    private const INSTITUTION_NAME_REGEX =
+        '\y(PCEA|ACK|AIC|SDA|RGC|GFI)\y'
+        . '|\y(CHURCH|CHAPEL|CATHEDRAL|PARISH|MINISTR|APOSTOLIC|COMMUNITY|CENTRE|CENTER'
+        . '|TABERNACLE|WORSHIP|FAITH|GOSPEL|DELIVERANCE|REVIVAL|MISSION|DIOCESE|SAINT)'
+        . '|\yST\.';
+
+    /**
+     * Institutional accounts — churches and institutions as ACCOUNTS, not
+     * anonymous rows: per-institution rollups, buyer-turnover risk, and
+     * cohort cross-sell.
+     *
+     * Institutions buy big, rebuy, and carry buyer-turnover risk (the PERSON
+     * who orders for the church changes; the church remains). Identity is the
+     * CANONICAL key (customer_id, else normalize_phone, else lowercased email
+     * — same as rfmSegments) over the trailing-365-day sales truth; the
+     * institution test is the INSTITUTION_NAME_REGEX heuristic above plus
+     * customers.customer_type='business'.
+     *
+     * Per account: revenue_365 / orders_365 / last_order_at / days_quiet,
+     * distinct products bought + the top product by spend, and
+     * buyer_contacts = DISTINCT (normalized phone | lowercased email) combos
+     * seen on its orders — more than one contact means the person ordering
+     * has changed at least once (the turnover signal). risk = quiet for more
+     * than 60 days AND >= KES 10,000 of trailing-365 revenue.
+     *
+     * CROSS-SELL: for each institution, the top 3 products it has NEVER
+     * bought among products popular WITH OTHER institutions — cohort
+     * popularity, so the pitch writes itself ("6 of 9 churches buy prefilled
+     * cups"). "Popular" = bought by >= 2 institutions in the cohort;
+     * adoption_pct = buying institutions / ALL institutions.
+     *
+     * Summary spans the WHOLE identified cohort (not the display cap):
+     * institutions, revenue_365_total, share_of_total_revenue_pct (of ALL
+     * trailing-365 sales-truth revenue), at_risk_count, at_risk_value.
+     * accounts ranked revenue_365 desc, capped at 30. Cached 10 minutes,
+     * keyed by outlet scope.
+     */
+    public function institutionalAccounts(): array
+    {
+        $scopeKey = $this->outletIds !== null
+            ? implode('-', collect($this->outletIds)->map(fn ($id) => (int) $id)->sort()->values()->all())
+            : 'all';
+
+        return \Illuminate\Support\Facades\Cache::remember(
+            "metrics:institutional_accounts:{$scopeKey}",
+            600,
+            fn () => $this->computeInstitutionalAccounts(),
+        );
+    }
+
+    /** The uncached rollup pass behind institutionalAccounts(). */
+    private function computeInstitutionalAccounts(): array
+    {
+        $key   = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
+        $now   = CarbonImmutable::now(self::TZ);
+        $today = $now->format('Y-m-d');
+        $since = $now->subDays(365)->toMutable();
+        $regex = self::INSTITUTION_NAME_REGEX;
+        $outletSql = $this->outletIds
+            ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')'
+            : '';
+
+        // Shared CTE chain: keyed sales-truth orders → per-identity rollup →
+        // the identities that pass the institution test. buyer_contact is the
+        // normalized phone|email pair actually typed on each order — the
+        // canonical key collapses them into one account, so counting the
+        // DISTINCT pairs is exactly the buyer-turnover signal.
+        $instCte = "
+            WITH keyed AS (
+                SELECT {$key} AS ckey, o.id AS order_id, o.customer_id, o.total_amount, o.created_at,
+                       TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,''))) AS name,
+                       o.customer_phone AS phone,
+                       NULLIF(CONCAT(
+                           COALESCE(normalize_phone(o.customer_phone), ''), '|',
+                           COALESCE(LOWER(NULLIF(o.customer_email,'')), '')
+                       ), '|') AS buyer_contact
+                FROM orders o
+                WHERE o.status NOT IN ('voided','cancelled')
+                  AND UPPER(o.currency_code) = 'KES'
+                  AND o.created_at >= ?
+                  AND {$key} IS NOT NULL
+                  {$outletSql}
+            ), per_customer AS (
+                SELECT k.ckey, MAX(k.name) AS name, MAX(k.phone) AS phone,
+                       MAX(k.customer_id) AS customer_id,
+                       COUNT(*)                       AS orders_365,
+                       COALESCE(SUM(k.total_amount), 0) AS revenue_365,
+                       MAX(k.created_at)              AS last_order_at,
+                       COUNT(DISTINCT k.buyer_contact) AS buyer_contacts
+                FROM keyed k GROUP BY k.ckey
+            ), institutions AS (
+                SELECT p.*
+                FROM per_customer p
+                LEFT JOIN customers c ON c.id = p.customer_id
+                WHERE c.customer_type = 'business'
+                   OR p.name ~* '{$regex}'
+                   OR COALESCE(c.company, '') ~* '{$regex}'
+                   OR TRIM(CONCAT(COALESCE(c.first_name,''),' ',COALESCE(c.last_name,''))) ~* '{$regex}'
+            )
+        ";
+
+        // 1. The institution cohort, ranked by money.
+        $rows = DB::select("
+            {$instCte}
+            SELECT i.*, (?::date - DATE(i.last_order_at)) AS days_quiet
+            FROM institutions i
+            ORDER BY i.revenue_365 DESC
+        ", [$since, $today]);
+
+        if ($rows === []) {
+            return [
+                'summary' => [
+                    'institutions'               => 0,
+                    'revenue_365_total'          => 0.0,
+                    'share_of_total_revenue_pct' => 0.0,
+                    'at_risk_count'              => 0,
+                    'at_risk_value'              => 0.0,
+                ],
+                'accounts' => [],
+            ];
+        }
+
+        // 2. Everything every institution bought: per (institution, product)
+        //    spend — feeds distinct-product counts, top product, cohort
+        //    adoption AND the never-bought cross-sell in one pass.
+        $lines = DB::select("
+            {$instCte}
+            SELECT k.ckey, oi.product_id,
+                   COALESCE(MAX(pt.name), MAX(p.slug), MAX(p.sku)) AS product_name,
+                   SUM(oi.total_price) AS spend
+            FROM keyed k
+            JOIN order_items oi ON oi.order_id = k.order_id AND oi.product_id IS NOT NULL
+            JOIN products p     ON p.id = oi.product_id
+            LEFT JOIN product_translations pt
+                   ON pt.product_id = p.id AND pt.language_code = 'en'
+            WHERE k.ckey IN (SELECT ckey FROM institutions)
+            GROUP BY k.ckey, oi.product_id
+        ", [$since]);
+
+        // 3. Denominator for the revenue share: ALL trailing-365 sales truth.
+        $totalRevenue = (float) $this->salesBase()
+            ->where('created_at', '>=', $since)
+            ->sum('total_amount');
+
+        // Per-institution product map + cohort adoption per product.
+        $byInst  = collect($lines)->groupBy('ckey');
+        $cohortN = count($rows);
+        $adoption = collect($lines)
+            ->groupBy('product_id')
+            ->map(fn ($ls) => [
+                'product_id' => (int) $ls->first()->product_id,
+                'name'       => $ls->first()->product_name,
+                'buyers'     => $ls->pluck('ckey')->unique()->count(),
+            ])
+            // "Popular with the cohort" needs more than one buyer — a single
+            // church's pet product is not a cross-sell thesis.
+            ->filter(fn ($p) => $p['buyers'] >= 2)
+            ->sortByDesc('buyers')
+            ->values();
+
+        $risky    = collect($rows)->filter(fn ($r) => (int) $r->days_quiet > 60 && (float) $r->revenue_365 >= 10000);
+        $instRevenue = (float) collect($rows)->sum(fn ($r) => (float) $r->revenue_365);
+
+        $accounts = collect($rows)->take(30)->map(function ($r) use ($byInst, $adoption, $cohortN) {
+            $owned = $byInst->get($r->ckey) ?? collect();
+            $ownedIds = $owned->pluck('product_id')->map(fn ($id) => (int) $id)->flip();
+            $top = $owned->sortByDesc(fn ($l) => (float) $l->spend)->first();
+
+            $crossSell = $adoption
+                ->reject(fn ($p) => $ownedIds->has($p['product_id']))
+                ->take(3)
+                ->map(fn ($p) => [
+                    'product_id'   => $p['product_id'],
+                    'name'         => $p['name'],
+                    'adoption_pct' => $cohortN > 0 ? round($p['buyers'] / $cohortN * 100, 1) : 0.0,
+                ])
+                ->values()
+                ->all();
+
+            return [
+                'ckey'            => $r->ckey,
+                'name'            => ($r->name !== null && $r->name !== '') ? $r->name : ($r->phone ?? 'Unknown'),
+                'phone'           => $r->phone,
+                'revenue_365'     => round((float) $r->revenue_365, 2),
+                'orders_365'      => (int) $r->orders_365,
+                'last_order_at'   => $r->last_order_at,
+                'days_quiet'      => (int) $r->days_quiet,
+                'risk'            => (int) $r->days_quiet > 60 && (float) $r->revenue_365 >= 10000,
+                'buyer_contacts'  => (int) $r->buyer_contacts,
+                'products_bought' => $owned->count(),
+                'top_product'     => $top?->product_name,
+                'cross_sell'      => $crossSell,
+            ];
+        })->values();
+
+        return [
+            'summary' => [
+                'institutions'               => $cohortN,
+                'revenue_365_total'          => round($instRevenue, 2),
+                'share_of_total_revenue_pct' => $totalRevenue > 0
+                    ? round($instRevenue / $totalRevenue * 100, 1)
+                    : 0.0,
+                'at_risk_count'              => $risky->count(),
+                'at_risk_value'              => round((float) $risky->sum(fn ($r) => (float) $r->revenue_365), 2),
+            ],
+            'accounts' => $accounts->all(),
+        ];
     }
 }

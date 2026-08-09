@@ -316,6 +316,26 @@ class ExecutiveReportController extends Controller
     }
 
     /**
+     * Institutional accounts — churches/institutions as accounts: rollups,
+     * buyer-turnover risk and cohort cross-sell. Identification is heuristic
+     * (customer_type='business' or an institution keyword in the name — see
+     * MetricEngine::INSTITUTION_NAME_REGEX). "As of now" like the radar (a
+     * quiet church only means anything against today). reports.view via the
+     * route group; outlet scoping via MetricEngine::for; cached 10 minutes
+     * inside the engine (keyed by scope).
+     */
+    public function institutions(Request $request)
+    {
+        $validated = $request->validate([
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+        ]);
+
+        $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+
+        return response()->json($engine->institutionalAccounts());
+    }
+
+    /**
      * Log a manual win-back contact (WhatsApp opened / call made / other).
      *
      * The row is stamped with the authenticated user and a SERVER-computed
