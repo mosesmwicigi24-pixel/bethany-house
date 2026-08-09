@@ -160,15 +160,65 @@ export function EmptyRow({
     );
 }
 
-// ─── Export Button (hidden until Nginx proxy header forwarding is fixed) ──────
-// TODO: re-enable once Authorization header passes through the proxy correctly.
+// ─── Export CSV Button ────────────────────────────────────────────────────────
+// Downloads via reportsApi.downloadCsv: an authenticated fetch + blob download
+// (Bearer token in the request header), the same pattern ReportPdfButton uses.
+// No proxy header forwarding involved — the old <a href> navigation that
+// couldn't carry the Authorization header is gone.
 
-export function ExportCsvButton(_props: {
+export function ExportCsvButton({
+    path,
+    params,
+    label = "Export CSV",
+}: {
     path: string;
     params: Record<string, any>;
     label?: string;
 }) {
-    return null;
+    const [loading, setLoading] = useState(false);
+    const toast = useToastStore();
+
+    const download = useCallback(async () => {
+        setLoading(true);
+        try {
+            const ok = await reportsApi.downloadCsv(path, params);
+            if (!ok) toast.error("CSV export failed. Please try again.");
+        } catch {
+            toast.error("CSV export failed. Please try again.");
+        } finally {
+            setLoading(false);
+        }
+    }, [path, params, toast]);
+
+    return (
+        <button
+            onClick={download}
+            disabled={loading}
+            className="btn-ghost btn-sm inline-flex items-center gap-1.5 disabled:opacity-50"
+        >
+            {loading ? (
+                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+            ) : (
+                <svg
+                    className="w-3.5 h-3.5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={1.75}
+                >
+                    <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"
+                    />
+                </svg>
+            )}
+            <span>{loading ? "Exporting…" : label}</span>
+        </button>
+    );
 }
 
 export function PrintButton({ onClick }: { onClick: () => void }) {
