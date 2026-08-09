@@ -256,6 +256,27 @@ class ExecutiveReportController extends Controller
     }
 
     /**
+     * Stock-out revenue loss — zero-stock windows RECONSTRUCTED from the
+     * inventory ledger over the trailing window (default 90 days), sales
+     * velocity computed over in-stock days only, and the estimated KES lost
+     * while shelves sat empty — plus the live "bleeding now" rate for
+     * products out right now. reports.view via the route group; outlet
+     * scoping via MetricEngine::for; cached 10 minutes inside the engine
+     * (keyed by scope + days).
+     */
+    public function stockoutLoss(Request $request)
+    {
+        $validated = $request->validate([
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+            'days'      => 'nullable|integer|min:30|max:365',
+        ]);
+
+        $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+
+        return response()->json($engine->stockoutLoss((int) ($validated['days'] ?? 90)));
+    }
+
+    /**
      * Win-back economics — dormant customers scored against their OWN
      * purchase rhythm, with the KES at risk, outreach history and 30-day
      * recovery attribution. "As of now" like the radar (dormancy only means

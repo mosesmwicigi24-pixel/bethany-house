@@ -64,6 +64,17 @@ export const reportsApi = {
             },
         }),
 
+    // Stock-out revenue loss — reconstructed zero-stock windows over a
+    // trailing window (default 90 days), velocity over in-stock days only,
+    // est. KES lost + live "bleeding now" rate. Cached 10 min server-side.
+    stockoutLoss: (outletId?: number, days?: number) =>
+        get<StockoutLossReport>(`${BASE}/stockout-loss`, {
+            params: {
+                ...(outletId ? { outlet_id: outletId } : {}),
+                ...(days ? { days } : {}),
+            },
+        }),
+
     // Win-back economics — dormant customers scored against their own purchase
     // rhythm: KES at risk, urgency, outreach history, 30-day recovery
     // attribution. "As of now" like the radar (no date range).
@@ -640,6 +651,43 @@ export interface AttachRatesReport {
         top_pair: { anchor: string; companion: string; attach_rate: number } | null;
     };
     anchors: AttachAnchor[];
+}
+
+// ── Stock-out revenue loss ────────────────────────────────────────────────────
+// Zero-stock windows reconstructed from the inventory ledger; a product is
+// "out" only while ALL its outlets' stock rows sat at ≤ 0. Velocity = units
+// sold ÷ in-stock days. confidence 'low' = the product's stock rows have no
+// transaction history at all — only its CURRENT out-streak (from updated_at)
+// is claimed, and its KES stay out of the measured summary totals.
+
+export interface StockoutLossRow {
+    product_id: number;
+    name: string;
+    currently_out: boolean;
+    /** Days of the CURRENT out-streak (0 when in stock; may exceed the window). */
+    out_streak_days: number;
+    /** Days at zero inside the trailing window. */
+    out_days_window: number;
+    /** Units sold per IN-stock day. */
+    velocity_per_day: number;
+    avg_price: number;
+    /** out_days_window × velocity × avg_price. */
+    est_lost_revenue: number;
+    /** velocity × avg_price while currently out, else 0. */
+    est_daily_loss: number;
+    confidence: "measured" | "low";
+}
+
+export interface StockoutLossReport {
+    summary: {
+        products_currently_out: number;
+        /** KES/day bleeding right now (measured-confidence products only). */
+        est_daily_loss_now: number;
+        /** KES lost across the window (measured-confidence products only). */
+        est_lost_revenue_window: number;
+        low_confidence_count: number;
+    };
+    products: StockoutLossRow[];
 }
 
 // ── Win-back economics ────────────────────────────────────────────────────────
