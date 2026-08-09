@@ -54,6 +54,16 @@ export const reportsApi = {
             params: { ...(outletId ? { outlet_id: outletId } : {}) },
         }),
 
+    // Attach-rate intelligence — basket affinities + missed-attach KES over a
+    // trailing window (default 180 days). Cached 10 min server-side.
+    attachRates: (outletId?: number, days?: number) =>
+        get<AttachRatesReport>(`${BASE}/attach-rates`, {
+            params: {
+                ...(outletId ? { outlet_id: outletId } : {}),
+                ...(days ? { days } : {}),
+            },
+        }),
+
     // Win-back economics — dormant customers scored against their own purchase
     // rhythm: KES at risk, urgency, outreach history, 30-day recovery
     // attribution. "As of now" like the radar (no date range).
@@ -588,6 +598,48 @@ export interface CollectionsFunnel {
     open_quotes: OpenQuoteRow[];
     stalled_deposits: StalledDepositRow[];
     unpaid_balances: UnpaidBalanceRow[];
+}
+
+// ── Attach-rate intelligence (basket affinity) ────────────────────────────────
+// Baskets = distinct products per order (trailing window, sales truth).
+// attach_rate = P(companion | anchor); lift = attach_rate / P(companion).
+// missed_revenue_estimate = missed baskets × attach_rate × avg companion line
+// value — an expected-value PROXY of what asking would have earned, not
+// booked money.
+
+export interface AttachCompanion {
+    product_id: number;
+    name: string;
+    sku: string | null;
+    /** % of the anchor's baskets that also contained this companion. */
+    attach_rate_pct: number;
+    /** How much likelier than chance the pairing is (1.0 = coincidence). */
+    lift: number;
+    /** Avg KES the companion earns per basket where it attached. */
+    avg_value: number;
+    /** Anchor baskets where the companion was NOT attached. */
+    missed: number;
+    missed_revenue_estimate: number;
+}
+
+export interface AttachAnchor {
+    product_id: number;
+    name: string;
+    baskets: number;
+    companions: AttachCompanion[];
+    /** Sum of the companions' missed-revenue estimates (the ranking key). */
+    missed_revenue_estimate: number;
+}
+
+export interface AttachRatesReport {
+    summary: {
+        total_baskets: number;
+        multi_item_pct: number;
+        avg_basket_items: number;
+        missed_revenue_estimate_total: number;
+        top_pair: { anchor: string; companion: string; attach_rate: number } | null;
+    };
+    anchors: AttachAnchor[];
 }
 
 // ── Win-back economics ────────────────────────────────────────────────────────

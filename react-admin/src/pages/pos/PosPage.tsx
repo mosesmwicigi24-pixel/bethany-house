@@ -39,6 +39,7 @@ import type {
     PosMeasurementField,
     PosSale,
     PosShippingMethod,
+    PosSuggestion,
 } from "@/api/pos";
 import type { SplitPayment as ModalSplitPayment, ConfiguredMethod } from "./components/PaymentModal";
 import { useToastStore } from "@/store/toast.store";
@@ -2349,6 +2350,88 @@ export default function PosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currencyForQuery]);
 
+    // ── "Usually bought together" suggestion chips ─────────────────────────────
+    // Debounced fetch keyed on the SET of product ids in the cart (quantity
+    // changes don't refire). Purely advisory: any failure or empty answer just
+    // means no chips — the sale flow is never blocked or interrupted.
+    const [suggestions, setSuggestions] = useState<PosSuggestion[]>([]);
+    const [addingSuggestion, setAddingSuggestion] = useState<number | null>(null);
+    const suggestTimer = useRef<ReturnType<typeof setTimeout>>();
+    const cartProductIds = useMemo(
+        () =>
+            Array.from(
+                new Set(cart.map((i) => Number(i.product_id)).filter((id) => id > 0)),
+            ).sort((a, b) => a - b),
+        [cart],
+    );
+    const cartIdsKey = cartProductIds.join(",");
+    useEffect(() => {
+        clearTimeout(suggestTimer.current);
+        if (cartProductIds.length === 0) {
+            setSuggestions([]);
+            return;
+        }
+        suggestTimer.current = setTimeout(() => {
+            posApi
+                .suggestions(cartProductIds)
+                .then((res) =>
+                    // The server already excludes in-cart ids, but the cart may
+                    // have changed while the request was in flight — re-filter.
+                    setSuggestions(
+                        (res.suggestions ?? []).filter(
+                            (s) => !cartProductIds.includes(s.product_id),
+                        ),
+                    ),
+                )
+                .catch(() => setSuggestions([]));
+        }, 500);
+        return () => clearTimeout(suggestTimer.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [cartIdsKey]);
+
+    // Adding a chip rides the SAME path as tapping a product card: fetch the
+    // full product (outlet stock + currency-correct prices) via the normal
+    // search endpoint, then handleProductClick — single-variant products drop
+    // straight into the cart, multi-variant ones open the usual variant
+    // picker. If the product can't be resolved (e.g. not stocked at this
+    // outlet), fall back to showing it in the product search UI.
+    const addSuggestionToCart = useCallback(
+        async (s: PosSuggestion) => {
+            if (!selectedOutletId || addingSuggestion !== null) return;
+            setAddingSuggestion(s.product_id);
+            try {
+                const res = await get<{ data: PosProduct[] }>(
+                    "/v1/admin/pos/products/search",
+                    { params: {
+                        q:         s.sku || s.name,
+                        outlet_id: String(selectedOutletId),
+                        ...(currencyForQuery ? { currency: currencyForQuery } : {}),
+                    }},
+                );
+                const product = (res.data ?? []).find(
+                    (p) => Number(p.id) === s.product_id,
+                );
+                if (product && product.variants.length > 0) {
+                    const def =
+                        product.variants.find((v) => v.is_default) ??
+                        product.variants[0];
+                    handleProductClick(product, def);
+                } else {
+                    // Graceful fallback: put the product in front of the clerk
+                    // through the normal search results instead of failing.
+                    setSearchInput(s.name);
+                    setSearchQuery(s.name);
+                    setMobilePanel("products");
+                }
+            } catch {
+                // Advisory feature — a failed lookup never interrupts the sale.
+            } finally {
+                setAddingSuggestion(null);
+            }
+        },
+        [selectedOutletId, currencyForQuery, handleProductClick, addingSuggestion],
+    );
+
     const totals = useMemo(
         () => calcTotals(cart, cartDiscType, cartDiscVal, shippingFeeFromMethod || shippingAmount, taxInclusive),
         [cart, cartDiscType, cartDiscVal, shippingFeeFromMethod, shippingAmount, taxInclusive],
@@ -3241,6 +3324,33 @@ export default function PosPage() {
                                     currency={effectiveCurrency}
                                 />
                             ))
+                        )}
+                        {/* "Usually bought together" chips — passive attach
+                            prompts from basket-affinity history. They render
+                            below the cart rows (zero layout shift for the
+                            rows or the checkout footer) and simply disappear
+                            when there is nothing worth suggesting. */}
+                        {cart.length > 0 && suggestions.length > 0 && (
+                            <div className="px-3 py-2 border-t border-line/60">
+                                <p className="text-2xs text-surface-400 mb-1.5">
+                                    Usually bought together:
+                                </p>
+                                <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
+                                    {suggestions.map((s) => (
+                                        <button
+                                            key={s.product_id}
+                                            onClick={() => addSuggestionToCart(s)}
+                                            disabled={addingSuggestion !== null}
+                                            title={`Bought alongside ${s.anchor_name} in ${s.attach_rate_pct}% of its baskets`}
+                                            className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-brand-200 bg-brand-50 text-brand-700 text-xs font-medium hover:bg-brand-100 transition-colors disabled:opacity-50"
+                                        >
+                                            {addingSuggestion === s.product_id
+                                                ? "…"
+                                                : `${s.name} · ${Math.round(s.attach_rate_pct)}%`}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
                         )}
                     </div>
 
