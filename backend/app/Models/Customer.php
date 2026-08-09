@@ -30,6 +30,7 @@ class Customer extends Model
         'status',
         'notes',
         'last_purchase_at',
+        'wa_marketing_opt_out',
     ];
 
     protected $casts = [
@@ -39,6 +40,7 @@ class Customer extends Model
         'loyalty_points' => 'integer',
         'last_purchase_at' => 'datetime',
         'deleted_at' => 'datetime',
+        'wa_marketing_opt_out' => 'boolean',
     ];
 
     protected static function boot()

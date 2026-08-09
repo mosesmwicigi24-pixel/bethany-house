@@ -471,6 +471,9 @@ export interface ReplenishmentDueRow {
     status: "overdue" | "due_soon";
     /** Average KES spent on this product per purchase event. */
     avg_value: number;
+    /** When the automated reorder ping last reached (or last tried) this pair. */
+    last_pinged_at: string | null;
+    last_ping_status: "sent" | "failed" | null;
 }
 
 export interface ReplenishmentRadar {
@@ -478,6 +481,8 @@ export interface ReplenishmentRadar {
         due_customers: number;
         due_pairs: number;
         expected_revenue: number;
+        /** Automated reorder pings sent in the last 30 days. */
+        pings_30d: number;
     };
     due: ReplenishmentDueRow[];
 }

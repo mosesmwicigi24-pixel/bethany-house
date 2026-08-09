@@ -47,6 +47,18 @@ return [
         // Approved AUTHENTICATION template used for passwordless order lookup.
         'otp_template'        => env('WABA_OTP_TEMPLATE', 'order_lookup_code'),
         'otp_template_lang'   => env('WABA_OTP_TEMPLATE_LANG', 'en'),
+        // Approved MARKETING template for automated reorder reminders.
+        // Created by `php artisan whatsapp:reorder-template`.
+        'reorder_template'      => env('WABA_REORDER_TEMPLATE', 'reorder_reminder'),
+        'reorder_template_lang' => env('WABA_REORDER_TEMPLATE_LANG', 'en'),
+    ],
+
+
+    // Automated replenishment pings (replenishment:send-pings). Sending
+    // marketing messages is a conscious opt-in: the daily schedule no-ops
+    // until REPLENISHMENT_PINGS_ENABLED=true is set in the environment.
+    'replenishment' => [
+        'pings_enabled' => env('REPLENISHMENT_PINGS_ENABLED', false),
     ],
 
 
