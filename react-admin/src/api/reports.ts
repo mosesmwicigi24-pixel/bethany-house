@@ -47,6 +47,13 @@ export const reportsApi = {
             params: { ...(outletId ? { outlet_id: outletId } : {}) },
         }),
 
+    // Collections funnel — quote/deposit/balance: money promised but not
+    // collected, "as of now" (no date range, same reasoning as the radar).
+    collectionsFunnel: (outletId?: number) =>
+        get<CollectionsFunnel>(`${BASE}/collections`, {
+            params: { ...(outletId ? { outlet_id: outletId } : {}) },
+        }),
+
     // Financial intelligence (reports.financial): earned P&L, budgets, cash flow, rails.
     financialIntelligence: (from: string, to: string) =>
         get<any>(`${BASE}/financial-intelligence`, { params: { period: "custom", from, to } }),
@@ -496,6 +503,77 @@ export interface ReplenishmentRadar {
         pings_30d: number;
     };
     due: ReplenishmentDueRow[];
+}
+
+// ── Collections funnel ────────────────────────────────────────────────────────
+// Quote → deposit → balance: every shilling promised but not collected, staged.
+// Balance figures share MetricEngine::openBalances()/outstandingAging() with
+// the executive Overview, so the two surfaces always agree.
+
+export interface OpenQuoteRow {
+    id: number;
+    number: string;
+    customer: string;
+    phone: string | null;
+    value: number;
+    /** Days since the quote was issued (issue date, else creation). */
+    age_days: number;
+    status: string;
+    expires_at: string | null;
+}
+
+export interface StalledDepositRow {
+    id: number;
+    number: string;
+    customer: string;
+    phone: string | null;
+    total: number;
+    deposit_paid: number;
+    balance_due: number;
+    /** Days since money last moved on this order (order date if never). */
+    days_since_last_payment: number;
+}
+
+export interface UnpaidBalanceRow {
+    id: number;
+    number: string;
+    customer: string;
+    phone: string | null;
+    total: number;
+    paid: number;
+    balance: number;
+    days_outstanding: number;
+    bucket: "0_30" | "31_60" | "61_90" | "90_plus";
+}
+
+export interface CollectionsAgingBucket {
+    key: "0_30" | "31_60" | "61_90" | "90_plus";
+    label: string;
+    amount: number;
+    orders: number;
+}
+
+export interface CollectionsFunnel {
+    summary: {
+        /** Headline: open-quote value + total outstanding balance. */
+        money_on_table: number;
+        open_quotes: { count: number; value: number; avg_age_days: number };
+        stalled_deposits: { count: number; deposit_held: number; balance_due: number };
+        unpaid_balances: { count: number; value: number };
+        aging: {
+            buckets: CollectionsAgingBucket[];
+            deposits_held: { orders: number; amount: number };
+        };
+        conversion: {
+            /** % of quotes raised in the last 90 days that became orders. */
+            quotes_converted_rate_90d: number | null;
+            avg_days_quote_to_order: number | null;
+            avg_days_deposit_to_paid: number | null;
+        };
+    };
+    open_quotes: OpenQuoteRow[];
+    stalled_deposits: StalledDepositRow[];
+    unpaid_balances: UnpaidBalanceRow[];
 }
 
 // ── Neema performance ─────────────────────────────────────────────────────────
