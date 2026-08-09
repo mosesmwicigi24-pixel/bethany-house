@@ -3,8 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\WinBackOutreach;
 use App\Services\Reporting\MetricEngine;
+use App\Support\Phone;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 /**
  * The Executive Dashboard — one call answering "how is the business right
@@ -229,6 +233,109 @@ class ExecutiveReportController extends Controller
         $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
 
         return response()->json($engine->collectionsFunnel());
+    }
+
+    /**
+     * Win-back economics — dormant customers scored against their OWN
+     * purchase rhythm, with the KES at risk, outreach history and 30-day
+     * recovery attribution. "As of now" like the radar (dormancy only means
+     * anything against today). reports.view via the route group; outlet
+     * scoping via MetricEngine::for.
+     */
+    public function winBack(Request $request)
+    {
+        $validated = $request->validate([
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+        ]);
+
+        $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+
+        return response()->json($engine->winBackEconomics());
+    }
+
+    /**
+     * Log a manual win-back contact (WhatsApp opened / call made / other).
+     *
+     * The row is stamped with the authenticated user and a SERVER-computed
+     * snapshot of the customer's trailing-365 revenue and days quiet —
+     * client-sent revenue_365/days_quiet are accepted only as a fallback
+     * when the identity has no resolvable sales history (defence against a
+     * stale tab writing fiction into the attribution base).
+     *
+     * Dedupe: the same identity (customer_id or canonical phone) logged
+     * within the last 24h returns 200 {already_logged: true} and writes
+     * nothing — two clerks, one call.
+     */
+    public function winBackOutreach(Request $request)
+    {
+        $validated = $request->validate([
+            'customer_id' => 'nullable|integer|exists:customers,id',
+            'phone'       => 'nullable|string|max:32',
+            'name'        => 'required|string|max:200',
+            'channel'     => 'required|string|in:whatsapp,call,other',
+            // Fallback snapshot values only — the server recomputes when it can.
+            'revenue_365' => 'nullable|numeric|min:0',
+            'days_quiet'  => 'nullable|integer|min:0',
+        ]);
+
+        $customerId = isset($validated['customer_id']) ? (int) $validated['customer_id'] : null;
+        $canonical  = Phone::canonical($validated['phone'] ?? null);
+        abort_if($customerId === null && $canonical === null, 422, 'customer_id or a usable phone is required.');
+
+        $existing = WinBackOutreach::query()
+            ->where('created_at', '>=', now()->subDay())
+            ->where(function ($q) use ($customerId, $canonical) {
+                if ($customerId !== null) {
+                    $q->orWhere('customer_id', $customerId);
+                }
+                if ($canonical !== null) {
+                    $q->orWhere('phone', $canonical);
+                }
+            })
+            ->latest('created_at')
+            ->first();
+
+        if ($existing !== null) {
+            return response()->json(['already_logged' => true, 'outreach' => $existing]);
+        }
+
+        // Server-side truth for the snapshot: this identity's trailing-365
+        // sales (canonical phone bridged via normalize_phone, same as the
+        // win-back cohort itself).
+        $snap = DB::table('orders')
+            ->whereNotIn('status', ['voided', 'cancelled'])
+            ->whereRaw("UPPER(currency_code) = 'KES'")
+            ->where('created_at', '>=', now()->subDays(365))
+            ->where(function ($q) use ($customerId, $canonical) {
+                if ($customerId !== null) {
+                    $q->orWhere('customer_id', $customerId);
+                }
+                if ($canonical !== null) {
+                    $q->orWhereRaw('normalize_phone(customer_phone) = ?', ['+' . $canonical]);
+                }
+            })
+            ->selectRaw('COALESCE(SUM(total_amount), 0) AS revenue_365, MAX(created_at) AS last_order_at')
+            ->first();
+
+        $hasHistory = $snap !== null && $snap->last_order_at !== null;
+        $revenue365 = $hasHistory
+            ? round((float) $snap->revenue_365, 2)
+            : (isset($validated['revenue_365']) ? round((float) $validated['revenue_365'], 2) : null);
+        $daysQuiet = $hasHistory
+            ? (int) Carbon::parse($snap->last_order_at)->diffInDays(now())
+            : ($validated['days_quiet'] ?? null);
+
+        $outreach = WinBackOutreach::create([
+            'customer_id'            => $customerId,
+            'phone'                  => $canonical,
+            'name'                   => $validated['name'],
+            'channel'                => $validated['channel'],
+            'contacted_by'           => $request->user()->id,
+            'revenue_365_at_contact' => $revenue365,
+            'days_quiet_at_contact'  => $daysQuiet,
+        ]);
+
+        return response()->json(['already_logged' => false, 'outreach' => $outreach], 201);
     }
 
     /** CFO block: earned P&L, budget-aware expenses, cash flow, rails. */

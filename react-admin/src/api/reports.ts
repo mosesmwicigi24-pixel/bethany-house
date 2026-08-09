@@ -54,6 +54,20 @@ export const reportsApi = {
             params: { ...(outletId ? { outlet_id: outletId } : {}) },
         }),
 
+    // Win-back economics — dormant customers scored against their own purchase
+    // rhythm: KES at risk, urgency, outreach history, 30-day recovery
+    // attribution. "As of now" like the radar (no date range).
+    winBack: (outletId?: number) =>
+        get<WinBackReport>(`${BASE}/win-back`, {
+            params: { ...(outletId ? { outlet_id: outletId } : {}) },
+        }),
+
+    // Log a manual win-back contact (WhatsApp opened / call made). The server
+    // stamps the auth user + a snapshot of revenue_365/days_quiet, and dedupes
+    // the same identity within 24h (already_logged: true).
+    logWinBackOutreach: (payload: WinBackOutreachPayload) =>
+        post<WinBackOutreachResult>(`${BASE}/win-back/outreach`, payload),
+
     // Financial intelligence (reports.financial): earned P&L, budgets, cash flow, rails.
     financialIntelligence: (from: string, to: string) =>
         get<any>(`${BASE}/financial-intelligence`, { params: { period: "custom", from, to } }),
@@ -574,6 +588,77 @@ export interface CollectionsFunnel {
     open_quotes: OpenQuoteRow[];
     stalled_deposits: StalledDepositRow[];
     unpaid_balances: UnpaidBalanceRow[];
+}
+
+// ── Win-back economics ────────────────────────────────────────────────────────
+// A customer is dormant when their silence is long relative to their OWN
+// median inter-purchase gap (min 45 days quiet), not a flat 60-day rule.
+// urgency = days_quiet / median_gap ("3.2× overdue").
+
+export interface WinBackCustomerRow {
+    /** Canonical customer key (customer_id, else normalized phone, else email). */
+    ckey: string;
+    customer_id: number | null;
+    name: string;
+    phone: string | null;
+    /** Trailing-365-day spend — the annual value at risk for this customer. */
+    revenue_365: number;
+    orders_365: number;
+    last_order_at: string;
+    days_quiet: number;
+    /** Median days between this customer's purchase days. */
+    median_gap_days: number;
+    /** days_quiet / median_gap — 2.0 means twice their usual gap has passed. */
+    urgency: number;
+    last_outreach: {
+        channel: "whatsapp" | "call" | "other";
+        at: string;
+        by_name: string | null;
+    } | null;
+    /** First order placed within 30 days AFTER the latest outreach, if any. */
+    recovered: {
+        order_number: string;
+        amount: number;
+        at: string;
+    } | null;
+}
+
+export interface WinBackReport {
+    summary: {
+        /** Whole dormant cohort (the list itself is capped at 50). */
+        customers_at_risk: number;
+        annual_value_at_risk: number;
+        contacted_30d: number;
+        /** Distinct customers contacted in the last 90d who ordered within 30d after. */
+        won_back_90d: number;
+        /** Sum of distinct first-orders-after-outreach (90d window). */
+        recovered_revenue_90d: number;
+        /** won_back_90d / distinct customers contacted in 90d. */
+        win_back_rate_pct: number;
+    };
+    customers: WinBackCustomerRow[];
+}
+
+export interface WinBackOutreachPayload {
+    customer_id?: number | null;
+    phone?: string | null;
+    name: string;
+    channel: "whatsapp" | "call" | "other";
+    /** Fallback snapshot values — the server recomputes from orders when it can. */
+    revenue_365?: number;
+    days_quiet?: number;
+}
+
+export interface WinBackOutreachResult {
+    already_logged: boolean;
+    outreach: {
+        id: number;
+        customer_id: number | null;
+        phone: string | null;
+        name: string;
+        channel: string;
+        created_at: string;
+    };
 }
 
 // ── Neema performance ─────────────────────────────────────────────────────────

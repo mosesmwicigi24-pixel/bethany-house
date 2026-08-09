@@ -1,8 +1,12 @@
 // src/pages/reports/CustomersReportPage.tsx
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { reportsApi, type ReplenishmentDueRow } from "@/api/reports";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+    reportsApi,
+    type ReplenishmentDueRow,
+    type WinBackCustomerRow,
+} from "@/api/reports";
 import { fmtKes } from "@/api/expenses";
 import { openWhatsApp } from "@/lib/whatsapp";
 import { Spinner } from "@/components/ui/Spinner";
@@ -40,8 +44,8 @@ import {
     TH_R,
 } from "./reportShared";
 
-type CustomersTab = "overview" | "ltv" | "retention" | "intelligence" | "replenishment";
-const CUSTOMERS_TABS: readonly CustomersTab[] = ["overview", "ltv", "retention", "intelligence", "replenishment"];
+type CustomersTab = "overview" | "ltv" | "retention" | "intelligence" | "replenishment" | "winback";
+const CUSTOMERS_TABS: readonly CustomersTab[] = ["overview", "ltv", "retention", "intelligence", "replenishment", "winback"];
 
 export default function CustomersReportPage() {
     const dr = useDateRange("this_month");
@@ -198,11 +202,13 @@ export default function CustomersReportPage() {
                                 ? "Lifetime Value"
                                 : tab === "replenishment"
                                   ? "Replenishment"
-                                  : tab === "retention"
-                                    ? "Retention"
-                                    : tab === "intelligence"
-                                      ? "Intelligence"
-                                      : "Overview"}
+                                  : tab === "winback"
+                                    ? "Win-back"
+                                    : tab === "retention"
+                                      ? "Retention"
+                                      : tab === "intelligence"
+                                        ? "Intelligence"
+                                        : "Overview"}
                         </button>
                     ))}
                 </nav>
@@ -210,13 +216,21 @@ export default function CustomersReportPage() {
 
             {/* ── OVERVIEW ── */}
             {activeTab === "intelligence" && (
-                <CustomerIntelligence start={dr.start} end={dr.end} />
+                <CustomerIntelligence
+                    start={dr.start}
+                    end={dr.end}
+                    onOpenWinBack={() => setActiveTab("winback")}
+                />
             )}
 
             {/* ── REPLENISHMENT — "as of now", deliberately ignores the date
                    range (like Inventory's stock tab): due/overdue only means
                    anything against today. ── */}
             {activeTab === "replenishment" && <ReplenishmentRadarTab />}
+
+            {/* ── WIN-BACK — "as of now" like the radar: dormancy is measured
+                   against today, not the report date range. ── */}
+            {activeTab === "winback" && <WinBackTab />}
 
             {activeTab === "overview" && (
                 <div className="space-y-6">
@@ -607,7 +621,15 @@ export default function CustomersReportPage() {
 // snapshot): segments, new vs returning money, the top table, and the dormant
 // list — the customers worth a phone call this week.
 
-function CustomerIntelligence({ start, end }: { start: string; end: string }) {
+function CustomerIntelligence({
+    start,
+    end,
+    onOpenWinBack,
+}: {
+    start: string;
+    end: string;
+    onOpenWinBack: () => void;
+}) {
     const { data, isLoading } = useQuery({
         queryKey: ["customer-intelligence", start, end],
         queryFn: () => reportsApi.customerIntelligence(start, end),
@@ -658,9 +680,17 @@ function CustomerIntelligence({ start, end }: { start: string; end: string }) {
                     </div>
                     {rfm.action_list.length > 0 && (
                         <div className="mt-4 rounded-lg border border-danger-200 bg-danger-50/30 p-3">
-                            <p className="text-xs font-semibold text-danger mb-2">
-                                💸 Win-back list — at-risk & can't-lose customers, biggest money first
-                            </p>
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                                <p className="text-xs font-semibold text-danger">
+                                    💸 Win-back list — at-risk & can't-lose customers, biggest money first
+                                </p>
+                                <button
+                                    onClick={onOpenWinBack}
+                                    className="text-xs font-medium text-brand-600 hover:text-brand-700 whitespace-nowrap shrink-0"
+                                >
+                                    See full win-back economics →
+                                </button>
+                            </div>
                             <div className="space-y-1.5">
                                 {rfm.action_list.map((c: any) => (
                                     <div key={(c.phone ?? "") + c.name} className="flex items-center gap-3 text-xs">
@@ -925,6 +955,276 @@ function ReplenishmentRadarTab() {
                                                         d ago
                                                     </span>
                                                 )}
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </TableWrapper>
+            </div>
+        </div>
+    );
+}
+
+// ─── Win-back economics tab ───────────────────────────────────────────────────
+// The RFM win-back list as a measured recovery engine. A customer is dormant
+// when their silence is long relative to THEIR OWN median inter-purchase gap
+// (min 45 days) — a monthly buyer 70 days quiet is an emergency, an annual
+// bulk buyer 70 days quiet is on schedule. Every WhatsApp/call is logged so
+// the summary can attribute orders placed within 30 days of an outreach.
+
+function WinBackTab() {
+    const queryClient = useQueryClient();
+    const [loggingKey, setLoggingKey] = useState<string | null>(null);
+
+    const { data, isLoading } = useQuery({
+        queryKey: ["win-back-economics"],
+        queryFn: () => reportsApi.winBack(),
+        staleTime: 60_000,
+    });
+
+    if (isLoading || !data)
+        return (
+            <div className="flex justify-center py-16">
+                <Spinner />
+            </div>
+        );
+
+    const { summary, customers } = data;
+
+    const winBackMessage = (row: WinBackCustomerRow) => {
+        const firstName = (row.name || "").trim().split(/\s+/)[0] || "there";
+        return (
+            `Hello ${firstName}, it's Bethany House 🙏 We've missed serving you! ` +
+            `It's been a while since your last order — anything we can prepare for you? We deliver.`
+        );
+    };
+
+    const logOutreach = async (
+        row: WinBackCustomerRow,
+        channel: "whatsapp" | "call",
+    ) => {
+        setLoggingKey(row.ckey);
+        try {
+            await reportsApi.logWinBackOutreach({
+                customer_id: row.customer_id ?? undefined,
+                phone: row.phone ?? undefined,
+                name: row.name,
+                channel,
+                revenue_365: row.revenue_365,
+                days_quiet: row.days_quiet,
+            });
+            await queryClient.invalidateQueries({
+                queryKey: ["win-back-economics"],
+            });
+        } finally {
+            setLoggingKey(null);
+        }
+    };
+
+    const handleWhatsApp = (row: WinBackCustomerRow) => {
+        // Open first (popup blockers dislike opens after an await), then log.
+        const opened = openWhatsApp(row.phone, winBackMessage(row));
+        if (opened) void logOutreach(row, "whatsapp");
+    };
+
+    return (
+        <div className="space-y-6">
+            <div className={KPI_GRID}>
+                <KpiCard
+                    label="Value at Risk"
+                    value={fmtKes(summary.annual_value_at_risk)}
+                    sub={`${summary.customers_at_risk} customer${summary.customers_at_risk === 1 ? "" : "s"} gone quiet`}
+                    color="text-danger"
+                />
+                <KpiCard
+                    label="Contacted (30d)"
+                    value={summary.contacted_30d}
+                    sub="Outreach logged"
+                />
+                <KpiCard
+                    label="Won Back (90d)"
+                    value={summary.won_back_90d}
+                    sub="Ordered within 30d of outreach"
+                    color="text-success"
+                />
+                <KpiCard
+                    label="Recovered (90d)"
+                    value={fmtKes(summary.recovered_revenue_90d)}
+                    sub="First order after outreach"
+                    color="text-success"
+                />
+                <KpiCard
+                    label="Win-back Rate"
+                    value={`${summary.win_back_rate_pct}%`}
+                    sub="Of customers contacted (90d)"
+                    color="text-brand-600"
+                />
+            </div>
+
+            <div className="card overflow-hidden">
+                <div className="px-5 pt-5 pb-4">
+                    <SectionHeader title="Dormant customers — biggest annual value first" />
+                    <p className="text-sm text-surface-500 mt-1">
+                        Each customer is measured against their OWN purchase
+                        rhythm: "3.2× overdue" means over three of their usual
+                        gaps have passed in silence (minimum 45 days quiet).
+                        WhatsApp and Log call both record the outreach, so
+                        orders placed within 30 days count as won back.
+                    </p>
+                </div>
+                <TableWrapper>
+                    <table className="w-full">
+                        <thead>
+                            <tr className="border-y border-line bg-surface-50/50">
+                                <th className={TH}>Customer</th>
+                                <th className={TH}>Phone</th>
+                                <th className={TH_R}>Annual Value</th>
+                                <th className={TH_R}>Orders</th>
+                                <th className={TH}>Last Order</th>
+                                <th className={TH_R}>Days Quiet</th>
+                                <th className={TH}>Urgency</th>
+                                <th className={TH}>Last Contacted</th>
+                                <th className={TH}>Status</th>
+                                <th className={TH}></th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-line">
+                            {customers.length === 0 ? (
+                                <EmptyRow cols={10} />
+                            ) : (
+                                customers.map((row) => (
+                                    <tr
+                                        key={row.ckey}
+                                        className="hover:bg-surface-50/50 transition-colors"
+                                    >
+                                        <td className="px-4 py-3 font-medium text-surface-900">
+                                            {row.name}
+                                            <span className="text-2xs text-surface-400 block">
+                                                usual gap ~
+                                                {Math.round(
+                                                    row.median_gap_days,
+                                                )}
+                                                d
+                                            </span>
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-surface-500 font-mono">
+                                            {row.phone ?? "-"}
+                                        </td>
+                                        <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                                            {fmtKes(row.revenue_365)}
+                                        </td>
+                                        <td className="px-4 py-3 text-right tabular-nums text-surface-600">
+                                            {row.orders_365}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-surface-500 whitespace-nowrap">
+                                            {dayjs(row.last_order_at).format(
+                                                "D MMM YY",
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-3 text-right tabular-nums font-bold text-amber-700">
+                                            {row.days_quiet}d
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <span
+                                                className={clsx(
+                                                    "px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap",
+                                                    row.urgency >= 3
+                                                        ? "bg-danger-light text-danger"
+                                                        : "bg-warning-light text-warning",
+                                                )}
+                                                title="How many of this customer's usual purchase gaps have passed in silence"
+                                            >
+                                                {row.urgency}× overdue
+                                            </span>
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-surface-500 whitespace-nowrap">
+                                            {row.last_outreach ? (
+                                                <span
+                                                    title={
+                                                        row.last_outreach
+                                                            .by_name
+                                                            ? `By ${row.last_outreach.by_name}`
+                                                            : undefined
+                                                    }
+                                                >
+                                                    <span className="capitalize">
+                                                        {
+                                                            row.last_outreach
+                                                                .channel
+                                                        }
+                                                    </span>{" "}
+                                                    ·{" "}
+                                                    {Math.max(
+                                                        0,
+                                                        dayjs().diff(
+                                                            dayjs(
+                                                                row
+                                                                    .last_outreach
+                                                                    .at,
+                                                            ),
+                                                            "day",
+                                                        ),
+                                                    )}
+                                                    d ago
+                                                </span>
+                                            ) : (
+                                                <span className="text-surface-300">
+                                                    —
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            {row.recovered ? (
+                                                <span
+                                                    className="px-2 py-0.5 rounded text-xs font-medium bg-success-light text-success whitespace-nowrap"
+                                                    title={`Order ${row.recovered.order_number} on ${dayjs(row.recovered.at).format("D MMM YY")}`}
+                                                >
+                                                    won back +
+                                                    {fmtKes(
+                                                        row.recovered.amount,
+                                                    )}
+                                                </span>
+                                            ) : (
+                                                <span className="text-surface-300 text-sm">
+                                                    —
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <div className="flex items-center gap-1.5">
+                                                {row.phone && (
+                                                    <button
+                                                        onClick={() =>
+                                                            handleWhatsApp(row)
+                                                        }
+                                                        disabled={
+                                                            loggingKey ===
+                                                            row.ckey
+                                                        }
+                                                        className="inline-flex items-center px-2.5 py-1.5 rounded-lg text-xs font-medium bg-success-light text-success hover:opacity-80 transition-opacity whitespace-nowrap disabled:opacity-50"
+                                                        title="Open WhatsApp with a prefilled win-back message and log the outreach"
+                                                    >
+                                                        WhatsApp
+                                                    </button>
+                                                )}
+                                                <button
+                                                    onClick={() =>
+                                                        void logOutreach(
+                                                            row,
+                                                            "call",
+                                                        )
+                                                    }
+                                                    disabled={
+                                                        loggingKey === row.ckey
+                                                    }
+                                                    className="inline-flex items-center px-2.5 py-1.5 rounded-lg text-xs font-medium bg-surface-100 text-surface-700 border border-line hover:bg-surface-200 transition-colors whitespace-nowrap disabled:opacity-50"
+                                                    title="Record that this customer was called"
+                                                >
+                                                    Log call
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
                                 ))

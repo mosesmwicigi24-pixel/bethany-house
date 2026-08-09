@@ -1223,6 +1223,203 @@ class MetricEngine
     }
 
     /**
+     * Win-back economics — the RFM win-back list turned into a MEASURED
+     * recovery engine: KES at risk per dormant customer, urgency against the
+     * customer's OWN rhythm, manual-outreach logging, and 30-day recovery
+     * attribution.
+     *
+     * Identity is the CANONICAL key (customer_id, else normalize_phone, else
+     * lowercased email — same as rfmSegments) over the same trailing-365-day
+     * sales-truth cohort.
+     *
+     * DORMANT = the customer's silence is long relative to THEIR OWN cadence,
+     * not a flat 60-day rule: a monthly buyer 70 days quiet is an emergency,
+     * an annual bulk buyer 70 days quiet is on schedule. Concretely a
+     * customer is dormant when ALL of:
+     *   - 2+ distinct purchase days in the window (a personal rhythm exists —
+     *     the median gap between consecutive purchase days is measurable);
+     *   - days_quiet > 1.5 × their median inter-purchase gap;
+     *   - days_quiet >= 45 (noise floor — nobody is "dormant" at 3 weeks);
+     *   - revenue_365 > 0 (there is money at risk).
+     * urgency = days_quiet / median_gap ("3.2× overdue"). Single-purchase
+     * customers have no measurable cadence and are deliberately excluded —
+     * they are promising/hibernating RFM material, not win-back economics.
+     *
+     * OUTREACH rows (win_back_outreach) match a customer by customer_id OR by
+     * phone: the table stores canonical E.164 digits with no '+' (the
+     * replenishment_pings convention), the cohort key stores normalize_phone
+     * output ('+'-prefixed), so the SQL bridge is '+' || w.phone.
+     *
+     * RECOVERY: an outreach is "won back" when the SAME identity places a
+     * sales-truth order within 30 days AFTER the outreach; the recovered
+     * value is that FIRST order's total (later orders are regular revenue,
+     * not attribution). Note the happy asymmetry: a customer who recovers
+     * stops being dormant, so they leave the list — the summary's trailing
+     * 90-day won_back / recovered_revenue figures are where recoveries are
+     * counted, while row-level `recovered` marks the rare relapse (recovered
+     * once, quiet again).
+     *
+     * Summary: customers_at_risk / annual_value_at_risk (the WHOLE cohort,
+     * not just the displayed page), contacted_30d (outreach rows),
+     * won_back_90d (distinct customers with outreach in the last 90d who
+     * ordered within 30d after it), recovered_revenue_90d (sum of distinct
+     * first-orders-after-outreach), win_back_rate_pct (won-back customers /
+     * distinct customers contacted in 90d). List is ranked revenue_365 desc,
+     * capped at $limit.
+     */
+    public function winBackEconomics(int $limit = 50): array
+    {
+        $key = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
+        $now   = CarbonImmutable::now(self::TZ);
+        $today = $now->format('Y-m-d');
+        $since = $now->subDays(365);
+        $outletSql = $this->outletIds
+            ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')'
+            : '';
+
+        // 1. The dormant cohort, ranked by money at risk. Gaps are measured
+        // between DISTINCT purchase days (two same-day orders are one visit,
+        // and a 0-day gap would poison the median).
+        $rows = DB::select("
+            WITH keyed AS (
+                SELECT {$key} AS ckey, o.customer_id, o.total_amount, o.created_at,
+                       TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,''))) AS name,
+                       o.customer_phone AS phone
+                FROM orders o
+                WHERE o.status NOT IN ('voided','cancelled')
+                  AND UPPER(o.currency_code) = 'KES'
+                  AND o.created_at >= ?
+                  AND {$key} IS NOT NULL
+                  {$outletSql}
+            ), buy_days AS (
+                SELECT DISTINCT ckey, DATE(created_at) AS d FROM keyed
+            ), gapped AS (
+                SELECT ckey, d - LAG(d) OVER (PARTITION BY ckey ORDER BY d) AS gap_days
+                FROM buy_days
+            ), rhythm AS (
+                SELECT ckey, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gap_days) AS median_gap
+                FROM gapped WHERE gap_days IS NOT NULL
+                GROUP BY ckey
+            ), per_customer AS (
+                SELECT ckey, MAX(name) AS name, MAX(phone) AS phone,
+                       MAX(customer_id) AS customer_id,
+                       COUNT(*) AS orders_365,
+                       COALESCE(SUM(total_amount), 0) AS revenue_365,
+                       MAX(created_at) AS last_order_at
+                FROM keyed GROUP BY ckey
+            )
+            SELECT p.*, r.median_gap,
+                   (?::date - DATE(p.last_order_at)) AS days_quiet
+            FROM per_customer p
+            JOIN rhythm r ON r.ckey = p.ckey
+            WHERE r.median_gap > 0
+              AND p.revenue_365 > 0
+              AND (?::date - DATE(p.last_order_at)) >= 45
+              AND (?::date - DATE(p.last_order_at)) > 1.5 * r.median_gap
+            ORDER BY p.revenue_365 DESC
+        ", [$since, $today, $today, $today]);
+
+        // 2. Every outreach row, each with its FIRST attributable order (same
+        // identity, within 30 days after the contact) — one query feeds both
+        // the per-row "last contacted / won back" columns and the summary.
+        $outreach = collect(DB::select("
+            SELECT w.id, w.customer_id, w.phone, w.channel, w.created_at,
+                   NULLIF(TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,''))), '') AS by_name,
+                   fo.order_id, fo.order_number, fo.recovered_amount, fo.ordered_at
+            FROM win_back_outreach w
+            LEFT JOIN users u ON u.id = w.contacted_by
+            LEFT JOIN LATERAL (
+                SELECT o.id AS order_id, o.order_number, o.total_amount AS recovered_amount,
+                       o.created_at AS ordered_at
+                FROM orders o
+                WHERE o.status NOT IN ('voided','cancelled')
+                  AND UPPER(o.currency_code) = 'KES'
+                  AND o.created_at >  w.created_at
+                  AND o.created_at <= w.created_at + INTERVAL '30 days'
+                  AND (
+                        (w.customer_id IS NOT NULL AND o.customer_id = w.customer_id)
+                     OR (w.phone IS NOT NULL AND normalize_phone(o.customer_phone) = '+' || w.phone)
+                  )
+                  {$outletSql}
+                ORDER BY o.created_at ASC
+                LIMIT 1
+            ) fo ON TRUE
+            ORDER BY w.created_at DESC
+        "));
+
+        // Latest outreach per identity handle (rows are already newest-first).
+        $latestByCustomerId = [];
+        $latestByPhone      = [];
+        foreach ($outreach as $w) {
+            if ($w->customer_id !== null && !isset($latestByCustomerId[(int) $w->customer_id])) {
+                $latestByCustomerId[(int) $w->customer_id] = $w;
+            }
+            if ($w->phone !== null && $w->phone !== '' && !isset($latestByPhone[$w->phone])) {
+                $latestByPhone[$w->phone] = $w;
+            }
+        }
+
+        $customers = collect($rows)->take($limit)->map(function ($r) use ($latestByCustomerId, $latestByPhone) {
+            $canonPhone = Phone::canonical($r->phone);
+            $byId    = $r->customer_id !== null ? ($latestByCustomerId[(int) $r->customer_id] ?? null) : null;
+            $byPhone = $canonPhone !== null ? ($latestByPhone[$canonPhone] ?? null) : null;
+            // Same customer may be reachable via both handles — take the newer.
+            $last = ($byId && $byPhone)
+                ? ($byId->created_at >= $byPhone->created_at ? $byId : $byPhone)
+                : ($byId ?? $byPhone);
+
+            return [
+                'ckey'            => $r->ckey,
+                'customer_id'     => $r->customer_id !== null ? (int) $r->customer_id : null,
+                'name'            => ($r->name !== null && $r->name !== '') ? $r->name : ($r->phone ?? 'Unknown'),
+                'phone'           => $r->phone,
+                'revenue_365'     => round((float) $r->revenue_365, 2),
+                'orders_365'      => (int) $r->orders_365,
+                'last_order_at'   => $r->last_order_at,
+                'days_quiet'      => (int) $r->days_quiet,
+                'median_gap_days' => round((float) $r->median_gap, 1),
+                'urgency'         => round((int) $r->days_quiet / max((float) $r->median_gap, 1), 1),
+                'last_outreach'   => $last ? [
+                    'channel' => $last->channel,
+                    'at'      => $last->created_at,
+                    'by_name' => $last->by_name,
+                ] : null,
+                'recovered'       => ($last && $last->order_id !== null) ? [
+                    'order_number' => $last->order_number,
+                    'amount'       => round((float) $last->recovered_amount, 2),
+                    'at'           => $last->ordered_at,
+                ] : null,
+            ];
+        })->values();
+
+        // 3. Summary. Identity handle for de-duping outreach rows: prefer the
+        // customer_id, fall back to canonical phone, else the row id.
+        $handle = fn ($w) => $w->customer_id !== null ? 'c:' . $w->customer_id
+            : (($w->phone !== null && $w->phone !== '') ? 'p:' . $w->phone : 'w:' . $w->id);
+
+        $o90 = $outreach->filter(fn ($w) => CarbonImmutable::parse($w->created_at) >= $now->subDays(90));
+        $contacted90 = $o90->map($handle)->unique();
+        $wonBack90   = $o90->filter(fn ($w) => $w->order_id !== null)->map($handle)->unique();
+        $recovered90 = $o90->filter(fn ($w) => $w->order_id !== null)
+            ->unique(fn ($w) => $w->order_id)
+            ->sum(fn ($w) => (float) $w->recovered_amount);
+
+        return [
+            'summary' => [
+                'customers_at_risk'     => count($rows),
+                'annual_value_at_risk'  => round((float) collect($rows)->sum('revenue_365'), 2),
+                'contacted_30d'         => $outreach->filter(fn ($w) => CarbonImmutable::parse($w->created_at) >= $now->subDays(30))->count(),
+                'won_back_90d'          => $wonBack90->count(),
+                'recovered_revenue_90d' => round($recovered90, 2),
+                'win_back_rate_pct'     => $contacted90->count() > 0
+                    ? round($wonBack90->count() / $contacted90->count() * 100, 1)
+                    : 0.0,
+            ],
+            'customers' => $customers->all(),
+        ];
+    }
+
+    /**
      * Replenishment Radar — proactive revenue on consumables.
      *
      * Churches rebuy communion bread, altar wine and prefilled cups on a
@@ -1993,10 +2190,14 @@ class MetricEngine
         $dormant = $this->dormantTopCustomers();
         if ($dormant->isNotEmpty()) {
             $worst = $dormant->first();
+            $valueAtRisk = (float) $dormant->sum('revenue_12m');
             $items[] = [
                 'key' => 'dormant_customers', 'severity' => 'medium',
                 'title' => $dormant->count() . ' top customer' . ($dormant->count() > 1 ? 's' : '') . ' quiet for 60+ days',
-                'detail' => "{$worst['name']} (KES " . number_format($worst['revenue_12m']) . " this year) last ordered {$worst['days_quiet']} days ago.",
+                // Lead with the money: the KES at risk is what makes someone
+                // actually open the win-back tab.
+                'detail' => 'KES ' . number_format($valueAtRisk) . " of annual value gone quiet — top: {$worst['name']} (KES "
+                    . number_format($worst['revenue_12m']) . ", last ordered {$worst['days_quiet']} days ago).",
                 'count' => $dormant->count(), 'link' => '/reports/customers',
                 'entities' => $dormant->take(3)->map(fn ($c) => [
                     'name'       => $c['name'],
@@ -2004,6 +2205,7 @@ class MetricEngine
                     'days_quiet' => $c['days_quiet'],
                 ])->values()->all(),
                 'actions' => [
+                    ['type' => 'navigate', 'label' => 'Open win-back economics', 'to' => '/reports/customers?tab=winback'],
                     ['type' => 'navigate', 'label' => 'Open customer report', 'to' => '/reports/customers'],
                 ],
             ];
