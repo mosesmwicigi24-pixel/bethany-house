@@ -1,0 +1,18 @@
+# box-deploy.service — one deploy tick for the Bethany Hub (pull-based).
+# Installed on the VPS at /etc/systemd/system/box-deploy.service.
+# Triggered by box-deploy.timer every ~60s. See docs/DEPLOY.md.
+[Unit]
+Description=Bethany Hub pull-based deploy tick
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# The script lives in the repo checkout so it is versioned and self-updating:
+# each deploy syncs /opt/bethany-house/repo, so the NEXT tick runs the newest
+# script. Bootstrap clones the repo there first (docs/DEPLOY.md).
+ExecStart=/opt/bethany-house/repo/deploy/box-deploy.sh
+# A full deploy (pull 3 images + migrate + recreate) can take a while, but
+# never let a hung docker/network call wedge the unit forever.
+TimeoutStartSec=30min
