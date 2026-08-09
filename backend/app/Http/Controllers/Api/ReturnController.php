@@ -131,7 +131,11 @@ class ReturnController extends Controller
                     $order->order_number,
                     $request->user()->id
                 );
-            } catch (\Exception) {}
+            } catch (\Throwable) {
+                // Best-effort only — NotificationService::returnRequested does
+                // not exist yet, and an undefined method throws \Error, which
+                // `catch (\Exception)` let straight through.
+            }
 
             return response()->json([
                 'message' => 'Return request submitted successfully',
@@ -517,7 +521,14 @@ class ReturnController extends Controller
             ], 422);
         }
 
-        if ($validated['refund_amount'] > $return->total_amount) {
+        // order_returns has no total column — the return's worth is its lines
+        // priced at what the customer actually paid (order_items.unit_price).
+        $returnTotal = (float) DB::table('return_items')
+            ->join('order_items', 'order_items.id', '=', 'return_items.order_item_id')
+            ->where('return_items.return_id', $id)
+            ->sum(DB::raw('return_items.quantity * order_items.unit_price'));
+
+        if ($validated['refund_amount'] > $returnTotal) {
             return response()->json([
                 'message' => 'Refund amount exceeds return total'
             ], 422);
@@ -539,51 +550,56 @@ class ReturnController extends Controller
 
         DB::beginTransaction();
         try {
-            // Update return
-            DB::table('order_returns')
-                ->where('id', $id)
-                ->update([
-                    'status' => 'completed',
-                    'refund_amount' => $validated['refund_amount'],
-                    'refund_method' => $validated['refund_method'],
-                    'refund_notes' => $validated['notes'] ?? null,
-                    'refunded_at' => now(),
-                    'refunded_by' => $request->user()->id,
-                    'completed_at' => now(),
-                    'updated_at' => now(),
-                ]);
+            // Update return. order_returns has no refund_notes/refunded_by/
+            // completed_at columns — refund notes are appended to admin_notes.
+            $update = [
+                'status'        => 'completed',
+                'refund_amount' => $validated['refund_amount'],
+                'refund_method' => $validated['refund_method'],
+                'refunded_at'   => now(),
+                'updated_at'    => now(),
+            ];
+            if (!empty($validated['notes'])) {
+                $update['admin_notes'] = trim(
+                    ($return->admin_notes ? $return->admin_notes . "\n" : '')
+                    . 'Refund: ' . $validated['notes']
+                );
+            }
+            DB::table('order_returns')->where('id', $id)->update($update);
 
-            // Restore inventory
+            // Restore inventory on the inventory_items ledger. return_items
+            // carries no variant/product columns — the line's identity lives on
+            // its order_item, and the stock row is resolved exactly like POS
+            // commit/void: the pinned inventory_item_id first, then
+            // product/variant scoped to the order's outlet (with warehouse
+            // fallback). Lines flagged restock=false (damaged goods) stay out
+            // of stock.
             $items = DB::table('return_items')
                 ->where('return_id', $id)
                 ->get();
 
             foreach ($items as $item) {
-                // Increment inventory (return to warehouse)
-                DB::table('inventories')
-                    ->where('variant_id', $item->variant_id)
-                    ->where('location_type', 'warehouse')
-                    ->increment('quantity', $item->quantity);
-
-                // Log inventory transaction
-                $inventory = DB::table('inventories')
-                    ->where('variant_id', $item->variant_id)
-                    ->where('location_type', 'warehouse')
-                    ->first();
-
-                if ($inventory) {
-                    DB::table('inventory_transactions')->insert([
-                        'inventory_id' => $inventory->id,
-                        'type' => 'return',
-                        'quantity' => $item->quantity,
-                        'reference_type' => 'order_return',
-                        'reference_id' => $return->id,
-                        'notes' => "Return #{$return->return_number}",
-                        'performed_by' => $request->user()->id,
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ]);
+                if (!$item->restock) {
+                    continue;
                 }
+
+                $orderItem = DB::table('order_items')->find($item->order_item_id);
+                if (!$orderItem) {
+                    continue;
+                }
+
+                $inventory = \App\Services\PosInventoryService::inventoryFor($orderItem, $order?->outlet_id);
+
+                // Writes the inventory_transactions row with the real schema:
+                // inventory_item_id / transaction_type / quantity_change /
+                // created_by, linked via reference_type+reference_id.
+                $inventory?->adjustQuantity(
+                    (int) $item->quantity,
+                    'return',
+                    'order_return',
+                    $return->id,
+                    $request->user()->id
+                );
             }
 
             // For an original-payment refund, allocate the payout onto the settled
@@ -640,7 +656,11 @@ class ReturnController extends Controller
                     $refundOrder?->currency_code ?? 'KES',
                     $refundOrder?->user_id ?? null
                 );
-            } catch (\Exception) {}
+            } catch (\Throwable) {
+                // Best-effort only — NotificationService::refundProcessed does
+                // not exist yet, and an undefined method throws \Error, which
+                // `catch (\Exception)` let straight through (500 after commit).
+            }
 
             return response()->json([
                 'message' => 'Refund processed successfully',

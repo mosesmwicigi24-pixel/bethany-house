@@ -185,21 +185,39 @@ class Inventory extends Model
         
         $this->save();
 
-        // Cast to int: the inventory_transactions table stores quantity columns as
-        // integer in PostgreSQL. The Inventory model casts quantity_on_hand as
-        // decimal:2 (returning "0.00" etc.), which PostgreSQL rejects for integer
-        // columns. Product/variant stock is always whole units.
-        InventoryTransaction::create([
-            'inventory_id'     => $this->id,
-            'transaction_type' => $type,
-            'reference_type'   => $referenceType,
-            'reference_id'     => $referenceId,
-            'quantity_change'  => (int) round((float) $quantity),
-            'quantity_before'  => (int) round((float) $oldQuantity),
-            'quantity_after'   => (int) round((float) $this->quantity_on_hand),
-            'unit_cost'        => $this->cost_per_unit,
-            'created_by'       => $userId ?? auth()->id(),
-        ]);
+        // The inventory_transactions ledger is keyed by inventory_item_id (NOT
+        // NULL FK to inventory_items) — it has no inventory_id column, so a row
+        // can never reference this legacy `inventories` record directly. Map to
+        // the inventory_items row for the same product/variant/outlet (creating
+        // it at zero if the item-side pool doesn't know this stock yet) so the
+        // admin Livewire flows land on the same COGS ledger as the API
+        // controllers. Material rows have no inventory_items counterpart and
+        // cannot satisfy the FK; their adjustment is applied but not ledgered
+        // here (see audit INV-1/INV-4 ledger unification).
+        if ($this->product_id) {
+            $item = InventoryItem::firstOrCreate([
+                'product_id'         => $this->product_id,
+                'product_variant_id' => $this->product_variant_id,
+                'outlet_id'          => $this->outlet_id,
+            ]);
+
+            // Cast to int: the inventory_transactions quantity columns are
+            // integer in PostgreSQL, while this model casts quantity_on_hand as
+            // decimal:2 (returning "0.00" etc.), which PostgreSQL rejects.
+            // Product/variant stock is always whole units. quantity_before/
+            // after snapshot THIS row's pool — the one actually adjusted.
+            InventoryTransaction::create([
+                'inventory_item_id' => $item->id,
+                'transaction_type'  => $type,
+                'reference_type'    => $referenceType,
+                'reference_id'      => $referenceId,
+                'quantity_change'   => (int) round((float) $quantity),
+                'quantity_before'   => (int) round((float) $oldQuantity),
+                'quantity_after'    => (int) round((float) $this->quantity_on_hand),
+                'unit_cost'         => $this->cost_per_unit,
+                'created_by'        => $userId ?? auth()->id(),
+            ]);
+        }
 
         return $this;
     }

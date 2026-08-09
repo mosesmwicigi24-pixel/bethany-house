@@ -36,7 +36,7 @@ class PosInventoryService
      * preferring the order's outlet then the warehouse row — never by variant
      * alone, which for simple products matched an arbitrary other product.
      */
-    private static function inventoryFor(object $item, ?int $outletId): ?InventoryItem
+    public static function inventoryFor(object $item, ?int $outletId): ?InventoryItem
     {
         if (!empty($item->inventory_item_id)) {
             $exact = InventoryItem::find($item->inventory_item_id);
