@@ -1192,6 +1192,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/inventory-intelligence',   [\App\Http\Controllers\Api\ExecutiveReportController::class, 'inventoryIntelligence']);
                 Route::get('/procurement-intelligence', [\App\Http\Controllers\Api\ExecutiveReportController::class, 'procurementIntelligence']);
                 Route::get('/customer-intelligence',    [\App\Http\Controllers\Api\ExecutiveReportController::class, 'customerIntelligence']);
+                Route::get('/engine-room',              [\App\Http\Controllers\Api\ExecutiveReportController::class, 'engineRoom']);
                 Route::get('/replenishment',            [\App\Http\Controllers\Api\ExecutiveReportController::class, 'replenishment']);
                 Route::get('/collections',              [\App\Http\Controllers\Api\ExecutiveReportController::class, 'collections']);
                 Route::get('/attach-rates',             [\App\Http\Controllers\Api\ExecutiveReportController::class, 'attachRates']);

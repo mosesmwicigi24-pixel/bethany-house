@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Api\Concerns\ExportsCsv;
 use App\Http\Controllers\Controller;
 use App\Models\WinBackOutreach;
 use App\Services\Reporting\MetricEngine;
@@ -23,6 +24,8 @@ use Illuminate\Support\Facades\DB;
  */
 class ExecutiveReportController extends Controller
 {
+    use ExportsCsv;
+
     public function executive(Request $request)
     {
         $validated = $request->validate([
@@ -202,6 +205,42 @@ class ExecutiveReportController extends Controller
     }
 
     /**
+     * Engine Room — the Overview strip: just the six revenue-engine summaries
+     * in one lightweight call. Every engine is either served from its own
+     * 10-minute cache or is a summary-sized query, so this stays cheap; each
+     * one is computed independently so a single engine failing degrades to a
+     * null (the SPA renders a "—" card) instead of taking the Overview down.
+     * reports.view via the route group; outlet scoping via MetricEngine::for.
+     */
+    public function engineRoom(Request $request)
+    {
+        $validated = $request->validate([
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+        ]);
+
+        $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+
+        $safe = static function (callable $compute) {
+            try {
+                return $compute();
+            } catch (\Throwable $e) {
+                report($e);
+
+                return null;
+            }
+        };
+
+        return response()->json([
+            'collections'   => $safe(static fn () => $engine->collectionsFunnel()['summary']),
+            'stockout'      => $safe(static fn () => $engine->stockoutLoss()['summary']),
+            'winback'       => $safe(static fn () => $engine->winBackEconomics()['summary']),
+            'attach'        => $safe(static fn () => $engine->attachRates()['summary']),
+            'replenishment' => $safe(static fn () => $engine->replenishmentRadar()['summary']),
+            'seasonal'      => $safe(static fn () => $engine->seasonalDemand()['summary']),
+        ]);
+    }
+
+    /**
      * Replenishment Radar — per-customer product reorder cycles. "As of now"
      * by design: the radar has no period parameter because due/overdue only
      * makes sense against today. reports.view via the route group; outlet
@@ -214,8 +253,21 @@ class ExecutiveReportController extends Controller
         ]);
 
         $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+        $radar  = $engine->replenishmentRadar();
 
-        return response()->json($engine->replenishmentRadar());
+        if ($this->wantsExport($request)) {
+            return $this->csvResponse(
+                ['Customer', 'Phone', 'Product', 'Tier', 'Status', 'Cycle Days', 'Purchase Events', 'Last Purchase', 'Next Due', 'Days Over', 'Expected Value (KES)', 'Last Pinged At', 'Last Ping Status'],
+                collect($radar['due'])->map(fn ($r) => [
+                    $r['name'], $r['phone'], $r['product_name'], $r['tier'], $r['status'],
+                    $r['cycle_days'], $r['purchase_events'], $r['last_purchase_at'], $r['next_due_at'],
+                    $r['days_over'], $r['avg_value'], $r['last_pinged_at'], $r['last_ping_status'],
+                ]),
+                'replenishment_radar',
+            );
+        }
+
+        return response()->json($radar);
     }
 
     /**
@@ -231,8 +283,30 @@ class ExecutiveReportController extends Controller
         ]);
 
         $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+        $funnel = $engine->collectionsFunnel();
 
-        return response()->json($engine->collectionsFunnel());
+        if ($this->wantsExport($request)) {
+            // One flat sheet: the three follow-up lists concatenated, tagged
+            // by stage so a filter on column A rebuilds each list.
+            $rows = collect($funnel['open_quotes'])->map(fn ($r) => [
+                'open_quote', $r['number'], $r['customer'], $r['phone'],
+                $r['value'], '', $r['value'], $r['age_days'], $r['status'],
+            ])->concat(collect($funnel['stalled_deposits'])->map(fn ($r) => [
+                'stalled_deposit', $r['number'], $r['customer'], $r['phone'],
+                $r['total'], $r['deposit_paid'], $r['balance_due'], $r['days_since_last_payment'], 'stalled',
+            ]))->concat(collect($funnel['unpaid_balances'])->map(fn ($r) => [
+                'unpaid_balance', $r['number'], $r['customer'], $r['phone'],
+                $r['total'], $r['paid'], $r['balance'], $r['days_outstanding'], $r['bucket'],
+            ]));
+
+            return $this->csvResponse(
+                ['Stage', 'Number', 'Customer', 'Phone', 'Total (KES)', 'Paid (KES)', 'Balance (KES)', 'Days', 'Status'],
+                $rows,
+                'collections_funnel',
+            );
+        }
+
+        return response()->json($funnel);
     }
 
     /**
@@ -251,8 +325,24 @@ class ExecutiveReportController extends Controller
         ]);
 
         $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+        $report = $engine->attachRates((int) ($validated['days'] ?? 180));
 
-        return response()->json($engine->attachRates((int) ($validated['days'] ?? 180)));
+        if ($this->wantsExport($request)) {
+            // Anchor → companion pairs, flattened one pair per row.
+            $rows = collect($report['anchors'])->flatMap(fn ($a) => collect($a['companions'])->map(fn ($c) => [
+                $a['name'], $a['baskets'], $c['name'], $c['sku'],
+                $c['attach_rate_pct'], $c['lift'], $c['avg_value'],
+                $c['missed'], $c['missed_revenue_estimate'],
+            ]));
+
+            return $this->csvResponse(
+                ['Anchor Product', 'Anchor Baskets', 'Companion Product', 'Companion SKU', 'Attach Rate %', 'Lift', 'Avg Value (KES)', 'Missed Baskets', 'Missed Revenue Est (KES)'],
+                $rows,
+                'attach_rates',
+            );
+        }
+
+        return response()->json($report);
     }
 
     /**
@@ -272,8 +362,21 @@ class ExecutiveReportController extends Controller
         ]);
 
         $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+        $report = $engine->stockoutLoss((int) ($validated['days'] ?? 90));
 
-        return response()->json($engine->stockoutLoss((int) ($validated['days'] ?? 90)));
+        if ($this->wantsExport($request)) {
+            return $this->csvResponse(
+                ['Product', 'Currently Out', 'Out Streak (days)', 'Out Days (window)', 'Velocity/Day', 'Avg Price (KES)', 'Est Lost Revenue (KES)', 'Est Daily Loss (KES)', 'Confidence'],
+                collect($report['products'])->map(fn ($p) => [
+                    $p['name'], $p['currently_out'] ? 'yes' : 'no', $p['out_streak_days'],
+                    $p['out_days_window'], $p['velocity_per_day'], $p['avg_price'],
+                    $p['est_lost_revenue'], $p['est_daily_loss'], $p['confidence'],
+                ]),
+                'stockout_loss',
+            );
+        }
+
+        return response()->json($report);
     }
 
     /**
@@ -293,8 +396,25 @@ class ExecutiveReportController extends Controller
         ]);
 
         $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+        $report = $engine->seasonalDemand();
 
-        return response()->json($engine->seasonalDemand());
+        if ($this->wantsExport($request)) {
+            // One row per (season, product) projection.
+            $rows = collect($report['seasons'])->flatMap(fn ($s) => collect($s['products'] ?? [])->map(fn ($p) => [
+                $s['label'], $s['start'], $s['end'], $s['days_until_start'],
+                $p['name'], $p['lift'], $p['projected_units'], $p['stock'], $p['gap'],
+                $p['lead_days'], $p['order_by'], $p['days_until_order_by'],
+                $p['est_gap_value'], $p['basis'],
+            ]));
+
+            return $this->csvResponse(
+                ['Season', 'Start', 'End', 'Days Until Start', 'Product', 'Lift', 'Projected Units', 'Stock', 'Gap', 'Lead Days', 'Order By', 'Days Until Order-By', 'Est Gap Value (KES)', 'Basis'],
+                $rows,
+                'seasonal_demand',
+            );
+        }
+
+        return response()->json($report);
     }
 
     /**
@@ -314,8 +434,29 @@ class ExecutiveReportController extends Controller
         ]);
 
         $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+        $report = $engine->internationalCorridor((int) ($validated['days'] ?? 180));
 
-        return response()->json($engine->internationalCorridor((int) ($validated['days'] ?? 180)));
+        if ($this->wantsExport($request)) {
+            // Currency rows then country rows, tagged by a 'group' column.
+            // Country revenue is a per-currency map (never summed across
+            // currencies) — rendered as "USD 1200; ZMW 800".
+            $rows = collect($report['currencies'])->map(fn ($c) => [
+                'currency', $c['currency'], $c['orders'], $c['customers'],
+                $c['revenue_native'], $c['paid_native'], $c['avg_order_native'], $c['kes_equivalent'],
+            ])->concat(collect($report['countries'])->map(fn ($c) => [
+                'country', $c['country_name'], $c['orders'], $c['customers'],
+                collect($c['revenue'])->map(fn ($v, $cur) => "{$cur} {$v}")->implode('; '),
+                '', '', '',
+            ]));
+
+            return $this->csvResponse(
+                ['Group', 'Name', 'Orders', 'Customers', 'Revenue (native)', 'Paid (native)', 'Avg Order (native)', 'KES Equivalent'],
+                $rows,
+                'international_corridor',
+            );
+        }
+
+        return response()->json($report);
     }
 
     /**
@@ -332,8 +473,22 @@ class ExecutiveReportController extends Controller
         ]);
 
         $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+        $report = $engine->winBackEconomics();
 
-        return response()->json($engine->winBackEconomics());
+        if ($this->wantsExport($request)) {
+            return $this->csvResponse(
+                ['Customer', 'Phone', 'Revenue 365d (KES)', 'Orders 365d', 'Last Order', 'Days Quiet', 'Median Gap (days)', 'Urgency', 'Last Outreach Channel', 'Last Outreach At', 'Recovered Order', 'Recovered Amount (KES)'],
+                collect($report['customers'])->map(fn ($c) => [
+                    $c['name'], $c['phone'], $c['revenue_365'], $c['orders_365'],
+                    $c['last_order_at'], $c['days_quiet'], $c['median_gap_days'], $c['urgency'],
+                    $c['last_outreach']['channel'] ?? '', $c['last_outreach']['at'] ?? '',
+                    $c['recovered']['order_number'] ?? '', $c['recovered']['amount'] ?? '',
+                ]),
+                'win_back_economics',
+            );
+        }
+
+        return response()->json($report);
     }
 
     /**
@@ -352,8 +507,22 @@ class ExecutiveReportController extends Controller
         ]);
 
         $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+        $report = $engine->institutionalAccounts();
 
-        return response()->json($engine->institutionalAccounts());
+        if ($this->wantsExport($request)) {
+            return $this->csvResponse(
+                ['Institution', 'Phone', 'Revenue 365d (KES)', 'Orders 365d', 'Last Order', 'Days Quiet', 'At Risk', 'Buyer Contacts', 'Products Bought', 'Top Product', 'Cross-Sell Suggestions'],
+                collect($report['accounts'])->map(fn ($a) => [
+                    $a['name'], $a['phone'], $a['revenue_365'], $a['orders_365'],
+                    $a['last_order_at'], $a['days_quiet'], $a['risk'] ? 'yes' : 'no',
+                    $a['buyer_contacts'], $a['products_bought'], $a['top_product'],
+                    collect($a['cross_sell'])->pluck('name')->implode('; '),
+                ]),
+                'institutional_accounts',
+            );
+        }
+
+        return response()->json($report);
     }
 
     /**

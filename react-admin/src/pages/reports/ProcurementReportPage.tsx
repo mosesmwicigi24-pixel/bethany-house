@@ -546,6 +546,10 @@ function SeasonalDemandTab() {
 
     return (
         <div className="space-y-6">
+            <div className="flex justify-end">
+                <ExportCsvButton path="seasonal-demand" params={{}} />
+            </div>
+
             {/* Season timeline strip */}
             <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1">
                 {seasons.map((s) => (

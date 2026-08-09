@@ -1194,7 +1194,9 @@ function StockoutLosses() {
 
     return (
         <div className="card card-body">
-            <SectionHeader title="Stock-out losses — what empty shelves cost (last 90 days)" />
+            <SectionHeader title="Stock-out losses — what empty shelves cost (last 90 days)">
+                <ExportCsvButton path="stockout-loss" params={{}} />
+            </SectionHeader>
             <div className={clsx(KPI_GRID, "mt-2 mb-4")}>
                 <KpiCard
                     label="Bleeding now"

@@ -1473,6 +1473,10 @@ function CollectionsTab() {
 
     return (
         <div className="space-y-6">
+            <div className="flex justify-end">
+                <ExportCsvButton path="collections" params={{}} />
+            </div>
+
             {/* Headline: the money */}
             <div className={KPI_GRID}>
                 <KpiCard
@@ -1862,6 +1866,10 @@ function BasketIntelTab() {
 
     return (
         <div className="space-y-6">
+            <div className="flex justify-end">
+                <ExportCsvButton path="attach-rates" params={{}} />
+            </div>
+
             <div className={KPI_GRID}>
                 <KpiCard
                     label="Missed Revenue Opportunity"
@@ -2035,6 +2043,10 @@ function InternationalTab() {
 
     return (
         <div className="space-y-6">
+            <div className="flex justify-end">
+                <ExportCsvButton path="international" params={{}} />
+            </div>
+
             <div className={KPI_GRID}>
                 <KpiCard
                     label="Corridor Orders"
