@@ -8,12 +8,26 @@ use App\Services\Neema\NeemaAnalyticsClient;
 use App\Support\Phone;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Nightly pull of Neema's per-person × per-channel message rollup into
  * channel_touchpoints, each phone matched to a hub customer (canonical E.164).
  * Idempotent — upserts on (phone, channel). No-ops cleanly when Neema is
  * unconfigured (the client returns []).
+ *
+ * Alongside the cumulative upsert, each run writes today's DELTA per
+ * (phone, channel) into channel_touchpoint_daily, so message volume becomes
+ * period-sliceable from deploy day onward (the cumulative totals cannot be
+ * sliced retroactively). Delta rules:
+ *   - first sight of a (phone, channel): the full incoming count IS the delta
+ *     (it is genuinely new to us, whatever its true age upstream);
+ *   - normal night: incoming total minus the stored total, floored at 0;
+ *   - upstream counter reset (incoming < stored): clamp to the incoming value —
+ *     the count restarted, so the incoming total is the best available "since
+ *     reset" figure and subtracting would go negative.
+ * Re-runs on the same day ACCUMULATE into that day's row (a second run only
+ * adds the increment since the first), so running twice never double-counts.
  */
 class SyncChannelTouchpoints extends Command
 {
@@ -52,17 +66,47 @@ class SyncChannelTouchpoints extends Command
                 $matched++;
             }
 
-            ChannelTouchpoint::updateOrCreate(
-                ['phone' => $phone, 'channel' => $r['channel']],
-                [
-                    'customer_id' => $customerId,
-                    'messages'    => (int) ($r['messages'] ?? 0),
-                    'inbound'     => (int) ($r['inbound'] ?? 0),
-                    'first_seen'  => !empty($r['first_at']) ? Carbon::parse($r['first_at']) : null,
-                    'last_seen'   => !empty($r['last_at'])  ? Carbon::parse($r['last_at'])  : null,
-                    'synced_at'   => $now,
-                ],
-            );
+            $incomingMessages = (int) ($r['messages'] ?? 0);
+            $incomingInbound  = (int) ($r['inbound'] ?? 0);
+
+            // Read the PREVIOUS cumulative totals before overwriting them —
+            // they are the only baseline the daily delta can be computed from.
+            $tp = ChannelTouchpoint::firstOrNew(['phone' => $phone, 'channel' => $r['channel']]);
+            if ($tp->exists) {
+                // Normal night: the increment. Counter reset upstream
+                // (incoming < stored): clamp to the incoming value.
+                $deltaMessages = $incomingMessages >= $tp->messages
+                    ? $incomingMessages - $tp->messages : $incomingMessages;
+                $deltaInbound = $incomingInbound >= $tp->inbound
+                    ? $incomingInbound - $tp->inbound : $incomingInbound;
+            } else {
+                // First sight: the whole count is new to us.
+                $deltaMessages = $incomingMessages;
+                $deltaInbound  = $incomingInbound;
+            }
+
+            $tp->fill([
+                'customer_id' => $customerId,
+                'messages'    => $incomingMessages,
+                'inbound'     => $incomingInbound,
+                'first_seen'  => !empty($r['first_at']) ? Carbon::parse($r['first_at']) : null,
+                'last_seen'   => !empty($r['last_at'])  ? Carbon::parse($r['last_at'])  : null,
+                'synced_at'   => $now,
+            ])->save();
+
+            // Accumulate today's delta. ON CONFLICT adds rather than replaces so
+            // a same-day re-run contributes only its increment, never a repeat.
+            if ($deltaMessages > 0 || $deltaInbound > 0) {
+                DB::statement(
+                    'INSERT INTO channel_touchpoint_daily (date, channel, phone, messages, inbound, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT (date, channel, phone)
+                     DO UPDATE SET messages   = channel_touchpoint_daily.messages + EXCLUDED.messages,
+                                   inbound    = channel_touchpoint_daily.inbound  + EXCLUDED.inbound,
+                                   updated_at = EXCLUDED.updated_at',
+                    [$now->toDateString(), $r['channel'], $phone, $deltaMessages, $deltaInbound, $now, $now],
+                );
+            }
             $synced++;
         }
 

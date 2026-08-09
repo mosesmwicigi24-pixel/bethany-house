@@ -80,6 +80,15 @@ export const reportsApi = {
     salesReturns: (params: DateRangeParams) =>
         get<any>(`${BASE}/sales/returns`, { params }),
 
+    /**
+     * Neema (AI agent) performance: leads funnel, lead→order conversion within
+     * 14 days, WhatsApp-channel sales, contacts and message volume per platform.
+     * Period message volume comes from daily snapshots that collect from deploy
+     * day onward (`message_volume.daily_since`); all-time totals are cumulative.
+     */
+    salesNeema: (params: DateRangeParams) =>
+        get<NeemaSalesReport>(`${BASE}/sales/neema`, { params }),
+
     // Customers
     customerSummary: (params: DateRangeParams) =>
         get<any>(`${BASE}/customers/summary`, { params }),
@@ -432,4 +441,42 @@ export interface SalesLedger {
     daily: { date: string; orders: number; sales: number; paid: number; credit: number }[];
     weekly: LedgerBucket[];
     monthly: LedgerBucket[];
+}
+
+// ── Neema performance ─────────────────────────────────────────────────────────
+export type MessagingChannel = "whatsapp" | "messenger" | "instagram" | "facebook";
+
+export interface NeemaSalesReport {
+    period: { start: string; end: string; currency: string };
+    leads: {
+        total: number;
+        by_status: Record<"new" | "assigned" | "quoted" | "won" | "lost", number>;
+        by_intent: { intent: string; count: number }[];
+        won_rate: number | null;
+    };
+    lead_conversion: {
+        converted: number;
+        conversion_rate: number | null;
+        orders: number;
+        revenue: number;
+        window_days: number;
+    };
+    whatsapp_sales: { orders: number; revenue: number; paid: number; balance: number };
+    contacts: {
+        channel: MessagingChannel;
+        new_contacts: number;
+        active_contacts: number;
+        contacts: number;
+        matched: number;
+        match_rate: number | null;
+    }[];
+    message_volume: {
+        channels: {
+            channel: MessagingChannel;
+            period: { messages: number; inbound: number };
+            all_time: { messages: number; inbound: number };
+        }[];
+        /** Date daily snapshots began collecting; period figures before this are structurally zero. */
+        daily_since: string | null;
+    };
 }
