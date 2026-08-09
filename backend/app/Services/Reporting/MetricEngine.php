@@ -3,6 +3,7 @@
 namespace App\Services\Reporting;
 
 use App\Models\User;
+use App\Support\Phone;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -1314,26 +1315,48 @@ class MetricEngine
                      r.avg_value DESC
         ", [$since, $today, $today, $today, $today, $today]);
 
-        $due = collect($rows)->map(fn ($r) => [
-            'ckey'             => $r->ckey,
-            'name'             => ($r->name !== null && $r->name !== '') ? $r->name : ($r->phone ?? 'Unknown'),
-            'phone'            => $r->phone,
-            'product_id'       => (int) $r->product_id,
-            'product_name'     => $r->product_name,
-            'cycle_days'       => (int) $r->cycle_days,
-            'purchase_events'  => (int) $r->purchase_events,
-            'last_purchase_at' => $r->last_purchase_at,
-            'next_due_at'      => $r->next_due_at,
-            'days_over'        => (int) $r->days_over,
-            'status'           => $r->status,
-            'avg_value'        => round((float) $r->avg_value, 2),
-        ])->values();
+        // Latest automated ping per (canonical phone, product) — the pings
+        // table stores canonical E.164 digits, radar rows carry the raw
+        // order phone, so the join key is Phone::canonical on our side.
+        $lastPings = collect(DB::select("
+            SELECT DISTINCT ON (phone, product_id) phone, product_id, status, created_at
+            FROM replenishment_pings
+            WHERE status IN ('sent', 'failed')
+            ORDER BY phone, product_id, created_at DESC
+        "))->keyBy(fn ($p) => $p->phone . '|' . $p->product_id);
+
+        $due = collect($rows)->map(function ($r) use ($lastPings) {
+            $ping = $lastPings->get(Phone::canonical($r->phone) . '|' . $r->product_id);
+
+            return [
+                'ckey'             => $r->ckey,
+                'name'             => ($r->name !== null && $r->name !== '') ? $r->name : ($r->phone ?? 'Unknown'),
+                'phone'            => $r->phone,
+                'product_id'       => (int) $r->product_id,
+                'product_name'     => $r->product_name,
+                'cycle_days'       => (int) $r->cycle_days,
+                'purchase_events'  => (int) $r->purchase_events,
+                'last_purchase_at' => $r->last_purchase_at,
+                'next_due_at'      => $r->next_due_at,
+                'days_over'        => (int) $r->days_over,
+                'status'           => $r->status,
+                'avg_value'        => round((float) $r->avg_value, 2),
+                'last_pinged_at'   => $ping?->created_at,
+                'last_ping_status' => $ping?->status,
+            ];
+        })->values();
+
+        $pings30d = (int) DB::table('replenishment_pings')
+            ->where('status', 'sent')
+            ->where('created_at', '>=', $now->subDays(30))
+            ->count();
 
         return [
             'summary' => [
                 'due_customers'    => $due->pluck('ckey')->unique()->count(),
                 'due_pairs'        => $due->count(),
                 'expected_revenue' => round((float) $due->sum('avg_value'), 2),
+                'pings_30d'        => $pings30d,
             ],
             'due' => $due->take($limit)->values()->all(),
         ];

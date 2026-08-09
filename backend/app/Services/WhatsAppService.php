@@ -75,9 +75,19 @@ class WhatsAppService
      */
     public static function sendTemplate(string $to, string $template, string $lang, array $components = []): bool
     {
+        return self::sendTemplateDetailed($to, $template, $lang, $components)['ok'];
+    }
+
+    /**
+     * Like sendTemplate() but returns the delivery detail the audit trail
+     * needs: ['ok' => bool, 'wamid' => ?string, 'error' => ?string]. The
+     * wamid is Meta's message id — the one their status webhooks reference.
+     */
+    public static function sendTemplateDetailed(string $to, string $template, string $lang, array $components = []): array
+    {
         if (!self::configured()) {
             Log::info('WhatsAppService: not configured, skipping template send.');
-            return false;
+            return ['ok' => false, 'wamid' => null, 'error' => 'not_configured'];
         }
 
         $version = config('services.whatsapp.api_version', 'v19.0');
@@ -103,7 +113,7 @@ class WhatsAppService
                 ->post("https://graph.facebook.com/{$version}/{$phoneId}/messages", $payload);
 
             if ($res->successful()) {
-                return true;
+                return ['ok' => true, 'wamid' => $res->json('messages.0.id'), 'error' => null];
             }
 
             $code = $res->json('error.code');
@@ -114,10 +124,11 @@ class WhatsAppService
                     ? "Template '{$template}' does not exist or is not approved for this WABA — run `php artisan whatsapp:otp-template`."
                     : null,
             ]);
-            return false;
+            $message = $res->json('error.message') ?: ('HTTP ' . $res->status());
+            return ['ok' => false, 'wamid' => null, 'error' => ($code ? "#{$code} " : '') . $message];
         } catch (\Exception $e) {
             Log::error("WhatsAppService template send exception for {$to}: {$e->getMessage()}");
-            return false;
+            return ['ok' => false, 'wamid' => null, 'error' => $e->getMessage()];
         }
     }
 

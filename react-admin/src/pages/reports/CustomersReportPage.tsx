@@ -786,6 +786,11 @@ function ReplenishmentRadarTab() {
                     sub="Past the usual cycle + grace"
                     color={overdueCount > 0 ? "text-danger" : "text-success"}
                 />
+                <KpiCard
+                    label="Pings (30d)"
+                    value={summary.pings_30d}
+                    sub="Automated WhatsApp reminders"
+                />
             </div>
 
             <div className="card overflow-hidden">
@@ -881,6 +886,26 @@ function ReplenishmentRadarTab() {
                                                     WhatsApp
                                                 </button>
                                             )}
+                                            {row.last_pinged_at &&
+                                                row.last_ping_status ===
+                                                    "sent" && (
+                                                    <span
+                                                        className="text-2xs text-surface-400 block mt-1 whitespace-nowrap"
+                                                        title="Automated reorder reminder already sent"
+                                                    >
+                                                        Pinged{" "}
+                                                        {Math.max(
+                                                            0,
+                                                            dayjs().diff(
+                                                                dayjs(
+                                                                    row.last_pinged_at,
+                                                                ),
+                                                                "day",
+                                                            ),
+                                                        )}
+                                                        d ago
+                                                    </span>
+                                                )}
                                         </td>
                                     </tr>
                                 ))
