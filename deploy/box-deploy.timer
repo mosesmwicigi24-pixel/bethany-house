@@ -1,0 +1,16 @@
+# box-deploy.timer — fires box-deploy.service every ~60s.
+# Installed on the VPS at /etc/systemd/system/box-deploy.timer.
+# Enable with: systemctl enable --now box-deploy.timer   (docs/DEPLOY.md)
+[Unit]
+Description=Poll for new Bethany Hub deploys every 60s
+
+[Timer]
+OnBootSec=60
+# Counted from the last time the service finished, so a long deploy never
+# overlaps the next tick (the script's flock is the second line of defence).
+OnUnitActiveSec=60
+AccuracySec=10
+Unit=box-deploy.service
+
+[Install]
+WantedBy=timers.target

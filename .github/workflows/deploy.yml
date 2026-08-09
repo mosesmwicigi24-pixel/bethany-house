@@ -1,12 +1,17 @@
 # Deploy to the Hostinger VPS (hub.bethanyhouse.co.ke) on every push to main.
 #
-# Flow: build the three production images -> push to GHCR under this repo ->
-# SSH into the VPS -> sync docker-compose.yml -> pull images -> run Laravel
-# migrations -> recreate containers.
+# Flow (PULL-BASED since 2026-08-10): build the three production images ->
+# push to GHCR under this repo -> DONE. The VPS deploys ITSELF: a systemd
+# timer (deploy/box-deploy.timer) runs deploy/box-deploy.sh every ~60s, which
+# polls main's sha via the public GitHub API and, when it changes, pulls the
+# new images and redeploys (compose sync + pull + migrate + up, exactly what
+# the old SSH step here used to do). No inbound SSH from GitHub is needed —
+# runner->VPS SSH kept timing out (Hostinger-level filtering / fail2ban).
+# Operator bootstrap + rollback: docs/DEPLOY.md.
 #
-# Required repo secrets:
-#   VPS_HOST     - VPS IP or hostname
-#   VPS_SSH_KEY  - private key whose public half is in root's authorized_keys
+# No secrets are required for deploys anymore (GITHUB_TOKEN pushes to GHCR).
+# The legacy push-based secrets (VPS_HOST, VPS_SSH_KEY, VPS_KNOWN_HOSTS) are
+# only needed if the commented-out rollback steps below are re-enabled.
 
 name: Deploy
 
@@ -127,122 +132,147 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
   deploy:
-    name: Deploy to VPS
+    name: Deploy notice (pull-based)
     needs: build
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up SSH
+      - name: Pull-based deploy notice
         run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
+          echo "Images for ${GITHUB_SHA} are on GHCR."
+          echo "Pull-based deploy: the box polls main every ~60s and will pull + migrate + restart itself once all three images are visible."
+          echo "Watch on the VPS: journalctl -u box-deploy.service -f   |   tail -f /opt/bethany-house/deploy.log"
+          echo "NOTE: until the one-time box bootstrap in docs/DEPLOY.md has been run, nothing deploys — the old containers keep running."
 
-          # Host key. ssh-keyscan is a LIVE network call to the VPS with no
-          # timeout or retry — under `bash -e` a single hiccup killed the whole
-          # deploy (the builds had all passed). It is also trust-on-first-use
-          # every run, so it accepts whatever key the host presents.
-          #
-          # Preferred: pin the key once via the VPS_KNOWN_HOSTS secret — no
-          # network call, deterministic, and actually verifies the host.
-          # Fallback: keyscan, but with a timeout and retries.
-          if [ -n "${{ secrets.VPS_KNOWN_HOSTS }}" ]; then
-            printf '%s\n' "${{ secrets.VPS_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
-            echo "Using pinned host key from VPS_KNOWN_HOSTS."
-          else
-            for i in 1 2 3 4 5; do
-              # keyscan can exit 0 having written nothing, so require content.
-              ssh-keyscan -T 15 -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
-              if [ -s ~/.ssh/known_hosts ]; then
-                echo "Host key acquired on attempt $i."
-                break
-              fi
-              echo "ssh-keyscan attempt $i found no key; retrying in $((i * 5))s…"
-              sleep $((i * 5))
-            done
-            if [ ! -s ~/.ssh/known_hosts ]; then
-              echo "::error::Could not reach ${{ secrets.VPS_HOST }}:22 to read its host key after 5 attempts. The VPS may be down, or fail2ban/the firewall may be blocking GitHub runner IPs."
-              exit 1
-            fi
-          fi
-        # Don't let one bad network moment fail a deploy whose images all built.
-        timeout-minutes: 3
+  # ───────────────────────────────────────────────────────────────────────────
+  # ROLLBACK PATH — legacy PUSH-BASED SSH deploy (disabled 2026-08-10).
+  # Kept verbatim below, commented out (every line is `  # ` + the original
+  # line, so stripping that exact prefix restores it). To roll back:
+  #   1. Uncomment this entire block (strip the leading "  # " from each
+  #      line) and DELETE the notice job above — two `deploy:` keys is
+  #      invalid YAML.
+  #   2. Ensure the VPS_HOST / VPS_SSH_KEY (and ideally VPS_KNOWN_HOSTS)
+  #      secrets still exist.
+  #   3. On the VPS: systemctl disable --now box-deploy.timer   (otherwise
+  #      both mechanisms will race to deploy).
+  # ───────────────────────────────────────────────────────────────────────────
+  #   deploy:
+  #     name: Deploy to VPS
+  #     needs: build
+  #     if: github.event_name != 'pull_request'
+  #     runs-on: ubuntu-latest
+  #     steps:
+  #       - uses: actions/checkout@v4
 
-      - name: Sync compose file
-        # The VPS can be briefly unreachable (a reboot, a network blip, or
-        # fail2ban/the firewall dropping GitHub runner IPs -> port 22 times out).
-        # Retry with backoff over a few minutes before giving up.
-        timeout-minutes: 6
-        run: |
-          scp_it() {
-            scp -o ConnectTimeout=20 -o ServerAliveInterval=15 \
-              -i ~/.ssh/deploy_key docker-compose.yml \
-              "root@${{ secrets.VPS_HOST }}:/opt/bethany-house/docker-compose.yml"
-          }
-          n=1
-          until scp_it; do
-            if [ "$n" -ge 6 ]; then
-              echo "::error::Could not reach the VPS to copy docker-compose.yml after $n attempts. The VPS may be down, or fail2ban/the firewall may be dropping GitHub runner IPs (port 22 times out). Fix: allowlist GitHub Actions IPs in fail2ban (ignoreip), or use a self-hosted runner / pull-based deploy so no inbound SSH from GitHub is needed."
-              exit 1
-            fi
-            echo "scp attempt $n failed (VPS unreachable?); retrying in 20s..."
-            sleep 20
-            n=$((n + 1))
-          done
-
-      - name: Pull images, migrate, restart
-        timeout-minutes: 12
-        run: |
-          # Remote deploy script (kept identical), written to a file so the SSH
-          # call can be retried around it without wrestling a heredoc.
-          cat > /tmp/deploy.sh <<'DEPLOY'
-          set -euo pipefail
-          cd /opt/bethany-house
-
-          # Pin the compose image namespace to this repo (survives .env drift).
-          if grep -q '^GITHUB_REPOSITORY=' .env; then
-            sed -i 's|^GITHUB_REPOSITORY=.*|GITHUB_REPOSITORY=${{ github.repository }}|' .env
-          else
-            echo 'GITHUB_REPOSITORY=${{ github.repository }}' >> .env
-          fi
-
-          # Ephemeral login so private GHCR packages pull; logged out afterwards
-          # so other stacks on this box keep pulling anonymously.
-          echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
-
-          docker compose pull laravel nextjs react-admin
-          # -T + </dev/null: without them `compose run` eats the container stdin
-          # and the script dies here "successfully".
-          docker compose run --rm --no-deps -T laravel php artisan migrate --force </dev/null
-          docker compose up -d --remove-orphans
-
-          docker logout ghcr.io
-          docker image prune -f
-
-          docker compose ps
-          DEPLOY
-
-          # Retry ONLY when SSH can't establish the connection (exit 255). A real
-          # failure inside the remote script (e.g. a migration error) exits with
-          # its own code and must fail fast -- never mask it behind retries.
-          set +e
-          n=1
-          while true; do
-            ssh -o ConnectTimeout=20 -o ServerAliveInterval=15 \
-              -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" bash -s < /tmp/deploy.sh
-            rc=$?
-            [ "$rc" -eq 0 ] && break
-            if [ "$rc" -ne 255 ]; then
-              echo "::error::Remote deploy failed (exit $rc) -- a real error on the VPS, not a connection problem. See the log above."
-              exit "$rc"
-            fi
-            if [ "$n" -ge 6 ]; then
-              echo "::error::Could not reach the VPS over SSH after $n attempts. Same cause/fix as the compose-sync step."
-              exit 1
-            fi
-            echo "ssh connection attempt $n failed (exit 255, VPS unreachable?); retrying in 20s..."
-            sleep 20
-            n=$((n + 1))
-          done
+  #       - name: Set up SSH
+  #         run: |
+  #           mkdir -p ~/.ssh
+  #           printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+  #           chmod 600 ~/.ssh/deploy_key
+  #
+  #           # Host key. ssh-keyscan is a LIVE network call to the VPS with no
+  #           # timeout or retry — under `bash -e` a single hiccup killed the whole
+  #           # deploy (the builds had all passed). It is also trust-on-first-use
+  #           # every run, so it accepts whatever key the host presents.
+  #           #
+  #           # Preferred: pin the key once via the VPS_KNOWN_HOSTS secret — no
+  #           # network call, deterministic, and actually verifies the host.
+  #           # Fallback: keyscan, but with a timeout and retries.
+  #           if [ -n "${{ secrets.VPS_KNOWN_HOSTS }}" ]; then
+  #             printf '%s\n' "${{ secrets.VPS_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+  #             echo "Using pinned host key from VPS_KNOWN_HOSTS."
+  #           else
+  #             for i in 1 2 3 4 5; do
+  #               # keyscan can exit 0 having written nothing, so require content.
+  #               ssh-keyscan -T 15 -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+  #               if [ -s ~/.ssh/known_hosts ]; then
+  #                 echo "Host key acquired on attempt $i."
+  #                 break
+  #               fi
+  #               echo "ssh-keyscan attempt $i found no key; retrying in $((i * 5))s…"
+  #               sleep $((i * 5))
+  #             done
+  #             if [ ! -s ~/.ssh/known_hosts ]; then
+  #               echo "::error::Could not reach ${{ secrets.VPS_HOST }}:22 to read its host key after 5 attempts. The VPS may be down, or fail2ban/the firewall may be blocking GitHub runner IPs."
+  #               exit 1
+  #             fi
+  #           fi
+  #         # Don't let one bad network moment fail a deploy whose images all built.
+  #         timeout-minutes: 3
+  #
+  #       - name: Sync compose file
+  #         # The VPS can be briefly unreachable (a reboot, a network blip, or
+  #         # fail2ban/the firewall dropping GitHub runner IPs -> port 22 times out).
+  #         # Retry with backoff over a few minutes before giving up.
+  #         timeout-minutes: 6
+  #         run: |
+  #           scp_it() {
+  #             scp -o ConnectTimeout=20 -o ServerAliveInterval=15 \
+  #               -i ~/.ssh/deploy_key docker-compose.yml \
+  #               "root@${{ secrets.VPS_HOST }}:/opt/bethany-house/docker-compose.yml"
+  #           }
+  #           n=1
+  #           until scp_it; do
+  #             if [ "$n" -ge 6 ]; then
+  #               echo "::error::Could not reach the VPS to copy docker-compose.yml after $n attempts. The VPS may be down, or fail2ban/the firewall may be dropping GitHub runner IPs (port 22 times out). Fix: allowlist GitHub Actions IPs in fail2ban (ignoreip), or use a self-hosted runner / pull-based deploy so no inbound SSH from GitHub is needed."
+  #               exit 1
+  #             fi
+  #             echo "scp attempt $n failed (VPS unreachable?); retrying in 20s..."
+  #             sleep 20
+  #             n=$((n + 1))
+  #           done
+  #
+  #       - name: Pull images, migrate, restart
+  #         timeout-minutes: 12
+  #         run: |
+  #           # Remote deploy script (kept identical), written to a file so the SSH
+  #           # call can be retried around it without wrestling a heredoc.
+  #           cat > /tmp/deploy.sh <<'DEPLOY'
+  #           set -euo pipefail
+  #           cd /opt/bethany-house
+  #
+  #           # Pin the compose image namespace to this repo (survives .env drift).
+  #           if grep -q '^GITHUB_REPOSITORY=' .env; then
+  #             sed -i 's|^GITHUB_REPOSITORY=.*|GITHUB_REPOSITORY=${{ github.repository }}|' .env
+  #           else
+  #             echo 'GITHUB_REPOSITORY=${{ github.repository }}' >> .env
+  #           fi
+  #
+  #           # Ephemeral login so private GHCR packages pull; logged out afterwards
+  #           # so other stacks on this box keep pulling anonymously.
+  #           echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+  #
+  #           docker compose pull laravel nextjs react-admin
+  #           # -T + </dev/null: without them `compose run` eats the container stdin
+  #           # and the script dies here "successfully".
+  #           docker compose run --rm --no-deps -T laravel php artisan migrate --force </dev/null
+  #           docker compose up -d --remove-orphans
+  #
+  #           docker logout ghcr.io
+  #           docker image prune -f
+  #
+  #           docker compose ps
+  #           DEPLOY
+  #
+  #           # Retry ONLY when SSH can't establish the connection (exit 255). A real
+  #           # failure inside the remote script (e.g. a migration error) exits with
+  #           # its own code and must fail fast -- never mask it behind retries.
+  #           set +e
+  #           n=1
+  #           while true; do
+  #             ssh -o ConnectTimeout=20 -o ServerAliveInterval=15 \
+  #               -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" bash -s < /tmp/deploy.sh
+  #             rc=$?
+  #             [ "$rc" -eq 0 ] && break
+  #             if [ "$rc" -ne 255 ]; then
+  #               echo "::error::Remote deploy failed (exit $rc) -- a real error on the VPS, not a connection problem. See the log above."
+  #               exit "$rc"
+  #             fi
+  #             if [ "$n" -ge 6 ]; then
+  #               echo "::error::Could not reach the VPS over SSH after $n attempts. Same cause/fix as the compose-sync step."
+  #               exit 1
+  #             fi
+  #             echo "ssh connection attempt $n failed (exit 255, VPS unreachable?); retrying in 20s..."
+  #             sleep 20
+  #             n=$((n + 1))
+  #           done
