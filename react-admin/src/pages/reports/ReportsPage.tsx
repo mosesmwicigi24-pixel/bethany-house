@@ -6,8 +6,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { reportsApi } from "@/api/reports";
+import { purchaseOrderApi } from "@/api/procurement";
 import { fmtKes } from "@/api/expenses";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useToastStore } from "@/store/toast.store";
 import { Spinner } from "@/components/ui/Spinner";
 import { clsx } from "clsx";
 import { useState } from "react";
@@ -103,8 +105,88 @@ const ATTN_ICON: Record<string, string> = {
     price_drift:        "🏷️",
 };
 
-function AttentionPanel({ items }: { items: any[] }) {
+// One card of the attention feed. The card body still navigates to the
+// item's report link; the action row underneath offers the one-click next
+// steps the backend attached ({type:'navigate'|'create_po'}). The card is a
+// div (role=button) because HTML forbids nesting the action <button>s
+// inside another <button>.
+function AttentionCard({ it }: { it: any }) {
     const navigate = useNavigate();
+    const toast = useToastStore();
+    const { can } = usePermissions();
+    const [creating, setCreating] = useState(false);
+    const high = it.severity === "high";
+
+    // create_po hits an endpoint gated by procurement.create — hide the
+    // button from users who would only collect a 403.
+    const actions: any[] = (it.actions ?? []).filter(
+        (a: any) => a.type !== "create_po" || can("procurement.create"),
+    );
+
+    const runAction = async (a: any) => {
+        if (a.type === "navigate" && a.to) {
+            navigate(a.to);
+            return;
+        }
+        if (a.type === "create_po" && a.material_ids?.length && !creating) {
+            setCreating(true);
+            try {
+                const res = await purchaseOrderApi.createFromSuggestions(a.material_ids);
+                const pos = res.purchase_orders ?? [];
+                toast.success(
+                    pos.length === 1
+                        ? `Draft ${pos[0].po_number} created — review and submit it.`
+                        : `${pos.length} draft POs created (one per supplier) — review and submit them.`,
+                );
+                if (pos[0]) navigate(`/procurement/purchase-orders/${pos[0].id}`);
+            } catch (e: any) {
+                toast.error(e?.message ?? "Could not create the draft purchase order.");
+            } finally {
+                setCreating(false);
+            }
+        }
+    };
+
+    return (
+        <div role="button" tabIndex={0}
+            onClick={() => navigate(it.link)}
+            onKeyDown={e => { if (e.key === "Enter") navigate(it.link); }}
+            className={clsx(
+                "text-left rounded-xl border-l-4 border border-line p-3 flex flex-col gap-1 transition-shadow hover:shadow-md cursor-pointer",
+                high ? "border-l-danger-500 bg-danger-50/50" : "border-l-amber-400 bg-amber-50/40",
+            )}>
+            <div className="flex items-center justify-between gap-2">
+                <span className="text-base leading-none" aria-hidden="true">{ATTN_ICON[it.key] ?? "⚠️"}</span>
+                <span className={clsx("text-2xs font-bold uppercase tracking-wide",
+                    high ? "text-danger-600" : "text-amber-600")}>
+                    {high ? "urgent" : "watch"}
+                </span>
+            </div>
+            <p className="text-xs font-bold text-surface-900 leading-snug line-clamp-2">{it.title}</p>
+            <p className="text-2xs text-surface-500 leading-snug line-clamp-2">{it.detail}</p>
+            {actions.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-auto pt-1">
+                    {actions.map((a: any, i: number) => (
+                        <button key={i}
+                            disabled={creating && a.type === "create_po"}
+                            onClick={e => { e.stopPropagation(); runAction(a); }}
+                            className={clsx(
+                                "text-2xs font-semibold rounded-md px-1.5 py-0.5 border transition-colors",
+                                a.type === "create_po"
+                                    ? "border-brand-300 bg-white text-brand-700 hover:bg-brand-50"
+                                    : "border-line bg-white/70 text-surface-600 hover:text-brand-600 hover:border-brand-300",
+                                creating && a.type === "create_po" && "opacity-50 cursor-wait",
+                            )}>
+                            {a.type === "create_po" && creating ? "Creating…" : a.label}
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function AttentionPanel({ items }: { items: any[] }) {
     if (!items.length) return (
         <div className="card card-body flex items-center gap-3 border-success-100 bg-success-50/40 py-2.5">
             <span aria-hidden="true">✅</span>
@@ -119,26 +201,7 @@ function AttentionPanel({ items }: { items: any[] }) {
                 <span className="text-2xs font-bold text-amber-700 bg-amber-100 rounded-full px-1.5 py-0.5">{items.length}</span>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-                {items.map(it => {
-                    const high = it.severity === "high";
-                    return (
-                        <button key={it.key} onClick={() => navigate(it.link)}
-                            className={clsx(
-                                "text-left rounded-xl border-l-4 border border-line p-3 flex flex-col gap-1 transition-shadow hover:shadow-md",
-                                high ? "border-l-danger-500 bg-danger-50/50" : "border-l-amber-400 bg-amber-50/40",
-                            )}>
-                            <div className="flex items-center justify-between gap-2">
-                                <span className="text-base leading-none" aria-hidden="true">{ATTN_ICON[it.key] ?? "⚠️"}</span>
-                                <span className={clsx("text-2xs font-bold uppercase tracking-wide",
-                                    high ? "text-danger-600" : "text-amber-600")}>
-                                    {high ? "urgent" : "watch"}
-                                </span>
-                            </div>
-                            <p className="text-xs font-bold text-surface-900 leading-snug line-clamp-2">{it.title}</p>
-                            <p className="text-2xs text-surface-500 leading-snug line-clamp-2">{it.detail}</p>
-                        </button>
-                    );
-                })}
+                {items.map(it => <AttentionCard key={it.key} it={it} />)}
             </div>
         </div>
     );
@@ -152,7 +215,7 @@ const KIND_PATH: Record<string, (r: any) => string | null> = {
     order:      r => `/sales/orders/${r.id}`,
     payment:    r => (r.order_id ? `/sales/orders/${r.order_id}` : null),
     production: r => `/production/orders/${r.id}`,
-    customer:   () => "/customers",
+    customer:   () => "/sales/customers",
     expense:    () => "/expenses",
 };
 
@@ -312,7 +375,7 @@ function ExecutiveOverview() {
                         <MetricCard label="Outstanding"
                             value={`KES ${Number(k.money.outstanding.amount).toLocaleString()}`}
                             sub={`${k.money.outstanding.orders} open orders`}
-                            onOpen={() => setDrill({ metric: "outstanding", label: "Outstanding balances", money: true, reportPath: "/pos/balances" })} />
+                            onOpen={() => setDrill({ metric: "outstanding", label: "Outstanding balances", money: true, reportPath: "/pos/outstanding-balances" })} />
                         <MetricCard label="Deposits Held"
                             value={`KES ${Number(k.money.aging?.deposits_held?.amount ?? 0).toLocaleString()}`}
                             sub={`${k.money.aging?.deposits_held?.orders ?? 0} undelivered — not income`}
@@ -349,7 +412,7 @@ function ExecutiveOverview() {
                         )}
                         <div className={clsx(k.financial ? "col-span-2 2xl:col-span-3" : "col-span-2 md:col-span-3 2xl:col-span-5")}>
                             <AgingCard aging={k.money.aging}
-                                onBucket={(bucket, label) => setDrill({ metric: "outstanding", bucket, label, money: true, reportPath: "/pos/balances" })} />
+                                onBucket={(bucket, label) => setDrill({ metric: "outstanding", bucket, label, money: true, reportPath: "/pos/outstanding-balances" })} />
                         </div>
                     </div>
                 </>

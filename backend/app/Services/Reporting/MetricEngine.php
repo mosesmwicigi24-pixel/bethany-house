@@ -886,6 +886,7 @@ class MetricEngine
                    GREATEST(m.reorder_point + COALESCE(d.shortfall, 0) - COALESCE(a.available, 0), 0) AS suggested,
                    lb.unit_price  AS last_price,
                    lb.supplier    AS last_supplier,
+                   lb.supplier_id AS last_supplier_id,
                    lb.order_date  AS last_ordered
             FROM materials m
             LEFT JOIN (
@@ -901,7 +902,7 @@ class MetricEngine
             ) d ON d.material_id = m.id
             LEFT JOIN (
                 SELECT DISTINCT ON (poi.material_id)
-                       poi.material_id, poi.unit_price, sup.name AS supplier, po2.order_date
+                       poi.material_id, poi.unit_price, sup.name AS supplier, sup.id AS supplier_id, po2.order_date
                 FROM purchase_order_items poi
                 JOIN purchase_orders po2 ON po2.id = poi.purchase_order_id
                 JOIN suppliers sup ON sup.id = po2.supplier_id
@@ -914,6 +915,7 @@ class MetricEngine
             LIMIT 12
         "))->map(fn ($r) => [
             'material'     => $r->name,
+            'material_id'  => (int) $r->id,
             'code'         => $r->code,
             'unit'         => $r->unit,
             'available'    => round((float) $r->available, 2),
@@ -923,6 +925,7 @@ class MetricEngine
             'est_cost'     => round((float) $r->suggested * (float) $r->unit_cost, 2),
             'last_price'   => $r->last_price !== null ? (float) $r->last_price : null,
             'last_supplier'=> $r->last_supplier,
+            'last_supplier_id' => $r->last_supplier_id !== null ? (int) $r->last_supplier_id : null,
             'last_ordered' => $r->last_ordered,
         ])->values();
     }
@@ -1294,14 +1297,14 @@ class MetricEngine
 
         return collect(DB::select("
             WITH buys AS (
-                SELECT poi.material_id, poi.unit_price, po.order_date, sup.name AS supplier,
+                SELECT poi.material_id, poi.unit_price, po.order_date, sup.name AS supplier, sup.id AS supplier_id,
                        ROW_NUMBER() OVER (PARTITION BY poi.material_id ORDER BY po.order_date DESC, poi.id DESC) AS rn
                 FROM purchase_order_items poi
                 JOIN purchase_orders po ON po.id = poi.purchase_order_id AND po.status <> 'cancelled'
                 JOIN suppliers sup ON sup.id = po.supplier_id
                 WHERE poi.material_id IS NOT NULL AND po.order_date >= ? {$scopePo}
             )
-            SELECT b.material_id, m.name, b.unit_price AS last_price, b.supplier, b.order_date,
+            SELECT b.material_id, m.name, b.unit_price AS last_price, b.supplier, b.supplier_id, b.order_date,
                    prior.avg_price AS avg_prior,
                    ROUND(((b.unit_price - prior.avg_price) / prior.avg_price * 100)::numeric, 1) AS drift_pct
             FROM buys b
@@ -1323,6 +1326,14 @@ class MetricEngine
      * "What requires my attention?" — every item cites the real numbers that
      * triggered it and links to the page where it gets fixed. Detectors only
      * emit when they have something to say.
+     *
+     * Each item carries the original flat shape ({key, severity, title,
+     * detail, count, link} — the digest email renders exactly these) plus,
+     * ADDITIVELY, an `actions` array of one-click next steps
+     * ({type:'navigate'|'create_po', label, ...}) and, where the upstream
+     * query already computed them, an `entities` array with the top rows
+     * behind the headline so the UI can show WHICH product/material/customer
+     * without another round-trip.
      */
     public function attention(): array
     {
@@ -1343,6 +1354,9 @@ class MetricEngine
                 'title' => "{$overdue->n} production order" . ($overdue->n > 1 ? 's' : '') . ' overdue',
                 'detail' => "Worst is {$daysLate} day" . ($daysLate === 1 ? '' : 's') . ' past due.',
                 'count' => (int) $overdue->n, 'link' => '/production/orders?status=overdue',
+                'actions' => [
+                    ['type' => 'navigate', 'label' => 'View overdue orders', 'to' => '/production/orders?status=overdue'],
+                ],
             ];
         }
 
@@ -1356,7 +1370,10 @@ class MetricEngine
                 'key' => 'balances_aging', 'severity' => 'high',
                 'title' => 'KES ' . number_format((float) $aging->owed) . ' owed for over 30 days',
                 'detail' => "{$aging->n} order" . ($aging->n > 1 ? 's' : '') . ' with balances older than a month.',
-                'count' => (int) $aging->n, 'link' => '/pos/balances',
+                'count' => (int) $aging->n, 'link' => '/pos/outstanding-balances',
+                'actions' => [
+                    ['type' => 'navigate', 'label' => 'Chase balances', 'to' => '/pos/outstanding-balances'],
+                ],
             ];
         }
 
@@ -1374,6 +1391,9 @@ class MetricEngine
                 'title' => "{$pendingPay->n} payment" . ($pendingPay->n > 1 ? 's' : '') . ' awaiting approval (KES ' . number_format((float) $pendingPay->amt) . ')',
                 'detail' => "Oldest has waited {$age} day" . ($age === 1 ? '' : 's') . '.',
                 'count' => (int) $pendingPay->n, 'link' => '/approvals',
+                'actions' => [
+                    ['type' => 'navigate', 'label' => 'Review approvals', 'to' => '/approvals'],
+                ],
             ];
         }
 
@@ -1385,6 +1405,9 @@ class MetricEngine
                 'title' => "Next 7 days need {$cap['due_pieces']} pieces — recent pace delivers ~{$cap['week_capacity']}",
                 'detail' => "Short by ~{$cap['shortfall']} pieces at the current {$cap['daily_throughput']}/day throughput.",
                 'count' => (int) ceil($cap['shortfall']), 'link' => '/reports/production',
+                'actions' => [
+                    ['type' => 'navigate', 'label' => 'Open production report', 'to' => '/reports/production'],
+                ],
             ];
         }
 
@@ -1397,6 +1420,14 @@ class MetricEngine
                 'title' => count($risks) . ' top-selling item' . (count($risks) > 1 ? 's' : '') . ' close to stockout',
                 'detail' => "\"{$worst['product']}\" has {$worst['on_hand']} left — about {$worst['cover_days']} days at its 30-day sales rate.",
                 'count' => count($risks), 'link' => '/reports/inventory',
+                'entities' => array_map(fn ($r) => [
+                    'product_id' => $r['product_id'],
+                    'product'    => $r['product'],
+                    'cover_days' => $r['cover_days'],
+                ], array_slice($risks, 0, 3)),
+                'actions' => [
+                    ['type' => 'navigate', 'label' => 'Open inventory report', 'to' => '/reports/inventory'],
+                ],
             ];
         }
 
@@ -1409,6 +1440,14 @@ class MetricEngine
                 'title' => $dormant->count() . ' top customer' . ($dormant->count() > 1 ? 's' : '') . ' quiet for 60+ days',
                 'detail' => "{$worst['name']} (KES " . number_format($worst['revenue_12m']) . " this year) last ordered {$worst['days_quiet']} days ago.",
                 'count' => $dormant->count(), 'link' => '/reports/customers',
+                'entities' => $dormant->take(3)->map(fn ($c) => [
+                    'name'       => $c['name'],
+                    'phone'      => $c['phone'],
+                    'days_quiet' => $c['days_quiet'],
+                ])->values()->all(),
+                'actions' => [
+                    ['type' => 'navigate', 'label' => 'Open customer report', 'to' => '/reports/customers'],
+                ],
             ];
         }
 
@@ -1422,6 +1461,16 @@ class MetricEngine
                 'detail' => number_format((float) $worst->available, 1) . " {$worst->unit} left, burning {$worst->daily_burn} {$worst->unit}/day"
                     . ($runway->count() > 1 ? ' — ' . ($runway->count() - 1) . ' more material' . ($runway->count() > 2 ? 's' : '') . ' under 14 days.' : '.'),
                 'count' => $runway->count(), 'link' => '/reports/procurement',
+                'entities' => $runway->take(3)->map(fn ($m) => [
+                    'material_id' => (int) $m->id,
+                    'name'        => $m->name,
+                    'runway_days' => (float) $m->runway_days,
+                ])->values()->all(),
+                'actions' => [
+                    ['type' => 'create_po', 'label' => 'Draft purchase order',
+                     'material_ids' => $runway->pluck('id')->map(fn ($id) => (int) $id)->values()->all()],
+                    ['type' => 'navigate', 'label' => 'Open procurement report', 'to' => '/reports/procurement'],
+                ],
             ];
         }
 
@@ -1436,6 +1485,9 @@ class MetricEngine
                     . " → {$mo[1]['month']}: KES " . number_format($mo[1]['revenue'])
                     . " → {$mo[2]['month']}: KES " . number_format($mo[2]['revenue']) . '.',
                 'count' => 3, 'link' => '/reports/sales',
+                'actions' => [
+                    ['type' => 'navigate', 'label' => 'Open sales report', 'to' => '/reports/sales'],
+                ],
             ];
         }
 
@@ -1450,6 +1502,16 @@ class MetricEngine
                     . number_format((float) $worst->avg_prior, 2) . " 90-day average"
                     . ($drift->count() > 1 ? ' — ' . ($drift->count() - 1) . ' more material' . ($drift->count() > 2 ? 's' : '') . ' drifting.' : '.'),
                 'count' => $drift->count(), 'link' => '/reports/procurement',
+                'entities' => $drift->take(3)->map(fn ($d) => [
+                    'material_id' => (int) $d->material_id,
+                    'name'        => $d->name,
+                    'supplier_id' => (int) $d->supplier_id,
+                    'supplier'    => $d->supplier,
+                    'drift_pct'   => (float) $d->drift_pct,
+                ])->values()->all(),
+                'actions' => [
+                    ['type' => 'navigate', 'label' => 'Open procurement report', 'to' => '/reports/procurement'],
+                ],
             ];
         }
 
@@ -1461,6 +1523,9 @@ class MetricEngine
                 'title' => "{$low} item" . ($low > 1 ? 's' : '') . ' at or below reorder point',
                 'detail' => 'Available quantity has crossed the reorder threshold.',
                 'count' => $low, 'link' => '/reports/inventory',
+                'actions' => [
+                    ['type' => 'navigate', 'label' => 'Open inventory report', 'to' => '/reports/inventory'],
+                ],
             ];
         }
 

@@ -300,6 +300,21 @@ export const purchaseOrderApi = {
             data,
         ),
 
+    // One click from the reports attention feed: server builds draft PO(s)
+    // from the stock-runway suggestion data (one per most-recent supplier).
+    createFromSuggestions: (materialIds: number[]) =>
+        post<{
+            message: string;
+            purchase_orders: Array<{
+                id: number;
+                po_number: string;
+                supplier_id: number;
+                total_amount: number;
+            }>;
+        }>("/v1/admin/purchase-orders/from-suggestions", {
+            material_ids: materialIds,
+        }),
+
     update: (id: number, data: Partial<PurchaseOrder>) =>
         put<{ message: string; purchase_order: PurchaseOrder }>(
             `/v1/admin/purchase-orders/${id}`,
