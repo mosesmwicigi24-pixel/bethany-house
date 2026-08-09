@@ -9,6 +9,9 @@ import {
     type NeemaSalesReport,
     type OpenQuoteRow,
     type AttachAnchor,
+    type CorridorCurrencyRow,
+    type CorridorCountryRow,
+    type CorridorProductRow,
 } from "@/api/reports";
 import { ordersApi } from "@/api/orders";
 import { openWhatsApp } from "@/lib/whatsapp";
@@ -20,6 +23,7 @@ import {
     Line,
     BarChart,
     Bar,
+    ComposedChart,
     PieChart,
     Pie,
     Cell,
@@ -63,9 +67,10 @@ type SalesTab =
     | "patterns"
     | "neema"
     | "collections"
-    | "basket";
+    | "basket"
+    | "international";
 const SALES_TABS: readonly SalesTab[] = [
-    "overview", "products", "customers", "channels", "patterns", "neema", "collections", "basket",
+    "overview", "products", "customers", "channels", "patterns", "neema", "collections", "basket", "international",
 ];
 
 export default function SalesReportPage() {
@@ -236,6 +241,7 @@ export default function SalesReportPage() {
                             ["neema", "Neema (AI agent)"],
                             ["collections", "Collections"],
                             ["basket", "Basket Intel"],
+                            ["international", "International"],
                         ] as const
                     ).map(([tab, label]) => (
                         <button
@@ -750,6 +756,9 @@ export default function SalesReportPage() {
 
             {/* ── BASKET INTEL TAB ── */}
             {activeTab === "basket" && <BasketIntelTab />}
+
+            {/* ── INTERNATIONAL TAB ── */}
+            {activeTab === "international" && <InternationalTab />}
 
             {(summaryQuery.data?.excluded_currencies ?? []).length > 0 && (
                 /* A total that quietly omits rows is worse than one that says
@@ -1983,6 +1992,288 @@ function BasketIntelTab() {
                         </tbody>
                     </table>
                 </TableWrapper>
+            </div>
+        </div>
+    );
+}
+
+// ─── International tab ────────────────────────────────────────────────────────
+// The diaspora/regional corridor the KES-only totals exclude (the amber
+// "excluded currencies" note at the bottom of this page is the only other
+// place those orders surface). Native currencies are shown natively — a KES
+// equivalent appears only when the currencies table carries real configured
+// rates; the report never invents a conversion.
+
+/** Native-currency money — NOT fmtKes: these figures are deliberately not KES. */
+function fmtNative(currency: string, amount: number) {
+    return `${currency} ${Number(amount ?? 0).toLocaleString("en-KE", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+    })}`;
+}
+
+function InternationalTab() {
+    const { data, isLoading } = useQuery({
+        queryKey: ["international-corridor"],
+        queryFn: () => reportsApi.internationalCorridor(),
+        staleTime: 60_000,
+    });
+
+    if (isLoading || !data)
+        return (
+            <div className="flex justify-center py-16">
+                <Spinner />
+            </div>
+        );
+
+    const { summary, currencies, countries, top_products, trend } = data;
+    const ratesUnavailable = summary.rates_unavailable;
+    const trendData = trend.map((t) => ({
+        ...t,
+        label: dayjs(`${t.month}-01`).format("MMM"),
+    }));
+
+    return (
+        <div className="space-y-6">
+            <div className={KPI_GRID}>
+                <KpiCard
+                    label="Corridor Orders"
+                    value={summary.corridor_orders.toLocaleString()}
+                    sub={`Last ${data.window_days} days — non-KES or shipped abroad`}
+                    color="text-brand-600"
+                />
+                <KpiCard
+                    label="Corridor Customers"
+                    value={summary.corridor_customers.toLocaleString()}
+                    sub="Distinct buyers across the corridor"
+                />
+                <KpiCard
+                    label="Currencies Active"
+                    value={summary.currencies_active}
+                    sub={
+                        summary.kes_equivalent_total != null
+                            ? `≈ ${fmtKes(summary.kes_equivalent_total)} combined`
+                            : "Totals shown per currency"
+                    }
+                />
+                <KpiCard
+                    label="Share of All Orders"
+                    value={`${summary.share_of_all_orders_pct}%`}
+                    sub="Corridor share of every order in the window"
+                />
+            </div>
+
+            {ratesUnavailable && summary.currencies_active > 0 && (
+                <p className="text-xs text-surface-400">
+                    Totals shown in native currencies — no conversion rates
+                    configured. Set exchange rates under Settings → Currencies
+                    to see a combined KES equivalent.
+                </p>
+            )}
+
+            {/* Currency table */}
+            <div className="card overflow-hidden">
+                <div className="px-5 pt-5 pb-4">
+                    <SectionHeader title="By currency" />
+                    <p className="text-sm text-surface-500 mt-1">
+                        Sales truth per order currency — revenue is what was
+                        sold, paid is settled payments net of refunds in that
+                        same currency. Different currencies are never summed
+                        together.
+                    </p>
+                </div>
+                <TableWrapper>
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="border-t border-line bg-surface-50">
+                                <th className={TH}>Currency</th>
+                                <th className={TH_R}>Orders</th>
+                                <th className={TH_R}>Customers</th>
+                                <th className={TH_R}>Revenue (native)</th>
+                                <th className={TH_R}>Paid (native)</th>
+                                <th className={TH_R}>Avg order</th>
+                                <th className={TH_R}>≈ KES</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-line">
+                            {currencies.length === 0 ? (
+                                <EmptyRow
+                                    cols={7}
+                                    text="No international orders in this window yet."
+                                />
+                            ) : (
+                                currencies.map((c: CorridorCurrencyRow) => (
+                                    <tr key={c.currency} className="hover:bg-surface-50/50 transition-colors">
+                                        <td className="px-4 py-3 font-medium text-surface-900">
+                                            {c.currency}
+                                        </td>
+                                        <td className="px-4 py-3 text-right tabular-nums">{c.orders}</td>
+                                        <td className="px-4 py-3 text-right tabular-nums">{c.customers}</td>
+                                        <td className="px-4 py-3 text-right tabular-nums font-semibold">
+                                            {fmtNative(c.currency, c.revenue_native)}
+                                        </td>
+                                        <td className="px-4 py-3 text-right tabular-nums text-surface-600">
+                                            {fmtNative(c.currency, c.paid_native)}
+                                        </td>
+                                        <td className="px-4 py-3 text-right tabular-nums text-surface-600">
+                                            {fmtNative(c.currency, c.avg_order_native)}
+                                        </td>
+                                        <td className="px-4 py-3 text-right tabular-nums text-surface-500">
+                                            {c.kes_equivalent != null ? fmtKes(c.kes_equivalent) : "—"}
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </TableWrapper>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Country table */}
+                <div className="card overflow-hidden">
+                    <div className="px-5 pt-5 pb-4">
+                        <SectionHeader title="By country" />
+                        <p className="text-sm text-surface-500 mt-1">
+                            Where corridor orders come from. "Unknown" is an
+                            order that carried no customer country.
+                        </p>
+                    </div>
+                    <TableWrapper>
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-t border-line bg-surface-50">
+                                    <th className={TH}>Country</th>
+                                    <th className={TH_R}>Orders</th>
+                                    <th className={TH_R}>Customers</th>
+                                    <th className={TH_R}>Revenue</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-line">
+                                {countries.length === 0 ? (
+                                    <EmptyRow cols={4} text="No international orders in this window yet." />
+                                ) : (
+                                    countries.map((c: CorridorCountryRow) => (
+                                        <tr key={c.country} className="hover:bg-surface-50/50 transition-colors">
+                                            <td className="px-4 py-3 font-medium text-surface-900">
+                                                {c.country_name}
+                                                {c.country !== "unknown" && (
+                                                    <span className="ml-1.5 text-xs text-surface-400">
+                                                        {c.country}
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-3 text-right tabular-nums">{c.orders}</td>
+                                            <td className="px-4 py-3 text-right tabular-nums">{c.customers}</td>
+                                            <td className="px-4 py-3 text-right tabular-nums text-surface-600">
+                                                {Object.entries(c.revenue).map(([cur, amt]) => (
+                                                    <span key={cur} className="block">
+                                                        {fmtNative(cur, amt)}
+                                                    </span>
+                                                ))}
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </TableWrapper>
+                </div>
+
+                {/* Top products */}
+                <div className="card overflow-hidden">
+                    <div className="px-5 pt-5 pb-4">
+                        <SectionHeader title="Top products internationally" />
+                        <p className="text-sm text-surface-500 mt-1">
+                            Ranked by the number of corridor orders each
+                            product appears in.
+                        </p>
+                    </div>
+                    <TableWrapper>
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-t border-line bg-surface-50">
+                                    <th className={TH}>Product</th>
+                                    <th className={TH_R}>Orders</th>
+                                    <th className={TH_R}>Units</th>
+                                    <th className={TH} style={{ width: 120 }}>Share</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-line">
+                                {top_products.length === 0 ? (
+                                    <EmptyRow cols={4} text="No corridor product lines in this window yet." />
+                                ) : (() => {
+                                    const maxOrders = Math.max(...top_products.map((p) => p.orders), 1);
+                                    return top_products.map((p: CorridorProductRow) => (
+                                        <tr key={p.product_id} className="hover:bg-surface-50/50 transition-colors">
+                                            <td className="px-4 py-3 font-medium text-surface-900">{p.name}</td>
+                                            <td className="px-4 py-3 text-right tabular-nums">{p.orders}</td>
+                                            <td className="px-4 py-3 text-right tabular-nums text-surface-600">{p.units}</td>
+                                            <td className="px-4 py-3">
+                                                <ProgressBar value={p.orders} max={maxOrders} color={CHART_COLORS[1]} />
+                                            </td>
+                                        </tr>
+                                    ));
+                                })()}
+                            </tbody>
+                        </table>
+                    </TableWrapper>
+                </div>
+            </div>
+
+            {/* Monthly trend */}
+            <div className="card p-5">
+                <SectionHeader title="Corridor trend — last 6 months" />
+                <p className="text-sm text-surface-500 mt-1 mb-2">
+                    Corridor orders per month
+                    {!ratesUnavailable && ", with the KES-equivalent revenue line"}
+                    .
+                </p>
+                <ResponsiveContainer width="100%" height={240}>
+                    <ComposedChart data={trendData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f2f3f2" />
+                        <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                        <YAxis
+                            yAxisId="orders"
+                            allowDecimals={false}
+                            tick={{ fontSize: 11 }}
+                            width={36}
+                        />
+                        {!ratesUnavailable && (
+                            <YAxis
+                                yAxisId="kes"
+                                orientation="right"
+                                tickFormatter={(v: number) => `${(v / 1000).toFixed(0)}K`}
+                                tick={{ fontSize: 11 }}
+                                width={48}
+                            />
+                        )}
+                        <Tooltip
+                            formatter={(v, name) =>
+                                name === "≈ KES revenue" ? fmtKes(v as number) : v
+                            }
+                        />
+                        <Legend />
+                        <Bar
+                            yAxisId="orders"
+                            dataKey="orders"
+                            name="Orders"
+                            fill={CHART_COLORS[0]}
+                            radius={[3, 3, 0, 0]}
+                        />
+                        {!ratesUnavailable && (
+                            <Line
+                                yAxisId="kes"
+                                type="monotone"
+                                dataKey="kes_equivalent"
+                                name="≈ KES revenue"
+                                stroke={CHART_COLORS[2]}
+                                strokeWidth={2}
+                                dot={false}
+                            />
+                        )}
+                    </ComposedChart>
+                </ResponsiveContainer>
             </div>
         </div>
     );
