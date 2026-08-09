@@ -636,6 +636,14 @@ class ReportController extends Controller
             ->limit($limit)
             ->get();
 
+        if ($this->wantsExport($request)) {
+            return $this->csvResponse(
+                ['Customer', 'Email', 'Phone', 'Orders', 'Total Spent', 'Avg Order Value', 'Last Order'],
+                $customers->map(fn ($c) => [$c->name, $c->email, $c->phone, $c->order_count, $c->total_spent, $c->avg_order_value, $c->last_order_date]),
+                'sales_by_customer'
+            );
+        }
+
         return response()->json($this->numify([
             'period'    => ['start' => $start, 'end' => $end],
             'customers' => $customers,
@@ -758,6 +766,24 @@ class ReportController extends Controller
             ->groupBy('return_items.reason')
             ->orderByRaw('COUNT(*) DESC')
             ->get();
+
+        if ($this->wantsExport($request)) {
+            // One row per return reason, with the period summary as a leading row
+            // (the page's KPI cards have no tabular equivalent otherwise).
+            $rows = collect([[
+                'ALL RETURNS',
+                $returns->total_returns,
+                $returns->total_refunded,
+            ]])->concat(
+                $byReason->map(fn ($r) => [$r->reason, $r->count, $r->total_refunded])
+            );
+
+            return $this->csvResponse(
+                ['Reason', 'Returns', 'Total Refunded'],
+                $rows,
+                'sales_returns'
+            );
+        }
 
         return response()->json($this->numify([
             'period'         => ['start' => $start, 'end' => $end],
