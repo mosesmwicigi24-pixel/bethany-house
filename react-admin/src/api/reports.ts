@@ -75,6 +75,14 @@ export const reportsApi = {
             },
         }),
 
+    // Seasonal demand planning — liturgical seasons ahead (120-day horizon),
+    // per-product lift from combined hub + legacy history, stock gaps and
+    // supplier-lead-time order-by dates. Cached 10 min server-side.
+    seasonalDemand: (outletId?: number) =>
+        get<SeasonalDemandReport>(`${BASE}/seasonal-demand`, {
+            params: { ...(outletId ? { outlet_id: outletId } : {}) },
+        }),
+
     // Win-back economics — dormant customers scored against their own purchase
     // rhythm: KES at risk, urgency, outreach history, 30-day recovery
     // attribution. "As of now" like the radar (no date range).
@@ -688,6 +696,54 @@ export interface StockoutLossReport {
         low_confidence_count: number;
     };
     products: StockoutLossRow[];
+}
+
+// ── Seasonal demand planning ──────────────────────────────────────────────────
+// The liturgical calendar (computed, not the storefront CMS seasons) crossed
+// with combined sales history: hub orders UNION imported legacy POS daily
+// aggregates. holy_week is exposed as a sub-window of lent (sub_of: 'lent')
+// and excluded from summary totals so the same units are not counted twice.
+
+export interface SeasonalDemandProductRow {
+    product_id: number;
+    name: string;
+    /** Seasonal units/day ÷ ordinary-time units/day (capped server-side). */
+    lift: number;
+    projected_units: number;
+    stock: number;
+    gap: number;
+    lead_days: number;
+    /** Season start minus the product's supplier lead time. */
+    order_by: string;
+    /** Negative = the order window has already passed. */
+    days_until_order_by: number;
+    est_gap_value: number;
+    /** 'hub' = trailing-60d hub velocity × lift; 'historical' = legacy rate. */
+    basis: "hub" | "historical";
+}
+
+export interface SeasonalDemandSeason {
+    key: string;
+    label: string;
+    start: string;
+    end: string;
+    days_until_start: number;
+    length_days: number;
+    /** Present on holy_week only — it rides inside lent. */
+    sub_of?: string;
+    products: SeasonalDemandProductRow[];
+}
+
+export interface SeasonalDemandReport {
+    seasons: SeasonalDemandSeason[];
+    summary: {
+        next_season: { key: string; label: string; start: string } | null;
+        total_gap_value: number;
+        /** Rows with a gap whose order-by date is within 14 days (or past). */
+        urgent_orders: number;
+        /** 0 until legacy history is imported (drives the unlock empty state). */
+        history_depth_days: number;
+    };
 }
 
 // ── Win-back economics ────────────────────────────────────────────────────────

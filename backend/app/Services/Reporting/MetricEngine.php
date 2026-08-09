@@ -2478,6 +2478,402 @@ class MetricEngine
         return $out;
     }
 
+    // ── Seasonal demand planning ──────────────────────────────────────────────
+
+    /**
+     * Liturgical demand planner — "what will the church year ask of the
+     * shelves next, and when must the POs go out?"
+     *
+     * For every non-ordinary liturgical season starting or running within the
+     * next $horizonDays (SeasonCalendar computes the calendar; holy_week is
+     * exposed as a sub-window of lent), each product's seasonal lift is
+     * measured from COMBINED history — hub order_items UNION the imported
+     * legacy_sales_daily aggregates — over the prior two years:
+     *
+     *   lift            = (seasonal units/day) ÷ (ordinary-time units/day)
+     *   projected_units = trailing-60d hub velocity × lift × season length
+     *                     (when the hub has no velocity yet, historical
+     *                      seasonal units/day × length — basis 'historical')
+     *   gap             = max(0, projected − stock on hand across outlets)
+     *   order_by        = season start − the product's supplier lead time
+     *                     (most recent supplier's average PO→GRN days,
+     *                      falling back to the global average, then 14)
+     *
+     * Legacy rows are analytics-only aggregates with no outlet, so they are
+     * included under every scope; hub-side sums remain outlet-scoped like
+     * every other metric. Cached 10 minutes per scope.
+     *
+     * Before the operator has run `seasonal:import-legacy` (and while the hub
+     * itself is young) there is no history: the report still returns the full
+     * season timeline with empty product lists and history_depth_days = 0 so
+     * the UI can invite the import instead of rendering a broken page.
+     */
+    public function seasonalDemand(int $horizonDays = 120): array
+    {
+        $scopeKey = $this->outletIds !== null
+            ? implode('-', collect($this->outletIds)->map(fn ($id) => (int) $id)->sort()->values()->all())
+            : 'all';
+
+        return \Illuminate\Support\Facades\Cache::remember(
+            "metrics:seasonal_demand:{$scopeKey}:{$horizonDays}",
+            600,
+            fn () => $this->computeSeasonalDemand($horizonDays),
+        );
+    }
+
+    /** Minimum ordinary-time velocity used as the lift denominator (div-0 guard). */
+    private const SEASONAL_BASELINE_FLOOR = 0.05;
+
+    /** Sanity ceiling on lift so one thin baseline cannot project absurd volumes. */
+    private const SEASONAL_LIFT_CAP = 25.0;
+
+    /** The uncached projection pass behind seasonalDemand(). */
+    private function computeSeasonalDemand(int $horizonDays): array
+    {
+        $today      = CarbonImmutable::now(self::TZ)->startOfDay();
+        $horizonEnd = $today->addDays($horizonDays);
+
+        // The demand seasons ahead (ordinary stretches are the baseline, not
+        // a surge to plan for). holy_week rides inside lent — kept for the
+        // drill-in view but excluded from summary totals to avoid counting
+        // the same units twice.
+        $upcoming = array_values(array_filter(
+            \App\Services\SeasonCalendar::seasonsForRange($today, $horizonEnd),
+            fn ($w) => ! in_array($w['key'], \App\Services\SeasonCalendar::ORDINARY_KEYS, true),
+        ));
+
+        $seasonShape = fn (array $w, array $products) => array_filter([
+            'key'              => $w['key'],
+            'label'            => $w['label'],
+            'start'            => $w['start']->toDateString(),
+            'end'              => $w['end']->toDateString(),
+            'days_until_start' => max(0, (int) round($today->diffInDays($w['start'], false))),
+            'length_days'      => (int) round($w['start']->diffInDays($w['end'])) + 1,
+            'sub_of'           => $w['key'] === 'holy_week' ? 'lent' : null,
+            'products'         => $products,
+        ], fn ($v) => $v !== null);
+
+        // History depth: the earliest combined sales date. No history → the
+        // graceful "import legacy history to unlock projections" shape.
+        $legacyMin = DB::table('legacy_sales_daily')->min('sale_date');
+        $hubMin    = DB::table('orders')
+            ->whereNotIn('status', self::SALE_EXCLUDED_STATUSES)
+            ->whereRaw("UPPER(currency_code) = 'KES'")
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+            ->min('created_at');
+
+        $starts = array_filter([
+            $legacyMin !== null ? CarbonImmutable::parse((string) $legacyMin, self::TZ)->startOfDay() : null,
+            $hubMin !== null ? CarbonImmutable::parse((string) $hubMin, self::TZ)->startOfDay() : null,
+        ]);
+        $historyStart = $starts === [] ? null : min($starts);
+
+        if ($historyStart === null || $historyStart->gte($today)) {
+            return [
+                'seasons' => array_map(fn ($w) => $seasonShape($w, []), $upcoming),
+                'summary' => [
+                    'next_season' => $upcoming === [] ? null : [
+                        'key'   => $upcoming[0]['key'],
+                        'label' => $upcoming[0]['label'],
+                        'start' => $upcoming[0]['start']->toDateString(),
+                    ],
+                    'total_gap_value'    => 0.0,
+                    'urgent_orders'      => 0,
+                    'history_depth_days' => 0,
+                ],
+            ];
+        }
+
+        $historyDepthDays = (int) round($historyStart->diffInDays($today));
+
+        // Observation range: prior two liturgical years, clipped to the days
+        // history actually covers (a window with no coverage must not dilute
+        // a units-per-day denominator).
+        $obsStart = max($historyStart, $today->subYears(2));
+        $obsEnd   = $today->subDay(); // full days only
+        $clip     = function (array $w) use ($obsStart, $obsEnd): ?array {
+            $s = max($w['start'], $obsStart);
+            $e = min($w['end'], $obsEnd);
+
+            return $s->lte($e) ? ['start' => $s, 'end' => $e] : null;
+        };
+
+        $observed = \App\Services\SeasonCalendar::seasonsForRange($obsStart, $obsEnd);
+
+        // Ordinary-time baseline: units/day per product across every clipped
+        // ordinary stretch (epiphany + post-Pentecost).
+        $ordinaryDays  = 0;
+        $ordinaryUnits = [];
+        foreach ($observed as $w) {
+            if (! in_array($w['key'], \App\Services\SeasonCalendar::ORDINARY_KEYS, true)) {
+                continue;
+            }
+            if (($c = $clip($w)) === null) {
+                continue;
+            }
+            $ordinaryDays += (int) round($c['start']->diffInDays($c['end'])) + 1;
+            foreach ($this->combinedSalesAgg($c['start'], $c['end']) as $pid => $agg) {
+                $ordinaryUnits[$pid] = ($ordinaryUnits[$pid] ?? 0.0) + $agg['units'];
+            }
+        }
+
+        // Current hub velocity + price: trailing 60 days of hub sales truth.
+        $hub60 = collect(DB::select("
+            SELECT oi.product_id,
+                   SUM(oi.quantity)    AS units,
+                   SUM(oi.total_price) AS revenue
+            FROM order_items oi
+            JOIN orders o ON o.id = oi.order_id
+            WHERE o.status NOT IN ('voided','cancelled')
+              AND UPPER(o.currency_code) = 'KES'
+              AND oi.product_id IS NOT NULL
+              AND o.created_at >= ?
+              " . $this->outletScopeSql('o.outlet_id') . '
+            GROUP BY oi.product_id
+        ', [$today->subDays(60)->toDateTimeString()]))->keyBy('product_id');
+
+        $seasons     = [];
+        $allRows     = []; // rows outside holy_week, for the summary
+        foreach ($upcoming as $w) {
+            // Prior occurrences of this season key — the upcoming window
+            // itself (matched by start date) never feeds its own history.
+            $seasonalDays  = 0;
+            $seasonalUnits = [];
+            $seasonalRev   = [];
+            foreach ($observed as $h) {
+                if ($h['key'] !== $w['key'] || $h['start']->equalTo($w['start'])) {
+                    continue;
+                }
+                if (($c = $clip($h)) === null) {
+                    continue;
+                }
+                $seasonalDays += (int) round($c['start']->diffInDays($c['end'])) + 1;
+                foreach ($this->combinedSalesAgg($c['start'], $c['end']) as $pid => $agg) {
+                    $seasonalUnits[$pid] = ($seasonalUnits[$pid] ?? 0.0) + $agg['units'];
+                    $seasonalRev[$pid]   = ($seasonalRev[$pid] ?? 0.0) + $agg['revenue'];
+                }
+            }
+
+            if ($seasonalDays === 0 || $seasonalUnits === []) {
+                $seasons[] = $seasonShape($w, []);
+                continue;
+            }
+
+            $lengthDays = (int) round($w['start']->diffInDays($w['end'])) + 1;
+            $productIds = array_keys($seasonalUnits);
+            $stocks     = $this->stockOnHandByProduct($productIds);
+            $leads      = $this->productLeadDays($productIds);
+            $names      = $this->productNames($productIds);
+
+            $rows = [];
+            foreach ($seasonalUnits as $pid => $units) {
+                if ($units <= 0) {
+                    continue; // no seasonal history → no basis to project
+                }
+                $seasonalPerDay = $units / $seasonalDays;
+                $baselinePerDay = max(($ordinaryUnits[$pid] ?? 0.0) / max(1, $ordinaryDays), self::SEASONAL_BASELINE_FLOOR);
+                $lift           = min($seasonalPerDay / $baselinePerDay, self::SEASONAL_LIFT_CAP);
+
+                $hub    = $hub60->get($pid);
+                $hubVel = $hub !== null ? (float) $hub->units / 60.0 : 0.0;
+
+                if ($hubVel > 0) {
+                    $projected = (int) round($hubVel * $lift * $lengthDays);
+                    $basis     = 'hub';
+                } else {
+                    $projected = (int) round($seasonalPerDay * $lengthDays);
+                    $basis     = 'historical';
+                }
+
+                $avgPrice = $hub !== null && (float) $hub->units > 0
+                    ? (float) $hub->revenue / (float) $hub->units
+                    : ($units > 0 ? ($seasonalRev[$pid] ?? 0.0) / $units : 0.0);
+
+                $stock    = (int) ($stocks[$pid] ?? 0);
+                $gap      = max(0, $projected - $stock);
+                $leadDays = $leads[$pid];
+                $orderBy  = $w['start']->subDays($leadDays);
+
+                $rows[] = [
+                    'product_id'          => (int) $pid,
+                    'name'                => $names[$pid] ?? ('#' . $pid),
+                    'lift'                => round($lift, 2),
+                    'projected_units'     => $projected,
+                    'stock'               => $stock,
+                    'gap'                 => $gap,
+                    'lead_days'           => $leadDays,
+                    'order_by'            => $orderBy->toDateString(),
+                    'days_until_order_by' => (int) round($today->diffInDays($orderBy, false)),
+                    'est_gap_value'       => round($gap * $avgPrice, 2),
+                    'basis'               => $basis,
+                    '_projected_value'    => $projected * $avgPrice,
+                ];
+            }
+
+            usort($rows, fn ($a, $b) => $b['_projected_value'] <=> $a['_projected_value']);
+            $rows = array_map(function ($r) {
+                unset($r['_projected_value']);
+
+                return $r;
+            }, array_slice($rows, 0, 20));
+
+            if ($w['key'] !== 'holy_week') {
+                $allRows = array_merge($allRows, $rows);
+            }
+            $seasons[] = $seasonShape($w, $rows);
+        }
+
+        $urgent = array_values(array_filter(
+            $allRows,
+            fn ($r) => $r['gap'] > 0 && $r['days_until_order_by'] <= 14,
+        ));
+
+        return [
+            'seasons' => $seasons,
+            'summary' => [
+                'next_season' => $upcoming === [] ? null : [
+                    'key'   => $upcoming[0]['key'],
+                    'label' => $upcoming[0]['label'],
+                    'start' => $upcoming[0]['start']->toDateString(),
+                ],
+                'total_gap_value'    => round(array_sum(array_column($allRows, 'est_gap_value')), 2),
+                'urgent_orders'      => count($urgent),
+                'history_depth_days' => $historyDepthDays,
+            ],
+        ];
+    }
+
+    /**
+     * Combined sales history for one inclusive date window: hub order_items
+     * (sales truth, outlet-scoped) UNION ALL legacy_sales_daily (analytics
+     * aggregates, no outlet dimension — included under every scope).
+     *
+     * @return array<int, array{units: float, revenue: float}> keyed by product_id
+     */
+    private function combinedSalesAgg(CarbonImmutable $start, CarbonImmutable $end): array
+    {
+        $rows = DB::select('
+            SELECT t.product_id, SUM(t.units) AS units, SUM(t.revenue) AS revenue
+            FROM (
+                SELECT oi.product_id, oi.quantity AS units, oi.total_price AS revenue
+                FROM order_items oi
+                JOIN orders o ON o.id = oi.order_id
+                WHERE o.status NOT IN (\'voided\',\'cancelled\')
+                  AND UPPER(o.currency_code) = \'KES\'
+                  AND oi.product_id IS NOT NULL
+                  AND o.created_at >= ? AND o.created_at < ?
+                  ' . $this->outletScopeSql('o.outlet_id') . '
+                UNION ALL
+                SELECT l.product_id, l.units, l.revenue
+                FROM legacy_sales_daily l
+                WHERE l.product_id IS NOT NULL
+                  AND l.sale_date >= ? AND l.sale_date <= ?
+            ) t
+            GROUP BY t.product_id
+        ', [
+            $start->toDateTimeString(),
+            $end->addDay()->toDateTimeString(),
+            $start->toDateString(),
+            $end->toDateString(),
+        ]);
+
+        $out = [];
+        foreach ($rows as $r) {
+            $out[(int) $r->product_id] = [
+                'units'   => (float) $r->units,
+                'revenue' => (float) $r->revenue,
+            ];
+        }
+
+        return $out;
+    }
+
+    /** @return array<int, int> product_id → summed quantity_on_hand (scoped). */
+    private function stockOnHandByProduct(array $productIds): array
+    {
+        if ($productIds === []) {
+            return [];
+        }
+
+        return DB::table('inventory_items')
+            ->whereIn('product_id', $productIds)
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+            ->groupBy('product_id')
+            ->selectRaw('product_id, SUM(quantity_on_hand) AS qty')
+            ->pluck('qty', 'product_id')
+            ->map(fn ($q) => (int) $q)
+            ->all();
+    }
+
+    /** @return array<int, string> product_id → display name (en translation, slug, sku). */
+    private function productNames(array $productIds): array
+    {
+        if ($productIds === []) {
+            return [];
+        }
+
+        return collect(DB::select('
+            SELECT p.id, COALESCE(MAX(pt.name), MAX(p.slug), MAX(p.sku)) AS name
+            FROM products p
+            LEFT JOIN product_translations pt
+                   ON pt.product_id = p.id AND pt.language_code = \'en\'
+            WHERE p.id IN (' . implode(',', array_map('intval', $productIds)) . ')
+            GROUP BY p.id
+        '))->pluck('name', 'id')->all();
+    }
+
+    /**
+     * Supplier lead time per product, in days: the average PO-date → first-GRN
+     * gap of the product's MOST RECENT supplier, falling back to the average
+     * across all delivered POs, then to a conservative 14 days.
+     *
+     * @return array<int, int> product_id → lead days (≥ 1)
+     */
+    private function productLeadDays(array $productIds): array
+    {
+        if ($productIds === []) {
+            return [];
+        }
+
+        // Average delivered lead per supplier (PO order_date → first GRN).
+        $supplierLead = collect(DB::select("
+            SELECT po.supplier_id, AVG(g.received_date - po.order_date) AS lead_days
+            FROM purchase_orders po
+            JOIN (
+                SELECT purchase_order_id, MIN(received_date) AS received_date
+                FROM goods_received_notes GROUP BY purchase_order_id
+            ) g ON g.purchase_order_id = po.id
+            WHERE po.status != 'cancelled'
+            GROUP BY po.supplier_id
+        "))->pluck('lead_days', 'supplier_id');
+
+        $globalLead = $supplierLead->isNotEmpty()
+            ? (float) $supplierLead->avg(fn ($v) => (float) $v)
+            : null;
+
+        // Each product's most recent supplier.
+        $recentSupplier = collect(DB::select('
+            SELECT DISTINCT ON (poi.product_id) poi.product_id, po.supplier_id
+            FROM purchase_order_items poi
+            JOIN purchase_orders po ON po.id = poi.purchase_order_id
+            WHERE poi.product_id IN (' . implode(',', array_map('intval', $productIds)) . ")
+              AND po.status != 'cancelled'
+            ORDER BY poi.product_id, po.order_date DESC, po.id DESC
+        "))->pluck('supplier_id', 'product_id');
+
+        $out = [];
+        foreach ($productIds as $pid) {
+            $supplierId = $recentSupplier->get($pid);
+            $lead       = $supplierId !== null && $supplierLead->has($supplierId)
+                ? (float) $supplierLead->get($supplierId)
+                : $globalLead;
+
+            $out[(int) $pid] = max(1, (int) round($lead ?? 14.0));
+        }
+
+        return $out;
+    }
+
     // ── Attention feed ────────────────────────────────────────────────────────
 
     /**
@@ -2655,6 +3051,50 @@ class MetricEngine
                 ])->values()->all(),
                 'actions' => [
                     ['type' => 'navigate', 'label' => 'See stock-out losses', 'to' => '/reports/inventory?tab=intelligence'],
+                ],
+            ];
+        }
+
+        // 5c. Seasonal order windows: the liturgical calendar is about to ask
+        // for stock the shelves can't cover, and the supplier lead time means
+        // the PO must leave NOW — not when the season starts.
+        $seasonal = $this->seasonalDemand();
+        if ($seasonal['summary']['urgent_orders'] > 0) {
+            $urgentRows   = [];
+            $leadSeason   = null;
+            foreach ($seasonal['seasons'] as $sw) {
+                if (($sw['sub_of'] ?? null) !== null) {
+                    continue; // holy_week rows already counted inside lent
+                }
+                $rows = array_filter(
+                    $sw['products'],
+                    fn ($r) => $r['gap'] > 0 && $r['days_until_order_by'] <= 14,
+                );
+                if ($rows !== [] && $leadSeason === null) {
+                    $leadSeason = $sw;
+                }
+                $urgentRows = array_merge($urgentRows, array_values($rows));
+            }
+            usort($urgentRows, fn ($a, $b) => $b['est_gap_value'] <=> $a['est_gap_value']);
+
+            $urgentGap = round(array_sum(array_column($urgentRows, 'est_gap_value')), 2);
+            $earliest  = min(array_column($urgentRows, 'order_by'));
+            $n         = count($urgentRows);
+            $items[] = [
+                'key'      => 'seasonal_order_window',
+                'severity' => min(array_column($urgentRows, 'days_until_order_by')) <= 7 ? 'high' : 'medium',
+                'title'    => "{$leadSeason['label']} demand needs {$n} order" . ($n === 1 ? '' : 's') . ' placed',
+                'detail'   => "{$leadSeason['label']} starts in {$leadSeason['days_until_start']}d — {$n} product"
+                    . ($n === 1 ? '' : 's') . " need ordering by {$earliest} (est KES " . number_format($urgentGap) . ' gap).',
+                'count'    => $n, 'link' => '/reports/procurement?tab=seasonal',
+                'entities' => array_map(fn ($r) => [
+                    'product_id' => $r['product_id'],
+                    'name'       => $r['name'],
+                    'gap'        => $r['gap'],
+                    'order_by'   => $r['order_by'],
+                ], array_slice($urgentRows, 0, 3)),
+                'actions'  => [
+                    ['type' => 'navigate', 'label' => 'Open seasonal demand', 'to' => '/reports/procurement?tab=seasonal'],
                 ],
             ];
         }

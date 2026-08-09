@@ -277,6 +277,27 @@ class ExecutiveReportController extends Controller
     }
 
     /**
+     * Seasonal demand planning — the liturgical calendar (SeasonCalendar's
+     * pure computus, not the storefront CMS seasons) crossed with combined
+     * sales history (hub orders UNION imported legacy POS aggregates):
+     * per-season product lift, projected units, stock gap and the ORDER-BY
+     * date each purchase must leave by given supplier lead times. "As of
+     * now" like the radar — the horizon is always the next 120 days.
+     * reports.view via the route group; outlet scoping via MetricEngine::for;
+     * cached 10 minutes inside the engine.
+     */
+    public function seasonalDemand(Request $request)
+    {
+        $validated = $request->validate([
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+        ]);
+
+        $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+
+        return response()->json($engine->seasonalDemand());
+    }
+
+    /**
      * Win-back economics — dormant customers scored against their OWN
      * purchase rhythm, with the KES at risk, outreach history and 30-day
      * recovery attribution. "As of now" like the radar (dormancy only means
