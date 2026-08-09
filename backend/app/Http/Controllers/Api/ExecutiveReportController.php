@@ -236,6 +236,26 @@ class ExecutiveReportController extends Controller
     }
 
     /**
+     * Attach-rate intelligence — basket affinities over the trailing window
+     * (default 180 days): which products sell together, how strongly (attach
+     * rate + lift), and the ESTIMATED revenue missed on anchor sales where
+     * the usual companion never made it into the basket. reports.view via the
+     * route group; outlet scoping via MetricEngine::for; result cached 10
+     * minutes inside the engine (keyed by scope + days).
+     */
+    public function attachRates(Request $request)
+    {
+        $validated = $request->validate([
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+            'days'      => 'nullable|integer|min:30|max:365',
+        ]);
+
+        $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+
+        return response()->json($engine->attachRates((int) ($validated['days'] ?? 180)));
+    }
+
+    /**
      * Win-back economics — dormant customers scored against their OWN
      * purchase rhythm, with the KES at risk, outreach history and 30-day
      * recovery attribution. "As of now" like the radar (dormancy only means

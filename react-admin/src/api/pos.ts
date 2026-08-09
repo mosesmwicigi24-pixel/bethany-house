@@ -47,6 +47,21 @@ export interface PosProduct {
     variants: PosVariant[];
 }
 
+/** One "Usually bought together" chip for the POS cart. */
+export interface PosSuggestion {
+    product_id: number;
+    name: string;
+    sku: string | null;
+    /** % of the anchor's baskets that historically included this product. */
+    attach_rate_pct: number;
+    /** Avg KES this product earns per basket where it attached. */
+    avg_value: number;
+    /** The in-cart product that triggered the suggestion. */
+    anchor_name: string;
+    /** Variant-less product price when one exists; null for variant products. */
+    price: number | null;
+}
+
 export interface CartItem {
     variant_id: number | null;  // null for simple products (no variants)
     product_name: string;
@@ -253,6 +268,15 @@ export const posApi = {
     searchProducts: (q: string, outlet_id: number) =>
         get<{ data: PosProduct[] }>("/v1/admin/pos/products/search", {
             params: { q, outlet_id: String(outlet_id) },
+        }),
+
+    // "Usually bought together" chips: given the product ids in the cart,
+    // up to 4 companion products ranked by attach_rate × avg line value
+    // (global basket affinities, 10-min server cache). Purely advisory —
+    // an empty list is a normal answer.
+    suggestions: (productIds: number[]) =>
+        get<{ suggestions: PosSuggestion[] }>("/v1/admin/pos/suggestions", {
+            params: { product_ids: productIds },
         }),
 
     createSale: (data: CreateSalePayload) =>

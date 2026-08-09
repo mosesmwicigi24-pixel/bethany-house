@@ -721,6 +721,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('register/history',          [PosController::class, 'registerHistory']);
                 Route::get('products',                  [PosController::class, 'products']);
                 Route::get('products/search',           [PosController::class, 'searchProducts']);
+                Route::get('suggestions',               [PosController::class, 'suggestions']);
                 Route::get('sales',                     [PosController::class, 'sales']);
                 Route::get('outstanding-balances',      [PosController::class, 'outstandingBalances']);
                 Route::get('sales/{id}',                [PosController::class, 'saleDetail']);
@@ -1193,6 +1194,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/customer-intelligence',    [\App\Http\Controllers\Api\ExecutiveReportController::class, 'customerIntelligence']);
                 Route::get('/replenishment',            [\App\Http\Controllers\Api\ExecutiveReportController::class, 'replenishment']);
                 Route::get('/collections',              [\App\Http\Controllers\Api\ExecutiveReportController::class, 'collections']);
+                Route::get('/attach-rates',             [\App\Http\Controllers\Api\ExecutiveReportController::class, 'attachRates']);
                 Route::get('/win-back',                 [\App\Http\Controllers\Api\ExecutiveReportController::class, 'winBack']);
                 Route::post('/win-back/outreach',       [\App\Http\Controllers\Api\ExecutiveReportController::class, 'winBackOutreach']);
                 Route::get('/financial-intelligence',   [\App\Http\Controllers\Api\ExecutiveReportController::class, 'financialIntelligence']);
@@ -1515,6 +1517,7 @@ Route::prefix('v1')->group(function () {
         Route::middleware(['role:pos_clerk|outlet_manager|admin|super_admin', 'permission:pos.access,sanctum'])->prefix('pos')->group(function () {
             Route::get('/products',                 [PosController::class, 'products']);
             Route::get('/products/search',          [PosController::class, 'searchProducts']);
+            Route::get('/suggestions',              [PosController::class, 'suggestions']);
             Route::post('/sales',                   [PosController::class, 'createSale']);
             Route::get('/sales/today',              [PosController::class, 'todaySales']);
             Route::post('/sales/{id}/receipt',      [PosController::class, 'printReceipt']);

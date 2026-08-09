@@ -2041,6 +2041,187 @@ class MetricEngine
         ];
     }
 
+    /**
+     * Attach-rate intelligence — basket affinity mining over the trailing
+     * $days of sales truth. The question it answers: "when a customer buys X,
+     * what should have been in the basket with it, and how much revenue did
+     * we leave on the counter by not asking?"
+     *
+     * Definitions (all sales truth: non-voided/cancelled KES orders, outlet
+     * scope in the query like every other metric here):
+     *
+     *  - BASKET      = the distinct products on one order (order_items grouped
+     *                  by order; null product_id lines excluded).
+     *  - ANCHOR      = a product appearing in >= 5 baskets — enough history to
+     *                  say anything at all.
+     *  - attach_rate = baskets(anchor + companion) / baskets(anchor)
+     *  - lift        = attach_rate / (baskets(companion) / total_baskets) —
+     *                  how much MORE likely the companion is next to the
+     *                  anchor than on its own. lift 1.0 = coincidence.
+     *  - Kept pairs: co-basket support >= 3 AND lift >= 1.2 AND
+     *                attach_rate >= 0.10; top 5 companions per anchor.
+     *  - avg_value   = the companion's average line spend (SUM total_price per
+     *                  basket) across the baskets where it DID attach.
+     *  - missed      = baskets(anchor) - baskets(anchor + companion): anchor
+     *                  sales where nobody offered the companion.
+     *  - missed_revenue_estimate = missed x attach_rate x avg_value — an
+     *                  EXPECTED-VALUE PROXY, not booked money: "if the missed
+     *                  baskets had attached at the observed rate". Labelled an
+     *                  estimate everywhere it surfaces.
+     *
+     * Anchors rank by their summed companion missed-revenue (the fix-this-
+     * first order), capped at 30. The whole result is cached 10 minutes per
+     * (outlet scope, days) — affinity moves slowly; the POS suggestion
+     * endpoint hits this on every cart change and must not re-mine baskets
+     * each keystroke.
+     */
+    public function attachRates(int $days = 180): array
+    {
+        $scopeKey = $this->outletIds !== null
+            ? implode('-', collect($this->outletIds)->map(fn ($id) => (int) $id)->sort()->values()->all())
+            : 'all';
+
+        return \Illuminate\Support\Facades\Cache::remember(
+            "metrics:attach_rates:{$scopeKey}:{$days}",
+            600,
+            fn () => $this->computeAttachRates($days),
+        );
+    }
+
+    /** The uncached mining pass behind attachRates(). */
+    private function computeAttachRates(int $days): array
+    {
+        $since = CarbonImmutable::now(self::TZ)->subDays($days)->startOfDay();
+        $outletSql = $this->outletIds
+            ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')'
+            : '';
+
+        // One CTE both queries share: a basket line = (order, product) with
+        // that basket's total spend on the product.
+        $linesCte = "
+            lines AS (
+                SELECT o.id AS order_id, oi.product_id,
+                       SUM(oi.total_price) AS line_value
+                FROM orders o
+                JOIN order_items oi ON oi.order_id = o.id
+                WHERE o.status NOT IN ('voided','cancelled')
+                  AND UPPER(o.currency_code) = 'KES'
+                  AND oi.product_id IS NOT NULL
+                  AND o.created_at >= ?
+                  {$outletSql}
+                GROUP BY o.id, oi.product_id
+            )";
+
+        $shape = DB::selectOne("
+            WITH {$linesCte}
+            SELECT COUNT(*) AS total_baskets,
+                   COALESCE(AVG(n), 0) AS avg_items,
+                   COUNT(*) FILTER (WHERE n >= 2) AS multi
+            FROM (SELECT order_id, COUNT(*) AS n FROM lines GROUP BY order_id) b
+        ", [$since]);
+
+        $totalBaskets = (int) $shape->total_baskets;
+        $summary = [
+            'total_baskets'                  => $totalBaskets,
+            'multi_item_pct'                 => $totalBaskets > 0
+                ? round((int) $shape->multi / $totalBaskets * 100, 1) : 0.0,
+            'avg_basket_items'               => round((float) $shape->avg_items, 2),
+            'missed_revenue_estimate_total'  => 0.0,
+            'top_pair'                       => null,
+        ];
+
+        if ($totalBaskets === 0) {
+            return ['summary' => $summary, 'anchors' => []];
+        }
+
+        // Directional pairs: every (anchor, companion) that co-occurred in
+        // >= 3 baskets, with the anchor seen in >= 5 baskets. attach_rate and
+        // lift are computed in SQL; the keep-thresholds are applied there too
+        // so PHP only shapes what survives.
+        $pairs = DB::select("
+            WITH {$linesCte},
+            prod AS (
+                SELECT product_id, COUNT(*) AS baskets FROM lines GROUP BY product_id
+            ),
+            pairs AS (
+                SELECT a.product_id AS anchor_id, b.product_id AS companion_id,
+                       COUNT(*) AS together, AVG(b.line_value) AS avg_value
+                FROM lines a
+                JOIN lines b ON b.order_id = a.order_id AND b.product_id <> a.product_id
+                GROUP BY a.product_id, b.product_id
+                HAVING COUNT(*) >= 3
+            )
+            SELECT p.anchor_id, p.companion_id, p.together,
+                   pa.baskets AS anchor_baskets,
+                   ROUND(p.avg_value::numeric, 2) AS avg_value,
+                   ROUND((p.together::numeric / pa.baskets), 4) AS attach_rate,
+                   ROUND((p.together::numeric / pa.baskets)
+                       / (pc.baskets::numeric / ?), 2) AS lift,
+                   COALESCE(pta.name, pra.slug, pra.sku) AS anchor_name,
+                   COALESCE(ptc.name, prc.slug, prc.sku) AS companion_name,
+                   prc.sku AS companion_sku
+            FROM pairs p
+            JOIN prod pa ON pa.product_id = p.anchor_id AND pa.baskets >= 5
+            JOIN prod pc ON pc.product_id = p.companion_id
+            JOIN products pra ON pra.id = p.anchor_id
+            JOIN products prc ON prc.id = p.companion_id
+            LEFT JOIN product_translations pta
+                   ON pta.product_id = p.anchor_id AND pta.language_code = 'en'
+            LEFT JOIN product_translations ptc
+                   ON ptc.product_id = p.companion_id AND ptc.language_code = 'en'
+            WHERE (p.together::numeric / pa.baskets) >= 0.10
+              AND (p.together::numeric / pa.baskets) / (pc.baskets::numeric / ?) >= 1.2
+            ORDER BY p.anchor_id, (p.together::numeric / pa.baskets) DESC
+        ", [$since, $totalBaskets, $totalBaskets]);
+
+        $anchors = collect($pairs)
+            ->groupBy('anchor_id')
+            ->map(function ($rows) {
+                $first = $rows->first();
+                $companions = $rows->take(5)->map(function ($r) {
+                    $attach = (float) $r->attach_rate;
+                    $avg    = (float) $r->avg_value;
+                    $missed = (int) $r->anchor_baskets - (int) $r->together;
+
+                    return [
+                        'product_id'               => (int) $r->companion_id,
+                        'name'                     => $r->companion_name,
+                        'sku'                      => $r->companion_sku,
+                        'attach_rate_pct'          => round($attach * 100, 1),
+                        'lift'                     => (float) $r->lift,
+                        'avg_value'                => round($avg, 2),
+                        'missed'                   => $missed,
+                        'missed_revenue_estimate'  => round($missed * $attach * $avg, 2),
+                    ];
+                })->values();
+
+                return [
+                    'product_id' => (int) $first->anchor_id,
+                    'name'       => $first->anchor_name,
+                    'baskets'    => (int) $first->anchor_baskets,
+                    'companions' => $companions->all(),
+                    'missed_revenue_estimate' => round($companions->sum('missed_revenue_estimate'), 2),
+                ];
+            })
+            ->sortByDesc('missed_revenue_estimate')
+            ->take(30)
+            ->values();
+
+        $summary['missed_revenue_estimate_total'] = round($anchors->sum('missed_revenue_estimate'), 2);
+
+        // Top pair = the single strongest attach among everything kept.
+        $best = collect($pairs)->sortByDesc('attach_rate')->first();
+        if ($best !== null) {
+            $summary['top_pair'] = [
+                'anchor'      => $best->anchor_name,
+                'companion'   => $best->companion_name,
+                'attach_rate' => round((float) $best->attach_rate * 100, 1),
+            ];
+        }
+
+        return ['summary' => $summary, 'anchors' => $anchors->all()];
+    }
+
     // ── Attention feed ────────────────────────────────────────────────────────
 
     /**

@@ -8,6 +8,7 @@ import {
     type LedgerBucket,
     type NeemaSalesReport,
     type OpenQuoteRow,
+    type AttachAnchor,
 } from "@/api/reports";
 import { ordersApi } from "@/api/orders";
 import { openWhatsApp } from "@/lib/whatsapp";
@@ -61,9 +62,10 @@ type SalesTab =
     | "channels"
     | "patterns"
     | "neema"
-    | "collections";
+    | "collections"
+    | "basket";
 const SALES_TABS: readonly SalesTab[] = [
-    "overview", "products", "customers", "channels", "patterns", "neema", "collections",
+    "overview", "products", "customers", "channels", "patterns", "neema", "collections", "basket",
 ];
 
 export default function SalesReportPage() {
@@ -233,6 +235,7 @@ export default function SalesReportPage() {
                             ["patterns", "Patterns"],
                             ["neema", "Neema (AI agent)"],
                             ["collections", "Collections"],
+                            ["basket", "Basket Intel"],
                         ] as const
                     ).map(([tab, label]) => (
                         <button
@@ -744,6 +747,9 @@ export default function SalesReportPage() {
 
             {/* ── COLLECTIONS TAB ── */}
             {activeTab === "collections" && <CollectionsTab />}
+
+            {/* ── BASKET INTEL TAB ── */}
+            {activeTab === "basket" && <BasketIntelTab />}
 
             {(summaryQuery.data?.excluded_currencies ?? []).length > 0 && (
                 /* A total that quietly omits rows is worse than one that says
@@ -1803,6 +1809,176 @@ function CollectionsTab() {
                                         </td>
                                     </tr>
                                 ))
+                            )}
+                        </tbody>
+                    </table>
+                </TableWrapper>
+            </div>
+        </div>
+    );
+}
+
+// ─── Basket Intel tab ─────────────────────────────────────────────────────────
+// Attach-rate intelligence: which products sell together (attach rate + lift
+// over the trailing 180 days), and the ESTIMATED KES missed on anchor sales
+// where the usual companion never made it into the basket. The same affinity
+// table powers the POS "Usually bought together" chips, so what this report
+// says the shop should ask, the till actually asks. All figures are
+// expected-value estimates, labelled as such — not booked money.
+
+function BasketIntelTab() {
+    const { data, isLoading } = useQuery({
+        queryKey: ["attach-rates"],
+        queryFn: () => reportsApi.attachRates(),
+        staleTime: 60_000,
+    });
+    // Which anchor rows are expanded to show their companion breakdown.
+    const [openAnchors, setOpenAnchors] = useState<Set<number>>(new Set());
+
+    if (isLoading || !data)
+        return (
+            <div className="flex justify-center py-16">
+                <Spinner />
+            </div>
+        );
+
+    const { summary, anchors } = data;
+    const toggle = (id: number) =>
+        setOpenAnchors((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+
+    return (
+        <div className="space-y-6">
+            <div className={KPI_GRID}>
+                <KpiCard
+                    label="Missed Revenue Opportunity"
+                    value={fmtKes(summary.missed_revenue_estimate_total)}
+                    sub="Estimate — if missed baskets attached at the observed rate"
+                    color="text-brand-600"
+                />
+                <KpiCard
+                    label="Multi-item Baskets"
+                    value={`${summary.multi_item_pct}%`}
+                    sub={`Of ${summary.total_baskets.toLocaleString()} baskets (180 days)`}
+                />
+                <KpiCard
+                    label="Avg Items / Basket"
+                    value={summary.avg_basket_items}
+                    sub="Distinct products per order"
+                />
+                <KpiCard
+                    label="Best Pair"
+                    value={
+                        summary.top_pair
+                            ? `${summary.top_pair.attach_rate}%`
+                            : "—"
+                    }
+                    sub={
+                        summary.top_pair
+                            ? `${summary.top_pair.anchor} → ${summary.top_pair.companion}`
+                            : "Not enough basket history yet"
+                    }
+                />
+            </div>
+
+            <div className="card overflow-hidden">
+                <div className="px-5 pt-5 pb-4">
+                    <SectionHeader title="Attach opportunities — ranked by missed KES" />
+                    <p className="text-sm text-surface-500 mt-1">
+                        When the anchor sells, its companions historically join
+                        the basket at the shown rate. "Missed est." is the
+                        expected value of the baskets where nobody asked —
+                        these exact pairings drive the POS "Usually bought
+                        together" chips. Click a row for the full companion
+                        breakdown.
+                    </p>
+                </div>
+                <TableWrapper>
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="border-t border-line bg-surface-50">
+                                <th className={TH}>Anchor product</th>
+                                <th className={TH_R}>Baskets</th>
+                                <th className={TH}>Top companion</th>
+                                <th className={TH_R}>Attach</th>
+                                <th className={TH_R}>Missed est.</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {anchors.length === 0 ? (
+                                <EmptyRow
+                                    cols={5}
+                                    text="Not enough multi-item baskets yet — affinities appear once products co-occur in 3+ orders."
+                                />
+                            ) : (
+                                anchors.map((a: AttachAnchor) => {
+                                    const open = openAnchors.has(a.product_id);
+                                    const top = a.companions[0];
+                                    return (
+                                        <React.Fragment key={a.product_id}>
+                                            <tr
+                                                onClick={() => toggle(a.product_id)}
+                                                className="border-t border-line hover:bg-surface-50 cursor-pointer"
+                                            >
+                                                <td className="px-4 py-3 font-medium text-surface-900">
+                                                    <span className="inline-flex items-center gap-2">
+                                                        <span
+                                                            className={clsx(
+                                                                "text-surface-400 transition-transform text-xs",
+                                                                open && "rotate-90",
+                                                            )}
+                                                        >
+                                                            ▶
+                                                        </span>
+                                                        {a.name}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-right tabular-nums">
+                                                    {a.baskets}
+                                                </td>
+                                                <td className="px-4 py-3 text-surface-600">
+                                                    {top ? top.name : "—"}
+                                                </td>
+                                                <td className="px-4 py-3 text-right tabular-nums">
+                                                    {top ? `${top.attach_rate_pct}%` : "—"}
+                                                </td>
+                                                <td className="px-4 py-3 text-right tabular-nums font-medium text-brand-600">
+                                                    {fmtKes(a.missed_revenue_estimate)}
+                                                </td>
+                                            </tr>
+                                            {open &&
+                                                a.companions.map((c) => (
+                                                    <tr
+                                                        key={`${a.product_id}-${c.product_id}`}
+                                                        className="border-t border-line/60 bg-surface-50/60"
+                                                    >
+                                                        <td className="pl-12 pr-4 py-2 text-surface-600">
+                                                            + {c.name}
+                                                        </td>
+                                                        <td className="px-4 py-2 text-right tabular-nums text-surface-500">
+                                                            {c.missed} missed
+                                                        </td>
+                                                        <td className="px-4 py-2 text-surface-500">
+                                                            lift ×{c.lift}
+                                                        </td>
+                                                        <td className="px-4 py-2 text-right tabular-nums">
+                                                            {c.attach_rate_pct}%
+                                                        </td>
+                                                        <td className="px-4 py-2 text-right tabular-nums text-surface-600">
+                                                            {fmtKes(c.missed_revenue_estimate)}
+                                                            <span className="block text-[11px] text-surface-400">
+                                                                avg {fmtKes(c.avg_value)}/basket
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                        </React.Fragment>
+                                    );
+                                })
                             )}
                         </tbody>
                     </table>

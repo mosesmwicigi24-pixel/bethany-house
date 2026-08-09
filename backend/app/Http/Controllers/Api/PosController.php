@@ -212,6 +212,86 @@ class PosController extends Controller
         ]);
     }
 
+    /**
+     * GET /pos/suggestions?product_ids[]=1&product_ids[]=2
+     *
+     * "Usually bought together" chips for the POS cart: given the product ids
+     * currently in the cart (the anchors), return up to 4 companion products
+     * ranked by attach_rate x avg companion line value — the expected-KES
+     * order of asking. Products already in the cart are excluded.
+     *
+     * Affinities are GLOBAL (MetricEngine::unscoped), deliberately: baskets
+     * are thin per outlet, the affinity signal is about the catalogue rather
+     * than the till, and the underlying attachRates() result is cached 10
+     * minutes so every terminal shares one warm copy. Stock/price for the
+     * add-to-cart step still comes from the clerk's own outlet via the
+     * normal products/search path.
+     *
+     * Purely advisory: an empty list is a normal response, never an error the
+     * POS should surface.
+     */
+    public function suggestions(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'product_ids'   => 'required|array|min:1|max:50',
+            'product_ids.*' => 'integer',
+        ]);
+
+        $inCart = array_map('intval', $validated['product_ids']);
+        $attach = \App\Services\Reporting\MetricEngine::unscoped()->attachRates();
+
+        // Best suggestion per companion across all cart anchors, scored by
+        // attach_rate x avg_value (expected companion revenue per ask).
+        $best = [];
+        foreach ($attach['anchors'] as $anchor) {
+            if (!in_array((int) $anchor['product_id'], $inCart, true)) {
+                continue;
+            }
+            foreach ($anchor['companions'] as $c) {
+                $pid = (int) $c['product_id'];
+                if (in_array($pid, $inCart, true)) {
+                    continue;
+                }
+                $score = ($c['attach_rate_pct'] / 100) * $c['avg_value'];
+                if (!isset($best[$pid]) || $score > $best[$pid]['score']) {
+                    $best[$pid] = [
+                        'score'           => $score,
+                        'product_id'      => $pid,
+                        'name'            => $c['name'],
+                        'sku'             => $c['sku'],
+                        'attach_rate_pct' => $c['attach_rate_pct'],
+                        'avg_value'       => $c['avg_value'],
+                        'anchor_name'     => $anchor['name'],
+                    ];
+                }
+            }
+        }
+
+        $top = collect($best)->sortByDesc('score')->take(4)->values();
+
+        // Cheap variant-less price hint: the product-level KES price row, when
+        // one exists (variant products price at the variant level and simply
+        // omit the hint).
+        $prices = DB::table('product_prices')
+            ->whereIn('product_id', $top->pluck('product_id'))
+            ->whereNull('product_variant_id')
+            ->where('currency_code', 'KES')
+            ->pluck('regular_price', 'product_id');
+
+        return response()->json([
+            'suggestions' => $top->map(fn ($s) => [
+                'product_id'      => $s['product_id'],
+                'name'            => $s['name'],
+                'sku'             => $s['sku'],
+                'attach_rate_pct' => $s['attach_rate_pct'],
+                'avg_value'       => $s['avg_value'],
+                'anchor_name'     => $s['anchor_name'],
+                'price'           => isset($prices[$s['product_id']])
+                    ? (float) $prices[$s['product_id']] : null,
+            ])->all(),
+        ]);
+    }
+
     // --- Cash Register --------------------------------------------------------
 
     /**
