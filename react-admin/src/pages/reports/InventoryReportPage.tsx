@@ -1,5 +1,6 @@
 // src/pages/reports/InventoryReportPage.tsx
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { reportsApi } from "@/api/reports";
 import { fmtKes } from "@/api/expenses";
@@ -50,12 +51,22 @@ const OUT_TYPES = new Set([
     "return_to_supplier",
 ]);
 
+const INVENTORY_TABS = ["overview", "stock", "movements", "intelligence"] as const;
+type InventoryTab = (typeof INVENTORY_TABS)[number];
+
 export default function InventoryReportPage() {
     const dr = useDateRange("this_month");
     const [lowOnly, setLowOnly] = useState(false);
-    const [activeTab, setActiveTab] = useState<
-        "overview" | "stock" | "movements" | "intelligence"
-    >("overview");
+    // Honour deep-links like /reports/inventory?tab=intelligence (the
+    // attention feed sends users here) — read once on mount, same pattern as
+    // CustomersReportPage; after that the tab buttons own the state.
+    const [searchParams] = useSearchParams();
+    const [activeTab, setActiveTab] = useState<InventoryTab>(() => {
+        const t = searchParams.get("tab");
+        return INVENTORY_TABS.includes(t as InventoryTab)
+            ? (t as InventoryTab)
+            : "overview";
+    });
     const [movTypeFilter, setMovTypeFilter] = useState("");
 
     const stockQuery = useQuery({
@@ -1036,6 +1047,8 @@ function InventoryIntelligence({ start, end }: { start: string; end: string }) {
                 <KpiCard label="Material Stock" value={fmtKes(materials.cost_value)} sub={`${materials.materials} materials at unit cost`} />
             </div>
 
+            <StockoutLosses />
+
             {stockout_risks.length > 0 && (
                 <div className="card card-body border border-danger-200 bg-danger-50/40">
                     <SectionHeader title="⚠ Stockout risk — best sellers running dry" />
@@ -1159,6 +1172,121 @@ function InventoryIntelligence({ start, end }: { start: string; end: string }) {
                     )}
                 </div>
             </div>
+        </div>
+    );
+}
+
+// ─── Stock-out losses ─────────────────────────────────────────────────────────
+// Realized revenue lost to empty shelves: zero-stock windows reconstructed
+// from the inventory ledger over the trailing 90 days, velocity computed over
+// in-stock days only, plus the live "bleeding now" rate for products out
+// right now. Trailing-window metric — independent of the page date range.
+
+function StockoutLosses() {
+    const { data, isLoading } = useQuery({
+        queryKey: ["stockout-loss"],
+        queryFn: () => reportsApi.stockoutLoss(),
+        staleTime: 60_000,
+    });
+    if (isLoading || !data) return null;
+    const { summary, products } = data;
+    if (products.length === 0) return null;
+
+    return (
+        <div className="card card-body">
+            <SectionHeader title="Stock-out losses — what empty shelves cost (last 90 days)" />
+            <div className={clsx(KPI_GRID, "mt-2 mb-4")}>
+                <KpiCard
+                    label="Bleeding now"
+                    value={`${fmtKes(summary.est_daily_loss_now)}/day`}
+                    color={summary.est_daily_loss_now > 0 ? "text-danger" : undefined}
+                    sub="products out right now, at their usual pace"
+                />
+                <KpiCard
+                    label="Est. lost this quarter"
+                    value={fmtKes(summary.est_lost_revenue_window)}
+                    sub="out-days × velocity × avg price, 90d"
+                />
+                <KpiCard
+                    label="Products out now"
+                    value={summary.products_currently_out}
+                    color={summary.products_currently_out > 0 ? "text-danger" : undefined}
+                    sub={
+                        summary.low_confidence_count > 0
+                            ? `${summary.low_confidence_count} low-confidence (no stock ledger)`
+                            : "all measured from the stock ledger"
+                    }
+                />
+            </div>
+            <TableWrapper>
+                <table className="w-full text-xs">
+                    <thead>
+                        <tr>
+                            <th className={TH}>Product</th>
+                            <th className={TH}>Status</th>
+                            <th className={TH_R}>Out days (90d)</th>
+                            <th className={TH_R}>Velocity/day</th>
+                            <th className={TH_R}>Avg price</th>
+                            <th className={TH_R}>Est. lost</th>
+                            <th className={TH}>Confidence</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-line">
+                        {products.map((p) => (
+                            <tr key={p.product_id}>
+                                <td className="px-3 py-2 font-medium text-surface-800">
+                                    {p.name}
+                                </td>
+                                <td className="px-3 py-2">
+                                    {p.currently_out ? (
+                                        <span className="text-2xs font-bold px-1.5 py-0.5 rounded bg-danger-100 text-danger-700">
+                                            OUT · {p.out_streak_days}d
+                                        </span>
+                                    ) : (
+                                        <span className="text-2xs font-bold px-1.5 py-0.5 rounded bg-success-100 text-success-700">
+                                            ok
+                                        </span>
+                                    )}
+                                </td>
+                                <td className="px-3 py-2 text-right tabular-nums">
+                                    {p.out_days_window}
+                                </td>
+                                <td className="px-3 py-2 text-right tabular-nums">
+                                    {p.velocity_per_day}
+                                </td>
+                                <td className="px-3 py-2 text-right tabular-nums text-surface-500">
+                                    {fmtKes(p.avg_price)}
+                                </td>
+                                <td className="px-3 py-2 text-right tabular-nums font-bold text-danger">
+                                    {fmtKes(p.est_lost_revenue)}
+                                </td>
+                                <td className="px-3 py-2">
+                                    <span
+                                        className="inline-flex items-center gap-1.5 cursor-default"
+                                        title={
+                                            p.confidence === "low"
+                                                ? "No inventory-ledger history for this product — only its current out-streak (from the stock row's last update) is claimed, and it is excluded from the KES totals above."
+                                                : "Reconstructed from the inventory transaction ledger."
+                                        }
+                                    >
+                                        <span
+                                            className={clsx(
+                                                "w-2 h-2 rounded-full",
+                                                p.confidence === "low"
+                                                    ? "bg-amber-400"
+                                                    : "bg-success-500",
+                                            )}
+                                        />
+                                        <span className="text-2xs text-surface-500">
+                                            {p.confidence}
+                                        </span>
+                                    </span>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </TableWrapper>
         </div>
     );
 }

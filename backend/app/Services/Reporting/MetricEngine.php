@@ -2222,6 +2222,262 @@ class MetricEngine
         return ['summary' => $summary, 'anchors' => $anchors->all()];
     }
 
+    // ── Stock-out revenue loss ────────────────────────────────────────────────
+
+    /**
+     * Stock-out revenue loss — what empty shelves cost, in KES.
+     *
+     * For every product that SOLD in the trailing window, the zero-stock
+     * windows are RECONSTRUCTED from inventory_transactions by walking each
+     * inventory item's ledger backwards from its live quantity_on_hand
+     * (balance before a transaction = balance after − quantity_change).
+     * A product counts as OUT only while ALL of its inventory items (across
+     * the scoped outlets) sat at ≤ 0 — the honest definition: if any outlet
+     * could still sell it, the shelf wasn't truly empty.
+     *
+     * Velocity is units sold ÷ IN-stock days only (out-days excluded from
+     * the divisor), so a product that spent half the window unavailable
+     * isn't punished with a halved rate. est_lost_revenue =
+     * out_days × velocity × avg unit price from the same sold lines.
+     * Products with zero sales in the window are skipped: no observed
+     * velocity means no measurable loss, and inventing one would be a guess.
+     *
+     * Confidence: some legacy write paths never logged
+     * inventory_transactions, so an item with no ledger rows AT ALL has
+     * unknown history. A product whose items are all ledger-less is reported
+     * as confidence 'low' — its only defensible claim is the CURRENT
+     * out-streak (dated from the stock row's updated_at, the last time
+     * anything touched it) — and its KES stay OUT of the measured summary
+     * totals, counted in low_confidence_count instead. Any transaction
+     * history at all makes the product 'measured'.
+     */
+    public function stockoutLoss(int $days = 90): array
+    {
+        $scopeKey = $this->outletIds !== null
+            ? implode('-', collect($this->outletIds)->map(fn ($id) => (int) $id)->sort()->values()->all())
+            : 'all';
+
+        return \Illuminate\Support\Facades\Cache::remember(
+            "metrics:stockout_loss:{$scopeKey}:{$days}",
+            600,
+            fn () => $this->computeStockoutLoss($days),
+        );
+    }
+
+    /** The uncached reconstruction pass behind stockoutLoss(). */
+    private function computeStockoutLoss(int $days): array
+    {
+        $now     = CarbonImmutable::now(self::TZ);
+        $since   = $now->subDays($days); // exact rolling window: length == $days
+        $nowTs   = $now->getTimestamp();
+        $sinceTs = $since->getTimestamp();
+
+        $empty = [
+            'summary' => [
+                'products_currently_out'  => 0,
+                'est_daily_loss_now'      => 0.0,
+                'est_lost_revenue_window' => 0.0,
+                'low_confidence_count'    => 0,
+            ],
+            'products' => [],
+        ];
+
+        // 1. Sales truth per product over the window: units + revenue give
+        //    the velocity numerator and the avg unit price.
+        $outletSql = $this->outletIds
+            ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')'
+            : '';
+        $sales = collect(DB::select("
+            SELECT oi.product_id,
+                   SUM(oi.quantity)    AS units,
+                   SUM(oi.total_price) AS revenue,
+                   COALESCE(MAX(pt.name), MAX(p.slug), MAX(p.sku)) AS name
+            FROM order_items oi
+            JOIN orders o   ON o.id = oi.order_id
+            JOIN products p ON p.id = oi.product_id
+            LEFT JOIN product_translations pt
+                   ON pt.product_id = p.id AND pt.language_code = 'en'
+            WHERE o.status NOT IN ('voided','cancelled')
+              AND UPPER(o.currency_code) = 'KES'
+              AND oi.product_id IS NOT NULL
+              AND o.created_at >= ?
+              {$outletSql}
+            GROUP BY oi.product_id
+            HAVING SUM(oi.quantity) > 0
+        ", [$since->toMutable()]))->keyBy('product_id');
+
+        if ($sales->isEmpty()) {
+            return $empty;
+        }
+
+        // 2. The live stock rows behind those products (outlet-scoped).
+        $stockRows = DB::table('inventory_items')
+            ->whereIn('product_id', $sales->keys()->all())
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+            ->get(['id', 'product_id', 'quantity_on_hand', 'created_at', 'updated_at']);
+
+        if ($stockRows->isEmpty()) {
+            return $empty;
+        }
+
+        // 3. Every ledger row for those items (all-time: pre-window rows are
+        //    needed to derive the balance that held before the window).
+        $ledger = DB::table('inventory_transactions')
+            ->whereIn('inventory_item_id', $stockRows->pluck('id')->all())
+            ->orderByDesc('created_at')->orderByDesc('id')
+            ->get(['inventory_item_id', 'quantity_change', 'created_at'])
+            ->groupBy('inventory_item_id');
+
+        // 4. Per item: reconstruct the ≤0 intervals as [startTs, endTs].
+        $itemZero  = []; // item id → merged ascending zero intervals
+        $itemHasTx = []; // item id → bool (any ledger history at all)
+        foreach ($stockRows as $it) {
+            $rows  = $ledger->get($it->id) ?? collect();
+            $hasTx = $rows->isNotEmpty();
+            $itemHasTx[$it->id] = $hasTx;
+
+            $segments = []; // [start, end, balance], built newest-first
+            if ($hasTx) {
+                $balance = (int) $it->quantity_on_hand;
+                $end     = $nowTs;
+                foreach ($rows as $t) { // newest → oldest
+                    $ts = Carbon::parse($t->created_at)->getTimestamp();
+                    $segments[] = [$ts, $end, $balance];
+                    $balance -= (int) $t->quantity_change;
+                    $end = $ts;
+                }
+                // Before the earliest ledger row the derived balance held
+                // constant — bounded by the stock row's own birth.
+                $born = Carbon::parse($it->created_at)->getTimestamp();
+                if ($born < $end) {
+                    $segments[] = [$born, $end, $balance];
+                }
+            } elseif ((int) $it->quantity_on_hand > 0) {
+                // No ledger, stock on hand: assume it stayed stocked. (This
+                // item alone can never put its product "out".)
+                $segments[] = [$sinceTs, $nowTs, (int) $it->quantity_on_hand];
+            } else {
+                // No ledger, at zero NOW: history unknown — the only
+                // defensible out-window starts at updated_at (last touch).
+                $touched = Carbon::parse($it->updated_at)->getTimestamp();
+                $segments[] = [min($touched, $nowTs), $nowTs, 0];
+            }
+
+            $zeros = [];
+            foreach ($segments as [$s, $e, $b]) {
+                if ($b <= 0 && $e > $s) {
+                    $zeros[] = [$s, $e];
+                }
+            }
+            usort($zeros, fn ($x, $y) => $x[0] <=> $y[0]);
+            $merged = [];
+            foreach ($zeros as $z) {
+                $n = count($merged);
+                if ($n > 0 && $z[0] <= $merged[$n - 1][1]) {
+                    $merged[$n - 1][1] = max($merged[$n - 1][1], $z[1]);
+                } else {
+                    $merged[] = $z;
+                }
+            }
+            $itemZero[$it->id] = $merged;
+        }
+
+        // 5. Per product: OUT = intersection of all items' zero intervals.
+        $rowsOut = [];
+        foreach ($stockRows->groupBy('product_id') as $pid => $its) {
+            $sale = $sales->get($pid);
+            if ($sale === null) {
+                continue;
+            }
+
+            $out = null;
+            foreach ($its as $it) {
+                $z   = $itemZero[$it->id];
+                $out = $out === null ? $z : self::intersectIntervals($out, $z);
+                if ($out === []) {
+                    break;
+                }
+            }
+            $out ??= [];
+
+            $outSeconds = 0.0;
+            foreach ($out as [$s, $e]) {
+                $outSeconds += max(0, min($e, $nowTs) - max($s, $sinceTs));
+            }
+            $outDaysWindow = round($outSeconds / 86400, 1);
+
+            $currentlyOut = $its->every(fn ($it) => (int) $it->quantity_on_hand <= 0);
+            if (! $currentlyOut && $outDaysWindow <= 0) {
+                continue; // sold fine, never out — nothing lost, no row.
+            }
+
+            $streak = 0.0;
+            if ($currentlyOut && $out !== []) {
+                // The final interval necessarily reaches "now"; its start is
+                // when the LAST outlet ran dry (unclipped, so a streak can
+                // honestly exceed the window).
+                $streak = round(($nowTs - $out[count($out) - 1][0]) / 86400, 1);
+            }
+
+            $inStockDays = max(1.0, $days - $outDaysWindow);
+            $velocity    = (float) $sale->units / $inStockDays;
+            $avgPrice    = (float) $sale->revenue / (float) $sale->units;
+
+            $rowsOut[] = [
+                'product_id'       => (int) $pid,
+                'name'             => $sale->name,
+                'currently_out'    => $currentlyOut,
+                'out_streak_days'  => $streak,
+                'out_days_window'  => $outDaysWindow,
+                'velocity_per_day' => round($velocity, 2),
+                'avg_price'        => round($avgPrice, 2),
+                'est_lost_revenue' => round($outDaysWindow * $velocity * $avgPrice, 2),
+                'est_daily_loss'   => $currentlyOut ? round($velocity * $avgPrice, 2) : 0.0,
+                'confidence'       => $its->contains(fn ($it) => $itemHasTx[$it->id]) ? 'measured' : 'low',
+            ];
+        }
+
+        // 6. Summary over EVERYTHING that qualified (before the display cap).
+        //    Low-confidence rows are visible but their KES never enter the
+        //    measured totals — a guess dressed as a sum stops being honest.
+        $all      = collect($rowsOut);
+        $measured = $all->where('confidence', 'measured');
+        $summary  = [
+            'products_currently_out'  => $all->where('currently_out', true)->count(),
+            'est_daily_loss_now'      => round((float) $measured->sum('est_daily_loss'), 2),
+            'est_lost_revenue_window' => round((float) $measured->sum('est_lost_revenue'), 2),
+            'low_confidence_count'    => $all->where('confidence', 'low')->count(),
+        ];
+
+        $products = $all
+            ->sortBy([['est_lost_revenue', 'desc'], ['est_daily_loss', 'desc']])
+            ->take(30)
+            ->values()
+            ->all();
+
+        return ['summary' => $summary, 'products' => $products];
+    }
+
+    /**
+     * Intersection of two ascending, non-overlapping interval lists
+     * ([[start, end], ...] in epoch seconds).
+     */
+    private static function intersectIntervals(array $a, array $b): array
+    {
+        $out = [];
+        $i = $j = 0;
+        while ($i < count($a) && $j < count($b)) {
+            $s = max($a[$i][0], $b[$j][0]);
+            $e = min($a[$i][1], $b[$j][1]);
+            if ($e > $s) {
+                $out[] = [$s, $e];
+            }
+            $a[$i][1] <= $b[$j][1] ? $i++ : $j++;
+        }
+
+        return $out;
+    }
+
     // ── Attention feed ────────────────────────────────────────────────────────
 
     /**
@@ -2363,6 +2619,42 @@ class MetricEngine
                 ], array_slice($risks, 0, 3)),
                 'actions' => [
                     ['type' => 'navigate', 'label' => 'Open inventory report', 'to' => '/reports/inventory'],
+                ],
+            ];
+        }
+
+        // 5b. Realized stock-out losses: shelves that ARE empty right now,
+        // priced at each product's own in-stock sales velocity. stockout_risk
+        // above is the forecast (thin cover); this is the bleed already
+        // happening.
+        $loss = $this->stockoutLoss();
+        if ($loss['summary']['est_daily_loss_now'] > 0) {
+            $bleeding = collect($loss['products'])
+                ->filter(fn ($p) => $p['currently_out'] && $p['confidence'] === 'measured')
+                ->sortByDesc('est_daily_loss')
+                ->values();
+            $daily = (float) $loss['summary']['est_daily_loss_now'];
+            $nOut  = (int) $loss['summary']['products_currently_out'];
+            $top   = $bleeding->first();
+            $items[] = [
+                'key' => 'stockout_loss', 'severity' => $daily >= 2000 ? 'high' : 'medium',
+                'title' => 'Empty shelves are costing ~KES ' . number_format($daily) . ' per day — '
+                    . $nOut . ' product' . ($nOut === 1 ? '' : 's') . ' out of stock',
+                'detail' => $top !== null
+                    ? "Worst is \"{$top['name']}\" — out {$top['out_streak_days']} day"
+                        . ((float) $top['out_streak_days'] === 1.0 ? '' : 's')
+                        . ', usually sells ' . $top['velocity_per_day'] . '/day (~KES '
+                        . number_format($top['est_daily_loss']) . '/day lost).'
+                    : 'Estimated from each product\'s in-stock sales velocity.',
+                'count' => $nOut, 'link' => '/reports/inventory?tab=intelligence',
+                'entities' => $bleeding->take(3)->map(fn ($p) => [
+                    'product_id'      => $p['product_id'],
+                    'name'            => $p['name'],
+                    'out_streak_days' => $p['out_streak_days'],
+                    'daily_loss'      => $p['est_daily_loss'],
+                ])->values()->all(),
+                'actions' => [
+                    ['type' => 'navigate', 'label' => 'See stock-out losses', 'to' => '/reports/inventory?tab=intelligence'],
                 ],
             ];
         }

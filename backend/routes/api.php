@@ -1195,6 +1195,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/replenishment',            [\App\Http\Controllers\Api\ExecutiveReportController::class, 'replenishment']);
                 Route::get('/collections',              [\App\Http\Controllers\Api\ExecutiveReportController::class, 'collections']);
                 Route::get('/attach-rates',             [\App\Http\Controllers\Api\ExecutiveReportController::class, 'attachRates']);
+                Route::get('/stockout-loss',            [\App\Http\Controllers\Api\ExecutiveReportController::class, 'stockoutLoss']);
                 Route::get('/win-back',                 [\App\Http\Controllers\Api\ExecutiveReportController::class, 'winBack']);
                 Route::post('/win-back/outreach',       [\App\Http\Controllers\Api\ExecutiveReportController::class, 'winBackOutreach']);
                 Route::get('/financial-intelligence',   [\App\Http\Controllers\Api\ExecutiveReportController::class, 'financialIntelligence']);
