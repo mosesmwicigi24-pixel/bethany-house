@@ -55,6 +55,10 @@ services:
             APP_ENV: production
             NEEMA_API_URL: ${NEEMA_API_URL:-https://neema.bethanyhouse.co.ke}
             NEEMA_ANALYTICS_KEY: ${NEEMA_ANALYTICS_KEY:-}
+            # WhatsApp Business Account id — template management (whatsapp:*-template)
+            WABA_ID: ${WABA_ID:-}
+            # Master switch for automated reorder pings (default OFF; conscious opt-in)
+            REPLENISHMENT_PINGS_ENABLED: ${REPLENISHMENT_PINGS_ENABLED:-false}
             NEEMA_EVENTS_SECRET: ${NEEMA_EVENTS_SECRET:-}
             STOREFRONT_URL: ${STOREFRONT_URL:-}
             APP_KEY: ${APP_KEY:?APP_KEY is required}
@@ -146,6 +150,10 @@ services:
             APP_ENV: production
             NEEMA_API_URL: ${NEEMA_API_URL:-https://neema.bethanyhouse.co.ke}
             NEEMA_ANALYTICS_KEY: ${NEEMA_ANALYTICS_KEY:-}
+            # WhatsApp Business Account id — template management (whatsapp:*-template)
+            WABA_ID: ${WABA_ID:-}
+            # Master switch for automated reorder pings (default OFF; conscious opt-in)
+            REPLENISHMENT_PINGS_ENABLED: ${REPLENISHMENT_PINGS_ENABLED:-false}
             NEEMA_EVENTS_SECRET: ${NEEMA_EVENTS_SECRET:-}
             STOREFRONT_URL: ${STOREFRONT_URL:-}
             APP_KEY: ${APP_KEY}
@@ -204,6 +212,10 @@ services:
             APP_ENV: production
             NEEMA_API_URL: ${NEEMA_API_URL:-https://neema.bethanyhouse.co.ke}
             NEEMA_ANALYTICS_KEY: ${NEEMA_ANALYTICS_KEY:-}
+            # WhatsApp Business Account id — template management (whatsapp:*-template)
+            WABA_ID: ${WABA_ID:-}
+            # Master switch for automated reorder pings (default OFF; conscious opt-in)
+            REPLENISHMENT_PINGS_ENABLED: ${REPLENISHMENT_PINGS_ENABLED:-false}
             NEEMA_EVENTS_SECRET: ${NEEMA_EVENTS_SECRET:-}
             STOREFRONT_URL: ${STOREFRONT_URL:-}
             APP_KEY: ${APP_KEY}
@@ -302,6 +314,10 @@ services:
             APP_ENV: production
             NEEMA_API_URL: ${NEEMA_API_URL:-https://neema.bethanyhouse.co.ke}
             NEEMA_ANALYTICS_KEY: ${NEEMA_ANALYTICS_KEY:-}
+            # WhatsApp Business Account id — template management (whatsapp:*-template)
+            WABA_ID: ${WABA_ID:-}
+            # Master switch for automated reorder pings (default OFF; conscious opt-in)
+            REPLENISHMENT_PINGS_ENABLED: ${REPLENISHMENT_PINGS_ENABLED:-false}
             NEEMA_EVENTS_SECRET: ${NEEMA_EVENTS_SECRET:-}
             STOREFRONT_URL: ${STOREFRONT_URL:-}
             APP_KEY: ${APP_KEY:?APP_KEY is required}
