@@ -452,7 +452,8 @@ export interface SalesLedger {
 
 // ── Replenishment radar ───────────────────────────────────────────────────────
 // One row per (customer, product) pair with a detected reorder rhythm whose
-// due window has opened. Sorted overdue-first, then expected value desc.
+// due window has opened. Established rows sort before provisional; within a
+// tier it is overdue-first, then expected value desc.
 
 export interface ReplenishmentDueRow {
     /** Canonical customer key (customer_id, else normalized phone, else email). */
@@ -461,6 +462,12 @@ export interface ReplenishmentDueRow {
     phone: string | null;
     product_id: number;
     product_name: string;
+    /**
+     * established — 3+ steady purchases, a confirmed rhythm (automation acts).
+     * provisional — exactly 2 purchases with a believable gap; confirms on the
+     * 3rd order. Shown muted; automated pings never touch these.
+     */
+    tier: "established" | "provisional";
     /** Median days between this customer's purchases of this product. */
     cycle_days: number;
     purchase_events: number;
@@ -480,6 +487,10 @@ export interface ReplenishmentRadar {
     summary: {
         due_customers: number;
         due_pairs: number;
+        /** Due rows in the provisional tier (subset of due_pairs). */
+        provisional_pairs: number;
+        /** ALL pairs at exactly 2 purchase dates, due or not — the pipeline. */
+        maturing_pairs: number;
         expected_revenue: number;
         /** Automated reorder pings sent in the last 30 days. */
         pings_30d: number;

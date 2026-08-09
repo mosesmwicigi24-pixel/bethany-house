@@ -791,6 +791,11 @@ function ReplenishmentRadarTab() {
                     value={summary.pings_30d}
                     sub="Automated WhatsApp reminders"
                 />
+                <KpiCard
+                    label="Maturing pairs"
+                    value={summary.maturing_pairs}
+                    sub="2 purchases — one more to confirm cycle"
+                />
             </div>
 
             <div className="card overflow-hidden">
@@ -799,8 +804,10 @@ function ReplenishmentRadarTab() {
                     <p className="text-sm text-surface-500 mt-1">
                         Detected from each customer's own purchase rhythm over
                         the last 18 months (3+ purchases at steady intervals).
-                        Lapsed customers (3+ cycles quiet) live on the win-back
-                        list instead.
+                        Muted "provisional" rows rest on a single repeat
+                        purchase — the 3rd order confirms them, and automated
+                        pings skip them. Lapsed customers (3+ cycles quiet)
+                        live on the win-back list instead.
                     </p>
                 </div>
                 <TableWrapper>
@@ -825,10 +832,22 @@ function ReplenishmentRadarTab() {
                                 due.map((row) => (
                                     <tr
                                         key={`${row.ckey}-${row.product_id}`}
-                                        className="hover:bg-surface-50/50 transition-colors"
+                                        className={clsx(
+                                            "hover:bg-surface-50/50 transition-colors",
+                                            row.tier === "provisional" &&
+                                                "opacity-60",
+                                        )}
                                     >
                                         <td className="px-4 py-3 font-medium text-surface-900">
                                             {row.name}
+                                            {row.tier === "provisional" && (
+                                                <span
+                                                    className="ml-2 px-1.5 py-0.5 rounded text-2xs font-medium bg-surface-100 text-surface-500 border border-line align-middle whitespace-nowrap"
+                                                    title="Based on a single repeat purchase — confirms on the 3rd order"
+                                                >
+                                                    provisional
+                                                </span>
+                                            )}
                                         </td>
                                         <td className="px-4 py-3 text-sm text-surface-500 font-mono">
                                             {row.phone ?? "-"}

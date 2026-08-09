@@ -19,7 +19,10 @@ use Tests\TestCase;
  *
  * A rhythmic buyer (3+ purchase dates at steady intervals) whose due window
  * has opened must surface with the detected cycle and expected value; erratic
- * intervals (CV > 0.6) and lapsed pairs (3+ cycles quiet) must not.
+ * intervals (CV > 0.6) and lapsed pairs (3+ cycles quiet) must not. A pair at
+ * exactly 2 purchase dates with a believable gap surfaces too, but only as
+ * tier 'provisional' — sorted after every established row and never touched
+ * by automated pings.
  */
 class ReplenishmentRadarTest extends TestCase
 {
@@ -122,6 +125,71 @@ class ReplenishmentRadarTest extends TestCase
         $this->assertSame([], $radar['due']);
     }
 
+    public function test_two_event_pair_with_sane_gap_surfaces_as_provisional(): void
+    {
+        $wine = $this->product('Altar Wine');
+        // Two purchases 30 days apart, the last 35 days ago: single gap = the
+        // cycle, next_due 5 days ago → due, but only PROVISIONALLY — one
+        // repeat purchase is a hypothesis until the 3rd order confirms it.
+        foreach ([65, 35] as $daysAgo) {
+            $this->sell('0755000444', 'Miriam', $wine, 6000, $daysAgo);
+        }
+
+        $radar = MetricEngine::for(User::factory()->create())->replenishmentRadar();
+
+        $this->assertSame(1, $radar['summary']['due_pairs']);
+        $this->assertSame(1, $radar['summary']['provisional_pairs']);
+        $this->assertSame(1, $radar['summary']['maturing_pairs']);
+
+        $row = $radar['due'][0];
+        $this->assertSame('provisional', $row['tier']);
+        $this->assertSame('Miriam', $row['name']);
+        $this->assertSame(2, $row['purchase_events']);
+        $this->assertEqualsWithDelta(30, $row['cycle_days'], 1);
+        $this->assertContains($row['status'], ['due_soon', 'overdue']);
+    }
+
+    public function test_two_event_pair_with_implausible_gap_is_excluded(): void
+    {
+        $wine = $this->product('Altar Wine');
+        // Two purchases 150 days apart — no believable 5–120d cycle, so no
+        // radar row. The pair still counts as MATURING (the pipeline metric
+        // deliberately tracks every 2-event pair, due or not).
+        foreach ([200, 50] as $daysAgo) {
+            $this->sell('0766000555', 'Titus', $wine, 6000, $daysAgo);
+        }
+
+        $radar = MetricEngine::for(User::factory()->create())->replenishmentRadar();
+
+        $this->assertSame(0, $radar['summary']['due_pairs']);
+        $this->assertSame(0, $radar['summary']['provisional_pairs']);
+        $this->assertSame(1, $radar['summary']['maturing_pairs']);
+        $this->assertSame([], $radar['due']);
+    }
+
+    public function test_established_rows_sort_before_provisional(): void
+    {
+        $bread = $this->product('Holy Communion Bread');
+        // Established rhythm worth 3,000 per order, due now.
+        foreach ([125, 95, 65, 35] as $daysAgo) {
+            $this->sell('0722000111', 'Grace', $bread, 3000, $daysAgo);
+        }
+        // Provisional pair worth triple — still ranks BELOW the confirmed one.
+        $wine = $this->product('Altar Wine');
+        foreach ([65, 35] as $daysAgo) {
+            $this->sell('0755000444', 'Miriam', $wine, 9000, $daysAgo);
+        }
+
+        $radar = MetricEngine::for(User::factory()->create())->replenishmentRadar();
+
+        $this->assertSame(2, $radar['summary']['due_pairs']);
+        $this->assertSame(1, $radar['summary']['provisional_pairs']);
+        $this->assertSame('established', $radar['due'][0]['tier']);
+        $this->assertSame('Grace', $radar['due'][0]['name']);
+        $this->assertSame('provisional', $radar['due'][1]['tier']);
+        $this->assertSame('Miriam', $radar['due'][1]['name']);
+    }
+
     public function test_endpoint_returns_radar_shape_for_report_viewers(): void
     {
         $this->viewer();
@@ -134,13 +202,15 @@ class ReplenishmentRadarTest extends TestCase
         $res = $this->getJson('/api/v1/admin/reports/replenishment')->assertOk();
 
         $res->assertJsonStructure([
-            'summary' => ['due_customers', 'due_pairs', 'expected_revenue'],
-            'due' => [['ckey', 'name', 'phone', 'product_id', 'product_name', 'cycle_days',
-                       'purchase_events', 'last_purchase_at', 'next_due_at', 'days_over',
-                       'status', 'avg_value']],
+            'summary' => ['due_customers', 'due_pairs', 'provisional_pairs',
+                          'maturing_pairs', 'expected_revenue'],
+            'due' => [['ckey', 'name', 'phone', 'product_id', 'product_name', 'tier',
+                       'cycle_days', 'purchase_events', 'last_purchase_at', 'next_due_at',
+                       'days_over', 'status', 'avg_value']],
         ]);
         $this->assertSame(1, $res->json('summary.due_pairs'));
         $this->assertSame('Holy Communion Bread', $res->json('due.0.product_name'));
+        $this->assertSame('established', $res->json('due.0.tier'));
     }
 
     public function test_endpoint_requires_reports_view(): void
