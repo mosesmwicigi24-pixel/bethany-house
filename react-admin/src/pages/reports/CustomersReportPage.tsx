@@ -594,7 +594,18 @@ function CustomerIntelligence({ start, end }: { start: string; end: string }) {
         staleTime: 60_000,
     });
     if (isLoading || !data) return <div className="flex justify-center py-16"><Spinner /></div>;
-    const { segments, new_vs_returning: nvr, top_customers, dormant } = data;
+    const { segments, new_vs_returning: nvr, top_customers, dormant, rfm } = data;
+
+    // Human labels + tone for the RFM segments (order comes from the API).
+    const RFM_META: Record<string, { label: string; tone: string }> = {
+        champions:       { label: "🏆 Champions",       tone: "text-success" },
+        loyal:           { label: "💚 Loyal",           tone: "text-success" },
+        promising:       { label: "🌱 Promising",       tone: "text-surface-800" },
+        needs_attention: { label: "👀 Needs attention", tone: "text-surface-800" },
+        at_risk:         { label: "⚠️ At risk",         tone: "text-amber-700" },
+        cant_lose:       { label: "🚨 Can't lose",      tone: "text-danger" },
+        hibernating:     { label: "😴 Hibernating",     tone: "text-surface-500" },
+    };
 
     return (
         <div className="space-y-6">
@@ -606,6 +617,44 @@ function CustomerIntelligence({ start, end }: { start: string; end: string }) {
                 <KpiCard label="Walk-in / Anonymous" value={fmtKes(nvr.anonymous?.revenue ?? 0)}
                     sub={`${nvr.anonymous?.orders ?? 0} orders with no identity — capture phones!`} />
             </div>
+
+            {rfm && (
+                <div className="card card-body">
+                    <SectionHeader title={`RFM segments (trailing ${rfm.window_days} days)`} />
+                    <div className={KPI_GRID + " mt-1"}>
+                        {rfm.segments.map((sg: any) => (
+                            <div key={sg.segment} className="rounded-lg border border-surface-200 p-3 flex flex-col gap-0.5">
+                                <p className={"text-xs font-semibold " + (RFM_META[sg.segment]?.tone ?? "text-surface-800")}>
+                                    {RFM_META[sg.segment]?.label ?? sg.segment}
+                                </p>
+                                <p className="text-lg font-bold tabular-nums text-surface-900">{sg.customers}</p>
+                                <p className="text-2xs text-surface-500">
+                                    {fmtKes(sg.revenue_365)} · {sg.revenue_share}% of revenue
+                                </p>
+                                <p className="text-2xs text-surface-400">avg {sg.avg_days_quiet}d since last order</p>
+                            </div>
+                        ))}
+                    </div>
+                    {rfm.action_list.length > 0 && (
+                        <div className="mt-4 rounded-lg border border-danger-200 bg-danger-50/30 p-3">
+                            <p className="text-xs font-semibold text-danger mb-2">
+                                💸 Win-back list — at-risk & can't-lose customers, biggest money first
+                            </p>
+                            <div className="space-y-1.5">
+                                {rfm.action_list.map((c: any) => (
+                                    <div key={(c.phone ?? "") + c.name} className="flex items-center gap-3 text-xs">
+                                        <span className="font-medium text-surface-800 flex-1 truncate">{c.name}</span>
+                                        {c.phone && <span className="text-surface-500 font-mono text-2xs">{c.phone}</span>}
+                                        <span className="text-2xs text-surface-400 capitalize">{String(c.segment).replace(/_/g, " ")}</span>
+                                        <span className="tabular-nums text-surface-600">{c.orders_365}× · {fmtKes(c.revenue_365)}</span>
+                                        <span className="font-bold text-amber-700 tabular-nums">{c.days_quiet}d</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
 
             {dormant.length > 0 && (
                 <div className="card card-body border border-amber-200 bg-amber-50/40">
