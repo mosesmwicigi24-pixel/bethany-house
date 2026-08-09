@@ -1191,6 +1191,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/inventory-intelligence',   [\App\Http\Controllers\Api\ExecutiveReportController::class, 'inventoryIntelligence']);
                 Route::get('/procurement-intelligence', [\App\Http\Controllers\Api\ExecutiveReportController::class, 'procurementIntelligence']);
                 Route::get('/customer-intelligence',    [\App\Http\Controllers\Api\ExecutiveReportController::class, 'customerIntelligence']);
+                Route::get('/replenishment',            [\App\Http\Controllers\Api\ExecutiveReportController::class, 'replenishment']);
                 Route::get('/financial-intelligence',   [\App\Http\Controllers\Api\ExecutiveReportController::class, 'financialIntelligence']);
                 Route::get('/dashboard/kpis',  [ReportController::class, 'dashboardKPIs']);
                 Route::get('/purchase-orders', [ReportController::class, 'purchaseOrderReport']);

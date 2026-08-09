@@ -197,6 +197,23 @@ class ExecutiveReportController extends Controller
         ]);
     }
 
+    /**
+     * Replenishment Radar — per-customer product reorder cycles. "As of now"
+     * by design: the radar has no period parameter because due/overdue only
+     * makes sense against today. reports.view via the route group; outlet
+     * scoping via MetricEngine::for like every other report.
+     */
+    public function replenishment(Request $request)
+    {
+        $validated = $request->validate([
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+        ]);
+
+        $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+
+        return response()->json($engine->replenishmentRadar());
+    }
+
     /** CFO block: earned P&L, budget-aware expenses, cash flow, rails. */
     public function financialIntelligence(Request $request)
     {
