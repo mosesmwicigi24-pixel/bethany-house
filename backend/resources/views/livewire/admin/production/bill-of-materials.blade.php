@@ -152,7 +152,7 @@
                                         <td class="px-4 py-3 text-right tabular-nums text-primary-500 font-semibold">{{ $item->quantity }}</td>
                                         <td class="px-4 py-3 text-primary-400 text-xs">{{ $item->unit_of_measure }}</td>
                                         <td class="px-4 py-3 text-right tabular-nums text-primary-500">
-                                            {{ number_format($item->quantity * ($item->material?->cost_per_unit ?? 0), 2) }}
+                                            {{ number_format($item->quantity * ($item->material?->unit_cost ?? 0), 2) }}
                                         </td>
                                     </tr>
                                 @endforeach
