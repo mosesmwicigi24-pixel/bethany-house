@@ -1,1 +1,6 @@
 react-admin/node_modules/
+
+# Windows "mark of the web" download metadata. WSL surfaces NTFS alternate data
+# streams as sibling files named "<file>:Zone.Identifier"; copying a directory
+# out of Windows drags them along. They are never part of the source tree.
+*:Zone.Identifier
