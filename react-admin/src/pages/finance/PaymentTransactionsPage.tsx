@@ -161,6 +161,14 @@ export default function PaymentTransactionsPage() {
                 <div>
                     <h1 className="page-title">Payment Transactions</h1>
                     <p className="page-subtitle">All payment records across every channel and gateway.</p>
+                    {can("reports.financial") && (
+                        <Link
+                            to="/reports/financial"
+                            className="mt-1 inline-block text-xs text-surface-400 hover:text-brand-500 transition-colors"
+                        >
+                            View financial report →
+                        </Link>
+                    )}
                 </div>
                 <div className="flex flex-col items-start gap-2 sm:items-end">
                     <DateRangePicker
