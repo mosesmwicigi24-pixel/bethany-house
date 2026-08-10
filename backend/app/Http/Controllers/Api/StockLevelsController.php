@@ -14,9 +14,13 @@ use App\Support\SortResolver;
 
 class StockLevelsController extends Controller
 {
-    /** Columns a client may sort the stock-levels list by. */
+    /**
+     * Columns a client may sort the stock-levels list by. `quantity_available`
+     * is the generated column (quantity_on_hand - quantity_reserved) the table
+     * actually shows, so it is sortable too.
+     */
     private const SORTABLE_COLUMNS = [
-        'quantity_on_hand', 'quantity_reserved', 'reorder_point',
+        'quantity_on_hand', 'quantity_reserved', 'quantity_available', 'reorder_point',
         'reorder_quantity', 'last_counted_at', 'created_at', 'updated_at',
     ];
 
@@ -73,9 +77,13 @@ class StockLevelsController extends Controller
             });
         }
 
+        // The admin SPA sends `sort_order` (useTableState); this endpoint only
+        // ever read `sort_dir`, so direction was silently ignored. Accept both,
+        // preferring `sort_order`, and keep `sort_dir` working for any other
+        // consumer already using it.
         [$sortBy, $sortDir] = SortResolver::resolve(
             $request->get('sort_by'),
-            $request->get('sort_dir', 'asc'),
+            $request->filled('sort_order') ? $request->get('sort_order') : $request->get('sort_dir', 'asc'),
             self::SORTABLE_COLUMNS,
             'quantity_on_hand'
         );
