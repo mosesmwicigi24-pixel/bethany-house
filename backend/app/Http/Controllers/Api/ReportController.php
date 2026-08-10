@@ -1675,6 +1675,11 @@ class ReportController extends Controller
             ->groupBy('status')
             ->get();
 
+        // Money awaiting approval in this window. Every SPEND figure across
+        // the reporting stack counts only approved + paid, so this is
+        // surfaced explicitly rather than silently missing from totals.
+        $pendingRow = $byStatus->firstWhere('status', 'pending_approval');
+
         if ($this->wantsExport($request)) {
             return $this->csvResponse(
                 ['Ref #', 'Title', 'Date', 'Category', 'Outlet', 'Vendor', 'Amount (KES)', 'Currency', 'Payment Method', 'Status'],
@@ -1688,6 +1693,10 @@ class ReportController extends Controller
             'expenses'  => $expensesList,
             'monthly'   => $monthly,
             'by_status' => $byStatus,
+            'pending_approval' => [
+                'count' => (int) ($pendingRow->count ?? 0),
+                'total' => round((float) ($pendingRow->total ?? 0), 2),
+            ],
             'total'     => $expensesList->sum('amount'),
         ]);
     }

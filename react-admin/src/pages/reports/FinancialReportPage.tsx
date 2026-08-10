@@ -480,6 +480,17 @@ export default function FinancialReportPage() {
                         />
                     </div>
 
+                    {/* Money awaiting approval — excluded from every spend total */}
+                    {Number(expQuery.data?.pending_approval?.total ?? 0) > 0 && (
+                        <p className="text-xs text-surface-500">
+                            Pending approval:{" "}
+                            <span className="font-medium tabular-nums">
+                                {fmtKes(expQuery.data.pending_approval.total)}
+                            </span>{" "}
+                            (excluded from all totals)
+                        </p>
+                    )}
+
                     {/* By status summary */}
                     {(expQuery.data?.by_status ?? []).length > 0 && (
                         <div className="flex gap-3 flex-wrap">

@@ -155,7 +155,9 @@ class CustomerFinancialIntelligenceTest extends TestCase
         DB::table('expenses')->insert([
             'reference_number' => 'EXP-P5-1', 'title' => 'Rent', 'category_id' => $categoryId,
             'amount' => 1500, 'amount_kes' => 1500,
-            'currency_code' => 'KES', 'expense_date' => now()->format('Y-m-d'), 'status' => 'completed',
+            // 'approved' is real vocabulary; the old seed said 'completed', a
+            // status the module never writes, and pinned the silent-zero bug.
+            'currency_code' => 'KES', 'expense_date' => now()->format('Y-m-d'), 'status' => 'approved',
             'payment_method' => 'cash', 'created_by' => $user->id,
             'outlet_id' => $outlet->id, 'created_at' => now(), 'updated_at' => now(),
         ]);
