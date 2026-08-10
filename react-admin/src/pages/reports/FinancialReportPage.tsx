@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { reportsApi } from "@/api/reports";
 import { fmtKes } from "@/api/expenses";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
 import { clsx } from "clsx";
 import dayjs from "dayjs";
@@ -44,6 +45,7 @@ import {
 } from "./reportShared";
 
 export default function FinancialReportPage() {
+    const { can } = usePermissions();
     const dr = useDateRange("last_30_days");
     const [compare, setCompare] = useState(false);
     const [activeTab, setActiveTab] = useState<"pl" | "expenses" | "trends" | "tax" | "cashflow" | "intelligence">(
@@ -168,7 +170,7 @@ export default function FinancialReportPage() {
         <div className="space-y-6 animate-fade-in">
             <ReportPageHeader
                 title="Financial Report"
-                subtitle="Profit & loss, revenue trends, and operating expenses."
+                subtitle="Analytical P&L view — profit & loss, expenses, tax, and cash flow."
                 reportType="financial"
                 exportPath="financial/profit-loss"
                 params={dr.params}
@@ -180,6 +182,16 @@ export default function FinancialReportPage() {
                 onEndChange={dr.setEnd}
                 compare={compare}
                 onCompareChange={setCompare}
+                extra={
+                    can("payments.view") ? (
+                        <Link
+                            to="/finance/transactions"
+                            className="text-xs text-surface-400 hover:text-brand-500 transition-colors whitespace-nowrap"
+                        >
+                            View payment ledger →
+                        </Link>
+                    ) : undefined
+                }
             />
 
             {/* KPIs */}
@@ -245,7 +257,8 @@ export default function FinancialReportPage() {
                                 : tab === "expenses" ? "Expenses"
                                 : tab === "trends" ? "Trends"
                                 : tab === "tax" ? "Tax"
-                                : "Cash Flow"}
+                                : tab === "cashflow" ? "Cash Flow"
+                                : "Intelligence"}
                         </button>
                     ))}
                 </nav>

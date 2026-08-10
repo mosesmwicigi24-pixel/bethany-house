@@ -354,6 +354,9 @@ const NAV: NavGroup[] = [
     },
 
     // ── Finance ───────────────────────────────────────────────────────────────
+    // Both money views live together: the raw payment ledger and the analytical
+    // Financial Report (P&L / expenses / tax / cash flow — was "Finance" under
+    // Reports, which read as a confusing duplicate of this section).
     {
         label: "Finance",
         items: [
@@ -363,12 +366,19 @@ const NAV: NavGroup[] = [
                 icon: "transactions",
                 permission: "payments.view",
             },
+            {
+                label: "Financial Report",
+                href: "/reports/financial",
+                icon: "expenses",
+                permission: "reports.view",
+            },
         ],
     },
 
     // ── Reports ───────────────────────────────────────────────────────────────
     // Sub-report order mirrors the operational section order above:
-    //   Sales → Customers → Production → Inventory → Procurement → Finance
+    //   Sales → Customers → Production → Inventory → Procurement
+    // (The Financial Report moved to the Finance section above.)
     {
         label: "Reports",
         items: [
@@ -406,12 +416,6 @@ const NAV: NavGroup[] = [
                 label: "Procurement",
                 href: "/reports/procurement",
                 icon: "purchase-orders",
-                permission: "reports.view",
-            },
-            {
-                label: "Finance",
-                href: "/reports/financial",
-                icon: "expenses",
                 permission: "reports.view",
             },
         ],
