@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\Reporting\MetricEngine;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
@@ -54,11 +55,17 @@ class ExpenseCategory extends Model
 
     /**
      * Current month spend for this category.
+     *
+     * SPEND is the canonical set (MetricEngine::EXPENSE_SPEND_STATUSES —
+     * approved + paid, on amount_kes, dated by expense_date); unchanged.
+     *
+     * @param int[]|null $outletIds Restrict to these outlets; null = all.
      */
-    public function currentMonthSpend(): float
+    public function currentMonthSpend(?array $outletIds = null): float
     {
         return $this->expenses()
-            ->whereIn('status', ['approved', 'paid'])
+            ->whereIn('status', MetricEngine::EXPENSE_SPEND_STATUSES)
+            ->when($outletIds !== null, fn ($q) => $q->whereIn('outlet_id', $outletIds))
             ->whereYear('expense_date', now()->year)
             ->whereMonth('expense_date', now()->month)
             ->sum('amount_kes');
@@ -66,10 +73,12 @@ class ExpenseCategory extends Model
 
     /**
      * Budget utilization percentage for current month.
+     *
+     * @param int[]|null $outletIds Restrict to these outlets; null = all.
      */
-    public function budgetUtilizationPercent(): ?float
+    public function budgetUtilizationPercent(?array $outletIds = null): ?float
     {
         if (!$this->budget_monthly || $this->budget_monthly == 0) return null;
-        return round(($this->currentMonthSpend() / $this->budget_monthly) * 100, 1);
+        return round(($this->currentMonthSpend($outletIds) / $this->budget_monthly) * 100, 1);
     }
 }
