@@ -97,6 +97,64 @@ class WhatsAppDeliveryTest extends TestCase
             ->assertSuccessful();
     }
 
+    public function test_digest_appends_engine_room_block_when_engines_have_signal(): void
+    {
+        $this->configureWhatsApp();
+        Http::fake(['graph.facebook.com/*' => Http::response(['messages' => [['id' => 'wamid.test']]], 200)]);
+
+        $this->seedOneFinding();
+        // Give the collections engine something to say: one open KES 8,000
+        // quote => money_on_table = 8,000 (the same seed EngineRoomTest uses).
+        DB::table('quotations')->insert([
+            'quote_number'    => 'QUO-000778',
+            'status'          => 'sent',
+            'source'          => 'admin',
+            'currency_code'   => 'KES',
+            'subtotal'        => 8000,
+            'discount_amount' => 0,
+            'tax_amount'      => 0,
+            'shipping_amount' => 0,
+            'total_amount'    => 8000,
+            'created_at'      => now()->subDays(3),
+            'updated_at'      => now()->subDays(3),
+        ]);
+        $this->saveDeliverySettings([
+            'whatsapp_enabled'    => true,
+            'whatsapp_recipients' => '+254712345678',
+        ]);
+
+        $this->artisan('insights:digest --force')->assertSuccessful();
+
+        // Same $body feeds email and WhatsApp — asserting the WhatsApp text
+        // pins the block for both rails.
+        Http::assertSent(function ($req) {
+            $body = $req['text']['body'] ?? '';
+
+            return str_contains($body, 'ENGINE ROOM')
+                && str_contains($body, 'On the table: KES 8,000')
+                && str_contains($body, 'Radar due: 0');
+        });
+    }
+
+    public function test_digest_omits_engine_room_block_when_engines_are_silent(): void
+    {
+        $this->configureWhatsApp();
+        Http::fake(['graph.facebook.com/*' => Http::response(['messages' => [['id' => 'wamid.test']]], 200)]);
+
+        // One attention finding (a late production order) so the digest DOES
+        // send — but no sales/quotes/outreach anywhere, so every engine is
+        // zero and the block must not appear.
+        $this->seedOneFinding();
+        $this->saveDeliverySettings([
+            'whatsapp_enabled'    => true,
+            'whatsapp_recipients' => '+254712345678',
+        ]);
+
+        $this->artisan('insights:digest --force')->assertSuccessful();
+
+        Http::assertSent(fn ($req) => !str_contains($req['text']['body'] ?? '', 'ENGINE ROOM'));
+    }
+
     public function test_meta_rejection_is_reported_not_swallowed(): void
     {
         $this->configureWhatsApp();

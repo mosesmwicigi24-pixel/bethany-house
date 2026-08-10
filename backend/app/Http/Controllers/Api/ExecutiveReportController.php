@@ -610,6 +610,147 @@ class ExecutiveReportController extends Controller
         return response()->json(['already_logged' => false, 'outreach' => $outreach], 201);
     }
 
+    /**
+     * Outreach log — the unified audit feed behind every proactive contact
+     * the Hub makes: automated replenishment-radar WhatsApp pings
+     * (replenishment_pings) merged with manual win-back outreach
+     * (win_back_outreach), newest first, capped at 100 rows.
+     *
+     * Outcomes are attributed the same way the engines themselves do it:
+     *  - winback rows reuse the win-back recovery rule — the FIRST order by
+     *    the same identity within 30 days AFTER the contact reads
+     *    "won back +KES X";
+     *  - radar pings read "reordered" when the same phone bought the same
+     *    product again within one cycle after the ping.
+     *
+     * Both tables are audit-sized and indexed on (phone, …, created_at), so
+     * the two feed queries and the four summary counts stay cheap. The feed
+     * is deliberately global (the audit tables carry no outlet dimension).
+     * reports.view via the route group; ?export=csv via ExportsCsv.
+     */
+    public function outreachLog(Request $request)
+    {
+        // Radar pings, newest first. The customer name comes from the linked
+        // customer when the ping resolved one; else the row's canonical phone
+        // (with the product name right beside it, context is never lost).
+        $pings = collect(DB::select("
+            SELECT p.id, p.created_at, p.phone, p.product_id, p.product_name,
+                   p.cycle_days, p.status,
+                   NULLIF(TRIM(CONCAT(COALESCE(c.first_name,''),' ',COALESCE(c.last_name,''))), '') AS customer_name,
+                   EXISTS (
+                       SELECT 1
+                       FROM orders o
+                       JOIN order_items oi ON oi.order_id = o.id
+                       WHERE oi.product_id = p.product_id
+                         AND o.status NOT IN ('voided','cancelled')
+                         AND normalize_phone(o.customer_phone) = '+' || p.phone
+                         AND o.created_at >  p.created_at
+                         AND o.created_at <= p.created_at + (p.cycle_days * INTERVAL '1 day')
+                   ) AS reordered
+            FROM replenishment_pings p
+            LEFT JOIN customers c ON c.id = p.customer_id
+            ORDER BY p.created_at DESC
+            LIMIT 100
+        "));
+
+        // Manual win-back outreach, newest first, each with its first
+        // attributable order — the same 30-day identity rule
+        // MetricEngine::winBackEconomics uses for the recovery summary.
+        $outreach = collect(DB::select("
+            SELECT w.id, w.created_at, w.name, w.phone, w.channel,
+                   NULLIF(TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,''))), '') AS by_name,
+                   fo.recovered_amount
+            FROM win_back_outreach w
+            LEFT JOIN users u ON u.id = w.contacted_by
+            LEFT JOIN LATERAL (
+                SELECT o.total_amount AS recovered_amount
+                FROM orders o
+                WHERE o.status NOT IN ('voided','cancelled')
+                  AND UPPER(o.currency_code) = 'KES'
+                  AND o.created_at >  w.created_at
+                  AND o.created_at <= w.created_at + INTERVAL '30 days'
+                  AND (
+                        (w.customer_id IS NOT NULL AND o.customer_id = w.customer_id)
+                     OR (w.phone IS NOT NULL AND normalize_phone(o.customer_phone) = '+' || w.phone)
+                  )
+                ORDER BY o.created_at ASC
+                LIMIT 1
+            ) fo ON TRUE
+            ORDER BY w.created_at DESC
+            LIMIT 100
+        "));
+
+        $rows = $pings->map(fn ($p) => [
+            'at'           => $p->created_at,
+            'type'         => 'radar_ping',
+            'name'         => $p->customer_name ?? $p->phone,
+            'phone'        => $p->phone,
+            'channel'      => 'whatsapp',
+            'product_name' => $p->product_name,
+            'status'       => $p->status,
+            'by'           => 'automation',
+            'outcome'      => $p->reordered ? 'reordered' : '—',
+        ])->concat($outreach->map(fn ($w) => [
+            'at'           => $w->created_at,
+            'type'         => 'winback',
+            'name'         => $w->name,
+            'phone'        => $w->phone,
+            'channel'      => $w->channel,
+            'product_name' => null,
+            'status'       => 'logged',
+            'by'           => $w->by_name ?? '—',
+            'outcome'      => $w->recovered_amount !== null
+                ? 'won back +KES ' . number_format(round((float) $w->recovered_amount))
+                : '—',
+        ]))
+            // Timestamps share one 'Y-m-d H:i:s' shape, so the string sort is
+            // the chronological sort.
+            ->sortByDesc('at')
+            ->take(100)
+            ->values();
+
+        if ($this->wantsExport($request)) {
+            return $this->csvResponse(
+                ['When', 'Type', 'Name', 'Phone', 'Channel', 'Product', 'Status', 'By', 'Outcome'],
+                $rows->map(fn ($r) => [
+                    $r['at'], $r['type'], $r['name'], $r['phone'], $r['channel'],
+                    $r['product_name'], $r['status'], $r['by'], $r['outcome'],
+                ]),
+                'outreach_log',
+            );
+        }
+
+        $since30 = now()->subDays(30);
+
+        return response()->json([
+            'summary' => [
+                'pings_30d'    => (int) DB::table('replenishment_pings')
+                    ->where('status', 'sent')->where('created_at', '>=', $since30)->count(),
+                'outreach_30d' => (int) DB::table('win_back_outreach')
+                    ->where('created_at', '>=', $since30)->count(),
+                'failures_30d' => (int) DB::table('replenishment_pings')
+                    ->where('status', 'failed')->where('created_at', '>=', $since30)->count(),
+                'won_back_30d' => (int) (DB::selectOne("
+                    SELECT COUNT(*) AS n
+                    FROM win_back_outreach w
+                    WHERE w.created_at >= ?
+                      AND EXISTS (
+                        SELECT 1 FROM orders o
+                        WHERE o.status NOT IN ('voided','cancelled')
+                          AND UPPER(o.currency_code) = 'KES'
+                          AND o.created_at >  w.created_at
+                          AND o.created_at <= w.created_at + INTERVAL '30 days'
+                          AND (
+                                (w.customer_id IS NOT NULL AND o.customer_id = w.customer_id)
+                             OR (w.phone IS NOT NULL AND normalize_phone(o.customer_phone) = '+' || w.phone)
+                          )
+                      )
+                ", [$since30])->n ?? 0),
+            ],
+            'rows' => $rows->all(),
+        ]);
+    }
+
     /** CFO block: earned P&L, budget-aware expenses, cash flow, rails. */
     public function financialIntelligence(Request $request)
     {

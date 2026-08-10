@@ -119,6 +119,12 @@ export const reportsApi = {
     logWinBackOutreach: (payload: WinBackOutreachPayload) =>
         post<WinBackOutreachResult>(`${BASE}/win-back/outreach`, payload),
 
+    // Outreach log — the unified audit feed: automated replenishment-radar
+    // WhatsApp pings merged with manual win-back outreach, newest first,
+    // capped at 100 rows, with per-row outcome attribution ("won back +KES X"
+    // / "reordered"). "As of now" like the radar (no date range).
+    outreachLog: () => get<OutreachLogReport>(`${BASE}/outreach-log`),
+
     // Engine Room — the Overview strip: the six revenue-engine summaries in
     // one lightweight call (each engine is cached or summary-sized on the
     // server; an engine that fails arrives as null and renders a "—" card
@@ -943,6 +949,42 @@ export interface EngineRoomSummaries {
     attach: AttachRatesReport["summary"] | null;
     replenishment: ReplenishmentRadar["summary"] | null;
     seasonal: SeasonalDemandReport["summary"] | null;
+}
+
+// ── Outreach log ──────────────────────────────────────────────────────────────
+// The unified recent-outreach audit feed: automated radar pings + manual
+// win-back outreach merged newest-first (cap 100).
+
+export interface OutreachLogRow {
+    at: string;
+    type: "radar_ping" | "winback";
+    /** Customer name when known; falls back to the canonical phone. */
+    name: string;
+    phone: string | null;
+    /** Always "whatsapp" for radar pings; the logged channel otherwise. */
+    channel: "whatsapp" | "call" | "other";
+    /** Radar pings only — the product the reminder was about. */
+    product_name: string | null;
+    /** Ping status (sent | failed | skipped_*) — "logged" for manual outreach. */
+    status: string;
+    /** The user who logged the outreach; "automation" for radar pings. */
+    by: string;
+    /** "won back +KES X" / "reordered" when attributable, else "—". */
+    outcome: string;
+}
+
+export interface OutreachLogReport {
+    summary: {
+        /** Automated pings SENT in the last 30 days. */
+        pings_30d: number;
+        /** Manual win-back contacts logged in the last 30 days. */
+        outreach_30d: number;
+        /** Automated pings that FAILED in the last 30 days. */
+        failures_30d: number;
+        /** 30d outreach rows with an attributed order within 30d after. */
+        won_back_30d: number;
+    };
+    rows: OutreachLogRow[];
 }
 
 export interface WinBackOutreachPayload {
