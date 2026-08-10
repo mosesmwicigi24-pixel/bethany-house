@@ -47,7 +47,7 @@ class BillOfMaterial extends Model
     public function getTotalCost()
     {
         return $this->items->sum(function ($item) {
-            return $item->quantity * ($item->material->cost_per_unit ?? 0);
+            return $item->quantity * ($item->material->unit_cost ?? 0);
         });
     }
 }

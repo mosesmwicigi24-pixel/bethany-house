@@ -293,9 +293,9 @@ class BomController extends Controller
                     'name'            => $item->material->name,
                     'material_type'   => $item->material->material_type,
                     'unit_of_measure' => $item->material->unit_of_measure,
-                    'cost_per_unit'   => (float) ($item->material->cost_per_unit ?? 0),
+                    'cost_per_unit'   => (float) ($item->material->unit_cost ?? 0),
                 ] : null,
-                'line_cost' => (float) $item->quantity * (float) ($item->material?->cost_per_unit ?? 0),
+                'line_cost' => (float) $item->quantity * (float) ($item->material?->unit_cost ?? 0),
             ];
 
             if ($withStock && $item->material) {
