@@ -38,6 +38,22 @@ class MetricEngine
     /** Sales truth: an order that exists commercially. */
     private const SALE_EXCLUDED_STATUSES = ['voided', 'cancelled'];
 
+    /**
+     * Expense truth: money the business has committed to spend.
+     *
+     * The expenses module's status vocabulary is draft | pending_approval |
+     * approved | rejected | paid | cancelled (see the expenses migration and
+     * ExpenseController's transitions). SPEND = approved + paid: 'approved'
+     * is committed money even before the optional mark-paid step, and
+     * mark-paid adoption is not guaranteed, so 'paid'-only would understate.
+     * Draft/pending/rejected/cancelled money is never spend. This is the
+     * same rule ReportController::profitLoss, EnhancedReportController and
+     * ExpenseBudget::actualSpend() use — one definition, everywhere.
+     * (A 'completed' status has never existed; filtering on it silently
+     * zeroed every expense figure this engine produced.)
+     */
+    public const EXPENSE_SPEND_STATUSES = ['approved', 'paid'];
+
     /** @var int[]|null Outlet ids the caller may see; null = unrestricted. */
     private ?array $outletIds;
 
@@ -161,6 +177,22 @@ class MetricEngine
     /** The settle timestamp: paid_at when present, else the row's creation. */
     private const PAID_AT = 'COALESCE(p.paid_at, p.created_at)';
 
+    /**
+     * Expense truth base: every expense figure this engine produces starts
+     * here — SPEND statuses only (approved + paid), scoped to the caller's
+     * outlets. Sums read amount_kes; windows filter on expense_date.
+     *
+     * @param string $from table expression, e.g. 'expenses' or 'expenses as x'
+     */
+    private function expenseSpendBase(string $from = 'expenses')
+    {
+        $alias = str_contains($from, ' as ') ? trim(explode(' as ', $from)[1]) : $from;
+
+        return DB::table($from)
+            ->whereIn("{$alias}.status", self::EXPENSE_SPEND_STATUSES)
+            ->when($this->outletIds, fn ($q) => $q->whereIn("{$alias}.outlet_id", $this->outletIds));
+    }
+
     /** Day bucket — timestamps are already Nairobi wall-clock (app.timezone). */
     private static function eatDay(string $col): string
     {
@@ -207,12 +239,10 @@ class MetricEngine
         return $this->flow(fn () => $this->moneyBase(), self::PAID_AT, 'COALESCE(SUM(p.amount - COALESCE(p.refund_amount,0)),0)', $s, $e, $ps, $pe);
     }
 
-    /** Financial: completed expenses in KES by expense date. */
+    /** Financial: approved + paid expenses in KES by expense date. */
     public function expenses(Carbon $s, Carbon $e, Carbon $ps, Carbon $pe): array
     {
-        $base = fn () => DB::table('expenses')
-            ->where('status', 'completed')
-            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds));
+        $base = fn () => $this->expenseSpendBase();
         // expense_date is a plain date — no timezone shifting needed.
         $flow = function (Carbon $a, Carbon $b) use ($base) {
             return (float) $base()->whereBetween('expense_date', [
@@ -392,10 +422,8 @@ class MetricEngine
                 ->selectRaw("id, order_number AS ref, due_date::timestamp AS at, '' AS who,
                     status AS detail, quantity::numeric AS amount, 'production' AS kind"),
 
-            'expenses' => DB::table('expenses')
-                ->where('status', 'completed')
+            'expenses' => $this->expenseSpendBase()
                 ->whereBetween('expense_date', [$s->format('Y-m-d'), $e->format('Y-m-d')])
-                ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
                 ->orderByDesc('expense_date')
                 ->selectRaw("id, title AS ref, expense_date::timestamp AS at, COALESCE(vendor_name,'') AS who,
                     COALESCE(department,'') AS detail, amount_kes AS amount, 'expense' AS kind"),
@@ -1649,9 +1677,7 @@ class MetricEngine
               AND p.settled_at BETWEEN ? AND ?
         ", [$s, $e]);
 
-        $expensesTotal = (float) DB::table('expenses')
-            ->where('status', 'completed')
-            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+        $expensesTotal = (float) $this->expenseSpendBase()
             ->whereBetween('expense_date', [$s->format('Y-m-d'), $e->format('Y-m-d')])
             ->sum('amount_kes');
 
@@ -1669,13 +1695,11 @@ class MetricEngine
         ];
     }
 
-    /** Completed expenses by category, with the category's monthly budget. */
+    /** Approved + paid expenses by category, with the category's monthly budget. */
     public function expensesByCategory(Carbon $s, Carbon $e)
     {
-        return DB::table('expenses as x')
+        return $this->expenseSpendBase('expenses as x')
             ->leftJoin('expense_categories as ec', 'ec.id', '=', 'x.category_id')
-            ->where('x.status', 'completed')
-            ->when($this->outletIds, fn ($q) => $q->whereIn('x.outlet_id', $this->outletIds))
             ->whereBetween('x.expense_date', [$s->format('Y-m-d'), $e->format('Y-m-d')])
             ->groupBy('ec.id', 'ec.name', 'ec.budget_monthly')
             ->selectRaw("COALESCE(ec.name, 'Uncategorised') AS category,
@@ -1695,9 +1719,7 @@ class MetricEngine
             ->groupBy(DB::raw("DATE_TRUNC('week', " . self::PAID_AT . ")"))
             ->orderBy('wk')->pluck('v', 'wk');
 
-        $out = DB::table('expenses')
-            ->where('status', 'completed')
-            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+        $out = $this->expenseSpendBase()
             ->whereBetween('expense_date', [$s->format('Y-m-d'), $e->format('Y-m-d')])
             ->selectRaw("DATE_TRUNC('week', expense_date)::date AS wk, COALESCE(SUM(amount_kes), 0) AS v")
             ->groupBy(DB::raw("DATE_TRUNC('week', expense_date)"))
