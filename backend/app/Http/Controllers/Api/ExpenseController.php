@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\Concerns\ScopesToAssignedOutlets;
 use App\Models\{Expense, ExpenseCategory, ExpenseBudget, ExpenseApproval, ExpenseLineItem, User};
 use App\Services\ActivityLogService;
 use App\Services\IntelligenceService;
@@ -14,69 +15,22 @@ use Carbon\Carbon;
 
 class ExpenseController extends Controller
 {
+    // ONE definition of "which outlets may this caller touch", used by every
+    // read and write path below and shared with DocumentPdfController, which
+    // renders the same expenses as PDFs. See the trait for the rule and the
+    // traps in it (no users.outlet_id column; empty array means nothing;
+    // NULL outlet_id is head office and out of scope for a manager).
+    use ScopesToAssignedOutlets;
+
     public function __construct(
         private ActivityLogService  $activityLog,
         private NotificationService $notifications,
     ) {}
 
-    // =========================================================================
-    // OUTLET SCOPING
-    //
-    // ONE definition of "which outlets may this caller touch", used by every
-    // read and write path below. It used to exist only inside index(), as
-    // `where('outlet_id', $user->outlet_id)` — a column users do not have
-    // (assignment is the many-to-many outlet_user pivot), so Laravel compiled
-    // it to `outlet_id IS NULL` and it scoped nothing. #20 fixed the query in
-    // index(); the decision now lives here so show(), summary(), budgets(),
-    // the receipt download and every mutation share it.
-    // =========================================================================
-
-    /**
-     * Outlet ids this user may see and act on.
-     *
-     * null  → unrestricted (admins, super admins, and any role that is not
-     *         outlet-scoped, e.g. finance).
-     * array → exactly the outlets assigned via the outlet_user pivot. An
-     *         EMPTY array is meaningful: a manager with no assignment sees
-     *         nothing, rather than falling open to everything.
-     *
-     * @return int[]|null
-     */
-    private function assignedOutletIdsOrNull(User $user): ?array
-    {
-        if (!$user->hasRole('outlet_manager') || $user->hasAnyRole(['admin', 'super_admin'])) {
-            return null;
-        }
-
-        return $user->outlets()->pluck('outlets.id')->map(fn ($id) => (int) $id)->all();
-    }
-
-    /**
-     * 403 unless $outletId is inside the caller's scope. Matches the existing
-     * convention (PosController::authoriseOutletAccess, MetricEngine::for).
-     * A null outlet — a head-office expense — is out of scope for a scoped
-     * manager, exactly as it is excluded from their list query.
-     *
-     * @param int[]|null $scope
-     */
-    private function authoriseOutletScope(?array $scope, ?int $outletId): void
-    {
-        if ($scope === null) {
-            return;
-        }
-
-        if ($outletId === null || !in_array($outletId, $scope, true)) {
-            abort(403, 'You do not have access to this outlet.');
-        }
-    }
-
     /** 403 unless this expense belongs to an outlet the caller is assigned to. */
     private function authoriseExpenseAccess(Expense $expense, User $user): void
     {
-        $this->authoriseOutletScope(
-            $this->assignedOutletIdsOrNull($user),
-            $expense->outlet_id === null ? null : (int) $expense->outlet_id,
-        );
+        $this->authoriseOutletScopeFor($user, $expense->outlet_id);
     }
 
     /** Fetch an expense and authorise it in one step. */
@@ -366,10 +320,7 @@ class ExpenseController extends Controller
         // Re-check on the way out too: a scoped manager must not move an
         // expense into an outlet they aren't assigned to.
         if (array_key_exists('outlet_id', $validated)) {
-            $this->authoriseOutletScope(
-                $this->assignedOutletIdsOrNull($request->user()),
-                $validated['outlet_id'] === null ? null : (int) $validated['outlet_id'],
-            );
+            $this->authoriseOutletScopeFor($request->user(), $validated['outlet_id']);
         }
 
         DB::beginTransaction();
@@ -854,10 +805,7 @@ class ExpenseController extends Controller
     public function updateBudget(Request $request, int $id)
     {
         $budget = ExpenseBudget::findOrFail($id);
-        $this->authoriseOutletScope(
-            $this->assignedOutletIdsOrNull($request->user()),
-            $budget->outlet_id === null ? null : (int) $budget->outlet_id,
-        );
+        $this->authoriseOutletScopeFor($request->user(), $budget->outlet_id);
 
         $validated = $request->validate([
             'budgeted_amount' => 'required|numeric|min:0',
