@@ -350,9 +350,6 @@ class ReportController extends Controller
     }
 
     /**
-     * GET /admin/reports/sales/by-product
-     */
-    /**
      * Sales ledger — GET /reports/sales/ledger
      *
      * Answers "what did we sell, what did we actually collect, and what are we
@@ -688,6 +685,9 @@ class ReportController extends Controller
         ]));
     }
 
+    /**
+     * GET /admin/reports/sales/by-product
+     */
     public function salesByProduct(Request $request)
     {
         [$start, $end] = $this->dateRange($request);
@@ -1348,36 +1348,12 @@ class ReportController extends Controller
         ]);
     }
 
-    /**
-     * GET /admin/reports/inventory/valuation
-     */
-    public function inventoryValuation(Request $request)
-    {
-        $query = InventoryItem::with(['outlet:id,name'])
-            ->where('quantity_on_hand', '>', 0);
-
-        if ($request->filled('outlet_id')) {
-            $query->where('outlet_id', $request->outlet_id);
-        }
-
-        $inventory = $query->get();
-
-        $byOutlet = $inventory->groupBy(fn ($i) => $i->outlet_id ?? 'warehouse')
-            ->map(function ($items) {
-                $outletName = $items->first()->outlet?->name ?? 'Warehouse';
-                return [
-                    'outlet_name'    => $outletName,
-                    'item_count'     => $items->count(),
-                    'total_quantity' => $items->sum('quantity_on_hand'),
-                    'total_value'    => null,
-                ];
-            })->values();
-
-        return response()->json([
-            'by_outlet'   => $byOutlet,
-            'total_value' => null,
-        ]);
-    }
+    // inventoryValuation() lived here and was never routed: /inventory/valuation
+    // has always resolved to EnhancedReportController::inventoryValuation, which
+    // actually prices the stock from product_prices. This one reported
+    // total_value: null for every outlet, so had the route ever been pointed at
+    // it the valuation page would have gone blank. Removed rather than kept as a
+    // trap; the split-brain that produced it is audit item Q-4.
 
     /**
      * GET /admin/reports/inventory/aging  - stub
