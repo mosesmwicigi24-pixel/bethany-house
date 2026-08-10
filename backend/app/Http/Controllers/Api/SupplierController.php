@@ -10,9 +10,16 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Str;
+use App\Support\SortResolver;
 
 class SupplierController extends Controller
 {
+    /** Columns a client may sort the suppliers list by. */
+    private const SORTABLE_COLUMNS = [
+        'name', 'company_code', 'type', 'status', 'supply_category',
+        'city', 'country', 'rating', 'credit_limit', 'created_at', 'updated_at',
+    ];
+
     /**
      * Get all suppliers
      */
@@ -52,8 +59,12 @@ class SupplierController extends Controller
                 ->withSum('purchaseOrders as total_purchased', 'total');
         }
 
-        $sortBy = $request->get('sort_by', 'name');
-        $sortOrder = $request->get('sort_order', 'asc');
+        [$sortBy, $sortOrder] = SortResolver::resolve(
+            $request->get('sort_by'),
+            $request->get('sort_order', 'asc'),
+            self::SORTABLE_COLUMNS,
+            'name'
+        );
         $query->orderBy($sortBy, $sortOrder);
 
         $perPage = $request->get('per_page', 20);
