@@ -23,7 +23,6 @@ use App\Http\Controllers\Api\{
     ReportController,
     UserController,
     SettingController,
-    MaterialController,
     ProductReviewController,
     RoleController,
     PermissionController,

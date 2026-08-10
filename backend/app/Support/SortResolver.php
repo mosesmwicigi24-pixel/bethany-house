@@ -6,9 +6,17 @@ namespace App\Support;
  * Resolves a client-supplied sort column + direction against a strict
  * allow-list.
  *
- * Column identifiers cannot be bound as query parameters the way values can,
- * so passing a raw request value straight into `orderBy()` is a SQL-injection
- * vector. Any column not in `$allowed` collapses to `$default`, and the
+ * The risk here is availability and information disclosure, not injection:
+ * the query builder's grammar wraps identifiers (doubling any inner quote)
+ * and rejects a direction that isn't literally 'asc' or 'desc' with an
+ * InvalidArgumentException, so a raw request value cannot break out of the
+ * ORDER BY clause. What it can do is name a column that does not exist —
+ * the database errors, the request 500s, and the difference between a 200
+ * and a 500 tells an unauthenticated caller exactly which columns a table
+ * has. That enumeration matters most on public routes such as
+ * `GET /{id}/reviews`.
+ *
+ * So: any column not in `$allowed` collapses to `$default`, and the
  * direction is normalised to a literal 'asc' or 'desc'.
  */
 class SortResolver
