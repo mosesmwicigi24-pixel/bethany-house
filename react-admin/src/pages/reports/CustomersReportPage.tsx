@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
     reportsApi,
     type InstitutionalAccountRow,
+    type OutreachLogRow,
     type ReplenishmentDueRow,
     type WinBackCustomerRow,
 } from "@/api/reports";
@@ -45,8 +46,8 @@ import {
     TH_R,
 } from "./reportShared";
 
-type CustomersTab = "overview" | "ltv" | "retention" | "intelligence" | "replenishment" | "winback" | "institutions";
-const CUSTOMERS_TABS: readonly CustomersTab[] = ["overview", "ltv", "retention", "intelligence", "replenishment", "winback", "institutions"];
+type CustomersTab = "overview" | "ltv" | "retention" | "intelligence" | "replenishment" | "winback" | "institutions" | "outreachlog";
+const CUSTOMERS_TABS: readonly CustomersTab[] = ["overview", "ltv", "retention", "intelligence", "replenishment", "winback", "institutions", "outreachlog"];
 
 export default function CustomersReportPage() {
     const dr = useDateRange("this_month");
@@ -207,11 +208,13 @@ export default function CustomersReportPage() {
                                     ? "Win-back"
                                     : tab === "institutions"
                                       ? "Institutions"
-                                      : tab === "retention"
-                                        ? "Retention"
-                                        : tab === "intelligence"
-                                          ? "Intelligence"
-                                          : "Overview"}
+                                      : tab === "outreachlog"
+                                        ? "Outreach log"
+                                        : tab === "retention"
+                                          ? "Retention"
+                                          : tab === "intelligence"
+                                            ? "Intelligence"
+                                            : "Overview"}
                         </button>
                     ))}
                 </nav>
@@ -239,6 +242,11 @@ export default function CustomersReportPage() {
                    now" like the radar (a quiet church only means anything
                    against today). ── */}
             {activeTab === "institutions" && <InstitutionsTab />}
+
+            {/* ── OUTREACH LOG — the unified audit trail behind every
+                   proactive contact: automated radar pings + manual win-back
+                   outreach, newest first, with outcome attribution. ── */}
+            {activeTab === "outreachlog" && <OutreachLogTab />}
 
             {activeTab === "overview" && (
                 <div className="space-y-6">
@@ -1504,6 +1512,192 @@ function InstitutionsTab() {
                                         </Fragment>
                                     );
                                 })
+                            )}
+                        </tbody>
+                    </table>
+                </TableWrapper>
+            </div>
+        </div>
+    );
+}
+
+// ─── Outreach log tab ─────────────────────────────────────────────────────────
+// The unified audit trail behind every proactive contact the Hub makes:
+// automated replenishment-radar WhatsApp pings (🎯, by "automation") merged
+// with manual win-back outreach (🔄, by whoever logged it), newest first,
+// each row carrying its attributed outcome — "reordered" when the pinged
+// phone bought the product again within a cycle, "won back +KES X" when a
+// contacted customer ordered within 30 days.
+
+function OutreachLogTab() {
+    const { data, isLoading } = useQuery({
+        queryKey: ["outreach-log"],
+        queryFn: () => reportsApi.outreachLog(),
+        staleTime: 60_000,
+    });
+
+    if (isLoading || !data)
+        return (
+            <div className="flex justify-center py-16">
+                <Spinner />
+            </div>
+        );
+
+    const { summary, rows } = data;
+
+    const relative = (at: string) => {
+        const days = Math.max(0, dayjs().diff(dayjs(at), "day"));
+        if (days === 0) return "today";
+        if (days === 1) return "yesterday";
+        return `${days}d ago`;
+    };
+
+    const statusPill = (status: string) =>
+        clsx(
+            "px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap",
+            status === "sent"
+                ? "bg-success-light text-success"
+                : status === "failed"
+                  ? "bg-danger-light text-danger"
+                  : status === "logged"
+                    ? "bg-brand-50 text-brand-700"
+                    : "bg-surface-100 text-surface-500",
+        );
+
+    return (
+        <div className="space-y-6">
+            <div className="flex justify-end">
+                <ExportCsvButton path="outreach-log" params={{}} />
+            </div>
+
+            <div className={KPI_GRID}>
+                <KpiCard
+                    label="Pings (30d)"
+                    value={summary.pings_30d}
+                    sub="Automated WhatsApp reminders sent"
+                />
+                <KpiCard
+                    label="Manual Outreach (30d)"
+                    value={summary.outreach_30d}
+                    sub="Win-back contacts logged"
+                />
+                <KpiCard
+                    label="Failures (30d)"
+                    value={summary.failures_30d}
+                    sub="Pings Meta rejected"
+                    color={
+                        summary.failures_30d > 0
+                            ? "text-danger"
+                            : "text-success"
+                    }
+                />
+                <KpiCard
+                    label="Won Back (30d)"
+                    value={summary.won_back_30d}
+                    sub="Outreach followed by an order"
+                    color="text-success"
+                />
+            </div>
+
+            <div className="card overflow-hidden">
+                <div className="px-5 pt-5 pb-4">
+                    <SectionHeader title="Recent outreach — newest first" />
+                    <p className="text-sm text-surface-500 mt-1">
+                        Every proactive contact in one feed: 🎯 automated
+                        replenishment pings and 🔄 manual win-back outreach
+                        (latest 100). Outcomes use the engines' own
+                        attribution — "reordered" means the pinged phone bought
+                        the product again within one cycle; "won back" means an
+                        order landed within 30 days of the contact.
+                    </p>
+                </div>
+                <TableWrapper>
+                    <table className="w-full">
+                        <thead>
+                            <tr className="border-y border-line bg-surface-50/50">
+                                <th className={TH}>Type</th>
+                                <th className={TH}>When</th>
+                                <th className={TH}>Who</th>
+                                <th className={TH}>Channel</th>
+                                <th className={TH}>Product</th>
+                                <th className={TH}>Status</th>
+                                <th className={TH}>By</th>
+                                <th className={TH}>Outcome</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-line">
+                            {rows.length === 0 ? (
+                                <EmptyRow cols={8} />
+                            ) : (
+                                rows.map((row: OutreachLogRow, i: number) => (
+                                    <tr
+                                        key={`${row.type}-${row.at}-${i}`}
+                                        className="hover:bg-surface-50/50 transition-colors"
+                                    >
+                                        <td className="px-4 py-3 text-sm whitespace-nowrap">
+                                            {row.type === "radar_ping" ? (
+                                                <span title="Automated replenishment-radar ping">
+                                                    🎯 Radar ping
+                                                </span>
+                                            ) : (
+                                                <span title="Manual win-back outreach">
+                                                    🔄 Win-back
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td
+                                            className="px-4 py-3 text-sm text-surface-500 whitespace-nowrap"
+                                            title={dayjs(row.at).format(
+                                                "D MMM YY, HH:mm",
+                                            )}
+                                        >
+                                            {relative(row.at)}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <span className="font-medium text-surface-900">
+                                                {row.name}
+                                            </span>
+                                            {row.phone && (
+                                                <span className="text-2xs text-surface-400 font-mono block">
+                                                    {row.phone}
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-surface-600 capitalize">
+                                            {row.channel}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-surface-700">
+                                            {row.product_name ?? (
+                                                <span className="text-surface-300">
+                                                    —
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <span
+                                                className={statusPill(
+                                                    row.status,
+                                                )}
+                                            >
+                                                {row.status.replace(/_/g, " ")}
+                                            </span>
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-surface-600">
+                                            {row.by}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            {row.outcome !== "—" ? (
+                                                <span className="px-2 py-0.5 rounded text-xs font-medium bg-success-light text-success whitespace-nowrap">
+                                                    {row.outcome}
+                                                </span>
+                                            ) : (
+                                                <span className="text-surface-300 text-sm">
+                                                    —
+                                                </span>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))
                             )}
                         </tbody>
                     </table>
