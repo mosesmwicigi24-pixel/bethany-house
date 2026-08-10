@@ -145,6 +145,26 @@ export interface CountryVisits { country_code: string; visits: number }
 export interface CountryBuyers { country_code: string; orders: number; revenue: number }
 export interface DimensionCount { visits: number }
 
+/**
+ * One country, traffic AND money on the same row — the unit the Insights
+ * "Markets" table is built from. Server-joined (AnalyticsController::overview)
+ * rather than stitched client-side, because `visitors_by_country` and
+ * `buyers_by_country` are each independently truncated to 50.
+ *
+ * `conversion_pct` is null when visits = 0 — a country CAN have orders and no
+ * recorded visits (geo unresolved, or the country was inferred from the buyer's
+ * phone). "Can't compute" and "nobody converted" render differently.
+ * No display name is sent: the client resolves it from the alpha-2 via
+ * Intl.DisplayNames, which covers every ISO code.
+ */
+export interface MarketRow {
+    country_code: string;
+    visits: number;
+    orders: number;
+    revenue: number;
+    conversion_pct: number | null;
+}
+
 export interface AnalyticsOverview {
     range_days: number;
     totals: {
@@ -153,6 +173,7 @@ export interface AnalyticsOverview {
         countries: number;
         mobile_share: number; // 0–100
     };
+    markets: MarketRow[];
     visitors_by_country: CountryVisits[];
     buyers_by_country: CountryBuyers[];
     devices: (DimensionCount & { device_type: string })[];
