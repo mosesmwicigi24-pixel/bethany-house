@@ -7,6 +7,7 @@ use App\Models\{Expense, ExpenseCategory, ExpenseBudget, ExpenseApproval, Expens
 use App\Services\ActivityLogService;
 use App\Services\IntelligenceService;
 use App\Services\NotificationService;
+use App\Services\Reporting\MetricEngine;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\{DB, Storage};
 use Carbon\Carbon;
@@ -17,6 +18,88 @@ class ExpenseController extends Controller
         private ActivityLogService  $activityLog,
         private NotificationService $notifications,
     ) {}
+
+    // =========================================================================
+    // OUTLET SCOPING
+    //
+    // ONE definition of "which outlets may this caller touch", used by every
+    // read and write path below. It used to exist only inside index(), as
+    // `where('outlet_id', $user->outlet_id)` — a column users do not have
+    // (assignment is the many-to-many outlet_user pivot), so Laravel compiled
+    // it to `outlet_id IS NULL` and it scoped nothing. #20 fixed the query in
+    // index(); the decision now lives here so show(), summary(), budgets(),
+    // the receipt download and every mutation share it.
+    // =========================================================================
+
+    /**
+     * Outlet ids this user may see and act on.
+     *
+     * null  → unrestricted (admins, super admins, and any role that is not
+     *         outlet-scoped, e.g. finance).
+     * array → exactly the outlets assigned via the outlet_user pivot. An
+     *         EMPTY array is meaningful: a manager with no assignment sees
+     *         nothing, rather than falling open to everything.
+     *
+     * @return int[]|null
+     */
+    private function assignedOutletIdsOrNull(User $user): ?array
+    {
+        if (!$user->hasRole('outlet_manager') || $user->hasAnyRole(['admin', 'super_admin'])) {
+            return null;
+        }
+
+        return $user->outlets()->pluck('outlets.id')->map(fn ($id) => (int) $id)->all();
+    }
+
+    /**
+     * 403 unless $outletId is inside the caller's scope. Matches the existing
+     * convention (PosController::authoriseOutletAccess, MetricEngine::for).
+     * A null outlet — a head-office expense — is out of scope for a scoped
+     * manager, exactly as it is excluded from their list query.
+     *
+     * @param int[]|null $scope
+     */
+    private function authoriseOutletScope(?array $scope, ?int $outletId): void
+    {
+        if ($scope === null) {
+            return;
+        }
+
+        if ($outletId === null || !in_array($outletId, $scope, true)) {
+            abort(403, 'You do not have access to this outlet.');
+        }
+    }
+
+    /** 403 unless this expense belongs to an outlet the caller is assigned to. */
+    private function authoriseExpenseAccess(Expense $expense, User $user): void
+    {
+        $this->authoriseOutletScope(
+            $this->assignedOutletIdsOrNull($user),
+            $expense->outlet_id === null ? null : (int) $expense->outlet_id,
+        );
+    }
+
+    /** Fetch an expense and authorise it in one step. */
+    private function findScopedExpense(int $id, User $user): Expense
+    {
+        $expense = Expense::findOrFail($id);
+        $this->authoriseExpenseAccess($expense, $user);
+
+        return $expense;
+    }
+
+    /**
+     * The canonical SPEND status set as a SQL literal list, for the raw
+     * CASE expressions below. Values come from
+     * MetricEngine::EXPENSE_SPEND_STATUSES — the one definition of expense
+     * spend (approved + paid, on amount_kes, dated by expense_date) that
+     * ExpenseConsistencyTest pins across the reporting stack. Constant
+     * strings only; nothing here is caller-supplied.
+     */
+    private static function spendStatusesSql(): string
+    {
+        return "'" . implode("','", MetricEngine::EXPENSE_SPEND_STATUSES) . "'";
+    }
 
     // =========================================================================
     // EXPENSE CRUD
@@ -51,13 +134,10 @@ class ExpenseController extends Controller
         ])->withCount('lineItems');
 
         // Role-scoped access: outlet managers see only expenses for the outlets
-        // they are assigned to (via the outlet_user pivot). Users have no
-        // `outlet_id` column — assignment is many-to-many — so the previous
-        // `$user->outlet_id` was always null and the scoping was broken.
-        $user = $request->user();
-        $scopeToAssignedOutlets = $user->hasRole('outlet_manager') && !$user->hasAnyRole(['admin', 'super_admin']);
-        $assignedOutletIds = $scopeToAssignedOutlets ? $user->outlets()->pluck('outlets.id') : null;
-        if ($scopeToAssignedOutlets) {
+        // they are assigned to. One definition, shared with every other method
+        // on this controller — see assignedOutletIdsOrNull().
+        $assignedOutletIds = $this->assignedOutletIdsOrNull($request->user());
+        if ($assignedOutletIds !== null) {
             $query->whereIn('outlet_id', $assignedOutletIds);
         }
 
@@ -88,15 +168,16 @@ class ExpenseController extends Controller
 
         // Summary stats for the filtered view
         $statsQuery = Expense::query();
-        if ($scopeToAssignedOutlets) {
+        if ($assignedOutletIds !== null) {
             $statsQuery->whereIn('outlet_id', $assignedOutletIds);
         }
+        $spend = self::spendStatusesSql();
         $stats = $statsQuery
             ->when(isset($validated['start_date']), fn($q) => $q->where('expense_date', '>=', $validated['start_date']))
             ->when(isset($validated['end_date']),   fn($q) => $q->where('expense_date', '<=', $validated['end_date']))
             ->selectRaw("
                 COUNT(*) as total_count,
-                SUM(CASE WHEN status IN ('approved','paid') THEN amount_kes ELSE 0 END) as approved_total,
+                SUM(CASE WHEN status IN ({$spend}) THEN amount_kes ELSE 0 END) as approved_total,
                 SUM(CASE WHEN status = 'pending_approval' THEN amount_kes ELSE 0 END) as pending_total,
                 COUNT(CASE WHEN status = 'pending_approval' THEN 1 END) as pending_count
             ")
@@ -111,8 +192,12 @@ class ExpenseController extends Controller
     /**
      * GET /api/v1/admin/expenses/{id}
      */
-    public function show(int $id)
+    public function show(int $id, Request $request)
     {
+        // Authorise before loading the payload: an out-of-scope id must not
+        // return the record, its approvals or its line items.
+        $this->findScopedExpense($id, $request->user());
+
         $expense = Expense::with([
             'category',
             'outlet:id,name',
@@ -167,6 +252,15 @@ class ExpenseController extends Controller
             'line_items.*.unit_price'  => 'required_with:line_items|numeric|min:0',
             'line_items.*.tax_amount'  => 'nullable|numeric|min:0',
         ]);
+
+        // A scoped manager may only book an expense against one of their own
+        // outlets. (Omitting outlet_id books it to head office, as before.)
+        if (isset($validated['outlet_id'])) {
+            $this->authoriseOutletScope(
+                $this->assignedOutletIdsOrNull($request->user()),
+                (int) $validated['outlet_id'],
+            );
+        }
 
         DB::beginTransaction();
         try {
@@ -246,7 +340,7 @@ class ExpenseController extends Controller
      */
     public function update(Request $request, int $id)
     {
-        $expense = Expense::findOrFail($id);
+        $expense = $this->findScopedExpense($id, $request->user());
 
         if (!in_array($expense->status, ['draft', 'rejected'])) {
             return response()->json(['message' => 'Only draft or rejected expenses can be edited.'], 422);
@@ -268,6 +362,15 @@ class ExpenseController extends Controller
             'notes'               => 'nullable|string|max:2000',
             'tags'                => 'nullable|array',
         ]);
+
+        // Re-check on the way out too: a scoped manager must not move an
+        // expense into an outlet they aren't assigned to.
+        if (array_key_exists('outlet_id', $validated)) {
+            $this->authoriseOutletScope(
+                $this->assignedOutletIdsOrNull($request->user()),
+                $validated['outlet_id'] === null ? null : (int) $validated['outlet_id'],
+            );
+        }
 
         DB::beginTransaction();
         try {
@@ -306,7 +409,7 @@ class ExpenseController extends Controller
      */
     public function destroy(int $id, Request $request)
     {
-        $expense = Expense::findOrFail($id);
+        $expense = $this->findScopedExpense($id, $request->user());
 
         if (!in_array($expense->status, ['draft', 'rejected', 'cancelled'])) {
             return response()->json(['message' => 'Only draft, rejected, or cancelled expenses can be deleted.'], 422);
@@ -328,8 +431,8 @@ class ExpenseController extends Controller
      */
     public function submit(int $id, Request $request)
     {
-        $expense = Expense::findOrFail($id);
         $user    = $request->user();
+        $expense = $this->findScopedExpense($id, $user);
 
         if ($expense->status !== 'draft') {
             return response()->json(['message' => 'Only draft expenses can be submitted.'], 422);
@@ -367,8 +470,8 @@ class ExpenseController extends Controller
      */
     public function approve(int $id, Request $request)
     {
-        $expense = Expense::findOrFail($id);
         $user    = $request->user();
+        $expense = $this->findScopedExpense($id, $user);
 
         if (!$user->can('expenses.approve')) {
             return response()->json(['message' => 'Forbidden. You do not have permission to approve expenses.'], 403);
@@ -445,8 +548,8 @@ class ExpenseController extends Controller
      */
     public function reject(int $id, Request $request)
     {
-        $expense = Expense::findOrFail($id);
         $user    = $request->user();
+        $expense = $this->findScopedExpense($id, $user);
 
         if (!$user->can('expenses.approve')) {
             return response()->json(['message' => 'Forbidden. You do not have permission to reject expenses.'], 403);
@@ -499,8 +602,8 @@ class ExpenseController extends Controller
      */
     public function markPaid(int $id, Request $request)
     {
-        $expense = Expense::findOrFail($id);
         $user    = $request->user();
+        $expense = $this->findScopedExpense($id, $user);
 
         if (!$user->can('expenses.approve')) {
             return response()->json(['message' => 'Forbidden. You do not have permission to mark expenses as paid.'], 403);
@@ -536,7 +639,7 @@ class ExpenseController extends Controller
      */
     public function cancel(int $id, Request $request)
     {
-        $expense = Expense::findOrFail($id);
+        $expense = $this->findScopedExpense($id, $request->user());
 
         if (in_array($expense->status, ['paid', 'cancelled'])) {
             return response()->json(['message' => 'Cannot cancel this expense.'], 422);
@@ -561,8 +664,8 @@ class ExpenseController extends Controller
             'receipt' => 'required|file|mimes:jpg,jpeg,png,pdf|max:10240', // 10MB
         ]);
 
-        $expense = Expense::findOrFail($id);
         $user    = $request->user();
+        $expense = $this->findScopedExpense($id, $user);
 
         // Delete old receipt
         if ($expense->receipt_path) {
@@ -583,9 +686,9 @@ class ExpenseController extends Controller
     /**
      * GET /api/v1/admin/expenses/{id}/receipt
      */
-    public function downloadReceipt(int $id)
+    public function downloadReceipt(int $id, Request $request)
     {
-        $expense = Expense::findOrFail($id);
+        $expense = $this->findScopedExpense($id, $request->user());
 
         if (!$expense->receipt_path) {
             return response()->json(['message' => 'No receipt attached.'], 404);
@@ -612,6 +715,10 @@ class ExpenseController extends Controller
 
     public function categories(Request $request)
     {
+        // The category list itself is reference data, but the spend figures
+        // hung off it are money — scope them to the caller's outlets.
+        $scope = $this->assignedOutletIdsOrNull($request->user());
+
         $categories = ExpenseCategory::with('children')
             ->whereNull('parent_id')
             ->where('is_active', true)
@@ -619,8 +726,8 @@ class ExpenseController extends Controller
             ->orderBy('name')
             ->get()
             ->map(fn($cat) => array_merge($cat->toArray(), [
-                'current_month_spend'       => $cat->currentMonthSpend(),
-                'budget_utilization_percent' => $cat->budgetUtilizationPercent(),
+                'current_month_spend'       => $cat->currentMonthSpend($scope),
+                'budget_utilization_percent' => $cat->budgetUtilizationPercent($scope),
             ]));
 
         return response()->json(['categories' => $categories]);
@@ -681,7 +788,17 @@ class ExpenseController extends Controller
             'outlet_id'     => 'nullable|exists:outlets,id',
         ]);
 
+        // Same scope as the expense list: a manager sees the budgets (and the
+        // actual-vs-budget figures derived from them) for their own outlets
+        // only. Group-wide budgets — outlet_id NULL — are not theirs to see,
+        // exactly as head-office expenses are excluded from index().
+        $scope = $this->assignedOutletIdsOrNull($request->user());
+        if (isset($validated['outlet_id'])) {
+            $this->authoriseOutletScope($scope, (int) $validated['outlet_id']);
+        }
+
         $budgets = ExpenseBudget::with('category:id,name,code,color', 'outlet:id,name')
+            ->when($scope !== null,                    fn($q) => $q->whereIn('outlet_id', $scope))
             ->when(isset($validated['period_type']),   fn($q) => $q->where('period_type',   $validated['period_type']))
             ->when(isset($validated['period_year']),   fn($q) => $q->where('period_year',   $validated['period_year']))
             ->when(isset($validated['period_number']), fn($q) => $q->where('period_number', $validated['period_number']))
@@ -709,6 +826,13 @@ class ExpenseController extends Controller
             'notes'          => 'nullable|string|max:500',
         ]);
 
+        if (isset($validated['outlet_id'])) {
+            $this->authoriseOutletScope(
+                $this->assignedOutletIdsOrNull($request->user()),
+                (int) $validated['outlet_id'],
+            );
+        }
+
         // Prevent duplicates
         $exists = ExpenseBudget::where([
             'category_id'   => $validated['category_id'],
@@ -729,7 +853,12 @@ class ExpenseController extends Controller
 
     public function updateBudget(Request $request, int $id)
     {
-        $budget    = ExpenseBudget::findOrFail($id);
+        $budget = ExpenseBudget::findOrFail($id);
+        $this->authoriseOutletScope(
+            $this->assignedOutletIdsOrNull($request->user()),
+            $budget->outlet_id === null ? null : (int) $budget->outlet_id,
+        );
+
         $validated = $request->validate([
             'budgeted_amount' => 'required|numeric|min:0',
             'notes'           => 'nullable|string|max:500',
@@ -767,8 +896,19 @@ class ExpenseController extends Controller
         $end       = $validated['end_date']   ?? now()->endOfMonth()->format('Y-m-d');
         $outletId  = $validated['outlet_id']  ?? null;
 
-        $base = Expense::whereIn('status', ['approved', 'paid'])
+        // Every figure below is money. A scoped manager gets their outlets'
+        // numbers, never the group's; an explicit outlet_id may narrow that
+        // scope but can never escape it (403, as MetricEngine::for does).
+        $scope = $this->assignedOutletIdsOrNull($request->user());
+        if ($outletId !== null) {
+            $this->authoriseOutletScope($scope, (int) $outletId);
+        }
+
+        // The spend definition is untouched: approved + paid, on amount_kes,
+        // dated by expense_date — MetricEngine::EXPENSE_SPEND_STATUSES.
+        $base = Expense::whereIn('status', MetricEngine::EXPENSE_SPEND_STATUSES)
             ->whereBetween('expense_date', [$start, $end])
+            ->when($scope !== null, fn($q) => $q->whereIn('outlet_id', $scope))
             ->when($outletId, fn($q) => $q->where('outlet_id', $outletId));
 
         // Totals
@@ -796,8 +936,9 @@ class ExpenseController extends Controller
             ->get();
 
         // Monthly trend (last 12 months)
-        $trend = Expense::whereIn('status', ['approved', 'paid'])
+        $trend = Expense::whereIn('status', MetricEngine::EXPENSE_SPEND_STATUSES)
             ->where('expense_date', '>=', now()->subMonths(11)->startOfMonth())
+            ->when($scope !== null, fn($q) => $q->whereIn('outlet_id', $scope))
             ->when($outletId, fn($q) => $q->where('outlet_id', $outletId))
             ->selectRaw("TO_CHAR(expense_date, 'YYYY-MM') as month, SUM(amount_kes) as total, COUNT(*) as count")
             ->groupBy('month')
@@ -806,6 +947,7 @@ class ExpenseController extends Controller
 
         // Pending for action
         $pending = Expense::where('status', 'pending_approval')
+            ->when($scope !== null, fn($q) => $q->whereIn('outlet_id', $scope))
             ->when($outletId, fn($q) => $q->where('outlet_id', $outletId))
             ->selectRaw('COUNT(*) as count, SUM(amount_kes) as total')
             ->first();
