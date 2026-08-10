@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\Concerns\ScopesToAssignedOutlets;
 use App\Models\Expense;
 use App\Models\GoodsReceivedNote;
 use App\Models\Order;
@@ -35,9 +36,29 @@ use Barryvdh\DomPDF\Facade\Pdf;
  * GET  /api/v1/admin/pdf/expenses/{id}
  *
  * All return application/pdf with Content-Disposition: attachment.
+ *
+ * SCOPING NOTE. Every route here is authenticated staff behind a permission,
+ * and each renderer resolves its document by bare id. That is only safe where
+ * the JSON endpoint for the same document is equally unscoped — otherwise the
+ * PDF becomes a way around the JSON route's authorisation.
+ *
+ * Expenses are the one document type the application scopes by outlet
+ * (ExpenseController, #266), so expense() applies the same scope — see below.
+ * Orders, invoices, receipts, quotations, shipments, returns, production
+ * orders, transfers, adjustments and the procurement documents are group-wide
+ * for any staff member holding the matching permission, exactly as their
+ * OrderController / QuotationController / etc. counterparts are; there is no
+ * per-outlet or per-customer restriction anywhere in the app for them, so
+ * these renderers leak nothing the JSON API does not already return. If that
+ * product decision changes, the scope belongs in those controllers AND here —
+ * use the ScopesToAssignedOutlets trait for both.
  */
 class DocumentPdfController extends Controller
 {
+    // Shared with ExpenseController — the same "which outlets may this caller
+    // touch" decision that guards the JSON expense endpoints.
+    use ScopesToAssignedOutlets;
+
     // ─── DomPDF helper ───────────────────────────────────────────────────────
 
     private function makePdf(string $html, string $filename): Response
@@ -384,8 +405,18 @@ class DocumentPdfController extends Controller
 
     // ─── Expense ──────────────────────────────────────────────────────────────
 
-    public function expense(int $id): Response
+    public function expense(int $id, Request $request): Response
     {
+        // Same outlet scope as GET /expenses/{id} and its receipt download.
+        // Without this an outlet_manager — who holds expenses.view by default —
+        // could pull the PDF of ANY expense in the group by id: amount, vendor,
+        // submitter, line items and the full approval trail. Authorise on a
+        // bare lookup first so an out-of-scope id never loads its relations.
+        $this->authoriseOutletScopeFor(
+            $request->user(),
+            Expense::findOrFail($id)->outlet_id,
+        );
+
         $exp = Expense::with([
             'category:id,name',
             'submittedBy:id,first_name,last_name,email',
