@@ -2493,7 +2493,7 @@ function BOMTab() {
                                         <div className="w-10 h-10 rounded-lg shrink-0 overflow-hidden bg-surface-100 flex items-center justify-center">
                                             {p.primary_image ? (
                                                 <img src={p.primary_image.image_url} alt={p.primary_image.alt_text ?? name}
-                                                    className="w-full h-full object-cover" />
+                                                    className="w-full h-full object-contain" />
                                             ) : (
                                                 <svg className="w-5 h-5 text-surface-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />

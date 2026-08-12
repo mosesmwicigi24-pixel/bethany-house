@@ -264,7 +264,7 @@ function AttachmentRow({
                         title={attachment.name}
                     >
                         {thumbUrl && (
-                            <img src={thumbUrl} alt={attachment.name} className="w-full h-full object-cover" />
+                            <img src={thumbUrl} alt={attachment.name} className="w-full h-full object-contain" />
                         )}
                     </button>
                     <span className="flex-1 truncate text-xs text-surface-600">{attachment.name}</span>

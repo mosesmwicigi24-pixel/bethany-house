@@ -312,7 +312,7 @@ export default function StockAdjustmentDetailPage() {
                             <SectionLabel>Product</SectionLabel>
                             <div className="p-3 bg-surface-50 rounded-xl">
                                 {item?.product?.image_url && (
-                                    <img src={item.product.image_url} alt="" className="w-full h-24 object-cover rounded-lg mb-2" />
+                                    <img src={item.product.image_url} alt="" className="w-full h-24 object-contain bg-surface-100 rounded-lg mb-2" />
                                 )}
                                 <p className="text-sm font-semibold text-surface-800">{item?.product?.name ?? "-"}</p>
                                 {item?.product?.sku && <p className="text-xs text-surface-500 font-mono mt-0.5">SKU: {item.product.sku}</p>}

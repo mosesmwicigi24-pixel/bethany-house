@@ -265,6 +265,11 @@ export default function ProfilePage() {
             {/* Avatar */}
             <div className="relative shrink-0">
               <div className="w-20 h-20 rounded-full bg-brand-500/10 flex items-center justify-center overflow-hidden border-2 border-brand-100">
+                {/* Deliberately object-cover, unlike every other image in the app.
+                    Product/stock/attachment imagery uses object-contain so nothing
+                    is cropped — but a face in a circular frame has to FILL the
+                    circle. object-contain would letterbox the portrait inside the
+                    ring and read as a broken avatar. */}
                 {avatarPreview
                   ? <img src={avatarPreview} alt="Avatar" className="w-full h-full object-cover" />
                   : <span className="text-brand-600 text-2xl font-bold">{initials}</span>

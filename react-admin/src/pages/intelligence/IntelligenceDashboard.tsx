@@ -100,7 +100,7 @@ function ReorderSuggestions() {
                     {suggestions.map((s: ReorderSuggestion) => (
                         <div key={s.inventory_item_id} className="flex items-center gap-3 px-5 py-3">
                             {s.product_image ? (
-                                <img src={s.product_image} alt={s.product_name} className="w-9 h-9 rounded-lg object-cover border border-line shrink-0"/>
+                                <img src={s.product_image} alt={s.product_name} className="w-9 h-9 rounded-lg object-contain bg-surface-100 border border-line shrink-0"/>
                             ) : (
                                 <div className="w-9 h-9 rounded-lg bg-surface-100 flex items-center justify-center shrink-0 text-surface-300">
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
