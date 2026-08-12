@@ -22,20 +22,27 @@ class NeemaEventEmitter
 {
     public static function emit(Order $order, string $type, array $extra = []): void
     {
-        $secret = (string) config('services.neema.events_secret');
-        $base   = rtrim((string) config('services.neema.url'), '/');
-        if ($secret === '' || $base === '') {
-            return;
-        }
-
-        $payload = array_merge([
+        self::emitRaw(array_merge([
             'id'             => "hub:{$order->id}:{$type}",
             'type'           => $type,
             'order_number'   => $order->order_number,
             'customer_phone' => $order->customer_phone,
             'amount'         => $order->total_amount !== null ? (float) $order->total_amount : null,
             'currency'       => $order->currency_code ?: 'KES',
-        ], $extra);
+        ], $extra));
+    }
+
+    /**
+     * Non-order events (catalog.updated on a price edit, …). Same HMAC
+     * contract, same inert-until-configured and never-throws guarantees.
+     */
+    public static function emitRaw(array $payload): void
+    {
+        $secret = (string) config('services.neema.events_secret');
+        $base   = rtrim((string) config('services.neema.url'), '/');
+        if ($secret === '' || $base === '') {
+            return;
+        }
 
         try {
             $body = json_encode($payload, JSON_UNESCAPED_UNICODE);
@@ -48,7 +55,8 @@ class NeemaEventEmitter
                 ->withBody($body, 'application/json')
                 ->post($base . '/api/hub/events');
         } catch (\Throwable $e) {
-            Log::info("Neema event {$type} for order {$order->order_number} not delivered: " . $e->getMessage());
+            $type = $payload['type'] ?? 'event';
+            Log::info("Neema event {$type} not delivered: " . $e->getMessage());
         }
     }
 }
