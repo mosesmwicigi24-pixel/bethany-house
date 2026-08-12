@@ -379,7 +379,7 @@ export default function ProductPagesPage() {
                                             <div key={b.id} className="flex items-center gap-3 py-3">
                                                 <span className="w-7 h-7 rounded-full bg-surface-100 text-surface-600 text-xs font-bold flex items-center justify-center flex-none">{b.sort_order ?? 0}</span>
                                                 {b.image_url ? (
-                                                    <img src={b.image_url} alt="" className="w-16 h-11 object-cover rounded border border-surface-200 flex-none" />
+                                                    <img src={b.image_url} alt="" className="w-16 h-11 object-contain bg-surface-50 rounded border border-surface-200 flex-none" />
                                                 ) : (
                                                     <div className="w-16 h-11 rounded border border-dashed border-surface-300 flex-none" />
                                                 )}
@@ -421,7 +421,7 @@ export default function ProductPagesPage() {
                     <Field label="Image" hint="Feature / poster image (JPG, PNG or WebP)">
                         <div className="flex items-center gap-3">
                             {imagePreview ? (
-                                <img src={imagePreview} alt="" className="w-28 h-18 object-cover rounded border border-surface-200" />
+                                <img src={imagePreview} alt="" className="w-28 h-18 object-contain bg-surface-50 rounded border border-surface-200" />
                             ) : (
                                 <div className="w-28 h-18 rounded border border-dashed border-surface-300 flex items-center justify-center text-xs text-surface-400">No image</div>
                             )}

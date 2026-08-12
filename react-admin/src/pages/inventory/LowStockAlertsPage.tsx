@@ -449,7 +449,7 @@ export default function LowStockAlertsPage() {
                                                                 alert.product
                                                                     .image_url
                                                             }
-                                                            className="w-full h-full object-cover"
+                                                            className="w-full h-full object-contain"
                                                             alt=""
                                                         />
                                                     ) : (

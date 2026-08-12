@@ -280,7 +280,7 @@ function NewAdjustmentModal({
                                                             item.product
                                                                 .image_url
                                                         }
-                                                        className="w-8 h-8 rounded object-cover shrink-0"
+                                                        className="w-8 h-8 rounded object-contain bg-surface-100 shrink-0"
                                                         alt=""
                                                     />
                                                 ) : (
@@ -1237,7 +1237,7 @@ export default function StockAdjustmentsPage() {
                                                                                 .product
                                                                                 .image_url
                                                                         }
-                                                                        className="w-full h-full object-cover"
+                                                                        className="w-full h-full object-contain"
                                                                         alt=""
                                                                     />
                                                                 ) : (

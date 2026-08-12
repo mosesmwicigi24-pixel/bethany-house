@@ -1831,7 +1831,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                 <div className="flex items-start gap-3">
                     {thumb ? (
                         <img src={thumb} alt={batch.label} onClick={() => window.open(thumb, "_blank")}
-                            className="w-16 h-16 rounded-lg object-cover border border-surface-200 shrink-0 cursor-pointer" />
+                            className="w-16 h-16 rounded-lg object-contain bg-surface-100 border border-surface-200 shrink-0 cursor-pointer" />
                     ) : (
                         <div className="w-16 h-16 rounded-lg bg-surface-100 flex items-center justify-center text-xl shrink-0">🎨</div>
                     )}
@@ -1915,7 +1915,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                         {photos.map(u => (
                             <div key={u} className="relative group">
                                 <img src={u} alt="" onClick={() => window.open(u, "_blank")}
-                                    className="w-10 h-10 rounded-md object-cover border border-surface-200 cursor-pointer" />
+                                    className="w-10 h-10 rounded-md object-contain bg-surface-100 border border-surface-200 cursor-pointer" />
                                 {canEdit && (
                                     <button
                                         onClick={() => onDeleteImage(batch.id, u)}
@@ -2589,7 +2589,7 @@ export default function ProductionOrderDetailPage() {
                         {order.product_image && (
                             <div className="rounded-xl overflow-hidden border border-surface-200">
                                 {/* h-28 on phones: the photo is orientation, not content */}
-                                <img src={order.product_image} alt={order.product_name} className="w-full h-28 sm:h-40 object-cover" />
+                                <img src={order.product_image} alt={order.product_name} className="w-full h-28 sm:h-40 object-contain bg-surface-50" />
                             </div>
                         )}
 

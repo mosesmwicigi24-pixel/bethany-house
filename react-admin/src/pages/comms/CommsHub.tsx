@@ -449,7 +449,7 @@ function AuthImage({ url, alt, isOwn, grid = false }: { url: string; alt: string
             <button type="button" onClick={() => setModal(true)}
                 className={clsx("block rounded-xl overflow-hidden hover:opacity-90 transition-opacity cursor-zoom-in",
                     grid ? "w-full aspect-square" : "max-w-[260px]")}>
-                <img src={blobUrl} alt={alt} className={clsx("object-cover", grid ? "w-full h-full" : "max-w-full max-h-52")} />
+                <img src={blobUrl} alt={alt} className={clsx("object-contain bg-surface-100", grid ? "w-full h-full" : "max-w-full max-h-52")} />
             </button>
             {modal && (
                 <PreviewModal src={blobUrl} name={alt || "image"} kind="image"
@@ -473,7 +473,7 @@ function AuthVideo({ url, name, isOwn, grid = false }: { url: string; name: stri
                 className={clsx("relative block rounded-xl overflow-hidden bg-black group",
                     grid ? "w-full aspect-square" : "max-w-[260px] w-64 h-40")}>
                 {blobUrl
-                    ? <video src={blobUrl} muted preload="metadata" className="w-full h-full object-cover" />
+                    ? <video src={blobUrl} muted preload="metadata" className="w-full h-full object-contain" />
                     : <div className={clsx("w-full bg-surface-900", grid ? "aspect-square" : "h-40", loading && "animate-pulse")} />}
                 <span className="absolute inset-0 flex items-center justify-center">
                     <span className="w-11 h-11 rounded-full bg-black/55 group-hover:bg-black/70 flex items-center justify-center transition-colors">
@@ -1340,9 +1340,9 @@ aria-label="Delete">✕</button>
                         return (
                             <div key={idx} className="relative group/att">
                                 {kind === "image" ? (
-                                    <div className="w-16 h-16 rounded-xl overflow-hidden border border-surface-200">
+                                    <div className="w-16 h-16 rounded-xl overflow-hidden border border-surface-200 bg-surface-100">
                                         <img src={previews[idx] ?? att.url} alt={att.name}
-                                            className="w-full h-full object-cover" />
+                                            className="w-full h-full object-contain" />
                                     </div>
                                 ) : (
                                     <div className="flex items-center gap-2 border border-surface-200 rounded-xl px-2.5 py-2 max-w-[160px]">

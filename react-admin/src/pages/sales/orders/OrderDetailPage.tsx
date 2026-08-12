@@ -3758,7 +3758,7 @@ export default function OrderDetailPage() {
                                                 <td className="px-4 py-3 text-surface-300 align-top">{i + 1}</td>
                                                 <td className="px-4 py-3 align-top">
                                                     <div className="flex items-start gap-2.5">
-                                                        {item.image_url && <img src={item.image_url} alt="" className="w-9 h-9 rounded-lg object-cover shrink-0 mt-0.5 border border-line" />}
+                                                        {item.image_url && <img src={item.image_url} alt="" className="w-9 h-9 rounded-lg object-contain bg-surface-100 shrink-0 mt-0.5 border border-line" />}
                                                         <div>
                                                             <p className="font-semibold text-surface-900">{item.product_name}</p>
                                                             {item.variant_name && <p className="text-surface-400 mt-0.5">{item.variant_name}</p>}

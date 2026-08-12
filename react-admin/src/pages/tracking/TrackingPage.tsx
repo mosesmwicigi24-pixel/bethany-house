@@ -307,7 +307,7 @@ function AttachmentGallery({ attachments }: { attachments: GalleryAttachment[] }
                         className="w-14 h-14 rounded-lg overflow-hidden border border-surface-200 hover:border-info-400 transition-colors shrink-0"
                         title={a.name}
                     >
-                        <img src={a.url} alt={a.name} className="w-full h-full object-cover" loading="lazy" />
+                        <img src={a.url} alt={a.name} className="w-full h-full object-contain bg-surface-100" loading="lazy" />
                     </button>
                 ))}
                 {files.map((a, i) => (

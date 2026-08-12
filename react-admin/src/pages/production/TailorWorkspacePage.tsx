@@ -685,7 +685,7 @@ function CompletionScreen({
                                     <img
                                         src={nextGroup.imageUrl}
                                         alt={nextGroup.productName}
-                                        className="w-12 h-12 rounded-xl object-cover border border-brand-100 shrink-0"
+                                        className="w-12 h-12 rounded-xl object-contain bg-white border border-brand-100 shrink-0"
                                     />
                                 ) : (
                                     <div className="w-12 h-12 rounded-xl bg-brand-100 flex items-center justify-center shrink-0">
@@ -808,7 +808,7 @@ function FocusCard({
                         <img
                             src={group.imageUrl}
                             alt={group.productName}
-                            className="w-14 h-14 rounded-xl object-cover border border-line shrink-0"
+                            className="w-14 h-14 rounded-xl object-contain bg-surface-100 border border-line shrink-0"
                         />
                     ) : (
                         <div className="w-14 h-14 rounded-xl bg-surface-100 flex items-center justify-center shrink-0 text-surface-300">
@@ -1262,7 +1262,7 @@ function QueueOrderGroup({
                     <img
                         src={group.imageUrl}
                         alt={group.productName}
-                        className="w-10 h-10 rounded-lg object-cover border border-line shrink-0"
+                        className="w-10 h-10 rounded-lg object-contain bg-surface-100 border border-line shrink-0"
                     />
                 ) : (
                     <div className="w-10 h-10 rounded-lg bg-surface-100 flex items-center justify-center shrink-0 text-surface-300">

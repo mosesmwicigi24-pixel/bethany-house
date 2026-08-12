@@ -326,7 +326,7 @@ function SortableTreeNode({
                         <img
                             src={category.image_url}
                             alt=""
-                            className="w-full h-full object-cover"
+                            className="w-full h-full object-contain"
                         />
                     ) : category.icon ? (
                         <span>{category.icon}</span>
@@ -619,7 +619,7 @@ function DetailPanel({
                             <img
                                 src={category.image_url}
                                 alt={category.name_en}
-                                className="w-full h-full object-cover"
+                                className="w-full h-full object-contain"
                             />
                         ) : category.icon ? (
                             <span className="text-3xl">{category.icon}</span>

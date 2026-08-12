@@ -734,7 +734,7 @@ function TransferDetailModal({
                                             {item.product?.image_url && (
                                                 <img
                                                     src={item.product.image_url}
-                                                    className="w-7 h-7 rounded object-cover shrink-0"
+                                                    className="w-7 h-7 rounded object-contain bg-surface-100 shrink-0"
                                                     alt=""
                                                 />
                                             )}
