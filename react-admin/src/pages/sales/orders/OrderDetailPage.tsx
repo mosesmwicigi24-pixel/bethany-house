@@ -5,6 +5,7 @@ import { clsx } from "clsx";
 import { ordersApi } from "@/api/orders";
 import { get, post } from "@/api/client";
 import type { Order, OrderStatus, OrderPayment } from "@/api/orders";
+import { productsApi, type ProductListItem } from "@/api/products";
 import { shippingApi, paymentMethodsApi } from "@/api/setup";
 import type { ShippingMethod, PaymentMethodSetup } from "@/types/setup";
 import { useToastStore } from "@/store/toast.store";
@@ -190,6 +191,284 @@ function MoreActionsMenu({ items }: { items: MoreActionItem[] }) {
                 </div>
             )}
         </div>
+    );
+}
+
+// ── Line-item editing ─────────────────────────────────────────────────────────
+//
+// A staged edit of the order's lines. Nothing here computes money: the row
+// shows what the line WILL be, and every figure that follows from it — subtotal,
+// tax, total, balance — is redrawn from the server's response after Update.
+// See OrderLineEditor on the backend for why that is not negotiable.
+
+interface DraftLine {
+    /** Stable React key; survives re-ordering and un-saved rows. */
+    key:                 string;
+    /** Present for a line that already exists on the order. */
+    id?:                 number;
+    product_id?:         number;
+    product_variant_id?: number | null;
+    product_name:        string;
+    variant_name?:       string | null;
+    sku?:                string | null;
+    quantity:            number;
+    unit_price:          number;
+    discount_amount:     number;
+    /** Percentage, display only — the server recomputes the actual tax. */
+    tax_rate?:           number;
+    production_order_id?: number | null;
+    isNew?:              boolean;
+}
+
+const toDraftLine = (item: any): DraftLine => ({
+    key:                 `existing-${item.id}`,
+    id:                  item.id,
+    product_id:          item.product_id,
+    product_variant_id:  item.product_variant_id ?? null,
+    product_name:        item.product_name,
+    variant_name:        item.variant_name,
+    sku:                 item.sku,
+    quantity:            Number(item.quantity ?? 1),
+    unit_price:          Number(item.unit_price ?? 0),
+    discount_amount:     Number(item.discount_amount ?? 0),
+    tax_rate:            Number(item.tax_rate ?? 0),
+    production_order_id: item.production_order_id ?? null,
+});
+
+/** Net-of-discount value of a staged line, before tax. Preview only. */
+const draftLineNet = (l: DraftLine) => l.unit_price * l.quantity - l.discount_amount;
+
+/** The ⋯ menu on a line: Edit and Delete. */
+function LineActionsMenu({ onEdit, onDelete, disabled, disabledHint }: {
+    onEdit: () => void; onDelete: () => void; disabled?: boolean; disabledHint?: string;
+}) {
+    const [open, setOpen] = useState(false);
+    const ref = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, []);
+
+    return (
+        <div className="relative" ref={ref}>
+            <button
+                onClick={() => setOpen(v => !v)}
+                disabled={disabled}
+                title={disabled ? disabledHint : "Line actions"}
+                aria-label="Line actions"
+                className={clsx(
+                    "w-6 h-6 rounded-md flex items-center justify-center transition-colors",
+                    disabled
+                        ? "text-surface-200 cursor-not-allowed"
+                        : "text-surface-400 hover:text-surface-700 hover:bg-surface-100",
+                    open && "bg-surface-100 text-surface-700",
+                )}
+            >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <circle cx="10" cy="4" r="1.5" /><circle cx="10" cy="10" r="1.5" /><circle cx="10" cy="16" r="1.5" />
+                </svg>
+            </button>
+            {open && (
+                <div className="absolute right-0 top-full mt-1 z-50 w-36 bg-white rounded-lg shadow-lg border border-surface-200 py-1">
+                    <button
+                        onClick={() => { onEdit(); setOpen(false); }}
+                        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-surface-700 hover:bg-surface-50 text-left"
+                    >
+                        <svg className="w-3.5 h-3.5 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" /></svg>
+                        Edit
+                    </button>
+                    <button
+                        onClick={() => { onDelete(); setOpen(false); }}
+                        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger-light text-left"
+                    >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+                        Delete
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
+/**
+ * Product picker for "Add item". Uses the admin catalogue search (products.view)
+ * rather than the POS search, so line editing does not silently require POS
+ * access. Variable products ask for the variant before the line can be added.
+ */
+function AddItemModal({ currency, onAdd, onClose }: {
+    currency: string;
+    onAdd: (line: DraftLine) => void;
+    onClose: () => void;
+}) {
+    const [term, setTerm]       = useState("");
+    const [picked, setPicked]   = useState<ProductListItem | null>(null);
+    const [variantId, setVariantId] = useState<number | null>(null);
+    const [qty, setQty]         = useState(1);
+    const [price, setPrice]     = useState("");
+
+    const results = useQuery({
+        queryKey: ["order-line-product-search", term],
+        queryFn:  () => productsApi.search(term, 20),
+        enabled:  term.trim().length >= 2,
+    });
+
+    // A variable product's variants (and their prices) only come with the
+    // full record, so fetch it once the operator picks one.
+    const detail = useQuery({
+        queryKey: ["order-line-product", picked?.id],
+        queryFn:  () => productsApi.get(picked!.id),
+        enabled:  !!picked && (picked.variants_count ?? 0) > 0,
+    });
+
+    const variants = detail.data?.product?.variants ?? [];
+    const variant  = variants.find(v => v.id === variantId) ?? null;
+
+    const suggestedPrice =
+        (variant?.prices?.find(p => p.currency_code === currency)?.regular_price
+            ?? variant?.prices?.[0]?.regular_price
+            ?? picked?.base_price?.regular_price
+            ?? 0);
+
+    const needsVariant = !!picked && (picked.variants_count ?? 0) > 0;
+    const ready        = !!picked && (!needsVariant || !!variantId) && qty >= 1;
+
+    const choose = (p: ProductListItem) => {
+        setPicked(p);
+        setVariantId(null);
+        setPrice(String(p.base_price?.regular_price ?? ""));
+    };
+
+    return (
+        <Modal open title="Add an item" onClose={onClose} size="lg">
+            <div className="space-y-4">
+                {!picked ? (
+                    <>
+                        <input
+                            autoFocus
+                            value={term}
+                            onChange={e => setTerm(e.target.value)}
+                            placeholder="Search the catalogue by name or SKU…"
+                            className="w-full text-sm border border-line rounded-lg px-3 py-2 focus:outline-none focus:border-brand-500"
+                        />
+                        <div className="max-h-72 overflow-y-auto rounded-lg border border-line divide-y divide-line">
+                            {term.trim().length < 2 && (
+                                <p className="text-xs text-surface-400 p-4 text-center">Type at least two characters.</p>
+                            )}
+                            {results.isFetching && <p className="text-xs text-surface-400 p-4 text-center">Searching…</p>}
+                            {!results.isFetching && term.trim().length >= 2 && (results.data?.data ?? []).length === 0 && (
+                                <p className="text-xs text-surface-400 p-4 text-center">Nothing matched.</p>
+                            )}
+                            {(results.data?.data ?? []).map(p => (
+                                <button
+                                    key={p.id}
+                                    onClick={() => choose(p)}
+                                    className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-surface-50 text-left"
+                                >
+                                    {p.primary_image?.image_url && (
+                                        <img src={p.primary_image.image_url} alt="" className="w-9 h-9 rounded-lg object-contain bg-surface-100 border border-line shrink-0" />
+                                    )}
+                                    <span className="min-w-0 flex-1">
+                                        <span className="block text-xs font-semibold text-surface-900 truncate">
+                                            {p.en_translation?.name ?? p.sku}
+                                        </span>
+                                        <span className="block text-2xs text-surface-400 font-mono">{p.sku}</span>
+                                    </span>
+                                    <span className="text-xs tabular-nums text-surface-600 shrink-0">
+                                        {p.base_price ? fmt(p.base_price.regular_price, "") : "—"}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                    </>
+                ) : (
+                    <>
+                        <div className="flex items-center justify-between rounded-lg bg-surface-50 border border-line px-3 py-2">
+                            <div className="min-w-0">
+                                <p className="text-xs font-semibold text-surface-900 truncate">{picked.en_translation?.name ?? picked.sku}</p>
+                                <p className="text-2xs text-surface-400 font-mono">{picked.sku}</p>
+                            </div>
+                            <button onClick={() => setPicked(null)} className="text-2xs text-brand-600 hover:underline shrink-0 ml-3">change</button>
+                        </div>
+
+                        {needsVariant && (
+                            <label className="block">
+                                <span className="text-2xs font-bold text-surface-500 uppercase tracking-widest">Variant</span>
+                                <select
+                                    value={variantId ?? ""}
+                                    onChange={e => {
+                                        const id = e.target.value ? Number(e.target.value) : null;
+                                        setVariantId(id);
+                                        const v = variants.find(x => x.id === id);
+                                        const p = v?.prices?.find(pp => pp.currency_code === currency)?.regular_price
+                                            ?? v?.prices?.[0]?.regular_price;
+                                        if (p != null) setPrice(String(p));
+                                    }}
+                                    className="mt-1 w-full text-sm border border-line rounded-lg px-3 py-2 focus:outline-none focus:border-brand-500"
+                                >
+                                    <option value="">{detail.isFetching ? "Loading variants…" : "Choose a variant"}</option>
+                                    {variants.map(v => (
+                                        <option key={v.id} value={v.id}>{v.variant_name} · {v.sku}</option>
+                                    ))}
+                                </select>
+                            </label>
+                        )}
+
+                        <div className="grid grid-cols-2 gap-3">
+                            <label className="block">
+                                <span className="text-2xs font-bold text-surface-500 uppercase tracking-widest">Quantity</span>
+                                <input
+                                    type="number" min={1} step={1} value={qty}
+                                    onChange={e => setQty(Math.max(1, Number(e.target.value) || 1))}
+                                    className="mt-1 w-full text-sm border border-line rounded-lg px-3 py-2 text-right tabular-nums focus:outline-none focus:border-brand-500"
+                                />
+                            </label>
+                            <label className="block">
+                                <span className="text-2xs font-bold text-surface-500 uppercase tracking-widest">Unit price ({currency})</span>
+                                <input
+                                    type="number" min={0} step="0.01"
+                                    value={price} placeholder={String(suggestedPrice)}
+                                    onChange={e => setPrice(e.target.value)}
+                                    className="mt-1 w-full text-sm border border-line rounded-lg px-3 py-2 text-right tabular-nums focus:outline-none focus:border-brand-500"
+                                />
+                            </label>
+                        </div>
+                        <p className="text-2xs text-surface-400">
+                            Tax is applied by the server at this product's rate. The order total is recalculated when you press Update.
+                        </p>
+                    </>
+                )}
+            </div>
+
+            <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-line">
+                <button onClick={onClose} className="btn-secondary btn-sm">Cancel</button>
+                <button
+                    disabled={!ready}
+                    onClick={() => {
+                        if (!picked) return;
+                        onAdd({
+                            key:                `new-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                            product_id:         picked.id,
+                            product_variant_id: variantId,
+                            product_name:       picked.en_translation?.name ?? picked.sku,
+                            variant_name:       variant?.variant_name ?? null,
+                            sku:                variant?.sku ?? picked.sku,
+                            quantity:           qty,
+                            unit_price:         price === "" ? Number(suggestedPrice) : Number(price),
+                            discount_amount:    0,
+                            isNew:              true,
+                        });
+                        onClose();
+                    }}
+                    className="btn-primary btn-sm disabled:opacity-40"
+                >
+                    Add to order
+                </button>
+            </div>
+        </Modal>
     );
 }
 
@@ -3273,6 +3552,66 @@ export default function OrderDetailPage() {
         onError:   (e: any) => toast.error(e?.message ?? "Failed to update price"),
     });
 
+    // ── Line-item editing ─────────────────────────────────────────────────────
+    // Staged, never optimistic. Edits accumulate in `itemsDraft`; nothing is
+    // sent until Update, and the figures on screen after that come from the
+    // server's response, not from arithmetic done here. Money is the server's
+    // to compute — see OrderLineEditor.
+    const canEditItems = canDo("orders.edit_items")
+        && !["cancelled", "refunded", "voided"].includes(order?.status ?? "");
+    const [itemsDraft, setItemsDraft]     = useState<DraftLine[] | null>(null);
+    const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
+    const [showAddItem, setShowAddItem]   = useState(false);
+    const [itemsReason, setItemsReason]   = useState("");
+    // Set when the server asks for an explicit acknowledgement (paid / shipped).
+    const [itemsConfirm, setItemsConfirm] = useState<{ reason: string; message: string } | null>(null);
+    // An order can be BOTH paid and shipped, so the server refuses twice.
+    // Acknowledgements accumulate — confirming the second must not drop the first.
+    const [itemsConfirmed, setItemsConfirmed] = useState({ paid: false, shipped: false });
+    const [itemsResult, setItemsResult]   = useState<
+        Awaited<ReturnType<typeof ordersApi.updateItems>> | null
+    >(null);
+
+    const beginDraft = (): DraftLine[] =>
+        itemsDraft ?? (order?.items ?? []).map(toDraftLine);
+
+    const updateItemsMutation = useMutation({
+        mutationFn: (confirm?: { paid?: boolean; shipped?: boolean }) =>
+            ordersApi.updateItems(order!.id, {
+                items: (itemsDraft ?? []).map((l) => ({
+                    ...(l.id ? { id: l.id } : {
+                        product_id:         l.product_id,
+                        product_variant_id: l.product_variant_id ?? null,
+                    }),
+                    quantity:        l.quantity,
+                    unit_price:      l.unit_price,
+                    discount_amount: l.discount_amount,
+                })),
+                ...(itemsReason.trim() ? { reason: itemsReason.trim() } : {}),
+                ...(confirm?.paid    ? { confirm_paid_change: true }    : {}),
+                ...(confirm?.shipped ? { confirm_shipped_change: true } : {}),
+            }),
+        onSuccess: (res) => {
+            setItemsDraft(null);
+            setEditingLineKey(null);
+            setItemsReason("");
+            setItemsConfirm(null);
+            setItemsConfirmed({ paid: false, shipped: false });
+            setItemsResult(res);
+            toast.success(res.message);
+            refresh();
+        },
+        onError: (e: ApiError) => {
+            // Two of the refusals are "are you sure?", not "no". Surface the
+            // confirmation instead of a red toast the operator can't act on.
+            if (e.reason === "confirm_paid_change" || e.reason === "confirm_shipped_change") {
+                setItemsConfirm({ reason: e.reason, message: e.message });
+                return;
+            }
+            toast.error(e.message);
+        },
+    });
+
     const noteMutation = useMutation({
         mutationFn: () => ordersApi.addNote(order!.id, { note: noteText, is_internal: noteInternal }),
         onSuccess:  () => { toast.success("Note added"); setNoteText(""); refresh(); },
@@ -3738,6 +4077,15 @@ export default function OrderDetailPage() {
                                     <svg className="w-3.5 h-3.5 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z"/></svg>
                                 </div>
                                 <p className="text-xs font-bold text-surface-700 uppercase tracking-widest">Items</p>
+                                {canEditItems && (
+                                    <button
+                                        onClick={() => { setItemsDraft(beginDraft()); setShowAddItem(true); }}
+                                        className="ml-auto inline-flex items-center gap-1 text-2xs font-semibold text-brand-600 hover:text-white hover:bg-brand-600 border border-brand-300 rounded-full px-2.5 py-1 transition-colors"
+                                    >
+                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
+                                        Add
+                                    </button>
+                                )}
                             </div>
                             <div className="rounded-xl border border-line overflow-hidden">
                                 <div className="overflow-x-auto">
@@ -3750,8 +4098,13 @@ export default function OrderDetailPage() {
                                             <th className="text-right px-4 py-2.5 font-semibold text-surface-500 w-14">Tax</th>
                                             <th className="text-right px-4 py-2.5 font-semibold text-surface-500 w-24">Unit</th>
                                             <th className="text-right px-4 py-2.5 font-semibold text-surface-500 w-24">Total</th>
+                                            {canEditItems && <th className="px-2 py-2.5 w-8" aria-label="Actions" />}
                                         </tr>
                                     </thead>
+                                    {/* Read mode. As soon as anything is staged the draft table
+                                        below takes over, so the operator only ever sees one
+                                        version of the truth at a time. */}
+                                    {!itemsDraft && (
                                     <tbody className="divide-y divide-line">
                                         {(order.items ?? []).map((item: any, i: number) => (
                                             <tr key={item.id ?? i} className="hover:bg-surface-50/50 transition-colors">
@@ -3846,12 +4199,186 @@ export default function OrderDetailPage() {
                                                 <td className="px-4 py-3 text-right font-bold text-surface-900 align-top tabular-nums">
                                                     {fmt((item.unit_price ?? 0) * (item.quantity ?? 1) - (item.discount_amount ?? 0) + ((order.prices_include_tax ?? true) ? 0 : (item.tax_amount ?? 0)), "")}
                                                 </td>
+                                                {canEditItems && (
+                                                    <td className="px-2 py-3 align-top">
+                                                        <LineActionsMenu
+                                                            disabled={!!item.production_order_id}
+                                                            disabledHint="This line is in production — amend the production order instead."
+                                                            onEdit={() => {
+                                                                setItemsDraft(beginDraft());
+                                                                setEditingLineKey(`existing-${item.id}`);
+                                                            }}
+                                                            onDelete={() =>
+                                                                setItemsDraft(beginDraft().filter(l => l.id !== item.id))
+                                                            }
+                                                        />
+                                                    </td>
+                                                )}
                                             </tr>
                                         ))}
                                     </tbody>
+                                    )}
+
+                                    {/* Staged edits. Quantities, prices and discounts are inputs
+                                        here; the money column is a PREVIEW of the line's own net
+                                        value, never the order total — that comes back from the
+                                        server when Update is pressed. */}
+                                    {itemsDraft && (
+                                    <tbody className="divide-y divide-line">
+                                        {itemsDraft.map((l, i) => {
+                                            const editing = editingLineKey === l.key || l.isNew;
+                                            const set = (patch: Partial<DraftLine>) =>
+                                                setItemsDraft(d => (d ?? []).map(x => x.key === l.key ? { ...x, ...patch } : x));
+                                            return (
+                                                <tr key={l.key} className={clsx(l.isNew && "bg-success-50/40")}>
+                                                    <td className="px-4 py-3 text-surface-300 align-top">{i + 1}</td>
+                                                    <td className="px-4 py-3 align-top">
+                                                        <p className="font-semibold text-surface-900">{l.product_name}</p>
+                                                        {l.variant_name && <p className="text-surface-400 mt-0.5">{l.variant_name}</p>}
+                                                        {l.sku && <p className="text-surface-300 font-mono mt-0.5 text-2xs">SKU: {l.sku}</p>}
+                                                        {l.isNew && (
+                                                            <span className="inline-flex items-center mt-1 text-2xs font-bold text-success-dark bg-success-light px-1.5 py-0.5 rounded">NEW</span>
+                                                        )}
+                                                        {editing && (
+                                                            <label className="flex items-center gap-1.5 mt-2 text-2xs text-surface-500">
+                                                                Line discount
+                                                                <input
+                                                                    type="number" min={0} step="0.01" value={l.discount_amount}
+                                                                    onChange={e => set({ discount_amount: Math.max(0, Number(e.target.value) || 0) })}
+                                                                    className="w-24 border border-line rounded px-2 py-0.5 text-right tabular-nums focus:outline-none focus:border-brand-500"
+                                                                />
+                                                            </label>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right align-top tabular-nums">
+                                                        {editing ? (
+                                                            <input
+                                                                type="number" min={1} step={1} value={l.quantity}
+                                                                onChange={e => set({ quantity: Math.max(1, Number(e.target.value) || 1) })}
+                                                                className="w-14 text-xs border border-brand-300 bg-brand-50 rounded px-1.5 py-1 text-right tabular-nums focus:outline-none focus:border-brand-500"
+                                                            />
+                                                        ) : (
+                                                            <span className="text-surface-600 font-medium">{l.quantity}</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right align-top">
+                                                        {(l.tax_rate ?? 0) > 0
+                                                            ? <span className="text-2xs font-semibold text-surface-500 bg-surface-100 rounded-full px-2 py-0.5">{l.tax_rate}%</span>
+                                                            : <span className="text-2xs text-surface-200">—</span>}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right align-top">
+                                                        {editing ? (
+                                                            <input
+                                                                type="number" min={0} step="0.01" value={l.unit_price}
+                                                                onChange={e => set({ unit_price: Math.max(0, Number(e.target.value) || 0) })}
+                                                                className="w-24 text-xs border border-brand-300 bg-brand-50 rounded px-2 py-1 text-right tabular-nums focus:outline-none focus:border-brand-500"
+                                                            />
+                                                        ) : (
+                                                            <span className="tabular-nums text-surface-600">{fmt(l.unit_price, "")}</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right font-bold text-surface-900 align-top tabular-nums">
+                                                        {fmt(draftLineNet(l), "")}
+                                                    </td>
+                                                    <td className="px-2 py-3 align-top">
+                                                        <LineActionsMenu
+                                                            disabled={!!l.production_order_id}
+                                                            disabledHint="This line is in production — amend the production order instead."
+                                                            onEdit={() => setEditingLineKey(l.key)}
+                                                            onDelete={() => setItemsDraft(d => (d ?? []).filter(x => x.key !== l.key))}
+                                                        />
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                        {itemsDraft.length === 0 && (
+                                            <tr>
+                                                <td colSpan={7} className="px-4 py-6 text-center text-2xs text-surface-400">
+                                                    An order must keep at least one line. Void the order instead of emptying it.
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                    )}
                                 </table>
                                 </div>
+
+                                {/* Commit bar. Server-authoritative: pressing Update sends the
+                                    whole desired line set and the page redraws from the reply. */}
+                                {itemsDraft && (
+                                    <div className="border-t border-line bg-surface-50 px-4 py-3 space-y-2.5">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <button
+                                                onClick={() => setShowAddItem(true)}
+                                                className="inline-flex items-center gap-1 text-2xs font-semibold text-brand-600 hover:text-white hover:bg-brand-600 border border-brand-300 rounded-full px-2.5 py-1 transition-colors"
+                                            >
+                                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
+                                                Add another
+                                            </button>
+                                            <input
+                                                value={itemsReason}
+                                                onChange={e => setItemsReason(e.target.value)}
+                                                placeholder="Why is this changing? (recorded in the audit trail)"
+                                                className="flex-1 min-w-[200px] text-xs border border-line rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-brand-500"
+                                            />
+                                        </div>
+                                        <div className="flex items-center justify-between gap-3">
+                                            <p className="text-2xs text-surface-500">
+                                                Totals, tax, stock and the balance due are recalculated by the server when you press Update.
+                                            </p>
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <button
+                                                    onClick={() => {
+                                                        setItemsDraft(null); setEditingLineKey(null); setItemsReason("");
+                                                        setItemsConfirm(null); setItemsConfirmed({ paid: false, shipped: false });
+                                                    }}
+                                                    disabled={updateItemsMutation.isPending}
+                                                    className="btn-secondary btn-sm"
+                                                >
+                                                    Cancel
+                                                </button>
+                                                <button
+                                                    onClick={() => updateItemsMutation.mutate(itemsConfirmed)}
+                                                    disabled={updateItemsMutation.isPending || itemsDraft.length === 0}
+                                                    className="btn-primary btn-sm disabled:opacity-40"
+                                                >
+                                                    {updateItemsMutation.isPending ? "Updating…" : "Update"}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
+
+                            {/* What the server actually did — including a payment mismatch it
+                                wants a human to notice. Shown until the next edit. */}
+                            {itemsResult && !itemsDraft && (
+                                <div className={clsx(
+                                    "mt-3 rounded-xl border px-3 py-2.5 text-2xs",
+                                    itemsResult.overpaid > 0
+                                        ? "border-warning bg-warning-light text-warning-dark"
+                                        : "border-success-200 bg-success-50 text-success-700",
+                                )}>
+                                    <p className="font-bold">
+                                        {itemsResult.added} added · {itemsResult.updated} changed · {itemsResult.removed} removed
+                                    </p>
+                                    <p className="mt-0.5">
+                                        New total {fmt(itemsResult.total_amount, cc)} · paid {fmt(itemsResult.amount_paid, cc)}
+                                        {itemsResult.balance > 0 && <> · balance due {fmt(itemsResult.balance, cc)}</>}
+                                        {itemsResult.previous_payment_status !== itemsResult.payment_status && (
+                                            <> · payment status {itemsResult.previous_payment_status} → <strong>{itemsResult.payment_status}</strong></>
+                                        )}
+                                    </p>
+                                    {itemsResult.overpaid > 0 && (
+                                        <p className="mt-1 font-bold">
+                                            ⚠ {fmt(itemsResult.overpaid, cc)} has been collected above the new total — a refund is due.
+                                        </p>
+                                    )}
+                                    {itemsResult.discount_clamped && (
+                                        <p className="mt-1">The cart discount exceeded the new subtotal and was reduced to match it.</p>
+                                    )}
+                                </div>
+                            )}
                             {/* Totals */}
                             <div className="mt-4 flex justify-end">
                                 <div className="w-64 space-y-1.5 text-xs">
@@ -4289,6 +4816,50 @@ export default function OrderDetailPage() {
             {showPaymentModal  && <AddPaymentModal      order={order} onClose={() => setShowPaymentModal(false)}  onDone={refresh}    />}
             {showCustomerModal && <AttachCustomerModal  order={order} onClose={() => setShowCustomerModal(false)} onDone={refresh}    />}
             {productionItem && <RaiseProductionModal order={order} item={productionItem} onClose={() => setProductionItem(null)} onDone={refresh} />}
+
+            {showAddItem && (
+                <AddItemModal
+                    currency={cc}
+                    onClose={() => setShowAddItem(false)}
+                    onAdd={(line) => setItemsDraft(d => [...(d ?? beginDraft()), line])}
+                />
+            )}
+
+            {/* The server refused until a human acknowledges the consequence.
+                Re-sent verbatim with the flag it asked for — the confirmation is
+                an acknowledgement, not a different request. */}
+            {itemsConfirm && (
+                <Modal open title="Confirm this change" onClose={() => setItemsConfirm(null)} size="md">
+                    <div className="space-y-3">
+                        <div className="rounded-lg border border-warning bg-warning-light px-3 py-2.5 text-xs text-warning-dark">
+                            {itemsConfirm.message}
+                        </div>
+                        <p className="text-2xs text-surface-500">
+                            The order total will be recalculated and the payment status re-derived from what has
+                            actually been collected. Recorded payments are never altered — if the new total falls
+                            below what was paid, the difference is flagged as a refund due.
+                        </p>
+                    </div>
+                    <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-line">
+                        <button onClick={() => setItemsConfirm(null)} className="btn-secondary btn-sm">Cancel</button>
+                        <button
+                            disabled={updateItemsMutation.isPending}
+                            onClick={() => {
+                                const next = {
+                                    paid:    itemsConfirmed.paid    || itemsConfirm.reason === "confirm_paid_change",
+                                    shipped: itemsConfirmed.shipped || itemsConfirm.reason === "confirm_shipped_change",
+                                };
+                                setItemsConfirmed(next);
+                                setItemsConfirm(null);
+                                updateItemsMutation.mutate(next);
+                            }}
+                            className="btn-primary btn-sm disabled:opacity-40"
+                        >
+                            {updateItemsMutation.isPending ? "Updating…" : "Yes, update the order"}
+                        </button>
+                    </div>
+                </Modal>
+            )}
             {showAuditLog      && <OrderAuditLog        orderId={order.id}                                        onClose={() => setShowAuditLog(false)} />}
             {showReceiptModal  && <ReceiptModal         order={order} onClose={() => setShowReceiptModal(false)}                      />}
             {showShippingModal && <SetShippingFeeModal  order={order} onClose={() => setShowShippingModal(false)} onDone={refresh}    />}

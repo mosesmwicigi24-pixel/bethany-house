@@ -23,6 +23,16 @@ class PosInventoryService
     /** POS persists made-to-order lines with a `__MTO__` note prefix. */
     private static function isMto(object $item): bool
     {
+        return self::isMtoLine($item);
+    }
+
+    /**
+     * Public form of the same question, for callers outside this service that
+     * must make the identical "did this line ever come off a shelf?" decision
+     * (OrderLineEditor). One definition, so the two can never disagree.
+     */
+    public static function isMtoLine(object $item): bool
+    {
         return str_starts_with((string) ($item->notes ?? ''), '__MTO__');
     }
 

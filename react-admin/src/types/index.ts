@@ -87,6 +87,14 @@ export interface Outlet {
 export interface ApiError {
   message: string
   errors?: Record<string, string[]>
+  /**
+   * Machine-readable refusal code from the API, when it sends one. Several
+   * order endpoints already do — `overpayment`, `reduce_shipping_forbidden`,
+   * `already_in_production`, and the line editor's `confirm_paid_change` —
+   * and callers need it to tell "ask the user to confirm" apart from "this is
+   * never going to be allowed" without string-matching the message.
+   */
+  reason?: string
 }
 
 export interface PaginatedResponse<T> {
