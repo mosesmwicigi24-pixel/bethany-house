@@ -79,4 +79,13 @@ return [
         'events_secret' => env('NEEMA_EVENTS_SECRET'),
     ],
 
+    'storefront' => [
+        'url' => env('STOREFRONT_URL', 'https://bethanyhouse.co.ke'),
+        // Catalogue-changed ping → POST {url}/api/revalidate, HMAC-signed.
+        // Must match the storefront's STOREFRONT_REVALIDATE_SECRET.
+        // Unset ⇒ no ping is sent (the revalidator is inert) and the storefront
+        // falls back to its own 300s ISR window.
+        'revalidate_secret' => env('STOREFRONT_REVALIDATE_SECRET'),
+    ],
+
 ];
