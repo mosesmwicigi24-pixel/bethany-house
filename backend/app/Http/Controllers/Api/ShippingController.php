@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\ShippingMethod;
 use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -441,24 +442,23 @@ class ShippingController extends Controller
 
         $zone = DB::table('shipping_zones')->find($zoneId);
 
-        $methods = DB::table('shipping_methods')
-            ->where('shipping_zone_id', $zoneId)
+        // Quote from the model's own definition of the rate — the same one
+        // OrderController::checkout() charges from, so a customer is never
+        // billed something other than what this endpoint showed them.
+        $methods = ShippingMethod::where('shipping_zone_id', $zoneId)
             ->where('is_active', true)
             ->orderBy('sort_order')
             ->get();
 
+        $cartTotal = (float) ($validated['cart_total'] ?? 0);
+
         $available = [];
         foreach ($methods as $method) {
-            if ($method->min_order_amount && ($validated['cart_total'] ?? 0) < $method->min_order_amount) {
+            if (!$method->isAvailableForOrder($cartTotal)) {
                 continue;
             }
 
-            $cost = match ($method->cost_type) {
-                'free'       => 0,
-                'flat_rate'  => (float) $method->flat_rate,
-                'percentage' => round(($validated['cart_total'] ?? 0) * $method->flat_rate / 100, 2),
-                default      => (float) $method->flat_rate,
-            };
+            $cost = $method->calculateCost($cartTotal);
 
             $available[] = [
                 'id'            => $method->id,

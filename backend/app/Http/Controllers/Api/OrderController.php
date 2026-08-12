@@ -14,6 +14,7 @@ use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\ProductVariant;
 use App\Models\InventoryItem;
+use App\Models\ShippingMethod;
 use App\Services\TaxCalculationService;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
@@ -481,11 +482,29 @@ class OrderController extends Controller
             $taxInclusive = $taxCalc['tax_inclusive'];
 
             // ── Shipping cost ─────────────────────────────────────────────────
-            $shippingCost   = 0;
+            // Charge what the customer was quoted. This read
+            // $shippingMethod->base_rate — a column that exists nowhere in the
+            // schema, since shipping_methods holds cost_type + flat_rate — so it
+            // was always null and every online order shipped free, whatever the
+            // method said. Both the quote (ShippingController::rates) and the
+            // charge now come from ShippingMethod::calculateCost, so the two
+            // cannot drift apart, and min_order_amount gates the charge exactly
+            // as it gates the offer: a method below its floor was never on the
+            // menu, so it must not be billed either.
+            $shippingCost   = 0.0;
             $shippingMethod = null;
             if ($validated['delivery_method'] === 'delivery' && !empty($validated['shipping_method_id'])) {
-                $shippingMethod = DB::table('shipping_methods')->find($validated['shipping_method_id']);
-                $shippingCost   = $shippingMethod?->base_rate ?? 0;
+                $goodsTotal     = (float) $taxCalc['total_gross'];
+                $shippingMethod = ShippingMethod::find($validated['shipping_method_id']);
+
+                if (!$shippingMethod || !$shippingMethod->isAvailableForOrder($goodsTotal)) {
+                    DB::rollBack();
+                    return response()->json([
+                        'message' => 'That delivery option is not available for this order.',
+                    ], 422);
+                }
+
+                $shippingCost = $shippingMethod->calculateCost($goodsTotal);
             }
 
             $totalAmount = $taxCalc['total_gross'] + $shippingCost;

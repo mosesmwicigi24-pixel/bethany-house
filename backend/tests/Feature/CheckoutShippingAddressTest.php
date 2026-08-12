@@ -133,7 +133,7 @@ class CheckoutShippingAddressTest extends TestCase
         return DB::table('shipping_methods')->insertGetId([
             'shipping_zone_id' => $zoneId,
             'name'             => $name,
-            'cost_type'        => 'flat',
+            'cost_type'        => 'flat_rate',
             'flat_rate'        => 350,
             'is_active'        => true,
             'created_at'       => now(),
