@@ -181,13 +181,13 @@ class OrderLineEditingTest extends TestCase
 
         $res->assertOk();
         // 2×1000 + 3×500 = 3500 net, +16% = 4060 gross.
-        $this->assertEqualsWithDelta(3500.0, $res->json('subtotal'), 0.01);
-        $this->assertEqualsWithDelta(560.0, $res->json('tax_amount'), 0.01);
-        $this->assertEqualsWithDelta(4060.0, $res->json('total_amount'), 0.01);
+        $this->assertSame(3500.0, (float) $res->json('subtotal'));
+        $this->assertSame(560.0, (float) $res->json('tax_amount'));
+        $this->assertSame(4060.0, (float) $res->json('total_amount'));
 
         $fresh = $order->fresh();
-        $this->assertEqualsWithDelta(3500.0, (float) $fresh->subtotal, 0.01);
-        $this->assertEqualsWithDelta(4060.0, (float) $fresh->total_amount, 0.01);
+        $this->assertSame(3500.0, (float) $fresh->subtotal);
+        $this->assertSame(4060.0, (float) $fresh->total_amount);
         $this->assertSame(2, $fresh->items()->count());
     }
 
@@ -204,13 +204,13 @@ class OrderLineEditingTest extends TestCase
         ]]);
 
         $res->assertOk();
-        $this->assertEqualsWithDelta(5000.0, $res->json('subtotal'), 0.01);
-        $this->assertEqualsWithDelta(800.0, $res->json('tax_amount'), 0.01);
-        $this->assertEqualsWithDelta(5800.0, $res->json('total_amount'), 0.01);
+        $this->assertSame(5000.0, (float) $res->json('subtotal'));
+        $this->assertSame(800.0, (float) $res->json('tax_amount'));
+        $this->assertSame(5800.0, (float) $res->json('total_amount'));
 
         $fresh = $line->fresh();
         $this->assertSame(5, (int) $fresh->quantity);
-        $this->assertEqualsWithDelta(400.0, (float) $fresh->cost_price, 0.01);   // untouched
+        $this->assertSame(400.0, (float) $fresh->cost_price);   // untouched
         $this->assertSame('product_price', $fresh->cost_source);
     }
 
@@ -234,9 +234,9 @@ class OrderLineEditingTest extends TestCase
         ]]);
 
         $res->assertOk();
-        $this->assertEqualsWithDelta(500.0, $res->json('subtotal'), 0.01);
-        $this->assertEqualsWithDelta(80.0, $res->json('tax_amount'), 0.01);
-        $this->assertEqualsWithDelta(580.0, $res->json('total_amount'), 0.01);
+        $this->assertSame(500.0, (float) $res->json('subtotal'));
+        $this->assertSame(80.0, (float) $res->json('tax_amount'));
+        $this->assertSame(580.0, (float) $res->json('total_amount'));
         $this->assertDatabaseMissing('order_items', ['id' => $line->id]);
     }
 
@@ -254,9 +254,9 @@ class OrderLineEditingTest extends TestCase
 
         $res->assertOk();
         // Inclusive: the customer pays 2320; the 320 VAT is extracted, not added.
-        $this->assertEqualsWithDelta(2320.0, $res->json('subtotal'), 0.01);
-        $this->assertEqualsWithDelta(320.0, $res->json('tax_amount'), 0.01);
-        $this->assertEqualsWithDelta(2320.0, $res->json('total_amount'), 0.01);
+        $this->assertSame(2320.0, (float) $res->json('subtotal'));
+        $this->assertSame(320.0, (float) $res->json('tax_amount'));
+        $this->assertSame(2320.0, (float) $res->json('total_amount'));
     }
 
     public function test_the_orders_own_inclusive_flag_wins_over_the_current_setting(): void
@@ -274,7 +274,7 @@ class OrderLineEditingTest extends TestCase
         ]]);
 
         $res->assertOk();
-        $this->assertEqualsWithDelta(1160.0, $res->json('total_amount'), 0.01);
+        $this->assertSame(1160.0, (float) $res->json('total_amount'));
         $this->assertTrue((bool) $order->fresh()->prices_include_tax);
     }
 
@@ -297,10 +297,10 @@ class OrderLineEditingTest extends TestCase
         $res->assertOk();
         $res->assertJsonPath('previous_payment_status', 'paid');
         $res->assertJsonPath('payment_status', 'partial');
-        $this->assertEqualsWithDelta(3000.0, $res->json('total_amount'), 0.01);
-        $this->assertEqualsWithDelta(2000.0, $res->json('amount_paid'), 0.01);
-        $this->assertEqualsWithDelta(1000.0, $res->json('balance'), 0.01);
-        $this->assertEqualsWithDelta(0.0, $res->json('overpaid'), 0.01);
+        $this->assertSame(3000.0, (float) $res->json('total_amount'));
+        $this->assertSame(2000.0, (float) $res->json('amount_paid'));
+        $this->assertSame(1000.0, (float) $res->json('balance'));
+        $this->assertSame(0.0, (float) $res->json('overpaid'));
 
         // The money already collected is untouched.
         $this->assertSame(1, Payment::where('order_id', $order->id)->count());
@@ -323,8 +323,8 @@ class OrderLineEditingTest extends TestCase
 
         $res->assertOk();
         $res->assertJsonPath('payment_status', 'paid');       // nothing outstanding…
-        $this->assertEqualsWithDelta(2000.0, $res->json('overpaid'), 0.01);   // …but 2000 is owed back
-        $this->assertEqualsWithDelta(0.0, $res->json('balance'), 0.01);
+        $this->assertSame(2000.0, (float) $res->json('overpaid'));   // …but 2000 is owed back
+        $this->assertSame(0.0, (float) $res->json('balance'));
 
         // And it is written where staff will actually see it.
         $this->assertStringContainsString('REFUND DUE', (string) $order->fresh()->notes);
@@ -454,7 +454,7 @@ class OrderLineEditingTest extends TestCase
         // Whole transaction rolled back — the line and the shelf are as they were.
         $this->assertSame(2, (int) $line->fresh()->quantity);
         $this->assertSame(3, (int) $inv->fresh()->quantity_on_hand);
-        $this->assertEqualsWithDelta(2000.0, (float) $order->fresh()->subtotal, 0.01);
+        $this->assertSame(2000.0, (float) $order->fresh()->subtotal);
     }
 
     // ── COGS ──────────────────────────────────────────────────────────────────
@@ -518,7 +518,7 @@ class OrderLineEditingTest extends TestCase
         // But its price may still be corrected.
         $this->edit($order, ['items' => [['id' => $line->id, 'quantity' => 2, 'unit_price' => 1200]]])
             ->assertOk();
-        $this->assertEqualsWithDelta(1200.0, (float) $line->fresh()->unit_price, 0.01);
+        $this->assertSame(1200.0, (float) $line->fresh()->unit_price);
     }
 
     public function test_a_returned_line_cannot_be_removed(): void
@@ -583,10 +583,10 @@ class OrderLineEditingTest extends TestCase
         $this->assertCount(1, $props['updated']);
         $this->assertSame(2, $props['updated'][0]['from']['quantity']);
         $this->assertSame(4, $props['updated'][0]['to']['quantity']);
-        $this->assertEqualsWithDelta(1000.0, $props['updated'][0]['from']['unit_price'], 0.01);
-        $this->assertEqualsWithDelta(1100.0, $props['updated'][0]['to']['unit_price'], 0.01);
-        $this->assertEqualsWithDelta(2000.0, $props['old_subtotal'], 0.01);
-        $this->assertEqualsWithDelta(4900.0, $props['new_subtotal'], 0.01);
+        $this->assertSame(1000.0, (float) $props['updated'][0]['from']['unit_price']);
+        $this->assertSame(1100.0, (float) $props['updated'][0]['to']['unit_price']);
+        $this->assertSame(2000.0, (float) $props['old_subtotal']);
+        $this->assertSame(4900.0, (float) $props['new_subtotal']);
     }
 
     public function test_the_endpoint_is_gated_by_orders_edit_items(): void
