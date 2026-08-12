@@ -150,6 +150,9 @@ const ProductionOrderDetailPage = lazy(() => import("@/pages/production/Producti
 const TailorWorkspacePage = lazy(
     () => import("@/pages/production/TailorWorkspacePage"),
 );
+const TailorStationPage = lazy(
+    () => import("@/pages/production/TailorStationPage"),
+);
 const TrackingPage = lazy(() => import("@/pages/tracking/TrackingPage"));
 const PaymentLinkPage = lazy(() => import("@/pages/PaymentLinkPage"));
 const PublicQuotationPage = lazy(() => import("@/pages/PublicQuotationPage"));
@@ -687,6 +690,21 @@ export default function App() {
                                 <ProtectedRoute permission="production.worker">
                                 <Suspense fallback={<PageLoader />}>
                                     <TailorWorkspacePage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        {/* Ledger-backed station screen. Strangler pattern:
+                            the page above stays reachable and untouched until
+                            the tailor_ledger_ui flag retires, so turning the
+                            flag off returns a station to it in one release
+                            with no data loss. */}
+                        <Route
+                            path="/production/station/:stageCode"
+                            element={
+                                <ProtectedRoute permission="production.worker">
+                                <Suspense fallback={<PageLoader />}>
+                                    <TailorStationPage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }
