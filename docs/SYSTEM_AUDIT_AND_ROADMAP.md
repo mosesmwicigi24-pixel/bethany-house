@@ -100,7 +100,7 @@ integrity/logic defect from this audit.
 | Shipments / shipping | ✅ | — | ⚠️ | `sort_by` SQLi in list; otherwise solid |
 | Customers | ✅ | ✅ | ✅ | — |
 | Products / catalogue | ✅ | ✅ | ✅ | Variants, images, translations, reviews |
-| Reports | ✅ | ✅ | ⚠️ | `ReportController` + `EnhancedReportController` overlap; unbounded queries; CSV export dead client-side |
+| Reports | ✅ | ✅ | ⚠️ | Enhanced/Report overlap cut to 3 methods (Q-4); unbounded queries; CSV export dead client-side |
 | Settings / i18n / tax | ✅ | ✅ | ✅ | DB-driven config |
 | Chat / channels (Reverb) | ✅ | ✅ | ✅ | Real-time staff comms |
 | CMS (content pages) | ✅ | — | ✅ | — |
@@ -209,7 +209,18 @@ below; the load-bearing ones are called out here with root cause.
   or freeze it.
 - **Q-3 (MED): Malformed migration timestamps** `2026_15_06_*`, `2026_16_06_*` (×3) sort after `2026_06_24`
   → run last on a fresh DB; ordering hazard that won't reproduce on the already-migrated prod box.
-- **Q-4 (MED): Duplicated reporting** (`ReportController` vs `EnhancedReportController`, both routed).
+- **Q-4 (MED, mostly resolved): Duplicated reporting** (`ReportController` vs `EnhancedReportController`).
+  The overlap was never two live implementations competing — it was one live class and one mostly-dead one.
+  16 of `EnhancedReportController`'s 19 public methods were routed nowhere (their only mount was the stale
+  `routes/routes/` tree deleted in #267) while each advertised a `GET /api/v1/admin/reports/...` URL that
+  404'd or was actually served by `ReportController`. All 16 are deleted; `ReportController::inventoryValuation`
+  — dead in the other direction, since `/inventory/valuation` resolves to the Enhanced one — went with them.
+  `tests/Feature/ReportRoutingTest.php` now fails if any report action is unroutable or documents a URL that
+  does not reach it.
+  **Remaining:** fold the last three (`inventoryValuation`, `taxReport`, `cashFlow`) into `ReportController`
+  and retire the class. Blocked on a deliberate decision, not effort: the two classes default to different
+  reporting windows — Enhanced to the current calendar month, `ReportController::dateRange()` to the trailing
+  30 days — so moving them changes what these three reports return for any caller that omits `start_date`.
 - **Q-5 (MED): CSV export dead across all reports** — `ExportCsvButton` stubbed to `return null` pending an
   nginx `Authorization`-forwarding fix; backend export endpoints exist but are UI-unreachable.
 - **Q-6 (LOW): Committed cruft** — `routes/routes/*` stale duplicate (895 vs 1425 lines), `test_backup.php`
