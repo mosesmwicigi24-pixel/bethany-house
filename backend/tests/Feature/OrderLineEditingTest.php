@@ -439,6 +439,35 @@ class OrderLineEditingTest extends TestCase
         $this->assertSame(0, (int) $inv->quantity_reserved);
     }
 
+    public function test_the_flags_are_the_only_authority_on_whether_stock_moved(): void
+    {
+        // stockMode() used to fall back to the ledger when all three flags were
+        // silent, because checkout() deducted stock and stamped nothing. Every
+        // writer stamps now and the two 2026_08_12 migrations repaired the orders
+        // that were already wrong, so a flagless order draws nothing — even with
+        // a 'sale' row of some other provenance pointing at it.
+        $this->actAsEditor();
+        $shirt = $this->product('Cassock', 1000, 400, onHand: 50);
+        [$order, $line] = $this->orderWithLine($shirt, 4, 1000);   // no stock flags
+
+        DB::table('inventory_transactions')->insert([
+            'inventory_item_id' => $this->inventoryFor($shirt)->id,
+            'transaction_type'  => 'sale',
+            'reference_type'    => Order::class,
+            'reference_id'      => $order->id,
+            'quantity_change'   => -4,
+            'quantity_before'   => 50,
+            'quantity_after'    => 50,
+            'created_at'        => now(),
+        ]);
+
+        $this->edit($order, ['items' => [['id' => $line->id, 'quantity' => 9]]])->assertOk();
+
+        $inv = $this->inventoryFor($shirt)->fresh();
+        $this->assertSame(50, (int) $inv->quantity_on_hand);
+        $this->assertSame(0, (int) $inv->quantity_reserved);
+    }
+
     public function test_insufficient_stock_is_refused_and_nothing_changes(): void
     {
         $this->actAsEditor();
