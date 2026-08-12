@@ -1014,7 +1014,12 @@ function ProductCard({
                         alt={product.name}
                         loading="lazy"
                         onError={() => setImgError(true)}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        // object-contain, not cover: most stock is portrait
+                        // (bottles, gowns, croziers) and cropping the ends makes
+                        // items hard to tell apart at a glance mid-sale. The tile's
+                        // gradient shows through the letterbox; p-2 keeps the
+                        // product off the edges. Hover zoom still applies.
+                        className="w-full h-full object-contain p-2 group-hover:scale-105 transition-transform duration-300"
                     />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center opacity-30">
