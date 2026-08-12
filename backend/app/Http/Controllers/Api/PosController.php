@@ -18,6 +18,7 @@ use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Services\ActivityLogService;
 use App\Services\ProductSerialService;
+use App\Services\OrderTotals;
 use App\Services\PosInventoryService;
 use App\Services\TaxCalculationService;
 use App\Services\NotificationService;
@@ -794,11 +795,7 @@ class PosController extends Controller
                 $lineBase     = $item['unit_price'] * $item['quantity'];
                 $discType     = $item['discount_type'] ?? 'none';
                 $discVal      = (float) ($item['discount_value'] ?? 0);
-                $lineDiscount = match ($discType) {
-                    'flat'    => min($discVal, $lineBase),
-                    'percent' => ($lineBase * $discVal) / 100,
-                    default   => 0.0,
-                };
+                $lineDiscount = OrderTotals::resolveDiscount($discType, $discVal, $lineBase);
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -842,16 +839,15 @@ class PosController extends Controller
             // -- 2. Cart-level discount & totals -------------------------------
             $cartDiscType = $validated['cart_discount_type'] ?? 'none';
             $cartDiscVal  = (float) ($validated['cart_discount_value'] ?? 0);
-            $cartDiscount = match ($cartDiscType) {
-                'flat'    => min($cartDiscVal, $itemSubtotal),
-                'percent' => ($itemSubtotal * $cartDiscVal) / 100,
-                default   => 0.0,
-            };
+            $cartDiscount = OrderTotals::resolveDiscount($cartDiscType, $cartDiscVal, $itemSubtotal);
 
-            $afterDiscount = $itemSubtotal - $cartDiscount;
-            // Phase 2 — total tax is sum of per-line taxes already calculated above
-            $taxAmount   = round(collect($itemsData)->sum('tax_amount'), 2);
-            $totalAmount = round($afterDiscount + ($taxInclusive ? 0 : $taxAmount), 2);
+            // Phase 2 — total tax is sum of per-line taxes already calculated above.
+            // This is the goods total, derived BEFORE the shipping charge is read,
+            // because it is what the tender is sized against a few lines down.
+            $rawTax      = collect($itemsData)->sum('tax_amount');
+            $totalAmount = OrderTotals::fromParts(
+                $itemSubtotal, $rawTax, $taxInclusive, $cartDiscount,
+            )->total;
 
             // Fill in amount for single-payment backwards-compat
             if (count($paymentsInput) === 1 && $paymentsInput[0]['amount'] === null) {
@@ -949,15 +945,12 @@ class PosController extends Controller
                 'currency_code'        => $currencyCode,
                 'customer_country_code' => $customerCountryCode ?: null,
                 'is_international'     => $isInternational,
-                'subtotal'             => round($itemSubtotal, 2),
-                'discount_amount'      => round($cartDiscount, 2),
+                ...OrderTotals::fromParts(
+                    $itemSubtotal, $rawTax, $taxInclusive, $cartDiscount, $shippingAmt,
+                )->columns(),
                 // FIX 2: persist raw cart discount type + value for lossless restore
                 'cart_discount_type'   => $cartDiscType,
                 'cart_discount_value'  => $cartDiscVal,
-                'tax_amount'           => $taxAmount,
-                'prices_include_tax'   => $taxInclusive,
-                'shipping_amount'      => $shippingAmt,
-                'total_amount'         => round($afterDiscount + ($taxInclusive ? 0 : $taxAmount) + $shippingAmt, 2),
                 // FIX 3: persist customer FK so restore can re-link the record
                 'customer_id'          => $customerId,
                 'customer_first_name'  => $validated['customer_first_name'] ?? null,
@@ -3135,11 +3128,7 @@ class PosController extends Controller
                 $lineBase     = $item['unit_price'] * $item['quantity'];
                 $discType     = $item['discount_type'] ?? 'none';
                 $discVal      = (float)($item['discount_value'] ?? 0);
-                $lineDiscount = match($discType) {
-                    'flat'    => min($discVal, $lineBase),
-                    'percent' => ($lineBase * $discVal) / 100,
-                    default   => 0.0,
-                };
+                $lineDiscount = OrderTotals::resolveDiscount($discType, $discVal, $lineBase);
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -3233,15 +3222,16 @@ class PosController extends Controller
             // ── 4. Recalculate totals ─────────────────────────────────────────
             $cartDiscType = $validated['cart_discount_type'] ?? 'none';
             $cartDiscVal  = (float)($validated['cart_discount_value'] ?? 0);
-            $cartDiscount = match($cartDiscType) {
-                'flat'    => min($cartDiscVal, $itemSubtotal),
-                'percent' => ($itemSubtotal * $cartDiscVal) / 100,
-                default   => 0.0,
-            };
-            $afterDiscount = $itemSubtotal - $cartDiscount;
-            $taxAmount     = round(collect($itemsData)->sum('tax_amount'), 2);
-            $shippingAmt   = round((float)($validated['shipping_amount'] ?? 0), 2);
-            $totalAmount   = round($afterDiscount + ($taxInclusive ? 0 : $taxAmount) + $shippingAmt, 2);
+            $cartDiscount = OrderTotals::resolveDiscount($cartDiscType, $cartDiscVal, $itemSubtotal);
+            $shippingAmt  = round((float)($validated['shipping_amount'] ?? 0), 2);
+            $totals       = OrderTotals::fromParts(
+                $itemSubtotal,
+                collect($itemsData)->sum('tax_amount'),
+                $taxInclusive,
+                $cartDiscount,
+                $shippingAmt,
+            );
+            $totalAmount  = $totals->total;
 
             // ── 5. Customer resolution ────────────────────────────────────────
             $customerId   = $validated['customer_id'] ?? null;
@@ -3268,15 +3258,10 @@ class PosController extends Controller
                 'currency_code'       => $resolvedCurrency,
                 'customer_country_code' => $customerCountryCode ?: $order->customer_country_code,
                 'is_international'    => $customerCountryCode !== '' ? $isInternational : $order->is_international,
-                'subtotal'            => round($itemSubtotal, 2),
-                'discount_amount'     => round($cartDiscount, 2),
+                ...$totals->columns(),
                 // FIX 2: persist raw cart discount type + value for lossless restore
                 'cart_discount_type'  => $cartDiscType,
                 'cart_discount_value' => $cartDiscVal,
-                'tax_amount'          => $taxAmount,
-                'prices_include_tax'  => $taxInclusive,
-                'shipping_amount'     => $shippingAmt,
-                'total_amount'        => $totalAmount,
                 'user_id'             => $linkedUserId ?? $order->user_id,
                 // FIX 3: persist customer FK so restore can re-link the record
                 'customer_id'         => $customerId ?? $order->customer_id,
@@ -3524,11 +3509,7 @@ class PosController extends Controller
                 $lineBase     = $item['unit_price'] * $item['quantity'];
                 $discType     = $item['discount_type'] ?? 'none';
                 $discVal      = (float)($item['discount_value'] ?? 0);
-                $lineDiscount = match ($discType) {
-                    'flat'    => min($discVal, $lineBase),
-                    'percent' => ($lineBase * $discVal) / 100,
-                    default   => 0.0,
-                };
+                $lineDiscount = OrderTotals::resolveDiscount($discType, $discVal, $lineBase);
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -3621,17 +3602,18 @@ class PosController extends Controller
 
             $cartDiscType = $validated['cart_discount_type'] ?? 'none';
             $cartDiscVal  = (float)($validated['cart_discount_value'] ?? 0);
-            $cartDiscount = match ($cartDiscType) {
-                'flat'    => min($cartDiscVal, $itemSubtotal),
-                'percent' => ($itemSubtotal * $cartDiscVal) / 100,
-                default   => 0.0,
-            };
-            $afterDiscount = $itemSubtotal - $cartDiscount;
-            $taxAmount     = round(collect($itemsData)->sum('tax_amount'), 2);
-            $shippingAmt   = round((float)($validated['shipping_amount'] ?? 0), 2);
-            $totalAmount   = round($afterDiscount + ($taxInclusive ? 0 : $taxAmount) + $shippingAmt, 2);
-            $isDeposit     = !empty($validated['is_deposit']);
-            $depositAmt    = $isDeposit ? round((float)($validated['deposit_amount'] ?? 0), 2) : null;
+            $cartDiscount = OrderTotals::resolveDiscount($cartDiscType, $cartDiscVal, $itemSubtotal);
+            $shippingAmt  = round((float)($validated['shipping_amount'] ?? 0), 2);
+            $totals       = OrderTotals::fromParts(
+                $itemSubtotal,
+                collect($itemsData)->sum('tax_amount'),
+                $taxInclusive,
+                $cartDiscount,
+                $shippingAmt,
+            );
+            $totalAmount  = $totals->total;
+            $isDeposit    = !empty($validated['is_deposit']);
+            $depositAmt   = $isDeposit ? round((float)($validated['deposit_amount'] ?? 0), 2) : null;
 
             $customerId   = $validated['customer_id'] ?? null;
             $linkedUserId = null;
@@ -3675,15 +3657,10 @@ class PosController extends Controller
                 'currency_code'       => $currencyCode,
                 'customer_country_code' => $customerCountryCode ?: null,
                 'is_international'    => $isInternational,
-                'subtotal'            => round($itemSubtotal, 2),
-                'discount_amount'     => round($cartDiscount, 2),
+                ...$totals->columns(),
                 // FIX 2: persist raw cart discount type + value for lossless restore
                 'cart_discount_type'  => $cartDiscType,
                 'cart_discount_value' => $cartDiscVal,
-                'tax_amount'          => $taxAmount,
-                'prices_include_tax'  => $taxInclusive,
-                'shipping_amount'     => $shippingAmt,
-                'total_amount'        => $totalAmount,
                 // FIX 3: persist customer FK so restore can re-link the record
                 'customer_id'         => $customerId,
                 'customer_first_name' => $validated['customer_first_name'] ?? null,
