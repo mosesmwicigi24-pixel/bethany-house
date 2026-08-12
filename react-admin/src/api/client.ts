@@ -88,6 +88,7 @@ function createApiClient(): AxiosInstance {
                 return Promise.reject({
                     message: data.message ?? "Validation failed.",
                     errors: data.errors,
+                    reason: data.reason,
                 } satisfies ApiError);
             }
 
@@ -99,9 +100,13 @@ function createApiClient(): AxiosInstance {
                 } satisfies ApiError);
             }
 
+            // Carry the API's `reason` code through. Several endpoints refuse
+            // with {message, reason} and no `errors` bag; without this the
+            // caller only ever saw the prose and had to guess what happened.
             return Promise.reject({
                 message: data?.message ?? "An unexpected error occurred.",
                 errors: data?.errors ?? {},
+                reason: data?.reason,
             } satisfies ApiError);
         },
     );

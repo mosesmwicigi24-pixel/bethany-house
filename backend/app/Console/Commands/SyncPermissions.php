@@ -37,6 +37,7 @@ class SyncPermissions extends Command
         'orders.view'              => ['View Orders',              'List and view order details',                'Orders'],
         'orders.create'            => ['Create Orders',            'Place new orders (admin side)',              'Orders'],
         'orders.edit'              => ['Edit Orders',              'Edit order details and status',              'Orders'],
+        'orders.edit_items'        => ['Edit Order Line Items',    'Add, change or remove the products on an existing order — including one that has already been paid (administrator only)', 'Orders'],
         'orders.cancel'            => ['Cancel Orders',            'Cancel unpaid/pending orders',               'Orders'],
         'orders.refund'            => ['Refund Orders',            'Process full or partial refunds',            'Orders'],
         'orders.set_shipping_fee'  => ['Set Shipping Fee',         'Add or raise the shipping charge on an order (allowed after payment)', 'Orders'],

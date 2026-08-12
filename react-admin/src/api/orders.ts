@@ -353,6 +353,56 @@ export const ordersApi = {
             order_subtotal: number;
         }>(`/v1/admin/orders/${orderId}/items/${itemId}/price`, { unit_price: newPrice }),
 
+    /**
+     * Replace the order's whole line set in one atomic server-side operation.
+     *
+     * Send the lines you want to END UP with: existing lines by `id` (with the
+     * quantity / price / discount you want them to have), new lines without an
+     * `id`, and simply omit anything you are removing. Anything downstream of a
+     * line — subtotal, tax, total, payment status, stock, COGS — is recomputed
+     * by the server; nothing here sends a total, and the response is the only
+     * source of truth for what the figures became.
+     *
+     * A 422 carries a `reason`: `confirm_paid_change` / `confirm_shipped_change`
+     * mean "re-send with the matching flag"; anything else is a hard refusal.
+     */
+    updateItems: (
+        id: number,
+        data: {
+            items: {
+                id?:                 number;
+                product_id?:         number;
+                product_variant_id?: number | null;
+                quantity:            number;
+                unit_price?:         number;
+                discount_amount?:    number;
+            }[];
+            reason?:                 string;
+            confirm_paid_change?:    boolean;
+            confirm_shipped_change?: boolean;
+        },
+    ) =>
+        put<{
+            message:          string;
+            subtotal:         number;
+            discount_amount:  number;
+            discount_clamped: boolean;
+            tax_amount:       number;
+            shipping_amount:  number;
+            total_amount:     number;
+            amount_paid:      number;
+            balance:          number;
+            /** > 0 means the customer has paid more than the order is now worth. */
+            overpaid:         number;
+            previous_payment_status: PaymentStatus;
+            payment_status:   PaymentStatus;
+            stock_mode:       "committed" | "reserved" | "none";
+            added:            number;
+            updated:          number;
+            removed:          number;
+            order:            Order | null;
+        }>(`/v1/admin/orders/${id}/items`, data),
+
     /** Raise a Made-to-Order production order for one line + capture its details. */
     raiseItemProduction: (orderId: number, itemId: number, data: {
         measurements?: Record<string, string>;

@@ -583,6 +583,13 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:orders.set_shipping_fee,sanctum');
                 Route::patch('/{id}/items/{itemId}/price', [OrderController::class, 'adjustItemPrice'])
                     ->middleware('permission:orders.edit,sanctum');
+                // Add / edit / remove lines on an existing order. Its own
+                // permission, NOT orders.edit: orders.edit is a day-to-day
+                // outlet-manager permission for status and notes, while this
+                // moves the money on a receipt that may already be paid — the
+                // same reasoning that fenced orders.reduce_shipping_fee off.
+                Route::put('/{id}/items',                [OrderController::class, 'updateItems'])
+                    ->middleware('permission:orders.edit_items,sanctum');
                 Route::post('/{id}/items/{itemId}/production', [OrderController::class, 'raiseItemProduction'])
                     ->middleware('permission:production.raise_order,sanctum');
                 Route::post('/{id}/set-deposit',         [OrderController::class, 'setDeposit'])
