@@ -1108,6 +1108,17 @@ Route::prefix('v1')->group(function () {
                         ->middleware('permission:orders.refund,sanctum');
                     Route::post('/{id}/void',      [PaymentController::class, 'voidPayment'])
                         ->middleware('permission:payments.void,sanctum');
+                    // Correct a payment recorded wrongly — amount, method,
+                    // reference or date. Narrower than it looks: status belongs
+                    // to void/approval, order_id to reassign, refunds to refund.
+                    Route::patch('/{id}',          [PaymentController::class, 'updatePayment'])
+                        ->middleware('permission:payments.edit,sanctum');
+                    // Erase a payment that never happened. Voiding is the normal
+                    // removal and keeps the record; this is for rows that never
+                    // represented reality, and the controller additionally
+                    // requires super_admin because it cannot be undone.
+                    Route::delete('/{id}',         [PaymentController::class, 'destroyPayment'])
+                        ->middleware('permission:payments.delete,sanctum');
                     Route::post('/{id}/reassign',  [PaymentController::class, 'reassignPayment'])
                         ->middleware('permission:payments.reassign,sanctum');
                 });

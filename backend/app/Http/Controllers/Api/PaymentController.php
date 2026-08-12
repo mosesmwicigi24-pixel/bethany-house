@@ -945,19 +945,7 @@ class PaymentController extends Controller
             'voided_by'  => auth()->id(),
         ]);
 
-        // Recompute the order's payment state. syncPaymentStatus() is the
-        // authoritative source (it drives payment_status from the net of the
-        // remaining paid payments); the amount_paid/balance_due columns are kept
-        // in sync with the SAME net figure so the two don't diverge.
-        if ($payment->order) {
-            $order = $payment->order;
-            $netPaid = $order->totalPaid();   // SUM(amount - refund_amount) over paid
-            $order->update([
-                'amount_paid' => $netPaid,
-                'balance_due' => max(0, (float) $order->total_amount - $netPaid),
-            ]);
-            $order->syncPaymentStatus();
-        }
+        $this->resyncOrder($payment->order);
 
         ActivityLogService::log('payment_voided', $payment, [
             'payment_number' => $payment->payment_number,
@@ -971,6 +959,198 @@ class PaymentController extends Controller
         return response()->json([
             'message' => 'Payment voided successfully.',
             'payment' => $payment->fresh(),
+        ]);
+    }
+
+    /**
+     * Recompute an order's money after a payment changes underneath it.
+     *
+     * `syncPaymentStatus()` is the whole job: it re-derives `payment_status`
+     * from the net of the payments that remain (`SUM(amount - refund_amount)`
+     * over paid rows), which is what every downstream consumer — shipment
+     * eligibility, the balance shown on the order, reporting — actually reads.
+     *
+     * The void handler used to also write `amount_paid` and `balance_due` here.
+     * Those columns do not exist on `orders`; the only stored figures are
+     * `deposit_amount` and `balance_due_date`, and the outstanding balance is
+     * derived on demand by `outstandingBalance()`. Eloquent was silently
+     * discarding both keys through the mass-assignment guard, so the code read
+     * as though it maintained two cached totals while maintaining neither.
+     * Repeating that in two new endpoints would have made a dead write look
+     * load-bearing, so it goes.
+     *
+     * Every path that alters a payment calls this, which is why it is one
+     * method rather than three copies.
+     */
+    private function resyncOrder(?\App\Models\Order $order): void
+    {
+        $order?->syncPaymentStatus();
+    }
+
+    /**
+     * PATCH /payment-transactions/{id}
+     *
+     * Correct a payment that was recorded wrongly.
+     *
+     * The case this exists for: an order's line items are edited after the
+     * money was taken, or a cashier keys 16,500 where the customer handed over
+     * 11,500. Until now the only options were to leave the record wrong or to
+     * void the whole payment and re-enter it, which loses the original
+     * reference — the very thing that reconciles against an M-Pesa or bank
+     * statement.
+     *
+     * What may be corrected is deliberately narrow: how much, by what method,
+     * against which reference, and when. Everything else has its own path and a
+     * different meaning — `status` belongs to void and approval, `order_id`
+     * belongs to reassign, and `refund_amount` is real money moving back to a
+     * customer rather than a typo.
+     *
+     * Nothing is silently rewritten: the before and after of every changed
+     * field is written to the activity log, so a correction is as auditable as
+     * the payment it corrects.
+     */
+    public function updatePayment(Request $request, int $id): \Illuminate\Http\JsonResponse
+    {
+        $payment = \App\Models\Payment::with('order')->findOrFail($id);
+
+        // Same whitelist the recording path uses: the built-in methods plus any
+        // active configured one, so an edit can never set a value that
+        // `addPayment` would have rejected.
+        $allowedMethods = array_values(array_unique(array_merge(
+            ['cash', 'mpesa', 'card', 'card_paystack', 'card_flutterwave', 'bank_transfer', 'other'],
+            DB::table('payment_methods')->where('is_active', true)->pluck('code')->all(),
+        )));
+
+        $validated = $request->validate([
+            'amount'             => 'sometimes|numeric|min:0.01',
+            'payment_method'     => 'sometimes|in:'.implode(',', $allowedMethods),
+            'provider_reference' => 'sometimes|nullable|string|max:255',
+            'payment_number'     => 'sometimes|nullable|string|max:255',
+            'paid_at'            => 'sometimes|nullable|date',
+            'reason'             => 'required|string|max:1000',
+        ]);
+
+        if ($payment->status === 'voided') {
+            return response()->json([
+                'message' => 'This payment is voided. Voiding is final — record a new payment instead of editing it.',
+            ], 422);
+        }
+
+        // Refunds are money that has already gone back to the customer. Letting
+        // the payment shrink below what was refunded would book a negative
+        // collection and quietly corrupt the order's balance.
+        $refunded = (float) ($payment->refund_amount ?? 0);
+
+        if (array_key_exists('amount', $validated) && (float) $validated['amount'] < $refunded) {
+            return response()->json([
+                'message' => "{$refunded} has already been refunded against this payment, so it cannot be reduced below that.",
+            ], 422);
+        }
+
+        $fields = ['amount', 'payment_method', 'provider_reference', 'payment_number', 'paid_at'];
+        $before = $payment->only($fields);
+
+        $payment->update(array_intersect_key($validated, array_flip($fields)));
+
+        $this->resyncOrder($payment->order);
+
+        // Only what actually moved, so the trail reads as a correction rather
+        // than a dump of every column.
+        $after   = $payment->fresh()->only($fields);
+        $changed = [];
+
+        foreach ($fields as $field) {
+            if ((string) ($before[$field] ?? '') !== (string) ($after[$field] ?? '')) {
+                $changed[$field] = ['from' => $before[$field], 'to' => $after[$field]];
+            }
+        }
+
+        ActivityLogService::log('payment_corrected', $payment, [
+            'payment_number' => $payment->payment_number,
+            'order_id'       => $payment->order_id,
+            'changed'        => $changed,
+            'reason'         => $validated['reason'],
+            'corrected_by'   => auth()->id(),
+        ]);
+
+        return response()->json([
+            'message' => $changed ? 'Payment corrected.' : 'Nothing changed.',
+            'changed' => $changed,
+            'payment' => $payment->fresh(),
+            'order'   => $payment->order?->fresh(['payments']),
+        ]);
+    }
+
+    /**
+     * DELETE /payment-transactions/{id}
+     *
+     * Erase a payment that never happened.
+     *
+     * This is not the normal way to remove money from an order — voiding is.
+     * A void leaves the row, its reference and its history in place while
+     * dropping it out of every total and report, because every revenue query in
+     * this system filters on `status`. That is almost always what "remove this
+     * payment" should mean, and it is what the order screen offers first.
+     *
+     * Deletion exists for the narrower case a void handles badly: a row that
+     * never represented reality — keyed against the wrong order, entered twice,
+     * or created while testing. Voiding those leaves a permanent mark on a
+     * customer's record for something that did not occur.
+     *
+     * Guarded accordingly. Super admin only, a reason is required, and a
+     * payment that has already refunded money cannot be deleted: that refund
+     * moved real funds, and erasing its origin would leave an unexplainable
+     * outflow. The full row is written to the activity log before it goes, so
+     * the deletion is reconstructable even though the record is not.
+     */
+    public function destroyPayment(Request $request, int $id): \Illuminate\Http\JsonResponse
+    {
+        $validated = $request->validate([
+            'reason' => 'required|string|max:1000',
+        ]);
+
+        $user = $request->user();
+
+        // Irreversible, so the gate is explicit rather than inherited: a
+        // permission can be granted to a role by mistake, and this is the one
+        // action in the payment surface with nothing to fall back on.
+        if (!$user?->hasRole('super_admin')) {
+            return response()->json([
+                'message' => 'Only a super admin can delete a payment. Void it instead — that removes it from every total and keeps the record.',
+            ], 403);
+        }
+
+        $payment = \App\Models\Payment::with('order')->findOrFail($id);
+
+        if ((float) ($payment->refund_amount ?? 0) > 0) {
+            return response()->json([
+                'message' => 'This payment has been refunded. Deleting it would leave the refund unexplained — void it instead.',
+            ], 422);
+        }
+
+        $order    = $payment->order;
+        $snapshot = $payment->toArray();
+
+        $payment->delete();
+
+        $this->resyncOrder($order);
+
+        ActivityLogService::log('payment_deleted', $order ?? $payment, [
+            'payment_id'     => $id,
+            'payment_number' => $snapshot['payment_number'] ?? null,
+            'order_id'       => $snapshot['order_id'] ?? null,
+            'amount'         => $snapshot['amount'] ?? null,
+            'payment_method' => $snapshot['payment_method'] ?? null,
+            'reason'         => $validated['reason'],
+            'deleted_by'     => auth()->id(),
+            // The whole row, so a deletion can be reconstructed even though the
+            // record itself is gone.
+            'snapshot'       => $snapshot,
+        ]);
+
+        return response()->json([
+            'message' => 'Payment deleted.',
+            'order'   => $order?->fresh(['payments']),
         ]);
     }
 

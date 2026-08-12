@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { ordersApi } from "@/api/orders";
-import { get, post } from "@/api/client";
+import { get, post, patch, del } from "@/api/client";
 import type { Order, OrderStatus, OrderPayment } from "@/api/orders";
 import { shippingApi, paymentMethodsApi } from "@/api/setup";
 import type { ShippingMethod, PaymentMethodSetup } from "@/types/setup";
@@ -2253,6 +2253,205 @@ function ProofUploadButton({ paymentId, onDone }: { paymentId: number; onDone: (
     );
 }
 
+// ── Payment Corrections ───────────────────────────────────────────────────────
+// A payment recorded wrongly used to be unfixable from here: the line items get
+// edited after the money is taken, the order reads "33,000 collected against
+// 28,000", and the only trace is a staff note asking someone to remember a
+// refund. Three actions, in the order of how much they destroy.
+
+type CorrectionMode = "edit" | "void" | "delete";
+
+const CORRECTION_COPY: Record<CorrectionMode, { title: string; blurb: string; confirm: string; tone: string }> = {
+    edit: {
+        title: "Correct this payment",
+        blurb: "Change what was recorded. The order's balance and status are recomputed from the payments that remain.",
+        confirm: "Save correction",
+        tone: "btn-primary",
+    },
+    void: {
+        // The safe removal, and the one offered first: reporting keys off
+        // status, so a voided payment leaves every total and every revenue
+        // report while the row, its reference and its history stay put.
+        title: "Void this payment",
+        blurb: "Removes the money from this order and from every report, and keeps the record. This is the right choice for a payment that should not count.",
+        confirm: "Void payment",
+        tone: "bg-amber-500 hover:bg-amber-600 text-white",
+    },
+    delete: {
+        title: "Delete this payment",
+        blurb: "Erases the record completely. Only do this for a payment that never happened — keyed twice, or against the wrong order. If real money changed hands, void it instead.",
+        confirm: "Delete permanently",
+        tone: "bg-danger hover:bg-danger-dark text-white",
+    },
+};
+
+function PaymentCorrectionModal({ payment, mode, currency, onClose, onDone }: {
+    payment: any;
+    mode: CorrectionMode;
+    currency: string;
+    onClose: () => void;
+    onDone: () => void;
+}) {
+    const toast = useToastStore();
+    const copy  = CORRECTION_COPY[mode];
+
+    const [amount, setAmount]       = useState(String(payment.amount ?? ""));
+    const [method, setMethod]       = useState(payment.payment_method ?? "cash");
+    const [reference, setReference] = useState(payment.provider_reference ?? "");
+    const [paidAt, setPaidAt]       = useState(payment.paid_at ? String(payment.paid_at).slice(0, 10) : "");
+    const [reason, setReason]       = useState("");
+
+    // Configured methods (I&M Paybill and friends) as well as the built-ins —
+    // the same set the server accepts. The payment's own method is always kept
+    // in the list so an edit can never silently move it off a method that has
+    // since been deactivated.
+    const { data: methodsData } = useQuery({
+        queryKey: ["payment-methods-available", currency],
+        queryFn: () => paymentMethodsApi.availableForSale(currency),
+    });
+
+    const methodOptions = (() => {
+        const seen = new Map<string, string>();
+        Object.entries(PAYMENT_METHODS).forEach(([code, m]) => seen.set(code, m.label));
+        ((methodsData as any)?.data ?? []).forEach((m: any) => seen.set(m.code, m.name ?? m.code));
+        if (payment.payment_method && !seen.has(payment.payment_method)) {
+            seen.set(payment.payment_method, payment.payment_method);
+        }
+        return [...seen.entries()];
+    })();
+
+    const mutation = useMutation({
+        mutationFn: async () => {
+            const url = `/v1/admin/payment-transactions/${payment.id}`;
+
+            if (mode === "edit") {
+                return patch(url, {
+                    amount: Number(amount),
+                    payment_method: method,
+                    provider_reference: reference || null,
+                    paid_at: paidAt || null,
+                    reason,
+                });
+            }
+            if (mode === "void") return post(`${url}/void`, { reason });
+            return del(url, { data: { reason } });
+        },
+        onSuccess: () => {
+            toast.success(
+                mode === "edit" ? "Payment corrected" :
+                mode === "void" ? "Payment voided" : "Payment deleted",
+            );
+            onDone();
+            onClose();
+        },
+        onError: (e: ApiError) => toast.error(e.message ?? "Could not update the payment"),
+    });
+
+    // A correction has to say why. It is the only thing that makes the audit
+    // entry worth reading a year later.
+    const valid = reason.trim().length > 0 && (mode !== "edit" || Number(amount) > 0);
+
+    return (
+        <Modal open onClose={onClose} title={copy.title}>
+            <div className="p-5 space-y-4">
+                <p className="text-xs text-surface-500 leading-relaxed">{copy.blurb}</p>
+
+                <div className="rounded-lg bg-surface-50 border border-line px-3 py-2 text-xs">
+                    <span className="font-mono text-surface-500">{payment.payment_number ?? "—"}</span>
+                    <span className="mx-2 text-surface-300">·</span>
+                    <span className="font-semibold text-surface-900">{fmt(payment.amount, currency)}</span>
+                </div>
+
+                {mode === "edit" && (
+                    <>
+                        <div>
+                            <label className="label">Amount</label>
+                            <input type="number" step="0.01" min="0.01" value={amount}
+                                onChange={e => setAmount(e.target.value)} className="input" />
+                        </div>
+                        <div>
+                            <label className="label">Method</label>
+                            <select value={method} onChange={e => setMethod(e.target.value)} className="input">
+                                {methodOptions.map(([code, label]) => (
+                                    <option key={code} value={code}>{label}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="label">Reference / proof</label>
+                            <input value={reference} onChange={e => setReference(e.target.value)}
+                                placeholder="M-Pesa code, slip number…" className="input" />
+                        </div>
+                        <div>
+                            <label className="label">Date received</label>
+                            <input type="date" value={paidAt} onChange={e => setPaidAt(e.target.value)} className="input" />
+                        </div>
+                    </>
+                )}
+
+                <div>
+                    <label className="label">Reason <span className="text-danger">*</span></label>
+                    <textarea value={reason} onChange={e => setReason(e.target.value)} rows={2}
+                        placeholder={mode === "edit"
+                            ? "e.g. Line items edited after payment — cash collected was 11,500."
+                            : "Why is this being removed?"}
+                        className="input" />
+                </div>
+
+                {mode === "delete" && (
+                    <p className="rounded-lg bg-danger-light border border-danger/30 px-3 py-2 text-xs text-danger-dark">
+                        This cannot be undone. The full record is written to the activity log first.
+                    </p>
+                )}
+
+                <div className="flex gap-2 pt-1">
+                    <button onClick={onClose} className="btn-secondary flex-1">Cancel</button>
+                    <button
+                        onClick={() => mutation.mutate()}
+                        disabled={!valid || mutation.isPending}
+                        className={clsx("flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold disabled:opacity-50", copy.tone)}>
+                        {mutation.isPending ? "Working…" : copy.confirm}
+                    </button>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
+/** Correction actions on a payment row, offered in order of least damage. */
+function PaymentRowActions({ payment, onPick }: {
+    payment: any;
+    onPick: (mode: CorrectionMode) => void;
+}) {
+    const { can, isSuperAdmin } = usePermissions();
+
+    const voided   = payment.status === "voided";
+    const canEdit  = can("payments.edit") && !voided;
+    const canVoid  = can("payments.void") && !voided;
+    // Irreversible, so it matches the server: super admin only, regardless of
+    // how the permission has been handed out.
+    const canDelete = isSuperAdmin;
+
+    if (!canEdit && !canVoid && !canDelete) return null;
+
+    return (
+        <div className="flex items-center justify-end gap-2">
+            {canEdit && (
+                <button onClick={() => onPick("edit")}
+                    className="text-2xs font-semibold text-brand-600 hover:underline">Edit</button>
+            )}
+            {canVoid && (
+                <button onClick={() => onPick("void")}
+                    className="text-2xs font-semibold text-amber-600 hover:underline">Void</button>
+            )}
+            {canDelete && (
+                <button onClick={() => onPick("delete")}
+                    className="text-2xs font-semibold text-danger hover:underline">Delete</button>
+            )}
+        </div>
+    );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 // ── Production Orders Section ─────────────────────────────────────────────────
@@ -3219,6 +3418,7 @@ export default function OrderDetailPage() {
     const [showRefundModal,   setShowRefundModal]    = useState(false);
     const [showVoidModal,     setShowVoidModal]      = useState(false);
     const [showPaymentModal,  setShowPaymentModal]   = useState(false);
+    const [correctingPayment, setCorrectingPayment]  = useState<{ payment: any; mode: CorrectionMode } | null>(null);
     const [showReceiptModal,  setShowReceiptModal]   = useState(false);
     const [showShippingModal, setShowShippingModal]  = useState(false);
     const [showDepositModal,  setShowDepositModal]   = useState(false);
@@ -3741,7 +3941,7 @@ export default function OrderDetailPage() {
                             </div>
                             <div className="rounded-xl border border-line overflow-hidden">
                                 <div className="overflow-x-auto">
-                                <table className="w-full text-xs min-w-[560px]">
+                                <table className="w-full text-xs min-w-[660px]">
                                     <thead>
                                         <tr className="bg-surface-50 border-b border-line">
                                             <th className="text-left px-4 py-2.5 font-semibold text-surface-500 w-6">#</th>
@@ -3977,6 +4177,9 @@ export default function OrderDetailPage() {
                                                 <th className="text-left px-4 py-2.5 font-semibold text-surface-500 hidden sm:table-cell">Date</th>
                                                 <th className="text-left px-4 py-2.5 font-semibold text-surface-500">Status</th>
                                                 <th className="text-right px-4 py-2.5 font-semibold text-surface-500">Amount</th>
+                                                <th className="text-right px-4 py-2.5 font-semibold text-surface-500">
+                                                    <span className="sr-only">Correct payment</span>
+                                                </th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-line">
@@ -4025,6 +4228,12 @@ export default function OrderDetailPage() {
                                                         )}
                                                     </td>
                                                     <td className="px-4 py-3 align-top text-right font-bold text-surface-900 tabular-nums">{fmt(p.amount, cc)}</td>
+                                                    <td className="px-4 py-3 align-top">
+                                                        <PaymentRowActions
+                                                            payment={p}
+                                                            onPick={(mode) => setCorrectingPayment({ payment: p, mode })}
+                                                        />
+                                                    </td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -4287,6 +4496,15 @@ export default function OrderDetailPage() {
             {showVoidModal     && <VoidOrderModal      order={order} onClose={() => setShowVoidModal(false)}     onDone={refresh}    />}
             {showRefundModal   && <RefundModal          order={order} onClose={() => setShowRefundModal(false)}   onDone={refresh}    />}
             {showPaymentModal  && <AddPaymentModal      order={order} onClose={() => setShowPaymentModal(false)}  onDone={refresh}    />}
+            {correctingPayment && (
+                <PaymentCorrectionModal
+                    payment={correctingPayment.payment}
+                    mode={correctingPayment.mode}
+                    currency={cc}
+                    onClose={() => setCorrectingPayment(null)}
+                    onDone={refresh}
+                />
+            )}
             {showCustomerModal && <AttachCustomerModal  order={order} onClose={() => setShowCustomerModal(false)} onDone={refresh}    />}
             {productionItem && <RaiseProductionModal order={order} item={productionItem} onClose={() => setProductionItem(null)} onDone={refresh} />}
             {showAuditLog      && <OrderAuditLog        orderId={order.id}                                        onClose={() => setShowAuditLog(false)} />}
