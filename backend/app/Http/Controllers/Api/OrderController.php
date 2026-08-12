@@ -15,6 +15,7 @@ use App\Models\InventoryItem;
 use App\Services\TaxCalculationService;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
+use App\Services\PosInventoryService;
 use App\Services\ReceiptService;
 use Illuminate\Support\Facades\Log;
 use App\Services\IntelligenceService;
@@ -498,8 +499,27 @@ class OrderController extends Controller
             ]);
 
             // ── Create order items with tax amounts ───────────────────────────
+            // Online checkout deducts quantity_on_hand right here — the goods are
+            // spoken for the moment the order exists. That IS a commit under the
+            // reservation model (see PosInventoryService), so the order must be
+            // stamped stock_committed_at with no stock_reserved_at: exactly the
+            // "committed without a reservation" shape the 2026_07_11 backfill gave
+            // legacy orders, and the shape every reader already handles
+            // (PosInventoryService::unwindForOrder restores on_hand;
+            // commitForOrder refuses to deduct twice; PosController's edit path
+            // detects it via $legacyCommitted). Leaving the flags null — as this
+            // did until now — made unwind release a reservation that was never
+            // taken and left the deducted stock stranded.
+            $drewStock = false;
             foreach ($cart->items as $index => $item) {
-                $inventoryItem  = InventoryItem::where('product_variant_id', $item->variant_id)->first();
+                // cart_items has no `variant_id` column — the chosen variant lives
+                // in product_variant_id (which is what CartItem::variant() reads).
+                // `$item->variant_id` was therefore always null, so this resolved
+                // whichever variant-less inventory row came back first and the
+                // order line was written with a null variant. Stamping a stock
+                // flag over a deduction against an arbitrary row would only make
+                // the lie authoritative, so fix the lookup at the same time.
+                $inventoryItem  = InventoryItem::where('product_variant_id', $item->product_variant_id)->first();
                 $availableStock = $inventoryItem?->quantity_available ?? 0;
 
                 if ($availableStock < $item->quantity) {
@@ -515,7 +535,11 @@ class OrderController extends Controller
                 OrderItem::create([
                     'order_id'           => $order->id,
                     'product_id'         => $item->variant->product_id,
-                    'product_variant_id' => $item->variant_id,
+                    'product_variant_id' => $item->product_variant_id,
+                    // Pin the exact finished-goods row this line draws from, so a
+                    // later void/cancel restores to that same row instead of
+                    // re-resolving and possibly landing on another outlet's.
+                    'inventory_item_id'  => $inventoryItem?->id,
                     'product_name'       => $item->variant->product->translations->first()?->name ?? 'Product',
                     'variant_name'       => $item->variant->variant_name,
                     'sku'                => $item->variant->sku,
@@ -524,7 +548,7 @@ class OrderController extends Controller
                     // COGS: snapshot per-unit cost (KES) at time of sale.
                     ...app(\App\Services\CostResolver::class)->columns(
                         $item->variant->product_id,
-                        $item->variant_id
+                        $item->product_variant_id
                     ),
                     'discount_amount'    => 0,
                     'tax_amount'         => $lineTax['tax_amount'],
@@ -536,7 +560,14 @@ class OrderController extends Controller
                         -$item->quantity, 'sale',
                         \App\Models\Order::class, $order->id, $user->id
                     );
+                    $drewStock = true;
                 }
+            }
+
+            // The physical count has moved: record it on the order so every
+            // reader of the reservation flags gets the right answer.
+            if ($drewStock) {
+                $order->forceFill(['stock_committed_at' => now()])->save();
             }
 
             // Clear cart
@@ -557,7 +588,12 @@ class OrderController extends Controller
 
             return response()->json([
                 'message'       => 'Order placed successfully',
-                'order'         => $order->load(['items.variant.product', 'shippingAddress']),
+                // Order has no `shippingAddress` relation — the destination lives
+                // in the order's own shipping_* columns — so this eager load threw
+                // *after* DB::commit(), and the catch below turned a successfully
+                // created, stock-deducted order into a 500 for the customer. That
+                // is how orders reach the state this change repairs.
+                'order'         => $order->load(['items.variant.product']),
                 'payment_link'  => rtrim(config('app.frontend_url'), '/') . "/pay/{$paymentToken}",
             ], 201);
 
@@ -689,7 +725,20 @@ class OrderController extends Controller
         $order->update([
             'status'          => $newStatus,
             'tracking_number' => $validated['tracking_number'] ?? $order->tracking_number,
+            'cancelled_at'    => $newStatus === 'cancelled'
+                ? ($order->cancelled_at ?? now())
+                : $order->cancelled_at,
         ]);
+
+        // Cancelling from the admin status dropdown is the third door onto the
+        // same order as cancelOrder() and voidOrder() — and the only one that
+        // used to return no stock at all, silently stranding whatever the order
+        // had drawn. Idempotent and flag-guarded, so it neither double-restores
+        // an order a cancel/void/reap already unwound nor invents stock for one
+        // that never drew any.
+        if ($newStatus === 'cancelled') {
+            PosInventoryService::unwindForOrder($order, $request->user()->id);
+        }
 
         DB::table('order_status_history')->insert([
             'order_id'    => $order->id,
@@ -737,17 +786,18 @@ class OrderController extends Controller
 
         DB::beginTransaction();
         try {
-            $order->update(['status' => 'cancelled']);
+            $order->update(['status' => 'cancelled', 'cancelled_at' => $order->cancelled_at ?? now()]);
 
-            foreach ($order->items as $item) {
-                $inventoryItem = InventoryItem::where('product_variant_id', $item->product_variant_id)->first();
-                if ($inventoryItem) {
-                    $inventoryItem->adjustQuantity(
-                        $item->quantity, 'cancellation',
-                        \App\Models\Order::class, $order->id, $request->user()->id
-                    );
-                }
-            }
+            // Return whatever stock this order was actually holding, exactly once.
+            // The old blind `adjustQuantity(+qty)` here restored the physical count
+            // for EVERY line — including orders that never deducted it (guest
+            // storefront orders, made-to-order lines) and orders already unwound by
+            // a void or the abandoned-order reaper, inventing stock each time.
+            // unwindForOrder reads the flags instead: restore on_hand if the order
+            // committed, release the reservation if it only reserved, do nothing if
+            // it never drew stock — and stamps stock_unwound_at so a second call is
+            // a no-op.
+            PosInventoryService::unwindForOrder($order, $request->user()->id);
 
             DB::commit();
 
@@ -845,22 +895,12 @@ class OrderController extends Controller
             // MON-1: reconcile payment_status now that the payments are voided.
             $order->syncPaymentStatus();
 
-            // Restock inventory for each line item
-            foreach ($order->items as $item) {
-                $inventoryItem = InventoryItem::where('product_variant_id', $item->product_variant_id)
-                    ->where(function ($q) use ($order) {
-                        $q->where('outlet_id', $order->outlet_id)->orWhereNull('outlet_id');
-                    })
-                    ->orderByRaw('outlet_id IS NULL ASC')
-                    ->first();
-
-                if ($inventoryItem) {
-                    $inventoryItem->adjustQuantity(
-                        $item->quantity, 'void',
-                        Order::class, $order->id, $request->user()->id
-                    );
-                }
-            }
+            // Return the stock this order was holding — once. Same reasoning as
+            // cancelOrder(): the flags say whether the physical count actually
+            // moved, so a guest storefront order (which never deducts) is left
+            // alone and an order already unwound by a cancel/reap is not restocked
+            // a second time. See PosInventoryService.
+            PosInventoryService::unwindForOrder($order, $request->user()->id);
 
             $order->update([
                 'status'      => 'voided',

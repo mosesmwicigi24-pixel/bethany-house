@@ -270,6 +270,7 @@ class NewSale extends Component
             ]);
 
             // Order items
+            $drewStock = false;
             foreach ($this->cart as $item) {
                 OrderItem::create([
                     'order_id'           => $order->id,
@@ -295,7 +296,17 @@ class NewSale extends Component
                         ->where('product_variant_id', $item['variant_id'])
                         ->first();
                     $inv?->adjustQuantity(-$item['qty'], 'sale', 'order', $order->id, auth()->id());
+                    $drewStock = $drewStock || (bool) $inv;
                 }
+            }
+
+            // This sale is paid and the goods are handed over in the same breath,
+            // so the physical count moves at creation — that is a commit with no
+            // reservation phase. Stamp it, or every reader of the reservation
+            // flags (PosInventoryService::unwindForOrder above all) concludes this
+            // order never drew stock and refuses to put it back on a void.
+            if ($drewStock) {
+                $order->forceFill(['stock_committed_at' => now()])->save();
             }
 
             // Payments record
