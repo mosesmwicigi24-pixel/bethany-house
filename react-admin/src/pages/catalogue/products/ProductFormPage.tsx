@@ -382,7 +382,10 @@ function SortableImage({
                 opacity: isDragging ? 0.3 : 1,
             }}
             className={clsx(
-                "relative rounded-xl overflow-hidden border-2 group aspect-square",
+                // bg-surface-50: product shots are portrait/odd ratios, so the
+                // square tile letterboxes them (object-contain). A neutral fill
+                // makes that read as deliberate framing rather than a gap.
+                "relative rounded-xl overflow-hidden border-2 group aspect-square bg-surface-50",
                 image.is_primary ? "border-brand-400" : "border-surface-200",
             )}
         >
@@ -412,7 +415,7 @@ function SortableImage({
                 src={image.image_url}
                 alt=""
                 onClick={() => onZoom(image)}
-                className="w-full h-full object-cover cursor-zoom-in"
+                className="w-full h-full object-contain cursor-zoom-in"
             />
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all flex flex-col items-center justify-center gap-1.5">
                 {image.is_primary ? (
@@ -1301,14 +1304,14 @@ function VariantImagesSection({
                         <div
                             key={img.id}
                             className={clsx(
-                                "relative group aspect-square rounded-lg overflow-hidden border-2",
+                                "relative group aspect-square rounded-lg overflow-hidden border-2 bg-surface-50",
                                 img.is_primary ? "border-brand-500" : "border-line",
                             )}
                         >
                             <img
                                 src={img.thumbnail_url || img.image_url}
                                 alt={img.alt_text ?? ""}
-                                className="w-full h-full object-cover"
+                                className="w-full h-full object-contain"
                             />
                             {img.is_primary && (
                                 <span className="absolute top-1 left-1 text-2xs font-bold bg-brand-500 text-white px-1 py-0.5 rounded">
