@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Address;
+use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Outlet;
 use App\Models\Payment;
@@ -419,6 +421,32 @@ class OrderController extends Controller
             return response()->json(['message' => 'Cart is empty'], 422);
         }
 
+        // ── Resolve the delivery address ──────────────────────────────────────
+        // shipping_address_id was validated and then thrown away: a delivery
+        // order was created with no destination on it at all, and orders carry
+        // no shipping_address_id column to recover it from later — the address
+        // is meant to be snapshotted onto the order (as StorefrontCheckoutController
+        // does), so that editing or deleting the saved address afterwards cannot
+        // rewrite where a placed order was sent.
+        //
+        // `exists:addresses,id` also asked only whether the row exists, not whose
+        // it is, so any id would pass. Scope it to this user — by user_id or via
+        // their customer profile, the two ways an address is owned — and fail the
+        // same way as any other bad input rather than leaking whether an id is real.
+        $shippingAddress = null;
+        if ($validated['delivery_method'] === 'delivery') {
+            $shippingAddress = Address::where('id', $validated['shipping_address_id'])
+                ->where(function ($q) use ($user) {
+                    $q->where('user_id', $user->id)
+                        ->orWhereIn('customer_id', Customer::where('user_id', $user->id)->select('id'));
+                })
+                ->first();
+
+            if (!$shippingAddress) {
+                return response()->json(['message' => 'Shipping address not found'], 422);
+            }
+        }
+
         // ── Resolve currency from country ─────────────────────────────────────
         $homeCountry     = DB::table('settings')->where('key', 'app_country')->value('value') ?? 'KE';
         $countryCode     = strtoupper($validated['country_code'] ?? $homeCountry);
@@ -453,7 +481,8 @@ class OrderController extends Controller
             $taxInclusive = $taxCalc['tax_inclusive'];
 
             // ── Shipping cost ─────────────────────────────────────────────────
-            $shippingCost = 0;
+            $shippingCost   = 0;
+            $shippingMethod = null;
             if ($validated['delivery_method'] === 'delivery' && !empty($validated['shipping_method_id'])) {
                 $shippingMethod = DB::table('shipping_methods')->find($validated['shipping_method_id']);
                 $shippingCost   = $shippingMethod?->base_rate ?? 0;
@@ -489,6 +518,18 @@ class OrderController extends Controller
                 'total_amount'             => $totalAmount,
                 'delivery_type'            => $validated['delivery_method'],
                 'pickup_outlet_id'         => $validated['pickup_location_id'] ?? null,
+                // Where it is actually going, snapshotted off the saved address —
+                // orders have no shipping_address_id column, these ARE the
+                // destination, and they must not move if the address later does.
+                'shipping_address_line1'   => $shippingAddress?->address_line1,
+                'shipping_address_line2'   => $shippingAddress?->address_line2,
+                'shipping_city'            => $shippingAddress?->city,
+                'shipping_state'           => $shippingAddress?->state_province,
+                'shipping_postal_code'     => $shippingAddress?->postal_code,
+                'shipping_country_code'    => $shippingAddress?->country_code,
+                // The chosen method was looked up for its rate and then dropped
+                // too, leaving the charge on the order with nothing naming it.
+                'shipping_method'          => $shippingMethod?->name,
                 'payment_method'           => $validated['payment_method'],
                 'notes'                    => $validated['notes'] ?? null,
                 'payment_token'            => $paymentToken,
