@@ -3056,8 +3056,15 @@ class PosController extends Controller
             // count instead and clear the committed flag so the edited order
             // re-enters the new model cleanly (reserve → commit on pay). MTO
             // lines were never inventory-backed.
+            //
+            // An order holding NEITHER (all three flags null — a guest storefront
+            // order, or one whose phantom committed flag 2026_08_12_130000 cleared)
+            // has nothing to give back: releasing its quantities would decrement
+            // quantity_reserved out of reservations belonging to other pending
+            // orders on the same row. Same guard as PosInventoryService::unwind.
             $legacyCommitted = $order->stock_committed_at && !$order->stock_reserved_at;
-            foreach ($order->items as $oldItem) {
+            $holdsStock      = $legacyCommitted || (bool) $order->stock_reserved_at;
+            foreach ($holdsStock ? $order->items : [] as $oldItem) {
                 if (str_starts_with($oldItem->notes ?? '', '__MTO__')) continue;
                 if (!$oldItem->product_variant_id) continue;
 

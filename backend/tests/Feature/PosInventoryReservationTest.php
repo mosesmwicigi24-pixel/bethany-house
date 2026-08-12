@@ -116,6 +116,22 @@ class PosInventoryReservationTest extends TestCase
         $this->assertStock(onHand: 10, reserved: 0);   // untouched
     }
 
+    public function test_unwind_of_an_order_holding_nothing_releases_nothing(): void
+    {
+        // No reservation, no commitment — a guest storefront order, or one whose
+        // phantom committed flag was cleared. Releasing "its" quantities here
+        // would cancel reservations belonging to whoever else is on the row.
+        $other = $this->orderWith(6);
+        PosInventoryService::reserveForOrder($other);
+        $this->assertStock(onHand: 10, reserved: 6);
+
+        $order = $this->orderWith(3);
+        PosInventoryService::unwindForOrder($order);
+
+        $this->assertStock(onHand: 10, reserved: 6);   // the other order keeps its six
+        $this->assertNotNull($order->fresh()->stock_unwound_at);
+    }
+
     public function test_unwind_is_idempotent(): void
     {
         $order = $this->orderWith(3);

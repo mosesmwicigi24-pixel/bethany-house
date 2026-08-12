@@ -234,6 +234,8 @@ class OnlineOrderStockFlagsTest extends TestCase
         // flags are null. The old void restocked every line regardless and
         // conjured units that had never left.
         [$product, $variant, $inventory] = $this->stockedVariant(onHand: 10);
+        // Another pending order is holding five of those units.
+        $inventory->reserveUnits(5);
 
         $order = Order::factory()->create([
             'order_type' => 'online',
@@ -258,6 +260,9 @@ class OnlineOrderStockFlagsTest extends TestCase
         ])->assertStatus(200);
 
         $this->assertSame(10, $this->onHand($inventory));
+        // And it leaves the reservations other pending orders hold on that row
+        // alone, rather than releasing its own quantities out of someone else's.
+        $this->assertSame(5, (int) $inventory->fresh()->quantity_reserved);
         $this->assertNotNull($order->fresh()->stock_unwound_at);
     }
 
