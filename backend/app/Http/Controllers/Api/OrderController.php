@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\Concerns\ScopesToAssignedOutlets;
 use App\Models\Order;
 use App\Models\Outlet;
 use App\Models\Payment;
@@ -26,6 +27,10 @@ use Illuminate\Support\Str;
 
 class OrderController extends Controller
 {
+    // Line editing is a money write, so it is scoped the same way #266/#268
+    // scoped expenses: an outlet-scoped caller may only touch their own outlets.
+    use ScopesToAssignedOutlets;
+
     /**
      * Columns a client may sort the order list/export by. Anything else
      * collapses to the default in SortResolver — `sort_by` is interpolated
@@ -1690,6 +1695,9 @@ class OrderController extends Controller
                     'order_created_pos'          => 'POS Order Created',
                     // Currency change
                     'currency_changed'           => 'Currency / Country Changed',
+                    // Line editing
+                    'order_items_edited'         => 'Line Items Edited',
+                    'order_item_price_adjusted'  => 'Line Price Adjusted',
                 ];
 
                 // Build a rich summary from properties where description is generic
@@ -1765,6 +1773,21 @@ class OrderController extends Controller
                 } elseif ($event === 'created' && isset($props['total'])) {
                     $currency = $props['currency'] ?? '';
                     $summary  = "Order created - total {$props['total']} {$currency}";
+                } elseif ($event === 'order_items_edited') {
+                    $parts = [];
+                    if (!empty($props['added']))   $parts[] = count($props['added']) . ' added';
+                    if (!empty($props['updated'])) $parts[] = count($props['updated']) . ' changed';
+                    if (!empty($props['removed'])) $parts[] = count($props['removed']) . ' removed';
+                    $summary = 'Line items edited' . ($parts ? ' (' . implode(', ', $parts) . ')' : '');
+                    if (isset($props['old_total'], $props['new_total'])) {
+                        $summary .= " — total {$props['old_total']} → {$props['new_total']}";
+                    }
+                    if (($props['overpaid'] ?? 0) > 0) {
+                        $summary .= " · REFUND DUE {$props['overpaid']}";
+                    }
+                    if (!empty($props['reason'])) {
+                        $summary .= ': ' . $props['reason'];
+                    }
                 } elseif ($event === 'currency_changed' && isset($props['old_currency'], $props['new_currency'])) {
                     $oldCountry = $props['old_country_code'] ?? '';
                     $newCountry = $props['new_country_code'] ?? '';
@@ -2087,6 +2110,74 @@ class OrderController extends Controller
             \Illuminate\Support\Facades\Log::error('adjustItemPrice failed', ['error' => $e->getMessage()]);
             return response()->json(['message' => 'Failed to update price.'], 500);
         }
+    }
+
+    // =========================================================================
+    // PUT /admin/orders/{orderId}/items
+    // =========================================================================
+
+    /**
+     * Replace an order's line set with the one the caller wants.
+     *
+     * ONE atomic desired-state submit rather than three verbs
+     * (POST item / PATCH item / DELETE item), for the same reason
+     * PosController::updatePendingOrder takes the whole cart: adding a line,
+     * dropping another and changing a third is a single commercial decision,
+     * and splitting it across three requests means three partial states, three
+     * payment-status recalculations, three audit rows, and a corrupted receipt
+     * if the browser dies between the second and the third. It also matches
+     * what the screen actually does — the operator stages changes and presses
+     * Update once.
+     *
+     * Everything that follows from the lines — subtotal, per-line tax, order
+     * tax, total, payment_status, stock, the COGS snapshot — is derived by
+     * OrderLineEditor inside a single transaction. The client sends no totals.
+     *
+     * @see \App\Services\OrderLineEditor for the guards and the arithmetic.
+     */
+    public function updateItems(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'items'                        => 'required|array|min:1',
+            'items.*.id'                   => 'nullable|integer',
+            'items.*.product_id'           => 'nullable|integer|exists:products,id',
+            'items.*.product_variant_id'   => 'nullable|integer|exists:product_variants,id',
+            'items.*.quantity'             => 'required|integer|min:1',
+            'items.*.unit_price'           => 'nullable|numeric|min:0',
+            'items.*.discount_amount'      => 'nullable|numeric|min:0',
+            'reason'                       => 'nullable|string|max:500',
+            'confirm_paid_change'          => 'boolean',
+            'confirm_shipped_change'       => 'boolean',
+        ]);
+
+        $order = Order::with(['items', 'payments'])->findOrFail($id);
+
+        // Same outlet rule as everywhere else that touches money (#266/#268):
+        // unrestricted for admins, otherwise only the caller's own outlets.
+        $this->authoriseOutletScopeFor($request->user(), $order->outlet_id);
+
+        $result = app(\App\Services\OrderLineEditor::class)->apply(
+            $order,
+            $validated['items'],
+            [
+                'confirm_paid_change'    => (bool) ($validated['confirm_paid_change'] ?? false),
+                'confirm_shipped_change' => (bool) ($validated['confirm_shipped_change'] ?? false),
+                'reason'                 => $validated['reason'] ?? null,
+            ],
+            $request->user(),
+        );
+
+        // Hand back the server's own figures — the page renders these, it does
+        // not compute its own. Plus the freshly-loaded order so the items table,
+        // the tax breakdown and the balance all redraw from one response.
+        return response()->json(array_merge($result, [
+            'message' => $result['overpaid'] > 0
+                ? 'Items updated. The order total is now below what has been collected — '
+                  . number_format($result['overpaid'], 2) . ' ' . ($order->currency_code ?? '')
+                  . ' is refundable.'
+                : 'Items updated.',
+            'order'   => $this->show($order->id)->getData(true)['order'] ?? null,
+        ]));
     }
 
     // =========================================================================

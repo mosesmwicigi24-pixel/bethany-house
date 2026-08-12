@@ -53,6 +53,11 @@ class PermissionDependencyService
         // and the customer picker to build an order line-by-line.
         'orders.create'           => ['orders.view', 'products.view', 'customers.view'],
         'orders.edit'             => ['orders.view', 'products.view', 'customers.view'],
+        // Editing the lines of an existing order needs the order itself, the
+        // catalogue (the "Add item" product picker calls the POS product
+        // search), and orders.edit — the line editor is part of the same
+        // edit-this-order surface and is worthless without it.
+        'orders.edit_items'       => ['orders.view', 'orders.edit', 'products.view'],
         'orders.cancel'           => ['orders.view'],
         'orders.set_deposit'      => ['orders.view'],
         // The shipping-fee modal loads GET /admin/shipping/methods, gated
