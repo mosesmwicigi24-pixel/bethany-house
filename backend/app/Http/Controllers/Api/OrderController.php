@@ -14,6 +14,7 @@ use App\Models\CartItem;
 use App\Models\ProductVariant;
 use App\Models\InventoryItem;
 use App\Services\CurrencyPricing;
+use App\Services\OrderRepricer;
 use App\Services\TaxCalculationService;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
@@ -1897,63 +1898,25 @@ class OrderController extends Controller
             ], 422);
         }
 
+        // The cart-level discount and the shipping fee are figures in the OLD
+        // currency too. A plan of null means one of them cannot cross.
+        $plan = OrderRepricer::plan($order, $repriced, $oldCurrency, $newCurrency);
+
+        if ($plan === null) {
+            return response()->json([
+                'message' => "Cannot switch this order to {$newCurrency}: its shipping or discount amount"
+                    . " cannot be converted from {$oldCurrency}. Set a {$newCurrency} exchange rate, then try again.",
+            ], 422);
+        }
+
+        $newTotal = $plan['total'];
+
         DB::beginTransaction();
         try {
-            foreach ($order->items as $item) {
-                if (!array_key_exists($item->id, $repriced)) {
-                    continue;
-                }
-
-                $newUnitPrice = $repriced[$item->id];
-
-                // Recalculate line tax and total with new price.
-                // Tax rate is preserved (e.g. 16% VAT) — only the base amount changes.
-                $discountAmount  = (float) $item->discount_amount;
-                $lineSubtotal    = max(0, ($newUnitPrice * $item->quantity) - $discountAmount);
-                $oldLineSubtotal = max(0, ((float) $item->unit_price * (int) $item->quantity) - $discountAmount);
-
-                // Use TaxCalculationService for accuracy; fall back to implied rate if needed.
-                if (!empty($item->product_id)) {
-                    $taxRate      = \App\Services\TaxCalculationService::rateForProduct($item->product_id);
-                    $taxInclusive = \App\Services\TaxCalculationService::isTaxInclusive();
-                    $newLineTax   = $taxInclusive
-                        ? round($lineSubtotal * $taxRate / (1 + $taxRate), 4)
-                        : round($lineSubtotal * $taxRate, 4);
-                } elseif ($oldLineSubtotal > 0 && (float) $item->tax_amount > 0) {
-                    $impliedRate = (float) $item->tax_amount / $oldLineSubtotal;
-                    $newLineTax  = round($lineSubtotal * $impliedRate, 4);
-                } else {
-                    $newLineTax = 0;
-                }
-
-                $newTotalPrice = round($lineSubtotal + $newLineTax, 2);
-
-                DB::table('order_items')->where('id', $item->id)->update([
-                    'unit_price'  => $newUnitPrice,
-                    'tax_amount'  => $newLineTax,
-                    'total_price' => $newTotalPrice,
-                    'updated_at'  => now(),
-                ]);
-            }
-
-            // ── Recalculate order-level totals ────────────────────────────────
-            $freshItems   = DB::table('order_items')->where('order_id', $order->id)->get();
-            $newSubtotal  = $freshItems->sum(fn ($i) => (float)$i->unit_price * (int)$i->quantity - (float)$i->discount_amount);
-            $newTaxAmount = $freshItems->sum(fn ($i) => (float)$i->tax_amount);
-            $newTotal     = round(
-                $newSubtotal - (float)$order->discount_amount
-                + ($order->prices_include_tax ? 0 : $newTaxAmount)
-                + (float)$order->shipping_amount,
-                2
-            );
-
-            $order->update([
+            OrderRepricer::apply($order, $plan, [
                 'currency_code'         => $newCurrency,
                 'customer_country_code' => $countryCode,
                 'is_international'      => $isInternational,
-                'subtotal'              => round($newSubtotal, 2),
-                'tax_amount'            => round($newTaxAmount, 2),
-                'total_amount'          => $newTotal,
             ]);
 
             DB::commit();
