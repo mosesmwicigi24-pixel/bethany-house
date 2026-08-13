@@ -364,7 +364,9 @@ const NAV: NavGroup[] = [
                 label: "Payment Transactions",
                 href: "/finance/transactions",
                 icon: "transactions",
-                permission: "payments.view",
+                // NOT payments.view — every cashier holds that so they can
+                // record a takings. The ledger has its own permission.
+                permission: "payments.transactions",
             },
             {
                 label: "Financial Report",
