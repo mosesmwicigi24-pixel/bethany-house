@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Exceptions\OrderLineEditException;
 use App\Models\InventoryItem;
-use App\Models\InventoryTransaction;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
@@ -490,10 +489,13 @@ class OrderLineEditor
      *   reserved  → only a reservation is held (quantity_on_hand untouched)
      *   none      → this order never drew inventory
      *
-     * The three timestamps are authoritative, but they are not universal: the
-     * storefront checkout path deducts quantity_on_hand directly and sets none
-     * of them. So when they are silent we ask the ledger — an inventory
-     * transaction of type 'sale' against this order is proof the goods moved.
+     * The three timestamps are authoritative and now universal. This used to fall
+     * back to the inventory_transactions ledger when they were all silent, because
+     * OrderController::checkout() deducted quantity_on_hand and stamped nothing —
+     * so silence could mean either "never drew stock" or "drew it and didn't say
+     * so". Every path that moves stock against an order stamps a flag now, and
+     * 2026_08_12_120000 / _130000 repaired the orders that were already wrong in
+     * both directions, so silence means exactly one thing again.
      */
     private function stockMode(Order $order): string
     {
@@ -507,12 +509,7 @@ class OrderLineEditor
             return 'reserved';
         }
 
-        $drewStock = InventoryTransaction::where('reference_type', Order::class)
-            ->where('reference_id', $order->id)
-            ->where('transaction_type', 'sale')
-            ->exists();
-
-        return $drewStock ? 'committed' : 'none';
+        return 'none';
     }
 
     /**

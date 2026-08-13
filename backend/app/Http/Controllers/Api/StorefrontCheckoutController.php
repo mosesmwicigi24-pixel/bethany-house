@@ -46,6 +46,12 @@ use Illuminate\Support\Str;
  * same trust boundary as phone/WhatsApp orders. Shipping is 0 with a
  * shipping_fee_note — Nairobi fees / international freight are confirmed
  * on dispatch.
+ *
+ * Because no stock moves, the order's three reservation flags
+ * (stock_reserved_at / stock_committed_at / stock_unwound_at) are all left
+ * null, and that is the truthful answer to "did this order draw stock?" —
+ * void/cancel therefore correctly restore nothing. Do not stamp a flag here
+ * without also moving stock; the two must always agree.
  */
 class StorefrontCheckoutController extends Controller
 {

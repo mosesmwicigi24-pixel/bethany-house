@@ -115,8 +115,21 @@ class PosInventoryService
             return;
         }
 
-        $order->loadMissing('items');
         $committed = (bool) $order->stock_committed_at;
+
+        // An order that neither reserved nor committed is holding nothing, so
+        // there is nothing to give back — mark it unwound and stop. Falling
+        // through to release() would decrement quantity_reserved by this order's
+        // quantities, quietly cancelling reservations that belong to OTHER
+        // pending orders on the same row. Guest storefront orders (which move no
+        // stock at all) and orders whose phantom committed flag was cleared by
+        // 2026_08_12_130000 both land here.
+        if (!$committed && !$order->stock_reserved_at) {
+            $order->forceFill(['stock_unwound_at' => now()])->save();
+            return;
+        }
+
+        $order->loadMissing('items');
 
         foreach ($order->items as $item) {
             if (self::isMto($item)) continue;
