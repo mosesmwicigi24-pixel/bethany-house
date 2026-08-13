@@ -19,8 +19,15 @@ export interface PosVariant {
     sku: string;
     variant_name: string;
     attributes: Record<string, string>;
-    price: number;
+    /** Price in `currency`. Null when the hub holds no price the shop can charge in it. */
+    price: number | null;
     sale_price?: number | null;
+    /**
+     * The hub has neither a price row in `currency` nor a rate to convert one.
+     * Quoting the base-currency figure under this label would overcharge by the
+     * whole exchange rate, so the item is unsellable until the shop sets a price.
+     */
+    price_unavailable?: boolean;
     currency: string;
     stock: number;
     is_default: boolean;
