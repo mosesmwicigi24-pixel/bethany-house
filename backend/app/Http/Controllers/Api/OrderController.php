@@ -137,7 +137,7 @@ class OrderController extends Controller
      */
     public function exportCsv(Request $request)
     {
-        $query = Order::with(['outlet', 'items']);
+        $query = Order::with(['outlet', 'items', 'creator:id,first_name,last_name']);
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
@@ -188,6 +188,7 @@ class OrderController extends Controller
             'Customer Email',
             'Customer Phone',
             'Outlet',
+            'Served by',
             'Items',
             'Subtotal',
             'Discount',
@@ -208,6 +209,7 @@ class OrderController extends Controller
                 $order->customer_email,
                 $order->customer_phone,
                 $order->outlet->name ?? '',
+                $order->creator?->name ?? '',
                 $order->items->count(),
                 $order->subtotal,
                 $order->discount_amount,

@@ -152,6 +152,63 @@ class ServedByAttributionTest extends TestCase
             ->assertJsonPath('data.0.served_by', 'Jackline Mwicigi');
     }
 
+    // ── The CSV export ──────────────────────────────────────────────────────
+
+    public function test_the_csv_export_names_the_person_next_to_the_outlet(): void
+    {
+        $jackline = $this->staff('Jackline', 'Mwicigi');
+        $this->orderRaisedBy($jackline);
+
+        Sanctum::actingAs($this->staff('Ann', 'Manager', ['orders.view']));
+
+        $csv = $this->get('/api/v1/admin/orders/export')->assertOk()->getContent();
+        $lines = array_values(array_filter(explode("\n", trim($csv))));
+
+        $this->assertStringContainsString('Served by', $lines[0], 'the header carries the column');
+        $this->assertStringContainsString('Jackline Mwicigi', $lines[1], 'and the row carries the name');
+    }
+
+    // ── The receipt ─────────────────────────────────────────────────────────
+
+    /**
+     * A receipt is a frozen snapshot, so who served has to be captured at
+     * issue time — reading it back off the order later would let a reprint
+     * disagree with the paper the customer already holds.
+     */
+    public function test_the_receipt_snapshot_records_who_took_the_money(): void
+    {
+        $jackline = $this->staff('Jackline', 'Mwicigi');
+        $order    = $this->orderRaisedBy($jackline);
+
+        $invoice = SalesDocument::create([
+            'type'              => SalesDocument::INVOICE,
+            'number'            => 'INV-0003',
+            'documentable_type' => Order::class,
+            'documentable_id'   => $order->id,
+            'issued_at'         => now(),
+            'status'            => 'issued',
+            'amount'            => (float) $order->total_amount,
+            'currency_code'     => $order->currency_code,
+            'created_by'        => $jackline->id,
+        ]);
+
+        $payment = $order->payments()->create([
+            'amount'         => (float) $order->total_amount,
+            'currency_code'  => $order->currency_code,
+            'payment_method' => 'cash',
+            'status'         => 'paid',
+            'paid_at'        => now(),
+        ]);
+
+        $peter   = $this->staff('Peter', 'Kamau');
+        $receipt = \App\Services\ReceiptService::onPaymentSettled($order, $payment, $peter->id);
+
+        $this->assertNotNull($receipt, 'a settled payment on an invoiced order produces a receipt');
+        $this->assertSame('Peter Kamau', $receipt->snapshot['served_by'],
+            'the receipt names whoever took the money, not whoever raised the order');
+        $this->assertNotNull($invoice->fresh());
+    }
+
     /**
      * Documents written before created_by was recorded on them fall back to
      * whoever raised the order, rather than showing a blank.
