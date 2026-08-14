@@ -235,6 +235,11 @@ class SyncPermissions extends Command
         ],
 
         'pos_clerk' => [
+            // Dashboard. The route was previously ungated, so clerks already
+            // had it; this makes that explicit rather than accidental. The
+            // group revenue figure is now withheld from them by buildStats,
+            // which checks reports.view separately.
+            'dashboard.view',
             // POS terminal. open_register/close_register included because
             // both scope strictly to the current user's own register
             // (CashRegister::where('opened_by', $user->id) in both
@@ -260,6 +265,9 @@ class SyncPermissions extends Command
         ],
 
         'tailor' => [
+            // Dashboard — as for pos_clerk, previously reachable because the
+            // route was ungated. Money figures are withheld by buildStats.
+            'dashboard.view',
             // Production worker workspace only
             'production.view',
             'production.worker',
