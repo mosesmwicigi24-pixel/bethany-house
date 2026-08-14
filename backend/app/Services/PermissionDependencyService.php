@@ -130,6 +130,9 @@ class PermissionDependencyService
         // All of these sit inside the permission:pos.access admin/pos
         // route group.
         'pos.discount'        => ['pos.access'],
+        // Overriding the ceiling is meaningless without the right to discount
+        // at all — PosDiscountPolicy checks pos.discount first.
+        'pos.discount_override' => ['pos.discount', 'pos.access'],
         'pos.void'            => ['pos.access'],
         'pos.open_register'   => ['pos.access'],
         'pos.close_register'  => ['pos.access'],

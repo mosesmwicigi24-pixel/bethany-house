@@ -107,7 +107,8 @@ class SyncPermissions extends Command
 
         // ── POS ─────────────────────────────────────────────────────────────
         'pos.access'           => ['POS Access',           'Use the point-of-sale terminal',              'POS'],
-        'pos.discount'         => ['Apply Discounts',      'Apply manual discounts at POS',               'POS'],
+        'pos.discount'         => ['Apply Discounts',      'Apply manual discounts at POS, up to the configured ceiling', 'POS'],
+        'pos.discount_override' => ['Discount Beyond the Ceiling', 'Apply a POS discount larger than the percentage ceiling that limits cashiers', 'POS'],
         'pos.void'             => ['Void Transactions',    'Void completed POS transactions',             'POS'],
         'pos.open_register'    => ['Open Cash Register',   'Open a new cash register session',            'POS'],
         'pos.close_register'   => ['Close Cash Register',  'Close and reconcile a cash register',         'POS'],
@@ -217,8 +218,9 @@ class SyncPermissions extends Command
             'inventory.view', 'inventory.adjust', 'inventory.transfer', 'inventory.approve',
             // Catalogue - view only
             'products.view',
-            // POS - full register access
-            'pos.access', 'pos.discount', 'pos.void',
+            // POS - full register access. discount_override makes this role the
+            // escalation target when a cashier hits the discount ceiling.
+            'pos.access', 'pos.discount', 'pos.discount_override', 'pos.void',
             'pos.open_register', 'pos.close_register', 'pos.returns', 'pos.cash_management',
             // Reports
             'reports.view',

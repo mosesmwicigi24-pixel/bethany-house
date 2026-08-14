@@ -18,6 +18,7 @@ use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Services\ActivityLogService;
 use App\Services\ProductSerialService;
+use App\Services\PosDiscountPolicy;
 use App\Services\PosInventoryService;
 use App\Services\TaxCalculationService;
 use App\Services\NotificationService;
@@ -799,6 +800,9 @@ class PosController extends Controller
                     'percent' => ($lineBase * $discVal) / 100,
                     default   => 0.0,
                 };
+                // pos.discount is checked here, against the RESOLVED amount, so
+                // a flat discount cannot walk around the percentage ceiling.
+                PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, 'line');
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -847,6 +851,8 @@ class PosController extends Controller
                 'percent' => ($itemSubtotal * $cartDiscVal) / 100,
                 default   => 0.0,
             };
+
+            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart');
 
             $afterDiscount = $itemSubtotal - $cartDiscount;
             // Phase 2 — total tax is sum of per-line taxes already calculated above
@@ -1252,6 +1258,15 @@ class PosController extends Controller
             }
             Log::error('POS sale failed', ['error' => $e->getMessage()]);
             return response()->json(['message' => 'Failed to complete sale. Please try again.'], 500);
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+            // A deliberate abort() — a refusal this method MEANT to give, such
+            // as the discount ceiling. Without this the \Throwable arm below
+            // swallows it and answers 500, which tells the cashier the till is
+            // broken when in fact they were declined. Every other refusal in
+            // this method returns a response rather than throwing, which is why
+            // the masking went unnoticed.
+            DB::rollBack();
+            throw $e;
         } catch (\Throwable $e) {
             DB::rollBack();
             Log::error('POS sale failed', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
@@ -3147,6 +3162,9 @@ class PosController extends Controller
                     'percent' => ($lineBase * $discVal) / 100,
                     default   => 0.0,
                 };
+                // pos.discount is checked here, against the RESOLVED amount, so
+                // a flat discount cannot walk around the percentage ceiling.
+                PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, 'line');
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -3245,6 +3263,8 @@ class PosController extends Controller
                 'percent' => ($itemSubtotal * $cartDiscVal) / 100,
                 default   => 0.0,
             };
+            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart');
+
             $afterDiscount = $itemSubtotal - $cartDiscount;
             $taxAmount     = round(collect($itemsData)->sum('tax_amount'), 2);
             $shippingAmt   = round((float)($validated['shipping_amount'] ?? 0), 2);
@@ -3353,6 +3373,10 @@ class PosController extends Controller
                 'order'         => $this->transformSaleOrder($order->fresh(['items', 'payments'])),  // FIX 6
             ], 200);
 
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+            // A deliberate abort() — see the note on createSale's arm.
+            DB::rollBack();
+            throw $e;
         } catch (\Throwable $e) {
             DB::rollBack();
             Log::error('POS updatePendingOrder failed', ['order_id' => $id, 'error' => $e->getMessage()]);
@@ -3536,6 +3560,9 @@ class PosController extends Controller
                     'percent' => ($lineBase * $discVal) / 100,
                     default   => 0.0,
                 };
+                // pos.discount is checked here, against the RESOLVED amount, so
+                // a flat discount cannot walk around the percentage ceiling.
+                PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, 'line');
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -3633,6 +3660,8 @@ class PosController extends Controller
                 'percent' => ($itemSubtotal * $cartDiscVal) / 100,
                 default   => 0.0,
             };
+            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart');
+
             $afterDiscount = $itemSubtotal - $cartDiscount;
             $taxAmount     = round(collect($itemsData)->sum('tax_amount'), 2);
             $shippingAmt   = round((float)($validated['shipping_amount'] ?? 0), 2);
@@ -3812,6 +3841,10 @@ class PosController extends Controller
             }
             Log::error('POS createPendingOrder failed', ['error' => $e->getMessage()]);
             return response()->json(['message' => 'Failed to create order. Please try again.'], 500);
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+            // A deliberate abort() — see the note on createSale's arm.
+            DB::rollBack();
+            throw $e;
         } catch (\Throwable $e) {
             DB::rollBack();
             Log::error('POS pending order failed', ['error' => $e->getMessage()]);
