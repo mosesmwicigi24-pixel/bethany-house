@@ -26,6 +26,8 @@ use Illuminate\Support\Str;
  */
 class PaymentApprovalController extends Controller
 {
+    use \App\Http\Controllers\Api\Concerns\ConstrainsRawQueriesToViewer;
+
     // Allowed proof file types
     const ALLOWED_MIME_TYPES = [
         'application/pdf',
@@ -50,6 +52,13 @@ class PaymentApprovalController extends Controller
             ->join('orders as o', 'p.order_id', '=', 'o.id')
             ->where('p.requires_approval', true)
             ->where('p.approval_status', 'pending_review');
+
+        // A raw query builder does NOT pick up Eloquent global scopes, so the
+        // ViewerScope on Order never reaches this list — it has to be applied
+        // by hand. Without it a cashier scoped to their own sales still reads
+        // every pending payment in the group, with the customer names and
+        // amounts attached.
+        $this->constrainToViewer($query, $request->user(), 'o');
 
         if ($request->filled('search')) {
             $s = $request->search;
@@ -100,10 +109,15 @@ class PaymentApprovalController extends Controller
             return $p;
         });
 
-        $total = DB::table('payments')
-            ->where('requires_approval', true)
-            ->where('approval_status', 'pending_review')
-            ->count();
+        // Scoped like the list above. An unbounded badge reading "47 pending"
+        // over a list showing two is both confusing and a small leak of the
+        // group's volume.
+        $totalQuery = DB::table('payments as p')
+            ->join('orders as o', 'p.order_id', '=', 'o.id')
+            ->where('p.requires_approval', true)
+            ->where('p.approval_status', 'pending_review');
+        $this->constrainToViewer($totalQuery, $request->user(), 'o');
+        $total = $totalQuery->count();
 
         return response()->json([
             'data'          => $payments->items(),

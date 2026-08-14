@@ -1090,7 +1090,14 @@ Route::prefix('v1')->group(function () {
 
                 Route::prefix('payments')->group(function () {
                     Route::get('/pending-approval',          [PaymentApprovalController::class, 'pendingApprovals']);
-                    Route::get('/cash-report',               [PaymentApprovalController::class, 'cashReport']);
+                    // Every cash payment in the group for a date range, with
+                    // customer names, phone numbers and order totals. That is a
+                    // finance report, and payments.view — the key every cashier
+                    // holds to record a takings — is not the right lock for it.
+                    // Same mistake as the transactions ledger, missed the first
+                    // time because only the payment-transactions prefix moved.
+                    Route::get('/cash-report',               [PaymentApprovalController::class, 'cashReport'])
+                        ->middleware('permission:payments.transactions,sanctum');
                     Route::get('/{id}/proof',                [PaymentApprovalController::class, 'serveProof']);
                     Route::post('/{id}/upload-proof',        [PaymentApprovalController::class, 'uploadProof'])
                         ->middleware('permission:payments.upload_proof,sanctum');
