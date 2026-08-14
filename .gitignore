@@ -1,5 +1,13 @@
 react-admin/node_modules/
 
+# Vite build output. The deployed bundle is built inside the image
+# (react-admin/Dockerfile: npm ci && npm run build, then the production stage
+# COPYs /app/dist from the builder), and box-deploy.sh only ever pulls those
+# prebuilt images from GHCR. Nothing reads this directory out of a checkout,
+# so a committed copy is stale the moment src/ changes -- and a local
+# `npm run build` used to add ~100 renamed hash chunks to every UI diff.
+react-admin/dist/
+
 # Windows "mark of the web" download metadata. WSL surfaces NTFS alternate data
 # streams as sibling files named "<file>:Zone.Identifier"; copying a directory
 # out of Windows drags them along. They are never part of the source tree.
