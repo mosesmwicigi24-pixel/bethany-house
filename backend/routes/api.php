@@ -731,6 +731,17 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── POS (admin-prefixed) ──────────────────────────────────────────
+            // Receivables lives under the /pos prefix by history, not by
+            // requirement. It was inside the pos.access group, so the till key
+            // opened it — and finance_manager, whose job this actually is, has
+            // no till and could not reach it at all.
+            //
+            // The rows are already bounded: outstandingBalances queries through
+            // Eloquent, so the viewer scope applies. This decides who gets the
+            // screen, which is a decision rather than a leak.
+            Route::get('pos/outstanding-balances', [PosController::class, 'outstandingBalances'])
+                ->middleware('permission:receivables.view,sanctum');
+
             Route::middleware('permission:pos.access,sanctum')->prefix('pos')->group(function () {
                 Route::get('outlets',                   [PosController::class, 'outlets']);
                 Route::get('register/status',           [PosController::class, 'registerStatus']);
@@ -739,7 +750,6 @@ Route::prefix('v1')->group(function () {
                 Route::get('products/search',           [PosController::class, 'searchProducts']);
                 Route::get('suggestions',               [PosController::class, 'suggestions']);
                 Route::get('sales',                     [PosController::class, 'sales']);
-                Route::get('outstanding-balances',      [PosController::class, 'outstandingBalances']);
                 Route::get('sales/{id}',                [PosController::class, 'saleDetail']);
                 Route::get('returns',                   [PosController::class, 'returns']);
                 Route::get('reports/daily',             [PosController::class, 'dailySummary']);
