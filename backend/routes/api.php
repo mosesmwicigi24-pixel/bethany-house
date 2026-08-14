@@ -269,8 +269,14 @@ Route::prefix('v1')->group(function () {
 
         Route::prefix('admin')->middleware('throttle:admin-api')->group(function () {
 
+            // sidebar-badges stays open to all staff: it drives the nav badge
+            // counts for every role, and its figures are already partly
+            // user-scoped (a tailor's row filters on assigned_to).
             Route::get('/sidebar-badges', [DashboardController::class, 'sidebarBadges']);
-            Route::get('/dashboard',      [DashboardController::class, 'index']);
+            // dashboard.view exists in the catalogue and was never consulted,
+            // so this endpoint answered to any authenticated user.
+            Route::get('/dashboard',      [DashboardController::class, 'index'])
+                ->middleware('permission:dashboard.view,sanctum');
 
             // ── In-App Notifications ─────────────────────────────────────────
             Route::prefix('notifications')->group(function () {
@@ -1075,11 +1081,25 @@ Route::prefix('v1')->group(function () {
 
             // ── Payments ─────────────────────────────────────────────────────
             Route::middleware('permission:payments.view,sanctum')->group(function () {
+                // The ledger is NOT the same capability as seeing a payment on
+                // an order. payments.view is held by every cashier so they can
+                // record a takings; payments.transactions — "View the full
+                // payment transaction ledger and analytics" — was defined for
+                // this group and then never wired up, so the whole group,
+                // including its CSV export, sat behind the cashier's key.
                 Route::prefix('payment-transactions')->group(function () {
-                    Route::get('/',             [PaymentController::class, 'allTransactions']);
-                    Route::get('/analytics',    [PaymentController::class, 'transactionAnalytics']);
-                    Route::get('/export',       [PaymentController::class, 'exportTransactions']);
-                    Route::get('/{id}',         [PaymentController::class, 'transactionDetails']);
+                    // Reading the ledger — the list, its analytics, its export
+                    // and a row's detail — is the capability payments.transactions
+                    // names. Acting on ONE payment is not: refund, void and
+                    // reassign keep their own permissions below, because
+                    // reversing a payment you are already handling is a
+                    // different job from reading every payment in the group.
+                    Route::middleware('permission:payments.transactions,sanctum')->group(function () {
+                        Route::get('/',          [PaymentController::class, 'allTransactions']);
+                        Route::get('/analytics', [PaymentController::class, 'transactionAnalytics']);
+                        Route::get('/export',    [PaymentController::class, 'exportTransactions']);
+                        Route::get('/{id}',      [PaymentController::class, 'transactionDetails']);
+                    });
                     Route::post('/{id}/refund',    [PaymentController::class, 'refundTransaction'])
                         ->middleware('permission:orders.refund,sanctum');
                     Route::post('/{id}/void',      [PaymentController::class, 'voidPayment'])

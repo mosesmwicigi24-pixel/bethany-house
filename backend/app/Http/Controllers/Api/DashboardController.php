@@ -103,6 +103,14 @@ class DashboardController extends Controller
 
     private function buildStats(Request $request): array
     {
+        // Money on this dashboard is group-wide and unscoped: today_sales is
+        // every paid order in the business. The route itself is now gated on
+        // dashboard.view, but that is held by roles who have no business
+        // reading group revenue — so the financial figures carry their own
+        // check. reports.view is the right cut: outlet managers and the
+        // finance/procurement roles hold it, cashiers and tailors do not.
+        $maySeeMoney = $request->user()?->can('reports.view') ?? false;
+
         $stats = [
             'total_users'  => User::count(),
             'active_users' => User::where('status', 'active')->count(),
@@ -114,14 +122,17 @@ class DashboardController extends Controller
             $stats['total_orders']   = Order::count();
             $stats['pending_orders'] = Order::whereIn('status', ['pending', 'processing'])->count();
             $stats['today_orders']   = Order::whereDate('created_at', today())->count();
-            $stats['today_sales']    = Order::whereDate('created_at', today())
-                ->where('payment_status', 'paid')
-                ->sum('total_amount');
-            // Phase 5
-            $stats['pending_payment_approvals'] = DB::table('payments')
-                ->where('requires_approval', true)
-                ->where('approval_status', 'pending_review')
-                ->count();
+
+            if ($maySeeMoney) {
+                $stats['today_sales'] = Order::whereDate('created_at', today())
+                    ->where('payment_status', 'paid')
+                    ->sum('total_amount');
+                // Phase 5
+                $stats['pending_payment_approvals'] = DB::table('payments')
+                    ->where('requires_approval', true)
+                    ->where('approval_status', 'pending_review')
+                    ->count();
+            }
         } catch (\Exception) {}
 
         try {
