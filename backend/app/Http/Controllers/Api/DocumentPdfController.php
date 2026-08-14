@@ -191,6 +191,7 @@ class DocumentPdfController extends Controller
             'items.variant:id,sku,variant_name',
             'outlet:id,name',
             'payments',
+            'creator:id,first_name,last_name',
         ])->findOrFail($id);
 
         $data                  = $order->toArray();
@@ -201,6 +202,9 @@ class DocumentPdfController extends Controller
         $data['customer_email'] = $order->user?->email ?? $order->customer_email;
         $data['customer_phone'] = $order->user?->phone ?? $order->customer_phone;
         $data['outlet_name']    = $order->outlet?->name;
+        // "Associate" on the printed order falls back to the outlet name when
+        // this is missing, which named the shop rather than the person.
+        $data['cashier_name']   = $order->creator?->name ?: null;
 
         $html = PdfService::order($data, $isInvoice);
         $prefix = $isInvoice ? 'Invoice' : 'Order';

@@ -135,6 +135,19 @@ class Order extends Model
     }
 
     /**
+     * The staff member who raised this order — the person who served the
+     * customer. Distinct from user(), which is the customer's own account.
+     *
+     * This is the same column the viewer scope owns an order by, so "the
+     * orders you can see" and "the orders that say your name" are guaranteed
+     * to be the same set.
+     */
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /**
      * The customer record this order is attached to. POS can set customer_id
      * while leaving the snapshot name columns blank, so this is the last
      * resort when resolving who an order (or its production job) is for.
