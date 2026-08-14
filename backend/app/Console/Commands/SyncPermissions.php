@@ -173,12 +173,63 @@ class SyncPermissions extends Command
      * Reflects the actual modules and actions each role performs in the system.
      * super_admin uses '*' - bypasses all checks in usePermissions().
      */
+    /**
+     * Named sets of permissions that go together because a JOB needs them
+     * together.
+     *
+     * A role used to be thirty-odd hand-maintained strings, which nobody could
+     * read at a glance and which drifted whenever one list was updated and its
+     * near-twin was not. A bundle is the unit of review instead: "a POS clerk
+     * is @self + @till + @sell + @take_payment + @walkin_customer" is a
+     * sentence somebody can check against how the shop actually works.
+     *
+     * A role's definition below may mix bundle references (@name) with plain
+     * permission strings and wildcards, so a role that is "the usual, plus two"
+     * says exactly that.
+     *
+     * These bundles were factored out of the existing role definitions and
+     * change nothing: expandBundles() reproduces the previous lists exactly.
+     */
+    const BUNDLES = [
+
+        // Everyone who signs in gets these.
+        'self'            => ['profile.view', 'profile.edit', 'notifications.view'],
+        'workspace'       => ['dashboard.view'],
+
+        // Operating a till. cash_management is deliberately NOT here — a
+        // cashier opens and closes their own drawer, but moving money in and
+        // out of it is a supervisor's action.
+        'till'            => ['pos.access', 'pos.discount', 'pos.void',
+                              'pos.open_register', 'pos.close_register', 'pos.returns'],
+
+        // Making a sale, and taking the money for it.
+        'sell'            => ['orders.view', 'orders.create'],
+        'take_payment'    => ['payments.view', 'payments.record', 'payments.upload_proof'],
+        'walkin_customer' => ['customers.view', 'customers.create', 'customers.create_without_email'],
+
+        // The shop floor: a worker's own tasks and the QC they submit on them.
+        'shop_floor'      => ['production.view', 'production.worker', 'production.submit_qc'],
+
+        // Stock, and buying it.
+        'stock'           => ['inventory.view', 'inventory.adjust', 'inventory.transfer', 'inventory.approve'],
+        'buying'          => ['procurement.view', 'procurement.create',
+                              'procurement.receive', 'procurement.approve'],
+    ];
+
+    /**
+     * Default permission sets for each system role, as bundles plus extras.
+     *
+     * super_admin uses '*' — it bypasses every check via Gate::before, so its
+     * stored grants do nothing.
+     */
     const ROLE_PERMISSIONS = [
 
         'super_admin' => '*',   // Wildcard - bypasses all permission checks
 
         'admin' => [
-            // Full access to everything except super_admin-only operations
+            // Full access to everything except super_admin-only operations.
+            // Not @self: admin has never been granted profile.*, and this
+            // refactor does not change who holds what.
             'dashboard.view',
             'orders.*', 'quotations.*', 'payments.*',
             'production.*',
@@ -198,84 +249,45 @@ class SyncPermissions extends Command
             'notifications.view',
         ],
 
+        // Runs one shop: its till, its stock, its production, its people.
         'outlet_manager' => [
-            'dashboard.view',
-            // Orders - full operational control
-            'orders.view', 'orders.create', 'orders.edit', 'orders.manage_returns',
+            '@self', '@workspace', '@till', '@sell', '@take_payment',
+            '@walkin_customer', '@stock',
+            // Beyond a cashier at the same till
+            'pos.cash_management',
+            'orders.edit', 'orders.manage_returns',
             'orders.set_shipping_fee', 'orders.set_deposit',
-            // Payments - record and upload; international approval excluded
-            'payments.view', 'payments.record', 'payments.upload_proof',
+            'customers.edit',
             // Production - manage orders and QC but not system configuration
             'production.view', 'production.raise_order', 'production.confirm_order',
             'production.manage_assignees', 'production.submit_qc', 'production.approve_qc',
-            // Shipments
             'shipment.view', 'shipment.create', 'shipment.manage_tracking',
-            // Customers
-            'customers.view', 'customers.create', 'customers.edit',
-            'customers.create_without_email',
-            // Inventory
-            'inventory.view', 'inventory.adjust', 'inventory.transfer', 'inventory.approve',
-            // Catalogue - view only
             'products.view',
-            // POS - full register access
-            'pos.access', 'pos.discount', 'pos.void',
-            'pos.open_register', 'pos.close_register', 'pos.returns', 'pos.cash_management',
-            // Reports
             'reports.view',
             // Expenses - create and submit; approval handled by admin/finance
             'expenses.view', 'expenses.create', 'expenses.edit', 'expenses.delete',
-            // Outlets - view and edit own outlet details
             'outlets.view', 'outlets.edit',
-            // Attendance - oversee their own outlet/workshop staff
             'attendance.view_team', 'attendance.manage',
-            // Profile
-            'profile.view', 'profile.edit',
-            // Notifications
-            'notifications.view',
         ],
 
+        // Sells at the counter. open_register/close_register are in @till
+        // because every cashier opens and closes their own drawer each shift —
+        // both scope strictly to the current user's own register.
         'pos_clerk' => [
-            // POS terminal. open_register/close_register included because
-            // both scope strictly to the current user's own register
-            // (CashRegister::where('opened_by', $user->id) in both
-            // PosController::openRegister/closeRegister) - every cashier
-            // opens and closes their own drawer each shift, this was never
-            // a manager-delegates-to-everyone action.
-            'pos.access', 'pos.discount', 'pos.returns', 'pos.void',
-            'pos.open_register', 'pos.close_register',
-            // Orders - create and view own orders (also gates the Invoices view)
-            'orders.view', 'orders.create',
-            // Quotations - see the quotation list (front of the sales-docs flow)
+            '@self', '@till', '@sell', '@take_payment', '@walkin_customer',
+            // Front of the sales-documents flow
             'quotations.view',
-            // Payments - record, upload proof, and view transaction history
-            'payments.view', 'payments.record', 'payments.upload_proof',
-            // Customers - create walk-in and view
-            'customers.view', 'customers.create', 'customers.create_without_email',
-            // Production - can raise MTO orders at POS
+            // Can raise a made-to-order job at the till
             'production.raise_order',
-            // Profile
-            'profile.view', 'profile.edit',
-            // Notifications
-            'notifications.view',
         ],
 
+        // Production worker workspace only.
         'tailor' => [
-            // Production worker workspace only
-            'production.view',
-            'production.worker',
-            'production.submit_qc',
-            // Profile
-            'profile.view', 'profile.edit',
-            // Notifications
-            'notifications.view',
+            '@self', '@shop_floor',
         ],
 
         'procurement_officer' => [
-            'dashboard.view',
-            // Procurement - full cycle
-            'procurement.view', 'procurement.create', 'procurement.receive', 'procurement.approve',
-            // Inventory - view and adjust raw materials
-            'inventory.view', 'inventory.adjust', 'inventory.transfer', 'inventory.approve',
+            '@self', '@workspace', '@buying', '@stock',
             // Catalogue - view to reference products when purchasing
             'products.view',
             // Payments - view transaction history for PO-related payments
@@ -284,10 +296,6 @@ class SyncPermissions extends Command
             'reports.view',
             // Expenses - view expenses linked to purchase orders
             'expenses.view',
-            // Profile
-            'profile.view', 'profile.edit',
-            // Notifications
-            'notifications.view',
         ],
     ];
 
@@ -300,30 +308,25 @@ class SyncPermissions extends Command
      */
     const EXTRA_ROLES = [
 
+        // NOTE: this differs from procurement_officer by reports.export ALONE.
+        // Both hold procurement.approve, so an officer can approve the purchase
+        // orders they raised themselves. That is a segregation-of-duties gap,
+        // not a refactor artefact — it is preserved here deliberately, because
+        // this change is not allowed to move a single grant. Fixing it is a
+        // policy decision.
         'procurement_manager' => [
-            'dashboard.view',
-            // Procurement - full cycle including approval authority
-            'procurement.view', 'procurement.create', 'procurement.approve', 'procurement.receive',
-            // Inventory - stock visibility and approval
-            'inventory.view', 'inventory.adjust', 'inventory.transfer', 'inventory.approve',
-            // Catalogue - view to reference products
+            '@self', '@workspace', '@buying', '@stock',
             'products.view',
-            // Payments - view transaction history for PO-related payments
             'payments.view',
-            // Reports - spend and procurement analytics
             'reports.view', 'reports.export',
-            // Expenses - view expenses linked to POs
             'expenses.view',
-            // Profile
-            'profile.view', 'profile.edit',
-            // Notifications
-            'notifications.view',
         ],
 
         'finance_manager' => [
-            'dashboard.view',
+            '@self', '@workspace',
             // Payments - full approval authority + view transactions ledger
-            'payments.view', 'payments.approve_international', 'payments.transactions', 'payments.void', 'payments.reassign',
+            'payments.view', 'payments.approve_international', 'payments.transactions',
+            'payments.void', 'payments.reassign',
             // Expenses - full control including approval and budgets
             'expenses.view', 'expenses.create', 'expenses.edit',
             'expenses.delete', 'expenses.approve', 'expenses.export', 'expenses.budgets',
@@ -331,13 +334,37 @@ class SyncPermissions extends Command
             'reports.view', 'reports.export', 'reports.financial',
             // Orders - view only (for payment context)
             'orders.view',
-            // Profile
-            'profile.view', 'profile.edit',
-            // Notifications
-            'notifications.view',
         ],
 
     ];
+
+    /**
+     * Resolve a role definition into a flat permission list, replacing every
+     * "@bundle" reference with the bundle's contents.
+     *
+     * @param  list<string>  $spec
+     * @return list<string>
+     */
+    public static function expandBundles(array $spec): array
+    {
+        $out = [];
+
+        foreach ($spec as $entry) {
+            if (str_starts_with($entry, '@')) {
+                $name = substr($entry, 1);
+                if (!isset(self::BUNDLES[$name])) {
+                    throw new \InvalidArgumentException("Unknown permission bundle: @{$name}");
+                }
+                foreach (self::BUNDLES[$name] as $p) {
+                    $out[] = $p;
+                }
+                continue;
+            }
+            $out[] = $entry;
+        }
+
+        return array_values(array_unique($out));
+    }
 
     public function handle(): void
     {
@@ -391,6 +418,11 @@ class SyncPermissions extends Command
             // super_admin wildcard bypass above, which continues before
             // reaching this code for that role).
             $wildcardExcluded = ['settings.manage_database'];
+
+            // Resolve "@bundle" references first, so wildcard expansion and
+            // dependency resolution below see a flat list exactly as they did
+            // when roles were written out longhand.
+            $perms = self::expandBundles($perms);
 
             // Expand wildcards like 'orders.*'
             $expanded = [];
