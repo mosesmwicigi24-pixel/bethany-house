@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Restricted;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -15,6 +16,30 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Quotation extends Model
 {
     use HasFactory;
+    /**
+     * Bounds every quotation query to what the caller may see — list, detail,
+     * search and the PDF. Order was scoped and this was not, so a clerk whose
+     * own sales were hidden from her colleagues could still read the whole
+     * shop's quotations, customer contacts and prices included.
+     */
+    use Restricted;
+
+    /** The capability that governs reading a quotation. */
+    public static function viewPermission(): string
+    {
+        return 'quotations.view';
+    }
+
+    /**
+     * created_by is the STAFF member who raised the quote. user_id is the
+     * customer's linked account — the same distinction Order draws, and for the
+     * same reason: scoping on it would show a clerk the quotes written FOR her
+     * rather than the ones written BY her.
+     */
+    public function ownerColumn(): string
+    {
+        return 'created_by';
+    }
 
     // Statuses.
     public const DRAFT     = 'draft';

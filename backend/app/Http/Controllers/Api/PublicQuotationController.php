@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Order;
 use App\Models\Quotation;
 use App\Services\QuotationService;
 use Illuminate\Http\JsonResponse;
@@ -36,8 +37,10 @@ class PublicQuotationController extends Controller
 
         if ($quotation->converted_order_id) {
             // Already accepted — hand back the existing pay-link so the customer
-            // can still pay (idempotent, friendly).
-            $order = $quotation->convertedOrder;
+            // can still pay (idempotent, friendly). Unscoped for the same reason
+            // as resolve(): Order is bounded too, and the customer's pay-link
+            // must not depend on whose session is attached to the request.
+            $order = Order::withoutViewerScope()->find($quotation->converted_order_id);
             return response()->json([
                 'message'   => 'This quotation was already accepted.',
                 'pay_token' => $order?->payment_token,
@@ -62,7 +65,13 @@ class PublicQuotationController extends Controller
 
     private function resolve(string $token): ?Quotation
     {
-        $quotation = Quotation::with('items')->where('quote_token', $token)->first();
+        // Outside the viewer boundary, deliberately. This page has no viewer —
+        // the token IS the authorization, and the customer holding it is not a
+        // member of staff. Left scoped, the quote would resolve or 404 by
+        // accident of whoever happened to be signed in on the same browser:
+        // the admin SPA serves this page from the same origin, so a clerk's
+        // session cookie rides along, and a colleague's quote would vanish.
+        $quotation = Quotation::withoutViewerScope()->with('items')->where('quote_token', $token)->first();
         if (!$quotation) {
             return null;
         }
