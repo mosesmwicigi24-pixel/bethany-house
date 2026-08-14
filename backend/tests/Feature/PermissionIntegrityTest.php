@@ -52,17 +52,15 @@ class PermissionIntegrityTest extends TestCase
      * Declared and granted, but enforced nowhere. Each is a control the Roles
      * screen advertises and the application does not apply.
      *
-     * Shrinking as they are wired up — dashboard.view, payments.transactions
-     * and pos.discount are fixed in the access-control PRs and will drop off as
-     * those land. The two profile.* entries are benign: self-service is implicit
-     * and no route consults them.
+     * Three have already dropped off as the access-control work landed:
+     * dashboard.view and payments.transactions now gate routes, and pos.discount
+     * is enforced by PosDiscountPolicy. The two profile.* entries are benign —
+     * self-service is implicit and no route consults them. The export pair and
+     * the walk-in flag are still real gaps.
      */
     private const KNOWN_INERT = [
         'customers.create_without_email',
-        'dashboard.view',
         'expenses.export',
-        'payments.transactions',
-        'pos.discount',
         'products.export',
         'profile.edit',
         'profile.view',

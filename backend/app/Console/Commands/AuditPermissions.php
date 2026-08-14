@@ -143,7 +143,16 @@ class AuditPermissions extends Command
                 if (is_dir($file) || !preg_match('/\.(php|ts|tsx)$/', $file)) {
                     continue;
                 }
-                if (preg_match_all($pattern, (string) file_get_contents($file), $m)) {
+                // Comments are stripped first. Prose describing a permission is
+                // not a gate: an unanchored scan once reported "middleware" and
+                // "not role" as phantoms from the sentence "guarded by
+                // permission: middleware, not role:", and a widened one picked
+                // up the ->can('a.b') in this very docblock.
+                $source = (string) file_get_contents($file);
+                $source = preg_replace('!/\*.*?\*/!s', '', $source) ?? $source;
+                $source = preg_replace('!(^|\s)//[^\n]*!', '', $source) ?? $source;
+
+                if (preg_match_all($pattern, $source, $m)) {
                     foreach ($m[1] as $hit) {
                         foreach (preg_split('/[|,]/', $hit) as $one) {
                             $one = trim($one);
@@ -162,8 +171,11 @@ class AuditPermissions extends Command
         // matches prose, and a comment reading "guarded by permission:
         // middleware, not role:" was duly reported as two phantom permissions.
         $scan($base . '/routes', "/['\"]permission:([a-z_. |,]+)/");
-        // ->can('a.b')                 — controller checks
-        $scan($base . '/app/Http', "/->can\(\s*'([a-z_. ]+)'/");
+        // ->can('a.b')                 — checked anywhere in the application,
+        // not only in controllers: PosDiscountPolicy lives in app/Services and
+        // scanning app/Http alone reported pos.discount as inert while it was
+        // being enforced on every sale.
+        $scan($base . '/app', "/->can\(\s*'([a-z_. ]+)'/");
         // ,can:a b                     — legacy names inside web.php role gates
         $scan($base . '/routes', "/,can:([a-z_ ]+)/");
         // "a.b" in the React sidebar's permission / anyOfPermissions keys
