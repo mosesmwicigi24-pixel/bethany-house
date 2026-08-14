@@ -577,7 +577,7 @@ class PosController extends Controller
             return null;
         }
 
-        return Order::where('client_request_id', $clientRequestId)->first();
+        return Order::withoutViewerScope()->where('client_request_id', $clientRequestId)->first();
     }
 
     public function createSale(Request $request): JsonResponse
@@ -2778,7 +2778,7 @@ class PosController extends Controller
     {
         do {
             $number = $prefix . strtoupper(Str::random(5));
-        } while (Order::where('order_number', $number)->exists());
+        } while (Order::withoutViewerScope()->where('order_number', $number)->exists());
         return $number;
     }
 

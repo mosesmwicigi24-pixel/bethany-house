@@ -134,7 +134,7 @@ class QuotationService
             // OrderController) and an HMAC pay-link token.
             $prefix      = DB::table('settings')->where('key', 'order_prefix')->value('value') ?? 'ORD-';
             $orderNumber = $prefix . strtoupper(Str::random(8));
-            while (Order::where('order_number', $orderNumber)->exists()) {
+            while (Order::withoutViewerScope()->where('order_number', $orderNumber)->exists()) {
                 $orderNumber = $prefix . strtoupper(Str::random(8));
             }
             $paymentToken = hash_hmac('sha256', $orderNumber . now()->toISOString() . Str::random(8), config('app.key'));
