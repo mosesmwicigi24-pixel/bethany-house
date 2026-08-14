@@ -1,0 +1,1 @@
+function r(n){if(!n)return null;let e=n.replace(/[^\d]/g,"");return e.startsWith("0")?e="254"+e.slice(1):e.length===9&&(e="254"+e),e.length>=11?e:null}function l(n,e){const t=r(n);return t?(window.open(`https://wa.me/${t}?text=${encodeURIComponent(e)}`,"_blank"),!0):!1}export{l as o};

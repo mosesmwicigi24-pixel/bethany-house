@@ -42,6 +42,7 @@ class PosRegisterAccountingTest extends TestCase
     {
         $user   = $this->actingWithPermissions(['pos.access', 'pos.void']);
         $outlet = Outlet::factory()->create();
+        auth()->user()?->outlets()->syncWithoutDetaching([$outlet->id]);
 
         // Drawer: 1000 float + a 300 cash deposit taken on a 1000 order.
         $register = CashRegister::create([
@@ -91,6 +92,7 @@ class PosRegisterAccountingTest extends TestCase
     {
         $user   = $this->actingWithPermissions(['pos.access', 'pos.returns']);
         $outlet = Outlet::factory()->create();
+        auth()->user()?->outlets()->syncWithoutDetaching([$outlet->id]);
 
         $register = CashRegister::create([
             'outlet_id'       => $outlet->id,
