@@ -358,11 +358,11 @@ Route::prefix('v1')->group(function () {
             Route::get('/tailor-workload', [IntelligenceController::class, 'tailorWorkload'])
                 ->middleware('permission:production.view,sanctum');
             Route::get('/churn-risk', [IntelligenceController::class, 'churnRisk'])
-                ->middleware('permission:customers.view,sanctum');
+                ->middleware('permission:intelligence.view,sanctum');
             Route::get('/customer-geography', [IntelligenceController::class, 'customerGeography'])
-                ->middleware('permission:customers.view,sanctum');
+                ->middleware('permission:intelligence.view,sanctum');
             Route::get('/channel-engagement', [IntelligenceController::class, 'channelEngagement'])
-                ->middleware('permission:customers.view,sanctum');
+                ->middleware('permission:intelligence.view,sanctum');
             Route::get('/budget-warnings', [IntelligenceController::class, 'budgetWarnings'])
                 ->middleware('permission:expenses.view,sanctum');
             // smart-tasks and entity-previews stay open to all authenticated
@@ -510,36 +510,40 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Marketing: liturgical seasons + Blessed Friday campaigns ──────
-            Route::middleware('permission:products.view,sanctum')->prefix('marketing')->group(function () {
+            // NOT products.view. That is a read permission on the catalogue,
+            // and it was opening Seasons, Campaigns and — because the home-front
+            // pages are built on marketing banners — editing the public
+            // storefront. A cashier held it via the orders.create dependency.
+            Route::middleware('permission:marketing.view,sanctum')->prefix('marketing')->group(function () {
                 Route::get('/seasons',          [\App\Http\Controllers\Api\SeasonController::class, 'adminIndex']);
                 Route::get('/seasons/{id}',     [\App\Http\Controllers\Api\SeasonController::class, 'adminShow']);
                 Route::post('/seasons',         [\App\Http\Controllers\Api\SeasonController::class, 'store'])
-                    ->middleware('permission:products.edit,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
                 Route::put('/seasons/{id}',     [\App\Http\Controllers\Api\SeasonController::class, 'update'])
-                    ->middleware('permission:products.edit,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
                 Route::delete('/seasons/{id}',  [\App\Http\Controllers\Api\SeasonController::class, 'destroy'])
-                    ->middleware('permission:products.delete,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
 
                 Route::get('/promotions',         [\App\Http\Controllers\Api\PromotionController::class, 'adminIndex']);
                 Route::get('/promotions/{id}',    [\App\Http\Controllers\Api\PromotionController::class, 'adminShow']);
                 Route::post('/promotions',        [\App\Http\Controllers\Api\PromotionController::class, 'store'])
-                    ->middleware('permission:products.edit,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
                 Route::put('/promotions/{id}',    [\App\Http\Controllers\Api\PromotionController::class, 'update'])
-                    ->middleware('permission:products.edit,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
                 Route::delete('/promotions/{id}', [\App\Http\Controllers\Api\PromotionController::class, 'destroy'])
-                    ->middleware('permission:products.delete,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
 
                 // Marketing content blocks (homepage hero slider, promos, etc.)
                 Route::get('/banners',             [\App\Http\Controllers\Api\BannerController::class, 'adminIndex']);
                 Route::get('/banners/{id}',        [\App\Http\Controllers\Api\BannerController::class, 'adminShow']);
                 Route::post('/banners',            [\App\Http\Controllers\Api\BannerController::class, 'store'])
-                    ->middleware('permission:products.edit,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
                 Route::post('/banners/{id}/image', [\App\Http\Controllers\Api\BannerController::class, 'uploadImage'])
-                    ->middleware('permission:products.edit,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
                 Route::put('/banners/{id}',        [\App\Http\Controllers\Api\BannerController::class, 'update'])
-                    ->middleware('permission:products.edit,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
                 Route::delete('/banners/{id}',     [\App\Http\Controllers\Api\BannerController::class, 'destroy'])
-                    ->middleware('permission:products.delete,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
             });
 
             // ── Insights / analytics ──────────────────────────────────────────

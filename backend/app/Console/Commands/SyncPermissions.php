@@ -120,6 +120,20 @@ class SyncPermissions extends Command
         'pos.returns'          => ['Process Returns',      'Process item returns at POS',                 'POS'],
         'pos.cash_management'  => ['POS Cash Management',  'Perform cash deposits, withdrawals and adjustments on a register', 'POS'],
 
+        // ── Marketing & storefront ──────────────────────────────────────────
+        // Split out of products.view, which is a READ permission on the
+        // catalogue and was also opening Seasons, Campaigns and — because the
+        // home-front pages are built on marketing banners — editing the public
+        // storefront's home and product pages.
+        'marketing.view'       => ['View Marketing',       'View liturgical seasons, campaigns and storefront banners', 'Marketing'],
+        'marketing.manage'     => ['Manage Marketing',     'Create and edit seasons, campaigns and the storefront home/product pages', 'Marketing'],
+
+        // ── Intelligence ────────────────────────────────────────────────────
+        // Split out of customers.view. Reading a customer record to serve them
+        // is not the same capability as reading where the customer base lives
+        // and which channels it buys through.
+        'intelligence.view'    => ['View Customer Intelligence', 'Customer geography, channel engagement and churn risk', 'Intelligence'],
+
         // ── Reports & Analytics ─────────────────────────────────────────────
         'reports.view'         => ['View Reports',         'Access sales, inventory and financial reports', 'Reports'],
         'reports.export'       => ['Export Reports',       'Export reports to CSV/PDF',                    'Reports'],
@@ -272,6 +286,8 @@ class SyncPermissions extends Command
             'procurement.*',
             'inventory.*',
             'products.*',
+            'marketing.*',
+            'intelligence.*',
             'pos.*',
             'reports.*',
             'expenses.*',
