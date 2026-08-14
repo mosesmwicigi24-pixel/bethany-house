@@ -184,6 +184,7 @@ class PaymentReconciliationCharacterizationTest extends TestCase
     {
         $this->actingWithPermissions(['pos.access', 'pos.void']);
         $outlet = Outlet::factory()->create();
+        auth()->user()?->outlets()->syncWithoutDetaching([$outlet->id]);
         $order = Order::factory()->create([
             'order_type' => 'pos', 'outlet_id' => $outlet->id,
             'total_amount' => 1000, 'status' => 'completed', 'payment_status' => 'paid',
