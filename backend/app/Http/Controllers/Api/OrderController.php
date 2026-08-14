@@ -2041,23 +2041,20 @@ class OrderController extends Controller
             }
 
             // ── Recalculate order-level totals ────────────────────────────────
-            $freshItems   = DB::table('order_items')->where('order_id', $order->id)->get();
-            $newSubtotal  = $freshItems->sum(fn ($i) => (float)$i->unit_price * (int)$i->quantity - (float)$i->discount_amount);
-            $newTaxAmount = $freshItems->sum(fn ($i) => (float)$i->tax_amount);
-            $newTotal     = round(
-                $newSubtotal - (float)$order->discount_amount
-                + ($order->prices_include_tax ? 0 : $newTaxAmount)
-                + (float)$order->shipping_amount,
-                2
+            // The cart discount and shipping are deliberately NOT converted —
+            // they stay at their old-currency figures, as they always have.
+            $freshItems = DB::table('order_items')->where('order_id', $order->id)->get();
+            $totals     = \App\Services\OrderTotals::forOrder(
+                $order,
+                (bool) $order->prices_include_tax,
+                $freshItems,
             );
+            $newTotal = $totals->total;
 
-            $order->update([
+            $totals->persistTo($order, [
                 'currency_code'         => $newCurrency,
                 'customer_country_code' => $countryCode,
                 'is_international'      => $isInternational,
-                'subtotal'              => round($newSubtotal, 2),
-                'tax_amount'            => round($newTaxAmount, 2),
-                'total_amount'          => $newTotal,
             ]);
 
             DB::commit();
@@ -2161,20 +2158,10 @@ class OrderController extends Controller
                 'total_price'     => round($lineTotal, 2),
             ]);
 
-            // Recalculate order totals from all items
-            $freshItems    = $order->items()->get();
-            $newSubtotal   = $freshItems->sum(fn ($i) => (float)$i->unit_price * (int)$i->quantity - (float)$i->discount_amount);
-            $cartDiscount  = (float)$order->discount_amount;  // cart-level discount stays
-            $afterDiscount = $newSubtotal - $cartDiscount;
-            $newTaxTotal   = $freshItems->sum(fn ($i) => (float)$i->tax_amount);
-            $shipping      = (float)$order->shipping_amount;
-            $newTotal      = round($afterDiscount + ($taxInclusive ? 0 : $newTaxTotal) + $shipping, 2);
-
-            $order->update([
-                'subtotal'     => round($newSubtotal, 2),
-                'tax_amount'   => round($newTaxTotal, 2),
-                'total_amount' => $newTotal,
-            ]);
+            // Recalculate order totals from all items. The cart-level discount
+            // and shipping already on the order ride along untouched.
+            $totals = \App\Services\OrderTotals::forOrder($order, $taxInclusive, $order->items()->get());
+            $totals->persistTo($order);
 
             DB::commit();
 
@@ -2201,8 +2188,8 @@ class OrderController extends Controller
             return response()->json([
                 'message'         => 'Price updated successfully.',
                 'item'            => $updatedItemArr,
-                'order_total'     => $newTotal,
-                'order_subtotal'  => round($newSubtotal, 2),
+                'order_total'     => $totals->total,
+                'order_subtotal'  => $totals->subtotal,
             ]);
 
         } catch (\Throwable $e) {
