@@ -2724,13 +2724,36 @@ class PosController extends Controller
         ]);
     }
 
+    /**
+     * 403 unless the caller may act at this outlet.
+     *
+     * An EMPTY assignment means NOTHING, never everything. The guard used to
+     * read `$assigned->isNotEmpty() && !$assigned->contains(...)`, so a
+     * non-admin with no outlet attached passed every check at every outlet
+     * rather than failing them all — the fall-open that ScopesToAssignedOutlets
+     * documents avoiding, in the same codebase:
+     *
+     *   "An EMPTY assignment array means 'nothing', never 'everything'. A
+     *    manager who has not been attached to an outlet must not fall open to
+     *    the whole group."
+     *
+     * Admins are unaffected: isAdminUser() returns before any of this.
+     */
     private function authoriseOutletAccess($user, int $outletId): void
     {
         if ($this->isAdminUser($user)) {
             return;
         }
+
         $assigned = $user->outlets()->pluck('outlets.id');
-        if ($assigned->isNotEmpty() && !$assigned->contains($outletId)) {
+
+        if ($assigned->isEmpty()) {
+            // Told apart from "wrong outlet" so the remedy is obvious to
+            // whoever reads it: this is a setup gap, not a refusal.
+            abort(403, 'Your account is not assigned to an outlet. Ask an administrator to assign one before using the till.');
+        }
+
+        if (!$assigned->contains($outletId)) {
             abort(403, 'You do not have access to this outlet.');
         }
     }
