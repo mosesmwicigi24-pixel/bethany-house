@@ -93,7 +93,10 @@ class OrderItem extends Model
 
     public function canBeReturned()
     {
-        return $this->order->isCompleted() &&
+        // Null-safe because Order carries a viewer scope: for a caller who may
+        // not see this line's order, the relation resolves to null. "Cannot be
+        // returned by you" is the right answer there — never a fatal.
+        return ($this->order?->isCompleted() ?? false) &&
                $this->quantity > $this->returnItems()->sum('quantity');
     }
 }

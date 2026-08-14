@@ -7,6 +7,8 @@ use App\Models\User;
 use App\Models\Order;
 use App\Models\Product;
 use Illuminate\Http\Request;
+use App\Enums\DataScope;
+use App\Services\DataScopeResolver;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -103,7 +105,25 @@ class DashboardController extends Controller
 
     private function buildStats(Request $request): array
     {
+        // today_sales used to be every paid order in the business, which is why
+        // it was put behind reports.view. That is still the right lock for a
+        // caller who would see the GROUP's takings — a tailor, say.
+        //
+        // But Order now carries a viewer scope, so for a narrowed role the same
+        // sum is their OWN takings, which is exactly what a cashier should see
+        // on their own dashboard. Withholding it there left the card rendering
+        // blank, which reads as a broken till rather than a deliberate boundary.
+        //
+        // So: show money to anyone who may read reports, OR to anyone whose
+        // view is already narrower than the whole business.
+        $user        = $request->user();
+        $scope       = DataScopeResolver::for($user, 'orders.view');
+        $maySeeMoney = ($user?->can('reports.view') ?? false) || $scope !== DataScope::All;
+
         $stats = [
+            // What the figures below are counted over, so the UI can say "your
+            // sales" rather than "total sales" without guessing.
+            'scope' => $scope->value,
             'total_users'  => User::count(),
             'active_users' => User::where('status', 'active')->count(),
             'staff_users'  => User::staffUsers()->count(),
@@ -114,14 +134,17 @@ class DashboardController extends Controller
             $stats['total_orders']   = Order::count();
             $stats['pending_orders'] = Order::whereIn('status', ['pending', 'processing'])->count();
             $stats['today_orders']   = Order::whereDate('created_at', today())->count();
-            $stats['today_sales']    = Order::whereDate('created_at', today())
-                ->where('payment_status', 'paid')
-                ->sum('total_amount');
-            // Phase 5
-            $stats['pending_payment_approvals'] = DB::table('payments')
-                ->where('requires_approval', true)
-                ->where('approval_status', 'pending_review')
-                ->count();
+
+            if ($maySeeMoney) {
+                $stats['today_sales'] = Order::whereDate('created_at', today())
+                    ->where('payment_status', 'paid')
+                    ->sum('total_amount');
+                // Phase 5
+                $stats['pending_payment_approvals'] = DB::table('payments')
+                    ->where('requires_approval', true)
+                    ->where('approval_status', 'pending_review')
+                    ->count();
+            }
         } catch (\Exception) {}
 
         try {

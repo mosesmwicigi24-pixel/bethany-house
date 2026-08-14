@@ -612,13 +612,17 @@ function RoleStatGrid({
 
     // ── POS Clerk view ───────────────────────────────────────────────────────
     if (roles.includes("pos_clerk")) {
+        // A cashier's orders are scoped to their own sales, so these figures
+        // are theirs — not the shop's. Labelled to say so: "Today's Sales"
+        // over a number that counts only your own reads as the business having
+        // had a very quiet day.
         return (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <CashTodayCard />
-                <StatCard label="Today's Sales"   value={fmtCurrency(stats?.today_sales)}
+                <StatCard label="Your Sales Today"   value={fmtCurrency(stats?.today_sales)}
                     loading={isLoading} color="bg-success-light text-success"
                     href="/sales/orders" icon={<CoinIcon />} />
-                <StatCard label="Today's Orders"  value={stats?.today_orders}
+                <StatCard label="Your Orders Today"  value={stats?.today_orders}
                     loading={isLoading} color="bg-brand-50 text-brand-600"
                     href="/sales/orders" icon={<ClipboardIcon />} />
                 <StatCard label="Notifications"   value={stats?.unread_notifications}

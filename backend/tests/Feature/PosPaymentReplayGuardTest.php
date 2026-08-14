@@ -66,6 +66,7 @@ class PosPaymentReplayGuardTest extends TestCase
     {
         $this->actingWithPermissions(['pos.access']);
         $outlet = Outlet::factory()->create();
+        auth()->user()?->outlets()->syncWithoutDetaching([$outlet->id]);
         $order  = $this->pendingPosOrder($outlet);
 
         Payment::factory()->create([
@@ -95,6 +96,7 @@ class PosPaymentReplayGuardTest extends TestCase
     {
         $this->actingWithPermissions(['pos.access']);
         $outlet = Outlet::factory()->create();
+        auth()->user()?->outlets()->syncWithoutDetaching([$outlet->id]);
         $order  = $this->pendingPosOrder($outlet, 15500); // 15,500 - 8,000 = 7,500 outstanding
 
         Payment::factory()->create([
@@ -124,6 +126,7 @@ class PosPaymentReplayGuardTest extends TestCase
     {
         $this->actingWithPermissions(['pos.access']);
         $outlet = Outlet::factory()->create();
+        auth()->user()?->outlets()->syncWithoutDetaching([$outlet->id]);
         $order  = $this->pendingPosOrder($outlet, 16000); // 16,000 - 8,000 = 8,000 outstanding
 
         Payment::factory()->create([

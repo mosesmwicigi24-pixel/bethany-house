@@ -26,6 +26,8 @@ use Illuminate\Support\Str;
  */
 class PaymentApprovalController extends Controller
 {
+    use \App\Http\Controllers\Api\Concerns\ConstrainsRawQueriesToViewer;
+
     // Allowed proof file types
     const ALLOWED_MIME_TYPES = [
         'application/pdf',
@@ -50,6 +52,13 @@ class PaymentApprovalController extends Controller
             ->join('orders as o', 'p.order_id', '=', 'o.id')
             ->where('p.requires_approval', true)
             ->where('p.approval_status', 'pending_review');
+
+        // A raw query builder does NOT pick up Eloquent global scopes, so the
+        // ViewerScope on Order never reaches this list — it has to be applied
+        // by hand. Without it a cashier scoped to their own sales still reads
+        // every pending payment in the group, with the customer names and
+        // amounts attached.
+        $this->constrainToViewer($query, $request->user(), 'o');
 
         if ($request->filled('search')) {
             $s = $request->search;
@@ -100,10 +109,15 @@ class PaymentApprovalController extends Controller
             return $p;
         });
 
-        $total = DB::table('payments')
-            ->where('requires_approval', true)
-            ->where('approval_status', 'pending_review')
-            ->count();
+        // Scoped like the list above. An unbounded badge reading "47 pending"
+        // over a list showing two is both confusing and a small leak of the
+        // group's volume.
+        $totalQuery = DB::table('payments as p')
+            ->join('orders as o', 'p.order_id', '=', 'o.id')
+            ->where('p.requires_approval', true)
+            ->where('p.approval_status', 'pending_review');
+        $this->constrainToViewer($totalQuery, $request->user(), 'o');
+        $total = $totalQuery->count();
 
         return response()->json([
             'data'          => $payments->items(),
@@ -178,13 +192,25 @@ class PaymentApprovalController extends Controller
         ]);
 
         // Notify admins that proof needs review (guard-safe: catch RoleDoesNotExist)
+        //
+        // The order is resolved WITHOUT the viewer scope on purpose. This is
+        // the system telling administrators that proof arrived, not the
+        // uploader reading an order — and a cashier scoped to their own sales
+        // may legitimately upload proof against a colleague's payment. Left as
+        // $payment->order, that relation returns null for them and the
+        // dereference below throws \Error, which the catch does not cover: the
+        // proof would already be saved and the caller would still see a 500.
+        $order = \App\Models\Order::withoutViewerScope()->find($payment->order_id);
+
         try {
-            NotificationService::paymentProofSubmitted(
-                $payment->id,
-                $payment->payment_number,
-                $payment->order->order_number,
-                $payment->order->id
-            );
+            if ($order) {
+                NotificationService::paymentProofSubmitted(
+                    $payment->id,
+                    $payment->payment_number,
+                    $order->order_number,
+                    $order->id
+                );
+            }
         } catch (\Spatie\Permission\Exceptions\RoleDoesNotExist $e) {
             // Role guard mismatch - notifications are non-critical, continue anyway
             \Illuminate\Support\Facades\Log::warning('NotificationService: role not found - ' . $e->getMessage());

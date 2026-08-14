@@ -7,6 +7,24 @@ use Illuminate\Database\Eloquent\Model;
 
 class ProductionTask extends Model
 {
+    /**
+     * A tailor's work. Bounded to the tasks assigned to them, not to the
+     * business's — GET /admin/production-tasks was gated on production.view
+     * alone, so every one of the nine tailors could list every task in the shop.
+     */
+    use \App\Models\Concerns\Restricted;
+
+    public static function viewPermission(): string
+    {
+        return 'production.view';
+    }
+
+    /** A task is not created by its worker — it is handed to them. */
+    public function ownerColumn(): string
+    {
+        return 'assigned_to';
+    }
+
     use HasFactory;
 
     protected $fillable = [
