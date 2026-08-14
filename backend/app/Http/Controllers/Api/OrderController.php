@@ -75,7 +75,7 @@ class OrderController extends Controller
 
     public function index(Request $request)
     {
-        $query = Order::with(['user', 'items', 'outlet']);
+        $query = Order::with(['user', 'items', 'outlet', 'creator:id,first_name,last_name']);
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
@@ -117,6 +117,13 @@ class OrderController extends Controller
         $perPage = $request->get('per_page', 20);
         $orders  = $query->paginate($perPage);
 
+        // Flatten who served each order onto the row, under the same key the
+        // detail route uses, so the list and the order agree on one name.
+        $orders->getCollection()->each(function (Order $order) {
+            $order->setAttribute('cashier_name', $order->creator?->name ?: null);
+            $order->unsetRelation('creator');
+        });
+
         return response()->json($orders);
     }
 
@@ -130,7 +137,7 @@ class OrderController extends Controller
      */
     public function exportCsv(Request $request)
     {
-        $query = Order::with(['outlet', 'items']);
+        $query = Order::with(['outlet', 'items', 'creator:id,first_name,last_name']);
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
@@ -181,6 +188,7 @@ class OrderController extends Controller
             'Customer Email',
             'Customer Phone',
             'Outlet',
+            'Served by',
             'Items',
             'Subtotal',
             'Discount',
@@ -201,6 +209,7 @@ class OrderController extends Controller
                 $order->customer_email,
                 $order->customer_phone,
                 $order->outlet->name ?? '',
+                $order->creator?->name ?? '',
                 $order->items->count(),
                 $order->subtotal,
                 $order->discount_amount,
@@ -254,6 +263,7 @@ class OrderController extends Controller
             'outlet:id,name',
             'payments',
             'statusHistory',
+            'creator:id,first_name,last_name',
             'invoiceDocument:id,number,documentable_id,documentable_type,type',
         ])->findOrFail($id);
 
@@ -269,7 +279,9 @@ class OrderController extends Controller
             ?? ($orderEmail && !str_starts_with($orderEmail, 'noemail+') ? $orderEmail : null);
         $data['customer_phone'] = $order->user?->phone ?? $order->customer_phone;
         $data['outlet_name']    = $order->outlet?->name;
-        $data['cashier_name']   = null;
+        // Who served this. The admin already had a row for it and rendered
+        // nothing, because this line used to be a hardcoded null.
+        $data['cashier_name']   = $order->creator?->name ?: null;
 
         $notesArray = [];
         if (!empty($order->notes)) {

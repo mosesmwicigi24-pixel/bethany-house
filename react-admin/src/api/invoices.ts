@@ -16,6 +16,8 @@ export interface Invoice {
         pay_token: string | null;
     } | null;
     customer_name: string | null;
+    /** The staff member who issued the invoice. */
+    served_by: string | null;
     quotation: { number: string; quotation_id: number; sales_doc_id: number } | null;
 }
 

@@ -61,7 +61,7 @@ class ReceiptService
                     'status'             => 'issued',
                     'amount'             => (float) $payment->amount,
                     'currency_code'      => $order->currency_code,
-                    'snapshot'           => self::snapshot($order, $payment, $number),
+                    'snapshot'           => self::snapshot($order, $payment, $number, $userId),
                     'created_by'         => $userId,
                 ]);
             }
@@ -83,15 +83,22 @@ class ReceiptService
     }
 
     /** A receipt records THIS payment and the invoice balance after it. */
-    private static function snapshot(Order $order, Payment $payment, string $receiptNumber): array
+    private static function snapshot(Order $order, Payment $payment, string $receiptNumber, ?int $userId = null): array
     {
         $order->refresh();
         $paidToDate = $order->totalPaid();
         $balance    = max(0, (float) $order->total_amount - $paidToDate);
 
+        // Who took the money. Falls back to whoever raised the order, since a
+        // payment can settle through a gateway callback with no user attached.
+        $servedBy = $userId
+            ? optional(\App\Models\User::find($userId))->name
+            : $order->creator?->name;
+
         return [
             'receipt_number' => $receiptNumber,
             'order_number'   => $order->order_number,
+            'served_by'      => $servedBy ?: null,
             'issued_at'      => now()->toIso8601String(),
             'currency_code'  => $order->currency_code,
             'payment' => [

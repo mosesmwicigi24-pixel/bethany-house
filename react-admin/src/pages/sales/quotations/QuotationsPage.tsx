@@ -148,6 +148,7 @@ export default function QuotationsPage() {
                                 <th>Customer</th>
                                 <th>Status</th>
                                 <th className="text-right">Total</th>
+                                <th>Served by</th>
                                 <th>Valid Until</th>
                                 <th className="text-right">Actions</th>
                             </tr>
@@ -161,6 +162,7 @@ export default function QuotationsPage() {
                                         <td>{customerName(q)}</td>
                                         <td><StatusBadge status={q.status} /></td>
                                         <td className="text-right tabular-nums">{money(q.total_amount, q.currency_code)}</td>
+                                        <td className="text-sm">{q.served_by ?? "—"}</td>
                                         <td>{q.valid_until ?? "—"}</td>
                                         <td>
                                             <div className="flex justify-end gap-1">

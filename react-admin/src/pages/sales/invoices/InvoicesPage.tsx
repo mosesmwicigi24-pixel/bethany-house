@@ -86,6 +86,7 @@ export default function InvoicesPage() {
                                 <th>From quote</th>
                                 <th className="text-right">Total</th>
                                 <th>Payment</th>
+                                <th>Served by</th>
                                 <th>Due</th>
                                 <th className="text-right">Actions</th>
                             </tr>
@@ -98,6 +99,7 @@ export default function InvoicesPage() {
                                     <td className="text-sm text-muted tabular-nums">{inv.quotation?.number ?? "—"}</td>
                                     <td className="text-right tabular-nums">{money(inv.amount, inv.currency_code)}</td>
                                     <td>{inv.order ? <PaymentBadge status={inv.order.payment_status} /> : "—"}</td>
+                                    <td className="text-sm">{inv.served_by ?? "—"}</td>
                                     <td>{inv.due_date ?? "—"}</td>
                                     <td>
                                         <div className="flex justify-end gap-1">
