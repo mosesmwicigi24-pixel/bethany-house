@@ -70,6 +70,11 @@ class SyncPermissions extends Command
         'production.submit_qc'             => ['Submit QC Results',             'Submit quality control pass/fail',                   'Production'],
         'production.approve_qc'            => ['Approve QC',                    'Final sign-off on QC (manager/admin)',               'Production'],
         'production.worker'                => ['Production Worker Access',      'Access tailor/QC worker workspace (My Tasks)',       'Production'],
+        // Enforced at routes/api.php and ProductionController::destroy, and
+        // never declared — so permission:sync never created it and NOBODY could
+        // hold it. The feature was super-admin-only by accident rather than by
+        // decision. Declared here so it can be granted deliberately.
+        'production.delete_order'          => ['Delete Production Order',       'Permanently delete a production order that is past draft', 'Production'],
 
         // ── Shipments ───────────────────────────────────────────────────────
         'shipment.view'            => ['View Shipments',           'View shipment records and tracking',         'Shipments'],
@@ -138,6 +143,12 @@ class SyncPermissions extends Command
         'settings.view'             => ['View Settings',             'View system settings and configuration',                     'Settings'],
         'settings.edit'             => ['Edit Settings',              'Change business settings and configuration',                 'Settings'],
         'settings.manage_database'  => ['Manage Database',           'Backups, restores, transaction cleanup and full data wipe',  'Settings'],
+        // Checked by the Sidebar's Recycle Bin entry. It was never declared, so
+        // it resolved false for everyone and the item showed only to
+        // super_admin, whose bypass ignores permissions — which happens to
+        // match the backend, where /admin/trash is role:super_admin. Declaring
+        // it makes that agreement deliberate instead of accidental.
+        'settings.manage'           => ['Manage Recycle Bin',        'View and restore soft-deleted records',                      'Settings'],
 
         // ── Users & Roles ────────────────────────────────────────────────────
         'users.view'           => ['View Users',           'List and view system users',                  'Users & Roles'],
@@ -390,7 +401,17 @@ class SyncPermissions extends Command
             // regardless of role - only assignable explicitly (or via the
             // super_admin wildcard bypass above, which continues before
             // reaching this code for that role).
-            $wildcardExcluded = ['settings.manage_database'];
+            // Never granted by a wildcard, only ever explicitly. These are
+            // destructive or system-owner capabilities, and `admin` holds
+            // 'settings.*' and 'production.*' — without this, declaring them at
+            // all would silently hand them to admin, which is the opposite of
+            // the intent. super_admin still reaches them via its Gate::before
+            // bypass, exactly as it did while they were undeclared.
+            $wildcardExcluded = [
+                'settings.manage_database',
+                'settings.manage',
+                'production.delete_order',
+            ];
 
             // Expand wildcards like 'orders.*'
             $expanded = [];
