@@ -186,6 +186,24 @@ class SyncPermissions extends Command
      * super_admin uses '*' - bypasses all checks in usePermissions().
      */
     /**
+     * How wide a view each role gets of the records it may reach.
+     *
+     * Anything not listed stays at 'all', which is the column default and the
+     * behaviour every role had before scoping existed. Narrowing a role is a
+     * line here plus a migration — the migration matters, because deploys run
+     * `migrate` and never `permission:sync`.
+     *
+     * pos_clerk at 'own' is the change that closes the order-book leak: five
+     * cashiers stop seeing each other's sales, and the invoices, exports and
+     * searches built on the same query narrow with it.
+     *
+     * @see \App\Enums\DataScope
+     */
+    const ROLE_SCOPES = [
+        'pos_clerk' => 'own',
+    ];
+
+    /**
      * Named sets of permissions that go together because a JOB needs them
      * together.
      *
@@ -422,6 +440,17 @@ class SyncPermissions extends Command
             );
             if ($role->wasRecentlyCreated) {
                 $this->info("  Created new role: {$roleName}");
+            }
+
+            // Data scope. Written for every role, not only the narrowed ones,
+            // so a role that is widened back to 'all' in ROLE_SCOPES actually
+            // widens rather than keeping whatever it had.
+            $scope = self::ROLE_SCOPES[$roleName] ?? 'all';
+            \Illuminate\Support\Facades\DB::table('roles')
+                ->where('id', $role->id)
+                ->update(['data_scope' => $scope]);
+            if ($scope !== 'all') {
+                $this->info("  {$roleName}: data scope {$scope}");
             }
 
             if ($perms === '*') {

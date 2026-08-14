@@ -1352,7 +1352,7 @@ class PosController extends Controller
     {
         $validated = $request->validate(['reason' => 'required|string|max:500']);
 
-        $order = Order::with('items')->where('order_type', 'pos')->findOrFail($id);
+        $order = $this->findPosSaleForAction($id);
         $this->authoriseOutletAccess($request->user(), $order->outlet_id);
 
         if ($order->status === 'voided') {
@@ -1475,7 +1475,7 @@ class PosController extends Controller
      */
     public function authorizeDispatch(Request $request, int $id): JsonResponse
     {
-        $order = Order::with('items')->where('order_type', 'pos')->findOrFail($id);
+        $order = $this->findPosSaleForAction($id);
         $this->authoriseOutletAccess($request->user(), $order->outlet_id);
 
         if (in_array($order->status, ['cancelled', 'voided', 'refunded'])) {
@@ -1532,7 +1532,7 @@ class PosController extends Controller
             'refund_method'              => 'required|in:cash,mpesa,store_credit,card',
         ]);
 
-        $order = Order::with('items')->findOrFail($validated['original_order_id']);
+        $order = $this->findPosSaleForAction((int) $validated['original_order_id']);
 
         if ($order->order_type !== 'pos') {
             return response()->json(['message' => 'Only POS orders can be returned via this endpoint.'], 422);
@@ -2725,6 +2725,37 @@ class PosController extends Controller
     }
 
     /**
+     * Load a POS sale, or explain why this cashier cannot act on it.
+     *
+     * With pos_clerk scoped to `own`, a plain findOrFail() on a colleague's
+     * sale answers 404 — while the customer is standing there holding the
+     * receipt. "Not found" is both untrue and unactionable. This tells the
+     * cashier what actually happened and what to do about it.
+     *
+     * Balance collection and returns against another cashier's sale are a
+     * supervisor's job by decision, not by accident.
+     */
+    private function findPosSaleForAction(int $id): Order
+    {
+        $visible = Order::with('items')->where('order_type', 'pos')->find($id);
+
+        if ($visible) {
+            return $visible;
+        }
+
+        $exists = Order::withoutViewerScope()
+            ->where('order_type', 'pos')
+            ->whereKey($id)
+            ->exists();
+
+        if ($exists) {
+            abort(403, 'This sale is not one of yours. A supervisor has to take a payment or process a return against it.');
+        }
+
+        abort(404, 'Sale not found.');
+    }
+
+    /**
      * 403 unless the caller may act at this outlet.
      *
      * An EMPTY assignment means NOTHING, never everything. The guard used to
@@ -3883,7 +3914,7 @@ class PosController extends Controller
      */
     public function recordPosPay(Request $request, int $id): JsonResponse
     {
-        $order = Order::with('items')->where('order_type', 'pos')->findOrFail($id);
+        $order = $this->findPosSaleForAction($id);
         $this->authoriseOutletAccess($request->user(), $order->outlet_id);
 
         if (!in_array($order->payment_status, ['pending', 'partial', 'deposit'])) {
