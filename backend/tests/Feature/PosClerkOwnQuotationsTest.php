@@ -324,17 +324,117 @@ class PosClerkOwnQuotationsTest extends TestCase
      * may do, not a bug in the boundary. Recorded as a test so the pairing is
      * found here rather than at a counter.
      */
-    public function test_a_clerk_cannot_yet_raise_a_quotation_which_is_why_her_list_starts_empty(): void
+    /**
+     * The scoped list is only worth having if she can put something in it.
+     * A shop floor with someone else's work on it, so "one" means bounded
+     * rather than merely unpopulated.
+     */
+    public function test_a_clerk_raises_a_quotation_and_it_is_the_only_one_she_sees(): void
     {
-        // A shop floor with work on it, so "empty" means bounded rather than
-        // merely unpopulated.
         $this->quoteBy($this->otherClerk());
-        $this->clerk();
+        $clerk = $this->clerk();
 
         $this->postJson('/api/v1/admin/quotations', [
             'items' => [['product_name' => 'Cassock', 'quantity' => 1, 'unit_price' => 1000]],
-        ])->assertForbidden();
+        ])->assertSuccessful();
 
-        $this->getJson('/api/v1/admin/quotations')->assertOk()->assertJsonCount(0, 'data');
+        $rows = $this->getJson('/api/v1/admin/quotations')->assertOk()->json('data');
+
+        $this->assertCount(1, $rows, 'her own, and not the other clerk\'s');
+        $this->assertSame($clerk->id, Quotation::withoutViewerScope()
+            ->find($rows[0]['id'])->created_by, 'stamped with her, which is what the scope reads');
+    }
+
+    /**
+     * She may prepare a price. Sending it to the customer is someone else's
+     * signature — quotations.issue is deliberately not hers.
+     */
+    public function test_but_she_cannot_issue_it(): void
+    {
+        $this->clerk();
+
+        $id = $this->postJson('/api/v1/admin/quotations', [
+            'items' => [['product_name' => 'Cassock', 'quantity' => 1, 'unit_price' => 1000]],
+        ])->assertSuccessful()->json('quotation.id');
+
+        $this->postJson("/api/v1/admin/quotations/{$id}/issue")->assertForbidden();
+    }
+
+    /** Editing her own draft is part of raising it. */
+    public function test_she_can_edit_her_own_draft(): void
+    {
+        $this->clerk();
+
+        $id = $this->postJson('/api/v1/admin/quotations', [
+            'items' => [['product_name' => 'Cassock', 'quantity' => 1, 'unit_price' => 1000]],
+        ])->assertSuccessful()->json('quotation.id');
+
+        $this->putJson("/api/v1/admin/quotations/{$id}", [
+            'items' => [['product_name' => 'Cassock', 'quantity' => 2, 'unit_price' => 1000]],
+        ])->assertSuccessful();
+    }
+
+    /**
+     * The grant is create, not a way around the boundary: she still cannot
+     * reach into a colleague's draft and change the price on it.
+     */
+    public function test_she_cannot_edit_another_clerks_draft(): void
+    {
+        $theirs = $this->quoteBy($this->otherClerk());
+        $this->clerk();
+
+        $this->putJson("/api/v1/admin/quotations/{$theirs->id}", [
+            'items' => [['product_name' => 'Cassock', 'quantity' => 99, 'unit_price' => 1]],
+        ])->assertNotFound();
+    }
+
+    /**
+     * Everything above passes because setUp runs permission:sync — which is
+     * exactly what production never runs. Deploys run `migrate` only, so the
+     * migration is the sole thing that carries this grant to the live system.
+     * Test it directly, or a green suite would prove nothing about the box.
+     */
+    public function test_the_migration_is_what_actually_grants_it_in_production(): void
+    {
+        $role = Role::findByName('pos_clerk', 'sanctum');
+
+        // Put the database back the way production looked before this shipped.
+        $role->revokePermissionTo('quotations.create');
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        $this->assertFalse(
+            $role->fresh()->permissions->contains('name', 'quotations.create'),
+            'precondition: the grant is absent'
+        );
+
+        (require database_path('migrations/2026_08_15_090000_let_a_clerk_raise_a_quotation.php'))->up();
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        $this->assertTrue(
+            $role->fresh()->permissions->contains('name', 'quotations.create'),
+            'the migration grants it without permission:sync'
+        );
+    }
+
+    /**
+     * down() revokes the grant but must not delete the permission row —
+     * admin holds the same one, and deleting it would strip them too.
+     */
+    public function test_rolling_back_does_not_disarm_admin(): void
+    {
+        $migration = require database_path('migrations/2026_08_15_090000_let_a_clerk_raise_a_quotation.php');
+        $migration->up();
+        $migration->down();
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        $this->assertFalse(
+            Role::findByName('pos_clerk', 'sanctum')->fresh()
+                ->permissions->contains('name', 'quotations.create'),
+            'the clerk loses it'
+        );
+        $this->assertTrue(
+            Role::findByName('admin', 'sanctum')->fresh()
+                ->permissions->contains('name', 'quotations.create'),
+            'and admin keeps it'
+        );
     }
 }

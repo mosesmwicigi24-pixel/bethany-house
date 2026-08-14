@@ -339,8 +339,16 @@ class SyncPermissions extends Command
             // clerks already had the screen. The group revenue figure is
             // withheld separately by buildStats, which checks reports.view.
             '@self', '@workspace', '@till', '@sell', '@take_payment', '@walkin_customer',
-            // Front of the sales-documents flow
-            'quotations.view',
+            // Front of the sales-documents flow. create covers raising and
+            // editing a DRAFT; issuing one is quotations.issue and is
+            // deliberately withheld, so a price reaches a customer over a
+            // second person's decision. Without create, the scoped list she
+            // was given in #297 could only ever be empty — she may see her own
+            // quotations and had no way to have any.
+            // Worth knowing: quotations.issue and quotations.delete are held
+            // by admin alone, so that second person is currently always an
+            // administrator. outlet_manager holds no quotation permission.
+            'quotations.view', 'quotations.create',
             // Can raise a made-to-order job at the till
             'production.raise_order',
         ],
