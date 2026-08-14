@@ -105,6 +105,10 @@ class OrderTotalsCharacterizationTest extends TestCase
         foreach ([...$permissions, 'orders.view'] as $name) {
             $user->givePermissionTo(Permission::findOrCreate($name, 'sanctum'));
         }
+        // The till refuses a caller whose account is assigned to no outlet at
+        // all — a setup gap rather than a refusal. Give the actor the outlet
+        // the fixture stocks, so these stay tests about arithmetic.
+        $user->outlets()->sync([$this->outlet->id]);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 
@@ -160,7 +164,7 @@ class OrderTotalsCharacterizationTest extends TestCase
     public function test_create_pending_order_totals(): void
     {
         $this->taxInclusivePricing(false);
-        $this->actor(['pos.access']);
+        $this->actor(['pos.access', 'pos.discount']);
 
         $id = $this->postJson('/api/v1/admin/pos/pending-order', $this->posCart())
             ->assertSuccessful()
@@ -172,7 +176,7 @@ class OrderTotalsCharacterizationTest extends TestCase
     public function test_create_pending_order_totals_under_tax_inclusive_pricing(): void
     {
         $this->taxInclusivePricing(true);
-        $this->actor(['pos.access']);
+        $this->actor(['pos.access', 'pos.discount']);
 
         $id = $this->postJson('/api/v1/admin/pos/pending-order', $this->posCart())
             ->assertSuccessful()
@@ -188,7 +192,7 @@ class OrderTotalsCharacterizationTest extends TestCase
     public function test_update_pending_order_totals(): void
     {
         $this->taxInclusivePricing(false);
-        $this->actor(['pos.access']);
+        $this->actor(['pos.access', 'pos.discount']);
 
         $id = $this->postJson('/api/v1/admin/pos/pending-order', [
             'outlet_id' => $this->outlet->id,
@@ -218,7 +222,7 @@ class OrderTotalsCharacterizationTest extends TestCase
     public function test_create_sale_totals(): void
     {
         $this->taxInclusivePricing(false);
-        $user = $this->actor(['pos.access']);
+        $user = $this->actor(['pos.access', 'pos.discount']);
         $this->openRegister($user);
 
         $id = $this->postJson('/api/v1/admin/pos/sales', $this->posCart() + [
@@ -233,7 +237,7 @@ class OrderTotalsCharacterizationTest extends TestCase
     public function test_create_sale_requires_the_tender_to_cover_shipping_too(): void
     {
         $this->taxInclusivePricing(false);
-        $user = $this->actor(['pos.access']);
+        $user = $this->actor(['pos.access', 'pos.discount']);
         $this->openRegister($user);
 
         $this->postJson('/api/v1/admin/pos/sales', $this->posCart() + [
