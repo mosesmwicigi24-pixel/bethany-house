@@ -49,6 +49,7 @@ class PosPendingOrderEditStockTest extends TestCase
         $user->givePermissionTo(Permission::findOrCreate('pos.access', 'sanctum'));
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
+        $user->outlets()->attach($this->outlet->id);
     }
 
     /** A variant with its own inventory row in this outlet. */

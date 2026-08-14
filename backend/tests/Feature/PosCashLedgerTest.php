@@ -38,6 +38,11 @@ class PosCashLedgerTest extends TestCase
 
     private function openCashRegister(Outlet $outlet, User $user, float $expected = 5000): CashRegister
     {
+        // A cashier who opens a drawer at an outlet works at that outlet.
+        // Previously unnecessary because the outlet guard fell open for a
+        // user with no assignment at all.
+        $user->outlets()->syncWithoutDetaching([$outlet->id]);
+
         return CashRegister::create([
             'register_number'   => "REG-{$outlet->id}-{$user->id}",
             'outlet_id'         => $outlet->id,
