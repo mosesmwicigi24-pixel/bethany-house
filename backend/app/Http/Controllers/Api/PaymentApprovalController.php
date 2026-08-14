@@ -178,13 +178,25 @@ class PaymentApprovalController extends Controller
         ]);
 
         // Notify admins that proof needs review (guard-safe: catch RoleDoesNotExist)
+        //
+        // The order is resolved WITHOUT the viewer scope on purpose. This is
+        // the system telling administrators that proof arrived, not the
+        // uploader reading an order — and a cashier scoped to their own sales
+        // may legitimately upload proof against a colleague's payment. Left as
+        // $payment->order, that relation returns null for them and the
+        // dereference below throws \Error, which the catch does not cover: the
+        // proof would already be saved and the caller would still see a 500.
+        $order = \App\Models\Order::withoutViewerScope()->find($payment->order_id);
+
         try {
-            NotificationService::paymentProofSubmitted(
-                $payment->id,
-                $payment->payment_number,
-                $payment->order->order_number,
-                $payment->order->id
-            );
+            if ($order) {
+                NotificationService::paymentProofSubmitted(
+                    $payment->id,
+                    $payment->payment_number,
+                    $order->order_number,
+                    $order->id
+                );
+            }
         } catch (\Spatie\Permission\Exceptions\RoleDoesNotExist $e) {
             // Role guard mismatch - notifications are non-critical, continue anyway
             \Illuminate\Support\Facades\Log::warning('NotificationService: role not found - ' . $e->getMessage());
