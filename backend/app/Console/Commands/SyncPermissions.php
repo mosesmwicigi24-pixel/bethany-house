@@ -201,6 +201,10 @@ class SyncPermissions extends Command
      */
     const ROLE_SCOPES = [
         'pos_clerk' => 'own',
+        // Nine people, the largest group in the hub. Their work is ASSIGNED to
+        // them, so 'own' resolves through assigned_to on a task and through
+        // either relationship on a production order.
+        'tailor'    => 'own',
     ];
 
     /**
