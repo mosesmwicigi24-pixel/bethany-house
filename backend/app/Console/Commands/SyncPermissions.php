@@ -134,6 +134,12 @@ class SyncPermissions extends Command
         // and which channels it buys through.
         'intelligence.view'    => ['View Customer Intelligence', 'Customer geography, channel engagement and churn risk', 'Intelligence'],
 
+        // ── Receivables ─────────────────────────────────────────────────────
+        // Split out of pos.access. That permission exists to open the till; it
+        // was also opening Outstanding Balances — every part-paid order in the
+        // group with the customer's name, phone and what they owe.
+        'receivables.view'     => ['View Outstanding Balances', 'Part-paid orders and what customers still owe', 'Receivables'],
+
         // ── Reports & Analytics ─────────────────────────────────────────────
         'reports.view'         => ['View Reports',         'Access sales, inventory and financial reports', 'Reports'],
         'reports.export'       => ['Export Reports',       'Export reports to CSV/PDF',                    'Reports'],
@@ -286,6 +292,7 @@ class SyncPermissions extends Command
             'procurement.*',
             'inventory.*',
             'products.*',
+            'receivables.*',
             'marketing.*',
             'intelligence.*',
             'pos.*',
@@ -306,6 +313,9 @@ class SyncPermissions extends Command
             // Beyond a cashier at the same till. discount_override makes this
             // role the escalation target when a cashier hits the 5% ceiling.
             'pos.cash_management', 'pos.discount_override',
+            // Chasing what a customer still owes is a manager's job, not a
+            // cashier's — the till key stopped carrying it.
+            'receivables.view',
             'orders.edit', 'orders.manage_returns',
             'orders.set_shipping_fee', 'orders.set_deposit',
             'customers.edit',
@@ -386,6 +396,7 @@ class SyncPermissions extends Command
             'expenses.delete', 'expenses.approve', 'expenses.export', 'expenses.budgets',
             // Reports - all reports including financial
             'reports.view', 'reports.export', 'reports.financial',
+            'receivables.view',
             // Orders - view only (for payment context)
             'orders.view',
         ],

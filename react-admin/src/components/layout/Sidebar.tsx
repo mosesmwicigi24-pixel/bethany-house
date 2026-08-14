@@ -129,7 +129,9 @@ const NAV: NavGroup[] = [
                 label: "Balances",
                 href: "/pos/outstanding-balances",
                 icon: "eod-reports",
-                permission: "pos.access",
+                // Chasing what customers owe is a manager's job, not a
+                // cashier's.
+                permission: "receivables.view",
             },
             {
                 label: "EoD Reports",
@@ -376,7 +378,10 @@ const NAV: NavGroup[] = [
                 label: "Financial Report",
                 href: "/reports/financial",
                 icon: "expenses",
-                permission: "reports.view",
+                // The backend has required reports.financial for a while; the
+                // menu still offered it to anyone with reports.view, who then
+                // got a 403 on arrival.
+                permission: "reports.financial",
             },
         ],
     },
