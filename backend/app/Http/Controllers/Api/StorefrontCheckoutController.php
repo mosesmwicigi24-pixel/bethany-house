@@ -103,7 +103,7 @@ class StorefrontCheckoutController extends Controller
 
         // ── Idempotency: same client_request_id → same order ─────────────────
         if (!empty($validated['client_request_id'])) {
-            $existing = Order::where('client_request_id', $validated['client_request_id'])->first();
+            $existing = Order::withoutViewerScope()->where('client_request_id', $validated['client_request_id'])->first();
             if ($existing) {
                 return response()->json([
                     'message'      => 'Order already placed',
@@ -238,7 +238,7 @@ class StorefrontCheckoutController extends Controller
 
         $prefix      = DB::table('settings')->where('key', 'order_prefix')->value('value') ?? 'ORD-';
         $orderNumber = $prefix . strtoupper(Str::random(8));
-        while (Order::where('order_number', $orderNumber)->exists()) {
+        while (Order::withoutViewerScope()->where('order_number', $orderNumber)->exists()) {
             $orderNumber = $prefix . strtoupper(Str::random(8));
         }
 
