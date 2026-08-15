@@ -43,6 +43,9 @@ class WhatsAppOrderCurrencyTest extends TestCase
     {
         $user = User::factory()->create();
         $user->givePermissionTo(Permission::findOrCreate('pos.access', 'sanctum'));
+        // The till refuses a caller assigned to no outlet at all — assign the
+        // fixture outlet so these stay tests about currency, not setup.
+        $user->outlets()->sync([$this->outlet()->id]);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 

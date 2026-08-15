@@ -297,9 +297,10 @@ class OrderTotalsCharacterizationTest extends TestCase
 
     /**
      * Re-pricing into another currency rewrites every line, then re-derives the
-     * order. The cart discount and shipping are NOT converted — pinning that
-     * here because it is surprising, and because the refactor must not quietly
-     * "fix" it.
+     * order. Since the WhatsApp-currency fix the cart discount and shipping ARE
+     * converted at the exchange rate — a KES 20 shipping fee on a USD order is
+     * USD 0.20, not USD 20. Pinned so nothing quietly reverts to keeping the
+     * old figures under the new label.
      */
     public function test_update_currency_totals(): void
     {
@@ -343,8 +344,8 @@ class OrderTotalsCharacterizationTest extends TestCase
         $fresh = $order->fresh();
         $this->assertSame(34.97, (float) $fresh->subtotal);
         $this->assertSame(5.60, (float) $fresh->tax_amount);
-        // 34.97 − 10 (cart discount, NOT converted) + 5.60 + 20 (shipping, NOT converted)
-        $this->assertSame(50.57, (float) $fresh->total_amount);
+        // 34.97 − 0.10 (cart discount, converted at 0.01) + 5.60 + 0.20 (shipping, converted)
+        $this->assertSame(40.67, (float) $fresh->total_amount);
     }
 
     /** An order carrying the awkward cart, already persisted. */
