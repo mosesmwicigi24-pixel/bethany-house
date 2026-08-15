@@ -96,7 +96,17 @@ class ProductionTask extends Model
 
         $orderQty = (int) ($this->productionOrder?->quantity ?? 1);
 
-        $earlier = self::where('production_order_id', $this->production_order_id)
+        // Unscoped deliberately. "Has an earlier stage passed me any pieces"
+        // is a question about this ORDER's pipeline, not about who is asking —
+        // and the earlier stages sit on OTHER tailors' benches by definition.
+        // Read through the viewer scope, this returned almost nothing for a
+        // tailor, minPassed stayed at the order quantity, and the gate told
+        // every one of them that nothing was blocking their work.
+        //
+        // Reading the pipeline is not permission to see it: the rows never
+        // leave this method, only the name of the stage in front of her does.
+        $earlier = self::withoutViewerScope()
+            ->where('production_order_id', $this->production_order_id)
             ->whereNotNull('sequence')
             ->where('sequence', '<', $this->sequence)
             ->orderBy('sequence')

@@ -1067,8 +1067,14 @@ class ProductionController extends Controller
         // SEE "waiting on Stitching" on the card, not discover it as an error
         // after tapping Start. One query for all unfinished predecessor tasks
         // across every order on this list — not a per-task lookup.
+        // Unscoped for the same reason as ProductionTask::blockingTask, which
+        // this mirrors: the predecessors belong to other benches, so read
+        // through the viewer scope this found none and the padlock never
+        // rendered — she was not even told what she was waiting on. Only the
+        // stage NAME reaches the response; the sibling rows do not.
         $orderIds = $tasks->pluck('production_order_id')->unique()->values();
-        $openSiblings = ProductionTask::whereIn('production_order_id', $orderIds)
+        $openSiblings = ProductionTask::withoutViewerScope()
+            ->whereIn('production_order_id', $orderIds)
             ->whereNotNull('sequence')
             ->whereNotIn('status', ProductionTask::SATISFIED_STATUSES)
             ->with('stage:id,name')
