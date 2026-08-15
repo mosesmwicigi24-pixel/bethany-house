@@ -35,6 +35,7 @@ class ProductSerialDispatchTest extends TestCase
     private function paidOrderWithSoldSerials(int $count): Order
     {
         $outlet  = Outlet::factory()->create();
+        auth()->user()?->outlets()->syncWithoutDetaching([$outlet->id]);
         $product = Product::factory()->create();
         $order   = Order::factory()->create([
             'order_type'     => 'pos',
@@ -84,6 +85,7 @@ class ProductSerialDispatchTest extends TestCase
     {
         $this->actingWith(['pos.access', 'orders.authorize_dispatch']);
         $outlet = Outlet::factory()->create();
+        auth()->user()?->outlets()->syncWithoutDetaching([$outlet->id]);
         $order  = Order::factory()->create([
             'order_type'     => 'pos',
             'outlet_id'      => $outlet->id,

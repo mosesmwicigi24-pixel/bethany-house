@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Api\Concerns\ScopesToAssignedOutlets;
+use App\Models\Address;
+use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Outlet;
 use App\Models\Payment;
@@ -15,9 +17,11 @@ use App\Models\ProductVariant;
 use App\Models\InventoryItem;
 use App\Services\CurrencyPricing;
 use App\Services\OrderRepricer;
+use App\Models\ShippingMethod;
 use App\Services\TaxCalculationService;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
+use App\Services\PosInventoryService;
 use App\Services\ReceiptService;
 use Illuminate\Support\Facades\Log;
 use App\Services\IntelligenceService;
@@ -73,7 +77,7 @@ class OrderController extends Controller
 
     public function index(Request $request)
     {
-        $query = Order::with(['user', 'items', 'outlet']);
+        $query = Order::with(['user', 'items', 'outlet', 'creator:id,first_name,last_name']);
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
@@ -115,6 +119,13 @@ class OrderController extends Controller
         $perPage = $request->get('per_page', 20);
         $orders  = $query->paginate($perPage);
 
+        // Flatten who served each order onto the row, under the same key the
+        // detail route uses, so the list and the order agree on one name.
+        $orders->getCollection()->each(function (Order $order) {
+            $order->setAttribute('cashier_name', $order->creator?->name ?: null);
+            $order->unsetRelation('creator');
+        });
+
         return response()->json($orders);
     }
 
@@ -128,7 +139,7 @@ class OrderController extends Controller
      */
     public function exportCsv(Request $request)
     {
-        $query = Order::with(['outlet', 'items']);
+        $query = Order::with(['outlet', 'items', 'creator:id,first_name,last_name']);
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
@@ -179,6 +190,7 @@ class OrderController extends Controller
             'Customer Email',
             'Customer Phone',
             'Outlet',
+            'Served by',
             'Items',
             'Subtotal',
             'Discount',
@@ -199,6 +211,7 @@ class OrderController extends Controller
                 $order->customer_email,
                 $order->customer_phone,
                 $order->outlet->name ?? '',
+                $order->creator?->name ?? '',
                 $order->items->count(),
                 $order->subtotal,
                 $order->discount_amount,
@@ -252,6 +265,7 @@ class OrderController extends Controller
             'outlet:id,name',
             'payments',
             'statusHistory',
+            'creator:id,first_name,last_name',
             'invoiceDocument:id,number,documentable_id,documentable_type,type',
         ])->findOrFail($id);
 
@@ -267,7 +281,9 @@ class OrderController extends Controller
             ?? ($orderEmail && !str_starts_with($orderEmail, 'noemail+') ? $orderEmail : null);
         $data['customer_phone'] = $order->user?->phone ?? $order->customer_phone;
         $data['outlet_name']    = $order->outlet?->name;
-        $data['cashier_name']   = null;
+        // Who served this. The admin already had a row for it and rendered
+        // nothing, because this line used to be a hardcoded null.
+        $data['cashier_name']   = $order->creator?->name ?: null;
 
         $notesArray = [];
         if (!empty($order->notes)) {
@@ -425,6 +441,32 @@ class OrderController extends Controller
             return response()->json(['message' => 'Cart is empty'], 422);
         }
 
+        // ── Resolve the delivery address ──────────────────────────────────────
+        // shipping_address_id was validated and then thrown away: a delivery
+        // order was created with no destination on it at all, and orders carry
+        // no shipping_address_id column to recover it from later — the address
+        // is meant to be snapshotted onto the order (as StorefrontCheckoutController
+        // does), so that editing or deleting the saved address afterwards cannot
+        // rewrite where a placed order was sent.
+        //
+        // `exists:addresses,id` also asked only whether the row exists, not whose
+        // it is, so any id would pass. Scope it to this user — by user_id or via
+        // their customer profile, the two ways an address is owned — and fail the
+        // same way as any other bad input rather than leaking whether an id is real.
+        $shippingAddress = null;
+        if ($validated['delivery_method'] === 'delivery') {
+            $shippingAddress = Address::where('id', $validated['shipping_address_id'])
+                ->where(function ($q) use ($user) {
+                    $q->where('user_id', $user->id)
+                        ->orWhereIn('customer_id', Customer::where('user_id', $user->id)->select('id'));
+                })
+                ->first();
+
+            if (!$shippingAddress) {
+                return response()->json(['message' => 'Shipping address not found'], 422);
+            }
+        }
+
         // ── Resolve currency from country ─────────────────────────────────────
         $homeCountry     = DB::table('settings')->where('key', 'app_country')->value('value') ?? 'KE';
         $countryCode     = strtoupper($validated['country_code'] ?? $homeCountry);
@@ -459,10 +501,29 @@ class OrderController extends Controller
             $taxInclusive = $taxCalc['tax_inclusive'];
 
             // ── Shipping cost ─────────────────────────────────────────────────
-            $shippingCost = 0;
+            // Charge what the customer was quoted. This read
+            // $shippingMethod->base_rate — a column that exists nowhere in the
+            // schema, since shipping_methods holds cost_type + flat_rate — so it
+            // was always null and every online order shipped free, whatever the
+            // method said. Both the quote (ShippingController::rates) and the
+            // charge now come from ShippingMethod::calculateCost, so the two
+            // cannot drift apart, and min_order_amount gates the charge exactly
+            // as it gates the offer: a method below its floor was never on the
+            // menu, so it must not be billed either.
+            $shippingCost   = 0.0;
+            $shippingMethod = null;
             if ($validated['delivery_method'] === 'delivery' && !empty($validated['shipping_method_id'])) {
-                $shippingMethod = DB::table('shipping_methods')->find($validated['shipping_method_id']);
-                $shippingCost   = $shippingMethod?->base_rate ?? 0;
+                $goodsTotal     = (float) $taxCalc['total_gross'];
+                $shippingMethod = ShippingMethod::find($validated['shipping_method_id']);
+
+                if (!$shippingMethod || !$shippingMethod->isAvailableForOrder($goodsTotal)) {
+                    DB::rollBack();
+                    return response()->json([
+                        'message' => 'That delivery option is not available for this order.',
+                    ], 422);
+                }
+
+                $shippingCost = $shippingMethod->calculateCost($goodsTotal);
             }
 
             $totalAmount = $taxCalc['total_gross'] + $shippingCost;
@@ -470,7 +531,7 @@ class OrderController extends Controller
             // ── Generate order number ─────────────────────────────────────────
             $prefix      = DB::table('settings')->where('key', 'order_prefix')->value('value') ?? 'ORD-';
             $orderNumber = $prefix . strtoupper(Str::random(8));
-            while (Order::where('order_number', $orderNumber)->exists()) {
+            while (Order::withoutViewerScope()->where('order_number', $orderNumber)->exists()) {
                 $orderNumber = $prefix . strtoupper(Str::random(8));
             }
 
@@ -495,6 +556,18 @@ class OrderController extends Controller
                 'total_amount'             => $totalAmount,
                 'delivery_type'            => $validated['delivery_method'],
                 'pickup_outlet_id'         => $validated['pickup_location_id'] ?? null,
+                // Where it is actually going, snapshotted off the saved address —
+                // orders have no shipping_address_id column, these ARE the
+                // destination, and they must not move if the address later does.
+                'shipping_address_line1'   => $shippingAddress?->address_line1,
+                'shipping_address_line2'   => $shippingAddress?->address_line2,
+                'shipping_city'            => $shippingAddress?->city,
+                'shipping_state'           => $shippingAddress?->state_province,
+                'shipping_postal_code'     => $shippingAddress?->postal_code,
+                'shipping_country_code'    => $shippingAddress?->country_code,
+                // The chosen method was looked up for its rate and then dropped
+                // too, leaving the charge on the order with nothing naming it.
+                'shipping_method'          => $shippingMethod?->name,
                 'payment_method'           => $validated['payment_method'],
                 'notes'                    => $validated['notes'] ?? null,
                 'payment_token'            => $paymentToken,
@@ -505,8 +578,27 @@ class OrderController extends Controller
             ]);
 
             // ── Create order items with tax amounts ───────────────────────────
+            // Online checkout deducts quantity_on_hand right here — the goods are
+            // spoken for the moment the order exists. That IS a commit under the
+            // reservation model (see PosInventoryService), so the order must be
+            // stamped stock_committed_at with no stock_reserved_at: exactly the
+            // "committed without a reservation" shape the 2026_07_11 backfill gave
+            // legacy orders, and the shape every reader already handles
+            // (PosInventoryService::unwindForOrder restores on_hand;
+            // commitForOrder refuses to deduct twice; PosController's edit path
+            // detects it via $legacyCommitted). Leaving the flags null — as this
+            // did until now — made unwind release a reservation that was never
+            // taken and left the deducted stock stranded.
+            $drewStock = false;
             foreach ($cart->items as $index => $item) {
-                $inventoryItem  = InventoryItem::where('product_variant_id', $item->variant_id)->first();
+                // cart_items has no `variant_id` column — the chosen variant lives
+                // in product_variant_id (which is what CartItem::variant() reads).
+                // `$item->variant_id` was therefore always null, so this resolved
+                // whichever variant-less inventory row came back first and the
+                // order line was written with a null variant. Stamping a stock
+                // flag over a deduction against an arbitrary row would only make
+                // the lie authoritative, so fix the lookup at the same time.
+                $inventoryItem  = InventoryItem::where('product_variant_id', $item->product_variant_id)->first();
                 $availableStock = $inventoryItem?->quantity_available ?? 0;
 
                 if ($availableStock < $item->quantity) {
@@ -522,7 +614,11 @@ class OrderController extends Controller
                 OrderItem::create([
                     'order_id'           => $order->id,
                     'product_id'         => $item->variant->product_id,
-                    'product_variant_id' => $item->variant_id,
+                    'product_variant_id' => $item->product_variant_id,
+                    // Pin the exact finished-goods row this line draws from, so a
+                    // later void/cancel restores to that same row instead of
+                    // re-resolving and possibly landing on another outlet's.
+                    'inventory_item_id'  => $inventoryItem?->id,
                     'product_name'       => $item->variant->product->translations->first()?->name ?? 'Product',
                     'variant_name'       => $item->variant->variant_name,
                     'sku'                => $item->variant->sku,
@@ -531,7 +627,7 @@ class OrderController extends Controller
                     // COGS: snapshot per-unit cost (KES) at time of sale.
                     ...app(\App\Services\CostResolver::class)->columns(
                         $item->variant->product_id,
-                        $item->variant_id
+                        $item->product_variant_id
                     ),
                     'discount_amount'    => 0,
                     'tax_amount'         => $lineTax['tax_amount'],
@@ -543,7 +639,14 @@ class OrderController extends Controller
                         -$item->quantity, 'sale',
                         \App\Models\Order::class, $order->id, $user->id
                     );
+                    $drewStock = true;
                 }
+            }
+
+            // The physical count has moved: record it on the order so every
+            // reader of the reservation flags gets the right answer.
+            if ($drewStock) {
+                $order->forceFill(['stock_committed_at' => now()])->save();
             }
 
             // Clear cart
@@ -564,7 +667,12 @@ class OrderController extends Controller
 
             return response()->json([
                 'message'       => 'Order placed successfully',
-                'order'         => $order->load(['items.variant.product', 'shippingAddress']),
+                // Order has no `shippingAddress` relation — the destination lives
+                // in the order's own shipping_* columns — so this eager load threw
+                // *after* DB::commit(), and the catch below turned a successfully
+                // created, stock-deducted order into a 500 for the customer. That
+                // is how orders reach the state this change repairs.
+                'order'         => $order->load(['items.variant.product']),
                 'payment_link'  => rtrim(config('app.frontend_url'), '/') . "/pay/{$paymentToken}",
             ], 201);
 
@@ -696,7 +804,20 @@ class OrderController extends Controller
         $order->update([
             'status'          => $newStatus,
             'tracking_number' => $validated['tracking_number'] ?? $order->tracking_number,
+            'cancelled_at'    => $newStatus === 'cancelled'
+                ? ($order->cancelled_at ?? now())
+                : $order->cancelled_at,
         ]);
+
+        // Cancelling from the admin status dropdown is the third door onto the
+        // same order as cancelOrder() and voidOrder() — and the only one that
+        // used to return no stock at all, silently stranding whatever the order
+        // had drawn. Idempotent and flag-guarded, so it neither double-restores
+        // an order a cancel/void/reap already unwound nor invents stock for one
+        // that never drew any.
+        if ($newStatus === 'cancelled') {
+            PosInventoryService::unwindForOrder($order, $request->user()->id);
+        }
 
         DB::table('order_status_history')->insert([
             'order_id'    => $order->id,
@@ -744,17 +865,18 @@ class OrderController extends Controller
 
         DB::beginTransaction();
         try {
-            $order->update(['status' => 'cancelled']);
+            $order->update(['status' => 'cancelled', 'cancelled_at' => $order->cancelled_at ?? now()]);
 
-            foreach ($order->items as $item) {
-                $inventoryItem = InventoryItem::where('product_variant_id', $item->product_variant_id)->first();
-                if ($inventoryItem) {
-                    $inventoryItem->adjustQuantity(
-                        $item->quantity, 'cancellation',
-                        \App\Models\Order::class, $order->id, $request->user()->id
-                    );
-                }
-            }
+            // Return whatever stock this order was actually holding, exactly once.
+            // The old blind `adjustQuantity(+qty)` here restored the physical count
+            // for EVERY line — including orders that never deducted it (guest
+            // storefront orders, made-to-order lines) and orders already unwound by
+            // a void or the abandoned-order reaper, inventing stock each time.
+            // unwindForOrder reads the flags instead: restore on_hand if the order
+            // committed, release the reservation if it only reserved, do nothing if
+            // it never drew stock — and stamps stock_unwound_at so a second call is
+            // a no-op.
+            PosInventoryService::unwindForOrder($order, $request->user()->id);
 
             DB::commit();
 
@@ -852,22 +974,12 @@ class OrderController extends Controller
             // MON-1: reconcile payment_status now that the payments are voided.
             $order->syncPaymentStatus();
 
-            // Restock inventory for each line item
-            foreach ($order->items as $item) {
-                $inventoryItem = InventoryItem::where('product_variant_id', $item->product_variant_id)
-                    ->where(function ($q) use ($order) {
-                        $q->where('outlet_id', $order->outlet_id)->orWhereNull('outlet_id');
-                    })
-                    ->orderByRaw('outlet_id IS NULL ASC')
-                    ->first();
-
-                if ($inventoryItem) {
-                    $inventoryItem->adjustQuantity(
-                        $item->quantity, 'void',
-                        Order::class, $order->id, $request->user()->id
-                    );
-                }
-            }
+            // Return the stock this order was holding — once. Same reasoning as
+            // cancelOrder(): the flags say whether the physical count actually
+            // moved, so a guest storefront order (which never deducts) is left
+            // alone and an order already unwound by a cancel/reap is not restocked
+            // a second time. See PosInventoryService.
+            PosInventoryService::unwindForOrder($order, $request->user()->id);
 
             $order->update([
                 'status'      => 'voided',
@@ -2020,20 +2132,10 @@ class OrderController extends Controller
                 'total_price'     => round($lineTotal, 2),
             ]);
 
-            // Recalculate order totals from all items
-            $freshItems    = $order->items()->get();
-            $newSubtotal   = $freshItems->sum(fn ($i) => (float)$i->unit_price * (int)$i->quantity - (float)$i->discount_amount);
-            $cartDiscount  = (float)$order->discount_amount;  // cart-level discount stays
-            $afterDiscount = $newSubtotal - $cartDiscount;
-            $newTaxTotal   = $freshItems->sum(fn ($i) => (float)$i->tax_amount);
-            $shipping      = (float)$order->shipping_amount;
-            $newTotal      = round($afterDiscount + ($taxInclusive ? 0 : $newTaxTotal) + $shipping, 2);
-
-            $order->update([
-                'subtotal'     => round($newSubtotal, 2),
-                'tax_amount'   => round($newTaxTotal, 2),
-                'total_amount' => $newTotal,
-            ]);
+            // Recalculate order totals from all items. The cart-level discount
+            // and shipping already on the order ride along untouched.
+            $totals = \App\Services\OrderTotals::forOrder($order, $taxInclusive, $order->items()->get());
+            $totals->persistTo($order);
 
             DB::commit();
 
@@ -2060,8 +2162,8 @@ class OrderController extends Controller
             return response()->json([
                 'message'         => 'Price updated successfully.',
                 'item'            => $updatedItemArr,
-                'order_total'     => $newTotal,
-                'order_subtotal'  => round($newSubtotal, 2),
+                'order_total'     => $totals->total,
+                'order_subtotal'  => $totals->subtotal,
             ]);
 
         } catch (\Throwable $e) {

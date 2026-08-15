@@ -19,6 +19,8 @@ use App\Models\PaymentMethod;
 use App\Services\ActivityLogService;
 use App\Services\CurrencyPricing;
 use App\Services\ProductSerialService;
+use App\Services\OrderTotals;
+use App\Services\PosDiscountPolicy;
 use App\Services\PosInventoryService;
 use App\Services\TaxCalculationService;
 use App\Services\NotificationService;
@@ -31,6 +33,8 @@ use Illuminate\Support\Str;
 
 class PosController extends Controller
 {
+    use \App\Http\Controllers\Api\Concerns\ConstrainsRawQueriesToViewer;
+
     /**
      * How recently an identical payment (same order, method and amount) counts
      * as a replay of the same submit rather than a second real payment.
@@ -577,7 +581,7 @@ class PosController extends Controller
             return null;
         }
 
-        return Order::where('client_request_id', $clientRequestId)->first();
+        return Order::withoutViewerScope()->where('client_request_id', $clientRequestId)->first();
     }
 
     public function createSale(Request $request): JsonResponse
@@ -795,11 +799,10 @@ class PosController extends Controller
                 $lineBase     = $item['unit_price'] * $item['quantity'];
                 $discType     = $item['discount_type'] ?? 'none';
                 $discVal      = (float) ($item['discount_value'] ?? 0);
-                $lineDiscount = match ($discType) {
-                    'flat'    => min($discVal, $lineBase),
-                    'percent' => ($lineBase * $discVal) / 100,
-                    default   => 0.0,
-                };
+                $lineDiscount = OrderTotals::resolveDiscount($discType, $discVal, $lineBase);
+                // pos.discount is checked here, against the RESOLVED amount, so
+                // a flat discount cannot walk around the percentage ceiling.
+                PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, 'line');
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -843,16 +846,17 @@ class PosController extends Controller
             // -- 2. Cart-level discount & totals -------------------------------
             $cartDiscType = $validated['cart_discount_type'] ?? 'none';
             $cartDiscVal  = (float) ($validated['cart_discount_value'] ?? 0);
-            $cartDiscount = match ($cartDiscType) {
-                'flat'    => min($cartDiscVal, $itemSubtotal),
-                'percent' => ($itemSubtotal * $cartDiscVal) / 100,
-                default   => 0.0,
-            };
+            $cartDiscount = OrderTotals::resolveDiscount($cartDiscType, $cartDiscVal, $itemSubtotal);
 
-            $afterDiscount = $itemSubtotal - $cartDiscount;
-            // Phase 2 — total tax is sum of per-line taxes already calculated above
-            $taxAmount   = round(collect($itemsData)->sum('tax_amount'), 2);
-            $totalAmount = round($afterDiscount + ($taxInclusive ? 0 : $taxAmount), 2);
+            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart');
+
+            // Phase 2 — total tax is sum of per-line taxes already calculated above.
+            // This is the goods total, derived BEFORE the shipping charge is read,
+            // because it is what the tender is sized against a few lines down.
+            $rawTax      = collect($itemsData)->sum('tax_amount');
+            $totalAmount = OrderTotals::fromParts(
+                $itemSubtotal, $rawTax, $taxInclusive, $cartDiscount,
+            )->total;
 
             // Fill in amount for single-payment backwards-compat
             if (count($paymentsInput) === 1 && $paymentsInput[0]['amount'] === null) {
@@ -950,15 +954,12 @@ class PosController extends Controller
                 'currency_code'        => $currencyCode,
                 'customer_country_code' => $customerCountryCode ?: null,
                 'is_international'     => $isInternational,
-                'subtotal'             => round($itemSubtotal, 2),
-                'discount_amount'      => round($cartDiscount, 2),
+                ...OrderTotals::fromParts(
+                    $itemSubtotal, $rawTax, $taxInclusive, $cartDiscount, $shippingAmt,
+                )->columns(),
                 // FIX 2: persist raw cart discount type + value for lossless restore
                 'cart_discount_type'   => $cartDiscType,
                 'cart_discount_value'  => $cartDiscVal,
-                'tax_amount'           => $taxAmount,
-                'prices_include_tax'   => $taxInclusive,
-                'shipping_amount'      => $shippingAmt,
-                'total_amount'         => round($afterDiscount + ($taxInclusive ? 0 : $taxAmount) + $shippingAmt, 2),
                 // FIX 3: persist customer FK so restore can re-link the record
                 'customer_id'          => $customerId,
                 'customer_first_name'  => $validated['customer_first_name'] ?? null,
@@ -1253,6 +1254,15 @@ class PosController extends Controller
             }
             Log::error('POS sale failed', ['error' => $e->getMessage()]);
             return response()->json(['message' => 'Failed to complete sale. Please try again.'], 500);
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+            // A deliberate abort() — a refusal this method MEANT to give, such
+            // as the discount ceiling. Without this the \Throwable arm below
+            // swallows it and answers 500, which tells the cashier the till is
+            // broken when in fact they were declined. Every other refusal in
+            // this method returns a response rather than throwing, which is why
+            // the masking went unnoticed.
+            DB::rollBack();
+            throw $e;
         } catch (\Throwable $e) {
             DB::rollBack();
             Log::error('POS sale failed', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
@@ -1338,7 +1348,7 @@ class PosController extends Controller
     {
         $validated = $request->validate(['reason' => 'required|string|max:500']);
 
-        $order = Order::with('items')->where('order_type', 'pos')->findOrFail($id);
+        $order = $this->findPosSaleForAction($id);
         $this->authoriseOutletAccess($request->user(), $order->outlet_id);
 
         if ($order->status === 'voided') {
@@ -1461,7 +1471,7 @@ class PosController extends Controller
      */
     public function authorizeDispatch(Request $request, int $id): JsonResponse
     {
-        $order = Order::with('items')->where('order_type', 'pos')->findOrFail($id);
+        $order = $this->findPosSaleForAction($id);
         $this->authoriseOutletAccess($request->user(), $order->outlet_id);
 
         if (in_array($order->status, ['cancelled', 'voided', 'refunded'])) {
@@ -1518,7 +1528,7 @@ class PosController extends Controller
             'refund_method'              => 'required|in:cash,mpesa,store_credit,card',
         ]);
 
-        $order = Order::with('items')->findOrFail($validated['original_order_id']);
+        $order = $this->findPosSaleForAction((int) $validated['original_order_id']);
 
         if ($order->order_type !== 'pos') {
             return response()->json(['message' => 'Only POS orders can be returned via this endpoint.'], 422);
@@ -2579,8 +2589,17 @@ class PosController extends Controller
 
         $this->authoriseOutletAccess($request->user(), $outletId);
 
+        $viewer = $request->user();
+
+        // The figures below are bounded to the caller — a cashier's day is her
+        // own takings, which is what #291 restored. That makes the VIEWER part
+        // of the answer, so it has to be part of the key. Keyed on outlet and
+        // date alone, whoever asked first decided what everyone else saw for
+        // the rest of the TTL: a cashier arriving after a manager was served
+        // the whole shop's takings out of the cache, and a manager arriving
+        // after a cashier was told the shop had taken her figure and no more.
         $ttl     = ($date < today()->toDateString()) ? 3600 : 60;
-        $summary = Cache::remember("pos_daily_{$outletId}_{$date}", $ttl, function () use ($outletId, $date) {
+        $summary = Cache::remember("pos_daily_{$outletId}_{$date}_v{$viewer->id}", $ttl, function () use ($outletId, $date, $viewer) {
 
             $sales     = Order::where('outlet_id', $outletId)
                 ->where('order_type', 'pos')
@@ -2605,13 +2624,21 @@ class PosController extends Controller
                 ])
                 ->values()->toArray();
 
-            // Top products
-            $topProducts = DB::table('order_items')
+            // Top products. This one is a RAW join, so the global scope that
+            // bounds $sales above never reaches it — the totals were the
+            // caller's own while the best-sellers beneath them were the whole
+            // outlet's. Bound it by hand, the same way #290 bound the other
+            // raw queries a cashier can reach.
+            $topProductsQuery = DB::table('order_items')
                 ->join('orders', 'order_items.order_id', '=', 'orders.id')
                 ->where('orders.outlet_id', $outletId)
                 ->where('orders.order_type', 'pos')
                 ->whereDate('orders.created_at', $date)
-                ->whereNotIn('orders.status', ['voided', 'cancelled'])
+                ->whereNotIn('orders.status', ['voided', 'cancelled']);
+
+            $this->constrainToViewer($topProductsQuery, $viewer, 'orders');
+
+            $topProducts = $topProductsQuery
                 ->selectRaw('order_items.product_name, SUM(order_items.quantity) as qty, SUM(order_items.total_price) as revenue')
                 ->groupBy('order_items.product_name')
                 ->orderByDesc('revenue')
@@ -2710,13 +2737,67 @@ class PosController extends Controller
         ]);
     }
 
+    /**
+     * Load a POS sale, or explain why this cashier cannot act on it.
+     *
+     * With pos_clerk scoped to `own`, a plain findOrFail() on a colleague's
+     * sale answers 404 — while the customer is standing there holding the
+     * receipt. "Not found" is both untrue and unactionable. This tells the
+     * cashier what actually happened and what to do about it.
+     *
+     * Balance collection and returns against another cashier's sale are a
+     * supervisor's job by decision, not by accident.
+     */
+    private function findPosSaleForAction(int $id): Order
+    {
+        $visible = Order::with('items')->where('order_type', 'pos')->find($id);
+
+        if ($visible) {
+            return $visible;
+        }
+
+        $exists = Order::withoutViewerScope()
+            ->where('order_type', 'pos')
+            ->whereKey($id)
+            ->exists();
+
+        if ($exists) {
+            abort(403, 'This sale is not one of yours. A supervisor has to take a payment or process a return against it.');
+        }
+
+        abort(404, 'Sale not found.');
+    }
+
+    /**
+     * 403 unless the caller may act at this outlet.
+     *
+     * An EMPTY assignment means NOTHING, never everything. The guard used to
+     * read `$assigned->isNotEmpty() && !$assigned->contains(...)`, so a
+     * non-admin with no outlet attached passed every check at every outlet
+     * rather than failing them all — the fall-open that ScopesToAssignedOutlets
+     * documents avoiding, in the same codebase:
+     *
+     *   "An EMPTY assignment array means 'nothing', never 'everything'. A
+     *    manager who has not been attached to an outlet must not fall open to
+     *    the whole group."
+     *
+     * Admins are unaffected: isAdminUser() returns before any of this.
+     */
     private function authoriseOutletAccess($user, int $outletId): void
     {
         if ($this->isAdminUser($user)) {
             return;
         }
+
         $assigned = $user->outlets()->pluck('outlets.id');
-        if ($assigned->isNotEmpty() && !$assigned->contains($outletId)) {
+
+        if ($assigned->isEmpty()) {
+            // Told apart from "wrong outlet" so the remedy is obvious to
+            // whoever reads it: this is a setup gap, not a refusal.
+            abort(403, 'Your account is not assigned to an outlet. Ask an administrator to assign one before using the till.');
+        }
+
+        if (!$assigned->contains($outletId)) {
             abort(403, 'You do not have access to this outlet.');
         }
     }
@@ -2741,7 +2822,7 @@ class PosController extends Controller
     {
         do {
             $number = $prefix . strtoupper(Str::random(5));
-        } while (Order::where('order_number', $number)->exists());
+        } while (Order::withoutViewerScope()->where('order_number', $number)->exists());
         return $number;
     }
 
@@ -3016,8 +3097,15 @@ class PosController extends Controller
             // count instead and clear the committed flag so the edited order
             // re-enters the new model cleanly (reserve → commit on pay). MTO
             // lines were never inventory-backed.
+            //
+            // An order holding NEITHER (all three flags null — a guest storefront
+            // order, or one whose phantom committed flag 2026_08_12_130000 cleared)
+            // has nothing to give back: releasing its quantities would decrement
+            // quantity_reserved out of reservations belonging to other pending
+            // orders on the same row. Same guard as PosInventoryService::unwind.
             $legacyCommitted = $order->stock_committed_at && !$order->stock_reserved_at;
-            foreach ($order->items as $oldItem) {
+            $holdsStock      = $legacyCommitted || (bool) $order->stock_reserved_at;
+            foreach ($holdsStock ? $order->items : [] as $oldItem) {
                 if (str_starts_with($oldItem->notes ?? '', '__MTO__')) continue;
                 if (!$oldItem->product_variant_id) continue;
 
@@ -3095,11 +3183,10 @@ class PosController extends Controller
                 $lineBase     = $item['unit_price'] * $item['quantity'];
                 $discType     = $item['discount_type'] ?? 'none';
                 $discVal      = (float)($item['discount_value'] ?? 0);
-                $lineDiscount = match($discType) {
-                    'flat'    => min($discVal, $lineBase),
-                    'percent' => ($lineBase * $discVal) / 100,
-                    default   => 0.0,
-                };
+                $lineDiscount = OrderTotals::resolveDiscount($discType, $discVal, $lineBase);
+                // pos.discount is checked here, against the RESOLVED amount, so
+                // a flat discount cannot walk around the percentage ceiling.
+                PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, 'line');
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -3193,15 +3280,17 @@ class PosController extends Controller
             // ── 4. Recalculate totals ─────────────────────────────────────────
             $cartDiscType = $validated['cart_discount_type'] ?? 'none';
             $cartDiscVal  = (float)($validated['cart_discount_value'] ?? 0);
-            $cartDiscount = match($cartDiscType) {
-                'flat'    => min($cartDiscVal, $itemSubtotal),
-                'percent' => ($itemSubtotal * $cartDiscVal) / 100,
-                default   => 0.0,
-            };
-            $afterDiscount = $itemSubtotal - $cartDiscount;
-            $taxAmount     = round(collect($itemsData)->sum('tax_amount'), 2);
-            $shippingAmt   = round((float)($validated['shipping_amount'] ?? 0), 2);
-            $totalAmount   = round($afterDiscount + ($taxInclusive ? 0 : $taxAmount) + $shippingAmt, 2);
+            $cartDiscount = OrderTotals::resolveDiscount($cartDiscType, $cartDiscVal, $itemSubtotal);
+            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart');
+            $shippingAmt  = round((float)($validated['shipping_amount'] ?? 0), 2);
+            $totals       = OrderTotals::fromParts(
+                $itemSubtotal,
+                collect($itemsData)->sum('tax_amount'),
+                $taxInclusive,
+                $cartDiscount,
+                $shippingAmt,
+            );
+            $totalAmount  = $totals->total;
 
             // ── 5. Customer resolution ────────────────────────────────────────
             $customerId   = $validated['customer_id'] ?? null;
@@ -3228,15 +3317,10 @@ class PosController extends Controller
                 'currency_code'       => $resolvedCurrency,
                 'customer_country_code' => $customerCountryCode ?: $order->customer_country_code,
                 'is_international'    => $customerCountryCode !== '' ? $isInternational : $order->is_international,
-                'subtotal'            => round($itemSubtotal, 2),
-                'discount_amount'     => round($cartDiscount, 2),
+                ...$totals->columns(),
                 // FIX 2: persist raw cart discount type + value for lossless restore
                 'cart_discount_type'  => $cartDiscType,
                 'cart_discount_value' => $cartDiscVal,
-                'tax_amount'          => $taxAmount,
-                'prices_include_tax'  => $taxInclusive,
-                'shipping_amount'     => $shippingAmt,
-                'total_amount'        => $totalAmount,
                 'user_id'             => $linkedUserId ?? $order->user_id,
                 // FIX 3: persist customer FK so restore can re-link the record
                 'customer_id'         => $customerId ?? $order->customer_id,
@@ -3306,6 +3390,10 @@ class PosController extends Controller
                 'order'         => $this->transformSaleOrder($order->fresh(['items', 'payments'])),  // FIX 6
             ], 200);
 
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+            // A deliberate abort() — see the note on createSale's arm.
+            DB::rollBack();
+            throw $e;
         } catch (\Throwable $e) {
             DB::rollBack();
             Log::error('POS updatePendingOrder failed', ['order_id' => $id, 'error' => $e->getMessage()]);
@@ -3510,11 +3598,10 @@ class PosController extends Controller
                 $lineBase     = $unitPrice * $item['quantity'];
                 $discType     = $item['discount_type'] ?? 'none';
                 $discVal      = (float)($item['discount_value'] ?? 0);
-                $lineDiscount = match ($discType) {
-                    'flat'    => min($discVal, $lineBase),
-                    'percent' => ($lineBase * $discVal) / 100,
-                    default   => 0.0,
-                };
+                $lineDiscount = OrderTotals::resolveDiscount($discType, $discVal, $lineBase);
+                // pos.discount is checked here, against the RESOLVED amount, so
+                // a flat discount cannot walk around the percentage ceiling.
+                PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, 'line');
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -3607,17 +3694,19 @@ class PosController extends Controller
 
             $cartDiscType = $validated['cart_discount_type'] ?? 'none';
             $cartDiscVal  = (float)($validated['cart_discount_value'] ?? 0);
-            $cartDiscount = match ($cartDiscType) {
-                'flat'    => min($cartDiscVal, $itemSubtotal),
-                'percent' => ($itemSubtotal * $cartDiscVal) / 100,
-                default   => 0.0,
-            };
-            $afterDiscount = $itemSubtotal - $cartDiscount;
-            $taxAmount     = round(collect($itemsData)->sum('tax_amount'), 2);
-            $shippingAmt   = round((float)($validated['shipping_amount'] ?? 0), 2);
-            $totalAmount   = round($afterDiscount + ($taxInclusive ? 0 : $taxAmount) + $shippingAmt, 2);
-            $isDeposit     = !empty($validated['is_deposit']);
-            $depositAmt    = $isDeposit ? round((float)($validated['deposit_amount'] ?? 0), 2) : null;
+            $cartDiscount = OrderTotals::resolveDiscount($cartDiscType, $cartDiscVal, $itemSubtotal);
+            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart');
+            $shippingAmt  = round((float)($validated['shipping_amount'] ?? 0), 2);
+            $totals       = OrderTotals::fromParts(
+                $itemSubtotal,
+                collect($itemsData)->sum('tax_amount'),
+                $taxInclusive,
+                $cartDiscount,
+                $shippingAmt,
+            );
+            $totalAmount  = $totals->total;
+            $isDeposit    = !empty($validated['is_deposit']);
+            $depositAmt   = $isDeposit ? round((float)($validated['deposit_amount'] ?? 0), 2) : null;
 
             $customerId   = $validated['customer_id'] ?? null;
             $linkedUserId = null;
@@ -3660,15 +3749,10 @@ class PosController extends Controller
                 'currency_code'       => $currencyCode,
                 'customer_country_code' => $customerCountryCode ?: null,
                 'is_international'    => $isInternational,
-                'subtotal'            => round($itemSubtotal, 2),
-                'discount_amount'     => round($cartDiscount, 2),
+                ...$totals->columns(),
                 // FIX 2: persist raw cart discount type + value for lossless restore
                 'cart_discount_type'  => $cartDiscType,
                 'cart_discount_value' => $cartDiscVal,
-                'tax_amount'          => $taxAmount,
-                'prices_include_tax'  => $taxInclusive,
-                'shipping_amount'     => $shippingAmt,
-                'total_amount'        => $totalAmount,
                 // FIX 3: persist customer FK so restore can re-link the record
                 'customer_id'         => $customerId,
                 'customer_first_name' => $validated['customer_first_name'] ?? null,
@@ -3790,6 +3874,10 @@ class PosController extends Controller
             }
             Log::error('POS createPendingOrder failed', ['error' => $e->getMessage()]);
             return response()->json(['message' => 'Failed to create order. Please try again.'], 500);
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+            // A deliberate abort() — see the note on createSale's arm.
+            DB::rollBack();
+            throw $e;
         } catch (\Throwable $e) {
             DB::rollBack();
             Log::error('POS pending order failed', ['error' => $e->getMessage()]);
@@ -3805,7 +3893,7 @@ class PosController extends Controller
      */
     public function recordPosPay(Request $request, int $id): JsonResponse
     {
-        $order = Order::with('items')->where('order_type', 'pos')->findOrFail($id);
+        $order = $this->findPosSaleForAction($id);
         $this->authoriseOutletAccess($request->user(), $order->outlet_id);
 
         if (!in_array($order->payment_status, ['pending', 'partial', 'deposit'])) {

@@ -21,7 +21,16 @@ class InvoiceController extends Controller
         $perPage = min((int) $request->integer('per_page', 25), 100);
 
         $query = SalesDocument::where('type', SalesDocument::INVOICE)
-            ->with(['documentable', 'parent'])
+            ->with([
+                // documentable is a morphTo, so the creator has to be loaded
+                // per type — Quotation has no such relation and a plain
+                // 'documentable.creator' would blow up on one.
+                'documentable' => fn ($m) => $m->morphWith([
+                    Order::class => ['creator:id,first_name,last_name'],
+                ]),
+                'parent',
+                'creator:id,first_name,last_name',
+            ])
             ->latest('id');
 
         if ($request->filled('search')) {
@@ -43,7 +52,13 @@ class InvoiceController extends Controller
     public function show(int $id): JsonResponse
     {
         $doc = SalesDocument::where('type', SalesDocument::INVOICE)
-            ->with(['documentable.items', 'parent'])
+            ->with([
+                'documentable' => fn ($m) => $m->morphWith([
+                    Order::class => ['items', 'creator:id,first_name,last_name'],
+                ]),
+                'parent',
+                'creator:id,first_name,last_name',
+            ])
             ->findOrFail($id);
 
         return response()->json(['invoice' => $this->present($doc)]);
@@ -72,6 +87,9 @@ class InvoiceController extends Controller
                 'pay_token'      => $order->payment_token,
             ] : null,
             'customer_name'  => $customer ?: null,
+            // Who issued it. Falls back to whoever raised the underlying order
+            // for documents created before created_by was recorded on them.
+            'served_by'      => $doc->creator?->name ?: ($order?->creator?->name ?: null),
             'quotation'      => $doc->parent ? [
                 'number'          => $doc->parent->number,
                 'quotation_id'    => $doc->parent->documentable_id,

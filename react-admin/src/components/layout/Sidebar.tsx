@@ -129,7 +129,9 @@ const NAV: NavGroup[] = [
                 label: "Balances",
                 href: "/pos/outstanding-balances",
                 icon: "eod-reports",
-                permission: "pos.access",
+                // Chasing what customers owe is a manager's job, not a
+                // cashier's.
+                permission: "receivables.view",
             },
             {
                 label: "EoD Reports",
@@ -310,13 +312,15 @@ const NAV: NavGroup[] = [
                 label: "Seasons",
                 href: "/marketing/seasons",
                 icon: "calendar",
-                permission: "products.view",
+                                // Not products.view — reading the catalogue is not
+                // running the marketing calendar.
+                permission: "marketing.view",
             },
             {
                 label: "Campaigns",
                 href: "/marketing/campaigns",
                 icon: "taxes",
-                permission: "products.view",
+                permission: "marketing.view",
             },
         ],
     },
@@ -329,13 +333,15 @@ const NAV: NavGroup[] = [
                 label: "Home Page",
                 href: "/home-front/home",
                 icon: "dashboard",
-                permission: "products.view",
+                                // These edit the PUBLIC storefront. They were reachable
+                // by anyone who could read the product catalogue.
+                permission: "marketing.view",
             },
             {
                 label: "Product Pages",
                 href: "/home-front/products",
                 icon: "products",
-                permission: "products.view",
+                permission: "marketing.view",
             },
         ],
     },
@@ -364,13 +370,18 @@ const NAV: NavGroup[] = [
                 label: "Payment Transactions",
                 href: "/finance/transactions",
                 icon: "transactions",
-                permission: "payments.view",
+                // NOT payments.view — every cashier holds that so they can
+                // record a takings. The ledger has its own permission.
+                permission: "payments.transactions",
             },
             {
                 label: "Financial Report",
                 href: "/reports/financial",
                 icon: "expenses",
-                permission: "reports.view",
+                // The backend has required reports.financial for a while; the
+                // menu still offered it to anyone with reports.view, who then
+                // got a 403 on arrival.
+                permission: "reports.financial",
             },
         ],
     },
@@ -435,13 +446,15 @@ const NAV: NavGroup[] = [
                 label: "Customer Geography",
                 href: "/intelligence/geography",
                 icon: "customers",
-                permission: "customers.view",
+                                // Not customers.view — serving a customer is not the
+                // same as reading where the customer base lives.
+                permission: "intelligence.view",
             },
             {
                 label: "Channel Engagement",
                 href: "/intelligence/channels",
                 icon: "customers",
-                permission: "customers.view",
+                permission: "intelligence.view",
             },
         ],
     },

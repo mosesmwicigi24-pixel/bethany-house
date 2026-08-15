@@ -25,7 +25,11 @@ class BannerCmsTest extends TestCase
     {
         $user = User::factory()->create();
         $user->assignRole(Role::findOrCreate('catalog_manager', 'sanctum'));
-        foreach (['products.view', 'products.edit', 'products.delete'] as $perm) {
+        // Banners are the storefront's shop front, not the catalogue. They
+        // moved off products.* for the same reason the marketing calendar did:
+        // reading the product list should not let you change what the public
+        // site says.
+        foreach (['products.view', 'marketing.view', 'marketing.manage'] as $perm) {
             $user->givePermissionTo(Permission::findOrCreate($perm, 'sanctum'));
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();

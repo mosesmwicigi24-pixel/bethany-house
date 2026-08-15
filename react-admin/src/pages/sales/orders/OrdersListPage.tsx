@@ -399,6 +399,7 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                                     <th>Payment</th>
                                     <th>Items</th>
                                     <th className="text-right">Total</th>
+                                    <th>Served by</th>
                                     <th>Date</th>
                                     <th />
                                 </tr>
@@ -406,7 +407,7 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                             <tbody>
                                 {orderGroups.map((group) => (
                                     <Fragment key={group.key}>
-                                        <DateGroupHeaderRow label={group.label} colSpan={9} />
+                                        <DateGroupHeaderRow label={group.label} colSpan={10} />
                                         {group.items.map((order) => (
                                     <tr
                                         key={order.id}
@@ -458,6 +459,15 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                                             </span>
                                             {(order as any).is_international && (
                                                 <span className="ml-1.5 text-2xs font-semibold text-info-600" title="International order">🌐</span>
+                                            )}
+                                        </td>
+                                        <td>
+                                            {order.cashier_name ? (
+                                                <span className="text-xs text-surface-600 whitespace-nowrap">
+                                                    {order.cashier_name}
+                                                </span>
+                                            ) : (
+                                                <span className="text-xs text-surface-300">—</span>
                                             )}
                                         </td>
                                         <td>

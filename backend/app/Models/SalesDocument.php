@@ -62,4 +62,14 @@ class SalesDocument extends Model
     {
         return $this->belongsTo(Payment::class);
     }
+
+    /**
+     * The staff member who issued this document — quotation, invoice or
+     * receipt alike. All three writers set created_by, so every document in
+     * the trail can say who produced it.
+     */
+    public function creator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
 }

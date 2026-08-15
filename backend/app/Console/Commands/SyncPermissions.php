@@ -70,6 +70,11 @@ class SyncPermissions extends Command
         'production.submit_qc'             => ['Submit QC Results',             'Submit quality control pass/fail',                   'Production'],
         'production.approve_qc'            => ['Approve QC',                    'Final sign-off on QC (manager/admin)',               'Production'],
         'production.worker'                => ['Production Worker Access',      'Access tailor/QC worker workspace (My Tasks)',       'Production'],
+        // Enforced at routes/api.php and ProductionController::destroy, and
+        // never declared — so permission:sync never created it and NOBODY could
+        // hold it. The feature was super-admin-only by accident rather than by
+        // decision. Declared here so it can be granted deliberately.
+        'production.delete_order'          => ['Delete Production Order',       'Permanently delete a production order that is past draft', 'Production'],
 
         // ── Shipments ───────────────────────────────────────────────────────
         'shipment.view'            => ['View Shipments',           'View shipment records and tracking',         'Shipments'],
@@ -107,12 +112,33 @@ class SyncPermissions extends Command
 
         // ── POS ─────────────────────────────────────────────────────────────
         'pos.access'           => ['POS Access',           'Use the point-of-sale terminal',              'POS'],
-        'pos.discount'         => ['Apply Discounts',      'Apply manual discounts at POS',               'POS'],
+        'pos.discount'         => ['Apply Discounts',      'Apply manual discounts at POS, up to the configured ceiling', 'POS'],
+        'pos.discount_override' => ['Discount Beyond the Ceiling', 'Apply a POS discount larger than the percentage ceiling that limits cashiers', 'POS'],
         'pos.void'             => ['Void Transactions',    'Void completed POS transactions',             'POS'],
         'pos.open_register'    => ['Open Cash Register',   'Open a new cash register session',            'POS'],
         'pos.close_register'   => ['Close Cash Register',  'Close and reconcile a cash register',         'POS'],
         'pos.returns'          => ['Process Returns',      'Process item returns at POS',                 'POS'],
         'pos.cash_management'  => ['POS Cash Management',  'Perform cash deposits, withdrawals and adjustments on a register', 'POS'],
+
+        // ── Marketing & storefront ──────────────────────────────────────────
+        // Split out of products.view, which is a READ permission on the
+        // catalogue and was also opening Seasons, Campaigns and — because the
+        // home-front pages are built on marketing banners — editing the public
+        // storefront's home and product pages.
+        'marketing.view'       => ['View Marketing',       'View liturgical seasons, campaigns and storefront banners', 'Marketing'],
+        'marketing.manage'     => ['Manage Marketing',     'Create and edit seasons, campaigns and the storefront home/product pages', 'Marketing'],
+
+        // ── Intelligence ────────────────────────────────────────────────────
+        // Split out of customers.view. Reading a customer record to serve them
+        // is not the same capability as reading where the customer base lives
+        // and which channels it buys through.
+        'intelligence.view'    => ['View Customer Intelligence', 'Customer geography, channel engagement and churn risk', 'Intelligence'],
+
+        // ── Receivables ─────────────────────────────────────────────────────
+        // Split out of pos.access. That permission exists to open the till; it
+        // was also opening Outstanding Balances — every part-paid order in the
+        // group with the customer's name, phone and what they owe.
+        'receivables.view'     => ['View Outstanding Balances', 'Part-paid orders and what customers still owe', 'Receivables'],
 
         // ── Reports & Analytics ─────────────────────────────────────────────
         'reports.view'         => ['View Reports',         'Access sales, inventory and financial reports', 'Reports'],
@@ -138,6 +164,12 @@ class SyncPermissions extends Command
         'settings.view'             => ['View Settings',             'View system settings and configuration',                     'Settings'],
         'settings.edit'             => ['Edit Settings',              'Change business settings and configuration',                 'Settings'],
         'settings.manage_database'  => ['Manage Database',           'Backups, restores, transaction cleanup and full data wipe',  'Settings'],
+        // Checked by the Sidebar's Recycle Bin entry. It was never declared, so
+        // it resolved false for everyone and the item showed only to
+        // super_admin, whose bypass ignores permissions — which happens to
+        // match the backend, where /admin/trash is role:super_admin. Declaring
+        // it makes that agreement deliberate instead of accidental.
+        'settings.manage'           => ['Manage Recycle Bin',        'View and restore soft-deleted records',                      'Settings'],
 
         // ── Users & Roles ────────────────────────────────────────────────────
         'users.view'           => ['View Users',           'List and view system users',                  'Users & Roles'],
@@ -173,12 +205,85 @@ class SyncPermissions extends Command
      * Reflects the actual modules and actions each role performs in the system.
      * super_admin uses '*' - bypasses all checks in usePermissions().
      */
+    /**
+     * How wide a view each role gets of the records it may reach.
+     *
+     * Anything not listed stays at 'all', which is the column default and the
+     * behaviour every role had before scoping existed. Narrowing a role is a
+     * line here plus a migration — the migration matters, because deploys run
+     * `migrate` and never `permission:sync`.
+     *
+     * pos_clerk at 'own' is the change that closes the order-book leak: five
+     * cashiers stop seeing each other's sales, and the invoices, exports and
+     * searches built on the same query narrow with it.
+     *
+     * @see \App\Enums\DataScope
+     */
+    const ROLE_SCOPES = [
+        'pos_clerk' => 'own',
+        // Nine people, the largest group in the hub. Their work is ASSIGNED to
+        // them, so 'own' resolves through assigned_to on a task and through
+        // either relationship on a production order.
+        'tailor'    => 'own',
+    ];
+
+    /**
+     * Named sets of permissions that go together because a JOB needs them
+     * together.
+     *
+     * A role used to be thirty-odd hand-maintained strings, which nobody could
+     * read at a glance and which drifted whenever one list was updated and its
+     * near-twin was not. A bundle is the unit of review instead: "a POS clerk
+     * is @self + @till + @sell + @take_payment + @walkin_customer" is a
+     * sentence somebody can check against how the shop actually works.
+     *
+     * A role's definition below may mix bundle references (@name) with plain
+     * permission strings and wildcards, so a role that is "the usual, plus two"
+     * says exactly that.
+     *
+     * These bundles were factored out of the existing role definitions and
+     * change nothing: expandBundles() reproduces the previous lists exactly.
+     */
+    const BUNDLES = [
+
+        // Everyone who signs in gets these.
+        'self'            => ['profile.view', 'profile.edit', 'notifications.view'],
+        'workspace'       => ['dashboard.view'],
+
+        // Operating a till. cash_management is deliberately NOT here — a
+        // cashier opens and closes their own drawer, but moving money in and
+        // out of it is a supervisor's action.
+        'till'            => ['pos.access', 'pos.discount', 'pos.void',
+                              'pos.open_register', 'pos.close_register', 'pos.returns'],
+
+        // Making a sale, and taking the money for it.
+        'sell'            => ['orders.view', 'orders.create'],
+        'take_payment'    => ['payments.view', 'payments.record', 'payments.upload_proof'],
+        'walkin_customer' => ['customers.view', 'customers.create', 'customers.create_without_email'],
+
+        // The shop floor: a worker's own tasks and the QC they submit on them.
+        'shop_floor'      => ['production.view', 'production.worker', 'production.submit_qc'],
+
+        // Stock, and buying it.
+        'stock'           => ['inventory.view', 'inventory.adjust', 'inventory.transfer', 'inventory.approve'],
+        'buying'          => ['procurement.view', 'procurement.create',
+                              'procurement.receive', 'procurement.approve'],
+    ];
+
+    /**
+     * Default permission sets for each system role, as bundles plus extras.
+     *
+     * super_admin uses '*' — it bypasses every check via Gate::before, so its
+     * stored grants do nothing.
+     */
     const ROLE_PERMISSIONS = [
 
         'super_admin' => '*',   // Wildcard - bypasses all permission checks
 
         'admin' => [
-            // Full access to everything except super_admin-only operations
+            // Full access to everything except super_admin-only operations.
+            // Not @self: admin has never been granted profile.*, and this
+            // refactor does not change who holds what.
             'dashboard.view',
             'orders.*', 'quotations.*', 'payments.*',
             'production.*',
@@ -187,6 +292,9 @@ class SyncPermissions extends Command
             'procurement.*',
             'inventory.*',
             'products.*',
+            'receivables.*',
+            'marketing.*',
+            'intelligence.*',
             'pos.*',
             'reports.*',
             'expenses.*',
@@ -198,84 +306,60 @@ class SyncPermissions extends Command
             'notifications.view',
         ],
 
+        // Runs one shop: its till, its stock, its production, its people.
         'outlet_manager' => [
-            'dashboard.view',
-            // Orders - full operational control
-            'orders.view', 'orders.create', 'orders.edit', 'orders.manage_returns',
+            '@self', '@workspace', '@till', '@sell', '@take_payment',
+            '@walkin_customer', '@stock',
+            // Beyond a cashier at the same till. discount_override makes this
+            // role the escalation target when a cashier hits the 5% ceiling.
+            'pos.cash_management', 'pos.discount_override',
+            // Chasing what a customer still owes is a manager's job, not a
+            // cashier's — the till key stopped carrying it.
+            'receivables.view',
+            'orders.edit', 'orders.manage_returns',
             'orders.set_shipping_fee', 'orders.set_deposit',
-            // Payments - record and upload; international approval excluded
-            'payments.view', 'payments.record', 'payments.upload_proof',
+            'customers.edit',
             // Production - manage orders and QC but not system configuration
             'production.view', 'production.raise_order', 'production.confirm_order',
             'production.manage_assignees', 'production.submit_qc', 'production.approve_qc',
-            // Shipments
             'shipment.view', 'shipment.create', 'shipment.manage_tracking',
-            // Customers
-            'customers.view', 'customers.create', 'customers.edit',
-            'customers.create_without_email',
-            // Inventory
-            'inventory.view', 'inventory.adjust', 'inventory.transfer', 'inventory.approve',
-            // Catalogue - view only
             'products.view',
-            // POS - full register access
-            'pos.access', 'pos.discount', 'pos.void',
-            'pos.open_register', 'pos.close_register', 'pos.returns', 'pos.cash_management',
-            // Reports
             'reports.view',
             // Expenses - create and submit; approval handled by admin/finance
             'expenses.view', 'expenses.create', 'expenses.edit', 'expenses.delete',
-            // Outlets - view and edit own outlet details
             'outlets.view', 'outlets.edit',
-            // Attendance - oversee their own outlet/workshop staff
             'attendance.view_team', 'attendance.manage',
-            // Profile
-            'profile.view', 'profile.edit',
-            // Notifications
-            'notifications.view',
         ],
 
+        // Sells at the counter. open_register/close_register are in @till
+        // because every cashier opens and closes their own drawer each shift —
+        // both scope strictly to the current user's own register.
         'pos_clerk' => [
-            // POS terminal. open_register/close_register included because
-            // both scope strictly to the current user's own register
-            // (CashRegister::where('opened_by', $user->id) in both
-            // PosController::openRegister/closeRegister) - every cashier
-            // opens and closes their own drawer each shift, this was never
-            // a manager-delegates-to-everyone action.
-            'pos.access', 'pos.discount', 'pos.returns', 'pos.void',
-            'pos.open_register', 'pos.close_register',
-            // Orders - create and view own orders (also gates the Invoices view)
-            'orders.view', 'orders.create',
-            // Quotations - see the quotation list (front of the sales-docs flow)
-            'quotations.view',
-            // Payments - record, upload proof, and view transaction history
-            'payments.view', 'payments.record', 'payments.upload_proof',
-            // Customers - create walk-in and view
-            'customers.view', 'customers.create', 'customers.create_without_email',
-            // Production - can raise MTO orders at POS
+            // @workspace is dashboard.view: the route was ungated before, so
+            // clerks already had the screen. The group revenue figure is
+            // withheld separately by buildStats, which checks reports.view.
+            '@self', '@workspace', '@till', '@sell', '@take_payment', '@walkin_customer',
+            // Front of the sales-documents flow. create covers raising and
+            // editing a DRAFT; issuing one is quotations.issue and is
+            // deliberately withheld, so a price reaches a customer over a
+            // second person's decision. Without create, the scoped list she
+            // was given in #297 could only ever be empty — she may see her own
+            // quotations and had no way to have any.
+            // Worth knowing: quotations.issue and quotations.delete are held
+            // by admin alone, so that second person is currently always an
+            // administrator. outlet_manager holds no quotation permission.
+            'quotations.view', 'quotations.create',
+            // Can raise a made-to-order job at the till
             'production.raise_order',
-            // Profile
-            'profile.view', 'profile.edit',
-            // Notifications
-            'notifications.view',
         ],
 
+        // Production worker workspace only.
         'tailor' => [
-            // Production worker workspace only
-            'production.view',
-            'production.worker',
-            'production.submit_qc',
-            // Profile
-            'profile.view', 'profile.edit',
-            // Notifications
-            'notifications.view',
+            '@self', '@workspace', '@shop_floor',
         ],
 
         'procurement_officer' => [
-            'dashboard.view',
-            // Procurement - full cycle
-            'procurement.view', 'procurement.create', 'procurement.receive', 'procurement.approve',
-            // Inventory - view and adjust raw materials
-            'inventory.view', 'inventory.adjust', 'inventory.transfer', 'inventory.approve',
+            '@self', '@workspace', '@buying', '@stock',
             // Catalogue - view to reference products when purchasing
             'products.view',
             // Payments - view transaction history for PO-related payments
@@ -284,10 +368,6 @@ class SyncPermissions extends Command
             'reports.view',
             // Expenses - view expenses linked to purchase orders
             'expenses.view',
-            // Profile
-            'profile.view', 'profile.edit',
-            // Notifications
-            'notifications.view',
         ],
     ];
 
@@ -300,44 +380,64 @@ class SyncPermissions extends Command
      */
     const EXTRA_ROLES = [
 
+        // NOTE: this differs from procurement_officer by reports.export ALONE.
+        // Both hold procurement.approve, so an officer can approve the purchase
+        // orders they raised themselves. That is a segregation-of-duties gap,
+        // not a refactor artefact — it is preserved here deliberately, because
+        // this change is not allowed to move a single grant. Fixing it is a
+        // policy decision.
         'procurement_manager' => [
-            'dashboard.view',
-            // Procurement - full cycle including approval authority
-            'procurement.view', 'procurement.create', 'procurement.approve', 'procurement.receive',
-            // Inventory - stock visibility and approval
-            'inventory.view', 'inventory.adjust', 'inventory.transfer', 'inventory.approve',
-            // Catalogue - view to reference products
+            '@self', '@workspace', '@buying', '@stock',
             'products.view',
-            // Payments - view transaction history for PO-related payments
             'payments.view',
-            // Reports - spend and procurement analytics
             'reports.view', 'reports.export',
-            // Expenses - view expenses linked to POs
             'expenses.view',
-            // Profile
-            'profile.view', 'profile.edit',
-            // Notifications
-            'notifications.view',
         ],
 
         'finance_manager' => [
-            'dashboard.view',
+            '@self', '@workspace',
             // Payments - full approval authority + view transactions ledger
-            'payments.view', 'payments.approve_international', 'payments.transactions', 'payments.void', 'payments.reassign',
+            'payments.view', 'payments.approve_international', 'payments.transactions',
+            'payments.void', 'payments.reassign',
             // Expenses - full control including approval and budgets
             'expenses.view', 'expenses.create', 'expenses.edit',
             'expenses.delete', 'expenses.approve', 'expenses.export', 'expenses.budgets',
             // Reports - all reports including financial
             'reports.view', 'reports.export', 'reports.financial',
+            'receivables.view',
             // Orders - view only (for payment context)
             'orders.view',
-            // Profile
-            'profile.view', 'profile.edit',
-            // Notifications
-            'notifications.view',
         ],
 
     ];
+
+    /**
+     * Resolve a role definition into a flat permission list, replacing every
+     * "@bundle" reference with the bundle's contents.
+     *
+     * @param  list<string>  $spec
+     * @return list<string>
+     */
+    public static function expandBundles(array $spec): array
+    {
+        $out = [];
+
+        foreach ($spec as $entry) {
+            if (str_starts_with($entry, '@')) {
+                $name = substr($entry, 1);
+                if (!isset(self::BUNDLES[$name])) {
+                    throw new \InvalidArgumentException("Unknown permission bundle: @{$name}");
+                }
+                foreach (self::BUNDLES[$name] as $p) {
+                    $out[] = $p;
+                }
+                continue;
+            }
+            $out[] = $entry;
+        }
+
+        return array_values(array_unique($out));
+    }
 
     public function handle(): void
     {
@@ -381,6 +481,17 @@ class SyncPermissions extends Command
                 $this->info("  Created new role: {$roleName}");
             }
 
+            // Data scope. Written for every role, not only the narrowed ones,
+            // so a role that is widened back to 'all' in ROLE_SCOPES actually
+            // widens rather than keeping whatever it had.
+            $scope = self::ROLE_SCOPES[$roleName] ?? 'all';
+            \Illuminate\Support\Facades\DB::table('roles')
+                ->where('id', $role->id)
+                ->update(['data_scope' => $scope]);
+            if ($scope !== 'all') {
+                $this->info("  {$roleName}: data scope {$scope}");
+            }
+
             if ($perms === '*') {
                 $this->info("  {$roleName}: super admin - no explicit permissions needed (wildcard bypass)");
                 continue;
@@ -390,7 +501,22 @@ class SyncPermissions extends Command
             // regardless of role - only assignable explicitly (or via the
             // super_admin wildcard bypass above, which continues before
             // reaching this code for that role).
-            $wildcardExcluded = ['settings.manage_database'];
+            // Never granted by a wildcard, only ever explicitly. These are
+            // destructive or system-owner capabilities, and `admin` holds
+            // 'settings.*' and 'production.*' — without this, declaring them at
+            // all would silently hand them to admin, which is the opposite of
+            // the intent. super_admin still reaches them via its Gate::before
+            // bypass, exactly as it did while they were undeclared.
+            $wildcardExcluded = [
+                'settings.manage_database',
+                'settings.manage',
+                'production.delete_order',
+            ];
+
+            // Resolve "@bundle" references first, so wildcard expansion and
+            // dependency resolution below see a flat list exactly as they did
+            // when roles were written out longhand.
+            $perms = self::expandBundles($perms);
 
             // Expand wildcards like 'orders.*'
             $expanded = [];

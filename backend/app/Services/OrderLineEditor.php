@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Exceptions\OrderLineEditException;
 use App\Models\InventoryItem;
-use App\Models\InventoryTransaction;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
@@ -497,10 +496,13 @@ class OrderLineEditor
      *   reserved  → only a reservation is held (quantity_on_hand untouched)
      *   none      → this order never drew inventory
      *
-     * The three timestamps are authoritative, but they are not universal: the
-     * storefront checkout path deducts quantity_on_hand directly and sets none
-     * of them. So when they are silent we ask the ledger — an inventory
-     * transaction of type 'sale' against this order is proof the goods moved.
+     * The three timestamps are authoritative and now universal. This used to fall
+     * back to the inventory_transactions ledger when they were all silent, because
+     * OrderController::checkout() deducted quantity_on_hand and stamped nothing —
+     * so silence could mean either "never drew stock" or "drew it and didn't say
+     * so". Every path that moves stock against an order stamps a flag now, and
+     * 2026_08_12_120000 / _130000 repaired the orders that were already wrong in
+     * both directions, so silence means exactly one thing again.
      */
     private function stockMode(Order $order): string
     {
@@ -514,12 +516,7 @@ class OrderLineEditor
             return 'reserved';
         }
 
-        $drewStock = InventoryTransaction::where('reference_type', Order::class)
-            ->where('reference_id', $order->id)
-            ->where('transaction_type', 'sale')
-            ->exists();
-
-        return $drewStock ? 'committed' : 'none';
+        return 'none';
     }
 
     /**
@@ -661,42 +658,34 @@ class OrderLineEditor
 
     /**
      * Derive subtotal / tax / total from whatever lines the order now has, and
-     * persist them. Same formula as adjustItemPrice, updateCurrency and
-     * updatePendingOrder — the order-level discount and shipping ride along
-     * untouched, except that a cart discount larger than the surviving subtotal
-     * is clamped rather than pushing the total negative.
+     * persist them. The order-level discount and shipping ride along untouched,
+     * except that a cart discount larger than the surviving subtotal is clamped
+     * rather than pushing the total negative — that clamp is this editor's own
+     * requirement, since removing lines is the only way to shrink a subtotal out
+     * from under a discount that was sized against it.
+     *
+     * The arithmetic itself lives in OrderTotals, alongside every other writer
+     * that persists these three columns.
      *
      * @return array{discount_clamped:bool}
      */
     private function recalculateTotals(Order $order, bool $taxInclusive): array
     {
-        $lines = OrderItem::where('order_id', $order->id)->get();
-
-        $subtotal = round($lines->sum(
-            fn ($i) => (float) $i->unit_price * (int) $i->quantity - (float) $i->discount_amount
-        ), 2);
-        $taxTotal = round($lines->sum(fn ($i) => (float) $i->tax_amount), 2);
-
-        $cartDiscount = (float) $order->discount_amount;
-        $clamped      = $cartDiscount > $subtotal;
-        if ($clamped) {
-            $cartDiscount = $subtotal;
-        }
-
-        $total = round(
-            $subtotal - $cartDiscount + ($taxInclusive ? 0 : $taxTotal) + (float) $order->shipping_amount,
-            2,
+        // Read the lines explicitly rather than through $order->items, which may
+        // still hold the pre-edit relation.
+        $totals = OrderTotals::forOrder(
+            $order,
+            $taxInclusive,
+            OrderItem::where('order_id', $order->id)->get(),
+            clampDiscount: true,
         );
 
-        $order->update([
-            'subtotal'           => $subtotal,
-            'discount_amount'    => round($cartDiscount, 2),
-            'tax_amount'         => $taxTotal,
-            'prices_include_tax' => $taxInclusive,
-            'total_amount'       => max(0, $total),
+        $totals->persistTo($order, [
+            'discount_amount'    => $totals->discount,
+            'prices_include_tax' => $totals->pricesIncludeTax,
         ]);
 
-        return ['discount_clamped' => $clamped];
+        return ['discount_clamped' => $totals->discountClamped];
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -121,7 +121,11 @@ class QuotationService
         $quotation->loadMissing('items');
 
         if ($quotation->converted_order_id) {
-            $order   = Order::with('items')->find($quotation->converted_order_id);
+            // "Which order did this quotation already become" is a fact about
+            // the table, not about the caller — and the public accept path
+            // creates that order with no created_by at all, so a scoped clerk
+            // asking would get null and dereference it one line later.
+            $order   = Order::withoutViewerScope()->with('items')->find($quotation->converted_order_id);
             $invoice = SalesDocument::where('type', SalesDocument::INVOICE)
                 ->where('documentable_type', Order::class)
                 ->where('documentable_id', $quotation->converted_order_id)
@@ -134,7 +138,7 @@ class QuotationService
             // OrderController) and an HMAC pay-link token.
             $prefix      = DB::table('settings')->where('key', 'order_prefix')->value('value') ?? 'ORD-';
             $orderNumber = $prefix . strtoupper(Str::random(8));
-            while (Order::where('order_number', $orderNumber)->exists()) {
+            while (Order::withoutViewerScope()->where('order_number', $orderNumber)->exists()) {
                 $orderNumber = $prefix . strtoupper(Str::random(8));
             }
             $paymentToken = hash_hmac('sha256', $orderNumber . now()->toISOString() . Str::random(8), config('app.key'));

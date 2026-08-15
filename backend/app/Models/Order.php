@@ -2,12 +2,36 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Restricted;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Order extends Model
 {
     use HasFactory;
+    /**
+     * Bounds every order query to what the caller may see — list, detail,
+     * export, search, PDF, notification payloads and anything written later.
+     * Inert until a role's data_scope is narrowed from 'all'.
+     */
+    use Restricted;
+
+    /** The capability that governs reading an order. */
+    public static function viewPermission(): string
+    {
+        return 'orders.view';
+    }
+
+    /**
+     * created_by is the STAFF member who raised the order. user_id is the
+     * customer's linked account — scoping on it would show a clerk the orders
+     * placed against their own customer record, which is not what "own sales"
+     * means.
+     */
+    public function ownerColumn(): string
+    {
+        return 'created_by';
+    }
 
     protected $fillable = [
         'order_number',
@@ -108,6 +132,19 @@ class Order extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * The staff member who raised this order — the person who served the
+     * customer. Distinct from user(), which is the customer's own account.
+     *
+     * This is the same column the viewer scope owns an order by, so "the
+     * orders you can see" and "the orders that say your name" are guaranteed
+     * to be the same set.
+     */
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
     }
 
     /**

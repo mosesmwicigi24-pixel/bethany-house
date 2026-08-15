@@ -269,8 +269,14 @@ Route::prefix('v1')->group(function () {
 
         Route::prefix('admin')->middleware('throttle:admin-api')->group(function () {
 
+            // sidebar-badges stays open to all staff: it drives the nav badge
+            // counts for every role, and its figures are already partly
+            // user-scoped (a tailor's row filters on assigned_to).
             Route::get('/sidebar-badges', [DashboardController::class, 'sidebarBadges']);
-            Route::get('/dashboard',      [DashboardController::class, 'index']);
+            // dashboard.view exists in the catalogue and was never consulted,
+            // so this endpoint answered to any authenticated user.
+            Route::get('/dashboard',      [DashboardController::class, 'index'])
+                ->middleware('permission:dashboard.view,sanctum');
 
             // ── In-App Notifications ─────────────────────────────────────────
             Route::prefix('notifications')->group(function () {
@@ -352,11 +358,11 @@ Route::prefix('v1')->group(function () {
             Route::get('/tailor-workload', [IntelligenceController::class, 'tailorWorkload'])
                 ->middleware('permission:production.view,sanctum');
             Route::get('/churn-risk', [IntelligenceController::class, 'churnRisk'])
-                ->middleware('permission:customers.view,sanctum');
+                ->middleware('permission:intelligence.view,sanctum');
             Route::get('/customer-geography', [IntelligenceController::class, 'customerGeography'])
-                ->middleware('permission:customers.view,sanctum');
+                ->middleware('permission:intelligence.view,sanctum');
             Route::get('/channel-engagement', [IntelligenceController::class, 'channelEngagement'])
-                ->middleware('permission:customers.view,sanctum');
+                ->middleware('permission:intelligence.view,sanctum');
             Route::get('/budget-warnings', [IntelligenceController::class, 'budgetWarnings'])
                 ->middleware('permission:expenses.view,sanctum');
             // smart-tasks and entity-previews stay open to all authenticated
@@ -504,36 +510,40 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Marketing: liturgical seasons + Blessed Friday campaigns ──────
-            Route::middleware('permission:products.view,sanctum')->prefix('marketing')->group(function () {
+            // NOT products.view. That is a read permission on the catalogue,
+            // and it was opening Seasons, Campaigns and — because the home-front
+            // pages are built on marketing banners — editing the public
+            // storefront. A cashier held it via the orders.create dependency.
+            Route::middleware('permission:marketing.view,sanctum')->prefix('marketing')->group(function () {
                 Route::get('/seasons',          [\App\Http\Controllers\Api\SeasonController::class, 'adminIndex']);
                 Route::get('/seasons/{id}',     [\App\Http\Controllers\Api\SeasonController::class, 'adminShow']);
                 Route::post('/seasons',         [\App\Http\Controllers\Api\SeasonController::class, 'store'])
-                    ->middleware('permission:products.edit,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
                 Route::put('/seasons/{id}',     [\App\Http\Controllers\Api\SeasonController::class, 'update'])
-                    ->middleware('permission:products.edit,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
                 Route::delete('/seasons/{id}',  [\App\Http\Controllers\Api\SeasonController::class, 'destroy'])
-                    ->middleware('permission:products.delete,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
 
                 Route::get('/promotions',         [\App\Http\Controllers\Api\PromotionController::class, 'adminIndex']);
                 Route::get('/promotions/{id}',    [\App\Http\Controllers\Api\PromotionController::class, 'adminShow']);
                 Route::post('/promotions',        [\App\Http\Controllers\Api\PromotionController::class, 'store'])
-                    ->middleware('permission:products.edit,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
                 Route::put('/promotions/{id}',    [\App\Http\Controllers\Api\PromotionController::class, 'update'])
-                    ->middleware('permission:products.edit,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
                 Route::delete('/promotions/{id}', [\App\Http\Controllers\Api\PromotionController::class, 'destroy'])
-                    ->middleware('permission:products.delete,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
 
                 // Marketing content blocks (homepage hero slider, promos, etc.)
                 Route::get('/banners',             [\App\Http\Controllers\Api\BannerController::class, 'adminIndex']);
                 Route::get('/banners/{id}',        [\App\Http\Controllers\Api\BannerController::class, 'adminShow']);
                 Route::post('/banners',            [\App\Http\Controllers\Api\BannerController::class, 'store'])
-                    ->middleware('permission:products.edit,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
                 Route::post('/banners/{id}/image', [\App\Http\Controllers\Api\BannerController::class, 'uploadImage'])
-                    ->middleware('permission:products.edit,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
                 Route::put('/banners/{id}',        [\App\Http\Controllers\Api\BannerController::class, 'update'])
-                    ->middleware('permission:products.edit,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
                 Route::delete('/banners/{id}',     [\App\Http\Controllers\Api\BannerController::class, 'destroy'])
-                    ->middleware('permission:products.delete,sanctum');
+                    ->middleware('permission:marketing.manage,sanctum');
             });
 
             // ── Insights / analytics ──────────────────────────────────────────
@@ -721,6 +731,17 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── POS (admin-prefixed) ──────────────────────────────────────────
+            // Receivables lives under the /pos prefix by history, not by
+            // requirement. It was inside the pos.access group, so the till key
+            // opened it — and finance_manager, whose job this actually is, has
+            // no till and could not reach it at all.
+            //
+            // The rows are already bounded: outstandingBalances queries through
+            // Eloquent, so the viewer scope applies. This decides who gets the
+            // screen, which is a decision rather than a leak.
+            Route::get('pos/outstanding-balances', [PosController::class, 'outstandingBalances'])
+                ->middleware('permission:receivables.view,sanctum');
+
             Route::middleware('permission:pos.access,sanctum')->prefix('pos')->group(function () {
                 Route::get('outlets',                   [PosController::class, 'outlets']);
                 Route::get('register/status',           [PosController::class, 'registerStatus']);
@@ -729,7 +750,6 @@ Route::prefix('v1')->group(function () {
                 Route::get('products/search',           [PosController::class, 'searchProducts']);
                 Route::get('suggestions',               [PosController::class, 'suggestions']);
                 Route::get('sales',                     [PosController::class, 'sales']);
-                Route::get('outstanding-balances',      [PosController::class, 'outstandingBalances']);
                 Route::get('sales/{id}',                [PosController::class, 'saleDetail']);
                 Route::get('returns',                   [PosController::class, 'returns']);
                 Route::get('reports/daily',             [PosController::class, 'dailySummary']);
@@ -1075,11 +1095,25 @@ Route::prefix('v1')->group(function () {
 
             // ── Payments ─────────────────────────────────────────────────────
             Route::middleware('permission:payments.view,sanctum')->group(function () {
+                // The ledger is NOT the same capability as seeing a payment on
+                // an order. payments.view is held by every cashier so they can
+                // record a takings; payments.transactions — "View the full
+                // payment transaction ledger and analytics" — was defined for
+                // this group and then never wired up, so the whole group,
+                // including its CSV export, sat behind the cashier's key.
                 Route::prefix('payment-transactions')->group(function () {
-                    Route::get('/',             [PaymentController::class, 'allTransactions']);
-                    Route::get('/analytics',    [PaymentController::class, 'transactionAnalytics']);
-                    Route::get('/export',       [PaymentController::class, 'exportTransactions']);
-                    Route::get('/{id}',         [PaymentController::class, 'transactionDetails']);
+                    // Reading the ledger — the list, its analytics, its export
+                    // and a row's detail — is the capability payments.transactions
+                    // names. Acting on ONE payment is not: refund, void and
+                    // reassign keep their own permissions below, because
+                    // reversing a payment you are already handling is a
+                    // different job from reading every payment in the group.
+                    Route::middleware('permission:payments.transactions,sanctum')->group(function () {
+                        Route::get('/',          [PaymentController::class, 'allTransactions']);
+                        Route::get('/analytics', [PaymentController::class, 'transactionAnalytics']);
+                        Route::get('/export',    [PaymentController::class, 'exportTransactions']);
+                        Route::get('/{id}',      [PaymentController::class, 'transactionDetails']);
+                    });
                     Route::post('/{id}/refund',    [PaymentController::class, 'refundTransaction'])
                         ->middleware('permission:orders.refund,sanctum');
                     Route::post('/{id}/void',      [PaymentController::class, 'voidPayment'])
@@ -1090,7 +1124,14 @@ Route::prefix('v1')->group(function () {
 
                 Route::prefix('payments')->group(function () {
                     Route::get('/pending-approval',          [PaymentApprovalController::class, 'pendingApprovals']);
-                    Route::get('/cash-report',               [PaymentApprovalController::class, 'cashReport']);
+                    // Every cash payment in the group for a date range, with
+                    // customer names, phone numbers and order totals. That is a
+                    // finance report, and payments.view — the key every cashier
+                    // holds to record a takings — is not the right lock for it.
+                    // Same mistake as the transactions ledger, missed the first
+                    // time because only the payment-transactions prefix moved.
+                    Route::get('/cash-report',               [PaymentApprovalController::class, 'cashReport'])
+                        ->middleware('permission:payments.transactions,sanctum');
                     Route::get('/{id}/proof',                [PaymentApprovalController::class, 'serveProof']);
                     Route::post('/{id}/upload-proof',        [PaymentApprovalController::class, 'uploadProof'])
                         ->middleware('permission:payments.upload_proof,sanctum');

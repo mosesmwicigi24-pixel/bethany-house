@@ -22,7 +22,11 @@ class MarketingCmsTest extends TestCase
     {
         $user = User::factory()->create();
         $user->assignRole(Role::findOrCreate('catalog_manager', 'sanctum'));
-        foreach (['products.view', 'products.edit', 'products.delete'] as $perm) {
+        // marketing.* rather than products.* — these endpoints used to sit
+        // behind the catalogue's read permission, which also handed a cashier
+        // the storefront editor. products.view stays because the promotion
+        // fixtures reference the catalogue.
+        foreach (['products.view', 'marketing.view', 'marketing.manage'] as $perm) {
             $user->givePermissionTo(Permission::findOrCreate($perm, 'sanctum'));
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();

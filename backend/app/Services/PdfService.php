@@ -722,6 +722,12 @@ HTML;
             'Date'        => self::date($snap['issued_at'] ?? null),
             'Paid Via'    => ucfirst(str_replace('_', ' ', $pay['method'] ?? '—')),
         ];
+        // Snapshots are frozen at issue time, so receipts written before this
+        // was recorded simply do not carry it — omit the row rather than
+        // printing a dash where a person's name belongs.
+        if (!empty($snap['served_by'])) {
+            $meta['Served By'] = $snap['served_by'];
+        }
 
         $parties = self::partyRow(
             'Received From', $custName,
