@@ -32,6 +32,8 @@ use Illuminate\Support\Str;
 
 class PosController extends Controller
 {
+    use \App\Http\Controllers\Api\Concerns\ConstrainsRawQueriesToViewer;
+
     /**
      * How recently an identical payment (same order, method and amount) counts
      * as a replay of the same submit rather than a second real payment.
@@ -2586,8 +2588,17 @@ class PosController extends Controller
 
         $this->authoriseOutletAccess($request->user(), $outletId);
 
+        $viewer = $request->user();
+
+        // The figures below are bounded to the caller — a cashier's day is her
+        // own takings, which is what #291 restored. That makes the VIEWER part
+        // of the answer, so it has to be part of the key. Keyed on outlet and
+        // date alone, whoever asked first decided what everyone else saw for
+        // the rest of the TTL: a cashier arriving after a manager was served
+        // the whole shop's takings out of the cache, and a manager arriving
+        // after a cashier was told the shop had taken her figure and no more.
         $ttl     = ($date < today()->toDateString()) ? 3600 : 60;
-        $summary = Cache::remember("pos_daily_{$outletId}_{$date}", $ttl, function () use ($outletId, $date) {
+        $summary = Cache::remember("pos_daily_{$outletId}_{$date}_v{$viewer->id}", $ttl, function () use ($outletId, $date, $viewer) {
 
             $sales     = Order::where('outlet_id', $outletId)
                 ->where('order_type', 'pos')
@@ -2612,13 +2623,21 @@ class PosController extends Controller
                 ])
                 ->values()->toArray();
 
-            // Top products
-            $topProducts = DB::table('order_items')
+            // Top products. This one is a RAW join, so the global scope that
+            // bounds $sales above never reaches it — the totals were the
+            // caller's own while the best-sellers beneath them were the whole
+            // outlet's. Bound it by hand, the same way #290 bound the other
+            // raw queries a cashier can reach.
+            $topProductsQuery = DB::table('order_items')
                 ->join('orders', 'order_items.order_id', '=', 'orders.id')
                 ->where('orders.outlet_id', $outletId)
                 ->where('orders.order_type', 'pos')
                 ->whereDate('orders.created_at', $date)
-                ->whereNotIn('orders.status', ['voided', 'cancelled'])
+                ->whereNotIn('orders.status', ['voided', 'cancelled']);
+
+            $this->constrainToViewer($topProductsQuery, $viewer, 'orders');
+
+            $topProducts = $topProductsQuery
                 ->selectRaw('order_items.product_name, SUM(order_items.quantity) as qty, SUM(order_items.total_price) as revenue')
                 ->groupBy('order_items.product_name')
                 ->orderByDesc('revenue')
