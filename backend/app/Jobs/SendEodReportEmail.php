@@ -71,6 +71,12 @@ class SendEodReportEmail implements ShouldQueue
                 'r.submitted_at',
                 'r.sentiments',
                 'r.order_notes',
+                // The two the per-cashier lookup below joins on. They were
+                // missing, and the `?? 0` that used to guard their absence
+                // turned "I do not have this column" into "match nothing",
+                // so every cashier's takings came out as zero.
+                'r.outlet_id',
+                'r.user_id',
                 'o.name as outlet_name',
                 DB::raw("TRIM(CONCAT(COALESCE(u.first_name,''), ' ', COALESCE(u.last_name,''))) as user_name"),
             ])
@@ -86,8 +92,12 @@ class SendEodReportEmail implements ShouldQueue
                         WHERE status IN ('completed','approved','paid')
                         GROUP BY order_id
                     ) as p"), 'p.order_id', '=', 'ord.id')
-                    ->where('ord.outlet_id', $row->outlet_id ?? 0)
-                    ->where('ord.created_by', $row->user_id ?? 0)
+                    // No `?? 0` here on purpose. A missing column should break
+                    // loudly rather than quietly filter on an id nothing has
+                    // and report a zero day, which is what it did for as long
+                    // as this job has been running.
+                    ->where('ord.outlet_id', $row->outlet_id)
+                    ->where('ord.created_by', $row->user_id)
                     ->whereDate('ord.created_at', $this->date)
                     ->whereNotIn('ord.status', ['voided', 'cancelled'])
                     ->where('ord.order_type', 'pos')
