@@ -344,6 +344,9 @@ class OrderTotalsCharacterizationTest extends TestCase
         $fresh = $order->fresh();
         $this->assertSame(34.97, (float) $fresh->subtotal);
         $this->assertSame(5.60, (float) $fresh->tax_amount);
+        // The converted figures are persisted, not merely totalled.
+        $this->assertSame(0.10, (float) $fresh->discount_amount);
+        $this->assertSame(0.20, (float) $fresh->shipping_amount);
         // 34.97 − 0.10 (cart discount, converted at 0.01) + 5.60 + 0.20 (shipping, converted)
         $this->assertSame(40.67, (float) $fresh->total_amount);
     }
