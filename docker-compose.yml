@@ -198,6 +198,14 @@ services:
                 condition: service_healthy
         networks:
             - bethany_network
+        # Overrides the image's baked-in curl healthcheck — no web server here.
+        # Exec form (no shell wrapper) so pgrep can't match its own invocation.
+        healthcheck:
+            test: ["CMD", "pgrep", "-f", "artisan queue:work"]
+            interval: 30s
+            timeout: 5s
+            retries: 3
+            start_period: 10s
 
     # ── Scheduler (Cron) ──────────────────────────────────────────────────────────
     scheduler:
@@ -239,6 +247,14 @@ services:
                 condition: service_healthy
         networks:
             - bethany_network
+        # Overrides the image's baked-in curl healthcheck — no web server here.
+        # Matches the PID-1 supervisor loop, whose cmdline carries "artisan schedule:run".
+        healthcheck:
+            test: ["CMD", "pgrep", "-f", "artisan schedule:run"]
+            interval: 30s
+            timeout: 5s
+            retries: 3
+            start_period: 10s
 
     # ── Next.js Public Frontend ───────────────────────────────────────────────────
     # NOTE: NEXT_PUBLIC_* vars are baked into the image at build time by CI.
@@ -260,6 +276,8 @@ services:
         networks:
             - bethany_network
         healthcheck:
+            # 127.0.0.1, not localhost: busybox wget tries ::1 first and the
+            # Next.js server binds IPv4 only — connection refused forever.
             test:
                 [
                     "CMD",
@@ -267,7 +285,7 @@ services:
                     "--no-verbose",
                     "--tries=1",
                     "--spider",
-                    "http://localhost:3000/",
+                    "http://127.0.0.1:3000/",
                 ]
             interval: 30s
             timeout: 10s
@@ -352,7 +370,10 @@ services:
         networks:
             - bethany_network
         healthcheck:
-            test: ["CMD-SHELL", "nc -z localhost 8080 || exit 1"]
+            # Reverb serves a real health endpoint at /up (verified 200 in prod).
+            # 127.0.0.1 explicitly: "localhost" resolves to ::1 first and Reverb
+            # binds IPv4 only, which is why the old nc check never passed.
+            test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/up || exit 1"]
             interval: 30s
             timeout: 10s
             retries: 3
