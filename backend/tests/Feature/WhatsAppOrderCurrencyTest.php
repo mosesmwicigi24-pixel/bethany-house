@@ -43,6 +43,8 @@ class WhatsAppOrderCurrencyTest extends TestCase
     {
         $user = User::factory()->create();
         $user->givePermissionTo(Permission::findOrCreate('pos.access', 'sanctum'));
+        // A till user must be assigned to the outlet they are selling from.
+        $user->outlets()->syncWithoutDetaching([$this->outlet()->id]);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 

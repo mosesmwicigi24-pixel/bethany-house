@@ -297,9 +297,15 @@ class OrderTotalsCharacterizationTest extends TestCase
 
     /**
      * Re-pricing into another currency rewrites every line, then re-derives the
-     * order. The cart discount and shipping are NOT converted — pinning that
-     * here because it is surprising, and because the refactor must not quietly
-     * "fix" it.
+     * order.
+     *
+     * This pin MOVED, deliberately (#279). It used to lock the cart discount and
+     * shipping fee staying as they were while the lines converted around them —
+     * surprising, and pinned so no refactor could quietly change it. It was also
+     * the same defect the WhatsApp orders had, one field along: KES 20 of
+     * shipping left sitting under a USD total is charged as USD 20, ~130x what
+     * the shop meant. They now convert with everything else, and the switch is
+     * refused outright when they cannot. Changed on purpose, not quietly.
      */
     public function test_update_currency_totals(): void
     {
@@ -343,8 +349,11 @@ class OrderTotalsCharacterizationTest extends TestCase
         $fresh = $order->fresh();
         $this->assertSame(34.97, (float) $fresh->subtotal);
         $this->assertSame(5.60, (float) $fresh->tax_amount);
-        // 34.97 − 10 (cart discount, NOT converted) + 5.60 + 20 (shipping, NOT converted)
-        $this->assertSame(50.57, (float) $fresh->total_amount);
+        // The cart discount and shipping travel at the same rate as the lines.
+        $this->assertSame(0.10, (float) $fresh->discount_amount);   // 10 KES
+        $this->assertSame(0.20, (float) $fresh->shipping_amount);   // 20 KES
+        // 34.97 − 0.10 + 5.60 + 0.20
+        $this->assertSame(40.67, (float) $fresh->total_amount);
     }
 
     /** An order carrying the awkward cart, already persisted. */
