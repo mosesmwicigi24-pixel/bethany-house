@@ -17,6 +17,7 @@ use App\Models\TaxRate;
 use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Services\ActivityLogService;
+use App\Services\CurrencyPricing;
 use App\Services\ProductSerialService;
 use App\Services\OrderTotals;
 use App\Services\PosDiscountPolicy;
@@ -2833,14 +2834,6 @@ class PosController extends Controller
 
         $measurements = $product->measurements ?? [];
 
-        // Load exchange rates once — used for currency conversion fallback.
-        $rateMap = DB::table('currencies')
-            ->where('is_active', true)
-            ->get(['code', 'exchange_rate', 'is_base'])
-            ->keyBy('code')
-            ->map(fn ($r) => ['rate' => (float) $r->exchange_rate, 'is_base' => (bool) $r->is_base])
-            ->toArray();
-
         return [
             'id'           => $product->id,
             'name'         => $translation?->name ?? $product->sku,
@@ -2856,7 +2849,7 @@ class PosController extends Controller
             // a single virtual variant from the product-level price and inventory
             // so the POS frontend always has at least one variant to render.
             'variants'  => $product->variants->isEmpty()
-                ? (function () use ($product, $outletId, $currency, $rateMap): \Illuminate\Support\Collection {
+                ? (function () use ($product, $outletId, $currency): \Illuminate\Support\Collection {
                     // Resolve product-level inventory
                     $candidates = collect([
                         $product->inventoryItems->first(),
@@ -2865,42 +2858,32 @@ class PosController extends Controller
                     $inventory  = $candidates->sortByDesc(fn ($i) => $i->quantity_available)->first();
                     $available  = $inventory ? $inventory->quantity_available : 0;
 
-                    // Resolve product-level price
-                    $priceRow = $product->prices->firstWhere('currency_code', $currency)
-                        ?? $product->prices->first(
-                            fn ($p) => isset($rateMap[$p->currency_code]) && $rateMap[$p->currency_code]['is_base']
-                        )
-                        ?? $product->prices->first();
-
-                    if ($priceRow && $priceRow->currency_code !== $currency) {
-                        $fromRate     = $rateMap[$priceRow->currency_code]['rate'] ?? 1;
-                        $toRate       = $rateMap[$currency]['rate']                ?? 1;
-                        $regularPrice = $fromRate > 0 ? round(((float) $priceRow->regular_price / $fromRate) * $toRate, 2) : (float) $priceRow->regular_price;
-                        $salePrice    = $priceRow->sale_price && $fromRate > 0
-                            ? round(((float) $priceRow->sale_price / $fromRate) * $toRate, 2)
-                            : null;
-                    } else {
-                        $regularPrice = $priceRow ? (float) $priceRow->regular_price : 0.0;
-                        $salePrice    = $priceRow?->sale_price ? (float) $priceRow->sale_price : null;
-                    }
+                    // Product-level price in the asked-for currency. Null means
+                    // the hub cannot express this product in that currency — the
+                    // POS says so rather than quoting the base-currency figure.
+                    $priced = CurrencyPricing::priceIn(
+                        $product->prices->whereNull('product_variant_id'),
+                        $currency
+                    );
 
                     $taxRateDecimal = TaxCalculationService::rateForProduct($product->id);
 
                     return collect([[
-                        'id'           => null,  // virtual — no real variant ID for simple products
-                        'sku'          => $product->sku,
-                        'variant_name' => $product->translations->first()?->name ?? $product->sku,
-                        'attributes'   => [],
-                        'price'        => $regularPrice,
-                        'sale_price'   => $salePrice,
-                        'currency'     => $currency,
-                        'stock'        => $available,
-                        'is_default'   => true,
-                        'tax_rate'     => round($taxRateDecimal * 100, 4),
-                        'tax_name'     => TaxCalculationService::rateLabelForProduct($product->id) ?: null,
+                        'id'                => null,  // virtual — no real variant ID for simple products
+                        'sku'               => $product->sku,
+                        'variant_name'      => $product->translations->first()?->name ?? $product->sku,
+                        'attributes'        => [],
+                        'price'             => $priced['regular_price'] ?? null,
+                        'sale_price'        => $priced['sale_price']    ?? null,
+                        'price_unavailable' => $priced === null,
+                        'currency'          => $currency,
+                        'stock'             => $available,
+                        'is_default'        => true,
+                        'tax_rate'          => round($taxRateDecimal * 100, 4),
+                        'tax_name'          => TaxCalculationService::rateLabelForProduct($product->id) ?: null,
                     ]]);
                 })()
-                : $product->variants->map(function (ProductVariant $v) use ($outletId, $product, $currency, $rateMap) {
+                : $product->variants->map(function (ProductVariant $v) use ($outletId, $product, $currency) {
                 // Collect all candidate inventory rows and pick the one with the
                 // highest available quantity.
                 $candidates = collect([
@@ -2923,51 +2906,28 @@ class PosController extends Controller
                 $available = $inventory ? $inventory->quantity_available : 0;
 
                 // ── Price resolution ─────────────────────────────────────────
-                // Step 1: look for a price row that matches the requested currency exactly.
-                $priceRow = $v->prices->firstWhere('currency_code', $currency);
-
-                if ($priceRow) {
-                    // Direct match — use it as-is.
-                    $regularPrice = (float) $priceRow->regular_price;
-                    $salePrice    = $priceRow->sale_price ? (float) $priceRow->sale_price : null;
-                } else {
-                    // Step 2: no exact row — find the best source price to convert from.
-                    // Prefer the base currency row; otherwise fall back to the first row.
-                    $basePriceRow = $v->prices->first(
-                        fn ($p) => isset($rateMap[$p->currency_code]) && $rateMap[$p->currency_code]['is_base']
-                    ) ?? $v->prices->first();
-
-                    if ($basePriceRow
-                        && isset($rateMap[$basePriceRow->currency_code], $rateMap[$currency])
-                        && $rateMap[$basePriceRow->currency_code]['rate'] > 0
-                    ) {
-                        $fromRate     = $rateMap[$basePriceRow->currency_code]['rate'];
-                        $toRate       = $rateMap[$currency]['rate'];
-                        $regularPrice = round(((float) $basePriceRow->regular_price / $fromRate) * $toRate, 2);
-                        $salePrice    = $basePriceRow->sale_price
-                            ? round(((float) $basePriceRow->sale_price / $fromRate) * $toRate, 2)
-                            : null;
-                    } else {
-                        // No usable exchange rate — return the source price raw.
-                        $regularPrice = $basePriceRow ? (float) $basePriceRow->regular_price : 0.0;
-                        $salePrice    = $basePriceRow?->sale_price ? (float) $basePriceRow->sale_price : null;
-                    }
-                }
+                // The variant's own row for this currency, else the base row
+                // converted at the configured rate. Null when neither exists:
+                // quoting a KES figure as USD is how orders got mispriced, so
+                // the tile carries "no price" and the cashier cannot sell it
+                // until the shop sets one.
+                $priced = CurrencyPricing::priceIn($v->prices, $currency);
 
                 $taxRateDecimal = TaxCalculationService::rateForProduct($product->id);
 
                 return [
-                    'id'           => $v->id,
-                    'sku'          => $v->sku,
-                    'variant_name' => $v->variant_name,
-                    'attributes'   => $v->attributes ?? [],
-                    'price'        => $regularPrice,
-                    'sale_price'   => $salePrice,
-                    'currency'     => $currency,
-                    'stock'        => $available,
-                    'is_default'   => (bool) $v->is_default,
-                    'tax_rate'     => round($taxRateDecimal * 100, 4),
-                    'tax_name'     => TaxCalculationService::rateLabelForProduct($product->id) ?: null,
+                    'id'                => $v->id,
+                    'sku'               => $v->sku,
+                    'variant_name'      => $v->variant_name,
+                    'attributes'        => $v->attributes ?? [],
+                    'price'             => $priced['regular_price'] ?? null,
+                    'sale_price'        => $priced['sale_price']    ?? null,
+                    'price_unavailable' => $priced === null,
+                    'currency'          => $currency,
+                    'stock'             => $available,
+                    'is_default'        => (bool) $v->is_default,
+                    'tax_rate'          => round($taxRateDecimal * 100, 4),
+                    'tax_name'          => TaxCalculationService::rateLabelForProduct($product->id) ?: null,
                 ];
             })->values(),
         ];
@@ -3273,23 +3233,23 @@ class PosController extends Controller
                     ?? $mtoProduct?->translations->first()?->name
                     ?? 'Unknown';
 
+                // No price sent — take the hub's, for the order's currency. A
+                // product with no catalogue price at all is quoted later and
+                // stays at 0; one the hub prices only in another currency it
+                // cannot convert is refused rather than carried over raw.
                 $mtoUnitPrice = (float)($pi['unit_price'] ?? 0);
-                if ($mtoUnitPrice === 0.0 && $mtoVariant) {
-                    // Variable product — look up variant prices
-                    $priceRow     = $mtoVariant->prices->firstWhere('currency_code', $resolvedCurrency)
-                        ?? $mtoVariant->prices->first();
-                    $mtoUnitPrice = $priceRow ? (float)$priceRow->regular_price : 0.0;
-                }
-                if ($mtoUnitPrice === 0.0 && !$mtoVariant && $mtoProductId) {
-                    // Simple product — look up product-level prices (product_variant_id IS NULL)
-                    $productPriceRow = \App\Models\ProductPrice::where('product_id', $mtoProductId)
-                        ->whereNull('product_variant_id')
-                        ->where('currency_code', $resolvedCurrency)
-                        ->first()
-                        ?? \App\Models\ProductPrice::where('product_id', $mtoProductId)
-                            ->whereNull('product_variant_id')
-                            ->first();
-                    $mtoUnitPrice = $productPriceRow ? (float)$productPriceRow->regular_price : 0.0;
+                if ($mtoUnitPrice === 0.0) {
+                    $mtoRows = CurrencyPricing::rowsFor($mtoProductId ?: null, $mtoVariantId);
+                    if ($mtoRows->isNotEmpty()) {
+                        $priced = CurrencyPricing::priceIn($mtoRows, $resolvedCurrency);
+                        if (!$priced) {
+                            DB::rollBack();
+                            return response()->json([
+                                'message' => CurrencyPricing::unpriceableReason($mtoName, $resolvedCurrency),
+                            ], 422);
+                        }
+                        $mtoUnitPrice = $priced['regular_price'];
+                    }
                 }
 
                 $mtoBase      = $mtoUnitPrice * (int)$pi['quantity'];
@@ -3548,6 +3508,15 @@ class PosController extends Controller
             $currencyCode = $this->resolveCurrency($outlet);
         }
 
+        // Who is taking this order decides who gets to price it. A cashier's
+        // POS quotes in the order's currency already (see transformProduct), so
+        // the price they send — including a deliberate override — stands. An
+        // agent-taken order does not: Neema reads the catalogue in KES while
+        // the currency here comes from the customer's country, and an unchecked
+        // unit_price is exactly how KES figures ended up wearing a USD label.
+        $channel   = $validated['channel'] ?? 'pos';
+        $hubPrices = $channel !== 'pos';
+
         DB::beginTransaction();
         try {
             $itemsData    = [];
@@ -3609,7 +3578,24 @@ class PosController extends Controller
                     return response()->json(['message' => "Insufficient stock for \"{$name}\". Available: {$available}."], 422);
                 }
 
-                $lineBase     = $item['unit_price'] * $item['quantity'];
+                // Agent-taken order: the hub's own price for this currency, or
+                // nothing. Refusing beats charging a KES number as USD.
+                $unitPrice = (float) $item['unit_price'];
+                if ($hubPrices) {
+                    $priced = CurrencyPricing::catalogue($productId, $variantId, $currencyCode);
+                    if (!$priced) {
+                        DB::rollBack();
+                        $name = $variantModel?->product?->translations->first()?->name
+                             ?? ($productId ? Product::with('translations')->find($productId)?->translations->first()?->name : null)
+                             ?? "Product #{$productId}";
+                        return response()->json([
+                            'message' => CurrencyPricing::unpriceableReason($name, $currencyCode),
+                        ], 422);
+                    }
+                    $unitPrice = $priced['regular_price'];
+                }
+
+                $lineBase     = $unitPrice * $item['quantity'];
                 $discType     = $item['discount_type'] ?? 'none';
                 $discVal      = (float)($item['discount_value'] ?? 0);
                 $lineDiscount = OrderTotals::resolveDiscount($discType, $discVal, $lineBase);
@@ -3619,7 +3605,7 @@ class PosController extends Controller
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
-                $taxCalcLine = TaxCalculationService::calculateLine($item['unit_price'], $item['quantity'], $productId, $taxInclusive);
+                $taxCalcLine = TaxCalculationService::calculateLine($unitPrice, $item['quantity'], $productId, $taxInclusive);
                 $lineSubtotalForOrder = $taxInclusive ? $lineSubtotal : $lineSubtotal + round($taxCalcLine['tax_amount'], 2);
 
                 $variant     = $variantModel ? $variantModel->load('product.translations') : null;
@@ -3634,7 +3620,7 @@ class PosController extends Controller
                     'variant_id'      => $variantId,
                     'product_id'      => $productId,
                     'quantity'        => $item['quantity'],
-                    'unit_price'      => $item['unit_price'],
+                    'unit_price'      => $unitPrice,
                     // FIX 1: persist raw discount type + value for lossless restore
                     'discount_type'   => $discType,
                     'discount_value'  => $discVal,
@@ -3661,24 +3647,24 @@ class PosController extends Controller
                     ?? 'Unknown';
 
                 // Use the unit_price from the production_items entry if provided,
-                // otherwise look it up from the variant's (or product-level) prices table.
+                // otherwise take the hub's catalogue price for this currency. An
+                // agent-taken order is always priced by the hub, for the same
+                // reason the stocked lines above are. A product the hub holds no
+                // price for at all is a made-to-measure line quoted later — it
+                // stays at 0 rather than blocking the cashier.
                 $mtoUnitPrice = (float)($pi['unit_price'] ?? 0);
-                if ($mtoUnitPrice === 0.0 && $mtoVariant) {
-                    // Variable product — look up variant prices
-                    $priceRow     = $mtoVariant->prices->firstWhere('currency_code', $currencyCode)
-                        ?? $mtoVariant->prices->first();
-                    $mtoUnitPrice = $priceRow ? (float)$priceRow->regular_price : 0.0;
-                }
-                if ($mtoUnitPrice === 0.0 && !$mtoVariant && $mtoProductId) {
-                    // Simple product — look up product-level prices (product_variant_id IS NULL)
-                    $productPriceRow = \App\Models\ProductPrice::where('product_id', $mtoProductId)
-                        ->whereNull('product_variant_id')
-                        ->where('currency_code', $currencyCode)
-                        ->first()
-                        ?? \App\Models\ProductPrice::where('product_id', $mtoProductId)
-                            ->whereNull('product_variant_id')
-                            ->first();
-                    $mtoUnitPrice = $productPriceRow ? (float)$productPriceRow->regular_price : 0.0;
+                if ($hubPrices || $mtoUnitPrice === 0.0) {
+                    $mtoRows = CurrencyPricing::rowsFor($mtoProductId ?: null, $mtoVariantId);
+                    if ($hubPrices || $mtoRows->isNotEmpty()) {
+                        $priced = CurrencyPricing::priceIn($mtoRows, $currencyCode);
+                        if (!$priced) {
+                            DB::rollBack();
+                            return response()->json([
+                                'message' => CurrencyPricing::unpriceableReason($mtoName, $currencyCode),
+                            ], 422);
+                        }
+                        $mtoUnitPrice = $priced['regular_price'];
+                    }
                 }
 
                 $mtoBase         = $mtoUnitPrice * (int)$pi['quantity'];
@@ -3744,7 +3730,6 @@ class PosController extends Controller
                 $validated['customer_email']      = $validated['customer_email']      ?? ($nc['email'] ?? null);
             }
 
-            $channel      = $validated['channel'] ?? 'pos';
             $numberPrefix = match ($channel) {
                 'whatsapp' => 'WA-',
                 'online'   => 'ONL-',

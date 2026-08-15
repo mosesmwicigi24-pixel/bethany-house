@@ -12,6 +12,7 @@ use App\Models\OrderShipment;
 use App\Models\ProductionOrder;
 use App\Models\ProductVariant;
 use App\Services\ActivityLogService;
+use App\Services\CurrencyPricing;
 use App\Services\NotificationService;
 use App\Services\TaxCalculationService;
 use Illuminate\Http\Request;
@@ -31,7 +32,9 @@ use Illuminate\Support\Str;
  *     USD), validated against active currencies with the same fallback as
  *     OrderController::checkout();
  *   • prices lines from product-level product_prices rows for that currency
- *     (falling back to any price row, mirroring checkout());
+ *     via CurrencyPricing — the shop's own row for the currency, else the base
+ *     row converted at the configured rate, else a 422 (never the base figure
+ *     relabelled, which silently overcharges by the exchange rate);
  *   • creates the order with order_type='online' plus a payment token, so
  *     the customer lands on the normal /pay/{token} page (M-Pesa/Paystack);
  *   • for producible lines, validates the submitted measurements against
@@ -160,11 +163,12 @@ class StorefrontCheckoutController extends Controller
             }
 
             $priceRows = $variant ? $variant->prices : $product->prices;
-            $price = $priceRows->firstWhere('currency_code', $currency)
-                ?? $priceRows->first();
+            $price     = CurrencyPricing::priceIn($priceRows, $currency);
             if (!$price) {
+                $name = $product->translations->first()?->name ?? $item['slug'];
+
                 return response()->json([
-                    'message' => "Product '{$item['slug']}' has no price configured",
+                    'message' => CurrencyPricing::unpriceableReason($name, $currency),
                 ], 422);
             }
 
@@ -194,8 +198,8 @@ class StorefrontCheckoutController extends Controller
 
             // Charge the current selling price (a manual sale if any) minus the
             // active promotion — resolved on the server, never sent by the client.
-            $regular   = (float) $price->regular_price;
-            $effective = (float) $price->getEffectivePrice();   // honours a manual sale_price
+            $regular   = $price['regular_price'];
+            $effective = $price['effective_price'];   // honours a manual sale_price
             $promo     = $promoService->promotionFor($product);
             $finalUnit = $promo ? $promoService->discountedUnit($effective, $promo) : $effective;
             $qty       = (int) $item['quantity'];

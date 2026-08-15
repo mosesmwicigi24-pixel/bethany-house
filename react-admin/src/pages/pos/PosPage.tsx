@@ -169,6 +169,12 @@ function calcTotals(
 const fmt = (n: number) =>
     n.toLocaleString("en-KE", { minimumFractionDigits: 2 });
 
+// A variant the hub cannot price in the currency this sale is running in.
+// Selling it would mean charging the base-currency figure under a foreign
+// label, so the tile says so and the cashier cannot add it.
+const unpriced = (v: { price: number | null; price_unavailable?: boolean }) =>
+    v.price_unavailable === true || v.price === null;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Cart draft persistence
 //
@@ -902,6 +908,7 @@ function VariantPicker({
                         const mto =
                             (v as any).is_made_to_order ||
                             (v as any).allow_backorder;
+                        const noPrice = unpriced(v);
                         return (
                             <button
                                 key={v.id}
@@ -911,13 +918,13 @@ function VariantPicker({
                                 }}
                                 className={clsx(
                                     "flex items-center justify-between p-3 rounded-xl border text-left transition-all active:scale-[0.98]",
-                                    oos && !mto
+                                    noPrice || (oos && !mto)
                                         ? "border-line bg-surface-50 opacity-50 cursor-not-allowed"
                                         : mto && oos
                                           ? "border-accent-200 bg-accent-50 cursor-pointer hover:border-accent-400"
                                           : "border-surface-200 hover:border-brand-400 hover:bg-brand-50 cursor-pointer",
                                 )}
-                                disabled={oos && !mto}
+                                disabled={noPrice || (oos && !mto)}
                             >
                                 <div>
                                     <p className="text-sm font-medium text-surface-900">
@@ -935,8 +942,13 @@ function VariantPicker({
                                     )}
                                 </div>
                                 <div className="text-right shrink-0 ml-3">
-                                    <p className="text-sm font-bold text-brand-600">
-                                        {currency} {fmt(v.price)}
+                                    <p className={clsx(
+                                        "text-sm font-bold",
+                                        noPrice ? "text-danger" : "text-brand-600",
+                                    )}>
+                                        {noPrice
+                                            ? `No ${currency} price`
+                                            : `${currency} ${fmt(v.price as number)}`}
                                     </p>
                                     <p
                                         className={clsx(
@@ -1096,10 +1108,14 @@ function ProductCard({
                 <p
                     className={clsx(
                         "mt-1.5 text-sm font-bold",
-                        mto && oos ? "text-accent-600" : "text-brand-600",
+                        unpriced(defaultVariant)
+                            ? "text-danger"
+                            : mto && oos ? "text-accent-600" : "text-brand-600",
                     )}
                 >
-                    {currency} {fmt(defaultVariant.price)}
+                    {unpriced(defaultVariant)
+                        ? `No ${currency} price`
+                        : `${currency} ${fmt(defaultVariant.price as number)}`}
                 </p>
             </div>
         </button>
@@ -2112,6 +2128,15 @@ export default function PosPage() {
     // ── Cart ops ───────────────────────────────────────────────────────────────
     const addToCart = useCallback(
         (product: PosProduct, variant: PosVariant) => {
+            // Refuse rather than sell at the base-currency figure: the whole
+            // point of the currency switch is that the customer pays THAT
+            // currency's price, and the hub does not have one for this item.
+            if (unpriced(variant)) {
+                toast.error(
+                    `${product.name} has no ${variant.currency} price. Set one on the product, or a ${variant.currency} exchange rate, before selling it in ${variant.currency}.`,
+                );
+                return;
+            }
             const isProduction =
                 (variant as any).is_made_to_order ||
                 (variant as any).allow_backorder;
@@ -2133,7 +2158,7 @@ export default function PosPage() {
                         product_name: product.name,
                         variant_name: variant.variant_name,
                         sku: variant.sku,
-                        price: variant.price,
+                        price: variant.price as number,   // guarded by unpriced() above
                         quantity: 1,
                         discount_type: "none",
                         discount_value: 0,
@@ -2152,7 +2177,7 @@ export default function PosPage() {
             setMobilePanel("cart");
             setLastCompletedSale(null); // clear previous sale banner when new order begins
         },
-        [],
+        [toast],
     );
 
     const handleProductClick = useCallback(
@@ -2344,13 +2369,27 @@ export default function PosPage() {
             }},
         ).then((res) => {
             const fresh: PosProduct[] = res.data ?? [];
-            setCart(prev => prev.map(item => {
+            // Lines the hub cannot price in the new currency are dropped, not
+            // carried over at the old number — a KES figure left sitting in a
+            // USD cart is charged as USD.
+            const dropped: string[] = [];
+            setCart(prev => prev.flatMap(item => {
                 for (const p of fresh) {
                     const v = p.variants.find(vv => Number(vv.id) === Number(item.variant_id));
-                    if (v) return { ...item, price: v.price };
+                    if (!v) continue;
+                    if (unpriced(v)) {
+                        dropped.push(item.product_name);
+                        return [];
+                    }
+                    return [{ ...item, price: v.price as number }];
                 }
-                return item;
+                return [item];
             }));
+            if (dropped.length > 0) {
+                toast.error(
+                    `Removed from the cart — no ${target} price on the hub: ${dropped.join(", ")}.`,
+                );
+            }
         }).catch(() => { /* silently ignore - stale price stays until item re-added */ });
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currencyForQuery]);

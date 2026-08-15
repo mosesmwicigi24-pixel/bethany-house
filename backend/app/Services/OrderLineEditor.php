@@ -7,7 +7,6 @@ use App\Models\InventoryItem;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
-use App\Models\ProductPrice;
 use App\Models\ProductVariant;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -445,7 +444,7 @@ class OrderLineEditor
 
         $unitPrice = array_key_exists('unit_price', $row) && $row['unit_price'] !== null
             ? (float) $row['unit_price']
-            : $this->cataloguePrice($productId, $variantId, $order->currency_code ?? 'KES');
+            : $this->cataloguePrice($productId, $variantId, $order->currency_code ?? 'KES', $name);
 
         $probe = (object) [
             'product_id'         => $productId,
@@ -468,16 +467,24 @@ class OrderLineEditor
         ];
     }
 
-    private function cataloguePrice(int $productId, ?int $variantId, string $currency): float
+    /**
+     * The hub's price for this line in the order's currency — its own row for
+     * that currency, else the base row converted at the configured rate. There
+     * is deliberately no third option: a KES figure carried onto a USD order
+     * reads as a normal price and is wrong by the whole exchange rate.
+     */
+    private function cataloguePrice(int $productId, ?int $variantId, string $currency, string $name): float
     {
-        $q = ProductPrice::query()->where('product_id', $productId);
-        $variantId
-            ? $q->where('product_variant_id', $variantId)
-            : $q->whereNull('product_variant_id');
+        $priced = CurrencyPricing::priceIn(
+            CurrencyPricing::rowsFor($variantId ? null : $productId, $variantId),
+            $currency
+        );
 
-        $row = (clone $q)->where('currency_code', $currency)->first() ?? (clone $q)->first();
+        if (!$priced) {
+            $this->refuse(CurrencyPricing::unpriceableReason($name, $currency), 'unpriceable_currency');
+        }
 
-        return $row ? (float) $row->regular_price : 0.0;
+        return $priced['regular_price'];
     }
 
     // ── Stock ─────────────────────────────────────────────────────────────────

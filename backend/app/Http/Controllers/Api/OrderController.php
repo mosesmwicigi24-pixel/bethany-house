@@ -15,6 +15,8 @@ use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\ProductVariant;
 use App\Models\InventoryItem;
+use App\Services\CurrencyPricing;
+use App\Services\OrderRepricer;
 use App\Models\ShippingMethod;
 use App\Services\TaxCalculationService;
 use App\Services\NotificationService;
@@ -1968,102 +1970,62 @@ class OrderController extends Controller
             return response()->json(['currency_code' => $newCurrency, 'changed' => false]);
         }
 
-        // ── Load exchange rate map for currency conversion ────────────────────
-        $rateMap = DB::table('currencies')
-            ->where('is_active', true)
-            ->get(['code', 'exchange_rate', 'is_base'])
-            ->keyBy('code')
-            ->map(fn ($r) => ['rate' => (float) $r->exchange_rate, 'is_base' => (bool) $r->is_base])
-            ->toArray();
+        // ── Reprice every line BEFORE writing anything ────────────────────────
+        // A price row entered for the new currency wins; otherwise the base row
+        // converted at the configured rate; otherwise — for a hand-priced line
+        // the catalogue knows nothing about — the line's own price converted.
+        // Where none of the three can be done the change is refused outright,
+        // because keeping the old figure under a new label is exactly what
+        // turned a KES 4,500 tray into a USD 4,500 order.
+        $repriced    = [];
+        $unpriceable = [];
+
+        foreach ($order->items as $item) {
+            $priced = CurrencyPricing::catalogue($item->product_id, $item->product_variant_id, $newCurrency);
+
+            if ($priced) {
+                $repriced[$item->id] = $priced['regular_price'];
+                continue;
+            }
+
+            $converted = CurrencyPricing::convert((float) $item->unit_price, $oldCurrency, $newCurrency);
+
+            if ($converted === null) {
+                $unpriceable[] = $item->product_name ?: "Item #{$item->id}";
+                continue;
+            }
+
+            $repriced[$item->id] = $converted;
+        }
+
+        if (!empty($unpriceable)) {
+            $names = implode(', ', array_unique($unpriceable));
+
+            return response()->json([
+                'message' => "Cannot switch this order to {$newCurrency}: no {$newCurrency} price on the hub for {$names}"
+                    . (CurrencyPricing::hasRate($newCurrency)
+                        ? '. Set one on the product, then try again.'
+                        : ", and {$newCurrency} has no exchange rate set. Set a {$newCurrency} price or rate, then try again."),
+                'unpriceable_items' => array_values(array_unique($unpriceable)),
+            ], 422);
+        }
+
+        // The cart-level discount and the shipping fee are figures in the OLD
+        // currency too. A plan of null means one of them cannot cross.
+        $plan = OrderRepricer::plan($order, $repriced, $oldCurrency, $newCurrency);
+
+        if ($plan === null) {
+            return response()->json([
+                'message' => "Cannot switch this order to {$newCurrency}: its shipping or discount amount"
+                    . " cannot be converted from {$oldCurrency}. Set a {$newCurrency} exchange rate, then try again.",
+            ], 422);
+        }
+
+        $newTotal = $plan['total'];
 
         DB::beginTransaction();
         try {
-            // ── Reprice each order item ───────────────────────────────────────
-            // Step 1: try an exact price row for the new currency.
-            // Step 2: if none, convert from the base-currency price row using
-            //         exchange rates - identical logic to PosController::transformProduct.
-            foreach ($order->items as $item) {
-                // Simple products have product_variant_id = null; look up prices
-                // by product_id with variant_id IS NULL instead of skipping them.
-                if ($item->product_variant_id) {
-                    $prices = DB::table('product_prices')
-                        ->where('product_variant_id', $item->product_variant_id)
-                        ->get();
-                } elseif ($item->product_id) {
-                    $prices = DB::table('product_prices')
-                        ->where('product_id', $item->product_id)
-                        ->whereNull('product_variant_id')
-                        ->get();
-                } else {
-                    // No product reference at all — skip (custom/manual line)
-                    continue;
-                }
-
-                $directRow = $prices->firstWhere('currency_code', $newCurrency);
-
-                if ($directRow) {
-                    $newUnitPrice = (float) $directRow->regular_price;
-                } else {
-                    // Find the base-currency row, then convert
-                    $baseRow = $prices->first(
-                        fn ($p) => isset($rateMap[$p->currency_code]) && $rateMap[$p->currency_code]['is_base']
-                    ) ?? $prices->first();
-
-                    if ($baseRow
-                        && isset($rateMap[$baseRow->currency_code], $rateMap[$newCurrency])
-                        && $rateMap[$baseRow->currency_code]['rate'] > 0
-                    ) {
-                        $fromRate     = $rateMap[$baseRow->currency_code]['rate'];
-                        $toRate       = $rateMap[$newCurrency]['rate'];
-                        $newUnitPrice = round(((float) $baseRow->regular_price / $fromRate) * $toRate, 2);
-                    } else {
-                        // No usable rate - keep existing price (avoids zeroing out)
-                        $newUnitPrice = (float) $item->unit_price;
-                    }
-                }
-
-                // Recalculate line tax and total with new price.
-                // Tax rate is preserved (e.g. 16% VAT) — only the base amount changes.
-                $discountAmount  = (float) $item->discount_amount;
-                $lineSubtotal    = max(0, ($newUnitPrice * $item->quantity) - $discountAmount);
-                $oldLineSubtotal = max(0, ((float) $item->unit_price * (int) $item->quantity) - $discountAmount);
-
-                // Use TaxCalculationService for accuracy; fall back to implied rate if needed.
-                if (!empty($item->product_id)) {
-                    $taxRate      = \App\Services\TaxCalculationService::rateForProduct($item->product_id);
-                    $taxInclusive = \App\Services\TaxCalculationService::isTaxInclusive();
-                    $newLineTax   = $taxInclusive
-                        ? round($lineSubtotal * $taxRate / (1 + $taxRate), 4)
-                        : round($lineSubtotal * $taxRate, 4);
-                } elseif ($oldLineSubtotal > 0 && (float) $item->tax_amount > 0) {
-                    $impliedRate = (float) $item->tax_amount / $oldLineSubtotal;
-                    $newLineTax  = round($lineSubtotal * $impliedRate, 4);
-                } else {
-                    $newLineTax = 0;
-                }
-
-                $newTotalPrice = round($lineSubtotal + $newLineTax, 2);
-
-                DB::table('order_items')->where('id', $item->id)->update([
-                    'unit_price'  => $newUnitPrice,
-                    'tax_amount'  => $newLineTax,
-                    'total_price' => $newTotalPrice,
-                    'updated_at'  => now(),
-                ]);
-            }
-
-            // ── Recalculate order-level totals ────────────────────────────────
-            // The cart discount and shipping are deliberately NOT converted —
-            // they stay at their old-currency figures, as they always have.
-            $freshItems = DB::table('order_items')->where('order_id', $order->id)->get();
-            $totals     = \App\Services\OrderTotals::forOrder(
-                $order,
-                (bool) $order->prices_include_tax,
-                $freshItems,
-            );
-            $newTotal = $totals->total;
-
-            $totals->persistTo($order, [
+            OrderRepricer::apply($order, $plan, [
                 'currency_code'         => $newCurrency,
                 'customer_country_code' => $countryCode,
                 'is_international'      => $isInternational,
