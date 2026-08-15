@@ -10,6 +10,7 @@ import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import type { ApiError } from "@/types";
 import { groupRowsByDate, DateGroupHeaderRow } from "@/lib/dateGrouping";
+import { neemaCallsUrl } from "@/lib/neema";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -1966,14 +1967,15 @@ function ProductionOrdersTab() {
                                                     </div>
                                                 </button>
 
-                                                {/* One tap to call. A phone number printed as TEXT on a list
-                                                    is a dead end — you cannot dial it from here. As a tel:
-                                                    link it keeps the capability and gives the line back.
+                                                {/* One tap to reach the customer — inside Neema Agent's call
+                                                    console (falls back to tel: for a number Neema can't map).
                                                     Sibling of the card button, never nested: a <button>
                                                     inside a <button> is invalid and swallows the tap. */}
                                                 {o.customer_contact && (
                                                     <a
-                                                        href={`tel:${o.customer_contact.replace(/[^+\d]/g, '')}`}
+                                                        href={neemaCallsUrl(o.customer_contact) ?? `tel:${o.customer_contact.replace(/[^+\d]/g, '')}`}
+                                                        target={neemaCallsUrl(o.customer_contact) ? '_blank' : undefined}
+                                                        rel="noopener noreferrer"
                                                         onClick={(e) => e.stopPropagation()}
                                                         aria-label={`Call ${o.customer_label ?? 'customer'} on ${o.customer_contact}`}
                                                         className="shrink-0 self-center mr-3 w-9 h-9 rounded-full bg-surface-100
