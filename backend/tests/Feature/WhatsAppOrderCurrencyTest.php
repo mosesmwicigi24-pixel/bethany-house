@@ -43,10 +43,15 @@ class WhatsAppOrderCurrencyTest extends TestCase
     {
         $user = User::factory()->create();
         $user->givePermissionTo(Permission::findOrCreate('pos.access', 'sanctum'));
+        // The till refuses a caller assigned to no outlet at all — a setup gap
+        // rather than a refusal, and the reason every one of these returned 403
+        // once this branch met main. This actor posts to the outlet it asks
+        // about, which is what an agent taking a WhatsApp order actually is.
+        $user->outlets()->sync([$this->outlet()->id]);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
-        Sanctum::actingAs($user);
+        Sanctum::actingAs($user->fresh());
 
-        return $user;
+        return $user->fresh();
     }
 
     private function editor(): User

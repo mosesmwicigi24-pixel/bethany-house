@@ -343,8 +343,17 @@ class OrderTotalsCharacterizationTest extends TestCase
         $fresh = $order->fresh();
         $this->assertSame(34.97, (float) $fresh->subtotal);
         $this->assertSame(5.60, (float) $fresh->tax_amount);
-        // 34.97 − 10 (cart discount, NOT converted) + 5.60 + 20 (shipping, NOT converted)
-        $this->assertSame(50.57, (float) $fresh->total_amount);
+        // CHANGED DELIBERATELY by #279, and this line is why the test exists.
+        //
+        // It used to pin 50.57 = 34.97 − 10 + 5.60 + 20, with the cart discount
+        // and the shipping charge left in the OLD currency while every line was
+        // converted. That is 20 US DOLLARS of shipping on an order whose goods
+        // came to $34.97, because the number was a shilling figure wearing a
+        // dollar label — the same class of bug #279 was written to kill.
+        //
+        // Both now convert with the rest of the order:
+        //   34.97 − 0.10 + 5.60 + 0.20 = 40.67
+        $this->assertSame(40.67, (float) $fresh->total_amount);
     }
 
     /** An order carrying the awkward cart, already persisted. */
