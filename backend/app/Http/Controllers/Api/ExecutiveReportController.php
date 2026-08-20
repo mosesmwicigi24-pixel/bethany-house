@@ -490,7 +490,7 @@ class ExecutiveReportController extends Controller
         ]);
 
         $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
-        $report = $engine->secondPurchase((int) ($validated['recent_days'] ?? 60));
+        $report = $engine->secondPurchase((int) ($validated['recent_days'] ?? 90));
 
         if ($this->wantsExport($request)) {
             return $this->csvResponse(
