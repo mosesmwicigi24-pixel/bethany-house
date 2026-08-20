@@ -71,14 +71,14 @@ class RepriceMislabelledOrders extends Command
                     continue;
                 }
 
-                [$correct, $quotedIn] = $found;
+                [$correct, $why] = $found;
 
                 if ($correct === null) {
                     $blocked[] = [
                         $order->order_number,
                         $item->product_name,
                         "{$currency} " . number_format((float) $item->unit_price, 2),
-                        "looks like a {$quotedIn} figure",
+                        $why,
                         CurrencyPricing::hasRate($currency) ? "no {$currency} price set" : "no {$currency} rate set",
                     ];
                     continue;
@@ -91,7 +91,7 @@ class RepriceMislabelledOrders extends Command
                     $item->product_name,
                     "{$currency} " . number_format((float) $item->unit_price, 2),
                     "→ {$currency} " . number_format($correct, 2),
-                    "was the {$quotedIn} price",
+                    $why,
                 ];
             }
 
@@ -143,11 +143,21 @@ class RepriceMislabelledOrders extends Command
     }
 
     /**
-     * Is this line billing another currency's number?
+     * Is this line demonstrably wrong? Two shapes qualify, and only two:
+     *
+     *   1. The stored figure IS a price row, just not this currency's — the
+     *      label moved without the number.
+     *   2. The line bills 0.00 for something the hub does have a price for.
+     *      Nobody sells a cassock for nothing; this is the damage an earlier
+     *      run of this command did by reading a blank 0.00 price row as real,
+     *      and it must be repairable by the same command that caused it.
+     *
+     * Anything else — a figure matching no row — is a discount or a negotiated
+     * price. A human decided it, and it is left alone.
      *
      * @return array{0: float|null, 1: string}|null  [correct price (null when the
-     *         hub cannot price it), the currency the stored figure came from];
-     *         null when the line is fine or its price is a human's decision.
+     *         hub cannot price it), why the stored figure is wrong]; null when
+     *         the line is fine or its price is a human's decision.
      */
     private function mislabelledPrice(object $item, string $currency): ?array
     {
@@ -164,7 +174,11 @@ class RepriceMislabelledOrders extends Command
             return null;   // already the hub's price for this currency
         }
 
-        // The tell: the stored figure IS a price row, just not this currency's.
+        if ($stored <= 0) {
+            // Only claimable when the hub can actually say what it should be.
+            return $priced ? [$priced['regular_price'], 'the line billed 0.00'] : null;
+        }
+
         $source = $rows->first(fn ($r) => strtoupper((string) $r->currency_code) !== $currency
             && abs(round((float) $r->regular_price, 2) - $stored) < 0.01);
 
@@ -172,7 +186,10 @@ class RepriceMislabelledOrders extends Command
             return null;   // a discount or a hand-set price — leave it to a human
         }
 
-        return [$priced['regular_price'] ?? null, strtoupper((string) $source->currency_code)];
+        return [
+            $priced['regular_price'] ?? null,
+            'was the ' . strtoupper((string) $source->currency_code) . ' price',
+        ];
     }
 
     private function report(array $rows, array $locked, array $blocked, array $flagged, bool $apply): void
