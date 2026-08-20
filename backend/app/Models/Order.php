@@ -35,6 +35,21 @@ class Order extends Model
     /** Pipeline. An unconfirmed cart — reportable, but NEVER as income. */
     public const PIPELINE_STATUSES = ['pending'];
 
+    /**
+     * The four staff queues an order can live in — HOW it becomes money.
+     * Orthogonal to source_channel (WHERE the customer came from) and to
+     * order_type (untouched legacy field the public storefront lookup returns).
+     *
+     *   till    walk-in, paid at the counter
+     *   web     self-service storefront checkout
+     *   chat    sold in a conversation (WhatsApp / Messenger / Instagram)
+     *   quoted  quotation → invoice → payable order (the sales desk)
+     */
+    public const SALES_BUCKETS = ['till', 'web', 'chat', 'quoted'];
+
+    /** Old channel names still arrive from callers; they map, never 404. */
+    public const LEGACY_CHANNEL_MAP = ['pos' => 'till', 'online' => 'web', 'whatsapp' => 'chat'];
+
     /** Neither: the order is dead and belongs in no sales figure. */
     public const DEAD_STATUSES = ['cancelled', 'voided', 'refunded'];
 
@@ -121,6 +136,8 @@ class Order extends Model
         'user_id',
         'outlet_id',
         'order_type',
+        'sales_bucket',
+        'source_channel',
         'status',
         'currency_code',
         'subtotal',
@@ -313,26 +330,42 @@ class Order extends Model
      */
     public function scopeSalesChannel($query, ?string $channel)
     {
-        if (! in_array($channel, ['pos', 'online', 'whatsapp'], true)) {
+        // Old names keep working: three list pages, the sales ledger and any
+        // bookmarked export URL predate the buckets.
+        $bucket = self::LEGACY_CHANNEL_MAP[$channel] ?? $channel;
+
+        if (! in_array($bucket, self::SALES_BUCKETS, true)) {
             return $query;
         }
 
+        // Bucket-first, with a legacy derivation for rows whose bucket is NULL
+        // (fixtures, or a writer added later that forgot — the guard test
+        // exists, but a forgotten row must degrade to the old behaviour, not
+        // vanish from every list).
         $whatsappOutletIds = \App\Models\Outlet::where('sales_channel', 'whatsapp')->pluck('id');
 
-        return match ($channel) {
-            'online'   => $query->where('order_type', 'online'),
-            'whatsapp' => $query->where(function ($q) use ($whatsappOutletIds) {
-                $q->whereIn('outlet_id', $whatsappOutletIds)
-                  ->orWhere('order_type', 'whatsapp');
+        $legacy = match ($bucket) {
+            'web'    => fn ($q) => $q->where('orders.order_type', 'online')
+                                     ->whereNull('orders.created_by'),
+            'quoted' => fn ($q) => $q->where('orders.order_type', 'online')
+                                     ->whereNotNull('orders.created_by'),
+            'chat'   => fn ($q) => $q->where(function ($qq) use ($whatsappOutletIds) {
+                $qq->whereIn('orders.outlet_id', $whatsappOutletIds)
+                   ->orWhere('orders.order_type', 'whatsapp');
             }),
             // whereNotIn alone would DROP orders with a NULL outlet_id: in SQL
             // `NULL NOT IN (1)` evaluates to NULL, not true, so every POS order
             // without an outlet silently vanished from the POS channel. The
             // null branch is explicit.
-            'pos'      => $query->where('order_type', 'pos')
-                                ->where(fn ($q) => $q->whereNull('outlet_id')
-                                                     ->orWhereNotIn('outlet_id', $whatsappOutletIds)),
+            'till'   => fn ($q) => $q->where('orders.order_type', 'pos')
+                                     ->where(fn ($qq) => $qq->whereNull('orders.outlet_id')
+                                                            ->orWhereNotIn('orders.outlet_id', $whatsappOutletIds)),
         };
+
+        return $query->where(function ($q) use ($bucket, $legacy) {
+            $q->where('orders.sales_bucket', $bucket)
+              ->orWhere(fn ($qq) => $qq->whereNull('orders.sales_bucket')->where($legacy));
+        });
     }
 
     public function scopePaid($query)

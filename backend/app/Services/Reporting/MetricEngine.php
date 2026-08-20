@@ -4155,7 +4155,7 @@ class MetricEngine
 
         // ── Per channel ──────────────────────────────────────────────────────
         $byChannel = [];
-        foreach (['pos', 'online', 'whatsapp'] as $c) {
+        foreach (\App\Models\Order::SALES_BUCKETS as $c) {
             $row = \App\Models\Order::query()
                 ->salesChannel($c)
                 ->pipeline()
@@ -4168,7 +4168,7 @@ class MetricEngine
 
             $byChannel[] = [
                 'channel' => $c,
-                'label'   => ['pos' => 'POS', 'online' => 'Online', 'whatsapp' => 'WhatsApp'][$c],
+                'label'   => ['till' => 'Till Sales', 'web' => 'Web Orders', 'chat' => 'Chat Orders', 'quoted' => 'Quoted Sales'][$c],
                 'orders'  => (int)   ($row->orders ?? 0),
                 'value'   => (float) ($row->value  ?? 0),
             ];

@@ -946,8 +946,8 @@ function SalesByOutletTable({ params }: { params: Record<string, any> }) {
 // landed in (see ReportController::salesLedger). Read "balance" as "still owed
 // on what we sold then", not "money that has not arrived yet".
 
-const CHANNEL_KEYS = ["pos", "online", "whatsapp"] as const;
-const CHANNEL_LABEL: Record<string, string> = { pos: "POS", online: "Online", whatsapp: "WhatsApp" };
+const CHANNEL_KEYS = ["till", "web", "chat", "quoted"] as const;
+const CHANNEL_LABEL: Record<string, string> = { till: "Till Sales", web: "Web Orders", chat: "Chat Orders", quoted: "Quoted Sales" };
 
 /** Balance is the number a manager is chasing, so it earns colour; zero does not. */
 function Owed({ value }: { value: number }) {

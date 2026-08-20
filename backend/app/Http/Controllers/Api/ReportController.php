@@ -394,7 +394,10 @@ class ReportController extends Controller
         [$start, $end] = $this->dateRange($request);
         $outletId  = $request->get('outlet_id');
         $currency  = strtoupper($request->get('currency_code', 'KES'));
-        $channels  = ['pos', 'online', 'whatsapp'];
+        // The four staff queues (Order::SALES_BUCKETS). 'Online' used to conflate
+        // self-service web orders with staff-converted quotations; the split
+        // restates that one channel's history — POS and WhatsApp are unchanged.
+        $channels  = ['till', 'web', 'chat', 'quoted'];
 
         // Cash per order: settled payments net of refunds. Computed once as a
         // sub-select so every aggregate below reuses it instead of re-joining.
@@ -456,7 +459,7 @@ class ReportController extends Controller
             $r = $scoped($c)->selectRaw($agg)->first();
             $byChannel[] = [
                 'channel' => $c,
-                'label'   => ['pos' => 'POS', 'online' => 'Online', 'whatsapp' => 'WhatsApp'][$c],
+                'label'   => ['till' => 'Till Sales', 'web' => 'Web Orders', 'chat' => 'Chat Orders', 'quoted' => 'Quoted Sales'][$c],
                 'orders'  => (int)   ($r->orders  ?? 0),
                 'sales'   => (float) ($r->sales   ?? 0),
                 'paid'    => (float) ($r->paid    ?? 0),
@@ -550,7 +553,7 @@ class ReportController extends Controller
             }
             $byStage[] = [
                 'channel' => $c,
-                'label'   => ['pos' => 'POS', 'online' => 'Online', 'whatsapp' => 'WhatsApp'][$c],
+                'label'   => ['till' => 'Till Sales', 'web' => 'Web Orders', 'chat' => 'Chat Orders', 'quoted' => 'Quoted Sales'][$c],
                 'stages'  => $stages,
             ];
         }

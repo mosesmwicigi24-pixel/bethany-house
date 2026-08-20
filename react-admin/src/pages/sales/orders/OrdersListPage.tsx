@@ -44,6 +44,15 @@ const CHANNEL_LABELS: Record<string, { label: string }> = {
     whatsapp: { label: "WhatsApp" },
 };
 
+/** Which app a chat sale came from — the badge on Chat Orders rows. */
+const SOURCE_BADGES: Record<string, { label: string; badge: string }> = {
+    whatsapp:  { label: "WhatsApp",  badge: "badge-success" },
+    messenger: { label: "Messenger", badge: "badge-info"    },
+    instagram: { label: "Instagram", badge: "badge-pink"    },
+    website:   { label: "Website",   badge: "badge-neutral" },
+    walk_in:   { label: "Walk-in",   badge: "badge-neutral" },
+};
+
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
     cash:          "Cash",
     mpesa:         "M-Pesa",
@@ -326,12 +335,13 @@ function FiltersBar({ filters, onChange, onClear, hideChannel }: FiltersBarProps
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-type SalesChannel = "pos" | "online" | "whatsapp";
+type SalesChannel = "till" | "web" | "chat" | "quoted";
 
 const CHANNEL_TITLES: Record<SalesChannel, { title: string; subtitle: string }> = {
-    pos:      { title: "POS Orders",      subtitle: "orders taken at the point of sale" },
-    online:   { title: "Online Orders",   subtitle: "orders placed through the storefront" },
-    whatsapp: { title: "WhatsApp Orders", subtitle: "orders taken over WhatsApp" },
+    till:   { title: "Till Sales",   subtitle: "walk-in sales paid at the counter" },
+    web:    { title: "Web Orders",   subtitle: "self-service orders from the website" },
+    chat:   { title: "Chat Orders",  subtitle: "orders sold in conversation — WhatsApp, Messenger, Instagram" },
+    quoted: { title: "Quoted Sales", subtitle: "quotation → invoice → payable order" },
 };
 
 export default function OrdersPage({ channel }: { channel?: SalesChannel } = {}) {
@@ -463,7 +473,10 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                                         // must fall through here too, not print a dangling separator.
                                         const email = order.customer_email && !order.customer_email.startsWith('noemail+') ? order.customer_email : null;
                                         const contact = email || order.customer_phone || null;
-                                        const channelLabel = CHANNEL_LABELS[order.order_type]?.label ?? order.order_type;
+                                        const src = order.source_channel ? SOURCE_BADGES[order.source_channel] : null;
+                                        const channelLabel = channel === "chat" && src
+                                            ? src.label
+                                            : CHANNEL_LABELS[order.order_type]?.label ?? order.order_type;
                                         const paymentLabel = PAYMENT_METHOD_LABELS[order.payment_method] ?? order.payment_method;
                                         // Contact if we have one, otherwise the payment method — never an empty tail.
                                         const detail = contact || paymentLabel || null;
@@ -579,7 +592,14 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                                                     ? <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round"><path d="M13.5 21v-7.5a.75.75 0 01.75-.75h3a.75.75 0 01.75.75V21m-4.5 0H2.36m11.14 0H18m0 0h3.64m-1.39 0V9.349m-16.5 11.65V9.35m0 0a3.001 3.001 0 003.75-.615A2.993 2.993 0 009.75 9.75c.896 0 1.7-.393 2.25-1.016a2.993 2.993 0 002.25 1.016c.896 0 1.7-.393 2.25-1.016a3.001 3.001 0 003.75.614m-16.5 0a3.004 3.004 0 01-.621-4.72L4.318 3.44A1.5 1.5 0 015.378 3h13.243a1.5 1.5 0 011.06.44l1.19 2.189a3 3 0 01-.621 4.72m-13.5 8.65h3.75a.75.75 0 00.75-.75V13.5a.75.75 0 00-.75-.75H6.75a.75.75 0 00-.75.75v3.75c0 .415.336.75.75.75z"/></svg>
                                                     : <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
                                                 }
-                                                {CHANNEL_LABELS[order.order_type]?.label ?? order.order_type}
+                                                {channel === "chat" && order.source_channel && SOURCE_BADGES[order.source_channel]
+                                                    ? SOURCE_BADGES[order.source_channel].label
+                                                    : CHANNEL_LABELS[order.order_type]?.label ?? order.order_type}
+                                                {channel === "quoted" && order.quotation_number && (
+                                                    <span className="block text-2xs text-surface-400 font-mono">
+                                                        {order.quotation_number}
+                                                    </span>
+                                                )}
                                             </span>
                                         </td>
                                         <td><StatusBadge status={order.status} /></td>

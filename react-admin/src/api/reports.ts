@@ -542,7 +542,7 @@ export interface LedgerFigures {
 export interface LedgerBucket {
     period: string;
     total: LedgerFigures;
-    by_channel: Record<"pos" | "online" | "whatsapp", LedgerFigures>;
+    by_channel: Record<"till" | "web" | "chat" | "quoted", LedgerFigures>;
 }
 // ── Second-purchase engine ────────────────────────────────────────────────────
 
@@ -615,7 +615,7 @@ export interface OrderPipelineReport {
         currency: string;
     };
     aging: { key: "fresh" | "recent" | "stale" | "dormant"; label: string; orders: number; value: number }[];
-    by_channel: { channel: "pos" | "online" | "whatsapp"; label: string; orders: number; value: number }[];
+    by_channel: { channel: "till" | "web" | "chat" | "quoted"; label: string; orders: number; value: number }[];
     orders: PipelineOrder[];
 }
 
@@ -625,17 +625,17 @@ export type OrderStage = "confirmed" | "processed" | "completed";
 
 export interface SalesLedger {
     period: { start: string; end: string; currency: string };
-    channels: (LedgerFigures & { channel: "pos" | "online" | "whatsapp"; label: string })[];
+    channels: (LedgerFigures & { channel: "till" | "web" | "chat" | "quoted"; label: string })[];
     /** Per-channel split across the three stages. Stages sum to the channel total. */
     by_stage: {
-        channel: "pos" | "online" | "whatsapp";
+        channel: "till" | "web" | "chat" | "quoted";
         label: string;
         stages: Record<OrderStage, LedgerFigures>;
     }[];
     /** Unconfirmed carts. Reportable, never income. */
     pipeline: {
         total: { orders: number; sales: number };
-        by_channel: Record<"pos" | "online" | "whatsapp", { orders: number; sales: number }>;
+        by_channel: Record<"till" | "web" | "chat" | "quoted", { orders: number; sales: number }>;
     };
     /** recognised + pipeline = gross. Bridges this report to older printouts. */
     reconciliation: {

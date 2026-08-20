@@ -90,17 +90,17 @@ class SalesLedgerTest extends TestCase
 
         // The WhatsApp-outlet order belongs to WhatsApp, not POS — that is the
         // rule the three Sales pages use, and the report must agree.
-        $this->assertSame(2, $byChannel['pos']['orders']);
-        $this->assertEqualsWithDelta(1500.0, (float) $byChannel['pos']['sales'], 0.01);
-        $this->assertEqualsWithDelta(1200.0, (float) $byChannel['pos']['paid'], 0.01);
-        $this->assertEqualsWithDelta(300.0, (float) $byChannel['pos']['balance'], 0.01);
+        $this->assertSame(2, $byChannel['till']['orders']);
+        $this->assertEqualsWithDelta(1500.0, (float) $byChannel['till']['sales'], 0.01);
+        $this->assertEqualsWithDelta(1200.0, (float) $byChannel['till']['paid'], 0.01);
+        $this->assertEqualsWithDelta(300.0, (float) $byChannel['till']['balance'], 0.01);
 
-        $this->assertSame(1, $byChannel['online']['orders']);
-        $this->assertEqualsWithDelta(800.0, (float) $byChannel['online']['balance'], 0.01);
+        $this->assertSame(1, $byChannel['web']['orders']);
+        $this->assertEqualsWithDelta(800.0, (float) $byChannel['web']['balance'], 0.01);
 
-        $this->assertSame(2, $byChannel['whatsapp']['orders']);
-        $this->assertEqualsWithDelta(1000.0, (float) $byChannel['whatsapp']['sales'], 0.01);
-        $this->assertEqualsWithDelta(500.0, (float) $byChannel['whatsapp']['paid'], 0.01);
+        $this->assertSame(2, $byChannel['chat']['orders']);
+        $this->assertEqualsWithDelta(1000.0, (float) $byChannel['chat']['sales'], 0.01);
+        $this->assertEqualsWithDelta(500.0, (float) $byChannel['chat']['paid'], 0.01);
     }
 
     public function test_sales_equals_paid_plus_balance_on_every_row(): void
@@ -139,7 +139,7 @@ class SalesLedgerTest extends TestCase
         $o = $this->order('pos', 1000, 1000);
         Payment::where('order_id', $o->id)->update(['refund_amount' => 400]);
 
-        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'pos');
+        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'till');
 
         $this->assertEqualsWithDelta(600.0, (float) $pos['paid'], 0.01);     // 1000 taken, 400 given back
         $this->assertEqualsWithDelta(400.0, (float) $pos['balance'], 0.01);
@@ -153,7 +153,7 @@ class SalesLedgerTest extends TestCase
 
         foreach (['weekly', 'monthly'] as $grain) {
             foreach ($this->ledger()[$grain] as $row) {
-                $this->assertSame(['pos', 'online', 'whatsapp'],
+                $this->assertSame(['till', 'web', 'chat', 'quoted'],
                     array_keys($row['by_channel']), "{$grain} row is missing a channel");
             }
         }
@@ -165,7 +165,7 @@ class SalesLedgerTest extends TestCase
         $this->order('pos', 1000, 0)->update(['status' => 'cancelled']);
         $this->order('pos', 250, 250);
 
-        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'pos');
+        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'till');
 
         $this->assertSame(1, $pos['orders']);
         $this->assertEqualsWithDelta(250.0, (float) $pos['sales'], 0.01);
@@ -183,7 +183,7 @@ class SalesLedgerTest extends TestCase
             'approval_status'   => 'pending',
         ]);
 
-        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'pos');
+        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'till');
 
         $this->assertEqualsWithDelta(0.0,    (float) $pos['paid'], 0.01);
         $this->assertEqualsWithDelta(1000.0, (float) $pos['balance'], 0.01);
@@ -198,7 +198,7 @@ class SalesLedgerTest extends TestCase
             'approval_status'   => 'approved',
         ]);
 
-        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'pos');
+        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'till');
 
         $this->assertEqualsWithDelta(1000.0, (float) $pos['paid'], 0.01);
         $this->assertEqualsWithDelta(0.0,    (float) $pos['balance'], 0.01);
