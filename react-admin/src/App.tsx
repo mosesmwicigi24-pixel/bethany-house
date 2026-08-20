@@ -475,7 +475,7 @@ export default function App() {
                             element={
                                 <ProtectedRoute permission="orders.view">
                                 <Suspense fallback={<PageLoader />}>
-                                    <OrdersPage channel="pos" />
+                                    <OrdersPage channel="till" />
                                 </Suspense>
                                 </ProtectedRoute>
                             }
@@ -485,7 +485,17 @@ export default function App() {
                             element={
                                 <ProtectedRoute permission="orders.view">
                                 <Suspense fallback={<PageLoader />}>
-                                    <OrdersPage channel="online" />
+                                    <OrdersPage channel="web" />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/sales/quoted-orders"
+                            element={
+                                <ProtectedRoute permission="orders.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <OrdersPage channel="quoted" />
                                 </Suspense>
                                 </ProtectedRoute>
                             }
@@ -495,7 +505,7 @@ export default function App() {
                             element={
                                 <ProtectedRoute permission="orders.view">
                                 <Suspense fallback={<PageLoader />}>
-                                    <OrdersPage channel="whatsapp" />
+                                    <OrdersPage channel="chat" />
                                 </Suspense>
                                 </ProtectedRoute>
                             }

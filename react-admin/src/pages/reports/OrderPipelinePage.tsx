@@ -47,9 +47,9 @@ function bucketOf(days: number): keyof typeof AGE_TONE {
 }
 
 const CHANNEL_LABEL: Record<string, string> = {
-    whatsapp: "WhatsApp",
-    online:   "Online",
-    pos:      "POS",
+    // Buckets (current payloads) and the legacy names (cached ones).
+    till: "Till Sales", web: "Web Orders", chat: "Chat Orders", quoted: "Quoted Sales",
+    whatsapp: "WhatsApp", online: "Online", pos: "POS",
 };
 
 export default function OrderPipelinePage() {

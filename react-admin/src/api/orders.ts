@@ -99,6 +99,12 @@ export interface Order {
     id: number;
     order_number: string;
     order_type: OrderChannel;
+    /** Staff queue: till | web | chat | quoted. Null on rows older than the buckets. */
+    sales_bucket?: "till" | "web" | "chat" | "quoted" | null;
+    /** Where the customer came from (whatsapp/messenger/instagram/website/walk_in). */
+    source_channel?: string | null;
+    /** Set when this order was born from a quotation. */
+    quotation_number?: string | null;
     channel?: OrderChannel;
     /** The INVOICE document this order bills, if it came from a quotation. */
     invoice_document?: { id: number; number: string; documentable_id: number } | null;

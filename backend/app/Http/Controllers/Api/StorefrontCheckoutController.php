@@ -272,6 +272,8 @@ class StorefrontCheckoutController extends Controller
                 'client_request_id'        => $validated['client_request_id'] ?? null,
                 'user_id'                  => null,
                 'order_type'               => 'online',
+                'sales_bucket'             => 'web',
+                'source_channel'           => 'website',
                 'status'                   => 'pending',
                 'currency_code'            => $currency,
                 'customer_country_code'    => $countryCode,

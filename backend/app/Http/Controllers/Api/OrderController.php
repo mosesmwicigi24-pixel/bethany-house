@@ -77,7 +77,13 @@ class OrderController extends Controller
 
     public function index(Request $request)
     {
-        $query = Order::with(['user', 'items', 'outlet', 'creator:id,first_name,last_name']);
+        $query = Order::with(['user', 'items', 'outlet', 'creator:id,first_name,last_name'])
+            // The Quoted Sales page shows which quotation an order was born
+            // from; one scalar sub-select beats N lookups from the client.
+            ->select('orders.*')
+            ->addSelect(['quotation_number' => \App\Models\Quotation::select('quote_number')
+                ->whereColumn('converted_order_id', 'orders.id')
+                ->limit(1)]);
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
@@ -544,6 +550,12 @@ class OrderController extends Controller
                 'order_number'             => $orderNumber,
                 'user_id'                  => $user->id,
                 'order_type'               => 'online',
+                // Staff raised this from the admin — it is sales-desk work
+                // (usually a quotation conversion), never a self-service web
+                // order. Historically these wore 'online' and sat on the
+                // Online Orders screen "Served by" someone, which is the
+                // conflation the buckets exist to end.
+                'sales_bucket'             => 'quoted',
                 'status'                   => 'pending',
                 'payment_status'           => 'pending',
                 'currency_code'            => $currency,

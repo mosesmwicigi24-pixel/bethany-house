@@ -252,6 +252,8 @@ class NewSale extends Component
             $order = Order::create([
                 'order_number'       => 'POS-' . date('Ymd') . '-' . str_pad(Order::whereDate('created_at', today())->count() + 1, 4, '0', STR_PAD_LEFT),
                 'order_type'         => 'pos',
+                'sales_bucket'       => 'till',
+                'source_channel'     => 'walk_in',
                 'status'             => 'completed',
                 'currency_code'      => $this->currency,
                 'outlet_id'          => $this->register?->outlet_id,
