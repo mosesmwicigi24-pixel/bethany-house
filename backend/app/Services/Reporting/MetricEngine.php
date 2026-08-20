@@ -3707,34 +3707,19 @@ class MetricEngine
               {$outletSql}
         ", [$since]);
 
-        // ── KES equivalence, only where a real configured rate exists. ───────
-        // currencies.exchange_rate is base-relative (Currency::convert: base
-        // amount = amount / rate; KES is the base at 1.0). The schema DEFAULTs
-        // exchange_rate to 1.0, so a NON-base currency sitting at exactly 1.0
-        // is an unconfigured row, not a peg — parity with KES is not a rate
-        // anyone set on purpose, and inventing 1:1 USD→KES would be worse
-        // than reporting native totals only.
-        $rateRows = DB::table('currencies')->get(['code', 'exchange_rate', 'is_base']);
-        $rates    = [];
-        foreach ($rateRows as $r) {
-            $code = strtoupper($r->code);
-            $rate = (float) $r->exchange_rate;
-            if ($rate <= 0) {
-                continue;
-            }
-            if ($code === 'KES' || $r->is_base) {
-                $rates[$code] = $rate; // base row (1.0 by convention)
-            } elseif (abs($rate - 1.0) > 1e-9) {
-                $rates[$code] = $rate;
-            }
-        }
-        $rates['KES'] = $rates['KES'] ?? 1.0;
-
-        $toKes = function (string $currency, float $amount) use ($rates): ?float {
-            $rate = $rates[strtoupper($currency)] ?? null;
-
-            return $rate !== null ? round($amount / $rate, 2) : null;
-        };
+        // ── KES equivalence, only where a real reporting rate exists. ───────
+        // A currency with no reporting rate is reported natively and left out
+        // of the KES total — inventing a rate would be worse than saying so.
+        //
+        // This block used to read currencies.exchange_rate — the PRICING rate.
+        // At 100 KES/USD it understated every dollar of foreign revenue by 22%
+        // against the 128 the business actually reports at. It was not a
+        // careless choice: the pricing rate was the only rate that existed.
+        // Now there is a reporting one, and this is what it is for.
+        $toKes = fn (string $currency, float $amount): ?float
+            => ($v = \App\Support\ReportingCurrency::toKes($amount, $currency)) === null
+                ? null
+                : round($v, 2);
 
         $currencyOut = collect($currencies)->map(fn ($c) => [
             'currency'         => $c->currency,
@@ -3829,7 +3814,12 @@ class MetricEngine
             ->whereNotIn('payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES)
             ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds));
 
-        $kes = fn () => $base()->whereRaw("UPPER(currency_code) = 'KES'");
+        // Foreign carts are translated at the REPORTING rate (128 KES/USD),
+        // not the pricing rate (100) a customer is quoted at. A currency with
+        // no reporting rate is still listed as work but stays out of the
+        // totals — see ReportingCurrency.
+        $kesAmount = \App\Support\ReportingCurrency::kes('total_amount', 'currency_code');
+        $kes = fn () => $base()->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('currency_code'));
 
         // ── Aging. Boundaries are inclusive-left, so every order lands in
         //    exactly one bucket and the bucket counts sum to the total.
@@ -3851,7 +3841,7 @@ class MetricEngine
             if ($b['max'] !== null) {
                 $q->whereRaw('(CURRENT_DATE - orders.created_at::date) <= ?', [$b['max']]);
             }
-            $row = $q->selectRaw('COUNT(*) AS orders, COALESCE(SUM(total_amount), 0) AS value')->first();
+            $row = $q->selectRaw("COUNT(*) AS orders, COALESCE(SUM({$kesAmount}), 0) AS value")->first();
             $aging[] = [
                 'key'    => $b['key'],
                 'label'  => $b['label'],
@@ -3866,9 +3856,11 @@ class MetricEngine
             $row = \App\Models\Order::query()
                 ->salesChannel($c)
                 ->pipeline()
-                ->whereRaw("UPPER(orders.currency_code) = 'KES'")
+                ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code'))
                 ->when($this->outletIds, fn ($q) => $q->whereIn('orders.outlet_id', $this->outletIds))
-                ->selectRaw('COUNT(*) AS orders, COALESCE(SUM(orders.total_amount), 0) AS value')
+                ->selectRaw('COUNT(*) AS orders, COALESCE(SUM('
+                    . \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code')
+                    . '), 0) AS value')
                 ->first();
 
             $byChannel[] = [
@@ -3903,7 +3895,8 @@ class MetricEngine
                 orders.customer_phone,
                 orders.customer_email,
                 COUNT(oi.id) AS item_count,
-                (CURRENT_DATE - orders.created_at::date)::int AS age_days
+                (CURRENT_DATE - orders.created_at::date)::int AS age_days,
+                " . \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code') . " AS total_kes
             ")
             ->get()
             ->map(function ($r) {
@@ -3915,6 +3908,11 @@ class MetricEngine
                     'channel'        => $r->order_type,
                     'currency_code'  => strtoupper((string) $r->currency_code),
                     'total_amount'   => (float) $r->total_amount,
+                    // The same money stated in KES, so a USD row can be read
+                    // against a KES one. Null when the currency has no
+                    // reporting rate — the row is still work, it just cannot
+                    // honestly be added to a shilling total.
+                    'total_kes'      => $r->total_kes === null ? null : (float) $r->total_kes,
                     'item_count'     => (int) $r->item_count,
                     'age_days'       => (int) $r->age_days,
                     'created_at'     => $r->created_at,
@@ -3926,8 +3924,12 @@ class MetricEngine
             ->values()
             ->all();
 
-        $totals   = $kes()->selectRaw('COUNT(*) AS orders, COALESCE(SUM(total_amount), 0) AS value')->first();
-        $nonKes   = (int) $base()->whereRaw("UPPER(currency_code) <> 'KES'")->count();
+        $totals   = $kes()->selectRaw("COUNT(*) AS orders, COALESCE(SUM({$kesAmount}), 0) AS value")->first();
+        // What remains outside the totals is now only what has NO reporting
+        // rate — not everything that merely isn't KES.
+        $nonKes   = (int) $base()
+            ->whereRaw('NOT ' . \App\Support\ReportingCurrency::convertibleFilter('currency_code'))
+            ->count();
 
         return [
             'summary' => [

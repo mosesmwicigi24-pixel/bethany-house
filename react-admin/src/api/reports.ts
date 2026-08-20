@@ -547,6 +547,9 @@ export interface PipelineOrder {
     channel: string;
     currency_code: string;
     total_amount: number;
+    /** The same money stated in KES at the reporting rate (128/USD).
+        Null when the currency has no reporting rate — listed, not counted. */
+    total_kes: number | null;
     item_count: number;
     age_days: number;
     created_at: string;
