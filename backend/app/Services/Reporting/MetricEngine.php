@@ -3930,7 +3930,12 @@ class MetricEngine
      * rate. A currency with no reporting rate stays in the counts — a customer
      * is a customer — but out of every money figure.
      */
-    public function secondPurchase(int $recentDays = 60, int $worklistLimit = 100): array
+    // The worklist window is 28 days because the data said so: the median gap
+    // between first and second purchase is SIX days. A returner returns almost
+    // immediately, so a one-time buyer from two months ago has mostly already
+    // decided — calling them is win-back work, not second-purchase work. Four
+    // weeks keeps the list warm without letting it silt up.
+    public function secondPurchase(int $recentDays = 28, int $worklistLimit = 100): array
     {
         $key = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
         $rate = "(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))";

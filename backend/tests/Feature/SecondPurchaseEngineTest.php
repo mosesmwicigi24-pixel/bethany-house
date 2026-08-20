@@ -165,6 +165,26 @@ class SecondPurchaseEngineTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_the_default_worklist_window_is_28_days(): void
+    {
+        // The median gap between first and second purchase is six days, so a
+        // one-time buyer older than four weeks is no longer warm. Inside the
+        // window they are on the list; outside it they still count in the
+        // summary — the customer exists, they are just not this week's call.
+        $this->order('0722000071', 1000, 25);   // inside
+        $this->order('0722000072', 9000, 40);   // outside
+
+        $r = MetricEngine::for(User::factory()->create())->secondPurchase();
+        $phones = collect($r['worklist'])->pluck('phone')->all();
+
+        $this->assertSame(28, $r['recent_days']);
+        $this->assertContains('0722000071', $phones);
+        $this->assertNotContains('0722000072', $phones,
+            'a 40-day-old one-time buyer is outside the default window');
+        $this->assertSame(2, $r['summary']['one_time_buyers'],
+            'the summary still counts both — the window shapes the list, not the truth');
+    }
+
     public function test_an_empty_database_answers_with_zeros_not_errors(): void
     {
         $r = MetricEngine::for(User::factory()->create())->secondPurchase();
