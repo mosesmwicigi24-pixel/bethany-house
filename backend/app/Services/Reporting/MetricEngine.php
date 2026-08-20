@@ -1232,9 +1232,23 @@ class MetricEngine
             ), scored AS (
                 -- R is scored on ABSOLUTE days-quiet thresholds (stable and
                 -- explainable; matches the shop's existing 60-day convention).
-                -- F and M are scored relative to the cohort via CUME_DIST so
-                -- the best customer always scores 5 — NTILE(5) over a small
-                -- cohort caps at score=N and makes top segments unreachable.
+                --
+                -- F and M are scored relative to the cohort. This has now been
+                -- wrong in both directions, so the reasoning is worth keeping:
+                --
+                --   NTILE(5)   caps at score=N on a small cohort, so the top
+                --              segments became unreachable.
+                --   CUME_DIST  counts rows <= the current value, which hands a
+                --              TIE the upper bound of its group. With 260 of
+                --              290 customers tied at one order, that bottom
+                --              group scored 260/290 = 0.897 -> f_score 5. The
+                --              least frequent buyers scored highest, and all
+                --              290 customers landed in 'champions'.
+                --
+                -- PERCENT_RANK is (rank - 1) / (rows - 1), which hands a tie the
+                -- LOWER bound: the modal bottom group scores 0 -> 1, and the
+                -- best customer still reaches 1.0 -> 5. LEAST caps the top,
+                -- because FLOOR(1.0 * 5) + 1 = 6.
                 SELECT *,
                        CASE
                            WHEN last_order_at >= NOW() - INTERVAL '30 days'  THEN 5
@@ -1243,8 +1257,8 @@ class MetricEngine
                            WHEN last_order_at >= NOW() - INTERVAL '180 days' THEN 2
                            ELSE 1
                        END AS r_score,
-                       CEIL(CUME_DIST() OVER (ORDER BY frequency ASC) * 5)::int AS f_score,
-                       CEIL(CUME_DIST() OVER (ORDER BY monetary  ASC) * 5)::int AS m_score
+                       LEAST(FLOOR(PERCENT_RANK() OVER (ORDER BY frequency ASC) * 5)::int + 1, 5) AS f_score,
+                       LEAST(FLOOR(PERCENT_RANK() OVER (ORDER BY monetary  ASC) * 5)::int + 1, 5) AS m_score
                 FROM per_customer
             )
             SELECT *,
@@ -1281,6 +1295,39 @@ class MetricEngine
             ];
         })->values();
 
+        // ── Can this cohort be segmented at all? ────────────────────────────
+        $spread = DB::selectOne("
+            SELECT COUNT(*)                              AS customers,
+                   COUNT(DISTINCT frequency)             AS distinct_frequency,
+                   COUNT(DISTINCT r_score)               AS distinct_recency,
+                   MAX(EXTRACT(EPOCH FROM (NOW() - last_order_at)) / 86400)::int AS max_days_quiet
+            FROM ({$scored}) s
+        ", [$since]);
+
+        $customers  = (int) ($spread->customers ?? 0);
+        $noFSpread  = (int) ($spread->distinct_frequency ?? 0) <= 1;
+        $noRSpread  = (int) ($spread->distinct_recency ?? 0) <= 1;
+        $degenerate = $customers > 0 && ($noFSpread || $noRSpread);
+
+        $notes = [];
+        if ($noFSpread) {
+            $notes[] = 'Every customer has the same order count, so frequency cannot rank anyone.';
+        }
+        if ($noRSpread) {
+            $notes[] = 'Every customer last ordered within the same recency band, so no one reads as lapsed.';
+        }
+
+        $diagnostics = [
+            'customers'          => $customers,
+            'distinct_frequency' => (int) ($spread->distinct_frequency ?? 0),
+            'distinct_recency'   => (int) ($spread->distinct_recency ?? 0),
+            'max_days_quiet'     => (int) ($spread->max_days_quiet ?? 0),
+            'degenerate'         => $degenerate,
+            'note'               => $degenerate
+                ? implode(' ', $notes) . ' Treat these segments as indicative only.'
+                : null,
+        ];
+
         // The call list: money walking out of the door, biggest first.
         $actionList = collect(DB::select("
             SELECT name, phone, segment, frequency, monetary, last_order_at
@@ -1310,6 +1357,15 @@ class MetricEngine
 
         return [
             'window_days' => 365,
+            // Whether this cohort can support segmentation at all.
+            //
+            // RFM is percentile scoring, and percentiles need spread. A base of
+            // one-time buyers who all shopped recently has none: every customer
+            // is genuinely alike on R and F, and any split of them is an
+            // artefact of the scoring rather than a fact about the customers.
+            // Saying so is more useful than printing seven buckets, six of them
+            // empty, and letting a reader conclude the report is broken.
+            'diagnostics' => $diagnostics,
             'segments'    => $segmentRows,
             'action_list' => $actionList,
             'anonymous'   => [
