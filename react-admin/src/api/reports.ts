@@ -580,6 +580,8 @@ export interface SecondPurchaseReport {
     };
     cohorts: SecondPurchaseCohort[];
     worklist: SecondPurchaseWorklistRow[];
+    /** One-time buyers in the window, whether or not they fit the row cap. */
+    worklist_total: number;
     recent_days: number;
 }
 

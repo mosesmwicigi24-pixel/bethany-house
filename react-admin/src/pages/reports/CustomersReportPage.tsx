@@ -1096,6 +1096,12 @@ function SecondPurchaseTab() {
                     <p className="font-semibold text-surface-900">
                         One-time buyers to call — last {data.recent_days} days, biggest first
                     </p>
+                    {worklist.length < data.worklist_total && (
+                        <p className="text-xs text-amber-700 mt-0.5">
+                            Showing the top {worklist.length} of {data.worklist_total} — export the
+                            CSV or narrow the window to reach the rest.
+                        </p>
+                    )}
                     <p className="text-xs text-surface-500 mt-0.5">
                         They chose the shop once, recently. A thank-you and a question is usually
                         all the second sale needs.
