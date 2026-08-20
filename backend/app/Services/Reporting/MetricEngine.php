@@ -3944,7 +3944,7 @@ class MetricEngine
     // Replenishment Radar needs >= 2 purchases to detect a rhythm, so a
     // one-time buyer running out of stock is invisible to it. Until their
     // second purchase exists, THIS list is the only place they appear.
-    public function secondPurchase(int $recentDays = 90, int $worklistLimit = 100): array
+    public function secondPurchase(int $recentDays = 90, int $worklistLimit = 250): array
     {
         $key = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
         $rate = "(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))";
@@ -4066,6 +4066,13 @@ class MetricEngine
         ];
 
         // ── The worklist: recent one-time buyers, biggest money first ───────
+        $workTotal = (int) (DB::selectOne("{$cte}
+            SELECT COUNT(*) AS n
+            FROM journeys j
+            WHERE j.orders = 1
+              AND j.first_at >= NOW() - make_interval(days => ?)
+        ", [$recentDays])->n ?? 0);
+
         $work = DB::select("{$cte}
             SELECT j.ckey, j.name, j.phone, j.email,
                    k.id AS order_id, k.order_number,
@@ -4092,10 +4099,14 @@ class MetricEngine
         ])->values()->all();
 
         return [
-            'summary'     => $summary,
-            'cohorts'     => $cohorts,
-            'worklist'    => $worklist,
-            'recent_days' => $recentDays,
+            'summary'        => $summary,
+            'cohorts'        => $cohorts,
+            'worklist'       => $worklist,
+            // Total one-time buyers in the window, whether or not they fit the
+            // row cap. A silent cap reads as "that's everyone" when it isn't;
+            // the UI compares this to the rows returned and says so.
+            'worklist_total' => $workTotal,
+            'recent_days'    => $recentDays,
         ];
     }
 

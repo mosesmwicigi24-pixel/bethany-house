@@ -188,6 +188,23 @@ class SecondPurchaseEngineTest extends TestCase
             'the summary still counts both — the window shapes the list, not the truth');
     }
 
+    public function test_a_row_cap_is_never_silent(): void
+    {
+        // Three one-time buyers, a cap of two: the list truncates but the
+        // response SAYS the window holds three — a cap that hides rows without
+        // saying so reads as "that's everyone", which is how the 60-90 day
+        // replenishment band vanished from a 100-row list of ~250 buyers.
+        $this->order('0722000081', 3000, 5);
+        $this->order('0722000082', 2000, 5);
+        $this->order('0722000083', 1000, 5);
+
+        $r = MetricEngine::for(User::factory()->create())->secondPurchase(90, 2);
+
+        $this->assertCount(2, $r['worklist']);
+        $this->assertSame(3, $r['worklist_total']);
+        $this->assertSame('0722000081', $r['worklist'][0]['phone'], 'the cap keeps the biggest');
+    }
+
     public function test_an_empty_database_answers_with_zeros_not_errors(): void
     {
         $r = MetricEngine::for(User::factory()->create())->secondPurchase();
