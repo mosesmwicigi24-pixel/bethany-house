@@ -466,6 +466,51 @@ class ExecutiveReportController extends Controller
      * anything against today). reports.view via the route group; outlet
      * scoping via MetricEngine::for.
      */
+    /**
+     * The unconfirmed order queue — GET /reports/order-pipeline
+     *
+     * Revenue is recognised on confirmation, so an unconfirmed cart is not
+     * income. That is the correct accounting answer and a useless operational
+     * one: 98 carts worth KES 1.1m do not stop existing because a report stops
+     * counting them. This is the list a human works through, aged so the
+     * triage order is obvious, and exportable so it can be worked offline.
+     */
+    public function orderPipeline(Request $request)
+    {
+        $validated = $request->validate([
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+            'sort'      => 'nullable|in:value,age',
+            'limit'     => 'nullable|integer|min:1|max:500',
+        ]);
+
+        $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+        $report = $engine->orderPipeline(
+            $validated['sort']  ?? 'value',
+            (int) ($validated['limit'] ?? 200),
+        );
+
+        if ($this->wantsExport($request)) {
+            return $this->csvResponse(
+                ['Order', 'Channel', 'Customer', 'Phone', 'Email', 'Items', 'Currency', 'Value', 'Age (days)', 'Created'],
+                collect($report['orders'])->map(fn ($o) => [
+                    $o['order_number'],
+                    $o['channel'],
+                    $o['customer_name'] ?? '',
+                    $o['customer_phone'] ?? '',
+                    $o['customer_email'] ?? '',
+                    $o['item_count'],
+                    $o['currency_code'],
+                    $o['total_amount'],
+                    $o['age_days'],
+                    $o['created_at'],
+                ])->all(),
+                'order-pipeline',
+            );
+        }
+
+        return response()->json($report);
+    }
+
     public function winBack(Request $request)
     {
         $validated = $request->validate([

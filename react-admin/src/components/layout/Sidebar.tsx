@@ -406,6 +406,12 @@ const NAV: NavGroup[] = [
                 permission: "reports.view",
             },
             {
+                label: "Unconfirmed Orders",
+                href: "/reports/order-pipeline",
+                icon: "orders",
+                permission: "reports.view",
+            },
+            {
                 label: "Customers",
                 href: "/reports/customers",
                 icon: "customers",
