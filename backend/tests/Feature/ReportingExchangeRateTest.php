@@ -143,6 +143,45 @@ class ReportingExchangeRateTest extends TestCase
             'the native amount is still shown — staff talk to the customer in dollars');
     }
 
+    public function test_a_compound_expression_converts_as_a_whole(): void
+    {
+        // The Collected-tile bug, pinned at its root. `a - b` must become
+        // ((a - b) * rate); precedence turning it into a - (b * rate) added
+        // USD to KES at face value whenever the refund term was zero.
+        $sql = ReportingCurrency::kes('p.amount - COALESCE(p.refund_amount,0)', 'p.currency_code');
+
+        $this->assertStringStartsWith('((p.amount - COALESCE(p.refund_amount,0)) *', $sql,
+            'the amount expression must be parenthesised before the rate touches it');
+    }
+
+    public function test_collected_money_converts_not_concatenates(): void
+    {
+        // One KES payment and one USD payment. Collected must be
+        // 1,000 + (10 x 128) = 2,280 — never 1,010 (face value) and never
+        // 1,000 (silent exclusion).
+        foreach ([['KES', 1000], ['USD', 10]] as [$ccy, $amount]) {
+            $order = Order::factory()->create([
+                'status' => 'completed', 'payment_status' => 'paid',
+                'currency_code' => $ccy, 'total_amount' => $amount,
+            ]);
+            DB::table('payments')->insert([
+                'order_id' => $order->id,
+                'payment_number' => 'PAY-' . strtoupper($ccy) . '-1',
+                'amount' => $amount, 'currency_code' => $ccy,
+                'payment_method' => 'cash', 'status' => 'paid',
+                'paid_at' => now(), 'created_at' => now(), 'updated_at' => now(),
+            ]);
+        }
+
+        $res = $this->actingAs($this->viewer(), 'sanctum')
+            ->getJson('/api/v1/admin/reports/sales/summary?start='
+                . now()->subDay()->toDateString() . '&end=' . now()->addDay()->toDateString());
+
+        $res->assertOk();
+        $this->assertSame(2280.0, (float) $res->json('summary.total_collected'),
+            'face value would read 1,010; exclusion would read 1,000');
+    }
+
     public function test_reporting_code_never_reads_the_pricing_column(): void
     {
         // The guard that outlives this test file: if someone reaches for

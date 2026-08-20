@@ -364,14 +364,21 @@ class SalesLedgerTest extends TestCase
             'status' => 'confirmed', 'created_at' => now(),
         ]);
 
-        $excluded = $this->getJson('/api/v1/admin/reports/sales/summary'
+        // USD has a reporting rate now, so its trace moved: it is CONVERTED
+        // into the totals (and says so), no longer excluded. The invariant
+        // this test protects — no foreign order vanishes without a trace —
+        // still holds, one list over.
+        $body = $this->getJson('/api/v1/admin/reports/sales/summary'
             .'?start_date='.now()->subDays(7)->format('Y-m-d')
             .'&end_date='.now()->format('Y-m-d'))
-            ->assertOk()->json('excluded_currencies');
+            ->assertOk()->json();
 
-        $usd = collect($excluded)->firstWhere('currency_code', 'USD');
-        $this->assertNotNull($usd, 'a non-reporting-currency order vanished with no trace');
+        $usd = collect($body['converted_currencies'])->firstWhere('currency_code', 'USD');
+        $this->assertNotNull($usd, 'a foreign order vanished with no trace');
         $this->assertSame(1, (int) $usd['orders']);
+        $this->assertSame(128.0, (float) $usd['rate']);
+        $this->assertSame([], $body['excluded_currencies'],
+            'a convertible currency must not be called excluded');
     }
 
     public function test_unique_customers_counts_walk_ins_not_only_registered_users(): void

@@ -174,6 +174,19 @@ class ReportController extends Controller
             ? \App\Support\ReportingCurrency::kes($col, 'orders.currency_code')
             : $col;
 
+        // Same bucket-or-derive rule as Order::scopeSalesChannel, as SQL — a
+        // NULL bucket (fixtures, a forgetful future writer) degrades to the
+        // legacy derivation instead of falling out of every tile.
+        $bucketExpr = "COALESCE(orders.sales_bucket, CASE
+            WHEN orders.order_type = 'whatsapp' THEN 'chat'
+            WHEN orders.order_type = 'online' AND orders.created_by IS NULL THEN 'web'
+            WHEN orders.order_type = 'online' THEN 'quoted'
+            ELSE 'till' END)";
+
+        $payKes = $reportInKes
+            ? \App\Support\ReportingCurrency::kes('p.amount - COALESCE(p.refund_amount, 0)', 'p.currency_code')
+            : 'p.amount - COALESCE(p.refund_amount, 0)';
+
         $base = fn () => Order::whereBetween('orders.created_at', [$start, $end])
             ->recognised()
             ->when($reportInKes,
@@ -211,6 +224,19 @@ class ReportController extends Controller
             (COALESCE(SUM(CASE WHEN order_type = 'pos'    THEN {$amtKes('orders.total_amount')} ELSE 0 END), 0))::float8 AS pos_revenue,
             COUNT(CASE WHEN order_type = 'online' THEN 1 END)                 AS online_count,
             COUNT(CASE WHEN order_type = 'pos'    THEN 1 END)                 AS pos_count,
+            -- The four bucket tiles. Unlike the two legacy fields above (kept
+            -- for compatibility), these COVER the whole order book: every
+            -- order lands in exactly one bucket, so the four revenues sum to
+            -- total_revenue — the reconciliation the old Online/POS pair
+            -- failed on screen (chat orders belonged to neither tile).
+            (COALESCE(SUM(CASE WHEN {$bucketExpr} = 'till'   THEN {$amtKes('orders.total_amount')} ELSE 0 END), 0))::float8 AS till_revenue,
+            (COALESCE(SUM(CASE WHEN {$bucketExpr} = 'web'    THEN {$amtKes('orders.total_amount')} ELSE 0 END), 0))::float8 AS web_revenue,
+            (COALESCE(SUM(CASE WHEN {$bucketExpr} = 'chat'   THEN {$amtKes('orders.total_amount')} ELSE 0 END), 0))::float8 AS chat_revenue,
+            (COALESCE(SUM(CASE WHEN {$bucketExpr} = 'quoted' THEN {$amtKes('orders.total_amount')} ELSE 0 END), 0))::float8 AS quoted_revenue,
+            COUNT(CASE WHEN {$bucketExpr} = 'till'   THEN 1 END)              AS till_count,
+            COUNT(CASE WHEN {$bucketExpr} = 'web'    THEN 1 END)              AS web_count,
+            COUNT(CASE WHEN {$bucketExpr} = 'chat'   THEN 1 END)              AS chat_count,
+            COUNT(CASE WHEN {$bucketExpr} = 'quoted' THEN 1 END)              AS quoted_count,
             COUNT(DISTINCT COALESCE(user_id::text, normalize_phone(customer_phone), NULLIF(lower(btrim(customer_email)), '')))                                            AS unique_customers,
             (COALESCE(SUM({$amtKes('orders.discount_amount')}) / NULLIF(SUM({$amtKes('orders.total_amount')}) + SUM({$amtKes('orders.discount_amount')}), 0) * 100, 0))::float8 AS discount_rate_percent
         ")->first();
@@ -260,7 +286,14 @@ class ReportController extends Controller
             ->whereNotIn('o.status', \App\Models\Order::DEAD_STATUSES)
             ->where(fn ($q) => $q->whereIn('o.status', \App\Models\Order::RECOGNISED_STATUSES)
                                  ->orWhereIn('o.payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES))
-            ->whereRaw('UPPER(o.currency_code) = ?', [$currency])
+            // Reporting in KES converts every convertible rail at the reporting
+            // rate — the same rule as the Collected tile, so the method rows
+            // FOOT to it. The old hard KES filter left foreign payments off
+            // this panel entirely while Collected counted them, an
+            // irreconcilable gap nobody could explain from the screen.
+            ->when($reportInKes,
+                fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('p.currency_code')),
+                fn ($q) => $q->whereRaw('UPPER(p.currency_code) = ?', [$currency]))
             ->when($outletId,  fn ($q) => $q->where('o.outlet_id',  $outletId))
             ->when($orderType, fn ($q) => $q->where('o.order_type', $orderType))
             ->where('p.status', 'paid')
@@ -272,10 +305,10 @@ class ReportController extends Controller
                 COALESCE(pm.name, p.payment_method) AS method_name,
                 pm.description                      AS method_description,
                 COUNT(DISTINCT o.id)                AS count,
-                (COALESCE(SUM(p.amount - COALESCE(p.refund_amount, 0)), 0))::float8 AS total
+                (COALESCE(SUM({$payKes}), 0))::float8 AS total
             ")
             ->groupBy('p.payment_method', 'pm.name', 'pm.description')
-            ->orderByRaw('(COALESCE(SUM(p.amount - COALESCE(p.refund_amount, 0)), 0))::float8 DESC')
+            ->orderByRaw("(COALESCE(SUM({$payKes}), 0))::float8 DESC")
             ->get();
 
         // Hourly distribution - useful for staffing decisions
@@ -338,12 +371,29 @@ class ReportController extends Controller
         // and were vanishing silently — 15 of them in a 30-day range. A total
         // that quietly omits rows is worse than one that says what it omitted,
         // because nothing on the page lets a reader notice.
-        $excluded = Order::whereBetween('orders.created_at', [$start, $end])
+        // Two different honesty notes, and conflating them made the page lie:
+        //   excluded_currencies  — no reporting rate exists, so the money is
+        //     genuinely NOT in the totals. Listed natively.
+        //   converted_currencies — a rate exists and the money IS in the
+        //     totals at that rate. Saying "excluded" about these (the old
+        //     behaviour) contradicted the very tiles above them.
+        $foreign = Order::whereBetween('orders.created_at', [$start, $end])
             ->recognised()
             ->whereRaw('UPPER(orders.currency_code) <> ?', [$currency])
-            ->selectRaw('orders.currency_code, COUNT(*) AS orders, (COALESCE(SUM(orders.total_amount),0))::float8 AS total')
-            ->groupBy('orders.currency_code')
+            ->selectRaw('UPPER(orders.currency_code) AS currency_code, COUNT(*) AS orders, (COALESCE(SUM(orders.total_amount),0))::float8 AS total')
+            ->groupBy(DB::raw('UPPER(orders.currency_code)'))
             ->get();
+
+        $rates     = \App\Support\ReportingCurrency::rates();
+        $excluded  = $foreign->filter(fn ($r) => ! isset($rates[$r->currency_code]))->values();
+        $converted = $foreign->filter(fn ($r) => isset($rates[$r->currency_code]))
+            ->map(fn ($r) => [
+                'currency_code' => $r->currency_code,
+                'orders'        => (int) $r->orders,
+                'total_native'  => (float) $r->total,
+                'rate'          => $rates[$r->currency_code],
+                'total_kes'     => round($r->total * $rates[$r->currency_code], 2),
+            ])->values();
 
         return response()->json($this->numify([
             'period'             => ['start' => $start, 'end' => $end],
@@ -360,7 +410,8 @@ class ReportController extends Controller
             // They are not meant to match; presenting them without saying so is
             // what made the page look like it contradicted itself.
             'collected_basis'    => 'payment_date',
-            'excluded_currencies' => $excluded,
+            'excluded_currencies'  => $excluded,
+            'converted_currencies' => $converted,
             'by_hour'            => $byHour,
             'by_day_of_week'     => $byDayOfWeek,
             'comparison'         => $comparison,
@@ -954,23 +1005,41 @@ class ReportController extends Controller
         [$start, $end] = $this->dateRange($request);
         $currency = $request->get('currency_code', 'KES');
 
+        // Three fixes in one query, all in the name of reconciling to the
+        // summary tiles above this table:
+        //  - LEFT JOIN: an order with no outlet (the sales desk raises these)
+        //    used to vanish from the table entirely.
+        //  - recognised basis: payment_status='paid' was a DIFFERENT revenue
+        //    definition than every tile — part-paid and deposit orders were
+        //    counted as revenue up top and missing down here.
+        //  - reporting-rate conversion, same as everywhere else.
+        // avg_daily_revenue divides by days WITH sales (trading days), not
+        // calendar days — deliberate, and now said out loud.
+        $kesAmt = strtoupper($currency) === 'KES'
+            ? \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code')
+            : 'orders.total_amount';
+
         $outlets = DB::table('orders')
-            ->join('outlets', 'orders.outlet_id', '=', 'outlets.id')
+            ->leftJoin('outlets', 'orders.outlet_id', '=', 'outlets.id')
             ->whereBetween('orders.created_at', [$start, $end])
-            ->where('orders.payment_status', 'paid')
-            ->whereRaw('UPPER(orders.currency_code) = ?', [strtoupper($currency)])
+            ->whereNotIn('orders.status', \App\Models\Order::DEAD_STATUSES)
+            ->where(fn ($q) => $q->whereIn('orders.status', \App\Models\Order::RECOGNISED_STATUSES)
+                                 ->orWhereIn('orders.payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES))
+            ->when(strtoupper($currency) === 'KES',
+                fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code')),
+                fn ($q) => $q->whereRaw('UPPER(orders.currency_code) = ?', [strtoupper($currency)]))
             ->groupBy('outlets.id', 'outlets.name', 'outlets.city')
             ->selectRaw("
                 outlets.id                                    AS outlet_id,
-                outlets.name                                  AS outlet_name,
+                COALESCE(outlets.name, 'No outlet (sales desk)') AS outlet_name,
                 outlets.city,
                 COUNT(orders.id)                              AS order_count,
-                (COALESCE(SUM(orders.total_amount), 0))::float8         AS total_revenue,
-                (COALESCE(AVG(orders.total_amount), 0))::float8         AS avg_order_value,
-                (COALESCE(SUM(orders.total_amount) / NULLIF(COUNT(DISTINCT DATE(orders.created_at)), 0), 0))::float8 AS avg_daily_revenue,
+                (COALESCE(SUM({$kesAmt}), 0))::float8         AS total_revenue,
+                (COALESCE(AVG({$kesAmt}), 0))::float8         AS avg_order_value,
+                (COALESCE(SUM({$kesAmt}) / NULLIF(COUNT(DISTINCT DATE(orders.created_at)), 0), 0))::float8 AS avg_daily_revenue,
                 MAX(orders.created_at)                        AS last_sale_date
             ")
-            ->orderByRaw('(COALESCE(SUM(orders.total_amount), 0))::float8 DESC')
+            ->orderByRaw("(COALESCE(SUM({$kesAmt}), 0))::float8 DESC")
             ->get();
 
         if ($this->wantsExport($request)) {
