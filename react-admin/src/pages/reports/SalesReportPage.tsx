@@ -1038,8 +1038,52 @@ function LedgerTab({ query }: { query: { data?: SalesLedger; isLoading: boolean 
         { orders: 0, sales: 0, paid: 0, balance: 0 },
     );
 
+    const STAGE_META: { key: "confirmed" | "processed" | "completed"; label: string; chip: string; bar: string }[] = [
+        { key: "confirmed", label: "Confirmed", chip: "badge-amber",   bar: "bg-amber"        },
+        { key: "processed", label: "Processed", chip: "badge-pink",    bar: "bg-pink-vivid"   },
+        { key: "completed", label: "Completed", chip: "badge-success", bar: "bg-success-vivid" },
+    ];
+
     return (
         <div className="space-y-6">
+            {/* ── Reconciliation ──────────────────────────────────────────────
+                Recognition removed unconfirmed carts from revenue. An
+                unexplained drop reads as broken software, so the bridge from
+                the old number to this one is stated before any figure. */}
+            {l.reconciliation && l.reconciliation.pipeline_sales > 0 && (
+                <div className="card p-5">
+                    <p className="text-xs font-semibold text-surface-500 uppercase tracking-wide">
+                        How this reconciles
+                    </p>
+                    <div className="mt-3 space-y-2 text-sm max-w-xl">
+                        <div className="flex justify-between">
+                            <span className="text-surface-700">Recognised sales</span>
+                            <span className="font-semibold tabular-nums text-surface-900">
+                                {fmtKes(l.reconciliation.recognised_sales)}
+                            </span>
+                        </div>
+                        <div className="flex justify-between">
+                            <span className="text-surface-500">
+                                + Unconfirmed pipeline
+                                <span className="ml-1.5 text-xs text-surface-400">not income</span>
+                            </span>
+                            <span className="font-semibold tabular-nums text-surface-500">
+                                {fmtKes(l.reconciliation.pipeline_sales)}
+                            </span>
+                        </div>
+                        <div className="flex justify-between border-t border-line pt-2">
+                            <span className="text-surface-700">= Gross order book</span>
+                            <span className="font-semibold tabular-nums text-surface-700">
+                                {fmtKes(l.reconciliation.gross_order_book)}
+                            </span>
+                        </div>
+                    </div>
+                    <p className="mt-3 text-xs text-surface-500 max-w-2xl leading-relaxed">
+                        {l.reconciliation.note}
+                    </p>
+                </div>
+            )}
+
             {/* Per channel, whole period */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 {l.channels.map(c => (
@@ -1075,6 +1119,88 @@ function LedgerTab({ query }: { query: { data?: SalesLedger; isLoading: boolean 
                     </div>
                 </div>
             </div>
+
+            {/* ── Three channel reports, each across the three stages ────────
+                WhatsApp, Online and POS. Every recognised order sits in exactly
+                one stage, so the three stage columns add up to the channel's
+                sales figure — the reconciliation a reader needs before
+                trusting a split. Unconfirmed carts are not a stage; they are
+                shown separately underneath so nobody mistakes them for work
+                in progress. */}
+            {l.by_stage?.map(ch => {
+                const stageTotal = STAGE_META.reduce((a, st) => a + (ch.stages[st.key]?.sales ?? 0), 0);
+                const pipe = l.pipeline?.by_channel?.[ch.channel];
+
+                return (
+                    <div key={ch.channel} className="card overflow-hidden">
+                        <div className="px-5 pt-5 pb-3 flex items-baseline justify-between gap-4">
+                            <div>
+                                <p className="font-semibold text-surface-900">{ch.label} orders</p>
+                                <p className="text-xs text-surface-500 mt-0.5">
+                                    Recognised income by stage. Confirmed, processed and completed
+                                    all count as sales.
+                                </p>
+                            </div>
+                            <p className="text-lg font-bold text-surface-900 tabular-nums shrink-0">
+                                {fmtKes(stageTotal)}
+                            </p>
+                        </div>
+
+                        <div className="table-wrapper rounded-none border-0">
+                            <table className="table">
+                                <thead>
+                                    <tr>
+                                        <th>Stage</th>
+                                        <th className="text-right">Orders</th>
+                                        <th className="text-right">Sales</th>
+                                        <th className="text-right">Paid</th>
+                                        <th className="text-right">Balance</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {STAGE_META.map(st => {
+                                        const f = ch.stages[st.key] ?? { orders: 0, sales: 0, paid: 0, balance: 0 };
+                                        return (
+                                            <tr key={st.key}>
+                                                <td><span className={st.chip}>{st.label}</span></td>
+                                                <td className="text-right tabular-nums">{f.orders}</td>
+                                                <td className="text-right tabular-nums font-semibold">{fmtKes(f.sales)}</td>
+                                                <td className="text-right tabular-nums text-success-700">{fmtKes(f.paid)}</td>
+                                                <td className="text-right"><Owed value={f.balance} /></td>
+                                            </tr>
+                                        );
+                                    })}
+                                    <tr className="bg-surface-50 font-semibold">
+                                        <td>Recognised total</td>
+                                        <td className="text-right tabular-nums">
+                                            {STAGE_META.reduce((a, st) => a + (ch.stages[st.key]?.orders ?? 0), 0)}
+                                        </td>
+                                        <td className="text-right tabular-nums">{fmtKes(stageTotal)}</td>
+                                        <td className="text-right tabular-nums text-success-700">
+                                            {fmtKes(STAGE_META.reduce((a, st) => a + (ch.stages[st.key]?.paid ?? 0), 0))}
+                                        </td>
+                                        <td className="text-right">
+                                            <Owed value={STAGE_META.reduce((a, st) => a + (ch.stages[st.key]?.balance ?? 0), 0)} />
+                                        </td>
+                                    </tr>
+                                    {!!pipe?.orders && (
+                                        <tr className="text-surface-500">
+                                            <td>
+                                                <span className="badge-neutral">Unconfirmed</span>
+                                                <span className="ml-2 text-xs">excluded from sales</span>
+                                            </td>
+                                            <td className="text-right tabular-nums">{pipe.orders}</td>
+                                            <td className="text-right tabular-nums">{fmtKes(pipe.sales)}</td>
+                                            <td className="text-right">&mdash;</td>
+                                            <td className="text-right">&mdash;</td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                );
+            })}
 
             {/* Daily: sales, paid, credit */}
             <div className="card overflow-hidden">

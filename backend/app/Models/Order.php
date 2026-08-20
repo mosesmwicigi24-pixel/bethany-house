@@ -8,6 +8,86 @@ use Illuminate\Database\Eloquent\Model;
 
 class Order extends Model
 {
+    /* ── Revenue recognition ──────────────────────────────────────────────
+     *
+     * An order is income only once a HUMAN has accepted it. Customers add to a
+     * cart on the storefront or on WhatsApp and wander off; those carts land
+     * here as `pending` and are a sales *pipeline*, not revenue. Counting them
+     * overstated the last-30-day sales report by KES 1,136,060 — 33% of the
+     * reported figure, and 82% of the Online channel — because the only filter
+     * anywhere was `status NOT IN (voided, cancelled)`.
+     *
+     * The three stages a confirmed order moves through, and the labels the UI
+     * shows for each:
+     *
+     *   confirmed                        → "Confirmed"  (amber)
+     *   processing | shipped | delivered → "Processed"  (pink)
+     *   completed                        → "Completed"  (green)
+     *
+     * All three are recognised income. POS is unaffected in practice — a till
+     * sale is confirmed at the moment of payment — so this restates the online
+     * and WhatsApp channels only.
+     */
+
+    /** Income. A human accepted the order; the sale is real. */
+    public const RECOGNISED_STATUSES = ['confirmed', 'processing', 'shipped', 'delivered', 'completed'];
+
+    /** Pipeline. An unconfirmed cart — reportable, but NEVER as income. */
+    public const PIPELINE_STATUSES = ['pending'];
+
+    /** Neither: the order is dead and belongs in no sales figure. */
+    public const DEAD_STATUSES = ['cancelled', 'voided', 'refunded'];
+
+    /**
+     * Payment states that mean real money arrived.
+     *
+     * A customer who pays a payment link before any staff member opens the
+     * order leaves it `pending` while the cash is already banked. Money in the
+     * account is not a browsing cart, so payment is a second, independent route
+     * to recognition — whichever happens first, confirmation or payment.
+     */
+    public const SETTLED_PAYMENT_STATUSES = ['paid', 'partial', 'deposit'];
+
+    /** status → the stage label the three channel reports group by. */
+    public const STAGE_OF_STATUS = [
+        'confirmed'  => 'confirmed',
+        'processing' => 'processed',
+        'shipped'    => 'processed',
+        'delivered'  => 'processed',
+        'completed'  => 'completed',
+    ];
+
+    /**
+     * Recognised income only. The base for every sales figure.
+     *
+     * Recognised = a human confirmed it, OR money actually arrived — and the
+     * order is not dead. The dead check is not redundant: a cancelled order can
+     * still carry a settled payment (that is what a refund unwinds), and
+     * without it the payment arm would drag cancelled orders back into revenue.
+     */
+    public function scopeRecognised($query)
+    {
+        return $query
+            ->whereNotIn('orders.status', self::DEAD_STATUSES)
+            ->where(fn ($q) => $q
+                ->whereIn('orders.status', self::RECOGNISED_STATUSES)
+                ->orWhereIn('orders.payment_status', self::SETTLED_PAYMENT_STATUSES));
+    }
+
+    /**
+     * Unconfirmed carts — the pipeline report, never the sales report.
+     *
+     * The exact complement of recognised() within the live order book: pending
+     * AND no money received. A pending order that has been paid is income, not
+     * pipeline, so it must not appear in both.
+     */
+    public function scopePipeline($query)
+    {
+        return $query
+            ->whereIn('orders.status', self::PIPELINE_STATUSES)
+            ->whereNotIn('orders.payment_status', self::SETTLED_PAYMENT_STATUSES);
+    }
+
     use HasFactory;
     /**
      * Bounds every order query to what the caller may see — list, detail,

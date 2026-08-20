@@ -733,25 +733,34 @@ class OrderController extends Controller
             }
         }
 
-        // ── Guard: cannot confirm if not fully paid ──────────────────────────
-        // "confirmed" means payment is verified and the order is ready to fulfil.
-        // Staff should not manually set it if the order still has an outstanding balance.
+        // ── Confirming is a COMMERCIAL act, not a payment receipt ────────────
+        // This used to refuse to confirm an order that was not paid in full.
+        // That rule quietly broke the business it was meant to protect: a
+        // vestment ordered on a deposit, or a WhatsApp order agreed with a
+        // customer who pays on delivery, could never be confirmed — so it sat
+        // at 'pending' forever, looking to everyone like an abandoned cart. 85
+        // WhatsApp orders were in exactly that state.
+        //
+        // Confirmation now means what the word means: a human accepted the
+        // order. That is what makes it recognised income (see
+        // Order::RECOGNISED_STATUSES); any unpaid remainder is a receivable and
+        // shows as the order's balance, which is the accountant's answer, not a
+        // reason to pretend the sale did not happen.
+        //
+        // The money guards that genuinely protect the business are untouched:
+        // 'completed' still requires full payment, and nothing may advance past
+        // a payment awaiting approval.
         if ($newStatus === 'confirmed') {
+            // Intelligence #5 — auto-draft production orders for producible items.
+            // Still gated on full payment: confirming a sale is cheap to undo,
+            // but cutting cloth for an unpaid order is not.
             $totalPaid = $order->payments->where('status', 'paid')->sum('amount');
-            if ($totalPaid < $order->total_amount - 0.01) {
-                return response()->json([
-                    'message'     => 'Cannot confirm this order - it has not been fully paid.',
-                    'reason'      => 'unpaid_balance',
-                    'outstanding' => round($order->total_amount - $totalPaid, 2),
-                ], 422);
+            if ($totalPaid >= $order->total_amount - 0.01) {
+                try {
+                    $order->loadMissing('items');
+                    IntelligenceService::autoLinkOrderToProduction($order);
+                } catch (\Exception) {}
             }
-
-            // Intelligence #5 — auto-draft production orders for producible items
-            // Runs after payment is verified so production only starts for paid orders.
-            try {
-                $order->loadMissing('items');
-                IntelligenceService::autoLinkOrderToProduction($order);
-            } catch (\Exception) {}
         }
 
         // ── Guard: cannot complete if there are pending production orders ─────

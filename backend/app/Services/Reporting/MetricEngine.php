@@ -35,8 +35,18 @@ class MetricEngine
 {
     private const TZ = 'Africa/Nairobi';
 
-    /** Sales truth: an order that exists commercially. */
-    private const SALE_EXCLUDED_STATUSES = ['voided', 'cancelled'];
+    /**
+     * Sales truth: an order a HUMAN has accepted.
+     *
+     * This used to be `NOT IN (voided, cancelled)`, which counted every
+     * abandoned storefront and WhatsApp cart as revenue — KES 1,136,060 of the
+     * last 30 days' reported sales, 33% of the figure. Recognition now follows
+     * Order::RECOGNISED_STATUSES, so an unconfirmed cart is pipeline, not
+     * income, and it reaches the sales report only after a person confirms it.
+     *
+     * @see \App\Models\Order::RECOGNISED_STATUSES  the single definition
+     */
+    private const SALE_RECOGNISED_STATUSES = \App\Models\Order::RECOGNISED_STATUSES;
 
     /**
      * Expense truth: money the business has committed to spend.
@@ -155,11 +165,29 @@ class MetricEngine
 
     // ── Query scaffolding ─────────────────────────────────────────────────────
 
-    /** Sales-truth base: commercial orders, KES, scoped. */
+    /**
+     * The recognition predicate, applied to any query over the orders table.
+     *
+     * Every sales figure in this engine goes through here, so the rule has one
+     * definition. It mirrors Order::scopeRecognised() exactly — the model scope
+     * serves Eloquent callers (the sales ledger, the order lists), this serves
+     * the query-builder ones.
+     *
+     * @param string $alias how orders is named in the query ('orders', 'o', …)
+     */
+    private function recognise($query, string $alias = 'orders')
+    {
+        return $query
+            ->whereNotIn("{$alias}.status", \App\Models\Order::DEAD_STATUSES)
+            ->where(fn ($q) => $q
+                ->whereIn("{$alias}.status", self::SALE_RECOGNISED_STATUSES)
+                ->orWhereIn("{$alias}.payment_status", \App\Models\Order::SETTLED_PAYMENT_STATUSES));
+    }
+
+    /** Sales-truth base: recognised orders, KES, scoped. */
     private function salesBase()
     {
-        return DB::table('orders')
-            ->whereNotIn('status', self::SALE_EXCLUDED_STATUSES)
+        return $this->recognise(DB::table('orders'))
             ->whereRaw("UPPER(currency_code) = 'KES'")
             ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds));
     }
@@ -697,7 +725,7 @@ class MetricEngine
     {
         return DB::table('order_items as oi')
             ->join('orders as o', 'o.id', '=', 'oi.order_id')
-            ->whereNotIn('o.status', self::SALE_EXCLUDED_STATUSES)
+            ->tap(fn ($q) => $this->recognise($q, 'o'))
             ->whereRaw("UPPER(o.currency_code) = 'KES'")
             ->whereBetween('o.created_at', [$s, $e])
             ->whereNotNull('oi.product_id')
@@ -990,8 +1018,7 @@ class MetricEngine
     /** Sales-truth orders aliased o, with the customer key attached. */
     private function customerOrders()
     {
-        return DB::table('orders as o')
-            ->whereNotIn('o.status', self::SALE_EXCLUDED_STATUSES)
+        return $this->recognise(DB::table('orders as o'), 'o')
             ->whereRaw("UPPER(o.currency_code) = 'KES'")
             ->when($this->outletIds, fn ($q) => $q->whereIn('o.outlet_id', $this->outletIds));
     }
@@ -2013,8 +2040,7 @@ class MetricEngine
 
         // Of orders fully settled in the last 90 days via 2+ payments: days
         // from the first payment (the deposit) to the last (paid in full).
-        $avgDepositToPaid = DB::table('orders')
-            ->whereNotIn('status', self::SALE_EXCLUDED_STATUSES)
+        $avgDepositToPaid = $this->recognise(DB::table('orders'))
             ->whereRaw("UPPER(currency_code) = 'KES'")
             ->where('payment_status', 'paid')
             ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
@@ -2578,8 +2604,7 @@ class MetricEngine
         // History depth: the earliest combined sales date. No history → the
         // graceful "import legacy history to unlock projections" shape.
         $legacyMin = DB::table('legacy_sales_daily')->min('sale_date');
-        $hubMin    = DB::table('orders')
-            ->whereNotIn('status', self::SALE_EXCLUDED_STATUSES)
+        $hubMin    = $this->recognise(DB::table('orders'))
             ->whereRaw("UPPER(currency_code) = 'KES'")
             ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
             ->min('created_at');

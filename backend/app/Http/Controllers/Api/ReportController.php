@@ -400,11 +400,12 @@ class ReportController extends Controller
         $scoped = fn (?string $channel) => Order::query()
             ->salesChannel($channel)
             ->whereBetween('orders.created_at', [$start, $end])
-            // 'voided' as well as 'cancelled' — the summary excludes both, and a
-            // report that shows two different sales totals on one screen is worse
-            // than one that is slightly wrong, because you cannot tell which to
-            // trust. One voided order (21,700) was the entire discrepancy.
-            ->whereNotIn('orders.status', ['voided', 'cancelled'])
+            // Recognised income only: an order a human has confirmed. Before
+            // this the filter was NOT IN (voided, cancelled), which counted
+            // abandoned storefront/WhatsApp carts as sales — 33% of the last
+            // 30 days' reported revenue. The unconfirmed money is not lost,
+            // it is reported separately as pipeline (see $pipeline below).
+            ->recognised()
             ->whereRaw('UPPER(orders.currency_code) = ?', [$currency])
             ->when($outletId, fn ($q) => $q->where('orders.outlet_id', $outletId))
             ->leftJoinSub($paidPerOrder, 'pay', fn ($j) => $j->on('pay.order_id', '=', 'orders.id'));
@@ -495,9 +496,82 @@ class ReportController extends Controller
             return array_values($rows);
         };
 
+        // ── Stage matrix: channel x (confirmed | processed | completed) ─────
+        // The three per-channel reports. Every recognised order sits in exactly
+        // one stage, so the stage columns sum to the channel's sales figure —
+        // the reconciliation a reader needs before trusting the split.
+        $byStage = [];
+        foreach ($channels as $c) {
+            $stages = ['confirmed' => null, 'processed' => null, 'completed' => null];
+            foreach ($stages as $stage => $_) {
+                $statuses = array_keys(array_filter(
+                    \App\Models\Order::STAGE_OF_STATUS,
+                    fn ($v) => $v === $stage,
+                ));
+                $r = $scoped($c)->whereIn('orders.status', $statuses)->selectRaw($agg)->first();
+                $stages[$stage] = [
+                    'orders'  => (int)   ($r->orders  ?? 0),
+                    'sales'   => (float) ($r->sales   ?? 0),
+                    'paid'    => (float) ($r->paid    ?? 0),
+                    'balance' => (float) ($r->balance ?? 0),
+                ];
+            }
+            $byStage[] = [
+                'channel' => $c,
+                'label'   => ['pos' => 'POS', 'online' => 'Online', 'whatsapp' => 'WhatsApp'][$c],
+                'stages'  => $stages,
+            ];
+        }
+
+        // ── Pipeline: unconfirmed carts, per channel ────────────────────────
+        // NOT income. Reported beside the sales figure precisely so nobody has
+        // to wonder where the missing money went: sales + pipeline + dead is
+        // the whole order book.
+        $pipelineScoped = fn (?string $channel) => Order::query()
+            ->salesChannel($channel)
+            ->whereBetween('orders.created_at', [$start, $end])
+            ->pipeline()
+            ->whereRaw('UPPER(orders.currency_code) = ?', [$currency])
+            ->when($outletId, fn ($q) => $q->where('orders.outlet_id', $outletId))
+            ->leftJoinSub($paidPerOrder, 'pay', fn ($j) => $j->on('pay.order_id', '=', 'orders.id'));
+
+        $pipeline = ['total' => ['orders' => 0, 'sales' => 0.0], 'by_channel' => []];
+        foreach ($channels as $c) {
+            $r = $pipelineScoped($c)->selectRaw($agg)->first();
+            $row = ['orders' => (int) ($r->orders ?? 0), 'sales' => (float) ($r->sales ?? 0)];
+            $pipeline['by_channel'][$c]   = $row;
+            $pipeline['total']['orders'] += $row['orders'];
+            $pipeline['total']['sales']  += $row['sales'];
+        }
+
+        // ── Reconciliation ──────────────────────────────────────────────────
+        // Recognition removed KES 1.1m from the reported figure overnight, and
+        // an unexplained cliff on a revenue chart reads as broken software, not
+        // as a correction. So the report states the bridge explicitly:
+        //
+        //   recognised sales        what the business actually earned
+        // + unconfirmed pipeline    carts nobody has confirmed yet
+        // = gross order book        the number this report used to print
+        //
+        // The gross line is labelled, never plotted as revenue. It exists so a
+        // reader comparing against last month's printout can see where the
+        // difference went instead of assuming data loss.
+        $recognisedSales = (float) collect($byChannel)->sum('sales');
+        $reconciliation  = [
+            'recognised_sales' => $recognisedSales,
+            'pipeline_sales'   => $pipeline['total']['sales'],
+            'gross_order_book' => $recognisedSales + $pipeline['total']['sales'],
+            'note'             => 'Gross order book is every live order including unconfirmed carts. '
+                                . 'It is what this report printed before revenue was recognised on '
+                                . 'confirmation, and is shown only to reconcile against older figures.',
+        ];
+
         return response()->json($this->numify([
-            'period'   => ['start' => $start, 'end' => $end, 'currency' => $currency],
-            'channels' => $byChannel,
+            'period'         => ['start' => $start, 'end' => $end, 'currency' => $currency],
+            'channels'       => $byChannel,
+            'by_stage'       => $byStage,
+            'pipeline'       => $pipeline,
+            'reconciliation' => $reconciliation,
             'daily'    => $daily,
             'weekly'   => $bucketed("TO_CHAR(DATE_TRUNC('week',  orders.created_at), 'IYYY-\"W\"IW')"),
             'monthly'  => $bucketed("TO_CHAR(DATE_TRUNC('month', orders.created_at), 'YYYY-MM')"),

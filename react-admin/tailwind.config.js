@@ -118,6 +118,16 @@ export default {
           50: '#fffbeb', 100: '#fef3c7', 200: '#fde68a', 300: '#fcd34d', 400: '#fbbf24',
           500: '#f59e0b', 600: '#d97706', 700: '#b45309', 800: '#92400e', 900: '#78350f',
         },
+        // The middle stage of an order's life. Amber = confirmed and waiting,
+        // pink = being worked, green = done. Pink is deliberately NOT a
+        // warning or a danger hue: a vestment on the workshop floor is good
+        // news, and the owner asked for a luminous pink to read that way at a
+        // glance down a list of amber and green rows.
+        pink: {
+          light: '#fce7f3', DEFAULT: '#db2777', dark: '#9d174d', vivid: '#ec4899',
+          50: '#fdf2f8', 100: '#fce7f3', 200: '#fbcfe8', 300: '#f9a8d4', 400: '#f472b6',
+          500: '#ec4899', 600: '#db2777', 700: '#be185d', 800: '#9d174d', 900: '#831843',
+        },
         success: {
           light: '#dcfce7', DEFAULT: '#16a34a', dark: '#15803d', vivid: '#22c55e',
           50: '#f0fdf4', 100: '#dcfce7', 200: '#bbf7d0', 300: '#86efac', 400: '#4ade80',

@@ -12,17 +12,25 @@ import { groupRowsByDate, DateGroupHeaderRow } from "@/lib/dateGrouping";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-// Traffic-light semantics: anything still in flight is AMBER, anything finished
-// is a vivid green, anything stopped is red/grey. `confirmed` was missing
-// entirely, so every POS sale fell through to the neutral grey chip — the most
-// common status in the system rendered as though it had no meaning.
+// Order-stage semantics. An order's life is three stages and the colours say
+// which one it is at a glance down a list:
+//
+//   Confirmed  amber  — a human accepted it; it is income and it is waiting
+//   Processed  pink   — it is being worked (in production, shipped, delivered)
+//   Completed  green  — done
+//
+// `pending` is deliberately NOT one of them. It is an unconfirmed cart a
+// customer built and abandoned, it is NOT income, and it is excluded from the
+// sales report — so it reads as neutral-grey "Unconfirmed", not as a warning.
+// Calling it "Pending Payment" implied the only missing thing was money, which
+// is how 98 abandoned carts came to be counted as KES 1.1m of revenue.
 const STATUS_CONFIG: Record<string, { label: string; dot: string; badge: string }> = {
-    pending:         { label: "Pending Payment", dot: "bg-warning",       badge: "badge-warning" },
+    pending:         { label: "Unconfirmed",     dot: "bg-surface-400",   badge: "badge-neutral" },
     paid:            { label: "Paid",            dot: "bg-success-vivid", badge: "badge-success" },
-    confirmed:       { label: "Confirmed",       dot: "bg-success-vivid", badge: "badge-success" },
-    processing:      { label: "Processing",      dot: "bg-amber",         badge: "badge-amber"   },
-    shipped:         { label: "Shipped",         dot: "bg-amber",         badge: "badge-amber"   },
-    delivered:       { label: "Delivered",       dot: "bg-success-vivid", badge: "badge-success" },
+    confirmed:       { label: "Confirmed",       dot: "bg-amber",         badge: "badge-amber"   },
+    processing:      { label: "Processed",       dot: "bg-pink-vivid",    badge: "badge-pink"    },
+    shipped:         { label: "Shipped",         dot: "bg-pink-vivid",    badge: "badge-pink"    },
+    delivered:       { label: "Delivered",       dot: "bg-pink-vivid",    badge: "badge-pink"    },
     completed:       { label: "Completed",       dot: "bg-success-vivid", badge: "badge-success" },
     cancelled:       { label: "Cancelled",       dot: "bg-danger",        badge: "badge-danger"  },
     refunded:        { label: "Refunded",        dot: "bg-surface-400",   badge: "badge-neutral" },
@@ -30,8 +38,9 @@ const STATUS_CONFIG: Record<string, { label: string; dot: string; badge: string 
 };
 
 const CHANNEL_LABELS: Record<string, { label: string }> = {
-    online: { label: "Online" },
-    pos:    { label: "POS"    },
+    online:   { label: "Online"   },
+    pos:      { label: "POS"      },
+    whatsapp: { label: "WhatsApp" },
 };
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {

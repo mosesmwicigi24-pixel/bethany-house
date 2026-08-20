@@ -529,9 +529,31 @@ export interface LedgerBucket {
     total: LedgerFigures;
     by_channel: Record<"pos" | "online" | "whatsapp", LedgerFigures>;
 }
+/** The three stages of a confirmed order's life. Unconfirmed carts are not a
+    stage — they are pipeline, and never appear here. */
+export type OrderStage = "confirmed" | "processed" | "completed";
+
 export interface SalesLedger {
     period: { start: string; end: string; currency: string };
     channels: (LedgerFigures & { channel: "pos" | "online" | "whatsapp"; label: string })[];
+    /** Per-channel split across the three stages. Stages sum to the channel total. */
+    by_stage: {
+        channel: "pos" | "online" | "whatsapp";
+        label: string;
+        stages: Record<OrderStage, LedgerFigures>;
+    }[];
+    /** Unconfirmed carts. Reportable, never income. */
+    pipeline: {
+        total: { orders: number; sales: number };
+        by_channel: Record<"pos" | "online" | "whatsapp", { orders: number; sales: number }>;
+    };
+    /** recognised + pipeline = gross. Bridges this report to older printouts. */
+    reconciliation: {
+        recognised_sales: number;
+        pipeline_sales: number;
+        gross_order_book: number;
+        note: string;
+    };
     daily: { date: string; orders: number; sales: number; paid: number; credit: number }[];
     weekly: LedgerBucket[];
     monthly: LedgerBucket[];
