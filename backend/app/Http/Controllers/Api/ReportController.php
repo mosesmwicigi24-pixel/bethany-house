@@ -165,9 +165,20 @@ class ReportController extends Controller
         // erased every part-paid and deposit order from "revenue".
         // Columns are qualified because $base() is joined against
         // payment_methods below; unqualified `created_at` is ambiguous there.
+        // Reporting in KES translates every convertible currency at the
+        // REPORTING rate (128 KES/USD), never the pricing rate (100) a customer
+        // is quoted at. Asking for a specific foreign currency reports it
+        // natively instead. USD sales are 58 orders the tiles could not see.
+        $reportInKes = $currency === 'KES';
+        $amtKes = fn (string $col) => $reportInKes
+            ? \App\Support\ReportingCurrency::kes($col, 'orders.currency_code')
+            : $col;
+
         $base = fn () => Order::whereBetween('orders.created_at', [$start, $end])
-            ->whereNotIn('orders.status', ['voided', 'cancelled'])
-            ->whereRaw('UPPER(orders.currency_code) = ?', [$currency])
+            ->recognised()
+            ->when($reportInKes,
+                fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code')),
+                fn ($q) => $q->whereRaw('UPPER(orders.currency_code) = ?', [$currency]))
             ->when($outletId,  fn ($q) => $q->where('orders.outlet_id',  $outletId))
             ->when($orderType, fn ($q) => $q->where('orders.order_type', $orderType));
 
@@ -175,28 +186,33 @@ class ReportController extends Controller
         $collected = (float) DB::table('payments as p')
             ->join('orders as o', 'o.id', '=', 'p.order_id')
             ->where('p.status', 'paid')
-            ->whereRaw('UPPER(p.currency_code) = ?', [$currency])
+            ->when($reportInKes,
+                fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('p.currency_code')),
+                fn ($q) => $q->whereRaw('UPPER(p.currency_code) = ?', [$currency]))
             ->when($outletId,  fn ($q) => $q->where('o.outlet_id',  $outletId))
             ->when($orderType, fn ($q) => $q->where('o.order_type', $orderType))
             ->whereBetween(DB::raw('COALESCE(p.paid_at, p.created_at)'), [$start, $end])
-            ->selectRaw('(COALESCE(SUM(p.amount - COALESCE(p.refund_amount,0)),0))::float8 AS v')
+            ->selectRaw('(COALESCE(SUM(' . ($reportInKes
+                    ? \App\Support\ReportingCurrency::kes('p.amount - COALESCE(p.refund_amount,0)', 'p.currency_code')
+                    : 'p.amount - COALESCE(p.refund_amount,0)')
+                . '),0))::float8 AS v')
             ->value('v');
 
         $summary = $base()->selectRaw("
             COUNT(*)                                                          AS total_orders,
-            (COALESCE(SUM(total_amount), 0))::float8                                    AS total_revenue,
-            (COALESCE(SUM(shipping_amount), 0))::float8                                 AS total_shipping,
-            (COALESCE(SUM(tax_amount), 0))::float8                                      AS total_tax,
-            (COALESCE(SUM(discount_amount), 0))::float8                                 AS total_discounts,
-            (COALESCE(AVG(total_amount), 0))::float8                                    AS average_order_value,
-            COALESCE(MIN(total_amount), 0)                                    AS min_order_value,
-            COALESCE(MAX(total_amount), 0)                                    AS max_order_value,
-            (COALESCE(SUM(CASE WHEN order_type = 'online' THEN total_amount ELSE 0 END), 0))::float8 AS online_revenue,
-            (COALESCE(SUM(CASE WHEN order_type = 'pos'    THEN total_amount ELSE 0 END), 0))::float8 AS pos_revenue,
+            (COALESCE(SUM({$amtKes('orders.total_amount')}), 0))::float8       AS total_revenue,
+            (COALESCE(SUM({$amtKes('orders.shipping_amount')}), 0))::float8    AS total_shipping,
+            (COALESCE(SUM({$amtKes('orders.tax_amount')}), 0))::float8         AS total_tax,
+            (COALESCE(SUM({$amtKes('orders.discount_amount')}), 0))::float8    AS total_discounts,
+            (COALESCE(AVG({$amtKes('orders.total_amount')}), 0))::float8       AS average_order_value,
+            COALESCE(MIN({$amtKes('orders.total_amount')}), 0)                 AS min_order_value,
+            COALESCE(MAX({$amtKes('orders.total_amount')}), 0)                 AS max_order_value,
+            (COALESCE(SUM(CASE WHEN order_type = 'online' THEN {$amtKes('orders.total_amount')} ELSE 0 END), 0))::float8 AS online_revenue,
+            (COALESCE(SUM(CASE WHEN order_type = 'pos'    THEN {$amtKes('orders.total_amount')} ELSE 0 END), 0))::float8 AS pos_revenue,
             COUNT(CASE WHEN order_type = 'online' THEN 1 END)                 AS online_count,
             COUNT(CASE WHEN order_type = 'pos'    THEN 1 END)                 AS pos_count,
             COUNT(DISTINCT COALESCE(user_id::text, normalize_phone(customer_phone), NULLIF(lower(btrim(customer_email)), '')))                                            AS unique_customers,
-            (COALESCE(SUM(discount_amount) / NULLIF(SUM(total_amount + discount_amount), 0) * 100, 0))::float8 AS discount_rate_percent
+            (COALESCE(SUM({$amtKes('orders.discount_amount')}) / NULLIF(SUM({$amtKes('orders.total_amount')}) + SUM({$amtKes('orders.discount_amount')}), 0) * 100, 0))::float8 AS discount_rate_percent
         ")->first();
 
         $daily = $base()->selectRaw("
@@ -241,7 +257,9 @@ class ReportController extends Controller
             ->join('orders as o', 'o.id', '=', 'p.order_id')
             ->leftJoin('payment_methods as pm', 'pm.code', '=', 'p.payment_method')
             ->whereBetween('o.created_at', [$start, $end])
-            ->whereNotIn('o.status', ['voided', 'cancelled'])
+            ->whereNotIn('o.status', \App\Models\Order::DEAD_STATUSES)
+            ->where(fn ($q) => $q->whereIn('o.status', \App\Models\Order::RECOGNISED_STATUSES)
+                                 ->orWhereIn('o.payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES))
             ->whereRaw('UPPER(o.currency_code) = ?', [$currency])
             ->when($outletId,  fn ($q) => $q->where('o.outlet_id',  $outletId))
             ->when($orderType, fn ($q) => $q->where('o.order_type', $orderType))
@@ -321,7 +339,7 @@ class ReportController extends Controller
         // that quietly omits rows is worse than one that says what it omitted,
         // because nothing on the page lets a reader notice.
         $excluded = Order::whereBetween('orders.created_at', [$start, $end])
-            ->whereNotIn('orders.status', ['voided', 'cancelled'])
+            ->recognised()
             ->whereRaw('UPPER(orders.currency_code) <> ?', [$currency])
             ->selectRaw('orders.currency_code, COUNT(*) AS orders, (COALESCE(SUM(orders.total_amount),0))::float8 AS total')
             ->groupBy('orders.currency_code')
@@ -389,6 +407,18 @@ class ReportController extends Controller
         // Today this changes nothing — all 15 approval-requiring payments are
         // already approved — so it is a guard for the first unverified entry,
         // not a restatement of current figures.
+        // Reporting in KES translates every convertible currency at the
+        // REPORTING rate (128 KES/USD) — not the pricing rate (100) a customer
+        // is quoted at. Asking for a specific foreign currency still reports
+        // that currency natively, untranslated.
+        $reportInKes = $currency === 'KES';
+        $orderKes    = $reportInKes
+            ? \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code')
+            : 'orders.total_amount';
+        $paidKes     = $reportInKes
+            ? \App\Support\ReportingCurrency::kes('COALESCE(pay.paid, 0)', 'orders.currency_code')
+            : 'COALESCE(pay.paid, 0)';
+
         $paidPerOrder = DB::table('payments')
             ->selectRaw('order_id, (COALESCE(SUM(amount - COALESCE(refund_amount, 0)), 0))::float8 AS paid')
             ->where('status', 'paid')
@@ -406,16 +436,18 @@ class ReportController extends Controller
             // 30 days' reported revenue. The unconfirmed money is not lost,
             // it is reported separately as pipeline (see $pipeline below).
             ->recognised()
-            ->whereRaw('UPPER(orders.currency_code) = ?', [$currency])
+            ->when($reportInKes,
+                fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code')),
+                fn ($q) => $q->whereRaw('UPPER(orders.currency_code) = ?', [$currency]))
             ->when($outletId, fn ($q) => $q->where('orders.outlet_id', $outletId))
             ->leftJoinSub($paidPerOrder, 'pay', fn ($j) => $j->on('pay.order_id', '=', 'orders.id'));
 
         $agg = "
             COUNT(*)                                              AS orders,
-            (COALESCE(SUM(orders.total_amount), 0))::float8                 AS sales,
-            (COALESCE(SUM(COALESCE(pay.paid, 0)), 0))::float8               AS paid,
-            GREATEST((COALESCE(SUM(orders.total_amount), 0))::float8
-                   - (COALESCE(SUM(COALESCE(pay.paid, 0)), 0))::float8, 0)  AS balance
+            (COALESCE(SUM({$orderKes}), 0))::float8               AS sales,
+            (COALESCE(SUM({$paidKes}), 0))::float8                AS paid,
+            GREATEST((COALESCE(SUM({$orderKes}), 0))::float8
+                   - (COALESCE(SUM({$paidKes}), 0))::float8, 0)   AS balance
         ";
 
         // ── Per channel, whole period ────────────────────────────────────────
@@ -531,7 +563,9 @@ class ReportController extends Controller
             ->salesChannel($channel)
             ->whereBetween('orders.created_at', [$start, $end])
             ->pipeline()
-            ->whereRaw('UPPER(orders.currency_code) = ?', [$currency])
+            ->when($reportInKes,
+                fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code')),
+                fn ($q) => $q->whereRaw('UPPER(orders.currency_code) = ?', [$currency]))
             ->when($outletId, fn ($q) => $q->where('orders.outlet_id', $outletId))
             ->leftJoinSub($paidPerOrder, 'pay', fn ($j) => $j->on('pay.order_id', '=', 'orders.id'));
 
@@ -632,14 +666,18 @@ class ReportController extends Controller
         $converted = (int) DB::table('leads as l')
             ->whereBetween('l.created_at', [$start, $end])
             ->whereExists(fn ($q) => $q->select(DB::raw(1))->from('orders as o')
-                ->whereNotIn('o.status', ['voided', 'cancelled'])
+                ->whereNotIn('o.status', \App\Models\Order::DEAD_STATUSES)
+            ->where(fn ($q) => $q->whereIn('o.status', \App\Models\Order::RECOGNISED_STATUSES)
+                                 ->orWhereIn('o.payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES))
                 ->whereRaw($matchSql))
             ->count();
 
         // Revenue over DISTINCT matched orders — a join-then-SUM would count an
         // order once per lead it matches, and one person can send two leads.
         $convOrders = DB::table('orders as o')
-            ->whereNotIn('o.status', ['voided', 'cancelled'])
+            ->whereNotIn('o.status', \App\Models\Order::DEAD_STATUSES)
+            ->where(fn ($q) => $q->whereIn('o.status', \App\Models\Order::RECOGNISED_STATUSES)
+                                 ->orWhereIn('o.payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES))
             ->whereExists(fn ($q) => $q->select(DB::raw(1))->from('leads as l')
                 ->whereBetween('l.created_at', [$start, $end])
                 ->whereRaw($matchSql))
@@ -658,7 +696,7 @@ class ReportController extends Controller
         $wa = Order::query()
             ->salesChannel('whatsapp')
             ->whereBetween('orders.created_at', [$start, $end])
-            ->whereNotIn('orders.status', ['voided', 'cancelled'])
+            ->recognised()
             ->whereRaw('UPPER(orders.currency_code) = ?', [$currency])
             ->leftJoinSub($paidPerOrder, 'pay', fn ($j) => $j->on('pay.order_id', '=', 'orders.id'))
             ->selectRaw('

@@ -117,14 +117,19 @@ export default function OrderPipelinePage() {
                 ))}
             </div>
 
-            {!!d?.summary.excluded_non_kes_orders && (
-                <p className="text-xs text-surface-500">
-                    {d.summary.excluded_non_kes_orders} order
-                    {d.summary.excluded_non_kes_orders === 1 ? " is" : "s are"} in another currency
-                    and {d.summary.excluded_non_kes_orders === 1 ? "is" : "are"} listed below but
-                    left out of the totals — KES and USD cannot be added into one figure.
-                </p>
-            )}
+            <p className="text-xs text-surface-500">
+                Foreign orders are counted at the reporting rate of{" "}
+                <strong>128 KES to 1 USD</strong> — not the 100 used when quoting a customer.
+                {!!d?.summary.excluded_non_kes_orders && (
+                    <>
+                        {" "}
+                        {d.summary.excluded_non_kes_orders} order
+                        {d.summary.excluded_non_kes_orders === 1 ? " is" : "s are"} in a currency with
+                        no reporting rate set; {d.summary.excluded_non_kes_orders === 1 ? "it is" : "they are"}{" "}
+                        listed below but left out of the totals rather than converted at a guess.
+                    </>
+                )}
+            </p>
 
             {/* Per channel */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -197,9 +202,20 @@ export default function OrderPipelinePage() {
                                         </td>
                                         <td className="text-right tabular-nums">{o.item_count}</td>
                                         <td className="text-right tabular-nums font-semibold">
-                                            {o.currency_code === "KES"
-                                                ? fmtKes(o.total_amount)
-                                                : `${o.currency_code} ${o.total_amount.toLocaleString()}`}
+                                            {o.currency_code === "KES" ? (
+                                                fmtKes(o.total_amount)
+                                            ) : (
+                                                <>
+                                                    {/* Native first — staff talk to this customer in
+                                                        dollars — with the KES the report counts beneath. */}
+                                                    <span>{o.currency_code} {o.total_amount.toLocaleString()}</span>
+                                                    <span className="block text-2xs font-normal text-surface-400">
+                                                        {o.total_kes === null
+                                                            ? "no reporting rate"
+                                                            : `≈ ${fmtKes(o.total_kes)}`}
+                                                    </span>
+                                                </>
+                                            )}
                                         </td>
                                         <td className={clsx("text-right tabular-nums font-medium", AGE_TONE[bucket])}>
                                             {o.age_days}d
