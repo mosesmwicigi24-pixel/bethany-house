@@ -92,8 +92,15 @@ class ReportingCurrency
             $cases .= sprintf(" WHEN '%s' THEN %.6F", $code, $rate);
         }
 
+        // The amount expression gets its OWN parentheses. Without them a
+        // compound expression breaks on operator precedence:
+        //   p.amount - COALESCE(p.refund_amount,0) * rate
+        // multiplies the rate into the refund term only, so with zero refunds
+        // the currency is added at face value — which is exactly how the
+        // Collected tile understated a month by KES 264,287 (10.1%) while
+        // looking perfectly plausible. Money SQL never trusts precedence.
         return sprintf(
-            '(%s * CASE UPPER(%s)%s ELSE NULL END)',
+            '((%s) * CASE UPPER(%s)%s ELSE NULL END)',
             $amountColumn,
             $currencyColumn,
             $cases,

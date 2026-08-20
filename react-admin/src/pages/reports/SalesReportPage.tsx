@@ -204,17 +204,21 @@ export default function SalesReportPage() {
 
             {/* KPIs row 2 */}
             <div className={KPI_GRID}>
-                <KpiCard
-                    label="Online Revenue"
-                    value={fmtKes(s.online_revenue)}
-                    sub={`${s.online_count ?? 0} orders`}
-                />
-                <KpiCard
-                    label="POS Revenue"
-                    value={fmtKes(s.pos_revenue)}
-                    sub={`${s.pos_count ?? 0} orders`}
-                />
-                <KpiCard label="Tax Collected" value={fmtKes(s.total_tax)} />
+                {/* The four queues, and they SUM to Total Revenue — the old
+                    Online/POS pair covered only two of them, so the page
+                    showed 245 orders against a 248 total and nobody could
+                    say where the rest went. */}
+                <KpiCard label="Till Sales" value={fmtKes(s.till_revenue ?? 0)}
+                         sub={`${s.till_count ?? 0} orders`} />
+                <KpiCard label="Web Orders" value={fmtKes(s.web_revenue ?? 0)}
+                         sub={`${s.web_count ?? 0} orders`} />
+                <KpiCard label="Chat Orders" value={fmtKes(s.chat_revenue ?? 0)}
+                         sub={`${s.chat_count ?? 0} orders`} />
+                <KpiCard label="Quoted Sales" value={fmtKes(s.quoted_revenue ?? 0)}
+                         sub={`${s.quoted_count ?? 0} orders`} />
+                {/* Accrued on this period's sales, by order date — not cash
+                    received. The old label said "Collected" and it never was. */}
+                <KpiCard label="Tax on sales" value={fmtKes(s.total_tax)} />
                 {/* "Collected" and the ledger's "Paid" are DIFFERENT questions and
                     are not meant to match: this is money that ARRIVED in the
                     period whatever period its order belongs to (treasury), while
@@ -760,6 +764,18 @@ export default function SalesReportPage() {
             {/* ── INTERNATIONAL TAB ── */}
             {activeTab === "international" && <InternationalTab />}
 
+            {(summaryQuery.data?.converted_currencies ?? []).length > 0 && (
+                <div className="card p-4 mb-6 border border-line bg-surface-50">
+                    <p className="text-xs text-surface-600">
+                        Included in the totals above at the reporting rate:{" "}
+                        {(summaryQuery.data?.converted_currencies ?? [])
+                            .map((c: any) => `${c.orders} order${c.orders === 1 ? "" : "s"} in ${c.currency_code}`
+                                + ` (${c.currency_code} ${Number(c.total_native).toLocaleString()} ≈ ${fmtKes(c.total_kes)} at ${c.rate})`)
+                            .join("; ")}
+                        .
+                    </p>
+                </div>
+            )}
             {(summaryQuery.data?.excluded_currencies ?? []).length > 0 && (
                 /* A total that quietly omits rows is worse than one that says
                    what it omitted — nothing else on the page lets a reader

@@ -36,6 +36,15 @@ class MetricEngine
     private const TZ = 'Africa/Nairobi';
 
     /**
+     * "Today" in SQL, as Nairobi sees it. CURRENT_DATE is the DB session's
+     * date (UTC), which made every age one day short between 21:00 and
+     * midnight EAT — caught when the suite happened to run past midnight and
+     * a 120-day-old fixture aged 119. created_at is stored Nairobi-local
+     * (app timezone), so only the "today" side of the subtraction was wrong.
+     */
+    private const TODAY_SQL = "(now() AT TIME ZONE 'Africa/Nairobi')::date";
+
+    /**
      * Sales truth: an order a HUMAN has accepted.
      *
      * This used to be `NOT IN (voided, cancelled)`, which counted every
@@ -4077,7 +4086,7 @@ class MetricEngine
             SELECT j.ckey, j.name, j.phone, j.email,
                    k.id AS order_id, k.order_number,
                    k.total_amount, k.currency_code, k.kes,
-                   (CURRENT_DATE - j.first_at::date)::int AS days_since
+                   (" . self::TODAY_SQL . " - j.first_at::date)::int AS days_since
             FROM journeys j
             JOIN keyed k ON k.ckey = j.ckey
             WHERE j.orders = 1
@@ -4140,9 +4149,9 @@ class MetricEngine
             // seconds-based FLOOR disagrees with that by one for most of every
             // day. Same expression as age_days below, so a row cannot land in
             // a bucket that contradicts the age printed next to it.
-            $q = $kes()->whereRaw('(CURRENT_DATE - orders.created_at::date) >= ?', [$b['min']]);
+            $q = $kes()->whereRaw('(' . self::TODAY_SQL . " - orders.created_at::date) >= ?", [$b['min']]);
             if ($b['max'] !== null) {
-                $q->whereRaw('(CURRENT_DATE - orders.created_at::date) <= ?', [$b['max']]);
+                $q->whereRaw('(' . self::TODAY_SQL . " - orders.created_at::date) <= ?", [$b['max']]);
             }
             $row = $q->selectRaw("COUNT(*) AS orders, COALESCE(SUM({$kesAmount}), 0) AS value")->first();
             $aging[] = [
@@ -4198,7 +4207,7 @@ class MetricEngine
                 orders.customer_phone,
                 orders.customer_email,
                 COUNT(oi.id) AS item_count,
-                (CURRENT_DATE - orders.created_at::date)::int AS age_days,
+                (" . self::TODAY_SQL . " - orders.created_at::date)::int AS age_days,
                 " . \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code') . " AS total_kes
             ")
             ->get()

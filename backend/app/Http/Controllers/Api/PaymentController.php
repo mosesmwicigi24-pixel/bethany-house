@@ -790,12 +790,16 @@ class PaymentController extends Controller
         $base = DB::table('payments')
             ->whereDate('created_at', '>=', $start)
             ->whereDate('created_at', '<=', $end)
-            ->when($currency, fn ($q) => $q->where('currency_code', strtoupper($currency)));
+            ->when($currency,
+                fn ($q) => $q->where('currency_code', strtoupper($currency)),
+                // No currency asked for: report in KES at the reporting rate.
+                // The old default summed every currency at face value.
+                fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('currency_code')));
 
         // Top-level KPIs — single query
         $kpis = (clone $base)->selectRaw("
             COUNT(*)                                                              AS total_count,
-            COALESCE(SUM(amount), 0)                                             AS total_volume,
+            COALESCE(SUM(" . ($currency ? 'amount' : \App\Support\ReportingCurrency::kes('amount', 'currency_code')) . "), 0) AS total_volume,
             COUNT(CASE WHEN status = 'paid'    THEN 1 END)                       AS paid_count,
             COALESCE(SUM(CASE WHEN status = 'paid'   THEN amount END), 0)        AS paid_volume,
             COUNT(CASE WHEN status = 'failed'  THEN 1 END)                       AS failed_count,

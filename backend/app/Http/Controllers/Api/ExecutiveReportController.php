@@ -668,7 +668,7 @@ class ExecutiveReportController extends Controller
                     $q->orWhereRaw('normalize_phone(customer_phone) = ?', ['+' . $canonical]);
                 }
             })
-            ->selectRaw('COALESCE(SUM(total_amount), 0) AS revenue_365, MAX(created_at) AS last_order_at')
+            ->selectRaw('COALESCE(SUM(' . \App\Support\ReportingCurrency::kes('total_amount', 'currency_code') . '), 0) AS revenue_365, MAX(created_at) AS last_order_at')
             ->first();
 
         $hasHistory = $snap !== null && $snap->last_order_at !== null;

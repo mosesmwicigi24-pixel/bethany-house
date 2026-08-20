@@ -108,8 +108,8 @@ class EnhancedReportController extends Controller
                 COALESCE(tax_rates.name, 'No Tax / Default') AS tax_name,
                 COALESCE(tax_rates.rate, 0) AS tax_rate,
                 COUNT(DISTINCT orders.id) AS order_count,
-                SUM(order_items.total_price) AS taxable_amount,
-                SUM(order_items.tax_amount)  AS tax_collected
+                SUM(" . \App\Support\ReportingCurrency::kes('order_items.total_price', 'orders.currency_code') . ") AS taxable_amount,
+                SUM(" . \App\Support\ReportingCurrency::kes('order_items.tax_amount', 'orders.currency_code') . ")  AS tax_collected
             ")
             ->groupBy('tax_rates.id', 'tax_rates.name', 'tax_rates.rate')
             ->orderByDesc('tax_collected')
@@ -143,10 +143,15 @@ class EnhancedReportController extends Controller
         $p = $this->params($request);
 
         // Inflows: completed payments grouped by month
+        // Every rail converts at the REPORTING rate before summing — a USD
+        // payment added at face value understates silently, the exact defect
+        // the 2026-08 audit found on the Collected tile. Rate-less currencies
+        // stay out of the sum rather than entering at a guess.
         $inflows = DB::table('payments')
             ->whereBetween('created_at', [$p['start'], $p['end']])
             ->where('status', 'paid')
-            ->selectRaw("TO_CHAR(created_at, 'YYYY-MM') AS month, SUM(amount) AS inflow, payment_method")
+            ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('currency_code'))
+            ->selectRaw("TO_CHAR(created_at, 'YYYY-MM') AS month, SUM(" . \App\Support\ReportingCurrency::kes('amount', 'currency_code') . ") AS inflow, payment_method")
             ->groupBy('month', 'payment_method')
             ->orderBy('month')
             ->get();
