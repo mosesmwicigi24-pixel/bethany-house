@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, Fragment } from "react";
+import { useState, useCallback, useEffect, useRef, Fragment } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { clsx } from "clsx";
@@ -9,6 +9,7 @@ import { useTableState } from "@/hooks/useTableState";
 import { Spinner } from "@/components/ui/Spinner";
 import type { ApiError } from "@/types";
 import { groupRowsByDate, DateGroupHeaderRow } from "@/lib/dateGrouping";
+import { usePermissions } from "@/hooks/usePermissions";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -50,6 +51,126 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
     bank_transfer: "Bank Transfer",
     cash_on_delivery: "COD",
 };
+
+// ── Stage menu ────────────────────────────────────────────────────────────────
+// Moving an order along its life used to mean opening it, finding Update
+// Status, choosing from a dropdown and saving — four steps per order, which is
+// unworkable against a backlog of a hundred unconfirmed carts. This is the same
+// action, one click from the list.
+//
+// The options offered are only the LEGAL ones. This table mirrors
+// OrderStatusMachine::TRANSITIONS on the server; the server remains the
+// authority and rejects anything illegal regardless, so the mirror exists to
+// avoid offering a person a button that can only fail — not to enforce.
+const TRANSITIONS: Record<string, string[]> = {
+    pending:    ["processing", "confirmed", "shipped", "delivered", "completed", "cancelled"],
+    processing: ["confirmed", "shipped", "delivered", "completed", "cancelled"],
+    confirmed:  ["processing", "shipped", "delivered", "completed", "cancelled"],
+    shipped:    ["delivered", "completed", "cancelled"],
+    delivered:  ["completed", "refunded"],
+    completed:  ["refunded"],
+    cancelled:  [],
+    refunded:   [],
+};
+
+/** The three stages, in the order an order lives through them. */
+const STAGE_ACTIONS: { to: OrderStatus; label: string; hint: string; tone?: string }[] = [
+    { to: "confirmed"  as OrderStatus, label: "Confirm",         hint: "Accept the order — it counts as sales from now on" },
+    { to: "processing" as OrderStatus, label: "Mark processed",  hint: "Being worked on" },
+    { to: "completed"  as OrderStatus, label: "Mark completed",  hint: "Done and fully paid" },
+];
+
+function StageMenu({ order, onDone }: { order: Order; onDone: () => void }) {
+    const [open, setOpen] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const ref = useRef<HTMLDivElement>(null);
+    const toast = useToastStore();
+    const { can } = usePermissions();
+
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, []);
+
+    if (!can("orders.edit")) return null;
+
+    const allowed = TRANSITIONS[order.status] ?? [];
+    const stages  = STAGE_ACTIONS.filter(a => allowed.includes(a.to));
+    const canCancel = allowed.includes("cancelled") && can("orders.cancel");
+
+    // A completed order has nowhere left to go; an empty menu is worse than none.
+    if (!stages.length && !canCancel) return null;
+
+    const move = async (to: OrderStatus, label: string) => {
+        setBusy(true);
+        try {
+            await ordersApi.updateStatus(order.id, { status: to });
+            toast.success(`${order.order_number} — ${label.toLowerCase()}`);
+            onDone();
+        } catch (e) {
+            // The server's guards carry the reason (unpaid balance, production
+            // still open, payment awaiting approval). Surfacing its message
+            // verbatim tells the user what to do; a generic failure does not.
+            toast.error((e as ApiError).message ?? "Could not update the order");
+        } finally {
+            setBusy(false);
+            setOpen(false);
+        }
+    };
+
+    return (
+        <div className="relative" ref={ref} onClick={(e) => e.stopPropagation()}>
+            <button
+                onClick={() => setOpen(v => !v)}
+                disabled={busy}
+                aria-label="Order stage"
+                title="Move this order along"
+                className={clsx(
+                    "w-6 h-6 rounded-md flex items-center justify-center transition-colors",
+                    "text-surface-400 hover:text-surface-700 hover:bg-surface-100",
+                    open && "bg-surface-100 text-surface-700",
+                    busy && "opacity-50",
+                )}
+            >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <circle cx="10" cy="4" r="1.5" /><circle cx="10" cy="10" r="1.5" /><circle cx="10" cy="16" r="1.5" />
+                </svg>
+            </button>
+
+            {open && (
+                <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-white rounded-lg shadow-lg border border-surface-200 py-1">
+                    <p className="px-3 py-1.5 text-2xs font-semibold uppercase tracking-wide text-surface-400">
+                        Move to
+                    </p>
+                    {stages.map(a => (
+                        <button
+                            key={a.to}
+                            onClick={() => move(a.to, a.label)}
+                            className="w-full px-3 py-1.5 text-left hover:bg-surface-50"
+                        >
+                            <span className="block text-xs font-medium text-surface-700">{a.label}</span>
+                            <span className="block text-2xs text-surface-400">{a.hint}</span>
+                        </button>
+                    ))}
+                    {canCancel && (
+                        <>
+                            <div className="my-1 border-t border-surface-100" />
+                            <button
+                                onClick={() => move("cancelled" as OrderStatus, "Cancelled")}
+                                className="w-full px-3 py-1.5 text-left text-xs font-medium text-danger hover:bg-danger-light"
+                            >
+                                Cancel order
+                            </button>
+                        </>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 
@@ -220,6 +341,16 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
     const _ts = useTableState();
     const page = _ts.state.page;
     const setPage = _ts.setPage;
+
+    // After a stage change, refresh this list AND the figures that depend on it.
+    // Confirming an order moves money from pipeline into recognised sales, so a
+    // stale sales report or pipeline queue would contradict what the user just
+    // did on screen.
+    const refetchAfterStageChange = useCallback(() => {
+        qc.invalidateQueries({ queryKey: ["orders"] });
+        qc.invalidateQueries({ queryKey: ["order-pipeline"] });
+        qc.invalidateQueries({ queryKey: ["report-sales-ledger"] });
+    }, [qc]);
 
     // A channel-scoped view (POS / Online / WhatsApp Orders) locks sales_channel.
     const baseFilters = useCallback((): OrderFilters => ({
@@ -487,6 +618,7 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                                         <td>
                                             <div className="flex items-center gap-1.5 justify-end">
                                                 <PaymentLinkButton order={order} />
+                                                <StageMenu order={order} onDone={refetchAfterStageChange} />
                                                 <svg className="w-4 h-4 text-surface-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
                                                 </svg>
