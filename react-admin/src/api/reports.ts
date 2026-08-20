@@ -180,6 +180,13 @@ export const reportsApi = {
      * Period message volume comes from daily snapshots that collect from deploy
      * day onward (`message_volume.daily_since`); all-time totals are cumulative.
      */
+    /**
+     * The unconfirmed order queue. `sort` defaults to 'value' — staff working a
+     * backlog should spend their first hour on the largest recoverable money.
+     */
+    orderPipeline: (params?: { outlet_id?: number; sort?: "value" | "age"; limit?: number }) =>
+        get<OrderPipelineReport>(`${BASE}/order-pipeline`, { params }),
+
     salesNeema: (params: DateRangeParams) =>
         get<NeemaSalesReport>(`${BASE}/sales/neema`, { params }),
 
@@ -529,6 +536,37 @@ export interface LedgerBucket {
     total: LedgerFigures;
     by_channel: Record<"pos" | "online" | "whatsapp", LedgerFigures>;
 }
+// ── Unconfirmed order queue ───────────────────────────────────────────────────
+// The work list behind the pipeline figure: carts nobody has confirmed. Aged,
+// because age is the signal that says whether a cart is a live lead or a number
+// that has been sitting in the order book pretending to be one.
+
+export interface PipelineOrder {
+    id: number;
+    order_number: string;
+    channel: string;
+    currency_code: string;
+    total_amount: number;
+    item_count: number;
+    age_days: number;
+    created_at: string;
+    customer_name: string | null;
+    customer_phone: string | null;
+    customer_email: string | null;
+}
+
+export interface OrderPipelineReport {
+    summary: {
+        orders: number;
+        value: number;
+        excluded_non_kes_orders: number;
+        currency: string;
+    };
+    aging: { key: "fresh" | "recent" | "stale" | "dormant"; label: string; orders: number; value: number }[];
+    by_channel: { channel: "pos" | "online" | "whatsapp"; label: string; orders: number; value: number }[];
+    orders: PipelineOrder[];
+}
+
 /** The three stages of a confirmed order's life. Unconfirmed carts are not a
     stage — they are pipeline, and never appear here. */
 export type OrderStage = "confirmed" | "processed" | "completed";

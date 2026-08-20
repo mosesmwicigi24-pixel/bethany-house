@@ -184,6 +184,7 @@ const PaymentTransactionsPage = lazy(
 // ── Reports module ───────────────────────────────────────────────────────────
 const ReportsPage        = lazy(() => import("@/pages/reports/ReportsPage"));
 const SalesReportPage       = lazy(() => import("@/pages/reports/SalesReportPage"));
+const OrderPipelinePage     = lazy(() => import("@/pages/reports/OrderPipelinePage"));
 const CustomersReportPage   = lazy(() => import("@/pages/reports/CustomersReportPage"));
 const InventoryReportPage   = lazy(() => import("@/pages/reports/InventoryReportPage"));
 const ProductionReportPage  = lazy(() => import("@/pages/reports/ProductionReportPage"));
@@ -907,6 +908,16 @@ export default function App() {
                                 <ProtectedRoute permission="reports.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <ReportsPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/reports/order-pipeline"
+                            element={
+                                <ProtectedRoute permission="reports.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <OrderPipelinePage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }

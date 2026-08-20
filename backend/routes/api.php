@@ -1248,6 +1248,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/institutions',             [\App\Http\Controllers\Api\ExecutiveReportController::class, 'institutions']);
                 Route::get('/international',            [\App\Http\Controllers\Api\ExecutiveReportController::class, 'international']);
                 Route::get('/win-back',                 [\App\Http\Controllers\Api\ExecutiveReportController::class, 'winBack']);
+                Route::get('/order-pipeline',           [\App\Http\Controllers\Api\ExecutiveReportController::class, 'orderPipeline']);
                 Route::post('/win-back/outreach',       [\App\Http\Controllers\Api\ExecutiveReportController::class, 'winBackOutreach']);
                 Route::get('/outreach-log',             [\App\Http\Controllers\Api\ExecutiveReportController::class, 'outreachLog']);
                 Route::get('/financial-intelligence',   [\App\Http\Controllers\Api\ExecutiveReportController::class, 'financialIntelligence']);

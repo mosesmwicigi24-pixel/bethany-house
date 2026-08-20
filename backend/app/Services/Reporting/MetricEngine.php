@@ -3794,4 +3794,151 @@ class MetricEngine
             'window_days'  => $days,
         ];
     }
+
+    /**
+     * The unconfirmed order queue — the work list behind the pipeline figure.
+     *
+     * These are carts a customer built on the storefront or over WhatsApp and
+     * never had confirmed. They are NOT income (see salesBase / recognise), and
+     * this is the report that stops that being the end of the story: someone
+     * has to look at each one and either confirm the sale or kill it.
+     *
+     * Aged, because age is the whole signal. A cart from this morning is a live
+     * lead worth a phone call; a cart from four months ago is a number that has
+     * been quietly sitting in the order book pretending to be a prospect. The
+     * buckets are the ones a credit controller would reach for, because the
+     * question is the same one: how long has this been outstanding, and is
+     * anyone still going to act on it?
+     *
+     * Ordered by value descending by default. Staff working a backlog of ~100
+     * carts should spend their first hour on the largest recoverable money, not
+     * on whatever happens to be oldest.
+     *
+     * MONEY IS KES-ONLY, as everywhere in this engine — adding KES to USD gives
+     * a number that means nothing. Rows of every currency are still listed,
+     * because a USD cart is work whether or not it can be summed; each row
+     * carries its own currency and `summary.excluded_non_kes_orders` says how
+     * many are outside the totals.
+     *
+     * @param string $sort 'value' (default) or 'age'
+     */
+    public function orderPipeline(string $sort = 'value', int $limit = 200): array
+    {
+        $base = fn () => DB::table('orders')
+            ->whereIn('status', \App\Models\Order::PIPELINE_STATUSES)
+            ->whereNotIn('payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES)
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds));
+
+        $kes = fn () => $base()->whereRaw("UPPER(currency_code) = 'KES'");
+
+        // ── Aging. Boundaries are inclusive-left, so every order lands in
+        //    exactly one bucket and the bucket counts sum to the total.
+        $buckets = [
+            ['key' => 'fresh',   'label' => '0–7 days',    'min' => 0,  'max' => 7],
+            ['key' => 'recent',  'label' => '8–30 days',   'min' => 8,  'max' => 30],
+            ['key' => 'stale',   'label' => '31–90 days',  'min' => 31, 'max' => 90],
+            ['key' => 'dormant', 'label' => 'Over 90 days','min' => 91, 'max' => null],
+        ];
+
+        $aging = [];
+        foreach ($buckets as $b) {
+            // Calendar days, not elapsed seconds: an aging report is read the
+            // way a credit controller reads one ("this is 31 days old"), and a
+            // seconds-based FLOOR disagrees with that by one for most of every
+            // day. Same expression as age_days below, so a row cannot land in
+            // a bucket that contradicts the age printed next to it.
+            $q = $kes()->whereRaw('(CURRENT_DATE - orders.created_at::date) >= ?', [$b['min']]);
+            if ($b['max'] !== null) {
+                $q->whereRaw('(CURRENT_DATE - orders.created_at::date) <= ?', [$b['max']]);
+            }
+            $row = $q->selectRaw('COUNT(*) AS orders, COALESCE(SUM(total_amount), 0) AS value')->first();
+            $aging[] = [
+                'key'    => $b['key'],
+                'label'  => $b['label'],
+                'orders' => (int)   ($row->orders ?? 0),
+                'value'  => (float) ($row->value  ?? 0),
+            ];
+        }
+
+        // ── Per channel ──────────────────────────────────────────────────────
+        $byChannel = [];
+        foreach (['pos', 'online', 'whatsapp'] as $c) {
+            $row = \App\Models\Order::query()
+                ->salesChannel($c)
+                ->pipeline()
+                ->whereRaw("UPPER(orders.currency_code) = 'KES'")
+                ->when($this->outletIds, fn ($q) => $q->whereIn('orders.outlet_id', $this->outletIds))
+                ->selectRaw('COUNT(*) AS orders, COALESCE(SUM(orders.total_amount), 0) AS value')
+                ->first();
+
+            $byChannel[] = [
+                'channel' => $c,
+                'label'   => ['pos' => 'POS', 'online' => 'Online', 'whatsapp' => 'WhatsApp'][$c],
+                'orders'  => (int)   ($row->orders ?? 0),
+                'value'   => (float) ($row->value  ?? 0),
+            ];
+        }
+
+        // ── The queue itself ─────────────────────────────────────────────────
+        $orderBy = $sort === 'age' ? 'orders.created_at' : 'orders.total_amount';
+        $dir     = $sort === 'age' ? 'asc' : 'desc';   // age: oldest first
+
+        $rows = \App\Models\Order::query()
+            ->pipeline()
+            ->when($this->outletIds, fn ($q) => $q->whereIn('orders.outlet_id', $this->outletIds))
+            ->leftJoin('order_items as oi', 'oi.order_id', '=', 'orders.id')
+            ->groupBy('orders.id')
+            ->orderBy($orderBy, $dir)
+            ->limit($limit)
+            ->selectRaw("
+                orders.id,
+                orders.order_number,
+                orders.order_type,
+                orders.outlet_id,
+                orders.currency_code,
+                orders.total_amount,
+                orders.created_at,
+                orders.customer_first_name,
+                orders.customer_last_name,
+                orders.customer_phone,
+                orders.customer_email,
+                COUNT(oi.id) AS item_count,
+                (CURRENT_DATE - orders.created_at::date)::int AS age_days
+            ")
+            ->get()
+            ->map(function ($r) {
+                $name = trim(($r->customer_first_name ?? '') . ' ' . ($r->customer_last_name ?? ''));
+
+                return [
+                    'id'             => (int) $r->id,
+                    'order_number'   => $r->order_number,
+                    'channel'        => $r->order_type,
+                    'currency_code'  => strtoupper((string) $r->currency_code),
+                    'total_amount'   => (float) $r->total_amount,
+                    'item_count'     => (int) $r->item_count,
+                    'age_days'       => (int) $r->age_days,
+                    'created_at'     => $r->created_at,
+                    'customer_name'  => $name !== '' ? $name : null,
+                    'customer_phone' => $r->customer_phone,
+                    'customer_email' => $r->customer_email,
+                ];
+            })
+            ->values()
+            ->all();
+
+        $totals   = $kes()->selectRaw('COUNT(*) AS orders, COALESCE(SUM(total_amount), 0) AS value')->first();
+        $nonKes   = (int) $base()->whereRaw("UPPER(currency_code) <> 'KES'")->count();
+
+        return [
+            'summary' => [
+                'orders'                    => (int)   ($totals->orders ?? 0),
+                'value'                     => (float) ($totals->value  ?? 0),
+                'excluded_non_kes_orders'   => $nonKes,
+                'currency'                  => 'KES',
+            ],
+            'aging'      => $aging,
+            'by_channel' => $byChannel,
+            'orders'     => $rows,
+        ];
+    }
 }
