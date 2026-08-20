@@ -544,11 +544,34 @@ class ReportController extends Controller
             $pipeline['total']['sales']  += $row['sales'];
         }
 
+        // ── Reconciliation ──────────────────────────────────────────────────
+        // Recognition removed KES 1.1m from the reported figure overnight, and
+        // an unexplained cliff on a revenue chart reads as broken software, not
+        // as a correction. So the report states the bridge explicitly:
+        //
+        //   recognised sales        what the business actually earned
+        // + unconfirmed pipeline    carts nobody has confirmed yet
+        // = gross order book        the number this report used to print
+        //
+        // The gross line is labelled, never plotted as revenue. It exists so a
+        // reader comparing against last month's printout can see where the
+        // difference went instead of assuming data loss.
+        $recognisedSales = (float) collect($byChannel)->sum('sales');
+        $reconciliation  = [
+            'recognised_sales' => $recognisedSales,
+            'pipeline_sales'   => $pipeline['total']['sales'],
+            'gross_order_book' => $recognisedSales + $pipeline['total']['sales'],
+            'note'             => 'Gross order book is every live order including unconfirmed carts. '
+                                . 'It is what this report printed before revenue was recognised on '
+                                . 'confirmation, and is shown only to reconcile against older figures.',
+        ];
+
         return response()->json($this->numify([
-            'period'   => ['start' => $start, 'end' => $end, 'currency' => $currency],
-            'channels' => $byChannel,
-            'by_stage' => $byStage,
-            'pipeline' => $pipeline,
+            'period'         => ['start' => $start, 'end' => $end, 'currency' => $currency],
+            'channels'       => $byChannel,
+            'by_stage'       => $byStage,
+            'pipeline'       => $pipeline,
+            'reconciliation' => $reconciliation,
             'daily'    => $daily,
             'weekly'   => $bucketed("TO_CHAR(DATE_TRUNC('week',  orders.created_at), 'IYYY-\"W\"IW')"),
             'monthly'  => $bucketed("TO_CHAR(DATE_TRUNC('month', orders.created_at), 'YYYY-MM')"),

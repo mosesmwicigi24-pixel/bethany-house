@@ -157,4 +157,65 @@ class RevenueRecognitionTest extends TestCase
             'the three stage columns must reconcile to the channel total');
         $this->assertSame(3000.0, $stageSales);
     }
+
+    public function test_the_reconciliation_bridges_the_old_number_to_the_new_one(): void
+    {
+        $this->order('confirmed');   // 1000 recognised
+        $this->order('pending');     // 1000 pipeline
+        $this->order('cancelled');   // dead: in neither, and not in gross
+
+        $res = $this->actingAs($this->viewer(), 'sanctum')
+            ->getJson('/api/v1/admin/reports/sales/ledger?start='
+                . now()->subDay()->toDateString() . '&end=' . now()->addDay()->toDateString());
+
+        $res->assertOk();
+
+        $this->assertSame(1000.0, (float) $res->json('reconciliation.recognised_sales'));
+        $this->assertSame(1000.0, (float) $res->json('reconciliation.pipeline_sales'));
+        $this->assertSame(2000.0, (float) $res->json('reconciliation.gross_order_book'),
+            'gross must equal recognised + pipeline exactly, or the bridge does not bridge');
+    }
+
+    public function test_staff_can_confirm_an_unpaid_order_so_it_stops_looking_abandoned(): void
+    {
+        // The case that stranded 85 WhatsApp orders: agreed with the customer,
+        // payment on delivery, so it could never leave 'pending'.
+        $order = Order::factory()->create([
+            'status' => 'pending', 'payment_status' => 'pending',
+            'currency_code' => 'KES', 'total_amount' => 5000,
+        ]);
+
+        $staff = User::factory()->create();
+        $staff->assignRole(Role::findOrCreate('admin', 'sanctum'));
+        foreach (['orders.view', 'orders.edit'] as $perm) {
+            $staff->givePermissionTo(Permission::findOrCreate($perm, 'sanctum'));
+        }
+
+        $this->actingAs($staff, 'sanctum')
+            ->putJson("/api/v1/admin/orders/{$order->id}/status", ['status' => 'confirmed'])
+            ->assertOk();
+
+        $this->assertSame('confirmed', $order->fresh()->status);
+        $this->assertContains($order->id, $this->recognisedIds(),
+            'confirming makes it income even with the balance outstanding');
+    }
+
+    public function test_completing_an_unpaid_order_is_still_refused(): void
+    {
+        $order = Order::factory()->create([
+            'status' => 'confirmed', 'payment_status' => 'pending',
+            'currency_code' => 'KES', 'total_amount' => 5000,
+        ]);
+
+        $staff = User::factory()->create();
+        $staff->assignRole(Role::findOrCreate('admin', 'sanctum'));
+        foreach (['orders.view', 'orders.edit'] as $perm) {
+            $staff->givePermissionTo(Permission::findOrCreate($perm, 'sanctum'));
+        }
+
+        $this->actingAs($staff, 'sanctum')
+            ->putJson("/api/v1/admin/orders/{$order->id}/status", ['status' => 'completed'])
+            ->assertStatus(422)
+            ->assertJsonPath('reason', 'unpaid_balance');
+    }
 }

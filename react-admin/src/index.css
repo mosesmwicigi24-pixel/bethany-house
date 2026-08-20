@@ -155,6 +155,12 @@
     .badge-amber {
         @apply badge bg-amber-light text-amber-dark;
     }
+    /* Order stage: being worked on. Sits between .badge-amber (confirmed,
+       waiting) and .badge-success (done). Pink, not a warning hue — work in
+       progress is good news. */
+    .badge-pink {
+        @apply badge bg-pink-light text-pink-dark;
+    }
     .badge-warning {
         @apply badge bg-warning-light text-warning-dark;
     }
