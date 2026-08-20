@@ -15,7 +15,11 @@ use Illuminate\Support\Facades\DB;
  *   1. A price the shop typed into the hub for that currency wins, verbatim.
  *      A USD order carries the hub's USD price; a Zambian order carries the
  *      hub's kwacha price. Nothing is done arithmetically to a figure a human
- *      set on purpose.
+ *      set on purpose. A row at 0.00 is NOT such a figure — it is a row
+ *      created and never filled in. Reading one as a real price billed two
+ *      live orders USD 0.00 for a tray, so rows at or below zero count as
+ *      absent: the answer becomes a converted price or a refusal, and both of
+ *      those are recoverable in a way that an invoice for nothing is not.
  *
  *   2. With no such row we convert from the base-currency row at the
  *      configured rate — and when no configured rate exists we return NULL
@@ -142,7 +146,12 @@ class CurrencyPricing
     public static function priceIn(iterable $rows, string $currency): ?array
     {
         $currency = strtoupper($currency);
-        $rows     = collect($rows)->filter();
+
+        // A row at 0.00 is a row somebody created and never filled in, not a
+        // decision to give the thing away. Reading it as a price billed two
+        // orders USD 0.00 for a tray. Treat it as absent — the shop types a
+        // price, or the order is refused, both of which are recoverable.
+        $rows = collect($rows)->filter(fn ($r) => $r && (float) $r->regular_price > 0);
 
         // 1. The shop's own price for this currency, used as entered.
         $direct = $rows->first(fn ($r) => strtoupper((string) $r->currency_code) === $currency);

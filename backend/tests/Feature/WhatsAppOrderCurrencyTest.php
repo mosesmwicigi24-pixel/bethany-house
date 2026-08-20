@@ -340,6 +340,47 @@ class WhatsAppOrderCurrencyTest extends TestCase
 
     // ── The rule itself ──────────────────────────────────────────────────────
 
+    public function test_a_price_row_of_zero_is_a_blank_row_not_a_free_product(): void
+    {
+        $this->currency('KES', 1.0, isBase: true);
+        $this->currency('USD', 0.0077);
+
+        // The shape that billed two live orders USD 0.00: a USD row exists on
+        // the product, but nobody ever typed a number into it.
+        $product = $this->product(['KES' => 4500, 'USD' => 0]);
+
+        $priced = CurrencyPricing::catalogue($product->id, null, 'USD');
+
+        // The blank row is ignored and the KES price converts instead.
+        $this->assertEqualsWithDelta(34.65, $priced['regular_price'], 0.01);
+        $this->assertSame('KES', $priced['converted_from']);
+    }
+
+    public function test_a_blank_row_with_no_rate_to_fall_back_on_is_unpriceable(): void
+    {
+        $this->currency('KES', 1.0, isBase: true);
+        $this->currency('USD');            // no configured rate either
+
+        $product = $this->product(['KES' => 4500, 'USD' => 0]);
+
+        // Nothing to say, so it says nothing — rather than 0.00.
+        $this->assertNull(CurrencyPricing::catalogue($product->id, null, 'USD'));
+    }
+
+    public function test_a_whatsapp_order_is_never_written_at_zero(): void
+    {
+        $this->clerk();
+        $this->currency('KES', 1.0, isBase: true);
+        $this->currency('USD');            // blank row AND no rate
+        $this->country('NG', 'USD');
+
+        $product = $this->product(['KES' => 4500, 'USD' => 0]);
+
+        $this->whatsappOrder($product, 'NG')->assertStatus(422);
+
+        $this->assertSame(0, Order::count());
+    }
+
     public function test_a_non_base_row_at_exactly_one_is_not_a_rate(): void
     {
         $this->currency('KES', 1.0, isBase: true);

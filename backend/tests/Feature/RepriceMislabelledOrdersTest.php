@@ -166,6 +166,43 @@ class RepriceMislabelledOrdersTest extends TestCase
         $this->assertEqualsWithDelta(30.0, (float) $order->fresh()->items->first()->unit_price, 0.01);
     }
 
+    /**
+     * The damage an earlier run of this command did: it read a blank 0.00 USD
+     * price row as real and billed two live orders nothing. The same command
+     * has to be able to put that right, so a line at 0.00 on a product the hub
+     * DOES price is a second provable error, alongside the mislabel.
+     */
+    public function test_a_line_billing_zero_is_corrected(): void
+    {
+        $this->currency('KES', 1.0, isBase: true);
+        $this->currency('USD', 0.0077);
+
+        $product = $this->product(['KES' => 4500, 'USD' => 35]);
+        $order   = $this->order($product, 'USD', 0);
+
+        $this->artisan('orders:reprice-currency --apply')
+            ->expectsOutputToContain('billed 0.00')
+            ->assertSuccessful();
+
+        $order->refresh()->load('items');
+        $this->assertEqualsWithDelta(35.0, (float) $order->items->first()->unit_price, 0.01);
+        $this->assertEqualsWithDelta(35.0, (float) $order->total_amount, 0.01);
+    }
+
+    public function test_a_zero_line_the_hub_cannot_price_is_left_for_a_human(): void
+    {
+        $this->currency('KES', 1.0, isBase: true);
+        $this->currency('USD');            // no rate to fall back on
+
+        $product = $this->product(['KES' => 4500]);
+        $order   = $this->order($product, 'USD', 0);
+
+        $this->artisan('orders:reprice-currency --apply')->assertSuccessful();
+
+        // Still 0 — but reported, never guessed at.
+        $this->assertEqualsWithDelta(0.0, (float) $order->fresh()->items->first()->unit_price, 0.01);
+    }
+
     public function test_a_paid_order_is_reported_but_never_rewritten(): void
     {
         $this->currency('KES', 1.0, isBase: true);
