@@ -3930,7 +3930,21 @@ class MetricEngine
      * rate. A currency with no reporting rate stays in the counts — a customer
      * is a customer — but out of every money figure.
      */
-    public function secondPurchase(int $recentDays = 60, int $worklistLimit = 100): array
+    // The worklist window is 90 days, set by the PRODUCT, not the median.
+    //
+    // The measured median gap to a second purchase is six days — but that
+    // number is right-censored: with only ~three months of order history, a
+    // ninety-day repeat cycle cannot yet have shown up in the data, so the
+    // median describes the fast-follow buyers (add-ons, event pieces) and is
+    // silent about replenishment. The owner's product knowledge fills the gap
+    // the data cannot: consumables — hosts, altar wine — take up to three
+    // months to exhaust, and the reorder moment lands near the END of that.
+    //
+    // Ninety days also closes a coverage hole between engines: the
+    // Replenishment Radar needs >= 2 purchases to detect a rhythm, so a
+    // one-time buyer running out of stock is invisible to it. Until their
+    // second purchase exists, THIS list is the only place they appear.
+    public function secondPurchase(int $recentDays = 90, int $worklistLimit = 100): array
     {
         $key = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
         $rate = "(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))";
