@@ -307,12 +307,19 @@ class OrderTotalsCharacterizationTest extends TestCase
         $this->taxInclusivePricing(false);
         $this->actor(['orders.edit']);
 
-        DB::table('currencies')->insert([
-            ['code' => 'KES', 'name' => 'Shilling', 'symbol' => 'KSh', 'exchange_rate' => 1,
-             'is_active' => true, 'is_base' => true, 'created_at' => now(), 'updated_at' => now()],
-            ['code' => 'USD', 'name' => 'Dollar', 'symbol' => '$', 'exchange_rate' => 0.01,
-             'is_active' => true, 'is_base' => false, 'created_at' => now(), 'updated_at' => now()],
-        ]);
+        // Upsert, not insert: the base currency rows are guaranteed by a
+        // migration now (reporting reads its rates from this table, and a
+        // missing row silently zeroes every report).
+        DB::table('currencies')->updateOrInsert(
+            ['code' => 'KES'],
+            ['name' => 'Shilling', 'symbol' => 'KSh', 'exchange_rate' => 1,
+             'is_active' => true, 'is_base' => true, 'updated_at' => now()],
+        );
+        DB::table('currencies')->updateOrInsert(
+            ['code' => 'USD'],
+            ['name' => 'Dollar', 'symbol' => '$', 'exchange_rate' => 0.01,
+             'is_active' => true, 'is_base' => false, 'updated_at' => now()],
+        );
         DB::table('countries')->updateOrInsert(
             ['code' => 'US'],
             ['name' => 'United States', 'default_currency_code' => 'USD',

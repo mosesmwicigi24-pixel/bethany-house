@@ -210,4 +210,73 @@ class ReportingExchangeRateTest extends TestCase
         // Changing what a report says must not change what a customer is charged.
         $this->assertSame(0.01, (float) DB::table('currencies')->where('id', $id)->value('exchange_rate'));
     }
+
+    /**
+     * The sweep's guard.
+     *
+     * Every other test in this suite uses KES fixtures, which pass whether or
+     * not conversion works — the KES rate is 1. This one seeds a dollar order
+     * and walks the reports that used to filter `currency_code = 'KES'` and
+     * therefore could not see it at all.
+     */
+    public function test_every_swept_report_can_see_a_dollar_order(): void
+    {
+        $usd = Order::factory()->create([
+            'order_type'     => 'whatsapp',
+            'status'         => 'confirmed',
+            'payment_status' => 'paid',
+            'currency_code'  => 'USD',
+            'total_amount'   => 100,            // => KES 12,800
+            'customer_phone' => '254722000999',
+            'customer_first_name' => 'Dollar', 'customer_last_name' => 'Customer',
+            'created_at'     => now()->subDays(3),
+        ]);
+
+        $viewer = $this->viewer();
+
+        // 1. Headline tiles
+        $summary = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/v1/admin/reports/sales/summary?start='
+                . now()->subDays(10)->toDateString() . '&end=' . now()->addDay()->toDateString())
+            ->assertOk();
+        $this->assertSame(12800.0, (float) $summary->json('summary.total_revenue'));
+
+        // 2. Ledger + its channel split
+        $ledger = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/v1/admin/reports/sales/ledger?start='
+                . now()->subDays(10)->toDateString() . '&end=' . now()->addDay()->toDateString())
+            ->assertOk();
+        $this->assertSame(12800.0, (float) collect($ledger->json('channels'))->sum('sales'));
+
+        // 3. The executive dashboard — one of the engines the sweep reached.
+        $exec = $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/v1/admin/reports/executive')->assertOk();
+        $this->assertSame(12800.0, (float) data_get($exec->json(), 'kpis.sales.revenue.current'),
+            'the executive dashboard filtered KES-only and could not see this order');
+
+        // 4. A customer engine reading raw SQL — the half that also still had
+        //    the OLD recognition rule until this sweep.
+        $topCustomers = MetricEngineProbe::topCustomerRevenue();
+        $this->assertSame(12800.0, $topCustomers,
+            'customer engines summed native totals behind a KES-only filter');
+
+        $this->assertSame('USD', $usd->fresh()->currency_code, 'the order itself is untouched');
+    }
+}
+
+/** Thin probe so the test can reach an engine method without an HTTP route. */
+class MetricEngineProbe
+{
+    public static function topCustomerRevenue(): float
+    {
+        $engine = \App\Services\Reporting\MetricEngine::for(
+            \App\Models\User::factory()->create(),
+        );
+        $rows = $engine->topCustomers(
+            \Carbon\Carbon::now()->subDays(10),
+            \Carbon\Carbon::now()->addDay(),
+        );
+
+        return (float) collect($rows)->sum('period_revenue');
+    }
 }

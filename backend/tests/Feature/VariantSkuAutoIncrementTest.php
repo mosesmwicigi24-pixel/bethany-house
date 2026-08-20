@@ -25,8 +25,9 @@ class VariantSkuAutoIncrementTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        DB::table('currencies')->insert([
-            'code' => 'KES', 'name' => 'Kenyan Shilling', 'symbol' => 'KSh',
+        DB::table('currencies')->updateOrInsert(
+            ['code' => 'KES'],
+            [ 'name' => 'Kenyan Shilling', 'symbol' => 'KSh',
             'created_at' => now(), 'updated_at' => now(),
         ]);
 

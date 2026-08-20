@@ -67,8 +67,9 @@ class WhatsAppOrderCurrencyTest extends TestCase
     /** A currency row. Base-relative rate; the schema's default is 1.0. */
     private function currency(string $code, float $rate = 1.0, bool $isBase = false): void
     {
-        DB::table('currencies')->insert([
-            'code' => $code, 'name' => $code, 'symbol' => $code,
+        DB::table('currencies')->updateOrInsert(
+            ['code' => $code],
+            [ 'name' => $code, 'symbol' => $code,
             'exchange_rate' => $rate, 'is_base' => $isBase, 'is_active' => true,
             'created_at' => now(), 'updated_at' => now(),
         ]);
