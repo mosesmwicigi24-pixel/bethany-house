@@ -475,6 +475,43 @@ class ExecutiveReportController extends Controller
      * counting them. This is the list a human works through, aged so the
      * triage order is obvious, and exportable so it can be worked offline.
      */
+    /**
+     * Second-purchase engine — GET /reports/second-purchase
+     *
+     * 86.5% of the trailing year's revenue came from one-time buyers. This is
+     * the funnel for the one conversion that changes that — first purchase to
+     * second — plus the worklist of recent one-time buyers to call.
+     */
+    public function secondPurchase(Request $request)
+    {
+        $validated = $request->validate([
+            'outlet_id'   => 'nullable|integer|exists:outlets,id',
+            'recent_days' => 'nullable|integer|min:7|max:365',
+        ]);
+
+        $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+        $report = $engine->secondPurchase((int) ($validated['recent_days'] ?? 60));
+
+        if ($this->wantsExport($request)) {
+            return $this->csvResponse(
+                ['Customer', 'Phone', 'Email', 'Order', 'Amount', 'Currency', 'KES', 'Days since'],
+                collect($report['worklist'])->map(fn ($w) => [
+                    $w['name'] ?? '',
+                    $w['phone'] ?? '',
+                    $w['email'] ?? '',
+                    $w['order_number'],
+                    $w['total_amount'],
+                    $w['currency_code'],
+                    $w['total_kes'] ?? '',
+                    $w['days_since'],
+                ])->all(),
+                'second-purchase-worklist',
+            );
+        }
+
+        return response()->json($report);
+    }
+
     public function orderPipeline(Request $request)
     {
         $validated = $request->validate([
