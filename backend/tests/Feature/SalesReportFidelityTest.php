@@ -122,6 +122,54 @@ class SalesReportFidelityTest extends TestCase
             'GBP stays out, USD comes in — and the note now agrees with the number');
     }
 
+
+    /**
+     * The owner's invariant, stated as arithmetic: a dollar is 128 shillings
+     * and a kwacha is 6.5 — EVERYWHERE money is summed. KES 1,000 + $10 +
+     * ZK 100 must read 2,930 on every surface. Face-value mixing reads 1,110;
+     * silent exclusion reads 1,000; any other number is a new bug.
+     */
+    public function test_the_tri_currency_invariant_holds_on_every_money_surface(): void
+    {
+        foreach ([['KES', 1000], ['USD', 10], ['ZMW', 100]] as [$ccy, $amount]) {
+            $order = Order::factory()->create([
+                'sales_bucket' => 'till', 'status' => 'completed', 'payment_status' => 'paid',
+                'currency_code' => $ccy, 'total_amount' => $amount,
+            ]);
+            DB::table('payments')->insert([
+                'order_id' => $order->id, 'payment_number' => 'PAY-TRI-' . $ccy,
+                'amount' => $amount, 'currency_code' => $ccy,
+                'payment_method' => 'cash', 'status' => 'paid',
+                'paid_at' => now(), 'created_at' => now(), 'updated_at' => now(),
+            ]);
+        }
+
+        $viewer = $this->viewer();
+        $viewer->givePermissionTo(Permission::findOrCreate('reports.financial', 'sanctum'));
+        $viewer->givePermissionTo(Permission::findOrCreate('payments.view', 'sanctum'));
+        $range = 'start=' . now()->subDay()->toDateString() . '&end=' . now()->addDay()->toDateString();
+
+        // 1. Summary tiles — revenue and collected
+        $s = $this->actingAs($viewer, 'sanctum')
+            ->getJson("/api/v1/admin/reports/sales/summary?{$range}")->assertOk()->json('summary');
+        $this->assertSame(2930.0, (float) $s['total_revenue'], 'summary revenue');
+        $this->assertSame(2930.0, (float) $s['total_collected'], 'summary collected');
+
+        // 2. The ledger's channel split
+        $ledger = $this->actingAs($viewer, 'sanctum')
+            ->getJson("/api/v1/admin/reports/sales/ledger?{$range}")->assertOk();
+        $this->assertSame(2930.0, (float) collect($ledger->json('channels'))->sum('sales'), 'ledger');
+
+        // 3. Cash flow inflows (EnhancedReportController — never swept before)
+        $cf = $this->actingAs($viewer, 'sanctum')
+            ->getJson("/api/v1/admin/reports/financial/cash-flow?start_date="
+                . now()->subDay()->toDateString() . '&end_date=' . now()->addDay()->toDateString())
+            ->assertOk()->json();
+        $inflow = collect($cf['cash_flow'] ?? $cf['inflows'] ?? [])->sum('inflow')
+            ?: collect($cf)->flatten(1)->filter(fn ($v) => is_array($v) && isset($v['inflow']))->sum('inflow');
+        $this->assertSame(2930.0, (float) $inflow, 'cash-flow inflows mixed at face value before this');
+    }
+
     public function test_the_outlet_table_reconciles_to_total_revenue(): void
     {
         $outlet = Outlet::factory()->create(['name' => 'Sonalux']);
