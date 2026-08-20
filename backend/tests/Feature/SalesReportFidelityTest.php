@@ -72,27 +72,48 @@ class SalesReportFidelityTest extends TestCase
 
     public function test_payment_methods_foot_to_the_collected_tile(): void
     {
-        // A KES rail and a USD rail. The methods panel used to hard-filter
-        // KES while Collected converted — an unexplainable gap on screen.
-        foreach ([['KES', 1000, 'cash'], ['USD', 10, 'card']] as [$ccy, $amount, $method]) {
-            $order = Order::factory()->create([
-                'status' => 'completed', 'payment_status' => 'paid',
-                'currency_code' => $ccy, 'total_amount' => $amount,
-            ]);
-            DB::table('payments')->insert([
-                'order_id' => $order->id, 'payment_number' => 'PAY-' . $ccy,
+        // The fixture that caught nothing the first time was same-day: order
+        // and payment inside the window, so ANY basis footed. This one
+        // diverges on purpose, the way live data did (KES 315,780 of old
+        // orders' balances paid in-window):
+        //  - an OLD order whose balance arrives in the window -> in BOTH
+        //  - an in-window order paid BEFORE the window        -> in NEITHER
+        //  - an unverified send-money payment                 -> in NEITHER
+        //  - a USD rail                                        -> converted in both
+        $pay = function (Order $order, $amount, $ccy, $method, $paidAt, array $extra = []) {
+            DB::table('payments')->insert(array_merge([
+                'order_id' => $order->id,
+                'payment_number' => 'PAY-' . $method . '-' . $order->id,
                 'amount' => $amount, 'currency_code' => $ccy,
                 'payment_method' => $method, 'status' => 'paid',
-                'paid_at' => now(), 'created_at' => now(), 'updated_at' => now(),
-            ]);
-        }
+                'paid_at' => $paidAt, 'created_at' => $paidAt, 'updated_at' => $paidAt,
+            ], $extra));
+        };
+
+        $old = Order::factory()->create(['status' => 'completed', 'payment_status' => 'paid',
+            'currency_code' => 'KES', 'total_amount' => 5000, 'created_at' => now()->subDays(60)]);
+        $pay($old, 5000, 'KES', 'mpesa', now());                       // arrives IN window
+
+        $early = Order::factory()->create(['status' => 'completed', 'payment_status' => 'paid',
+            'currency_code' => 'KES', 'total_amount' => 900]);
+        $pay($early, 900, 'KES', 'cash', now()->subDays(40));          // arrived long BEFORE any window
+
+        $usd = Order::factory()->create(['status' => 'completed', 'payment_status' => 'paid',
+            'currency_code' => 'USD', 'total_amount' => 10]);
+        $pay($usd, 10, 'USD', 'card', now());                          // in window, converts
+
+        $unverified = Order::factory()->create(['status' => 'completed', 'payment_status' => 'paid',
+            'currency_code' => 'KES', 'total_amount' => 7777]);
+        $pay($unverified, 7777, 'KES', 'mpesa_send', now(),
+            ['requires_approval' => true, 'approval_status' => 'pending_review']);
 
         $body = $this->summary();
         $methodsTotal = collect($body['by_payment_method'])->sum('total');
 
+        $this->assertSame(6280.0, (float) $body['summary']['total_collected'],
+            '5000 (old order, paid now) + 10x128; the early payment and the unverified one stay out');
         $this->assertSame((float) $body['summary']['total_collected'], (float) $methodsTotal,
-            'every shilling on the Collected tile must be attributable to a rail');
-        $this->assertSame(2280.0, (float) $methodsTotal, '1000 + 10x128');
+            'the rails must account for exactly the money the tile claims arrived');
     }
 
     public function test_the_exclusion_note_only_names_money_that_is_actually_excluded(): void

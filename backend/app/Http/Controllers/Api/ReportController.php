@@ -199,6 +199,13 @@ class ReportController extends Controller
         $collected = (float) DB::table('payments as p')
             ->join('orders as o', 'o.id', '=', 'p.order_id')
             ->where('p.status', 'paid')
+            // Same rule as the ledger: a payment recorded from a customer's
+            // word (Mukuru, Western Union, M-Pesa send-money) is not collected
+            // until someone verifies it. The tile lacked this guard while the
+            // methods panel had it — one of two reasons they could not foot.
+            ->where(fn ($q) => $q->where('p.requires_approval', false)
+                                 ->orWhereNull('p.requires_approval')
+                                 ->orWhere('p.approval_status', 'approved'))
             ->when($reportInKes,
                 fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('p.currency_code')),
                 fn ($q) => $q->whereRaw('UPPER(p.currency_code) = ?', [$currency]))
@@ -282,10 +289,14 @@ class ReportController extends Controller
         $byPaymentMethod = DB::table('payments as p')
             ->join('orders as o', 'o.id', '=', 'p.order_id')
             ->leftJoin('payment_methods as pm', 'pm.code', '=', 'p.payment_method')
-            ->whereBetween('o.created_at', [$start, $end])
+            // The panel answers "HOW did the collected money arrive", so it
+            // shares the Collected tile's basis exactly: payment date, not
+            // order date. Windowing on o.created_at made it a receivables
+            // view wearing a treasury caption — on live data the two sides
+            // diverged by KES 315,780 of old orders' balances paid this
+            // period, and the divergence was invisible on same-day fixtures.
+            ->whereBetween(DB::raw('COALESCE(p.paid_at, p.created_at)'), [$start, $end])
             ->whereNotIn('o.status', \App\Models\Order::DEAD_STATUSES)
-            ->where(fn ($q) => $q->whereIn('o.status', \App\Models\Order::RECOGNISED_STATUSES)
-                                 ->orWhereIn('o.payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES))
             // Reporting in KES converts every convertible rail at the reporting
             // rate — the same rule as the Collected tile, so the method rows
             // FOOT to it. The old hard KES filter left foreign payments off
