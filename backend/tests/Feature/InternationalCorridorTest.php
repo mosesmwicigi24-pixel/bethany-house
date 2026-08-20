@@ -83,8 +83,9 @@ class InternationalCorridorTest extends TestCase
      */
     private function rate(string $code, float $kesPerUnit, bool $isBase = false): void
     {
-        DB::table('currencies')->insert([
-            'code' => $code, 'name' => $code, 'symbol' => $code,
+        DB::table('currencies')->updateOrInsert(
+            ['code' => $code],
+            [ 'name' => $code, 'symbol' => $code,
             // The pricing rate is left at its default here; this suite is about
             // reporting, and the two must not be conflated.
             'exchange_rate' => 1.0,
@@ -174,7 +175,15 @@ class InternationalCorridorTest extends TestCase
 
     public function test_without_configured_rates_totals_are_native_only(): void
     {
-        // currencies table is empty → no rates exist for USD.
+        // No REPORTING rate for USD. The row exists (a migration guarantees the
+        // base currencies now), so the unset state has to be stated explicitly
+        // rather than relying on an empty table.
+        DB::table('currencies')->whereRaw("UPPER(code) <> 'KES'")
+            ->update(['reporting_rate_to_kes' => null]);
+        DB::table('currencies')->whereRaw("UPPER(code) = 'KES'")
+            ->update(['reporting_rate_to_kes' => null]);
+        \App\Support\ReportingCurrency::forget();
+
         $this->order('USD', 100, 10, ['customer_phone' => '+12025550101']);
 
         $report = $this->report();
@@ -198,8 +207,9 @@ class InternationalCorridorTest extends TestCase
         // unnecessary, it is wrong — it would refuse to honour a currency a
         // human deliberately pegged at 1:1.
         $this->rate('KES', 1.0, isBase: true);
-        DB::table('currencies')->insert([
-            'code' => 'USD', 'name' => 'USD', 'symbol' => 'USD',
+        DB::table('currencies')->updateOrInsert(
+            ['code' => 'USD'],
+            [ 'name' => 'USD', 'symbol' => 'USD',
             'exchange_rate' => 1.0, 'reporting_rate_to_kes' => null,
             'is_base' => false, 'is_active' => true,
             'created_at' => now(), 'updated_at' => now(),

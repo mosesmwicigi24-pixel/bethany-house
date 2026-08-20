@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Order;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
@@ -125,18 +126,48 @@ class OrderPipelineQueueTest extends TestCase
         $this->assertSame('whatsapp', $res->json('orders.0.channel'));
     }
 
-    public function test_foreign_currency_carts_are_listed_but_kept_out_of_the_totals(): void
+    public function test_foreign_currency_carts_are_counted_at_the_reporting_rate(): void
     {
-        $this->cart(1000, 2);                                   // KES
-        $usd = $this->cart(50, 2, 'whatsapp', ['currency_code' => 'USD']);
+        // This test used to assert the opposite — that a USD cart was listed
+        // but excluded from the total, because there was no rate to convert it
+        // with and adding dollars to shillings would have been a lie. There is
+        // a reporting rate now (128 KES to 1 USD), so the honest answer changed
+        // from "cannot say" to a number.
+        $this->cart(1000, 2);                                   // KES 1,000
+        $usd = $this->cart(50, 2, 'whatsapp', ['currency_code' => 'USD']);  // => KES 6,400
+
+        $res = $this->actingAs($this->viewer(), 'sanctum')->getJson('/api/v1/admin/reports/order-pipeline');
+
+        $this->assertSame(7400.0, (float) $res->json('summary.value'),
+            '1,000 KES + (50 USD x 128) = 7,400');
+        $this->assertSame(0, (int) $res->json('summary.excluded_non_kes_orders'));
+
+        $row = collect($res->json('orders'))->firstWhere('id', $usd->id);
+        $this->assertSame(50.0, (float) $row['total_amount'], 'the native amount is still shown');
+        $this->assertSame('USD', $row['currency_code']);
+        $this->assertSame(6400.0, (float) $row['total_kes']);
+    }
+
+    public function test_a_currency_with_no_reporting_rate_is_listed_but_never_summed(): void
+    {
+        // The honesty that survives: a rate we do not have is not invented.
+        DB::table('currencies')->updateOrInsert(
+            ['code' => 'GBP'],
+            ['name' => 'Pound', 'symbol' => '£', 'exchange_rate' => 1,
+             'reporting_rate_to_kes' => null, 'is_base' => false, 'is_active' => true],
+        );
+        \App\Support\ReportingCurrency::forget();
+
+        $this->cart(1000, 2);
+        $gbp = $this->cart(80, 2, 'whatsapp', ['currency_code' => 'GBP']);
 
         $res = $this->actingAs($this->viewer(), 'sanctum')->getJson('/api/v1/admin/reports/order-pipeline');
 
         $this->assertSame(1000.0, (float) $res->json('summary.value'),
-            'KES and USD must never be summed into one number');
+            'a currency with no reporting rate must not reach the total');
         $this->assertSame(1, (int) $res->json('summary.excluded_non_kes_orders'));
-        $this->assertContains($usd->id, collect($res->json('orders'))->pluck('id')->all(),
-            'a USD cart is still work and must appear in the queue');
+        $this->assertContains($gbp->id, collect($res->json('orders'))->pluck('id')->all(),
+            'but it is still work, so it stays in the queue');
     }
 
     public function test_the_queue_needs_reports_view(): void
