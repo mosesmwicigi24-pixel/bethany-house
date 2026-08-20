@@ -8,6 +8,7 @@ import {
     type OutreachLogRow,
     type ReplenishmentDueRow,
     type WinBackCustomerRow,
+    type SecondPurchaseWorklistRow,
 } from "@/api/reports";
 import { fmtKes } from "@/api/expenses";
 import { openWhatsApp } from "@/lib/whatsapp";
@@ -46,8 +47,8 @@ import {
     TH_R,
 } from "./reportShared";
 
-type CustomersTab = "overview" | "ltv" | "retention" | "intelligence" | "replenishment" | "winback" | "institutions" | "outreachlog";
-const CUSTOMERS_TABS: readonly CustomersTab[] = ["overview", "ltv", "retention", "intelligence", "replenishment", "winback", "institutions", "outreachlog"];
+type CustomersTab = "overview" | "secondpurchase" | "ltv" | "retention" | "intelligence" | "replenishment" | "winback" | "institutions" | "outreachlog";
+const CUSTOMERS_TABS: readonly CustomersTab[] = ["overview", "secondpurchase", "ltv", "retention", "intelligence", "replenishment", "winback", "institutions", "outreachlog"];
 
 export default function CustomersReportPage() {
     const dr = useDateRange("this_month");
@@ -200,7 +201,9 @@ export default function CustomersReportPage() {
                                     : "border-transparent text-surface-500 hover:text-surface-700",
                             )}
                         >
-                            {tab === "ltv"
+                            {tab === "secondpurchase"
+                                ? "Second Purchase"
+                                : tab === "ltv"
                                 ? "Lifetime Value"
                                 : tab === "replenishment"
                                   ? "Replenishment"
@@ -236,6 +239,7 @@ export default function CustomersReportPage() {
 
             {/* ── WIN-BACK — "as of now" like the radar: dormancy is measured
                    against today, not the report date range. ── */}
+            {activeTab === "secondpurchase" && <SecondPurchaseTab />}
             {activeTab === "winback" && <WinBackTab />}
 
             {/* ── INSTITUTIONS — churches/institutions as accounts, "as of
@@ -993,6 +997,162 @@ function ReplenishmentRadarTab() {
 // (min 45 days) — a monthly buyer 70 days quiet is an emergency, an annual
 // bulk buyer 70 days quiet is on schedule. Every WhatsApp/call is logged so
 // the summary can attribute orders placed within 30 days of an outreach.
+
+function SecondPurchaseTab() {
+    const { data, isLoading } = useQuery({
+        queryKey: ["second-purchase"],
+        queryFn: () => reportsApi.secondPurchase(),
+        staleTime: 60_000,
+    });
+
+    if (isLoading || !data)
+        return (
+            <div className="flex justify-center py-16">
+                <Spinner />
+            </div>
+        );
+
+    const { summary, cohorts, worklist } = data;
+
+    const askMessage = (row: SecondPurchaseWorklistRow) => {
+        const firstName = (row.name || "").trim().split(/\s+/)[0] || "there";
+        return (
+            `Hello ${firstName}, it's Bethany House 🙏 Thank you for your recent order ` +
+            `${row.order_number} — we hope it's serving you well! Is there anything else ` +
+            `we can prepare for you? We deliver.`
+        );
+    };
+
+    return (
+        <div className="space-y-6">
+            {/* Why this tab exists, in one line the reader can act on. */}
+            <p className="text-sm text-surface-500 max-w-3xl">
+                Most of this business&rsquo;s revenue comes from customers who bought once and never
+                returned. This is the funnel for the one conversion that changes that — first
+                purchase to second — and the list of recent first-time buyers to call.
+            </p>
+
+            <div className={KPI_GRID}>
+                <KpiCard label="First-time buyers (365d)" value={summary.first_time_buyers} />
+                <KpiCard label="Came back" value={summary.returned}
+                         sub={`${summary.repeat_rate_pct}% repeat rate`} />
+                <KpiCard label="Median days to 2nd order"
+                         value={summary.median_days_to_second ?? "—"}
+                         sub="among those who returned" />
+                <KpiCard label="10% conversion is worth"
+                         value={summary.opportunity_10pct_kes !== null ? fmtKes(summary.opportunity_10pct_kes) : "—"}
+                         sub={`${summary.one_time_buyers} one-time buyers x avg ${summary.avg_first_order_kes !== null ? fmtKes(summary.avg_first_order_kes) : "—"}`} />
+            </div>
+
+            {/* Cohorts */}
+            <div className="card overflow-hidden">
+                <div className="px-5 pt-5 pb-3">
+                    <p className="font-semibold text-surface-900">Return rate by first-purchase month</p>
+                    <p className="text-xs text-surface-500 mt-0.5">
+                        Of the customers whose FIRST order was in each month, how many came back.
+                        A greyed rate means the cohort hasn&rsquo;t had that long yet — it is a floor,
+                        not a verdict.
+                    </p>
+                </div>
+                <TableWrapper>
+                    <table className="table">
+                        <thead>
+                            <tr>
+                                <th className={TH}>First purchase in</th>
+                                <th className={TH_R}>New customers</th>
+                                <th className={TH_R}>Back in 30d</th>
+                                <th className={TH_R}>Back in 60d</th>
+                                <th className={TH_R}>Back in 90d</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {!cohorts.length && <EmptyRow cols={5} text="No first-time buyers in the last 12 months." />}
+                            {cohorts.map((c) => (
+                                <tr key={c.cohort}>
+                                    <td className="font-medium">{dayjs(c.cohort + "-01").format("MMM YYYY")}</td>
+                                    <td className="text-right tabular-nums">{c.first_time_buyers}</td>
+                                    {([30, 60, 90] as const).map((w) => {
+                                        const rate   = c[`rate_${w}_pct` as const];
+                                        const count  = c[`returned_${w}` as const];
+                                        const mature = c[`mature_${w}` as const];
+                                        return (
+                                            <td key={w}
+                                                className={clsx("text-right tabular-nums", !mature && "text-surface-300")}
+                                                title={mature ? undefined : "Cohort hasn't had this long yet"}>
+                                                {rate}% <span className="text-2xs">({count})</span>{!mature && "*"}
+                                            </td>
+                                        );
+                                    })}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </TableWrapper>
+            </div>
+
+            {/* The worklist */}
+            <div className="card overflow-hidden">
+                <div className="px-5 pt-5 pb-3">
+                    <p className="font-semibold text-surface-900">
+                        One-time buyers to call — last {data.recent_days} days, biggest first
+                    </p>
+                    <p className="text-xs text-surface-500 mt-0.5">
+                        They chose the shop once, recently. A thank-you and a question is usually
+                        all the second sale needs.
+                    </p>
+                </div>
+                <TableWrapper>
+                    <table className="table">
+                        <thead>
+                            <tr>
+                                <th className={TH}>Customer</th>
+                                <th className={TH}>First order</th>
+                                <th className={TH_R}>Value</th>
+                                <th className={TH_R}>Days ago</th>
+                                <th className={TH_R}>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {!worklist.length && <EmptyRow cols={5} text="No recent one-time buyers. Every recent customer has already returned." />}
+                            {worklist.map((w) => (
+                                <tr key={w.order_id}>
+                                    <td>
+                                        <p className="text-sm font-medium text-surface-900">{w.name ?? "—"}</p>
+                                        {w.phone && <p className="text-xs text-surface-400">{w.phone}</p>}
+                                    </td>
+                                    <td>
+                                        <span className="font-mono text-xs text-brand-600">{w.order_number}</span>
+                                    </td>
+                                    <td className="text-right tabular-nums font-semibold">
+                                        {w.currency_code === "KES"
+                                            ? fmtKes(w.total_amount)
+                                            : (<>
+                                                {w.currency_code} {w.total_amount.toLocaleString()}
+                                                <span className="block text-2xs font-normal text-surface-400">
+                                                    {w.total_kes !== null ? `≈ ${fmtKes(w.total_kes)}` : "no reporting rate"}
+                                                </span>
+                                               </>)}
+                                    </td>
+                                    <td className="text-right tabular-nums">{w.days_since}d</td>
+                                    <td className="text-right">
+                                        {w.phone ? (
+                                            <button className="btn-ghost btn-sm"
+                                                    onClick={() => openWhatsApp(w.phone, askMessage(w))}>
+                                                WhatsApp
+                                            </button>
+                                        ) : (
+                                            <span className="text-xs text-surface-300">no phone</span>
+                                        )}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </TableWrapper>
+            </div>
+        </div>
+    );
+}
 
 function WinBackTab() {
     const queryClient = useQueryClient();

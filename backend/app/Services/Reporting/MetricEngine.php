@@ -3905,6 +3905,186 @@ class MetricEngine
      *
      * @param string $sort 'value' (default) or 'age'
      */
+    /**
+     * Second-purchase engine — the report this customer base actually needs.
+     *
+     * 86.5% of the trailing year's revenue came from customers who bought once
+     * and never returned, and the few who do return spend ~35% more per order.
+     * RFM and win-back assume a base of lapsed regulars; this base has almost
+     * none. The money here is not in winning back the lapsed — it is in turning
+     * first-time buyers into second-time buyers, and this engine measures that
+     * one conversion and hands staff the list of people to convert.
+     *
+     *  - cohorts: for each month of FIRST purchase, how many of that month's
+     *    new customers came back within 30/60/90 days. Each window carries a
+     *    mature flag, because a cohort younger than its window reads as
+     *    "nobody returns" when the truth is "not yet" — the failure mode that
+     *    makes naive retention charts lie.
+     *  - worklist: recent one-time buyers, biggest first order first. These are
+     *    warm — they chose the shop once, recently — and each row carries the
+     *    contact details needed to act.
+     *
+     * Identity, recognition, scoping and money follow the engine's conventions:
+     * CUSTOMER_KEY identity, recognised orders only (an abandoned cart is not a
+     * first purchase), outlet scoping, and money stated in KES at the REPORTING
+     * rate. A currency with no reporting rate stays in the counts — a customer
+     * is a customer — but out of every money figure.
+     */
+    public function secondPurchase(int $recentDays = 60, int $worklistLimit = 100): array
+    {
+        $key = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
+        $rate = "(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))";
+        $outletSql = $this->outletIds
+            ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')'
+            : '';
+
+        // No date floor on the CTE: a second purchase must be visible even when
+        // the first one is old. The cohort/summary/worklist queries below each
+        // apply their own window to first_at instead.
+        $cte = "
+            WITH keyed AS (
+                SELECT {$key} AS ckey, o.id, o.order_number, o.total_amount, o.currency_code,
+                       o.total_amount * {$rate} AS kes,
+                       o.created_at,
+                       TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,''))) AS name,
+                       o.customer_phone AS phone, o.customer_email AS email
+                FROM orders o
+                WHERE o.status NOT IN ('cancelled','voided','refunded')
+                  AND (o.status IN ('confirmed','processing','shipped','delivered','completed')
+                       OR o.payment_status IN ('paid','partial','deposit'))
+                  {$outletSql}
+            ), per_customer AS (
+                SELECT ckey,
+                       MIN(created_at) AS first_at,
+                       COUNT(*)        AS orders,
+                       MAX(name) AS name, MAX(phone) AS phone, MAX(email) AS email
+                FROM keyed WHERE ckey IS NOT NULL
+                GROUP BY ckey
+            ), journeys AS (
+                SELECT p.*,
+                       (SELECT MIN(k.created_at) FROM keyed k
+                         WHERE k.ckey = p.ckey AND k.created_at > p.first_at) AS second_at
+                FROM per_customer p
+            )
+        ";
+
+        // ── Monthly cohorts, trailing 12 months of first purchases ──────────
+        $cohortRows = DB::select("{$cte}
+            SELECT TO_CHAR(DATE_TRUNC('month', first_at), 'YYYY-MM') AS cohort,
+                   MIN(first_at)::date AS cohort_start,
+                   COUNT(*) AS first_time_buyers,
+                   COUNT(*) FILTER (WHERE second_at IS NOT NULL AND second_at <= first_at + INTERVAL '30 days') AS returned_30,
+                   COUNT(*) FILTER (WHERE second_at IS NOT NULL AND second_at <= first_at + INTERVAL '60 days') AS returned_60,
+                   COUNT(*) FILTER (WHERE second_at IS NOT NULL AND second_at <= first_at + INTERVAL '90 days') AS returned_90,
+                   COUNT(*) FILTER (WHERE second_at IS NOT NULL) AS returned_ever
+            FROM journeys
+            WHERE first_at >= DATE_TRUNC('month', NOW() - INTERVAL '11 months')
+            GROUP BY 1 ORDER BY 1
+        ");
+
+        $now = CarbonImmutable::now(self::TZ);
+        $cohorts = collect($cohortRows)->map(function ($r) use ($now) {
+            $monthEnd = CarbonImmutable::parse($r->cohort . '-01', self::TZ)->endOfMonth();
+            $n = (int) $r->first_time_buyers;
+            $pct = fn (int $x) => $n > 0 ? round($x / $n * 100, 1) : 0.0;
+
+            return [
+                'cohort'            => $r->cohort,
+                'first_time_buyers' => $n,
+                'returned_30'       => (int) $r->returned_30,
+                'returned_60'       => (int) $r->returned_60,
+                'returned_90'       => (int) $r->returned_90,
+                'rate_30_pct'       => $pct((int) $r->returned_30),
+                'rate_60_pct'       => $pct((int) $r->returned_60),
+                'rate_90_pct'       => $pct((int) $r->returned_90),
+                // A window is mature once EVERY member of the cohort has had
+                // that long to return — i.e. the month closed >= N days ago.
+                // An immature rate is a floor, not a fact.
+                'mature_30'         => $monthEnd->addDays(30)->lte($now),
+                'mature_60'         => $monthEnd->addDays(60)->lte($now),
+                'mature_90'         => $monthEnd->addDays(90)->lte($now),
+            ];
+        })->values()->all();
+
+        // ── Summary over the trailing 365 days of first purchases ───────────
+        $sum = DB::selectOne("{$cte}
+            SELECT COUNT(*) AS first_time_buyers,
+                   COUNT(*) FILTER (WHERE second_at IS NOT NULL) AS returned,
+                   PERCENTILE_CONT(0.5) WITHIN GROUP (
+                       ORDER BY EXTRACT(EPOCH FROM (second_at - first_at)) / 86400
+                   ) FILTER (WHERE second_at IS NOT NULL) AS median_days_to_second
+            FROM journeys
+            WHERE first_at >= NOW() - INTERVAL '365 days'
+        ");
+
+        // One-time buyers and the money shape of the opportunity. AVG skips the
+        // NULL kes of unconvertible currencies on its own.
+        $oneTime = DB::selectOne("{$cte}
+            SELECT COUNT(*) AS customers,
+                   AVG(k.kes) AS avg_first_order_kes
+            FROM journeys j
+            JOIN keyed k ON k.ckey = j.ckey
+            WHERE j.orders = 1
+              AND j.first_at >= NOW() - INTERVAL '365 days'
+        ");
+
+        $oneTimers   = (int) ($oneTime->customers ?? 0);
+        $avgFirstKes = $oneTime->avg_first_order_kes !== null ? (float) $oneTime->avg_first_order_kes : null;
+        $firstTimers = (int) ($sum->first_time_buyers ?? 0);
+        $returned    = (int) ($sum->returned ?? 0);
+
+        $summary = [
+            'window_days'           => 365,
+            'first_time_buyers'     => $firstTimers,
+            'returned'              => $returned,
+            'repeat_rate_pct'       => $firstTimers > 0 ? round($returned / $firstTimers * 100, 1) : 0.0,
+            'median_days_to_second' => $sum->median_days_to_second !== null
+                ? (int) round((float) $sum->median_days_to_second)
+                : null,
+            'one_time_buyers'       => $oneTimers,
+            'avg_first_order_kes'   => $avgFirstKes !== null ? round($avgFirstKes, 2) : null,
+            // The stake, stated conservatively: one customer in ten buying once
+            // more at their own average. Not a forecast — a yardstick for what
+            // an hour of calling the worklist is worth.
+            'opportunity_10pct_kes' => $avgFirstKes !== null
+                ? round(0.10 * $oneTimers * $avgFirstKes, 2)
+                : null,
+        ];
+
+        // ── The worklist: recent one-time buyers, biggest money first ───────
+        $work = DB::select("{$cte}
+            SELECT j.ckey, j.name, j.phone, j.email,
+                   k.id AS order_id, k.order_number,
+                   k.total_amount, k.currency_code, k.kes,
+                   (CURRENT_DATE - j.first_at::date)::int AS days_since
+            FROM journeys j
+            JOIN keyed k ON k.ckey = j.ckey
+            WHERE j.orders = 1
+              AND j.first_at >= NOW() - make_interval(days => ?)
+            ORDER BY k.kes DESC NULLS LAST
+            LIMIT ?
+        ", [$recentDays, $worklistLimit]);
+
+        $worklist = collect($work)->map(fn ($r) => [
+            'name'          => trim((string) $r->name) !== '' ? $r->name : null,
+            'phone'         => $r->phone,
+            'email'         => $r->email,
+            'order_id'      => (int) $r->order_id,
+            'order_number'  => $r->order_number,
+            'total_amount'  => (float) $r->total_amount,
+            'currency_code' => strtoupper((string) $r->currency_code),
+            'total_kes'     => $r->kes !== null ? round((float) $r->kes, 2) : null,
+            'days_since'    => (int) $r->days_since,
+        ])->values()->all();
+
+        return [
+            'summary'     => $summary,
+            'cohorts'     => $cohorts,
+            'worklist'    => $worklist,
+            'recent_days' => $recentDays,
+        ];
+    }
+
     public function orderPipeline(string $sort = 'value', int $limit = 200): array
     {
         $base = fn () => DB::table('orders')

@@ -181,6 +181,14 @@ export const reportsApi = {
      * day onward (`message_volume.daily_since`); all-time totals are cumulative.
      */
     /**
+     * Second-purchase engine: the first→second purchase funnel plus the
+     * worklist of recent one-time buyers. 86.5% of trailing-year revenue came
+     * from customers who bought once — this is the conversion that moves it.
+     */
+    secondPurchase: (params?: { outlet_id?: number; recent_days?: number }) =>
+        get<SecondPurchaseReport>(`${BASE}/second-purchase`, { params }),
+
+    /**
      * The unconfirmed order queue. `sort` defaults to 'value' — staff working a
      * backlog should spend their first hour on the largest recoverable money.
      */
@@ -536,6 +544,45 @@ export interface LedgerBucket {
     total: LedgerFigures;
     by_channel: Record<"pos" | "online" | "whatsapp", LedgerFigures>;
 }
+// ── Second-purchase engine ────────────────────────────────────────────────────
+
+export interface SecondPurchaseCohort {
+    cohort: string;                 // "2026-07"
+    first_time_buyers: number;
+    returned_30: number; returned_60: number; returned_90: number;
+    rate_30_pct: number; rate_60_pct: number; rate_90_pct: number;
+    /** false = the cohort hasn't had this long yet; its rate is a floor, not a fact */
+    mature_30: boolean; mature_60: boolean; mature_90: boolean;
+}
+
+export interface SecondPurchaseWorklistRow {
+    name: string | null;
+    phone: string | null;
+    email: string | null;
+    order_id: number;
+    order_number: string;
+    total_amount: number;
+    currency_code: string;
+    total_kes: number | null;
+    days_since: number;
+}
+
+export interface SecondPurchaseReport {
+    summary: {
+        window_days: number;
+        first_time_buyers: number;
+        returned: number;
+        repeat_rate_pct: number;
+        median_days_to_second: number | null;
+        one_time_buyers: number;
+        avg_first_order_kes: number | null;
+        opportunity_10pct_kes: number | null;
+    };
+    cohorts: SecondPurchaseCohort[];
+    worklist: SecondPurchaseWorklistRow[];
+    recent_days: number;
+}
+
 // ── Unconfirmed order queue ───────────────────────────────────────────────────
 // The work list behind the pipeline figure: carts nobody has confirmed. Aged,
 // because age is the signal that says whether a cart is a live lead or a number
