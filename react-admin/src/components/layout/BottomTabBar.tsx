@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom'
 import { clsx } from 'clsx'
 import { usePermissions } from '@/hooks/usePermissions'
+import { useVisualViewport } from '@/lib/useVisualViewport'
 
 /*
  * Mobile app shell: a five-slot bottom tab bar, phone-only (md:hidden).
@@ -94,8 +95,16 @@ const MORE_ICON = (
 export function BottomTabBar({ onOpenMenu }: { onOpenMenu: () => void }) {
     const { pathname } = useLocation()
     const { can } = usePermissions()
+    const { keyboardOpen } = useVisualViewport()
 
     const visible = TABS.filter((t) => !t.permission || can(t.permission))
+
+    // With the keyboard up the shell is only ~400px tall, and this bar was
+    // spending 56px of it plus the home-indicator inset sitting directly over
+    // the field being typed into — on the product Pricing tab it cut the Cost
+    // Price box in half. Nobody navigates while typing, so stand down until
+    // the keyboard closes; the flex column reclaims the height immediately.
+    if (keyboardOpen) return null
 
     return (
         <nav

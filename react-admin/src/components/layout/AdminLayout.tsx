@@ -180,12 +180,38 @@ export function AdminLayout() {
             const h = window.visualViewport?.height ?? window.innerHeight
             document.documentElement.style.setProperty('--vh', `${h * 0.01}px`)
         }
+
+        // The keyboard ANIMATES in, and iOS reports the viewport partway
+        // through that animation and then goes quiet. A single reading
+        // therefore lands mid-flight: the shell is sized to less than the room
+        // actually available, so the page sits parked too high with a band of
+        // dead canvas between it and the keyboard, and the bottom of the form
+        // — the Cost Price box on the product Pricing tab — is squeezed out of
+        // reach. Re-measure as the animation settles rather than trusting the
+        // first number, and again when focus moves between fields.
+        const timers: number[] = []
+        const settle = () => {
+            setVh()
+            timers.push(window.setTimeout(setVh, 150))
+            timers.push(window.setTimeout(setVh, 400))
+        }
+
         setVh()
         window.addEventListener('resize', setVh)
-        window.visualViewport?.addEventListener('resize', setVh)
+        window.visualViewport?.addEventListener('resize', settle)
+        // offsetTop changes when iOS scrolls the layout viewport to reveal the
+        // focused field; height can change with it and fires no resize.
+        window.visualViewport?.addEventListener('scroll', setVh)
+        document.addEventListener('focusin', settle)
+        document.addEventListener('focusout', settle)
+
         return () => {
+            timers.forEach(clearTimeout)
             window.removeEventListener('resize', setVh)
-            window.visualViewport?.removeEventListener('resize', setVh)
+            window.visualViewport?.removeEventListener('resize', settle)
+            window.visualViewport?.removeEventListener('scroll', setVh)
+            document.removeEventListener('focusin', settle)
+            document.removeEventListener('focusout', settle)
         }
     }, [])
 
