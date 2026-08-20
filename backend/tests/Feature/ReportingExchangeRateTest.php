@@ -166,4 +166,48 @@ class ReportingExchangeRateTest extends TestCase
             );
         }
     }
+
+    public function test_the_kwacha_converts_at_its_own_reporting_rate(): void
+    {
+        DB::table('currencies')->updateOrInsert(
+            ['code' => 'ZMW'],
+            ['name' => 'Zambian Kwacha', 'symbol' => 'ZK', 'exchange_rate' => 0.14,
+             'reporting_rate_to_kes' => 6.5, 'is_base' => false, 'is_active' => true],
+        );
+        ReportingCurrency::forget();
+
+        $this->assertSame(6.5, ReportingCurrency::rates()['ZMW']);
+        $this->assertSame(45500.0, ReportingCurrency::toKes(7000, 'ZMW'));
+
+        // The direction differs from USD, which is the whole reason these are
+        // two columns: reporting is HIGHER than pricing for the dollar
+        // (128 vs 100) and LOWER for the kwacha (6.5 vs ~7.14). One cannot be
+        // derived from the other.
+        $pricingKesPerZmw = 1 / (float) DB::table('currencies')->where('code', 'ZMW')->value('exchange_rate');
+        $this->assertGreaterThan(ReportingCurrency::rates()['ZMW'], $pricingKesPerZmw,
+            'the kwacha reports LOWER than it prices');
+        $this->assertGreaterThan(1 / 0.01, ReportingCurrency::rates()['USD'],
+            'the dollar reports HIGHER than it prices — opposite directions, same table');
+    }
+
+    public function test_an_admin_can_change_a_reporting_rate_without_a_deploy(): void
+    {
+        $admin = User::factory()->create();
+        $admin->assignRole(Role::findOrCreate('admin', 'sanctum'));
+        foreach (['settings.view', 'settings.edit'] as $p) {
+            $admin->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
+        }
+
+        $id = DB::table('currencies')->where('code', 'USD')->value('id');
+
+        $this->actingAs($admin, 'sanctum')
+            ->putJson("/api/v1/admin/currencies-management/{$id}", ['reporting_rate_to_kes' => 130])
+            ->assertOk();
+
+        $this->assertSame(130.0, ReportingCurrency::rates()['USD'],
+            'the rate cache must be busted on write, or the change waits out a 5-minute TTL');
+
+        // Changing what a report says must not change what a customer is charged.
+        $this->assertSame(0.01, (float) DB::table('currencies')->where('id', $id)->value('exchange_rate'));
+    }
 }

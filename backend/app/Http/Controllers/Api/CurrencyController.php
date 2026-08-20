@@ -52,6 +52,13 @@ class CurrencyController extends Controller
             'name'               => 'required|string|max:100',
             'symbol'             => 'required|string|max:10',
             'exchange_rate'      => 'required|numeric|min:0.000001',
+            // KES per ONE unit of this currency, used ONLY to state completed
+            // sales in the reporting currency — 128 for USD, 6.5 for ZMW. It is
+            // NOT exchange_rate above, which is the base-relative PRICING rate a
+            // customer is quoted at (0.01 for USD). Nullable on purpose: unset
+            // means "do not convert", and those orders are reported apart rather
+            // than at a guess.
+            'reporting_rate_to_kes' => 'sometimes|nullable|numeric|min:0.000001',
             'decimal_places'     => 'required|integer|min:0|max:4',
             'symbol_position'    => 'sometimes|in:before,after',
             'thousand_separator' => 'sometimes|string|max:5',
@@ -70,6 +77,7 @@ class CurrencyController extends Controller
             'name'               => $validated['name'],
             'symbol'             => $validated['symbol'],
             'exchange_rate'      => $validated['exchange_rate'],
+            'reporting_rate_to_kes' => $validated['reporting_rate_to_kes'] ?? null,
             'decimal_places'     => $validated['decimal_places'],
             'symbol_position'    => $validated['symbol_position'] ?? 'before',
             'thousand_separator' => $validated['thousand_separator'] ?? ',',
@@ -80,6 +88,13 @@ class CurrencyController extends Controller
             'created_at'         => now(),
             'updated_at'         => now(),
         ]);
+
+        // Both rate caches, because a currency row feeds both: pricing (what a
+        // customer is quoted) and reporting (what earned money is worth). Left
+        // un-busted, an edited rate sat behind a 5-minute TTL and looked like
+        // the save had not worked.
+        \App\Services\CurrencyPricing::forget();
+        \App\Support\ReportingCurrency::forget();
 
         try {
             ActivityLogService::log('currency_created', null, [
@@ -111,6 +126,13 @@ class CurrencyController extends Controller
             'name'               => 'sometimes|string|max:100',
             'symbol'             => 'sometimes|string|max:10',
             'exchange_rate'      => 'sometimes|numeric|min:0.000001',
+            // KES per ONE unit of this currency, used ONLY to state completed
+            // sales in the reporting currency — 128 for USD, 6.5 for ZMW. It is
+            // NOT exchange_rate above, which is the base-relative PRICING rate a
+            // customer is quoted at (0.01 for USD). Nullable on purpose: unset
+            // means "do not convert", and those orders are reported apart rather
+            // than at a guess.
+            'reporting_rate_to_kes' => 'sometimes|nullable|numeric|min:0.000001',
             'decimal_places'     => 'sometimes|integer|min:0|max:4',
             'symbol_position'    => 'sometimes|in:before,after',
             'thousand_separator' => 'sometimes|string|max:5',
@@ -121,6 +143,13 @@ class CurrencyController extends Controller
         DB::table('currencies')
             ->where('id', $id)
             ->update(array_merge($validated, ['updated_at' => now()]));
+
+        // Both rate caches, because a currency row feeds both: pricing (what a
+        // customer is quoted) and reporting (what earned money is worth). Left
+        // un-busted, an edited rate sat behind a 5-minute TTL and looked like
+        // the save had not worked.
+        \App\Services\CurrencyPricing::forget();
+        \App\Support\ReportingCurrency::forget();
 
         try {
             ActivityLogService::log('currency_updated', null, [
@@ -285,12 +314,19 @@ class CurrencyController extends Controller
     }
 
     /**
-     * Update exchange rate for a single currency.
+     * Update the PRICING exchange rate for a single currency.
+     *
+     * This is the rate a customer is quoted at (100 KES = 1 USD). The reporting
+     * rate — what earned money is worth, 128 KES = 1 USD — is a different
+     * column and is set through update(); a caller may pass it here too, but
+     * naming it explicitly is the point, so that nobody changes what customers
+     * are charged while intending to change what a report says.
      */
     public function updateRates(Request $request, $id)
     {
         $validated = $request->validate([
             'exchange_rate' => 'required|numeric|min:0.000001',
+            'reporting_rate_to_kes' => 'sometimes|nullable|numeric|min:0.000001',
         ]);
 
         $currency = DB::table('currencies')->find($id);
@@ -305,10 +341,18 @@ class CurrencyController extends Controller
             ], 422);
         }
 
+        // NOT array_filter: null is a legitimate reporting rate meaning "do not
+        // convert this currency", and filtering would silently discard it.
         DB::table('currencies')->where('id', $id)->update([
             'exchange_rate' => $validated['exchange_rate'],
+            'reporting_rate_to_kes' => array_key_exists('reporting_rate_to_kes', $validated)
+                ? $validated['reporting_rate_to_kes']
+                : $currency->reporting_rate_to_kes,
             'updated_at'    => now(),
         ]);
+
+        \App\Services\CurrencyPricing::forget();
+        \App\Support\ReportingCurrency::forget();
 
         try {
             ActivityLogService::log('currency_rate_updated', null, [
