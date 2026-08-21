@@ -10,10 +10,20 @@ import { waNumber } from "./whatsapp";
 const NEEMA_BASE: string =
     (import.meta.env.VITE_NEEMA_URL as string | undefined) ?? "https://neema.bethanyhouse.co.ke";
 
-/** The customer's chat thread in Neema's inbox. Null if the number is unusable. */
-export function neemaChatUrl(phone?: string | null): string | null {
+/**
+ * The customer's chat thread in Neema's inbox. Null if the number is unusable.
+ *
+ * Pass the order number when there is one: a Meta (Messenger/Instagram)
+ * customer's thread is keyed by PSID, and the phone the order carries may
+ * exist nowhere in Neema's identities — it was captured during ordering. The
+ * order number lets Neema walk order → person → thread server-side, so the
+ * link lands on the right chat for BOTH WhatsApp and Meta customers.
+ */
+export function neemaChatUrl(phone?: string | null, orderNumber?: string | null): string | null {
     const num = waNumber(phone);
-    return num ? `${NEEMA_BASE}/dashboard?open=${num}` : null;
+    if (!num) return null;
+    const ref = orderNumber ? `&ref=${encodeURIComponent(orderNumber)}` : "";
+    return `${NEEMA_BASE}/dashboard?open=${num}${ref}`;
 }
 
 /** The customer's call history in Neema's call console. Null if the number is unusable. */
