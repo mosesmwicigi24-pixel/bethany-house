@@ -4020,8 +4020,8 @@ export default function OrderDetailPage() {
                                                         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" /></svg>
                                                         {order.customer_phone}
                                                     </a>
-                                                    {neemaChatUrl(order.customer_phone) && (
-                                                        <a href={neemaChatUrl(order.customer_phone)!} target="_blank" rel="noopener noreferrer"
+                                                    {neemaChatUrl(order.customer_phone, order.order_number) && (
+                                                        <a href={neemaChatUrl(order.customer_phone, order.order_number)!} target="_blank" rel="noopener noreferrer"
                                                             title="Chat on Neema Agent"
                                                             className="inline-flex items-center gap-1 text-xs font-medium text-success-600 hover:underline">
                                                             <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 6.3A7.9 7.9 0 0012 4a8 8 0 00-6.9 12l-1 3.6 3.7-1a8 8 0 003.2.7h.1a8 8 0 006.6-12.9zM12 18.5a6.6 6.6 0 01-3.4-.9l-.2-.1-2.2.6.6-2.1-.2-.3a6.6 6.6 0 1112.1-3.7 6.6 6.6 0 01-6.7 6.5zm3.6-4.9c-.2-.1-1.2-.6-1.3-.6-.2-.1-.3-.1-.4.1l-.6.7c-.1.1-.2.2-.4.1a5.4 5.4 0 01-2.7-2.3c-.2-.3.2-.3.5-1 0-.1 0-.2 0-.3l-.6-1.4c-.1-.3-.3-.3-.4-.3h-.4a.7.7 0 00-.5.2 2 2 0 00-.6 1.5c0 .9.6 1.7.7 1.8.1.2 1.3 2 3.1 2.8 1.2.5 1.6.5 2.2.4.4 0 1.2-.5 1.3-.9.2-.5.2-.9.1-.9 0-.1-.1-.1-.3-.2z"/></svg>
