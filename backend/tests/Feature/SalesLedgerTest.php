@@ -133,6 +133,37 @@ class SalesLedgerTest extends TestCase
         }
     }
 
+    public function test_an_overpaid_order_does_not_mask_another_orders_debt(): void
+    {
+        // The cross-subsidy defect. balance used to be clamped on the BUCKET sum
+        // — GREATEST(SUM(sales) - SUM(paid), 0) — so an order paid beyond its own
+        // total spent the excess cancelling a DIFFERENT order's balance, and a
+        // real receivable silently vanished. Capping paid per order (the rule
+        // MetricEngine::OWED already uses) keeps each order's debt its own.
+        //
+        // Same channel, same period. Expected values reasoned by hand, NOT read
+        // back from the implementation's own formula:
+        //   A: sold 1000, paid 1500 -> 500 overpaid; contributes 1000 paid, 0 owed
+        //   B: sold 1000, paid    0 ->               contributes    0 paid, 1000 owed
+        //   bucket: sales 2000, paid 1000 (NOT 1500), balance 1000 (NOT 500)
+        // Before the fix: paid 1500, balance GREATEST(2000-1500,0)=500 — B's debt gone.
+        $this->viewer();
+        $this->order('pos', 1000, 1500);   // overpaid
+        $this->order('pos', 1000, 0);      // unpaid
+
+        $till = collect($this->ledger()['channels'])->firstWhere('channel', 'till');
+
+        $this->assertEqualsWithDelta(2000.0, (float) $till['sales'], 0.01);
+        $this->assertEqualsWithDelta(1000.0, (float) $till['paid'], 0.01,
+            'an overpayment was counted as paying down more than its own order');
+        $this->assertEqualsWithDelta(1000.0, (float) $till['balance'], 0.01,
+            "the unpaid order's debt was masked by another order's overpayment");
+        $this->assertEqualsWithDelta(
+            (float) $till['sales'], (float) $till['paid'] + (float) $till['balance'], 0.01,
+            'sales = paid + balance broke under an overpayment',
+        );
+    }
+
     public function test_refunds_are_netted_off_the_paid_figure(): void
     {
         $this->viewer();
