@@ -507,12 +507,23 @@ class ReportController extends Controller
             ->when($outletId, fn ($q) => $q->where('orders.outlet_id', $outletId))
             ->leftJoinSub($paidPerOrder, 'pay', fn ($j) => $j->on('pay.order_id', '=', 'orders.id'));
 
+        // Clamp PER ORDER, not on the bucket sum. paid is capped at each order's
+        // own total and balance is that order's shortfall — the rule
+        // MetricEngine::OWED already uses. The old form clamped the bucket total
+        // (GREATEST(SUM(sales) - SUM(paid), 0)): an order paid beyond its own
+        // total spent the excess cancelling a DIFFERENT order's balance in the
+        // same bucket, so a real receivable silently vanished and the invariant
+        // sales = paid + balance broke. Per order, no overpayment can pay down
+        // anything but its own line. With no overpayment present every figure is
+        // identical to before. This $agg is reused by the per-channel, daily,
+        // weekly, monthly and stage aggregates below, so they all inherit it.
+        $paidCapped   = "LEAST({$paidKes}, {$orderKes})";
+        $owedPerOrder = "GREATEST({$orderKes} - {$paidKes}, 0)";
         $agg = "
             COUNT(*)                                              AS orders,
             (COALESCE(SUM({$orderKes}), 0))::float8               AS sales,
-            (COALESCE(SUM({$paidKes}), 0))::float8                AS paid,
-            GREATEST((COALESCE(SUM({$orderKes}), 0))::float8
-                   - (COALESCE(SUM({$paidKes}), 0))::float8, 0)   AS balance
+            (COALESCE(SUM({$paidCapped}), 0))::float8            AS paid,
+            (COALESCE(SUM({$owedPerOrder}), 0))::float8          AS balance
         ";
 
         // ── Per channel, whole period ────────────────────────────────────────
@@ -764,12 +775,15 @@ class ReportController extends Controller
             ->recognised()
             ->whereRaw('UPPER(orders.currency_code) = ?', [$currency])
             ->leftJoinSub($paidPerOrder, 'pay', fn ($j) => $j->on('pay.order_id', '=', 'orders.id'))
+            // Per-order clamp, same rule as the sales ledger above: cap paid at
+            // each order's own total and take its shortfall, so an overpaid order
+            // cannot mask another's balance in the bucket sum. Single currency
+            // here, so the expressions are native rather than KES-translated.
             ->selectRaw('
-                COUNT(*)                                                        AS orders,
-                (COALESCE(SUM(orders.total_amount), 0))::float8                 AS revenue,
-                (COALESCE(SUM(COALESCE(pay.paid, 0)), 0))::float8               AS paid,
-                GREATEST((COALESCE(SUM(orders.total_amount), 0))::float8
-                       - (COALESCE(SUM(COALESCE(pay.paid, 0)), 0))::float8, 0)  AS balance
+                COUNT(*)                                                                              AS orders,
+                (COALESCE(SUM(orders.total_amount), 0))::float8                                        AS revenue,
+                (COALESCE(SUM(LEAST(COALESCE(pay.paid, 0), orders.total_amount)), 0))::float8          AS paid,
+                (COALESCE(SUM(GREATEST(orders.total_amount - COALESCE(pay.paid, 0), 0)), 0))::float8   AS balance
             ')
             ->first();
 
