@@ -59,6 +59,21 @@ class PhoneNormalisationTest extends TestCase
         $this->assertSame('+393248827122', $this->norm('+39 3248827122'));
     }
 
+    public function test_the_double_zero_international_prefix_is_not_a_kenyan_zero(): void
+    {
+        // '0044 7401 182700' is a UK number written with the 00 international
+        // dialling prefix, NOT a Kenyan 0-national number — it must keep +44 and
+        // converge with its own +44 spelling, never become +254…0044….
+        $this->assertSame('+447401182700', $this->norm('0044 7401 182700'));
+        $this->assertSame($this->norm('+44 7401 182700'), $this->norm('0044 7401 182700'));
+
+        // 00 + Kenya's own code is still Kenya.
+        $this->assertSame('+254712345678', $this->norm('00254712345678'));
+
+        // And a genuine Kenyan national number is untouched by the new branch.
+        $this->assertSame('+254724351780', $this->norm('0724351780'));
+    }
+
     public function test_two_different_countries_do_not_collide(): void
     {
         // The reason for full-E.164 matching rather than "last 9 digits".
@@ -97,6 +112,27 @@ class PhoneNormalisationTest extends TestCase
 
         // Only the one identifiable customer is counted. The two note-carrying
         // orders are UNCOUNTED, not counted as a single shared person.
+        $this->assertSame(1, $this->uniqueCustomers());
+    }
+
+    public function test_a_payment_reference_in_the_phone_field_is_not_a_customer(): void
+    {
+        // The hole the length gate alone left open: a note carrying 9+ digits
+        // ('MPESA REF 123456789') cleared it and became +254123456789 — a fake
+        // customer that any other row sharing those digits then merged into.
+        // Anything carrying letters is a note, not a phone: NULL.
+        $this->assertNull($this->norm('MPESA REF 123456789'));
+        $this->assertNull($this->norm('Ref 123456789 paid'));
+        $this->assertNull($this->norm('txn 987654321'));
+
+        // And at report level: two orders carrying different digit-bearing notes
+        // plus one real customer count as exactly one customer — the notes are
+        // uncounted, not merged with each other or with the real buyer.
+        $this->viewer();
+        Order::factory()->create(['user_id' => null, 'customer_phone' => 'MPESA REF 123456789', 'customer_email' => null, 'created_at' => now()]);
+        Order::factory()->create(['user_id' => null, 'customer_phone' => 'Ref 987654321 cash',  'customer_email' => null, 'created_at' => now()]);
+        Order::factory()->create(['user_id' => null, 'customer_phone' => '0798238300',          'customer_email' => null, 'created_at' => now()]);
+
         $this->assertSame(1, $this->uniqueCustomers());
     }
 
