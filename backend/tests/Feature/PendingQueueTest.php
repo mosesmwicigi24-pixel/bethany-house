@@ -91,8 +91,11 @@ class PendingQueueTest extends TestCase
         // — the smaller order going cold must sit on top.
         Order::factory()->create(['status' => 'pending', 'payment_status' => 'pending',
             'currency_code' => 'KES', 'total_amount' => 50000, 'created_at' => now()]);
+        // subDays(40) exactly lands a hair UNDER 40 days by the time Postgres
+        // computes the age (the microseconds between now() here and now() in
+        // the query), and FLOOR turns 39.99997 into 39 — so step past the edge.
         Order::factory()->create(['status' => 'pending', 'payment_status' => 'pending',
-            'currency_code' => 'USD', 'total_amount' => 100, 'created_at' => now()->subDays(40)]);
+            'currency_code' => 'USD', 'total_amount' => 100, 'created_at' => now()->subDays(40)->subHours(1)]);
 
         $q = $this->queue();
 
