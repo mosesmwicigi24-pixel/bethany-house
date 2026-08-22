@@ -12,6 +12,7 @@ use App\Models\InventoryItem;
 use App\Models\InventoryTransaction;
 use App\Models\CashRegister;
 use App\Models\CashRegisterTransaction;
+use App\Support\HtmlSanitizer;
 use App\Models\Outlet;
 use App\Models\TaxRate;
 use App\Models\Payment;
@@ -1972,6 +1973,11 @@ class PosController extends Controller
 
         $now = now();
 
+        // sentiments is WYSIWYG HTML rendered in the admin console and the EoD
+        // email; sanitise to a safe allow-list on the way in so neither reader
+        // ever receives an executable payload (stored-XSS fix).
+        $cleanSentiments = HtmlSanitizer::sentiments($validated['sentiments'] ?? null);
+
         $existing = DB::table('cash_register_eod_reports')
             ->where('register_id', $registerId)
             ->where('user_id', $user->id)
@@ -1983,7 +1989,7 @@ class PosController extends Controller
                 ->where('id', $existing->id)
                 ->update([
                     'order_notes'  => json_encode($cleanNotes),
-                    'sentiments'   => $validated['sentiments'] ?? null,
+                    'sentiments'   => $cleanSentiments,
                     'submitted_at' => $now,
                     'updated_at'   => $now,
                 ]);
@@ -1995,7 +2001,7 @@ class PosController extends Controller
                 'outlet_id'    => $outletId,
                 'report_date'  => $date,
                 'order_notes'  => json_encode($cleanNotes),
-                'sentiments'   => $validated['sentiments'] ?? null,
+                'sentiments'   => $cleanSentiments,
                 'submitted_at' => $now,
                 'created_at'   => $now,
                 'updated_at'   => $now,
@@ -2008,7 +2014,7 @@ class PosController extends Controller
                 'outlet_id'      => $outletId,
                 'date'           => $date,
                 'note_count'     => count($cleanNotes),
-                'has_sentiments' => !empty($validated['sentiments']),
+                'has_sentiments' => !empty($cleanSentiments),
             ]);
         } catch (\Exception) {}
 
