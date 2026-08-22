@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Order;
+use App\Models\Outlet;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -98,6 +99,33 @@ class SalesBucketTest extends TestCase
 
         $this->assertContains($chat->id, Order::query()->salesChannel('chat')->pluck('orders.id')->all());
         $this->assertContains($till->id, Order::query()->salesChannel('till')->pluck('orders.id')->all());
+    }
+
+    public function test_a_null_bucket_online_order_at_a_whatsapp_outlet_is_chat_only(): void
+    {
+        // The legacy fallback must PARTITION. An online order recorded against a
+        // WhatsApp outlet with its bucket forgotten used to match chat (WhatsApp
+        // outlet) AND one of web/quoted (online, by created_by) — double-counting
+        // it, so weekly/monthly totals exceeded the channel sum. A WhatsApp outlet
+        // is chat, matching the backfill's precedence; each order lands in exactly
+        // one bucket. Both created_by shapes are exercised because both the web and
+        // the quoted legacy branch carry the exclusion.
+        $waOutlet = Outlet::factory()->create(['sales_channel' => 'whatsapp']);
+        $staff    = User::factory()->create();
+
+        $selfServe = $this->order(['order_type' => 'online', 'created_by' => null,
+            'outlet_id' => $waOutlet->id, 'sales_bucket' => null]);          // would-be web
+        $converted = $this->order(['order_type' => 'online', 'created_by' => $staff->id,
+            'outlet_id' => $waOutlet->id, 'sales_bucket' => null]);          // would-be quoted
+
+        $inBucket = fn (string $c) => Order::query()->salesChannel($c)->pluck('orders.id')->all();
+
+        foreach ([$selfServe, $converted] as $o) {
+            $this->assertContains($o->id, $inBucket('chat'));
+            $this->assertNotContains($o->id, $inBucket('web'));
+            $this->assertNotContains($o->id, $inBucket('quoted'));
+            $this->assertNotContains($o->id, $inBucket('till'));
+        }
     }
 
     public function test_the_old_channel_names_still_answer(): void
