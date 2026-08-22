@@ -94,11 +94,6 @@ jobs:
           - service: bethany-laravel
             context: ./backend
             build-args: ""
-          - service: bethany-nextjs
-            context: ./frontend
-            build-args: |
-              NEXT_PUBLIC_API_URL=/api
-              NEXT_PUBLIC_APP_URL=https://hub.bethanyhouse.co.ke
           - service: bethany-react-admin
             context: ./react-admin
             build-args: |
@@ -242,7 +237,7 @@ jobs:
   #           # so other stacks on this box keep pulling anonymously.
   #           echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
   #
-  #           docker compose pull laravel nextjs react-admin
+  #           docker compose pull laravel react-admin
   #           # -T + </dev/null: without them `compose run` eats the container stdin
   #           # and the script dies here "successfully".
   #           docker compose run --rm --no-deps -T laravel php artisan migrate --force </dev/null
