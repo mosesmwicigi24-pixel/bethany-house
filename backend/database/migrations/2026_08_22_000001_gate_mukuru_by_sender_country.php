@@ -12,18 +12,20 @@ use Illuminate\Support\Facades\DB;
  *
  *   +27 South Africa   +44 United Kingdom   +263 Zimbabwe   +260 Zambia
  *   +265 Malawi        +267 Botswana        +266 Lesotho    +256 Uganda
- *   +250 Rwanda        +254 Kenya
+ *   +250 Rwanda
  *
  * Mukuru OPERATES more widely (Mozambique, Eswatini, DRC, Nigeria, Ghana,
  * Tanzania…) but sender capability there is not clearly documented; add a
  * prefix here (or via the DB) when it is verified, and the page follows.
+ * Kenya is deliberately ABSENT (owner, 2026-08-22): domestic customers pay
+ * by M-Pesa — Mukuru at home is noise on the page.
  * PublicPaymentController::methodWorksForCustomer() reads this; methods
  * without the key stay ungated.
  */
 return new class extends Migration
 {
     private const MUKURU_SENDER_PREFIXES = [
-        '+27', '+44', '+263', '+260', '+265', '+267', '+266', '+256', '+250', '+254',
+        '+27', '+44', '+263', '+260', '+265', '+267', '+266', '+256', '+250',
     ];
 
     public function up(): void

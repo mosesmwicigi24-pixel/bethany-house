@@ -41,9 +41,13 @@ class MukuruCountryGateTest extends TestCase
         $this->assertContains('mukuru', $this->methodCodes($this->orderWith('+27 78 227 5061')));
     }
 
-    public function test_a_kenyan_customer_sees_mukuru(): void
+    public function test_a_kenyan_customer_does_not_see_mukuru(): void
     {
-        $this->assertContains('mukuru', $this->methodCodes($this->orderWith('0743942757')));
+        // Owner's rule (2026-08-22): Kenyans pay by M-Pesa — Mukuru at home
+        // is noise. The domestic rails stay on offer.
+        $codes = $this->methodCodes($this->orderWith('0743942757'));
+        $this->assertNotContains('mukuru', $codes);
+        $this->assertContains('mpesa_manual', $codes);
     }
 
     public function test_an_ethiopian_customer_does_not_see_mukuru(): void
@@ -110,5 +114,6 @@ class MukuruCountryGateTest extends TestCase
             'the migration must stamp sender_countries onto the mukuru row');
         $this->assertContains('+27', $config['sender_countries']);
         $this->assertNotContains('+251', $config['sender_countries']);
+        $this->assertNotContains('+254', $config['sender_countries'], 'Kenya is deliberately absent — owner rule');
     }
 }
