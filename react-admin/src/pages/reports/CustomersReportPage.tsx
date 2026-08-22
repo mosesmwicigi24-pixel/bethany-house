@@ -764,7 +764,7 @@ function CustomerIntelligence({
                         <div className="space-y-1.5 mt-1">
                             {top_customers.map((c: any, i: number) => (
                                 <div key={c.ckey} className="flex items-center gap-2.5 text-xs">
-                                    <span className="text-2xs font-bold text-surface-300 w-4">{i + 1}</span>
+                                    <span className="text-2xs font-bold text-surface-500 w-4">{i + 1}</span>
                                     <div className="flex-1 min-w-0">
                                         <p className="font-medium text-surface-800 truncate">{c.name || c.phone}</p>
                                         <p className="text-2xs text-surface-400">{c.lifetime_orders} orders lifetime · {fmtKes(c.lifetime_revenue)}</p>
@@ -1077,7 +1077,7 @@ function SecondPurchaseTab() {
                                         const mature = c[`mature_${w}` as const];
                                         return (
                                             <td key={w}
-                                                className={clsx("text-right tabular-nums", !mature && "text-surface-300")}
+                                                className={clsx("text-right tabular-nums", !mature && "text-surface-500")}
                                                 title={mature ? undefined : "Cohort hasn't had this long yet"}>
                                                 {rate}% <span className="text-2xs">({count})</span>{!mature && "*"}
                                             </td>
@@ -1147,7 +1147,7 @@ function SecondPurchaseTab() {
                                                 WhatsApp
                                             </button>
                                         ) : (
-                                            <span className="text-xs text-surface-300">no phone</span>
+                                            <span className="text-xs text-surface-500">no phone</span>
                                         )}
                                     </td>
                                 </tr>
@@ -1360,7 +1360,7 @@ function WinBackTab() {
                                                     d ago
                                                 </span>
                                             ) : (
-                                                <span className="text-surface-300">
+                                                <span className="text-surface-500">
                                                     —
                                                 </span>
                                             )}
@@ -1377,7 +1377,7 @@ function WinBackTab() {
                                                     )}
                                                 </span>
                                             ) : (
-                                                <span className="text-surface-300 text-sm">
+                                                <span className="text-surface-500 text-sm">
                                                     —
                                                 </span>
                                             )}
@@ -1834,7 +1834,7 @@ function OutreachLogTab() {
                                         </td>
                                         <td className="px-4 py-3 text-sm text-surface-700">
                                             {row.product_name ?? (
-                                                <span className="text-surface-300">
+                                                <span className="text-surface-500">
                                                     —
                                                 </span>
                                             )}
@@ -1857,7 +1857,7 @@ function OutreachLogTab() {
                                                     {row.outcome}
                                                 </span>
                                             ) : (
-                                                <span className="text-surface-300 text-sm">
+                                                <span className="text-surface-500 text-sm">
                                                     —
                                                 </span>
                                             )}

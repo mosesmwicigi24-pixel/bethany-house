@@ -365,7 +365,7 @@ export function EmptyState({
 }: EmptyStateProps) {
     return (
         <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
-            {icon && <div className="text-surface-300 mb-4">{icon}</div>}
+            {icon && <div className="text-surface-500 mb-4">{icon}</div>}
             <p className="text-sm font-medium text-surface-600">{title}</p>
             <p className="text-xs text-surface-400 mt-1 max-w-xs">
                 {description}

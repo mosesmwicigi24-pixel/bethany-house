@@ -167,7 +167,7 @@ function DragHandle(props: React.HTMLAttributes<HTMLDivElement>) {
         <div
             {...props}
             title="Drag to reorder"
-            className="w-5 h-5 flex items-center justify-center rounded text-surface-300 hover:text-surface-500 hover:bg-surface-100 cursor-grab active:cursor-grabbing transition-colors shrink-0 touch-none"
+            className="w-5 h-5 flex items-center justify-center rounded text-surface-500 hover:text-surface-500 hover:bg-surface-100 cursor-grab active:cursor-grabbing transition-colors shrink-0 touch-none"
         >
             <svg
                 className="w-3.5 h-3.5"
@@ -332,7 +332,7 @@ function SortableTreeNode({
                         <span>{category.icon}</span>
                     ) : (
                         <svg
-                            className="w-3 h-3 text-surface-300"
+                            className="w-3 h-3 text-surface-500"
                             fill="none"
                             viewBox="0 0 24 24"
                             stroke="currentColor"
@@ -368,7 +368,7 @@ function SortableTreeNode({
                 {/* Right-side badges + actions */}
                 <div className="flex items-center gap-1 shrink-0">
                     {descendants > 0 && (
-                        <span className="text-2xs text-surface-300 font-mono tabular-nums">
+                        <span className="text-2xs text-surface-500 font-mono tabular-nums">
                             {descendants}
                         </span>
                     )}
@@ -378,7 +378,7 @@ function SortableTreeNode({
                         </span>
                     )}
                     {!category.is_active && (
-                        <span className="text-2xs text-surface-300">off</span>
+                        <span className="text-2xs text-surface-500">off</span>
                     )}
 
                     {/* Hover actions */}
@@ -625,7 +625,7 @@ function DetailPanel({
                             <span className="text-3xl">{category.icon}</span>
                         ) : (
                             <svg
-                                className="w-7 h-7 text-surface-300"
+                                className="w-7 h-7 text-surface-500"
                                 fill="none"
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"
@@ -681,7 +681,7 @@ function DetailPanel({
                         </p>
                         {category.parent && (
                             <p className="text-xs text-surface-500 mt-1">
-                                <span className="text-surface-300">Under</span>{" "}
+                                <span className="text-surface-500">Under</span>{" "}
                                 {category.breadcrumb
                                     .split(" > ")
                                     .slice(0, -1)
@@ -940,7 +940,7 @@ function DetailPanel({
                                             "text-2xs",
                                             child.is_active
                                                 ? "text-success"
-                                                : "text-surface-300",
+                                                : "text-surface-500",
                                         )}
                                     >
                                         {child.is_active
@@ -1324,7 +1324,7 @@ export default function CategoriesPage() {
                                 {flatCategories.length} total
                             </span>
                         </div>
-                        <p className="text-2xs text-surface-300 flex items-center gap-1">
+                        <p className="text-2xs text-surface-500 flex items-center gap-1">
                             <svg
                                 className="w-3 h-3"
                                 fill="currentColor"
@@ -1442,7 +1442,7 @@ export default function CategoriesPage() {
                         <div className="flex flex-col items-center justify-center h-full text-center px-8">
                             <div className="w-16 h-16 rounded-2xl bg-surface-100 flex items-center justify-center mb-4">
                                 <svg
-                                    className="w-8 h-8 text-surface-300"
+                                    className="w-8 h-8 text-surface-500"
                                     fill="none"
                                     viewBox="0 0 24 24"
                                     stroke="currentColor"
@@ -1463,7 +1463,7 @@ export default function CategoriesPage() {
                                 manage subcategories, and update SEO settings.
                             </p>
                             {treeCategories.length > 0 && (
-                                <p className="text-2xs text-surface-300 mt-3">
+                                <p className="text-2xs text-surface-500 mt-3">
                                     Drag the{" "}
                                     <span className="font-mono">⠿</span> handle
                                     to reorder within a level

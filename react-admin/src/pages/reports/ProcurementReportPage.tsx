@@ -701,7 +701,7 @@ function SeasonalDemandTab() {
                                                                 : ` · ${r.days_until_order_by}d`}
                                                         </span>
                                                     ) : (
-                                                        <span className="text-surface-300">
+                                                        <span className="text-surface-500">
                                                             covered
                                                         </span>
                                                     )}
@@ -782,7 +782,7 @@ function ProcurementIntelligence({ start, end }: { start: string; end: string })
                                         <td className="px-3 py-2 text-2xs text-surface-500">
                                             {r.last_supplier
                                                 ? <>{r.last_supplier}{r.last_price != null && <> · {fmtKes(r.last_price)}/{r.unit}</>}</>
-                                                : <span className="italic text-surface-300">no purchase history</span>}
+                                                : <span className="italic text-surface-500">no purchase history</span>}
                                         </td>
                                     </tr>
                                 ))}

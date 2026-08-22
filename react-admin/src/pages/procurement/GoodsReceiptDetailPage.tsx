@@ -263,7 +263,7 @@ export default function GoodsReceiptDetailPage() {
                                                         {hasRejection ? (
                                                             <span className="text-danger-700 font-semibold">{item.quantity_rejected}</span>
                                                         ) : (
-                                                            <span className="text-surface-300">-</span>
+                                                            <span className="text-surface-500">-</span>
                                                         )}
                                                     </td>
                                                     <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-success-700">{accepted}</td>

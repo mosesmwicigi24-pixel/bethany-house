@@ -134,7 +134,7 @@ aria-label="Close">
                                     <p className="text-2xs">Try a different receipt number</p>
                                 </div>
                             ) : searchQuery.length < 3 ? (
-                                <div className="flex flex-col items-center justify-center h-32 text-surface-300 gap-2">
+                                <div className="flex flex-col items-center justify-center h-32 text-surface-500 gap-2">
                                     <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={0.8}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
                                     <p className="text-sm">Enter at least 3 characters to search</p>
                                 </div>

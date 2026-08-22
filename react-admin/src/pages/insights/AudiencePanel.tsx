@@ -59,7 +59,7 @@ export function AudiencePanel({
                 <h3 className="font-semibold text-surface-900">How they browse</h3>
                 <p className={clsx("text-xs font-medium", signal.tone)} title={POWER_SIGNAL_NOTE}>
                     {signal.label}
-                    <span className="ml-1 cursor-help text-surface-300">ⓘ</span>
+                    <span className="ml-1 cursor-help text-surface-500">ⓘ</span>
                 </p>
             </div>
 

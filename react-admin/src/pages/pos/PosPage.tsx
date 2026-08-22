@@ -489,7 +489,7 @@ function CountryPickerPanel({
                     </button>
                     <button
                         onClick={() => { onChange(""); setSearch(""); }}
-                        className="text-surface-300 hover:text-danger shrink-0"
+                        className="text-surface-500 hover:text-danger shrink-0"
                         aria-label="Close"
                         title="Clear country"
                     >
@@ -515,7 +515,7 @@ function CountryPickerPanel({
                             placeholder="Search country…"
                             className="flex-1 text-xs outline-none bg-transparent placeholder-surface-300"
                         />
-                        <button onClick={() => { setOpen(false); setSearch(""); }} className="text-surface-300 hover:text-surface-600 shrink-0"
+                        <button onClick={() => { setOpen(false); setSearch(""); }} className="text-surface-500 hover:text-surface-600 shrink-0"
 aria-label="Close">
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
@@ -571,7 +571,7 @@ aria-label="Close">
                     </div>
 
                     {activeCurrencies.length > 0 && (
-                        <p className="px-3 py-1.5 text-2xs text-surface-300 border-t border-line">
+                        <p className="px-3 py-1.5 text-2xs text-surface-500 border-t border-line">
                             Active currencies: {activeCurrencies.join(", ")}
                         </p>
                     )}
@@ -759,7 +759,7 @@ aria-label="Close" title="Remove customer">
                                 setQ("");
                                 setOpen(false);
                             }}
-                            className="text-surface-300 hover:text-surface-600"
+                            className="text-surface-500 hover:text-surface-600"
                             aria-label="Close"
                         >
                             <svg
@@ -1379,7 +1379,7 @@ function CartRow({
                     <button
                         onClick={() => onRemove(index)}
                         title="Remove item"
-                        className="hidden sm:flex w-6 h-6 items-center justify-center rounded text-surface-300 hover:text-danger hover:bg-danger-light transition-colors ml-0.5"
+                        className="hidden sm:flex w-6 h-6 items-center justify-center rounded text-surface-500 hover:text-danger hover:bg-danger-light transition-colors ml-0.5"
                     >
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
@@ -1397,7 +1397,7 @@ function CartRow({
                         "text-2xs px-1.5 py-0.5 rounded font-medium transition-colors leading-none",
                         item.discount_type !== "none"
                             ? "bg-warning-light text-warning-dark"
-                            : "text-surface-300 hover:text-surface-600 hover:bg-surface-100",
+                            : "text-surface-500 hover:text-surface-600 hover:bg-surface-100",
                     )}
                 >
                     {item.discount_type === "percent" ? `-${item.discount_value}%` :
@@ -1412,7 +1412,7 @@ function CartRow({
                         "flex items-center gap-0.5 text-2xs px-1.5 py-0.5 rounded font-medium transition-colors leading-none",
                         item.price_adjusted
                             ? "bg-brand-100 text-brand-700"
-                            : "text-surface-300 hover:text-brand-600 hover:bg-brand-50",
+                            : "text-surface-500 hover:text-brand-600 hover:bg-brand-50",
                     )}
                 >
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -1429,7 +1429,7 @@ function CartRow({
                         "flex items-center gap-0.5 text-2xs px-1.5 py-0.5 rounded font-medium transition-colors leading-none",
                         hasMto
                             ? "bg-accent-100 text-accent-700"
-                            : "text-surface-300 hover:text-accent-600 hover:bg-accent-50",
+                            : "text-surface-500 hover:text-accent-600 hover:bg-accent-50",
                     )}
                 >
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/></svg>
@@ -3343,13 +3343,13 @@ export default function PosPage() {
                         receiptMode ? "flex-1 min-h-0" : "sm:flex-1 sm:min-h-0",
                     )}>
                         {cart.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center h-full gap-3 text-surface-300 p-6">
+                            <div className="flex flex-col items-center justify-center h-full gap-3 text-surface-500 p-6">
                                 <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={0.75}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z"/>
                                 </svg>
                                 <div className="text-center">
                                     <p className="text-sm font-medium text-surface-400">Tap a product to add</p>
-                                    <p className="text-xs text-surface-300 mt-0.5">Your order appears here</p>
+                                    <p className="text-xs text-surface-500 mt-0.5">Your order appears here</p>
                                 </div>
                             </div>
                         ) : (

@@ -754,7 +754,7 @@ export default function ExpenseDetailPage() {
                 >
                     Expenses
                 </button>
-                <span className="text-surface-300">/</span>
+                <span className="text-surface-500">/</span>
                 <span className="text-surface-700 font-medium">
                     {expense.reference_number}
                 </span>

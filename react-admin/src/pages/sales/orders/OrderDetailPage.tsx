@@ -1082,7 +1082,7 @@ function ChangeCurrencyModal({ order, onClose, onDone }: {
                     </div>
                     {canSave && (
                         <>
-                            <svg className="w-4 h-4 text-surface-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <svg className="w-4 h-4 text-surface-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3"/>
                             </svg>
                             <div className="flex-1 text-right">
@@ -2678,7 +2678,7 @@ function ThreadEntityPopup({ query, onSelect, onDismiss }: {
             <div className="flex items-center justify-between px-3 pt-1.5 pb-1">
                 <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest">Tag order or production</p>
                 <button onMouseDown={e => { e.preventDefault(); onDismiss(); }}
-                    className="text-surface-300 hover:text-surface-500 p-0.5 rounded">
+                    className="text-surface-500 hover:text-surface-500 p-0.5 rounded">
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
                     </svg>
@@ -2916,12 +2916,12 @@ function ProductionOrderChannelThread({ poId }: { poId: number }) {
             {/* Messages */}
             <div className="flex-1 overflow-y-auto px-1 py-2 space-y-3" style={{ maxHeight: 380 }}>
                 {messages.length === 0 ? (
-                    <div className="text-center py-10 text-surface-300">
+                    <div className="text-center py-10 text-surface-500">
                         <svg className="w-10 h-10 mx-auto mb-2 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                         </svg>
                         <p className="text-sm font-medium text-surface-400">No messages yet</p>
-                        <p className="text-xs text-surface-300 mt-1">Start the conversation below</p>
+                        <p className="text-xs text-surface-500 mt-1">Start the conversation below</p>
                     </div>
                 ) : messages.map(msg => {
                     if (msg.type === "system") return (
@@ -2944,7 +2944,7 @@ function ProductionOrderChannelThread({ poId }: { poId: number }) {
                             <div className={clsx("flex flex-col gap-0.5 max-w-[78%]", isOwn && "items-end")}>
                                 <div className={clsx("flex items-center gap-1.5 px-0.5", isOwn && "flex-row-reverse")}>
                                     <span className="text-2xs font-semibold text-surface-700">{msg.user?.name ?? "System"}</span>
-                                    <span className="text-2xs text-surface-300">{fmtTime(msg.created_at)}</span>
+                                    <span className="text-2xs text-surface-500">{fmtTime(msg.created_at)}</span>
                                 </div>
                                 <div className={clsx(
                                     "px-3 py-2 rounded-2xl",
@@ -3002,17 +3002,17 @@ function ProductionOrderChannelThread({ poId }: { poId: number }) {
                 </div>
                 {!body && (
                     <div className="flex items-center gap-3 px-1 pt-1.5">
-                        <span className="flex items-center gap-1 text-2xs text-surface-300">
+                        <span className="flex items-center gap-1 text-2xs text-surface-500">
                             <kbd className="px-1 py-0.5 rounded bg-surface-100 text-surface-400 font-mono text-2xs border border-surface-200 leading-none">@</kbd>
                             mention people
                         </span>
                         <span className="text-surface-200 text-2xs select-none">·</span>
-                        <span className="flex items-center gap-1 text-2xs text-surface-300">
+                        <span className="flex items-center gap-1 text-2xs text-surface-500">
                             <kbd className="px-1 py-0.5 rounded bg-surface-100 text-surface-400 font-mono text-2xs border border-surface-200 leading-none">#</kbd>
                             tag an order
                         </span>
                         <span className="text-surface-200 text-2xs select-none">·</span>
-                        <span className="text-2xs text-surface-300">visible in CommsHub</span>
+                        <span className="text-2xs text-surface-500">visible in CommsHub</span>
                     </div>
                 )}
             </div>
@@ -3233,7 +3233,7 @@ function RaiseProductionModal({ order, item, onClose, onDone }: {
                                 <input value={r.v} onChange={e => setRow(i, { v: e.target.value })} placeholder="Value (e.g. 40 in)"
                                     className="input text-sm flex-1 min-w-0" />
                                 <button type="button" onClick={() => setRows(rs => rs.filter((_, idx) => idx !== i))}
-                                    className="w-7 h-7 shrink-0 rounded-lg flex items-center justify-center text-surface-300 hover:text-danger hover:bg-danger-light" aria-label="Remove">
+                                    className="w-7 h-7 shrink-0 rounded-lg flex items-center justify-center text-surface-500 hover:text-danger hover:bg-danger-light" aria-label="Remove">
                                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
                                 </button>
                             </div>
@@ -3439,9 +3439,9 @@ aria-label="Close">
                         <div className="flex justify-center py-12"><Spinner /></div>
                     ) : logs.length === 0 ? (
                         <div className="text-center py-12 space-y-2">
-                            <svg className="w-8 h-8 text-surface-300 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z"/></svg>
+                            <svg className="w-8 h-8 text-surface-500 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z"/></svg>
                             <p className="text-surface-400 text-xs">No activity recorded yet.</p>
-                            <p className="text-surface-300 text-2xs">Actions on this order will appear here.</p>
+                            <p className="text-surface-500 text-2xs">Actions on this order will appear here.</p>
                         </div>
                     ) : (
                         <div className="relative">
@@ -3473,7 +3473,7 @@ aria-label="Close">
                                             <p className="text-2xs text-surface-400 mt-1 flex items-center gap-1">
                                                 <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>
                                                 <span className="font-medium text-surface-500">{actorName}</span>
-                                                {log.ip_address && <span className="text-surface-300 ml-1">· {log.ip_address}</span>}
+                                                {log.ip_address && <span className="text-surface-500 ml-1">· {log.ip_address}</span>}
                                             </p>
                                         </div>
                                     </div>
@@ -3934,7 +3934,7 @@ export default function OrderDetailPage() {
                                         : <svg className="w-3.5 h-3.5 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
                                     }
                                     {order.order_type === "pos" ? "POS Sale" : "Online Order"}
-                                    {order.outlet_name && <><span className="text-surface-300">·</span><span>{order.outlet_name}</span></>}
+                                    {order.outlet_name && <><span className="text-surface-500">·</span><span>{order.outlet_name}</span></>}
                                 </span>
                                 {order.production_orders && order.production_orders.length > 0 && (
                                     <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full bg-accent-50 text-accent-700 border border-accent-200">
@@ -4116,14 +4116,14 @@ export default function OrderDetailPage() {
                                     <tbody className="divide-y divide-line">
                                         {(order.items ?? []).map((item: any, i: number) => (
                                             <tr key={item.id ?? i} className="hover:bg-surface-50/50 transition-colors">
-                                                <td className="px-4 py-3 text-surface-300 align-top">{i + 1}</td>
+                                                <td className="px-4 py-3 text-surface-500 align-top">{i + 1}</td>
                                                 <td className="px-4 py-3 align-top">
                                                     <div className="flex items-start gap-2.5">
                                                         {item.image_url && <img src={item.image_url} alt="" className="w-9 h-9 rounded-lg object-contain bg-surface-100 shrink-0 mt-0.5 border border-line" />}
                                                         <div>
                                                             <p className="font-semibold text-surface-900">{item.product_name}</p>
                                                             {item.variant_name && <p className="text-surface-400 mt-0.5">{item.variant_name}</p>}
-                                                            {item.sku && <p className="text-surface-300 font-mono mt-0.5 text-2xs">SKU: {item.sku}</p>}
+                                                            {item.sku && <p className="text-surface-500 font-mono mt-0.5 text-2xs">SKU: {item.sku}</p>}
                                                             <div className="flex flex-wrap gap-1 mt-1">
                                                                 {item.discount_amount > 0 && (
                                                                     <span className="inline-flex items-center text-2xs font-medium text-warning-dark bg-warning-light px-1.5 py-0.5 rounded">
@@ -4239,11 +4239,11 @@ export default function OrderDetailPage() {
                                                 setItemsDraft(d => (d ?? []).map(x => x.key === l.key ? { ...x, ...patch } : x));
                                             return (
                                                 <tr key={l.key} className={clsx(l.isNew && "bg-success-50/40")}>
-                                                    <td className="px-4 py-3 text-surface-300 align-top">{i + 1}</td>
+                                                    <td className="px-4 py-3 text-surface-500 align-top">{i + 1}</td>
                                                     <td className="px-4 py-3 align-top">
                                                         <p className="font-semibold text-surface-900">{l.product_name}</p>
                                                         {l.variant_name && <p className="text-surface-400 mt-0.5">{l.variant_name}</p>}
-                                                        {l.sku && <p className="text-surface-300 font-mono mt-0.5 text-2xs">SKU: {l.sku}</p>}
+                                                        {l.sku && <p className="text-surface-500 font-mono mt-0.5 text-2xs">SKU: {l.sku}</p>}
                                                         {l.isNew && (
                                                             <span className="inline-flex items-center mt-1 text-2xs font-bold text-success-dark bg-success-light px-1.5 py-0.5 rounded">NEW</span>
                                                         )}
@@ -4569,7 +4569,7 @@ export default function OrderDetailPage() {
                             ) : (
                                 <div className="py-10 text-center border-2 border-dashed border-line rounded-xl">
                                     <div className="w-10 h-10 rounded-xl bg-surface-50 flex items-center justify-center mx-auto mb-2">
-                                        <svg className="w-5 h-5 text-surface-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z"/></svg>
+                                        <svg className="w-5 h-5 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z"/></svg>
                                     </div>
                                     <p className="text-xs text-surface-400 font-medium">No payments recorded yet</p>
                                     {canAddPayment && <button onClick={() => setShowPaymentModal(true)} className="mt-2 text-xs text-brand-500 hover:underline font-semibold">Record first payment →</button>}
@@ -4637,7 +4637,7 @@ export default function OrderDetailPage() {
                                                         {(h.changed_by_name ?? h.created_by) && <span className="text-2xs text-surface-400">by {h.changed_by_name ?? h.created_by}</span>}
                                                     </div>
                                                     {h.notes && <p className="text-2xs text-surface-500 mt-0.5">{h.notes}</p>}
-                                                    <p className="text-2xs text-surface-300 mt-0.5">{new Date(h.created_at).toLocaleString("en-KE", {dateStyle:"medium",timeStyle:"short"})}</p>
+                                                    <p className="text-2xs text-surface-500 mt-0.5">{new Date(h.created_at).toLocaleString("en-KE", {dateStyle:"medium",timeStyle:"short"})}</p>
                                                 </div>
                                             </div>
                                         ))}
@@ -4670,7 +4670,7 @@ export default function OrderDetailPage() {
                                         <p className="text-xs text-surface-700 whitespace-pre-wrap">{order.customer_notes}</p>
                                     </div>
                                 )}
-                                {!order.notes && !order.customer_notes && <p className="text-xs text-surface-300 italic">No notes on this order.</p>}
+                                {!order.notes && !order.customer_notes && <p className="text-xs text-surface-500 italic">No notes on this order.</p>}
                                 <div className="space-y-2 pt-1 border-t border-line">
                                     <textarea value={noteText} onChange={e => setNoteText(e.target.value)}
                                         placeholder="Add a note…" rows={2} className="input resize-none text-xs w-full" />
@@ -4879,7 +4879,7 @@ export default function OrderDetailPage() {
                         <svg className="w-5 h-5 text-brand-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
                         <div className="flex-1 min-w-0">
                             <p className="text-xs font-semibold text-white mb-1">Payment link copied to clipboard</p>
-                            <p className="text-2xs text-surface-300 font-mono truncate">{paymentLink}</p>
+                            <p className="text-2xs text-surface-500 font-mono truncate">{paymentLink}</p>
                         </div>
                         <button onClick={() => setPaymentLink(null)} className="text-surface-400 hover:text-white transition-colors ml-2 shrink-0" aria-label="Close">
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>

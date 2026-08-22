@@ -178,7 +178,7 @@ const PER_PAGE_OPTIONS = [15, 25, 50, 100];
 
 function SortIcon({ active, dir }: { active: boolean; dir?: "asc" | "desc" }) {
     return (
-        <span className={clsx("inline-flex flex-col gap-px ml-0.5", active ? "text-brand-500" : "text-surface-300")}>
+        <span className={clsx("inline-flex flex-col gap-px ml-0.5", active ? "text-brand-500" : "text-surface-500")}>
             <svg className="w-2.5 h-2.5" viewBox="0 0 10 6" fill="currentColor" opacity={!active || dir === "asc" ? 1 : 0.3}>
                 <path d="M5 0L9.33 6H.67L5 0z" />
             </svg>

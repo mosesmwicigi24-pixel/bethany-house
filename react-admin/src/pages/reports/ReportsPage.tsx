@@ -49,7 +49,7 @@ function Sparkline({ series }: { series?: Record<string, number> }) {
 function DeltaChip({ current, previous, downIsGood = false }: {
     current: number; previous: number; downIsGood?: boolean;
 }) {
-    if (!previous) return <span className="text-2xs text-surface-300">— prev n/a</span>;
+    if (!previous) return <span className="text-2xs text-surface-500">— prev n/a</span>;
     const pct = ((current - previous) / Math.abs(previous)) * 100;
     if (Math.abs(pct) < 0.05) return <span className="text-2xs text-surface-400">± 0%</span>;
     const up = pct > 0;
@@ -478,7 +478,7 @@ function AgingCard({ aging, onBucket }: { aging: any; onBucket: (bucket: string,
                                 style={{ width: `${(Number(b.amount) / max) * 100}%` }} />
                         </div>
                         <span className={clsx("text-2xs font-bold tabular-nums w-16 text-right shrink-0",
-                            Number(b.amount) > 0 ? "text-surface-700 group-hover:text-brand-600" : "text-surface-300")}>
+                            Number(b.amount) > 0 ? "text-surface-700 group-hover:text-brand-600" : "text-surface-500")}>
                             {Number(b.amount) >= 1000 ? `${Math.round(Number(b.amount) / 1000)}k` : Number(b.amount)}
                         </span>
                     </button>
@@ -885,7 +885,7 @@ export default function ReportsPage() {
                                 </div>
                             </div>
                             <svg
-                                className="w-4 h-4 text-surface-300 group-hover:text-brand-500 transition-colors shrink-0 mt-0.5"
+                                className="w-4 h-4 text-surface-500 group-hover:text-brand-500 transition-colors shrink-0 mt-0.5"
                                 fill="none"
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"

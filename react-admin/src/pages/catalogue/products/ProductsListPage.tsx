@@ -711,7 +711,7 @@ export default function ProductsListPage() {
                                                     ) : (
                                                         <div className="w-full h-full flex items-center justify-center">
                                                             <svg
-                                                                className="w-5 h-5 text-surface-300"
+                                                                className="w-5 h-5 text-surface-500"
                                                                 fill="none"
                                                                 viewBox="0 0 24 24"
                                                                 stroke="currentColor"
@@ -793,7 +793,7 @@ export default function ProductsListPage() {
                                                     )}
                                                 </div>
                                             ) : (
-                                                <span className="text-xs text-surface-300">
+                                                <span className="text-xs text-surface-500">
                                                     -
                                                 </span>
                                             )}
