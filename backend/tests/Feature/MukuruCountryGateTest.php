@@ -43,11 +43,27 @@ class MukuruCountryGateTest extends TestCase
 
     public function test_a_kenyan_customer_does_not_see_mukuru(): void
     {
-        // Owner's rule (2026-08-22): Kenyans pay by M-Pesa — Mukuru at home
-        // is noise. The domestic rails stay on offer.
+        // Owner's rule (2026-08-22): Kenyans pay by M-Pesa / bank — the
+        // remittance rails at home are noise. The domestic rails stay on offer.
         $codes = $this->methodCodes($this->orderWith('0743942757'));
         $this->assertNotContains('mukuru', $codes);
+        $this->assertNotContains('wu_moneygram', $codes);
         $this->assertContains('mpesa_manual', $codes);
+    }
+
+    public function test_western_union_still_shows_everywhere_but_kenya(): void
+    {
+        // WU is blocklist-shaped: named only where NOT offered.
+        $this->assertContains('wu_moneygram', $this->methodCodes($this->orderWith('+251 972 763 678')));
+        $this->assertContains('wu_moneygram', $this->methodCodes($this->orderWith('+1 415 555 0100')));
+    }
+
+    public function test_initiate_refuses_western_union_for_a_kenyan(): void
+    {
+        $order = $this->orderWith('0743942757');
+
+        $this->postJson("/api/v1/pay/{$order->payment_token}/initiate", ['method' => 'wu_moneygram'])
+            ->assertStatus(422);
     }
 
     public function test_an_ethiopian_customer_does_not_see_mukuru(): void
@@ -95,8 +111,8 @@ class MukuruCountryGateTest extends TestCase
 
     public function test_ungated_methods_ignore_the_country_entirely(): void
     {
-        // wu_moneygram has no sender_countries key — an Ethiopian customer
-        // can still initiate it.
+        // wu_moneygram carries only the Kenya blocklist — an Ethiopian
+        // customer can still initiate it.
         $order = $this->orderWith('+251 972 763 678');
 
         $this->postJson("/api/v1/pay/{$order->payment_token}/initiate", ['method' => 'wu_moneygram'])

@@ -19,8 +19,11 @@ use Illuminate\Support\Facades\DB;
  * prefix here (or via the DB) when it is verified, and the page follows.
  * Kenya is deliberately ABSENT (owner, 2026-08-22): domestic customers pay
  * by M-Pesa — Mukuru at home is noise on the page.
- * PublicPaymentController::methodWorksForCustomer() reads this; methods
- * without the key stay ungated.
+ * Western Union/MoneyGram is the opposite shape: it works nearly everywhere,
+ * so it carries `excluded_sender_countries` — offering it to a Kenyan
+ * alongside M-Pesa is noise (owner's rule, 2026-08-22).
+ * PublicPaymentController::methodWorksForCustomer() reads both keys; methods
+ * with neither stay ungated.
  */
 return new class extends Migration
 {
@@ -30,15 +33,18 @@ return new class extends Migration
 
     public function up(): void
     {
-        $row = DB::table('payment_methods')->where('code', 'mukuru')->first();
+        $this->mergeConfig('mukuru', ['sender_countries' => self::MUKURU_SENDER_PREFIXES]);
+        $this->mergeConfig('wu_moneygram', ['excluded_sender_countries' => ['+254']]);
+    }
+
+    private function mergeConfig(string $code, array $keys): void
+    {
+        $row = DB::table('payment_methods')->where('code', $code)->first();
         if (!$row) {
             return; // environment never seeded the manual methods — nothing to gate
         }
-
-        $config = json_decode($row->configuration ?? '{}', true) ?: [];
-        $config['sender_countries'] = self::MUKURU_SENDER_PREFIXES;
-
-        DB::table('payment_methods')->where('code', 'mukuru')->update([
+        $config = array_merge(json_decode($row->configuration ?? '{}', true) ?: [], $keys);
+        DB::table('payment_methods')->where('code', $code)->update([
             'configuration' => json_encode($config),
             'updated_at'    => now(),
         ]);
@@ -46,15 +52,17 @@ return new class extends Migration
 
     public function down(): void
     {
-        $row = DB::table('payment_methods')->where('code', 'mukuru')->first();
-        if (!$row) {
-            return;
+        foreach (['mukuru' => 'sender_countries', 'wu_moneygram' => 'excluded_sender_countries'] as $code => $key) {
+            $row = DB::table('payment_methods')->where('code', $code)->first();
+            if (!$row) {
+                continue;
+            }
+            $config = json_decode($row->configuration ?? '{}', true) ?: [];
+            unset($config[$key]);
+            DB::table('payment_methods')->where('code', $code)->update([
+                'configuration' => json_encode($config),
+                'updated_at'    => now(),
+            ]);
         }
-        $config = json_decode($row->configuration ?? '{}', true) ?: [];
-        unset($config['sender_countries']);
-        DB::table('payment_methods')->where('code', 'mukuru')->update([
-            'configuration' => json_encode($config),
-            'updated_at'    => now(),
-        ]);
     }
 };

@@ -828,18 +828,23 @@ class PublicPaymentController extends Controller
     }
 
     /**
-     * Whether a payment rail actually operates where this customer is.
-     * Gated by `configuration.sender_countries` — E.164 dialing prefixes the
-     * rail accepts senders from (seeded for Mukuru, whose send markets are a
-     * specific list; absent on every other method, which leaves them
-     * ungated). An order with no usable phone stays ungated too: "we cannot
-     * place you" is not "it will not work there".
+     * Whether a payment rail actually operates where — and is worth offering
+     * to — this customer. Two configuration keys, both E.164 dialing-prefix
+     * lists: `sender_countries` is an ALLOWLIST (Mukuru: its send markets are
+     * a specific list) and `excluded_sender_countries` is a BLOCKLIST
+     * (Western Union: works nearly everywhere, but offering it to a Kenyan
+     * alongside M-Pesa is noise — owner's rule, 2026-08-22). Methods with
+     * neither key are ungated, and an order with no usable phone stays
+     * ungated too: "we cannot place you" is not "it will not work there".
      */
     private static function methodWorksForCustomer(object $method, $order): bool
     {
         $config   = json_decode($method->configuration ?? '{}', true) ?: [];
-        $prefixes = $config['sender_countries'] ?? null;
-        if (!is_array($prefixes) || $prefixes === []) {
+        $allow    = $config['sender_countries'] ?? null;
+        $deny     = $config['excluded_sender_countries'] ?? null;
+        $hasAllow = is_array($allow) && $allow !== [];
+        $hasDeny  = is_array($deny) && $deny !== [];
+        if (!$hasAllow && !$hasDeny) {
             return true;
         }
 
@@ -848,13 +853,26 @@ class PublicPaymentController extends Controller
             return true;
         }
 
-        foreach ($prefixes as $prefix) {
-            if ($prefix !== '' && str_starts_with($e164, (string) $prefix)) {
-                return true;
+        // Blocklist first: a rail that works almost everywhere (Western
+        // Union) names only where it should NOT be offered.
+        if ($hasDeny) {
+            foreach ($deny as $prefix) {
+                if ($prefix !== '' && str_starts_with($e164, (string) $prefix)) {
+                    return false;
+                }
             }
         }
 
-        return false;
+        if ($hasAllow) {
+            foreach ($allow as $prefix) {
+                if ($prefix !== '' && str_starts_with($e164, (string) $prefix)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        return true;
     }
 
     /**
