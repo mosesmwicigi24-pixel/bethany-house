@@ -75,6 +75,86 @@ class OrderController extends Controller
         }
     }
 
+    /**
+     * The pending-queue worklist: every order no human has confirmed and no
+     * money has touched — the limbo the recognition rule (correctly) keeps
+     * out of every financial report. Staff work it top-down; each row exits
+     * by exactly one of confirm / record-payment / cancel.
+     *
+     * Ordered by value x age (KES x sqrt(days+1)): a big order going stale
+     * outranks a bigger one placed this morning. Rate-less currencies get no
+     * KES value and sink to the bottom rather than being priced at a guess —
+     * the same listed-never-summed rule the reports follow.
+     */
+    public function pendingQueue(Request $request)
+    {
+        $kes = \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code');
+        // created_at is written Nairobi-local-naive while Postgres now() is
+        // UTC — bare now() understates every age by 3 hours (the same clock
+        // mismatch MetricEngine::TODAY_SQL exists for), so age against the
+        // clock the timestamps were written with.
+        $ageDays = "EXTRACT(epoch FROM ((now() AT TIME ZONE 'Africa/Nairobi') - orders.created_at)) / 86400.0";
+
+        $base = Order::query()
+            ->whereRaw("LOWER(orders.status) = 'pending'")
+            ->whereRaw("LOWER(COALESCE(orders.payment_status, '')) NOT IN ('paid', 'partial', 'deposit')");
+
+        $rows = (clone $base)
+            ->selectRaw(<<<SQL
+                orders.id, orders.order_number,
+                orders.customer_first_name, orders.customer_last_name,
+                orders.customer_phone, orders.customer_email,
+                orders.currency_code, orders.total_amount,
+                orders.created_at, orders.updated_at,
+                COALESCE(orders.sales_bucket, orders.order_type) AS source,
+                FLOOR({$ageDays}) AS days_pending,
+                ROUND(({$kes})::numeric, 2) AS kes_value,
+                (({$kes}) * sqrt({$ageDays} + 1.0)) AS priority,
+                -- Same normalize_phone the unique-customer count uses: two
+                -- pending orders from one number are usually one sale quoted
+                -- twice, and confirming both double-counts the pipeline.
+                -- Guard on the NORMALIZED value: the function returns NULL for
+                -- junk ("n/a", short strings), and PARTITION BY lumps all NULLs
+                -- into one group — junk must never flag junk as a duplicate.
+                CASE WHEN normalize_phone(orders.customer_phone) IS NULL THEN FALSE
+                     ELSE COUNT(*) OVER (PARTITION BY normalize_phone(orders.customer_phone)) > 1
+                END AS possible_duplicate
+                SQL)
+            ->orderByRaw('priority DESC NULLS LAST, orders.created_at ASC')
+            ->limit(500)
+            ->get();
+
+        $summary = (clone $base)
+            ->selectRaw(<<<SQL
+                COUNT(*) AS total_count,
+                ROUND(SUM({$kes})::numeric, 2) AS total_kes,
+                COUNT(*) FILTER (WHERE {$ageDays} < 7)                        AS fresh_count,
+                COUNT(*) FILTER (WHERE {$ageDays} >= 7 AND {$ageDays} < 30)   AS aging_count,
+                COUNT(*) FILTER (WHERE {$ageDays} >= 30)                      AS stale_count
+                SQL)
+            ->first();
+
+        // Currencies with no reporting rate are listed, never summed — the
+        // total above must only ever contain money we can actually convert.
+        $excluded = (clone $base)
+            ->whereRaw('NOT ' . \App\Support\ReportingCurrency::convertibleFilter('orders.currency_code'))
+            ->selectRaw('UPPER(orders.currency_code) AS code, COUNT(*) AS n, SUM(orders.total_amount) AS amount')
+            ->groupBy('code')
+            ->get();
+
+        return response()->json([
+            'summary' => [
+                'total_count' => (int) $summary->total_count,
+                'total_kes'   => (float) ($summary->total_kes ?? 0),
+                'fresh_count' => (int) $summary->fresh_count,
+                'aging_count' => (int) $summary->aging_count,
+                'stale_count' => (int) $summary->stale_count,
+                'excluded_currencies' => $excluded,
+            ],
+            'rows' => $rows,
+        ]);
+    }
+
     public function index(Request $request)
     {
         $query = Order::with(['user', 'items', 'outlet', 'creator:id,first_name,last_name'])

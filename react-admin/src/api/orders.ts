@@ -203,7 +203,42 @@ export interface OrderFilters {
 
 // ── API ───────────────────────────────────────────────────────────────────────
 
+
+// ── Pending queue (the unconfirmed-order worklist) ───────────────────────────
+
+export interface PendingQueueRow {
+    id: number;
+    order_number: string;
+    customer_first_name: string | null;
+    customer_last_name: string | null;
+    customer_phone: string | null;
+    customer_email: string | null;
+    currency_code: string;
+    total_amount: string | number;
+    created_at: string;
+    updated_at: string;
+    source: string | null;
+    days_pending: number;
+    /** Null when the currency has no reporting rate — listed, never summed. */
+    kes_value: string | number | null;
+    possible_duplicate: boolean;
+}
+
+export interface PendingQueueSummary {
+    total_count: number;
+    total_kes: number;
+    fresh_count: number;
+    aging_count: number;
+    stale_count: number;
+    excluded_currencies: { code: string; n: number; amount: string | number }[];
+}
+
 export const ordersApi = {
+    /** The unconfirmed-order worklist, sorted by value x age. */
+    pendingQueue: () =>
+        get<{ summary: PendingQueueSummary; rows: PendingQueueRow[] }>(
+            "/v1/admin/orders/pending-queue"),
+
     list: (params?: OrderFilters) =>
         get<{
             data: Order[];
