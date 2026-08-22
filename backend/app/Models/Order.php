@@ -344,22 +344,31 @@ class Order extends Model
         // vanish from every list).
         $whatsappOutletIds = \App\Models\Outlet::where('sales_channel', 'whatsapp')->pluck('id');
 
+        // A WhatsApp-channel outlet belongs to chat, whatever else the row looks
+        // like — the precedence the backfill applied (its chat statement overwrote
+        // both the pos and the online-split rows). Every non-chat bucket must
+        // therefore EXCLUDE WhatsApp outlets, or an order recorded against one
+        // matches two buckets in the legacy fallback and double-counts in
+        // weekly/monthly totals. whereNotIn alone would DROP orders with a NULL
+        // outlet_id: in SQL `NULL NOT IN (1)` evaluates to NULL, not true, so a
+        // POS order without an outlet would silently vanish. The null branch is
+        // explicit, and this one predicate is shared by till, web and quoted.
+        $notWhatsappOutlet = fn ($qq) => $qq->whereNull('orders.outlet_id')
+                                            ->orWhereNotIn('orders.outlet_id', $whatsappOutletIds);
+
         $legacy = match ($bucket) {
             'web'    => fn ($q) => $q->where('orders.order_type', 'online')
-                                     ->whereNull('orders.created_by'),
+                                     ->whereNull('orders.created_by')
+                                     ->where($notWhatsappOutlet),
             'quoted' => fn ($q) => $q->where('orders.order_type', 'online')
-                                     ->whereNotNull('orders.created_by'),
+                                     ->whereNotNull('orders.created_by')
+                                     ->where($notWhatsappOutlet),
             'chat'   => fn ($q) => $q->where(function ($qq) use ($whatsappOutletIds) {
                 $qq->whereIn('orders.outlet_id', $whatsappOutletIds)
                    ->orWhere('orders.order_type', 'whatsapp');
             }),
-            // whereNotIn alone would DROP orders with a NULL outlet_id: in SQL
-            // `NULL NOT IN (1)` evaluates to NULL, not true, so every POS order
-            // without an outlet silently vanished from the POS channel. The
-            // null branch is explicit.
             'till'   => fn ($q) => $q->where('orders.order_type', 'pos')
-                                     ->where(fn ($qq) => $qq->whereNull('orders.outlet_id')
-                                                            ->orWhereNotIn('orders.outlet_id', $whatsappOutletIds)),
+                                     ->where($notWhatsappOutlet),
         };
 
         return $query->where(function ($q) use ($bucket, $legacy) {
