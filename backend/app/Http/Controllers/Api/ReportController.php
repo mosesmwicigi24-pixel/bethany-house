@@ -1632,11 +1632,22 @@ class ReportController extends Controller
         [$start, $end] = $this->dateRange($request);
         $currency = $request->get('currency_code', 'KES');
 
-        $revenue = DB::table('orders')
-            ->whereBetween('created_at', [$start, $end])
-            ->where('payment_status', 'paid')
-            ->whereRaw('UPPER(currency_code) = ?', [strtoupper($currency)])
-            ->sum('total_amount');
+        // Same revenue truth as every tile on the sales report: RECOGNISED
+        // orders (a human confirmed it, or money arrived), converted at the
+        // reporting rate. The old payment_status='paid' basis made this P&L
+        // disagree with the Sales Report on the same screen-width — part-paid
+        // and deposit orders were revenue up there and invisible down here.
+        $plInKes = strtoupper($currency) === 'KES';
+        $revenue = (float) Order::query()
+            ->whereBetween('orders.created_at', [$start, $end])
+            ->recognised()
+            ->when($plInKes,
+                fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code')),
+                fn ($q) => $q->whereRaw('UPPER(orders.currency_code) = ?', [strtoupper($currency)]))
+            ->selectRaw('COALESCE(SUM(' . ($plInKes
+                ? \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code')
+                : 'orders.total_amount') . '), 0) AS v')
+            ->value('v');
 
         // COGS: prefer the per-line cost snapshot captured at sale time
         // (order_items.cost_price); for historical lines that predate the
@@ -1664,9 +1675,13 @@ class ReportController extends Controller
                 LIMIT 1
             ) pr ON TRUE
             WHERE o.created_at BETWEEN ? AND ?
-              AND o.payment_status = 'paid'
-              AND UPPER(o.currency_code) = ?
-        ", [$start, $end, strtoupper($currency)]);
+              AND o.status NOT IN ('cancelled','voided','refunded')
+              AND (o.status IN ('confirmed','processing','shipped','delivered','completed')
+                   OR o.payment_status IN ('paid','partial','deposit'))
+              AND " . ($plInKes
+                  ? "(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL"
+                  : "UPPER(o.currency_code) = " . DB::getPdo()->quote(strtoupper($currency))) . "
+        ", [$start, $end]);
         $cogs          = (float) ($cogsRow->cogs ?? 0);
         $unpricedLines = (int) ($cogsRow->unpriced_lines ?? 0);
 
@@ -1713,11 +1728,18 @@ class ReportController extends Controller
         $comparison = null;
         if ($request->boolean('compare')) {
             [$ps, $pe] = $this->priorPeriod($start, $end);
-            $priorRevenue = DB::table('orders')
-                ->whereBetween('created_at', [$ps, $pe])
-                ->where('payment_status', 'paid')
-                ->whereRaw('UPPER(currency_code) = ?', [strtoupper($currency)])
-                ->sum('total_amount');
+            // Same basis as the current period, or the change-%% compares
+            // apples to oranges.
+            $priorRevenue = (float) Order::query()
+                ->whereBetween('orders.created_at', [$ps, $pe])
+                ->recognised()
+                ->when($plInKes,
+                    fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code')),
+                    fn ($q) => $q->whereRaw('UPPER(orders.currency_code) = ?', [strtoupper($currency)]))
+                ->selectRaw('COALESCE(SUM(' . ($plInKes
+                    ? \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code')
+                    : 'orders.total_amount') . '), 0) AS v')
+                ->value('v');
             $priorOpex = DB::table('expenses')
                 ->whereBetween('expense_date', [substr($ps, 0, 10), substr($pe, 0, 10)])
                 ->whereIn('status', ['approved', 'paid'])
