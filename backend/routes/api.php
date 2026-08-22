@@ -279,7 +279,10 @@ Route::prefix('v1')->group(function () {
                 ->middleware('permission:dashboard.view,sanctum');
 
             // ── In-App Notifications ─────────────────────────────────────────
-            Route::prefix('notifications')->group(function () {
+            // notifications.view is in every STAFF role's bundle; the one role
+            // without it (walkin_customer) is a customer account and has no
+            // business on the staff bell.
+            Route::middleware('permission:notifications.view,sanctum')->prefix('notifications')->group(function () {
                 Route::get('/',             [NotificationController::class, 'index']);
                 Route::get('/unread-count', [NotificationController::class, 'unreadCount']);
                 Route::post('/read-all',    [NotificationController::class, 'markAllRead']);
@@ -426,7 +429,11 @@ Route::prefix('v1')->group(function () {
             // permanently force-delete soft-deleted records across every
             // model in the system. Added the role check that was always
             // intended here.
-            Route::middleware(['role:super_admin'])->prefix('trash')->group(function () {
+            // settings.manage ("Manage Recycle Bin") is the advertised control.
+            // Nobody but the super_admin wildcard holds it today, so behaviour
+            // is identical — but the toggle on the Roles screen now actually
+            // governs this, instead of a role name buried in a route file.
+            Route::middleware(['permission:settings.manage,sanctum'])->prefix('trash')->group(function () {
                 Route::get('/',                          [TrashController::class, 'summary']);
                 Route::get('/{model}',                   [TrashController::class, 'index']);
                 Route::post('/{model}/restore-all',      [TrashController::class, 'restoreAll']);
@@ -1596,7 +1603,12 @@ Route::prefix('v1')->group(function () {
 
         // ═══ TAILOR ROUTES ═══════════════════════════════════════════════════
 
-        Route::middleware(['role:tailor|admin|super_admin'])->prefix('tailor')->group(function () {
+        // Gated by the PERMISSION the Roles screen advertises, not a hard-coded
+        // role list. production.worker sat in the catalogue governing nothing
+        // while this list did the real work — so granting it to a custom role
+        // changed nothing, which is how permissions rot. admin keeps access via
+        // an explicit grant in the catalogue; super_admin via the wildcard.
+        Route::middleware(['permission:production.worker,sanctum'])->prefix('tailor')->group(function () {
             Route::get('/tasks',                  [ProductionController::class, 'myTasks']);
             Route::get('/tasks/{id}',             [ProductionController::class, 'taskDetails']);
             Route::get('/tasks/{id}/history',     [ProductionController::class, 'taskHistory']);
