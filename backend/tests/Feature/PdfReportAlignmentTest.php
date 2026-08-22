@@ -54,9 +54,12 @@ class PdfReportAlignmentTest extends TestCase
 
         $d = $this->pdfData('salesData');
 
-        // 1000 + 10x128 + 100x6.5 + 500 = 4,430. Face value reads 1,610;
-        // the old paid-basis KES-only version reads 1,000.
-        $this->assertSame(4430.0, (float) $d['summary']->total_revenue);
+        // 1000 + 10x128 + 100x6.5 + 500 = 3,430. Face value reads 1,610;
+        // the old paid-basis KES-only version reads 1,000. (The first draft of
+        // this assertion said 4,430 — the CODE was right and the test's
+        // arithmetic wrong, which is its own small lesson in who to suspect
+        // first.)
+        $this->assertSame(3430.0, (float) $d['summary']->total_revenue);
         $this->assertSame(4, (int) $d['summary']->total_orders, 'the cart stays out');
         $this->assertSame(4, (int) $d['summary']->unique_customers,
             'walk-ins have phones, not accounts — COUNT(user_id) saw zero of them');
@@ -69,6 +72,7 @@ class PdfReportAlignmentTest extends TestCase
         $product = \App\Models\Product::factory()->create();
         DB::table('order_items')->insert([
             'order_id' => $order->id, 'product_id' => $product->id,
+            'sku' => 'TEST-CAS-1',
             'product_name' => 'Cassock', 'quantity' => 2, 'unit_price' => 5000,
             'total_price' => 10000, 'cost_price' => 3000,   // snapshot COGS = 6,000
             'created_at' => now(), 'updated_at' => now(),
