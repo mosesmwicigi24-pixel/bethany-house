@@ -45,7 +45,7 @@ LOCK_FILE="${BASE_DIR}/.box-deploy.lock"
 
 # The three images CI publishes; all must exist at the target sha before we
 # touch anything (guards against deploying mid-build).
-IMAGES=(bethany-laravel bethany-nextjs bethany-react-admin)
+IMAGES=(bethany-laravel bethany-react-admin)
 
 ts() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
 log() { printf '%s %s\n' "$(ts)" "$*" >> "$LOG_FILE"; echo "$*"; }
@@ -181,7 +181,7 @@ fi
 
 # Pull BEFORE touching running containers — a failed pull leaves the stack
 # exactly as it was.
-timeout 900 docker compose pull laravel nextjs react-admin
+timeout 900 docker compose pull laravel react-admin
 
 # -T + </dev/null: without them `compose run` eats stdin and the script dies
 # here "successfully" (same guard as the old workflow).
