@@ -95,9 +95,16 @@ class ReportController extends Controller
      */
     private function priorPeriod(string $start, string $end): array
     {
-        $startDt = Carbon::parse($start);
-        $endDt   = Carbon::parse($end);
-        $days    = $startDt->diffInDays($endDt) + 1;
+        // Carbon 3 returns diffIn*() as a signed FLOAT, and dateRange() appends
+        // ' 23:59:59' to $end — so diffInDays() gave 29.99998…, +1 gave
+        // 30.99998…, and subDays() cascaded the fraction into 23h59m59s, pushing
+        // priorStart a whole day early. Every "vs previous period" comparison
+        // therefore ran against a window one day LONGER than the current one
+        // (on the "today" option, two days against one). Compare whole days:
+        // anchor both ends to the start of their day and drop the time off $end.
+        $startDt = Carbon::parse($start)->startOfDay();
+        $endDt   = Carbon::parse(substr($end, 0, 10))->startOfDay();
+        $days    = (int) round($startDt->diffInDays($endDt)) + 1;
 
         $priorEnd   = $startDt->copy()->subDay();
         $priorStart = $priorEnd->copy()->subDays($days - 1);
