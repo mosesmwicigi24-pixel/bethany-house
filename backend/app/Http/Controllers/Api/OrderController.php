@@ -89,7 +89,11 @@ class OrderController extends Controller
     public function pendingQueue(Request $request)
     {
         $kes = \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code');
-        $ageDays = "EXTRACT(epoch FROM (now() - orders.created_at)) / 86400.0";
+        // created_at is written Nairobi-local-naive while Postgres now() is
+        // UTC — bare now() understates every age by 3 hours (the same clock
+        // mismatch MetricEngine::TODAY_SQL exists for), so age against the
+        // clock the timestamps were written with.
+        $ageDays = "EXTRACT(epoch FROM ((now() AT TIME ZONE 'Africa/Nairobi') - orders.created_at)) / 86400.0";
 
         $base = Order::query()
             ->whereRaw("LOWER(orders.status) = 'pending'")
