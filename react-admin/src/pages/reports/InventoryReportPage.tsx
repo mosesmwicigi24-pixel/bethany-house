@@ -665,7 +665,7 @@ export default function InventoryReportPage() {
                                                             }
                                                         />
                                                     ) : (
-                                                        <span className="text-xs text-surface-300">
+                                                        <span className="text-xs text-surface-500">
                                                             No threshold
                                                         </span>
                                                     )}

@@ -218,10 +218,10 @@ export function MarketsTable({ markets }: { markets: MarketRow[] }) {
                                             ) : quiet ? (
                                                 <span className="badge badge-neutral whitespace-nowrap font-normal">no orders yet</span>
                                             ) : (
-                                                <span className="text-surface-300">0</span>
+                                                <span className="text-surface-500">0</span>
                                             )}
                                         </td>
-                                        <td className={clsx("whitespace-nowrap px-4 py-2.5 text-right tabular-nums", buys ? "text-surface-800" : "text-surface-300")}>
+                                        <td className={clsx("whitespace-nowrap px-4 py-2.5 text-right tabular-nums", buys ? "text-surface-800" : "text-surface-500")}>
                                             {fmtKesCompact(row.revenue)}
                                         </td>
                                         <td

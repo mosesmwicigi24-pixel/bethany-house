@@ -1141,7 +1141,7 @@ function DetailPanel({
                                             })}
                                         </p>
                                         {tx.created_by && (
-                                            <p className="text-2xs text-surface-300">
+                                            <p className="text-2xs text-surface-500">
                                                 {tx.created_by.name}
                                             </p>
                                         )}
@@ -1419,7 +1419,7 @@ export default function RawMaterialsPage() {
                                                             </span>
                                                         )}
                                                         {!m.is_active && (
-                                                            <span className="text-2xs text-surface-300">
+                                                            <span className="text-2xs text-surface-500">
                                                                 inactive
                                                             </span>
                                                         )}
@@ -1574,7 +1574,7 @@ export default function RawMaterialsPage() {
                         <div className="flex flex-col items-center justify-center h-full text-center px-6">
                             <div className="w-14 h-14 rounded-2xl bg-surface-100 flex items-center justify-center mb-4">
                                 <svg
-                                    className="w-7 h-7 text-surface-300"
+                                    className="w-7 h-7 text-surface-500"
                                     fill="none"
                                     viewBox="0 0 24 24"
                                     stroke="currentColor"

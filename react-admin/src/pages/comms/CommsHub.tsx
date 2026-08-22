@@ -551,7 +551,7 @@ function AuthFileLink({ url, name, isOwn }: { url: string; name: string; isOwn: 
                     <p className="text-2xs mt-0.5 text-surface-400">{meta.label}</p>
                 </div>
                 {/* Open hint */}
-                <svg className="w-4 h-4 shrink-0 text-surface-300"
+                <svg className="w-4 h-4 shrink-0 text-surface-500"
                     fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
                 </svg>
@@ -645,7 +645,7 @@ function EntityPickerPopup({
                 </p>
                 <button
                     onMouseDown={e => { e.preventDefault(); onDismiss(); }}
-                    className="text-surface-300 hover:text-surface-500 transition-colors p-0.5 rounded"
+                    className="text-surface-500 hover:text-surface-500 transition-colors p-0.5 rounded"
                     aria-label="Close"
                 >
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -664,7 +664,7 @@ function EntityPickerPopup({
                 </p>
                 <button
                     onMouseDown={e => { e.preventDefault(); onDismiss(); }}
-                    className="text-surface-300 hover:text-surface-500 transition-colors p-0.5 rounded"
+                    className="text-surface-500 hover:text-surface-500 transition-colors p-0.5 rounded"
                     aria-label="Close picker"
                 >
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -1483,12 +1483,12 @@ aria-label="Delete">✕</button>
                 {/* Shortcut hints - visible when composer is empty */}
                 {!body && !attachments.length && (
                     <div className="flex items-center gap-3 px-1 pt-1.5 pb-0.5">
-                        <span className="flex items-center gap-1 text-2xs text-surface-300">
+                        <span className="flex items-center gap-1 text-2xs text-surface-500">
                             <kbd className="px-1 py-0.5 rounded bg-surface-100 text-surface-400 font-mono text-2xs border border-surface-200 leading-none">@</kbd>
                             mention people
                         </span>
                         <span className="text-surface-200 text-2xs select-none">·</span>
-                        <span className="flex items-center gap-1 text-2xs text-surface-300">
+                        <span className="flex items-center gap-1 text-2xs text-surface-500">
                             <kbd className="px-1 py-0.5 rounded bg-surface-100 text-surface-400 font-mono text-2xs border border-surface-200 leading-none">#</kbd>
                             tag an order
                         </span>
@@ -2411,7 +2411,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                     <span className="font-mono font-semibold text-surface-400 shrink-0">{orderCtx.orderNumber}</span>
                                     {orderCtx.currentStage && (
                                         <>
-                                            <span className="text-surface-300">·</span>
+                                            <span className="text-surface-500">·</span>
                                             <span>{orderCtx.currentStage}</span>
                                         </>
                                     )}
@@ -2419,20 +2419,20 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                         const { label, cls } = fmtDueDate(orderCtx.dueDate);
                                         return (
                                             <>
-                                                <span className="text-surface-300">·</span>
+                                                <span className="text-surface-500">·</span>
                                                 <span className={cls}>{label}</span>
                                             </>
                                         );
                                     })()}
                                     {orderCtx.completion != null && (
                                         <>
-                                            <span className="text-surface-300">·</span>
+                                            <span className="text-surface-500">·</span>
                                             <span className={clsx(orderCtx.completion >= 100 ? "text-success-600 font-medium" : undefined)}>
                                                 {orderCtx.completion}% done
                                             </span>
                                         </>
                                     )}
-                                    <span className="text-surface-300">·</span>
+                                    <span className="text-surface-500">·</span>
                                     <span>{memberCount} member{memberCount !== 1 ? "s" : ""}{onlineIds.length > 0 ? `, ${onlineIds.length} online` : ""}</span>
                                 </div>
                             </div>
@@ -2684,7 +2684,7 @@ aria-label="Close">
                                 <p className="text-sm font-semibold text-surface-800 truncate">{u.name}</p>
                                 <p className="text-xs text-surface-400 truncate">{u.email}</p>
                             </div>
-                            <svg className="w-4 h-4 text-surface-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <svg className="w-4 h-4 text-surface-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
                             </svg>
                         </button>
@@ -2772,7 +2772,7 @@ function OrderThreadItem({ channel, active, onClick, onDismiss }: {
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onDismiss(); }}
                 title="Dismiss thread (reappears on new message)"
-                className="absolute top-1.5 right-1.5 w-5 h-5 rounded-md flex items-center justify-center text-surface-300 hover:text-danger hover:bg-danger/10 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity z-10"
+                className="absolute top-1.5 right-1.5 w-5 h-5 rounded-md flex items-center justify-center text-surface-500 hover:text-danger hover:bg-danger/10 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity z-10"
             >
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
@@ -2815,7 +2815,7 @@ function OrderThreadItem({ channel, active, onClick, onDismiss }: {
                         </span>
                         <span className="ml-auto flex items-center gap-1.5 shrink-0">
                             {fmtWhen(channel.last_message?.created_at ?? channel.last_activity_at) && (
-                                <span className={clsx("text-2xs tabular-nums", unread > 0 ? "text-brand-600 font-semibold" : "text-surface-300")}>
+                                <span className={clsx("text-2xs tabular-nums", unread > 0 ? "text-brand-600 font-semibold" : "text-surface-500")}>
                                     {fmtWhen(channel.last_message?.created_at ?? channel.last_activity_at)}
                                 </span>
                             )}
@@ -2842,7 +2842,7 @@ function OrderThreadItem({ channel, active, onClick, onDismiss }: {
                             {stripMarkdown(channel.last_message.body)}
                         </p>
                     ) : (
-                        <p className="text-2xs text-surface-300 truncate mt-0.5 italic">No messages yet</p>
+                        <p className="text-2xs text-surface-500 truncate mt-0.5 italic">No messages yet</p>
                     )}
                 </div>
             </div>
@@ -2920,7 +2920,7 @@ function OrderThreadsSection({ channels, activeId, onSelect, onDismiss, recently
                     {/* Search input — only shown when there are enough channels to warrant it */}
                     {channels.length >= 5 && (
                         <div className="relative mb-1.5">
-                            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-surface-300"
+                            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-surface-500"
                                 fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
                             </svg>
@@ -2928,11 +2928,11 @@ function OrderThreadsSection({ channels, activeId, onSelect, onDismiss, recently
                                 value={search}
                                 onChange={e => setSearch(e.target.value)}
                                 placeholder="Find order…"
-                                className="w-full text-2xs pl-7 pr-2.5 py-1.5 rounded-lg bg-surface-100 border border-transparent focus:border-brand-300 focus:outline-none focus:bg-white placeholder:text-surface-300 transition-colors"
+                                className="w-full text-2xs pl-7 pr-2.5 py-1.5 rounded-lg bg-surface-100 border border-transparent focus:border-brand-300 focus:outline-none focus:bg-white placeholder:text-surface-500 transition-colors"
                             />
                             {search && (
                                 <button onClick={() => setSearch("")}
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-surface-300 hover:text-surface-500">
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-surface-500 hover:text-surface-500">
                                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
                                     </svg>
@@ -3078,7 +3078,7 @@ function ChannelItem({ channel, active, onClick, currentUserName }: {
                         {channel.name}
                     </p>
                     {when && (
-                        <span className={clsx("text-2xs shrink-0 tabular-nums", unread > 0 ? "text-brand-600 font-semibold" : "text-surface-300")}>
+                        <span className={clsx("text-2xs shrink-0 tabular-nums", unread > 0 ? "text-brand-600 font-semibold" : "text-surface-500")}>
                             {when}
                         </span>
                     )}
@@ -3094,7 +3094,7 @@ function ChannelItem({ channel, active, onClick, currentUserName }: {
                             {stripMarkdown(channel.last_message.body)}
                         </p>
                     ) : (
-                        <p className="text-2xs text-surface-300 italic truncate">No messages yet</p>
+                        <p className="text-2xs text-surface-500 italic truncate">No messages yet</p>
                     )}
                     {unread > 0 && (
                         <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-brand-600 text-white text-2xs font-bold flex items-center justify-center">

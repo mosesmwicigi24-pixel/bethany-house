@@ -154,7 +154,7 @@ function AttachmentPreviewModal({
                     />
                 ) : (
                     <div className="rounded-xl border border-line bg-surface-50 py-12 flex flex-col items-center gap-2">
-                        <svg className="w-10 h-10 text-surface-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <svg className="w-10 h-10 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
                         </svg>
                         <p className="text-sm text-surface-400">No inline preview available for this file type.</p>
@@ -274,7 +274,7 @@ function AttachmentRow({
                     <button type="button" onClick={() => setPreviewing(true)}
                         className="text-brand-600 hover:underline shrink-0 font-medium text-xs">View</button>
                     {onRemove && (
-                        <button type="button" onClick={onRemove} className="text-surface-300 hover:text-danger shrink-0" aria-label="Remove">×</button>
+                        <button type="button" onClick={onRemove} className="text-surface-500 hover:text-danger shrink-0" aria-label="Remove">×</button>
                     )}
                 </div>
                 {previewing && <AttachmentPreviewModal attachment={attachment} onClose={() => setPreviewing(false)} />}
@@ -304,7 +304,7 @@ function AttachmentRow({
                     <button
                         type="button"
                         onClick={onRemove}
-                        className="text-surface-300 hover:text-danger shrink-0"
+                        className="text-surface-500 hover:text-danger shrink-0"
                         aria-label="Remove"
                     >
                         ×
@@ -450,7 +450,7 @@ function AddTrackingModal({
                                     <button
                                         type="button"
                                         onClick={() => setFiles((prev) => prev.filter((_, i) => i !== idx))}
-                                        className="text-surface-300 hover:text-danger shrink-0"
+                                        className="text-surface-500 hover:text-danger shrink-0"
                                         aria-label="Remove"
                                     >
                                         ×
@@ -634,7 +634,7 @@ function CreateShipmentModal({
                                     <button
                                         type="button"
                                         onClick={() => setFiles((prev) => prev.filter((_, i) => i !== idx))}
-                                        className="text-surface-300 hover:text-danger shrink-0"
+                                        className="text-surface-500 hover:text-danger shrink-0"
                                         aria-label="Remove"
                                     >
                                         ×
@@ -827,7 +827,7 @@ function EditShipmentModal({
                                     <button
                                         type="button"
                                         onClick={() => setNewFiles((prev) => prev.filter((_, i) => i !== idx))}
-                                        className="text-surface-300 hover:text-danger shrink-0"
+                                        className="text-surface-500 hover:text-danger shrink-0"
                                         aria-label="Remove"
                                     >
                                         ×
@@ -1028,7 +1028,7 @@ export function ShipmentSection({
                             {latestPublicEvent.location && (
                                 <p className="text-surface-400"><span className="inline-flex items-center gap-1"><svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>{latestPublicEvent.location}</span></p>
                             )}
-                            <p className="text-surface-300">
+                            <p className="text-surface-500">
                                 {new Date(latestPublicEvent.event_time).toLocaleString("en-KE", {
                                     dateStyle: "medium", timeStyle: "short",
                                 })}
@@ -1077,7 +1077,7 @@ export function ShipmentSection({
                                             <p className="text-surface-700">{event.description}</p>
                                         )}
                                         {event.location && <p className="text-surface-400"><span className="inline-flex items-center gap-1"><svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>{event.location}</span></p>}
-                                        <p className="text-surface-300">
+                                        <p className="text-surface-500">
                                             {new Date(event.event_time).toLocaleString("en-KE", { dateStyle: "short", timeStyle: "short" })}
                                             {event.added_by_name && ` · ${event.added_by_name}`}
                                         </p>

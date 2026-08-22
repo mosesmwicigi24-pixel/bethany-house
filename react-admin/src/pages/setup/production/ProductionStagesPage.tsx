@@ -69,7 +69,7 @@ function DragHandle(props: React.HTMLAttributes<HTMLDivElement>) {
         <div
             {...props}
             title="Drag to reorder"
-            className="w-7 h-7 flex items-center justify-center rounded text-surface-300 hover:text-surface-500 hover:bg-surface-100 cursor-grab active:cursor-grabbing transition-colors shrink-0 touch-none"
+            className="w-7 h-7 flex items-center justify-center rounded text-surface-500 hover:text-surface-500 hover:bg-surface-100 cursor-grab active:cursor-grabbing transition-colors shrink-0 touch-none"
         >
             <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 16 16">
                 <circle cx="5.5" cy="4"  r="1.2" />
@@ -224,7 +224,7 @@ function SortableStageRow({
                 {/* Colour dot + order number */}
                 <div className="flex items-center gap-2 shrink-0">
                     <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: stage.color ?? "#757d72" }} />
-                    <span className="text-2xs font-mono text-surface-300 w-4 text-center">{index + 1}</span>
+                    <span className="text-2xs font-mono text-surface-500 w-4 text-center">{index + 1}</span>
                 </div>
 
                 {/* Name + description */}

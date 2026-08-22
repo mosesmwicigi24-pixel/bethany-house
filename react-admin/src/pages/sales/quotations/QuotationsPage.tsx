@@ -138,7 +138,7 @@ export default function QuotationsPage() {
                 {isLoading ? (
                     <div className="flex justify-center py-16"><Spinner size="lg" /></div>
                 ) : rows.length === 0 ? (
-                    <div className="py-16 text-center text-sm text-muted">No quotations yet.</div>
+                    <div className="py-16 text-center text-sm text-surface-500">No quotations yet.</div>
                 ) : (
                     <div className="table-wrapper rounded-none border-0">
                     <table className="table">
@@ -220,7 +220,7 @@ export default function QuotationsPage() {
 
             {data && data.last_page > 1 && (
                 <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted">
+                    <span className="text-surface-500">
                         {data.from ?? 0}–{data.to ?? 0} of {data.total}
                     </span>
                     <div className="flex gap-2">
@@ -253,7 +253,7 @@ export default function QuotationsPage() {
                         </div>
                     }
                 >
-                    <p className="text-sm text-muted">
+                    <p className="text-sm text-surface-500">
                         Accept <span className="font-medium">{confirmAccept.quote_number}</span> and create an invoice?
                         This confirms the order and reserves stock.
                     </p>
@@ -275,7 +275,7 @@ export default function QuotationsPage() {
                         </div>
                     }
                 >
-                    <p className="text-sm text-muted">Delete this draft quotation? This can't be undone.</p>
+                    <p className="text-sm text-surface-500">Delete this draft quotation? This can't be undone.</p>
                 </Modal>
             )}
         </div>
@@ -482,8 +482,8 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
                         onChange={(e) => searchProducts(e.target.value)}
                     />
                     {(searching || hits.length > 0) && (
-                        <div className="absolute z-10 mt-1 w-full rounded-md border bg-surface shadow-lg">
-                            {searching && <div className="px-3 py-2 text-sm text-muted">Searching…</div>}
+                        <div className="absolute z-10 mt-1 w-full rounded-md border bg-surface-0 shadow-lg">
+                            {searching && <div className="px-3 py-2 text-sm text-surface-500">Searching…</div>}
                             {hits.map((h) => (
                                 <button
                                     key={h.id}
@@ -492,7 +492,7 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
                                     onClick={() => addProduct(h)}
                                 >
                                     <span>{h.name}</span>
-                                    <span className="text-xs text-muted">{h.sku}</span>
+                                    <span className="text-xs text-surface-500">{h.sku}</span>
                                 </button>
                             ))}
                         </div>
@@ -514,7 +514,7 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
                         </thead>
                         <tbody>
                             {rows.length === 0 ? (
-                                <tr><td colSpan={5} className="py-6 text-center text-sm text-muted">Add a line, then search a product or type a description.</td></tr>
+                                <tr><td colSpan={5} className="py-6 text-center text-sm text-surface-500">Add a line, then search a product or type a description.</td></tr>
                             ) : rows.map((r) => (
                                 <tr key={r.key}>
                                     <td className="relative">
@@ -527,8 +527,8 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
                                             onBlur={() => setTimeout(() => setActiveRow((k) => (k === r.key ? null : k)), 150)}
                                         />
                                         {activeRow === r.key && (rowSearching || rowHits.length > 0) && (
-                                            <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border bg-surface shadow-lg">
-                                                {rowSearching && <div className="px-3 py-2 text-xs text-muted">Searching…</div>}
+                                            <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border bg-surface-0 shadow-lg">
+                                                {rowSearching && <div className="px-3 py-2 text-xs text-surface-500">Searching…</div>}
                                                 {rowHits.map((h) => (
                                                     <button
                                                         key={h.id}
@@ -537,7 +537,7 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
                                                         onMouseDown={(e) => { e.preventDefault(); pickForRow(r.key, h); }}
                                                     >
                                                         <span>{h.name}</span>
-                                                        <span className="text-xs text-muted">{h.sku}</span>
+                                                        <span className="text-xs text-surface-500">{h.sku}</span>
                                                     </button>
                                                 ))}
                                             </div>
@@ -564,12 +564,12 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
                         <div className="flex items-center justify-between">
                             <button type="button" className="btn-ghost btn-sm" onClick={addAdHoc}>+ Add line</button>
                             <div className="text-sm">
-                                <span className="text-muted">Subtotal (excl. tax): </span>
+                                <span className="text-surface-500">Subtotal (excl. tax): </span>
                                 <span className="font-semibold tabular-nums">{money(subtotal, currency)}</span>
                             </div>
                         </div>
                         <div className="flex items-center justify-end gap-3 text-sm">
-                            <label className="text-muted">Shipping</label>
+                            <label className="text-surface-500">Shipping</label>
                             <input
                                 className="input w-32 text-right"
                                 type="number" min="0" step="0.01"
@@ -588,7 +588,7 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
                     <FieldTextarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
                 </Field>
 
-                <p className="text-xs text-muted">
+                <p className="text-xs text-surface-500">
                     Tax is applied automatically on save based on each product's rate. Once issued, a quotation is
                     locked — edits require a new quotation.
                 </p>

@@ -134,7 +134,7 @@ export default function CustomerGeographyPage() {
                                                 <td className="px-4 py-3.5 text-right tabular-nums font-semibold text-surface-800">{fmtNum(c.visits)}</td>
                                                 <td className="px-4 py-3.5 text-right tabular-nums font-semibold text-surface-800">{fmtNum(c.carts)}</td>
                                                 <td className="px-4 py-3.5 text-right tabular-nums font-semibold text-surface-800">{fmtNum(c.orders)}</td>
-                                                <td className="px-4 py-3.5 text-right tabular-nums font-bold text-surface-900 whitespace-nowrap">{c.revenue > 0 ? money(c.revenue, c.currency) : <span className="text-surface-300 font-normal">—</span>}</td>
+                                                <td className="px-4 py-3.5 text-right tabular-nums font-bold text-surface-900 whitespace-nowrap">{c.revenue > 0 ? money(c.revenue, c.currency) : <span className="text-surface-500 font-normal">—</span>}</td>
                                                 {/* Customers — number + share bar, like the Progress column */}
                                                 <td className="px-5 py-3.5">
                                                     <div className="flex items-center justify-end gap-2.5">

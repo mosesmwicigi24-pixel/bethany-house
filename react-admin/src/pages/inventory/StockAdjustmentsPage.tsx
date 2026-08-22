@@ -1243,7 +1243,7 @@ export default function StockAdjustmentsPage() {
                                                                 ) : (
                                                                     <div className="w-full h-full flex items-center justify-center">
                                                                         <svg
-                                                                            className="w-4 h-4 text-surface-300"
+                                                                            className="w-4 h-4 text-surface-500"
                                                                             fill="none"
                                                                             viewBox="0 0 24 24"
                                                                             stroke="currentColor"

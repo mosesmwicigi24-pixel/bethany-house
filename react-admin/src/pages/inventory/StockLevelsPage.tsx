@@ -1228,7 +1228,7 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
                                                 onClick={() =>
                                                     removeRow(row._key)
                                                 }
-                                                className="text-surface-300 hover:text-danger transition-colors"
+                                                className="text-surface-500 hover:text-danger transition-colors"
                                                 aria-label="Close"
                                             >
                                                 <svg
@@ -1714,7 +1714,7 @@ export default function StockLevelsPage() {
                                         title="Reorder settings"
                                         aria-label="Reorder settings"
                                         onClick={() => setReorderItem(item)}
-                                        className="shrink-0 px-3 flex items-center text-surface-300 active:text-brand-600 transition-colors"
+                                        className="shrink-0 px-3 flex items-center text-surface-500 active:text-brand-600 transition-colors"
                                     >
                                         <SettingsIcon />
                                     </button>
@@ -1778,7 +1778,7 @@ export default function StockLevelsPage() {
                                                     ) : (
                                                         <div className="w-full h-full flex items-center justify-center">
                                                             <svg
-                                                                className="w-4 h-4 text-surface-300"
+                                                                className="w-4 h-4 text-surface-500"
                                                                 fill="none"
                                                                 viewBox="0 0 24 24"
                                                                 stroke="currentColor"

@@ -259,7 +259,7 @@ function LineItemRow({ item, index, onChange, onRemove }: LineItemRowProps) {
                 <button
                     type="button"
                     onClick={() => onRemove(item._key)}
-                    className="w-6 h-6 rounded-full flex items-center justify-center text-surface-300 hover:text-danger hover:bg-danger-light transition-colors opacity-0 group-hover:opacity-100"
+                    className="w-6 h-6 rounded-full flex items-center justify-center text-surface-500 hover:text-danger hover:bg-danger-light transition-colors opacity-0 group-hover:opacity-100"
                     aria-label="Close"
                 >
                     <svg
@@ -558,7 +558,7 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                 <div className="card-body text-center py-12">
                     <div className="w-16 h-16 rounded-2xl bg-surface-100 flex items-center justify-center mx-auto mb-4">
                         <svg
-                            className="w-8 h-8 text-surface-300"
+                            className="w-8 h-8 text-surface-500"
                             fill="none"
                             viewBox="0 0 24 24"
                             stroke="currentColor"

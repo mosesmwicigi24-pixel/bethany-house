@@ -209,7 +209,7 @@ function AddTrackingModal({ shipmentId, onClose, onDone }: {
                                         Visible to customer
                                     </label>
                                     <button type="button" onClick={() => removeFile(idx)}
-                                        className="text-surface-300 hover:text-danger shrink-0" aria-label="Remove">
+                                        className="text-surface-500 hover:text-danger shrink-0" aria-label="Remove">
                                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                                         </svg>

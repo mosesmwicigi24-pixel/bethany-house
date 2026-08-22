@@ -307,7 +307,7 @@ function NotificationBell() {
                                                 e.stopPropagation();
                                                 deleteMut.mutate(n.id);
                                             }}
-                                            className="opacity-0 group-hover:opacity-100 text-surface-300 hover:text-danger transition-opacity"
+                                            className="opacity-0 group-hover:opacity-100 text-surface-500 hover:text-danger transition-opacity"
                                             aria-label="Close"
                                             title="Dismiss"
                                         >
@@ -596,7 +596,7 @@ export function Topbar({
                     {breadcrumbs.map((crumb, i) => (
                         <span key={i} className="flex items-center gap-1.5">
                             {i > 0 && (
-                                <span className="text-surface-300">/</span>
+                                <span className="text-surface-500">/</span>
                             )}
                             {crumb.href && i < breadcrumbs.length - 1 ? (
                                 <Link

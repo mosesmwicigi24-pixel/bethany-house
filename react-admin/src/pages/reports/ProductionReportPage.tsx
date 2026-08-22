@@ -839,7 +839,7 @@ function CostingTab({ data, isLoading, params }: {
                                         </td>
                                         <td className="px-4 py-3 text-right tabular-nums text-sm text-surface-600">
                                             {row.qty_sold > 0 ? row.qty_sold : (
-                                                <span className="text-surface-300">—</span>
+                                                <span className="text-surface-500">—</span>
                                             )}
                                             {row.qty_remaining > 0 && (
                                                 <span className="ml-1 text-xs text-warning">
@@ -852,14 +852,14 @@ function CostingTab({ data, isLoading, params }: {
                                         </td>
                                         <td className="px-4 py-3 text-right tabular-nums text-sm font-medium text-surface-900">
                                             {row.revenue > 0 ? fmtKes(row.revenue) : (
-                                                <span className="text-surface-300 font-normal text-xs">No sales linked</span>
+                                                <span className="text-surface-500 font-normal text-xs">No sales linked</span>
                                             )}
                                         </td>
                                         <td className={clsx(
                                             "px-4 py-3 text-right tabular-nums text-sm font-semibold",
                                             row.revenue > 0
                                                 ? (row.is_profitable ? "text-success" : "text-danger")
-                                                : "text-surface-300",
+                                                : "text-surface-500",
                                         )}>
                                             {row.revenue > 0 ? fmtKes(row.gross_profit) : "—"}
                                         </td>
@@ -1023,7 +1023,7 @@ function IntelligenceTab({ start, end }: { start: string; end: string }) {
                         <div className="space-y-1.5 mt-1">
                             {tailors.map((t: any, i: number) => (
                                 <div key={t.tailor} className="flex items-center gap-2.5">
-                                    <span className="text-2xs font-bold text-surface-300 w-4">{i + 1}</span>
+                                    <span className="text-2xs font-bold text-surface-500 w-4">{i + 1}</span>
                                     <span className="text-xs font-medium text-surface-800 flex-1 truncate">{t.tailor}</span>
                                     <span className="text-2xs text-surface-400">{t.tasks} stages{t.avg_hours != null ? ` · ${fmtHours(Number(t.avg_hours))} avg` : ""}</span>
                                     <span className="text-xs font-bold tabular-nums text-surface-800 w-14 text-right">{t.pieces} pcs</span>

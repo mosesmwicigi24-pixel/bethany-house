@@ -341,7 +341,7 @@ function EditOrderModal({ order, onClose, onSaved, canReduce = false }: { order:
                                         placeholder="Value (e.g. 40 in)"
                                         className="input text-sm flex-1 min-w-0" />
                                     <button type="button" onClick={() => removeMeas(i)}
-                                        className="w-7 h-7 shrink-0 rounded-lg flex items-center justify-center text-surface-300 hover:text-danger hover:bg-danger-light transition-all" aria-label="Remove">
+                                        className="w-7 h-7 shrink-0 rounded-lg flex items-center justify-center text-surface-500 hover:text-danger hover:bg-danger-light transition-all" aria-label="Remove">
                                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
                                     </button>
                                 </div>
@@ -899,7 +899,7 @@ function StagesPipeline({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
             </svg>
             <p className="text-sm font-medium">No stages defined</p>
-            <p className="text-xs mt-1 text-surface-300">Stages will appear once the order is confirmed.</p>
+            <p className="text-xs mt-1 text-surface-500">Stages will appear once the order is confirmed.</p>
         </div>
     );
 
@@ -1105,7 +1105,7 @@ function StagesPipeline({
                                         {assignee.first_name} {assignee.last_name}
                                     </span>
                                 ) : (
-                                    <span className="text-surface-300 italic text-2xs">Unassigned</span>
+                                    <span className="text-surface-500 italic text-2xs">Unassigned</span>
                                 )}
                                 {isMyTask && <span className="text-2xs font-bold text-brand-600">(you)</span>}
                                 {canUnlock && !isDone && !task.started_at && (
@@ -1276,7 +1276,7 @@ function ThreadEntityPopup({ query, onSelect, onDismiss }: {
             <div className="flex items-center justify-between px-3 pt-1.5 pb-1">
                 <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest">Tag order or production</p>
                 <button onMouseDown={e => { e.preventDefault(); onDismiss(); }}
-                    className="text-surface-300 hover:text-surface-500 p-0.5 rounded">
+                    className="text-surface-500 hover:text-surface-500 p-0.5 rounded">
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
                     </svg>
@@ -1556,12 +1556,12 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
             {/* Messages */}
             <div className="flex-1 overflow-y-auto px-1 py-2 space-y-3" style={{ maxHeight: 420 }}>
                 {messages.length === 0 ? (
-                    <div className="text-center py-10 text-surface-300">
+                    <div className="text-center py-10 text-surface-500">
                         <svg className="w-10 h-10 mx-auto mb-2 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                         </svg>
                         <p className="text-sm font-medium text-surface-400">No messages yet</p>
-                        <p className="text-xs text-surface-300 mt-1">Start the conversation below</p>
+                        <p className="text-xs text-surface-500 mt-1">Start the conversation below</p>
                     </div>
                 ) : messages.map(msg => {
                     if (msg.type === "system") return (
@@ -1584,7 +1584,7 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
                             <div className={clsx("flex flex-col gap-0.5 max-w-[78%]", isOwn && "items-end")}>
                                 <div className={clsx("flex items-center gap-1.5 px-0.5", isOwn && "flex-row-reverse")}>
                                     <span className="text-2xs font-semibold text-surface-700">{msg.user?.name ?? "System"}</span>
-                                    <span className="text-2xs text-surface-300">{fmtTime(msg.created_at)}</span>
+                                    <span className="text-2xs text-surface-500">{fmtTime(msg.created_at)}</span>
                                 </div>
                                 <div className={clsx(
                                     "px-3 py-2 rounded-2xl",
@@ -1650,17 +1650,17 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
                 {/* Shortcut hints */}
                 {!body && (
                     <div className="flex items-center gap-3 px-1 pt-1.5">
-                        <span className="flex items-center gap-1 text-2xs text-surface-300">
+                        <span className="flex items-center gap-1 text-2xs text-surface-500">
                             <kbd className="px-1 py-0.5 rounded bg-surface-100 text-surface-400 font-mono text-2xs border border-surface-200 leading-none">@</kbd>
                             mention people
                         </span>
                         <span className="text-surface-200 text-2xs select-none">·</span>
-                        <span className="flex items-center gap-1 text-2xs text-surface-300">
+                        <span className="flex items-center gap-1 text-2xs text-surface-500">
                             <kbd className="px-1 py-0.5 rounded bg-surface-100 text-surface-400 font-mono text-2xs border border-surface-200 leading-none">#</kbd>
                             tag an order
                         </span>
                         <span className="text-surface-200 text-2xs select-none">·</span>
-                        <span className="text-2xs text-surface-300">visible in CommsHub</span>
+                        <span className="text-2xs text-surface-500">visible in CommsHub</span>
                     </div>
                 )}
             </div>
@@ -1858,7 +1858,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                             <p className="text-xs text-surface-600 mt-1.5 flex items-center gap-1.5 flex-wrap">
                                 <StageIcon slug={currentTask.stage?.slug} className="w-3 h-3 text-surface-400 shrink-0" />
                                 <span>Now at <b className="text-surface-800">{currentTask.stage?.name}</b></span>
-                                <span className="text-surface-300">·</span>
+                                <span className="text-surface-500">·</span>
                                 {tailor
                                     ? <span>{tailor.first_name} {tailor.last_name}</span>
                                     : <span className="italic text-surface-400">unassigned</span>}

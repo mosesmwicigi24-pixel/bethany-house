@@ -369,7 +369,7 @@ function MethodList({
                             <p className="text-sm font-semibold text-surface-800">{meta.label}</p>
                             {meta.sub && <p className="text-xs text-surface-400 mt-0.5">{meta.sub}</p>}
                         </div>
-                        <svg className="w-4 h-4 text-surface-300 group-hover:text-surface-500 transition-colors shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <svg className="w-4 h-4 text-surface-500 group-hover:text-surface-500 transition-colors shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
                         </svg>
                     </button>
@@ -940,7 +940,7 @@ function BankTransferPanel({
                         </div>
                     ) : (
                         <>
-                            <svg className="w-8 h-8 text-surface-300 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <svg className="w-8 h-8 text-surface-500 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
                             </svg>
                             <p className="text-xs text-surface-400">Tap to choose image or PDF</p>
@@ -1092,7 +1092,7 @@ function ManualTransferPanel({
                         </div>
                     ) : (
                         <>
-                            <svg className="w-8 h-8 text-surface-300 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <svg className="w-8 h-8 text-surface-500 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
                             </svg>
                             <p className="text-xs text-surface-400">Tap to choose image or PDF</p>
@@ -1426,7 +1426,7 @@ export default function PaymentLinkPage() {
                 </Card>
 
                 {/* Security footer */}
-                <p className="text-center text-2xs text-surface-300 flex items-center justify-center gap-1.5">
+                <p className="text-center text-2xs text-surface-500 flex items-center justify-center gap-1.5">
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/>
                     </svg>

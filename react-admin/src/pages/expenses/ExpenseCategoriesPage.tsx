@@ -724,7 +724,7 @@ export default function ExpenseCategoriesPage() {
                                                     cat.requires_approval_above,
                                                 )
                                             ) : (
-                                                <span className="text-surface-300">
+                                                <span className="text-surface-500">
                                                     -
                                                 </span>
                                             )}
@@ -733,7 +733,7 @@ export default function ExpenseCategoriesPage() {
                                             {cat.budget_monthly != null ? (
                                                 fmtKes(cat.budget_monthly)
                                             ) : (
-                                                <span className="text-surface-300">
+                                                <span className="text-surface-500">
                                                     -
                                                 </span>
                                             )}
@@ -755,14 +755,14 @@ export default function ExpenseCategoriesPage() {
                                                     }
                                                 />
                                             ) : (
-                                                <span className="text-xs text-surface-300">
+                                                <span className="text-xs text-surface-500">
                                                     No budget set
                                                 </span>
                                             )}
                                         </td>
                                         <td className="px-4 py-3 text-sm font-mono text-surface-500">
                                             {cat.gl_code ?? (
-                                                <span className="text-surface-300">
+                                                <span className="text-surface-500">
                                                     -
                                                 </span>
                                             )}

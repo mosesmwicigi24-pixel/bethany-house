@@ -193,7 +193,7 @@ export default function BusinessSettingsPage() {
                             />
                         ) : (
                             <svg
-                                className="w-8 h-8 text-surface-300"
+                                className="w-8 h-8 text-surface-500"
                                 fill="none"
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"

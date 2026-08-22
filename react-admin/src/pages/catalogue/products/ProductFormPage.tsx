@@ -1995,7 +1995,7 @@ function MeasurementsTab({
                                 <button
                                     type="button"
                                     onClick={() => removeField(i)}
-                                    className="w-6 h-6 rounded-full flex items-center justify-center text-surface-300 hover:text-danger hover:bg-danger-light transition-colors opacity-0 group-hover:opacity-100"
+                                    className="w-6 h-6 rounded-full flex items-center justify-center text-surface-500 hover:text-danger hover:bg-danger-light transition-colors opacity-0 group-hover:opacity-100"
                                     aria-label="Close"
                                 >
                                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -2075,7 +2075,7 @@ function MeasurementsTab({
                                             <span className="ml-1 text-danger">*</span>
                                         )}
                                     </label>
-                                    <div className="input text-sm py-1.5 text-surface-300 italic">
+                                    <div className="input text-sm py-1.5 text-surface-500 italic">
                                         Enter value…
                                     </div>
                                 </div>
@@ -3278,7 +3278,7 @@ export default function ProductFormPage() {
                                         className="border-2 border-dashed border-surface-200 rounded-xl p-10 text-center cursor-pointer hover:border-brand-300 hover:bg-brand-50 transition-colors"
                                     >
                                         <svg
-                                            className="w-8 h-8 text-surface-300 mx-auto mb-2"
+                                            className="w-8 h-8 text-surface-500 mx-auto mb-2"
                                             fill="none"
                                             viewBox="0 0 24 24"
                                             stroke="currentColor"
@@ -3293,7 +3293,7 @@ export default function ProductFormPage() {
                                         <p className="text-sm text-surface-400">
                                             Click to upload images
                                         </p>
-                                        <p className="text-xs text-surface-300 mt-1">
+                                        <p className="text-xs text-surface-500 mt-1">
                                             PNG, JPG, WebP · optimised automatically for fast, high-quality upload
                                         </p>
                                     </div>
@@ -3331,7 +3331,7 @@ export default function ProductFormPage() {
                                                     className="aspect-square border-2 border-dashed border-surface-200 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-brand-300 hover:bg-brand-50 transition-colors"
                                                 >
                                                     <svg
-                                                        className="w-5 h-5 text-surface-300"
+                                                        className="w-5 h-5 text-surface-500"
                                                         fill="none"
                                                         viewBox="0 0 24 24"
                                                         stroke="currentColor"
@@ -3497,7 +3497,7 @@ export default function ProductFormPage() {
                                         <p className="text-sm text-surface-400 mb-1">
                                             No variants yet.
                                         </p>
-                                        <p className="text-xs text-surface-300 mb-3">
+                                        <p className="text-xs text-surface-500 mb-3">
                                             Click "Generate from Attributes" to
                                             define sizes, colours, and other
                                             options.
@@ -3614,7 +3614,7 @@ export default function ProductFormPage() {
                                                                                 ).toLocaleString()}
                                                                             </span>
                                                                         ) : (
-                                                                            <span className="text-surface-300">
+                                                                            <span className="text-surface-500">
                                                                                 -
                                                                             </span>
                                                                         )}

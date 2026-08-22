@@ -159,7 +159,7 @@ function Field({ label, value, onChange }: {
                 type="number" min="0" step="any" value={value}
                 onChange={e => onChange(e.target.value)}
                 placeholder="0"
-                className="w-full rounded-lg border border-surface-200 bg-white px-3 py-2 text-sm text-surface-800 focus:outline-none focus:ring-2 focus:ring-info-400 placeholder:text-surface-300"
+                className="w-full rounded-lg border border-surface-200 bg-white px-3 py-2 text-sm text-surface-800 focus:outline-none focus:ring-2 focus:ring-info-400 placeholder:text-surface-500"
             />
         </div>
     );
@@ -398,7 +398,7 @@ export default function ProductCostingReportPage() {
                         {r.cost_breakdown.lines.length === 0 ? (
                             <div className="px-5 py-8 text-center">
                                 <p className="text-sm text-surface-400">No materials recorded.</p>
-                                <p className="text-xs text-surface-300 mt-1">Use "Adjust Values" to add labour, packaging, and other costs.</p>
+                                <p className="text-xs text-surface-500 mt-1">Use "Adjust Values" to add labour, packaging, and other costs.</p>
                             </div>
                         ) : (
                             <div className="overflow-x-auto">
@@ -435,7 +435,7 @@ export default function ProductCostingReportPage() {
                                                             <div className="h-full bg-amber-400 rounded-full"
                                                                 style={{ width: `${pct}%` }} />
                                                         </div>
-                                                        <span className="text-xs text-surface-300 tabular-nums w-7 text-right">{pct}%</span>
+                                                        <span className="text-xs text-surface-500 tabular-nums w-7 text-right">{pct}%</span>
                                                         <span className="text-sm font-bold text-surface-800 tabular-nums">
                                                             {fmt(line.total_cost)}
                                                         </span>
@@ -561,7 +561,7 @@ export default function ProductCostingReportPage() {
                                                 <div className="flex-1 max-w-20 bg-surface-100 rounded-full h-1.5 overflow-hidden">
                                                     <div className="h-full bg-danger-300 rounded-full" style={{ width: `${pct}%` }} />
                                                 </div>
-                                                <span className="text-xs text-surface-300 tabular-nums">{pct}%</span>
+                                                <span className="text-xs text-surface-500 tabular-nums">{pct}%</span>
                                             </div>
                                             <span className="text-sm font-bold text-surface-800 tabular-nums ml-4">
                                                 {fmt(exp.amount)}
@@ -645,7 +645,7 @@ export default function ProductCostingReportPage() {
             </div>
 
             {/* Footer */}
-            <p className="text-center text-xs text-surface-300 pt-6">
+            <p className="text-center text-xs text-surface-500 pt-6">
                 Generated {r.header.generated_at} · Bethany House
             </p>
         </div>

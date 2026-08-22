@@ -245,17 +245,17 @@ export function WorldMapHero({ markets }: { markets: MarketRow[] }) {
                         </p>
                         {hover.row ? (
                             <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 tabular-nums">
-                                <dt className="text-surface-300">Visits</dt>
+                                <dt className="text-surface-500">Visits</dt>
                                 <dd className="text-right">{fmtInt(hover.row.visits)}</dd>
-                                <dt className="text-surface-300">Orders</dt>
+                                <dt className="text-surface-500">Orders</dt>
                                 <dd className="text-right">{fmtInt(hover.row.orders)}</dd>
-                                <dt className="text-surface-300">Revenue</dt>
+                                <dt className="text-surface-500">Revenue</dt>
                                 <dd className="text-right">{hover.row.revenue ? fmtKes(hover.row.revenue) : "—"}</dd>
-                                <dt className="text-surface-300">Conversion</dt>
+                                <dt className="text-surface-500">Conversion</dt>
                                 <dd className="text-right">{fmtConversion(hover.row.conversion_pct)}</dd>
                             </dl>
                         ) : (
-                            <p className="mt-0.5 text-surface-300">No visits or orders in this period.</p>
+                            <p className="mt-0.5 text-surface-500">No visits or orders in this period.</p>
                         )}
                     </div>
                 )}

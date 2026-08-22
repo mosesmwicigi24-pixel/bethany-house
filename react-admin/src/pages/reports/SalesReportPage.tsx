@@ -826,7 +826,7 @@ export default function SalesReportPage() {
                                                 className={clsx(
                                                     "w-8 h-8 rounded flex items-center justify-center text-xs font-mono transition-colors",
                                                     intensity === 0
-                                                        ? "bg-surface-50 text-surface-300"
+                                                        ? "bg-surface-50 text-surface-500"
                                                         : intensity <= 3
                                                           ? "bg-brand-100 text-brand-600"
                                                           : intensity <= 6

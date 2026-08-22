@@ -627,7 +627,7 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                                                     {order.cashier_name}
                                                 </span>
                                             ) : (
-                                                <span className="text-xs text-surface-300">—</span>
+                                                <span className="text-xs text-surface-500">—</span>
                                             )}
                                         </td>
                                         <td>
@@ -639,7 +639,7 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                                             <div className="flex items-center gap-1.5 justify-end">
                                                 <PaymentLinkButton order={order} />
                                                 <StageMenu order={order} onDone={refetchAfterStageChange} />
-                                                <svg className="w-4 h-4 text-surface-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <svg className="w-4 h-4 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
                                                 </svg>
                                             </div>

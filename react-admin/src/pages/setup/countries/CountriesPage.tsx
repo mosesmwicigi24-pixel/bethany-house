@@ -554,7 +554,7 @@ export default function CountriesPage() {
                                         ✓ Enabled
                                     </span>
                                 ) : (
-                                    <span className="text-xs text-surface-300">
+                                    <span className="text-xs text-surface-500">
                                         -
                                     </span>
                                 );
