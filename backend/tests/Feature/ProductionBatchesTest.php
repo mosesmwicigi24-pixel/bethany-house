@@ -32,6 +32,7 @@ class ProductionBatchesTest extends TestCase
     {
         $user = User::factory()->create();
         $user->assignRole(Role::findOrCreate('tailor', 'sanctum'));
+        $user->givePermissionTo(Permission::findOrCreate('production.worker', 'sanctum'));
         $user->givePermissionTo(Permission::findOrCreate('production.view', 'sanctum'));
         $user->givePermissionTo(Permission::findOrCreate('production.raise_order', 'sanctum'));
         app(PermissionRegistrar::class)->forgetCachedPermissions();
