@@ -572,6 +572,8 @@ Route::prefix('v1')->group(function () {
                 // Must come before GET /{id} - otherwise Laravel matches
                 // "export" as the {id} parameter and routes to show() instead.
                 Route::get('/export',                    [OrderController::class, 'exportCsv']);
+                // Also before /{id} for the same reason as /export.
+                Route::get('/pending-queue',             [OrderController::class, 'pendingQueue']);
                 Route::get('/{id}',                      [OrderController::class, 'show']);
                 Route::get('/{id}/audit-log',            [OrderController::class, 'auditLog']);
                 Route::get('/{id}/invoice',              [OrderController::class, 'generateInvoice']);

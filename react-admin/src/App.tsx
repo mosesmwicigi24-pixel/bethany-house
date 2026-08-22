@@ -97,6 +97,7 @@ const EodReportSettingsPage = lazy(() => import("@/pages/pos/EodReportSettingsPa
 const OutstandingBalancesPage = lazy(() => import("@/pages/pos/OutstandingBalancesPage"));
 
 const OrdersPage = lazy(() => import("@/pages/sales/orders/OrdersListPage"));
+const PendingQueuePage = lazy(() => import("@/pages/sales/orders/PendingQueuePage"));
 const QuotationsPage = lazy(() => import("@/pages/sales/quotations/QuotationsPage"));
 const InvoicesPage = lazy(() => import("@/pages/sales/invoices/InvoicesPage"));
 const OrderDetailPage = lazy(
@@ -464,6 +465,16 @@ export default function App() {
                                 <ProtectedRoute permission="orders.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <OrdersPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/sales/pending-queue"
+                            element={
+                                <ProtectedRoute permission="orders.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <PendingQueuePage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }
