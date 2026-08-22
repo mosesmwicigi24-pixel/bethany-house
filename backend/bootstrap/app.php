@@ -4,6 +4,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use App\Http\Middleware\EnsureStaff;
 use App\Http\Middleware\EnsureTwoFactorIsSetup;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -54,6 +55,12 @@ return Application::configure(basePath: dirname(__DIR__))
             'permission' => \Spatie\Permission\Middleware\PermissionMiddleware::class,
             'role_or_permission' => \Spatie\Permission\Middleware\RoleOrPermissionMiddleware::class,
             'ensure.2fa' => EnsureTwoFactorIsSetup::class,
+            // The staff boundary on the whole /admin/* API. canAccessAdmin()
+            // (isSystem || isStaff) was enforced only at admin login; without
+            // this, any authenticated user — a self-registered customer
+            // included — reached every admin route lacking a per-route
+            // permission gate.
+            'ensure.staff' => EnsureStaff::class,
         ]);
 
         // Configure authentication redirects

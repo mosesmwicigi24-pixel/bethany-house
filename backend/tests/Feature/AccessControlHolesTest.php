@@ -44,6 +44,47 @@ class AccessControlHolesTest extends TestCase
         return $user;
     }
 
+    private function actingAsCustomer(): User
+    {
+        // Exactly what POST /auth/register mints: an active customer with a
+        // ['*'] token and no roles or permissions. UserFactory defaults to
+        // 'staff', so the customer state is explicit here.
+        $user = User::factory()->customer()->create();
+        Sanctum::actingAs($user);
+
+        return $user;
+    }
+
+    // ── 0. The staff boundary on the whole /admin/* surface ──────────────────
+
+    public function test_a_self_registered_customer_is_refused_the_admin_api(): void
+    {
+        // Before EnsureStaff, a customer token reached every admin route without
+        // a per-route permission gate: internal chat (read AND write), internal
+        // comments with user enumeration, and global search.
+        $this->actingAsCustomer();
+
+        $this->getJson('/api/v1/admin/sidebar-badges')->assertForbidden();
+        $this->getJson('/api/v1/admin/channels')->assertForbidden();
+        $this->getJson('/api/v1/admin/comments')->assertForbidden();
+        $this->getJson('/api/v1/admin/comments/users')->assertForbidden();
+        $this->getJson('/api/v1/admin/search')->assertForbidden();
+        // A permission-gated route is refused too — now by the staff gate,
+        // which runs ahead of the permission check.
+        $this->getJson('/api/v1/admin/dashboard')->assertForbidden();
+    }
+
+    public function test_the_staff_gate_lets_a_plain_staff_user_through(): void
+    {
+        // A staff user with no extra permissions still reaches a bare admin
+        // route: EnsureStaff is an outer boundary, not a permission. The default
+        // UserFactory user_type is 'staff'.
+        $user = User::factory()->create();
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/v1/admin/sidebar-badges')->assertOk();
+    }
+
     // ── 1. The payment ledger ────────────────────────────────────────────────
 
     public function test_a_cashiers_payments_view_no_longer_opens_the_ledger(): void

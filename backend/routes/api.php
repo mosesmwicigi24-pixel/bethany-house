@@ -267,7 +267,7 @@ Route::prefix('v1')->group(function () {
         // accessible to every role (admin, tailor, pos_clerk, etc.) because
         // all staff members can receive messages and notifications.
 
-        Route::prefix('admin')->middleware('throttle:admin-api')->group(function () {
+        Route::prefix('admin')->middleware(['throttle:admin-api', 'ensure.staff'])->group(function () {
 
             // sidebar-badges stays open to all staff: it drives the nav badge
             // counts for every role, and its figures are already partly
@@ -350,7 +350,7 @@ Route::prefix('v1')->group(function () {
         // whole block had no permission check at all, so e.g. a tailor or
         // pos_clerk could read customer churn-risk data and budget overruns,
         // and could trigger auto-reorder purchase orders.
-        Route::middleware(['auth:sanctum', 'throttle:admin-api'])->prefix('admin/intelligence')->group(function () {
+        Route::middleware(['auth:sanctum', 'throttle:admin-api', 'ensure.staff'])->prefix('admin/intelligence')->group(function () {
             Route::middleware('permission:inventory.view,sanctum')->group(function () {
                 Route::get('/reorder-suggestions',           [IntelligenceController::class, 'reorderSuggestions']);
                 Route::get('/material-shortages',            [IntelligenceController::class, 'materialShortages']);
@@ -382,7 +382,7 @@ Route::prefix('v1')->group(function () {
         // This means any permission can be granted/revoked per user independently
         // of their role — full flexibility without code changes.
 
-        Route::middleware(['auth:sanctum', 'throttle:admin-api'])->prefix('admin')->group(function () {
+        Route::middleware(['auth:sanctum', 'throttle:admin-api', 'ensure.staff'])->prefix('admin')->group(function () {
 
             // ── Profile — every authenticated staff member ───────────────────
             Route::prefix('profile')->group(function () {
@@ -1445,7 +1445,7 @@ Route::prefix('v1')->group(function () {
         // permission check now enforces (rather than a second, redundant
         // role:super_admin check that made the permission unassignable to
         // anyone else even on purpose).
-        Route::middleware(['throttle:admin-api'])->prefix('admin')->group(function () {
+        Route::middleware(['throttle:admin-api', 'ensure.staff'])->prefix('admin')->group(function () {
 
             Route::middleware('permission:roles.view,sanctum')->prefix('roles')->group(function () {
                 Route::get('/',                  [RoleController::class, 'index']);
