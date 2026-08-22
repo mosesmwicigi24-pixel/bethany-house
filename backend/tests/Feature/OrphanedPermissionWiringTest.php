@@ -20,6 +20,10 @@ class OrphanedPermissionWiringTest extends TestCase
     private function userWithRole(string $role): User
     {
         Artisan::call('permission:sync');
+        // The registrar caches role->permission maps aggressively; without a
+        // flush, grants made by the sync are invisible to the middleware and
+        // every request 403s regardless of what the Roles screen would show.
+        app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
         $user = User::factory()->create();
         $user->assignRole(\Spatie\Permission\Models\Role::findByName($role, 'sanctum'));
 

@@ -30,6 +30,7 @@ class ProductionStageTemplateAndGatingTest extends TestCase
     {
         $user = User::factory()->create();
         $user->assignRole(Role::findOrCreate('tailor', 'sanctum'));
+        $user->givePermissionTo(Permission::findOrCreate('production.worker', 'sanctum'));
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 

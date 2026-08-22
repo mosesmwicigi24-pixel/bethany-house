@@ -9,6 +9,7 @@ use App\Models\ProductionTask;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
+use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
@@ -33,6 +34,7 @@ class ProductionPieceProgressTest extends TestCase
     {
         $user = User::factory()->create();
         $user->assignRole(Role::findOrCreate('tailor', 'sanctum'));
+        $user->givePermissionTo(Permission::findOrCreate('production.worker', 'sanctum'));
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 
