@@ -34,31 +34,33 @@ class OrphanedPermissionWiringTest extends TestCase
     {
         $tailor = $this->userWithRole('tailor');
         $this->actingAs($tailor, 'sanctum')
-            ->getJson('/api/v1/admin/tailor/tasks')->assertOk();
+            ->getJson('/api/v1/tailor/tasks')->assertOk();
 
         // admin keeps the access it always had — via production.*, now visibly.
         $admin = $this->userWithRole('admin');
         $this->actingAs($admin, 'sanctum')
-            ->getJson('/api/v1/admin/tailor/tasks')->assertOk();
+            ->getJson('/api/v1/tailor/tasks')->assertOk();
 
         // a clerk has no business on the shop floor's task list
         $clerk = $this->userWithRole('pos_clerk');
         $this->actingAs($clerk, 'sanctum')
-            ->getJson('/api/v1/admin/tailor/tasks')->assertForbidden();
+            ->getJson('/api/v1/tailor/tasks')->assertForbidden();
     }
 
     public function test_settings_manage_governs_the_recycle_bin(): void
     {
-        // admin holds settings.* — the Roles screen advertised recycle-bin
-        // access for admin all along while a hard-coded role gate denied it.
-        // The screen wins: what it displays is now what happens.
+        // settings.manage sits in the sync's wildcardExcluded list — admin's
+        // settings.* deliberately NEVER expands to it. So admin stays out
+        // (exactly the old role:super_admin behaviour), super_admin enters via
+        // the Gate::before wildcard, and the permission is grantable one role
+        // at a time on the Roles screen — which now actually governs.
         $admin = $this->userWithRole('admin');
         $this->actingAs($admin, 'sanctum')
-            ->getJson('/api/v1/admin/trash')->assertOk();
-
-        $finance = $this->userWithRole('finance_manager');
-        $this->actingAs($finance, 'sanctum')
             ->getJson('/api/v1/admin/trash')->assertForbidden();
+
+        $super = $this->userWithRole('super_admin');
+        $this->actingAs($super, 'sanctum')
+            ->getJson('/api/v1/admin/trash')->assertOk();
     }
 
     public function test_notifications_view_governs_the_staff_bell(): void
@@ -67,9 +69,10 @@ class OrphanedPermissionWiringTest extends TestCase
         $this->actingAs($clerk, 'sanctum')
             ->getJson('/api/v1/admin/notifications')->assertOk();
 
-        // walkin_customer is a customer account, not staff — no bell.
-        $customer = $this->userWithRole('walkin_customer');
-        $this->actingAs($customer, 'sanctum')
+        // A user holding no staff role has no bell — the block used to be
+        // auth-only, so ANY authenticated account could read it.
+        $nobody = User::factory()->create();
+        $this->actingAs($nobody, 'sanctum')
             ->getJson('/api/v1/admin/notifications')->assertForbidden();
     }
 }
