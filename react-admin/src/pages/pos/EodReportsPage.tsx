@@ -324,11 +324,11 @@ export default function EodReportsPage() {
                                         </div>
                                         <div className="mt-2 flex items-center gap-2 flex-wrap text-2xs">
                                             <span className="text-surface-400">{r.order_count} order{r.order_count !== 1 ? "s" : ""}</span>
-                                            <span className="text-surface-300">·</span>
+                                            <span className="text-surface-500">·</span>
                                             <span className="text-surface-400">Paid <span className="text-success font-semibold">KES {fmt(r.total_paid)}</span></span>
                                             {r.total_balance > 0.01 && (
                                                 <>
-                                                    <span className="text-surface-300">·</span>
+                                                    <span className="text-surface-500">·</span>
                                                     <span className="text-surface-400">Bal <span className="text-warning font-semibold">KES {fmt(r.total_balance)}</span></span>
                                                 </>
                                             )}
@@ -417,7 +417,7 @@ export default function EodReportsPage() {
                                                     KES {fmt(r.total_balance)}
                                                 </span>
                                             ) : (
-                                                <span className="text-surface-300 font-medium">—</span>
+                                                <span className="text-surface-500 font-medium">—</span>
                                             )}
                                         </td>
 

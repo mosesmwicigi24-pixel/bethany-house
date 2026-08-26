@@ -964,7 +964,7 @@ export default function ExpensesPage() {
                                     {/* Vendor */}
                                     <td className="px-4 py-3 text-sm text-surface-500 max-w-[120px] truncate hidden lg:table-cell">
                                         {exp.vendor_name ?? (
-                                            <span className="text-surface-300">
+                                            <span className="text-surface-500">
                                                 -
                                             </span>
                                         )}
@@ -995,7 +995,7 @@ export default function ExpensesPage() {
                                         {exp.submittedBy ? (
                                             `${exp.submittedBy.first_name} ${exp.submittedBy.last_name}`
                                         ) : (
-                                            <span className="text-surface-300">
+                                            <span className="text-surface-500">
                                                 -
                                             </span>
                                         )}

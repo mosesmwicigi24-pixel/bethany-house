@@ -447,7 +447,7 @@ export default function UsersPage() {
                                         }
                                     </span>
                                 ) : (
-                                    <span className="text-xs text-surface-300">
+                                    <span className="text-xs text-surface-500">
                                         -
                                     </span>
                                 ),
@@ -476,7 +476,7 @@ export default function UsersPage() {
                                         ).toLocaleDateString()}
                                     </span>
                                 ) : (
-                                    <span className="text-xs text-surface-300">
+                                    <span className="text-xs text-surface-500">
                                         Never
                                     </span>
                                 ),

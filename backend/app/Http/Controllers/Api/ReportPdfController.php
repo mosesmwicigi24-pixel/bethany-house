@@ -220,37 +220,77 @@ HTML;
     // GET /api/v1/admin/reports/pdf/sales
     // =========================================================================
 
-    public function sales(Request $request): Response
+    /**
+     * The recognised-revenue predicate + reporting-rate conversion, exactly as
+     * the on-screen sales report defines them. The PDF exists to be carried
+     * into meetings; a printout that disagrees with the screen it was exported
+     * from is worse than no printout.
+     */
+    private function recognisedOrders($q, string $alias = 'orders')
+    {
+        $a = $alias === '' ? '' : $alias . '.';
+
+        return $q->whereNotIn("{$a}status", \App\Models\Order::DEAD_STATUSES)
+            ->where(fn ($qq) => $qq->whereIn("{$a}status", \App\Models\Order::RECOGNISED_STATUSES)
+                                   ->orWhereIn("{$a}payment_status", \App\Models\Order::SETTLED_PAYMENT_STATUSES));
+    }
+
+    private function currencyGuard($q, string $currency, string $col)
+    {
+        return strtoupper($currency) === 'KES'
+            ? $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter($col))
+            : $q->whereRaw("UPPER({$col}) = ?", [strtoupper($currency)]);
+    }
+
+    private function moneyExpr(string $currency, string $amountCol, string $currencyCol): string
+    {
+        return strtoupper($currency) === 'KES'
+            ? \App\Support\ReportingCurrency::kes($amountCol, $currencyCol)
+            : $amountCol;
+    }
+
+    /**
+     * The sales PDF's numbers, extracted so tests can assert them without
+     * parsing a rendered PDF — and corrected to the screen's definitions:
+     * recognised revenue, reporting-rate conversion, the canonical customer
+     * key. The old version used payment_status='paid' (a different revenue
+     * truth than every tile), KES-only filters that silently excluded foreign
+     * orders, a category block that MIXED currencies raw, and a customer
+     * count that only saw registered accounts.
+     */
+    public function salesData(Request $request): array
     {
         [$start, $end] = $this->dateRange($request);
         $currency = strtoupper($request->get('currency', 'KES'));
+        $amt = fn (string $col, string $cur) => $this->moneyExpr($currency, $col, $cur);
 
         // Summary
-        $summary = DB::table('orders')
+        $summary = $this->currencyGuard(
+                $this->recognisedOrders(DB::table('orders'), ''),
+                $currency, 'currency_code')
             ->whereBetween('created_at', [$start, $end])
-            ->where('payment_status', 'paid')
-            ->whereRaw('UPPER(currency_code) = ?', [$currency])
             ->selectRaw("
                 COUNT(*) AS total_orders,
-                COALESCE(SUM(total_amount), 0) AS total_revenue,
-                COALESCE(AVG(total_amount), 0) AS avg_order_value,
-                COALESCE(SUM(tax_amount), 0)   AS total_tax,
-                COALESCE(SUM(discount_amount), 0) AS total_discounts,
-                COUNT(DISTINCT user_id) AS unique_customers
+                COALESCE(SUM({$amt('total_amount', 'currency_code')}), 0) AS total_revenue,
+                COALESCE(AVG({$amt('total_amount', 'currency_code')}), 0) AS avg_order_value,
+                COALESCE(SUM({$amt('tax_amount', 'currency_code')}), 0)   AS total_tax,
+                COALESCE(SUM({$amt('discount_amount', 'currency_code')}), 0) AS total_discounts,
+                COUNT(DISTINCT COALESCE(user_id::text, normalize_phone(customer_phone), NULLIF(lower(btrim(customer_email)), ''))) AS unique_customers
             ")->first();
 
         // By product (top 20)
-        $byProduct = DB::table('order_items')
-            ->join('orders', 'order_items.order_id', '=', 'orders.id')
+        $byProduct = $this->currencyGuard(
+                $this->recognisedOrders(
+                    DB::table('order_items')->join('orders', 'order_items.order_id', '=', 'orders.id'),
+                    'orders'),
+                $currency, 'orders.currency_code')
             ->whereBetween('orders.created_at', [$start, $end])
-            ->where('orders.payment_status', 'paid')
-            ->whereRaw('UPPER(orders.currency_code) = ?', [$currency])
             ->groupBy('order_items.product_name')
             ->selectRaw("
                 order_items.product_name,
                 SUM(order_items.quantity) AS quantity_sold,
-                COALESCE(SUM(order_items.total_price), 0) AS total_revenue,
-                COALESCE(AVG(order_items.unit_price), 0) AS avg_price
+                COALESCE(SUM({$amt('order_items.total_price', 'orders.currency_code')}), 0) AS total_revenue,
+                COALESCE(AVG({$amt('order_items.unit_price', 'orders.currency_code')}), 0) AS avg_price
             ")
             ->orderByDesc('total_revenue')
             ->limit(20)
@@ -266,43 +306,55 @@ HTML;
                   ->where('category_translations.language_code', '=', 'en');
             })
             ->whereBetween('orders.created_at', [$start, $end])
-            ->where('orders.payment_status', 'paid')
+            // This block previously had NO currency guard at all — the one
+            // place in the PDF that MIXED currencies raw instead of excluding.
+            ->tap(fn ($q) => $this->recognisedOrders($q, 'orders'))
+            ->tap(fn ($q) => $this->currencyGuard($q, $currency, 'orders.currency_code'))
             ->groupBy('categories.id', 'category_translations.name')
             ->selectRaw("
                 COALESCE(category_translations.name, 'Uncategorised') AS category_name,
                 COUNT(DISTINCT orders.id) AS order_count,
-                COALESCE(SUM(order_items.total_price), 0) AS total_revenue
+                COALESCE(SUM({$amt('order_items.total_price', 'orders.currency_code')}), 0) AS total_revenue
             ")
             ->orderByDesc('total_revenue')
             ->get();
 
         // By payment method
-        $byPayment = DB::table('orders')
+        $byPayment = $this->currencyGuard(
+                $this->recognisedOrders(DB::table('orders'), ''),
+                $currency, 'currency_code')
             ->whereBetween('created_at', [$start, $end])
-            ->where('payment_status', 'paid')
             ->whereNotNull('payment_method')
             ->groupBy('payment_method')
-            ->selectRaw("payment_method, COUNT(*) AS count, COALESCE(SUM(total_amount), 0) AS total")
+            ->selectRaw("payment_method, COUNT(*) AS count, COALESCE(SUM({$amt('total_amount', 'currency_code')}), 0) AS total")
             ->orderByDesc('total')
             ->get();
         $pmTotal = $byPayment->sum('total');
 
         // Daily breakdown (last portion)
-        $daily = DB::table('orders')
+        $daily = $this->currencyGuard(
+                $this->recognisedOrders(DB::table('orders'), ''),
+                $currency, 'currency_code')
             ->whereBetween('created_at', [$start, $end])
-            ->where('payment_status', 'paid')
-            ->selectRaw("DATE(created_at) AS date, COUNT(*) AS orders, COALESCE(SUM(total_amount), 0) AS revenue")
+            ->selectRaw("DATE(created_at) AS date, COUNT(*) AS orders, COALESCE(SUM({$amt('total_amount', 'currency_code')}), 0) AS revenue")
             ->groupBy(DB::raw('DATE(created_at)'))
             ->orderBy('date')
             ->get();
 
+        return compact('start', 'end', 'currency', 'summary', 'byProduct', 'byCategory', 'byPayment', 'pmTotal', 'daily');
+    }
+
+    public function sales(Request $request): Response
+    {
+        extract($this->salesData($request));
+
         $cur = $currency;
         $kpis = $this->kpiGrid([
-            ['label' => 'Total Revenue',   'value' => $this->fmt((float)$summary->total_revenue, $cur), 'sub' => "{$summary->total_orders} paid orders"],
+            ['label' => 'Total Revenue',   'value' => $this->fmt((float)$summary->total_revenue, $cur), 'sub' => "{$summary->total_orders} orders (sales truth)"],
             ['label' => 'Avg Order Value', 'value' => $this->fmt((float)$summary->avg_order_value, $cur)],
             ['label' => 'Total Orders',    'value' => $summary->total_orders],
             ['label' => 'Unique Customers','value' => $summary->unique_customers],
-            ['label' => 'Tax Collected',   'value' => $this->fmt((float)$summary->total_tax, $cur)],
+            ['label' => 'Tax on sales',   'value' => $this->fmt((float)$summary->total_tax, $cur)],
             ['label' => 'Discounts Given', 'value' => $this->fmt((float)$summary->total_discounts, $cur)],
         ]);
 
@@ -348,33 +400,71 @@ HTML;
     // GET /api/v1/admin/reports/pdf/financial
     // =========================================================================
 
-    public function financial(Request $request): Response
+    /**
+     * The financial PDF's numbers — same extraction rationale as salesData(),
+     * and the same definitions as the P&L page: recognised revenue, converted
+     * at the reporting rate, and the REAL cost-snapshot COGS. The old version
+     * carried a 'no COGS tracked yet' note long after COGS shipped, so the
+     * printed Net Profit disagreed with the P&L on screen by the whole cost
+     * of goods. Tax and discounts also summed EVERY currency raw.
+     */
+    public function financialData(Request $request): array
     {
         [$start, $end] = $this->dateRange($request);
         $currency = strtoupper($request->get('currency', 'KES'));
+        $amt = fn (string $col) => $this->moneyExpr($currency, $col, 'currency_code');
 
-        $revenue = (float) DB::table('orders')
+        $sums = $this->currencyGuard(
+                $this->recognisedOrders(DB::table('orders'), ''),
+                $currency, 'currency_code')
             ->whereBetween('created_at', [$start, $end])
-            ->where('payment_status', 'paid')
-            ->whereRaw('UPPER(currency_code) = ?', [$currency])
-            ->sum('total_amount');
+            ->selectRaw("
+                COALESCE(SUM({$amt('total_amount')}), 0)    AS revenue,
+                COALESCE(SUM({$amt('tax_amount')}), 0)      AS tax,
+                COALESCE(SUM({$amt('discount_amount')}), 0) AS discounts
+            ")->first();
+        $revenue      = (float) $sums->revenue;
+        $taxCollected = (float) $sums->tax;
+        $discounts    = (float) $sums->discounts;
 
-        $taxCollected = (float) DB::table('orders')
-            ->whereBetween('created_at', [$start, $end])
-            ->where('payment_status', 'paid')
-            ->sum('tax_amount');
-
-        $discounts = (float) DB::table('orders')
-            ->whereBetween('created_at', [$start, $end])
-            ->where('payment_status', 'paid')
-            ->sum('discount_amount');
+        // COGS: identical formula to ReportController::profitLoss — the
+        // snapshot cost on the line first, today's KES cost price second,
+        // unpriced lines counted so the margin is never silently overstated.
+        $cogsRow = DB::selectOne("
+            SELECT
+                COALESCE(SUM(oi.quantity * COALESCE(oi.cost_price, pr.cost_price)), 0)::float8 AS cogs,
+                COUNT(*) FILTER (WHERE COALESCE(oi.cost_price, pr.cost_price) IS NULL)         AS unpriced_lines
+            FROM order_items oi
+            JOIN orders o ON o.id = oi.order_id
+            LEFT JOIN LATERAL (
+                SELECT pp.cost_price
+                FROM product_prices pp
+                WHERE UPPER(pp.currency_code) = 'KES'
+                  AND pp.cost_price IS NOT NULL
+                  AND (
+                        (oi.product_variant_id IS NOT NULL AND pp.product_variant_id = oi.product_variant_id)
+                     OR (pp.product_id = oi.product_id AND pp.product_variant_id IS NULL)
+                  )
+                ORDER BY pp.product_variant_id IS NULL
+                LIMIT 1
+            ) pr ON TRUE
+            WHERE o.created_at BETWEEN ? AND ?
+              AND o.status NOT IN ('cancelled','voided','refunded')
+              AND (o.status IN ('confirmed','processing','shipped','delivered','completed')
+                   OR o.payment_status IN ('paid','partial','deposit'))
+              AND " . (strtoupper($currency) === 'KES'
+                  ? "(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL"
+                  : 'UPPER(o.currency_code) = ' . DB::getPdo()->quote($currency)) . "
+        ", [$start, $end]);
+        $cogs          = (float) ($cogsRow->cogs ?? 0);
+        $unpricedLines = (int) ($cogsRow->unpriced_lines ?? 0);
 
         $opex = (float) DB::table('expenses')
             ->whereBetween('expense_date', [substr($start, 0, 10), substr($end, 0, 10)])
             ->whereIn('status', ['approved', 'paid'])
             ->sum('amount_kes');
 
-        $grossProfit  = $revenue;  // no COGS tracked yet
+        $grossProfit  = $revenue - $cogs;
         $grossMargin  = $revenue > 0 ? round(($grossProfit / $revenue) * 100, 1) : 0;
         $netProfit    = $grossProfit - $opex;
         $netMargin    = $revenue > 0 ? round(($netProfit / $revenue) * 100, 1) : 0;
@@ -397,21 +487,32 @@ HTML;
             ->limit(30)
             ->get();
 
-        $monthly = DB::table('orders')
+        $monthly = $this->currencyGuard(
+                $this->recognisedOrders(DB::table('orders'), ''),
+                $currency, 'currency_code')
             ->whereBetween('created_at', [$start, $end])
-            ->where('payment_status', 'paid')
-            ->selectRaw("TO_CHAR(created_at, 'YYYY-MM') AS month, COALESCE(SUM(total_amount), 0) AS revenue, COUNT(*) AS orders")
+            ->selectRaw("TO_CHAR(created_at, 'YYYY-MM') AS month, COALESCE(SUM({$amt('total_amount')}), 0) AS revenue, COUNT(*) AS orders")
             ->groupBy(DB::raw("TO_CHAR(created_at, 'YYYY-MM')"))
             ->orderBy('month')
             ->get();
 
+        return compact('start', 'end', 'currency', 'revenue', 'taxCollected', 'discounts',
+                       'cogs', 'unpricedLines', 'opex', 'grossProfit', 'grossMargin',
+                       'netProfit', 'netMargin', 'expCats', 'expenses', 'monthly');
+    }
+
+    public function financial(Request $request): Response
+    {
+        extract($this->financialData($request));
+
         $cur = $currency;
         $kpis = $this->kpiGrid([
             ['label' => 'Revenue',            'value' => $this->fmt($revenue, $cur)],
-            ['label' => 'Gross Profit',       'value' => $this->fmt($grossProfit, $cur), 'sub' => "{$grossMargin}% margin"],
+            ['label' => 'Gross Profit',       'value' => $this->fmt($grossProfit, $cur),
+             'sub' => "{$grossMargin}% margin after COGS" . ($unpricedLines > 0 ? " · {$unpricedLines} unpriced lines" : '')],
             ['label' => 'Operating Expenses', 'value' => $this->fmt($opex, $cur)],
             ['label' => 'Net Profit',         'value' => $this->fmt($netProfit, $cur), 'sub' => "{$netMargin}% margin"],
-            ['label' => 'Tax Collected',      'value' => $this->fmt($taxCollected, $cur)],
+            ['label' => 'Tax on sales',      'value' => $this->fmt($taxCollected, $cur)],
             ['label' => 'Discounts Given',    'value' => $this->fmt($discounts, $cur)],
         ]);
 

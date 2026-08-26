@@ -811,7 +811,7 @@ function FocusCard({
                             className="w-14 h-14 rounded-xl object-contain bg-surface-100 border border-line shrink-0"
                         />
                     ) : (
-                        <div className="w-14 h-14 rounded-xl bg-surface-100 flex items-center justify-center shrink-0 text-surface-300">
+                        <div className="w-14 h-14 rounded-xl bg-surface-100 flex items-center justify-center shrink-0 text-surface-500">
                             <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" />
                             </svg>
@@ -992,7 +992,7 @@ function FocusCard({
                                     className={clsx(
                                         "flex-1 min-w-0 truncate text-[13px]",
                                         isDone
-                                            ? "line-through text-surface-300"
+                                            ? "line-through text-surface-500"
                                             : isActive
                                             ? "font-semibold text-surface-900"
                                             : "text-surface-500"
@@ -1115,7 +1115,7 @@ function FocusCard({
 
                                 {/* Completed time */}
                                 {isDone && task.completed_at && (
-                                    <span className="text-2xs text-surface-300 font-mono shrink-0">
+                                    <span className="text-2xs text-surface-500 font-mono shrink-0">
                                         {new Date(
                                             task.completed_at
                                         ).toLocaleTimeString("en-KE", {
@@ -1265,7 +1265,7 @@ function QueueOrderGroup({
                         className="w-10 h-10 rounded-lg object-contain bg-surface-100 border border-line shrink-0"
                     />
                 ) : (
-                    <div className="w-10 h-10 rounded-lg bg-surface-100 flex items-center justify-center shrink-0 text-surface-300">
+                    <div className="w-10 h-10 rounded-lg bg-surface-100 flex items-center justify-center shrink-0 text-surface-500">
                         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
                             <path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" />
                         </svg>
@@ -1315,7 +1315,7 @@ function QueueOrderGroup({
                 {/* Chevron */}
                 <svg
                     className={clsx(
-                        "w-4 h-4 text-surface-300 shrink-0 transition-transform duration-200",
+                        "w-4 h-4 text-surface-500 shrink-0 transition-transform duration-200",
                         open ? "rotate-180" : ""
                     )}
                     fill="none"
@@ -1387,7 +1387,7 @@ function QueueOrderGroup({
                                     className={clsx(
                                         "flex-1 text-xs",
                                         isDone
-                                            ? "line-through text-surface-300"
+                                            ? "line-through text-surface-500"
                                             : isInProgress
                                             ? "font-semibold text-surface-800"
                                             : "text-surface-600"
@@ -1427,7 +1427,7 @@ function QueueOrderGroup({
                                         </button>
                                     )}
                                     {isDone && task.completed_at && (
-                                        <span className="text-2xs text-surface-300 font-mono">
+                                        <span className="text-2xs text-surface-500 font-mono">
                                             {new Date(
                                                 task.completed_at
                                             ).toLocaleTimeString("en-KE", {

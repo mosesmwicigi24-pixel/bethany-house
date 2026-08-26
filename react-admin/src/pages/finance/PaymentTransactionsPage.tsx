@@ -342,7 +342,7 @@ export default function PaymentTransactionsPage() {
                             </svg>
                             Filters
                             {activeFilters > 0 && (
-                                <span className="w-4 h-4 bg-brand text-white text-2xs rounded-full flex items-center justify-center font-bold">{activeFilters}</span>
+                                <span className="w-4 h-4 bg-brand-500 text-white text-2xs rounded-full flex items-center justify-center font-bold">{activeFilters}</span>
                             )}
                         </button>
 
@@ -444,7 +444,7 @@ export default function PaymentTransactionsPage() {
                                                         className="text-xs font-semibold text-brand hover:underline">
                                                         {txn.order.order_number}
                                                     </Link>
-                                                ) : <span className="text-surface-300 text-xs">—</span>}
+                                                ) : <span className="text-surface-500 text-xs">—</span>}
                                             </td>
                                             {/* Customer */}
                                             <td className="px-4 py-3 text-xs text-surface-700">
@@ -485,7 +485,7 @@ export default function PaymentTransactionsPage() {
                                             </td>
                                             {/* Arrow */}
                                             <td className="px-4 py-3">
-                                                <svg className="w-4 h-4 text-surface-300 group-hover:text-brand transition-colors"
+                                                <svg className="w-4 h-4 text-surface-500 group-hover:text-brand transition-colors"
                                                     fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
                                                 </svg>

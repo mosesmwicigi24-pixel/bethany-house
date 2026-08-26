@@ -123,7 +123,7 @@ export function DateGroupHeaderRow({
             >
                 {label}
                 {typeof count === "number" && (
-                    <span className="ml-2 font-normal text-surface-300 normal-case tracking-normal">
+                    <span className="ml-2 font-normal text-surface-500 normal-case tracking-normal">
                         · {count} {count === 1 ? "record" : "records"}
                     </span>
                 )}

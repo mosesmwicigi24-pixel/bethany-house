@@ -35,8 +35,27 @@ class MetricEngine
 {
     private const TZ = 'Africa/Nairobi';
 
-    /** Sales truth: an order that exists commercially. */
-    private const SALE_EXCLUDED_STATUSES = ['voided', 'cancelled'];
+    /**
+     * "Today" in SQL, as Nairobi sees it. CURRENT_DATE is the DB session's
+     * date (UTC), which made every age one day short between 21:00 and
+     * midnight EAT — caught when the suite happened to run past midnight and
+     * a 120-day-old fixture aged 119. created_at is stored Nairobi-local
+     * (app timezone), so only the "today" side of the subtraction was wrong.
+     */
+    private const TODAY_SQL = "(now() AT TIME ZONE 'Africa/Nairobi')::date";
+
+    /**
+     * Sales truth: an order a HUMAN has accepted.
+     *
+     * This used to be `NOT IN (voided, cancelled)`, which counted every
+     * abandoned storefront and WhatsApp cart as revenue — KES 1,136,060 of the
+     * last 30 days' reported sales, 33% of the figure. Recognition now follows
+     * Order::RECOGNISED_STATUSES, so an unconfirmed cart is pipeline, not
+     * income, and it reaches the sales report only after a person confirms it.
+     *
+     * @see \App\Models\Order::RECOGNISED_STATUSES  the single definition
+     */
+    private const SALE_RECOGNISED_STATUSES = \App\Models\Order::RECOGNISED_STATUSES;
 
     /**
      * Expense truth: money the business has committed to spend.
@@ -155,12 +174,72 @@ class MetricEngine
 
     // ── Query scaffolding ─────────────────────────────────────────────────────
 
-    /** Sales-truth base: commercial orders, KES, scoped. */
+    /**
+     * State a money column in KES at the REPORTING rate (128 KES/USD,
+     * 6.5 KES/ZMW) — never the pricing rate a customer is quoted at.
+     *
+     * Every money figure this engine produces goes through here, so that a
+     * report cannot silently add a dollar to a shilling and cannot silently
+     * drop the dollar either. A currency with no reporting rate yields NULL,
+     * which SUM() skips; pair with ReportingCurrency::convertibleFilter() when
+     * the row itself should be excluded from counts as well.
+     *
+     * @see \App\Support\ReportingCurrency  the one definition of the rates
+     */
+    private function kes(string $amountColumn, string $currencyColumn): string
+    {
+        return \App\Support\ReportingCurrency::kes($amountColumn, $currencyColumn);
+    }
+
+    /**
+     * The same conversion expressed as pure SQL, reading the rate from the
+     * currencies table instead of being built in PHP.
+     *
+     * Used by the aggregates swept across this engine. Two reasons it is a
+     * scalar sub-select rather than a generated CASE:
+     *
+     *  1. It is quote-agnostic. These aggregates live in a mix of single- and
+     *     double-quoted PHP strings, and a `{$...}` interpolation silently
+     *     becomes a literal in the single-quoted half — a class of bug that
+     *     produces SQL syntax errors at best and wrong numbers at worst.
+     *  2. It cannot go stale. A CASE baked at query-build time carries whatever
+     *     the rate cache held; this reads the rate the database has right now,
+     *     so an edited rate takes effect on the next query.
+     *
+     * A currency with no reporting rate yields NULL, so the row contributes
+     * nothing to a SUM rather than being counted at a guess.
+     */
+    private const RATE_SQL = '(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(%s))';
+
+    private static function rate(string $currencyColumn): string
+    {
+        return sprintf(self::RATE_SQL, $currencyColumn);
+    }
+
+    /**
+     * The recognition predicate, applied to any query over the orders table.
+     *
+     * Every sales figure in this engine goes through here, so the rule has one
+     * definition. It mirrors Order::scopeRecognised() exactly — the model scope
+     * serves Eloquent callers (the sales ledger, the order lists), this serves
+     * the query-builder ones.
+     *
+     * @param string $alias how orders is named in the query ('orders', 'o', …)
+     */
+    private function recognise($query, string $alias = 'orders')
+    {
+        return $query
+            ->whereNotIn("{$alias}.status", \App\Models\Order::DEAD_STATUSES)
+            ->where(fn ($q) => $q
+                ->whereIn("{$alias}.status", self::SALE_RECOGNISED_STATUSES)
+                ->orWhereIn("{$alias}.payment_status", \App\Models\Order::SETTLED_PAYMENT_STATUSES));
+    }
+
+    /** Sales-truth base: recognised orders, KES, scoped. */
     private function salesBase()
     {
-        return DB::table('orders')
-            ->whereNotIn('status', self::SALE_EXCLUDED_STATUSES)
-            ->whereRaw("UPPER(currency_code) = 'KES'")
+        return $this->recognise(DB::table('orders'))
+            ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code)) IS NOT NULL")
             ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds));
     }
 
@@ -170,7 +249,7 @@ class MetricEngine
         return DB::table('payments as p')
             ->join('orders as o', 'o.id', '=', 'p.order_id')
             ->where('p.status', 'paid')
-            ->whereRaw("UPPER(p.currency_code) = 'KES'")
+            ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code)) IS NOT NULL")
             ->when($this->outletIds, fn ($q) => $q->whereIn('o.outlet_id', $this->outletIds));
     }
 
@@ -225,7 +304,7 @@ class MetricEngine
     /** Sales truth: what we sold (order totals, voids/cancels excluded). */
     public function revenue(Carbon $s, Carbon $e, Carbon $ps, Carbon $pe): array
     {
-        return $this->flow(fn () => $this->salesBase(), 'orders.created_at', 'COALESCE(SUM(total_amount),0)', $s, $e, $ps, $pe);
+        return $this->flow(fn () => $this->salesBase(), 'orders.created_at', 'COALESCE(SUM(total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))),0)', $s, $e, $ps, $pe);
     }
 
     public function ordersCount(Carbon $s, Carbon $e, Carbon $ps, Carbon $pe): array
@@ -236,7 +315,7 @@ class MetricEngine
     /** Money truth: what actually settled, net of refunds. */
     public function collected(Carbon $s, Carbon $e, Carbon $ps, Carbon $pe): array
     {
-        return $this->flow(fn () => $this->moneyBase(), self::PAID_AT, 'COALESCE(SUM(p.amount - COALESCE(p.refund_amount,0)),0)', $s, $e, $ps, $pe);
+        return $this->flow(fn () => $this->moneyBase(), self::PAID_AT, 'COALESCE(SUM((p.amount - COALESCE(p.refund_amount,0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code))),0)', $s, $e, $ps, $pe);
     }
 
     /** Financial: approved + paid expenses in KES by expense date. */
@@ -305,7 +384,7 @@ class MetricEngine
             ->whereIn('payment_status', ['pending', 'partial', 'deposit'])
             ->leftJoinSub(
                 DB::table('payments')->where('status', 'paid')
-                    ->selectRaw('order_id, SUM(amount - COALESCE(refund_amount,0)) AS paid')
+                    ->selectRaw('order_id, SUM((amount - COALESCE(refund_amount,0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))) AS paid')
                     ->groupBy('order_id'),
                 'pp', 'pp.order_id', '=', 'orders.id',
             );
@@ -697,8 +776,8 @@ class MetricEngine
     {
         return DB::table('order_items as oi')
             ->join('orders as o', 'o.id', '=', 'oi.order_id')
-            ->whereNotIn('o.status', self::SALE_EXCLUDED_STATUSES)
-            ->whereRaw("UPPER(o.currency_code) = 'KES'")
+            ->tap(fn ($q) => $this->recognise($q, 'o'))
+            ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL")
             ->whereBetween('o.created_at', [$s, $e])
             ->whereNotNull('oi.product_id')
             ->when($this->outletIds, fn ($q) => $q->whereIn('o.outlet_id', $this->outletIds))
@@ -775,7 +854,7 @@ class MetricEngine
             ->leftJoin(DB::raw("(
                     SELECT oi.product_id, MAX(o.created_at) AS last_sold, MAX(oi.product_name) AS sold_name
                     FROM order_items oi JOIN orders o ON o.id = oi.order_id
-                    WHERE o.status NOT IN ('voided','cancelled')
+                    WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
                     GROUP BY oi.product_id
                 ) ls"), 'ls.product_id', '=', 'ii.product_id')
             ->where('ii.quantity_on_hand', '>', 0)
@@ -965,7 +1044,7 @@ class MetricEngine
         $row = DB::table('purchase_orders')
             ->whereNotIn('status', ['received', 'completed', 'closed', 'cancelled'])
             ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
-            ->selectRaw('COUNT(*) AS n, COALESCE(SUM(total_amount), 0) AS value, MIN(order_date) AS oldest')
+            ->selectRaw('COUNT(*) AS n, COALESCE(SUM(total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))), 0) AS value, MIN(order_date) AS oldest')
             ->first();
 
         return [
@@ -990,9 +1069,8 @@ class MetricEngine
     /** Sales-truth orders aliased o, with the customer key attached. */
     private function customerOrders()
     {
-        return DB::table('orders as o')
-            ->whereNotIn('o.status', self::SALE_EXCLUDED_STATUSES)
-            ->whereRaw("UPPER(o.currency_code) = 'KES'")
+        return $this->recognise(DB::table('orders as o'), 'o')
+            ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL")
             ->when($this->outletIds, fn ($q) => $q->whereIn('o.outlet_id', $this->outletIds));
     }
 
@@ -1009,9 +1087,9 @@ class MetricEngine
             ->whereBetween('o.created_at', [$s, $e])
             ->groupBy(DB::raw("COALESCE(cid.customer_type, cp.customer_type, 'walk_in')"))
             ->selectRaw("COALESCE(cid.customer_type, cp.customer_type, 'walk_in') AS segment,
-                COUNT(*) AS orders, COALESCE(SUM(o.total_amount), 0) AS revenue,
+                COUNT(*) AS orders, COALESCE(SUM(o.total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))), 0) AS revenue,
                 COUNT(DISTINCT " . self::CUSTOMER_KEY . ") AS customers")
-            ->orderByDesc(DB::raw('COALESCE(SUM(o.total_amount), 0)'))
+            ->orderByDesc(DB::raw('COALESCE(SUM(o.total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))), 0)'))
             ->get();
     }
 
@@ -1025,16 +1103,16 @@ class MetricEngine
         $key = self::CUSTOMER_KEY;
         $rows = DB::select("
             WITH keyed AS (
-                SELECT o.id, o.total_amount, o.created_at, {$key} AS ckey,
+                SELECT o.id, o.total_amount, o.currency_code, o.created_at, {$key} AS ckey,
                        MIN(o.created_at) OVER (PARTITION BY {$key}) AS first_order_at
                 FROM orders o
-                WHERE o.status NOT IN ('voided','cancelled')
-                  AND UPPER(o.currency_code) = 'KES'
+                WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
+                  AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL
                   " . ($this->outletIds ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')' : '') . "
             )
             SELECT CASE WHEN ckey IS NULL THEN 'anonymous'
                         WHEN first_order_at < ? THEN 'returning' ELSE 'new' END AS bucket,
-                   COUNT(*) AS orders, COALESCE(SUM(total_amount), 0) AS revenue,
+                   COUNT(*) AS orders, COALESCE(SUM(total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))), 0) AS revenue,
                    COUNT(DISTINCT ckey) AS customers
             FROM keyed WHERE created_at BETWEEN ? AND ?
             GROUP BY 1
@@ -1057,19 +1135,19 @@ class MetricEngine
         $key = self::CUSTOMER_KEY;
         return collect(DB::select("
             WITH keyed AS (
-                SELECT {$key} AS ckey, o.total_amount, o.created_at,
+                SELECT {$key} AS ckey, o.total_amount, o.currency_code, o.created_at,
                        TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,''))) AS name,
                        o.customer_phone AS phone
                 FROM orders o
-                WHERE o.status NOT IN ('voided','cancelled') AND UPPER(o.currency_code) = 'KES'
+                WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit')) AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL
                   AND {$key} IS NOT NULL
                   " . ($this->outletIds ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')' : '') . "
             )
             SELECT ckey, MAX(name) AS name, MAX(phone) AS phone,
                    COUNT(*) FILTER (WHERE created_at BETWEEN ? AND ?) AS period_orders,
-                   COALESCE(SUM(total_amount) FILTER (WHERE created_at BETWEEN ? AND ?), 0) AS period_revenue,
+                   COALESCE(SUM(total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))) FILTER (WHERE created_at BETWEEN ? AND ?), 0) AS period_revenue,
                    COUNT(*) AS lifetime_orders,
-                   COALESCE(SUM(total_amount), 0) AS lifetime_revenue,
+                   COALESCE(SUM(total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))), 0) AS lifetime_revenue,
                    MAX(created_at) AS last_order_at
             FROM keyed
             GROUP BY ckey
@@ -1089,18 +1167,18 @@ class MetricEngine
         $now = CarbonImmutable::now(self::TZ);
         return collect(DB::select("
             WITH keyed AS (
-                SELECT {$key} AS ckey, o.total_amount, o.created_at,
+                SELECT {$key} AS ckey, o.total_amount, o.currency_code, o.created_at,
                        TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,''))) AS name,
                        o.customer_phone AS phone
                 FROM orders o
-                WHERE o.status NOT IN ('voided','cancelled') AND UPPER(o.currency_code) = 'KES'
+                WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit')) AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL
                   AND {$key} IS NOT NULL AND o.created_at >= ?
                   " . ($this->outletIds ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')' : '') . "
             ), ranked AS (
                 SELECT ckey, MAX(name) AS name, MAX(phone) AS phone,
-                       SUM(total_amount) AS revenue_12m, MAX(created_at) AS last_order_at
+                       SUM(total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))) AS revenue_12m, MAX(created_at) AS last_order_at
                 FROM keyed GROUP BY ckey
-                ORDER BY SUM(total_amount) DESC LIMIT ?
+                ORDER BY SUM(total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))) DESC LIMIT ?
             )
             SELECT * FROM ranked WHERE last_order_at < ?
             ORDER BY revenue_12m DESC
@@ -1146,26 +1224,40 @@ class MetricEngine
 
         $scored = "
             WITH keyed AS (
-                SELECT {$key} AS ckey, o.total_amount, o.created_at,
+                SELECT {$key} AS ckey, o.total_amount, o.currency_code, o.created_at,
                        TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,''))) AS name,
                        o.customer_phone AS phone
                 FROM orders o
-                WHERE o.status NOT IN ('voided','cancelled')
-                  AND UPPER(o.currency_code) = 'KES'
+                WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
+                  AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL
                   AND o.created_at >= ?
                   {$outletSql}
             ), per_customer AS (
                 SELECT ckey, MAX(name) AS name, MAX(phone) AS phone,
                        COUNT(*)                    AS frequency,
-                       COALESCE(SUM(total_amount), 0) AS monetary,
+                       COALESCE(SUM(total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))), 0) AS monetary,
                        MAX(created_at)             AS last_order_at
                 FROM keyed WHERE ckey IS NOT NULL GROUP BY ckey
             ), scored AS (
                 -- R is scored on ABSOLUTE days-quiet thresholds (stable and
                 -- explainable; matches the shop's existing 60-day convention).
-                -- F and M are scored relative to the cohort via CUME_DIST so
-                -- the best customer always scores 5 — NTILE(5) over a small
-                -- cohort caps at score=N and makes top segments unreachable.
+                --
+                -- F and M are scored relative to the cohort. This has now been
+                -- wrong in both directions, so the reasoning is worth keeping:
+                --
+                --   NTILE(5)   caps at score=N on a small cohort, so the top
+                --              segments became unreachable.
+                --   CUME_DIST  counts rows <= the current value, which hands a
+                --              TIE the upper bound of its group. With 260 of
+                --              290 customers tied at one order, that bottom
+                --              group scored 260/290 = 0.897 -> f_score 5. The
+                --              least frequent buyers scored highest, and all
+                --              290 customers landed in 'champions'.
+                --
+                -- PERCENT_RANK is (rank - 1) / (rows - 1), which hands a tie the
+                -- LOWER bound: the modal bottom group scores 0 -> 1, and the
+                -- best customer still reaches 1.0 -> 5. LEAST caps the top,
+                -- because FLOOR(1.0 * 5) + 1 = 6.
                 SELECT *,
                        CASE
                            WHEN last_order_at >= NOW() - INTERVAL '30 days'  THEN 5
@@ -1174,8 +1266,8 @@ class MetricEngine
                            WHEN last_order_at >= NOW() - INTERVAL '180 days' THEN 2
                            ELSE 1
                        END AS r_score,
-                       CEIL(CUME_DIST() OVER (ORDER BY frequency ASC) * 5)::int AS f_score,
-                       CEIL(CUME_DIST() OVER (ORDER BY monetary  ASC) * 5)::int AS m_score
+                       LEAST(FLOOR(PERCENT_RANK() OVER (ORDER BY frequency ASC) * 5)::int + 1, 5) AS f_score,
+                       LEAST(FLOOR(PERCENT_RANK() OVER (ORDER BY monetary  ASC) * 5)::int + 1, 5) AS m_score
                 FROM per_customer
             )
             SELECT *,
@@ -1212,6 +1304,39 @@ class MetricEngine
             ];
         })->values();
 
+        // ── Can this cohort be segmented at all? ────────────────────────────
+        $spread = DB::selectOne("
+            SELECT COUNT(*)                              AS customers,
+                   COUNT(DISTINCT frequency)             AS distinct_frequency,
+                   COUNT(DISTINCT r_score)               AS distinct_recency,
+                   MAX(EXTRACT(EPOCH FROM (NOW() - last_order_at)) / 86400)::int AS max_days_quiet
+            FROM ({$scored}) s
+        ", [$since]);
+
+        $customers  = (int) ($spread->customers ?? 0);
+        $noFSpread  = (int) ($spread->distinct_frequency ?? 0) <= 1;
+        $noRSpread  = (int) ($spread->distinct_recency ?? 0) <= 1;
+        $degenerate = $customers > 0 && ($noFSpread || $noRSpread);
+
+        $notes = [];
+        if ($noFSpread) {
+            $notes[] = 'Every customer has the same order count, so frequency cannot rank anyone.';
+        }
+        if ($noRSpread) {
+            $notes[] = 'Every customer last ordered within the same recency band, so no one reads as lapsed.';
+        }
+
+        $diagnostics = [
+            'customers'          => $customers,
+            'distinct_frequency' => (int) ($spread->distinct_frequency ?? 0),
+            'distinct_recency'   => (int) ($spread->distinct_recency ?? 0),
+            'max_days_quiet'     => (int) ($spread->max_days_quiet ?? 0),
+            'degenerate'         => $degenerate,
+            'note'               => $degenerate
+                ? implode(' ', $notes) . ' Treat these segments as indicative only.'
+                : null,
+        ];
+
         // The call list: money walking out of the door, biggest first.
         $actionList = collect(DB::select("
             SELECT name, phone, segment, frequency, monetary, last_order_at
@@ -1230,10 +1355,10 @@ class MetricEngine
         ])->values();
 
         $anonymous = DB::selectOne("
-            SELECT COUNT(*) AS orders, COALESCE(SUM(o.total_amount), 0) AS revenue
+            SELECT COUNT(*) AS orders, COALESCE(SUM(o.total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))), 0) AS revenue
             FROM orders o
-            WHERE o.status NOT IN ('voided','cancelled')
-              AND UPPER(o.currency_code) = 'KES'
+            WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
+              AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL
               AND o.created_at >= ?
               AND {$key} IS NULL
               {$outletSql}
@@ -1241,6 +1366,15 @@ class MetricEngine
 
         return [
             'window_days' => 365,
+            // Whether this cohort can support segmentation at all.
+            //
+            // RFM is percentile scoring, and percentiles need spread. A base of
+            // one-time buyers who all shopped recently has none: every customer
+            // is genuinely alike on R and F, and any split of them is an
+            // artefact of the scoring rather than a fact about the customers.
+            // Saying so is more useful than printing seven buckets, six of them
+            // empty, and letting a reader conclude the report is broken.
+            'diagnostics' => $diagnostics,
             'segments'    => $segmentRows,
             'action_list' => $actionList,
             'anonymous'   => [
@@ -1310,12 +1444,12 @@ class MetricEngine
         // and a 0-day gap would poison the median).
         $rows = DB::select("
             WITH keyed AS (
-                SELECT {$key} AS ckey, o.customer_id, o.total_amount, o.created_at,
+                SELECT {$key} AS ckey, o.customer_id, o.total_amount, o.currency_code, o.created_at,
                        TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,''))) AS name,
                        o.customer_phone AS phone
                 FROM orders o
-                WHERE o.status NOT IN ('voided','cancelled')
-                  AND UPPER(o.currency_code) = 'KES'
+                WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
+                  AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL
                   AND o.created_at >= ?
                   AND {$key} IS NOT NULL
                   {$outletSql}
@@ -1332,7 +1466,7 @@ class MetricEngine
                 SELECT ckey, MAX(name) AS name, MAX(phone) AS phone,
                        MAX(customer_id) AS customer_id,
                        COUNT(*) AS orders_365,
-                       COALESCE(SUM(total_amount), 0) AS revenue_365,
+                       COALESCE(SUM(total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))), 0) AS revenue_365,
                        MAX(created_at) AS last_order_at
                 FROM keyed GROUP BY ckey
             )
@@ -1360,8 +1494,8 @@ class MetricEngine
                 SELECT o.id AS order_id, o.order_number, o.total_amount AS recovered_amount,
                        o.created_at AS ordered_at
                 FROM orders o
-                WHERE o.status NOT IN ('voided','cancelled')
-                  AND UPPER(o.currency_code) = 'KES'
+                WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
+                  AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL
                   AND o.created_at >  w.created_at
                   AND o.created_at <= w.created_at + INTERVAL '30 days'
                   AND (
@@ -1503,8 +1637,8 @@ class MetricEngine
                        MAX(o.customer_phone) AS phone
                 FROM orders o
                 JOIN order_items oi ON oi.order_id = o.id
-                WHERE o.status NOT IN ('voided','cancelled')
-                  AND UPPER(o.currency_code) = 'KES'
+                WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
+                  AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL
                   AND oi.product_id IS NOT NULL
                   AND o.created_at >= ?
                   AND {$key} IS NOT NULL
@@ -1601,8 +1735,8 @@ class MetricEngine
                 SELECT {$key} AS ckey, oi.product_id
                 FROM orders o
                 JOIN order_items oi ON oi.order_id = o.id
-                WHERE o.status NOT IN ('voided','cancelled')
-                  AND UPPER(o.currency_code) = 'KES'
+                WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
+                  AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL
                   AND oi.product_id IS NOT NULL
                   AND o.created_at >= ?
                   AND {$key} IS NOT NULL
@@ -1639,21 +1773,21 @@ class MetricEngine
         $scope = $this->outletScopeSql('o.outlet_id');
         $earned = DB::selectOne("
             WITH paid AS (
-                SELECT order_id, SUM(amount - COALESCE(refund_amount,0)) AS net,
+                SELECT order_id, SUM((amount - COALESCE(refund_amount,0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))) AS net,
                        MAX(COALESCE(paid_at, created_at)) AS settled_at
                 FROM payments WHERE status = 'paid' GROUP BY order_id
             )
-            SELECT COUNT(*) AS orders, COALESCE(SUM(o.total_amount), 0) AS revenue
+            SELECT COUNT(*) AS orders, COALESCE(SUM(o.total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))), 0) AS revenue
             FROM orders o JOIN paid p ON p.order_id = o.id
-            WHERE o.status NOT IN ('voided','cancelled')
-              AND UPPER(o.currency_code) = 'KES' {$scope}
+            WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
+              AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL {$scope}
               AND p.net >= o.total_amount - 0.01
               AND p.settled_at BETWEEN ? AND ?
         ", [$s, $e]);
 
         $cogs = DB::selectOne("
             WITH paid AS (
-                SELECT order_id, SUM(amount - COALESCE(refund_amount,0)) AS net,
+                SELECT order_id, SUM((amount - COALESCE(refund_amount,0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))) AS net,
                        MAX(COALESCE(paid_at, created_at)) AS settled_at
                 FROM payments WHERE status = 'paid' GROUP BY order_id
             )
@@ -1671,8 +1805,8 @@ class MetricEngine
                 ORDER BY (pp.product_variant_id IS NOT NULL AND pp.product_variant_id = oi.product_variant_id) DESC
                 LIMIT 1
             ) pr ON TRUE
-            WHERE o.status NOT IN ('voided','cancelled')
-              AND UPPER(o.currency_code) = 'KES' {$scope}
+            WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
+              AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL {$scope}
               AND p.net >= o.total_amount - 0.01
               AND p.settled_at BETWEEN ? AND ?
         ", [$s, $e]);
@@ -1715,7 +1849,7 @@ class MetricEngine
         $in = $this->moneyBase()
             ->whereBetween(DB::raw(self::PAID_AT), [$s, $e])
             ->selectRaw("DATE_TRUNC('week', " . self::PAID_AT . ")::date AS wk,
-                COALESCE(SUM(p.amount - COALESCE(p.refund_amount,0)), 0) AS v")
+                COALESCE(SUM((p.amount - COALESCE(p.refund_amount,0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code))), 0) AS v")
             ->groupBy(DB::raw("DATE_TRUNC('week', " . self::PAID_AT . ")"))
             ->orderBy('wk')->pluck('v', 'wk');
 
@@ -1741,10 +1875,10 @@ class MetricEngine
             ->whereBetween(DB::raw(self::PAID_AT), [$s, $e])
             ->groupBy('p.payment_method')
             ->selectRaw("p.payment_method AS method, COUNT(*) AS payments,
-                COALESCE(SUM(p.amount), 0) AS gross,
+                COALESCE(SUM(p.amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code))), 0) AS gross,
                 COALESCE(SUM(COALESCE(p.refund_amount, 0)), 0) AS refunds,
-                COALESCE(SUM(p.amount - COALESCE(p.refund_amount, 0)), 0) AS net")
-            ->orderByDesc(DB::raw('COALESCE(SUM(p.amount - COALESCE(p.refund_amount, 0)), 0)'))
+                COALESCE(SUM((p.amount - COALESCE(p.refund_amount, 0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code))), 0) AS net")
+            ->orderByDesc(DB::raw('COALESCE(SUM((p.amount - COALESCE(p.refund_amount, 0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code))), 0)'))
             ->get();
     }
 
@@ -1871,7 +2005,7 @@ class MetricEngine
         return DB::table('quotations')
             ->whereNotIn('status', ['converted', 'declined', 'expired'])
             ->whereNull('converted_order_id')
-            ->whereRaw("UPPER(currency_code) = 'KES'")
+            ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code)) IS NOT NULL")
             ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds));
     }
 
@@ -1929,7 +2063,7 @@ class MetricEngine
             ])->values()->all();
 
         $quoteSummary = $this->openQuotes()
-            ->selectRaw("COUNT(*) AS n, COALESCE(SUM(total_amount),0) AS value,
+            ->selectRaw("COUNT(*) AS n, COALESCE(SUM(total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))),0) AS value,
                 COALESCE(AVG(?::date - COALESCE(issued_at, created_at)::date),0) AS avg_age", [$today])
             ->first();
 
@@ -1998,7 +2132,7 @@ class MetricEngine
 
         $convRow = DB::table('quotations')
             ->where('created_at', '>=', $since90)
-            ->whereRaw("UPPER(currency_code) = 'KES'")
+            ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code)) IS NOT NULL")
             ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
             ->selectRaw("COUNT(*) AS total,
                 COUNT(*) FILTER (WHERE status = 'converted' OR converted_order_id IS NOT NULL) AS converted")
@@ -2013,9 +2147,8 @@ class MetricEngine
 
         // Of orders fully settled in the last 90 days via 2+ payments: days
         // from the first payment (the deposit) to the last (paid in full).
-        $avgDepositToPaid = DB::table('orders')
-            ->whereNotIn('status', self::SALE_EXCLUDED_STATUSES)
-            ->whereRaw("UPPER(currency_code) = 'KES'")
+        $avgDepositToPaid = $this->recognise(DB::table('orders'))
+            ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code)) IS NOT NULL")
             ->where('payment_status', 'paid')
             ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
             ->joinSub(
@@ -2126,8 +2259,8 @@ class MetricEngine
                        SUM(oi.total_price) AS line_value
                 FROM orders o
                 JOIN order_items oi ON oi.order_id = o.id
-                WHERE o.status NOT IN ('voided','cancelled')
-                  AND UPPER(o.currency_code) = 'KES'
+                WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
+                  AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL
                   AND oi.product_id IS NOT NULL
                   AND o.created_at >= ?
                   {$outletSql}
@@ -2319,8 +2452,8 @@ class MetricEngine
             JOIN products p ON p.id = oi.product_id
             LEFT JOIN product_translations pt
                    ON pt.product_id = p.id AND pt.language_code = 'en'
-            WHERE o.status NOT IN ('voided','cancelled')
-              AND UPPER(o.currency_code) = 'KES'
+            WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
+              AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL
               AND oi.product_id IS NOT NULL
               AND o.created_at >= ?
               {$outletSql}
@@ -2578,9 +2711,8 @@ class MetricEngine
         // History depth: the earliest combined sales date. No history → the
         // graceful "import legacy history to unlock projections" shape.
         $legacyMin = DB::table('legacy_sales_daily')->min('sale_date');
-        $hubMin    = DB::table('orders')
-            ->whereNotIn('status', self::SALE_EXCLUDED_STATUSES)
-            ->whereRaw("UPPER(currency_code) = 'KES'")
+        $hubMin    = $this->recognise(DB::table('orders'))
+            ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code)) IS NOT NULL")
             ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
             ->min('created_at');
 
@@ -2646,8 +2778,8 @@ class MetricEngine
                    SUM(oi.total_price) AS revenue
             FROM order_items oi
             JOIN orders o ON o.id = oi.order_id
-            WHERE o.status NOT IN ('voided','cancelled')
-              AND UPPER(o.currency_code) = 'KES'
+            WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
+              AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL
               AND oi.product_id IS NOT NULL
               AND o.created_at >= ?
               " . $this->outletScopeSql('o.outlet_id') . '
@@ -2992,7 +3124,7 @@ class MetricEngine
             ->join('orders as o', 'o.id', '=', 'p.order_id')
             ->where('p.requires_approval', true)->where('p.approval_status', 'pending_review')
             ->when($this->outletIds, fn ($q) => $q->whereIn('o.outlet_id', $this->outletIds))
-            ->selectRaw('COUNT(*) AS n, COALESCE(SUM(p.amount),0) AS amt, MIN(p.created_at) AS oldest')
+            ->selectRaw('COUNT(*) AS n, COALESCE(SUM(p.amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code))),0) AS amt, MIN(p.created_at) AS oldest')
             ->first();
         if ($pendingPay->n > 0) {
             $age = (int) Carbon::parse($pendingPay->oldest)->diffInDays(now());
@@ -3387,8 +3519,8 @@ class MetricEngine
                            COALESCE(LOWER(NULLIF(o.customer_email,'')), '')
                        ), '|') AS buyer_contact
                 FROM orders o
-                WHERE o.status NOT IN ('voided','cancelled')
-                  AND UPPER(o.currency_code) = 'KES'
+                WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
+                  AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL
                   AND o.created_at >= ?
                   AND {$key} IS NOT NULL
                   {$outletSql}
@@ -3569,7 +3701,7 @@ class MetricEngine
                    COALESCE(SUM(o.total_amount), 0) AS revenue_native,
                    COUNT(DISTINCT {$key}) AS customers
             FROM orders o
-            WHERE o.status NOT IN ('voided','cancelled')
+            WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
               AND {$corridor}
               AND o.created_at >= ?
               {$outletSql}
@@ -3588,7 +3720,7 @@ class MetricEngine
             JOIN orders o ON o.id = p.order_id
             WHERE p.status = 'paid'
               AND UPPER(p.currency_code) = UPPER(o.currency_code)
-              AND o.status NOT IN ('voided','cancelled')
+              AND o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
               AND {$corridor}
               AND o.created_at >= ?
               {$outletSql}
@@ -3606,7 +3738,7 @@ class MetricEngine
                    COALESCE(SUM(o.total_amount), 0) AS revenue_native,
                    COUNT(DISTINCT {$key}) AS customers
             FROM orders o
-            WHERE o.status NOT IN ('voided','cancelled')
+            WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
               AND {$corridor}
               AND o.created_at >= ?
               {$outletSql}
@@ -3645,7 +3777,7 @@ class MetricEngine
             JOIN products pr    ON pr.id = oi.product_id
             LEFT JOIN product_translations pt
                    ON pt.product_id = pr.id AND pt.language_code = 'en'
-            WHERE o.status NOT IN ('voided','cancelled')
+            WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
               AND {$corridor}
               AND o.created_at >= ?
               {$outletSql}
@@ -3664,7 +3796,7 @@ class MetricEngine
                    COUNT(DISTINCT o.id)   AS orders,
                    COALESCE(SUM(o.total_amount), 0) AS revenue_native
             FROM orders o
-            WHERE o.status NOT IN ('voided','cancelled')
+            WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
               AND {$corridor}
               AND o.created_at >= ?
               {$outletSql}
@@ -3677,39 +3809,24 @@ class MetricEngine
                    COUNT(DISTINCT {$key}) FILTER (WHERE {$corridor}) AS corridor_customers,
                    COUNT(DISTINCT o.id) AS all_orders
             FROM orders o
-            WHERE o.status NOT IN ('voided','cancelled')
+            WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
               AND o.created_at >= ?
               {$outletSql}
         ", [$since]);
 
-        // ── KES equivalence, only where a real configured rate exists. ───────
-        // currencies.exchange_rate is base-relative (Currency::convert: base
-        // amount = amount / rate; KES is the base at 1.0). The schema DEFAULTs
-        // exchange_rate to 1.0, so a NON-base currency sitting at exactly 1.0
-        // is an unconfigured row, not a peg — parity with KES is not a rate
-        // anyone set on purpose, and inventing 1:1 USD→KES would be worse
-        // than reporting native totals only.
-        $rateRows = DB::table('currencies')->get(['code', 'exchange_rate', 'is_base']);
-        $rates    = [];
-        foreach ($rateRows as $r) {
-            $code = strtoupper($r->code);
-            $rate = (float) $r->exchange_rate;
-            if ($rate <= 0) {
-                continue;
-            }
-            if ($code === 'KES' || $r->is_base) {
-                $rates[$code] = $rate; // base row (1.0 by convention)
-            } elseif (abs($rate - 1.0) > 1e-9) {
-                $rates[$code] = $rate;
-            }
-        }
-        $rates['KES'] = $rates['KES'] ?? 1.0;
-
-        $toKes = function (string $currency, float $amount) use ($rates): ?float {
-            $rate = $rates[strtoupper($currency)] ?? null;
-
-            return $rate !== null ? round($amount / $rate, 2) : null;
-        };
+        // ── KES equivalence, only where a real reporting rate exists. ───────
+        // A currency with no reporting rate is reported natively and left out
+        // of the KES total — inventing a rate would be worse than saying so.
+        //
+        // This block used to read currencies.exchange_rate — the PRICING rate.
+        // At 100 KES/USD it understated every dollar of foreign revenue by 22%
+        // against the 128 the business actually reports at. It was not a
+        // careless choice: the pricing rate was the only rate that existed.
+        // Now there is a reporting one, and this is what it is for.
+        $toKes = fn (string $currency, float $amount): ?float
+            => ($v = \App\Support\ReportingCurrency::toKes($amount, $currency)) === null
+                ? null
+                : round($v, 2);
 
         $currencyOut = collect($currencies)->map(fn ($c) => [
             'currency'         => $c->currency,
@@ -3767,6 +3884,375 @@ class MetricEngine
             ])->all(),
             'trend'        => $trend->all(),
             'window_days'  => $days,
+        ];
+    }
+
+    /**
+     * The unconfirmed order queue — the work list behind the pipeline figure.
+     *
+     * These are carts a customer built on the storefront or over WhatsApp and
+     * never had confirmed. They are NOT income (see salesBase / recognise), and
+     * this is the report that stops that being the end of the story: someone
+     * has to look at each one and either confirm the sale or kill it.
+     *
+     * Aged, because age is the whole signal. A cart from this morning is a live
+     * lead worth a phone call; a cart from four months ago is a number that has
+     * been quietly sitting in the order book pretending to be a prospect. The
+     * buckets are the ones a credit controller would reach for, because the
+     * question is the same one: how long has this been outstanding, and is
+     * anyone still going to act on it?
+     *
+     * Ordered by value descending by default. Staff working a backlog of ~100
+     * carts should spend their first hour on the largest recoverable money, not
+     * on whatever happens to be oldest.
+     *
+     * MONEY IS KES-ONLY, as everywhere in this engine — adding KES to USD gives
+     * a number that means nothing. Rows of every currency are still listed,
+     * because a USD cart is work whether or not it can be summed; each row
+     * carries its own currency and `summary.excluded_non_kes_orders` says how
+     * many are outside the totals.
+     *
+     * @param string $sort 'value' (default) or 'age'
+     */
+    /**
+     * Second-purchase engine — the report this customer base actually needs.
+     *
+     * 86.5% of the trailing year's revenue came from customers who bought once
+     * and never returned, and the few who do return spend ~35% more per order.
+     * RFM and win-back assume a base of lapsed regulars; this base has almost
+     * none. The money here is not in winning back the lapsed — it is in turning
+     * first-time buyers into second-time buyers, and this engine measures that
+     * one conversion and hands staff the list of people to convert.
+     *
+     *  - cohorts: for each month of FIRST purchase, how many of that month's
+     *    new customers came back within 30/60/90 days. Each window carries a
+     *    mature flag, because a cohort younger than its window reads as
+     *    "nobody returns" when the truth is "not yet" — the failure mode that
+     *    makes naive retention charts lie.
+     *  - worklist: recent one-time buyers, biggest first order first. These are
+     *    warm — they chose the shop once, recently — and each row carries the
+     *    contact details needed to act.
+     *
+     * Identity, recognition, scoping and money follow the engine's conventions:
+     * CUSTOMER_KEY identity, recognised orders only (an abandoned cart is not a
+     * first purchase), outlet scoping, and money stated in KES at the REPORTING
+     * rate. A currency with no reporting rate stays in the counts — a customer
+     * is a customer — but out of every money figure.
+     */
+    // The worklist window is 90 days, set by the PRODUCT, not the median.
+    //
+    // The measured median gap to a second purchase is six days — but that
+    // number is right-censored: with only ~three months of order history, a
+    // ninety-day repeat cycle cannot yet have shown up in the data, so the
+    // median describes the fast-follow buyers (add-ons, event pieces) and is
+    // silent about replenishment. The owner's product knowledge fills the gap
+    // the data cannot: consumables — hosts, altar wine — take up to three
+    // months to exhaust, and the reorder moment lands near the END of that.
+    //
+    // Ninety days also closes a coverage hole between engines: the
+    // Replenishment Radar needs >= 2 purchases to detect a rhythm, so a
+    // one-time buyer running out of stock is invisible to it. Until their
+    // second purchase exists, THIS list is the only place they appear.
+    public function secondPurchase(int $recentDays = 90, int $worklistLimit = 250): array
+    {
+        $key = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
+        $rate = "(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))";
+        $outletSql = $this->outletIds
+            ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')'
+            : '';
+
+        // No date floor on the CTE: a second purchase must be visible even when
+        // the first one is old. The cohort/summary/worklist queries below each
+        // apply their own window to first_at instead.
+        $cte = "
+            WITH keyed AS (
+                SELECT {$key} AS ckey, o.id, o.order_number, o.total_amount, o.currency_code,
+                       o.total_amount * {$rate} AS kes,
+                       o.created_at,
+                       TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,''))) AS name,
+                       o.customer_phone AS phone, o.customer_email AS email
+                FROM orders o
+                WHERE o.status NOT IN ('cancelled','voided','refunded')
+                  AND (o.status IN ('confirmed','processing','shipped','delivered','completed')
+                       OR o.payment_status IN ('paid','partial','deposit'))
+                  {$outletSql}
+            ), per_customer AS (
+                SELECT ckey,
+                       MIN(created_at) AS first_at,
+                       COUNT(*)        AS orders,
+                       MAX(name) AS name, MAX(phone) AS phone, MAX(email) AS email
+                FROM keyed WHERE ckey IS NOT NULL
+                GROUP BY ckey
+            ), journeys AS (
+                SELECT p.*,
+                       (SELECT MIN(k.created_at) FROM keyed k
+                         WHERE k.ckey = p.ckey AND k.created_at > p.first_at) AS second_at
+                FROM per_customer p
+            )
+        ";
+
+        // ── Monthly cohorts, trailing 12 months of first purchases ──────────
+        $cohortRows = DB::select("{$cte}
+            SELECT TO_CHAR(DATE_TRUNC('month', first_at), 'YYYY-MM') AS cohort,
+                   MIN(first_at)::date AS cohort_start,
+                   COUNT(*) AS first_time_buyers,
+                   COUNT(*) FILTER (WHERE second_at IS NOT NULL AND second_at <= first_at + INTERVAL '30 days') AS returned_30,
+                   COUNT(*) FILTER (WHERE second_at IS NOT NULL AND second_at <= first_at + INTERVAL '60 days') AS returned_60,
+                   COUNT(*) FILTER (WHERE second_at IS NOT NULL AND second_at <= first_at + INTERVAL '90 days') AS returned_90,
+                   COUNT(*) FILTER (WHERE second_at IS NOT NULL) AS returned_ever
+            FROM journeys
+            WHERE first_at >= DATE_TRUNC('month', NOW() - INTERVAL '11 months')
+            GROUP BY 1 ORDER BY 1
+        ");
+
+        $now = CarbonImmutable::now(self::TZ);
+        $cohorts = collect($cohortRows)->map(function ($r) use ($now) {
+            $monthEnd = CarbonImmutable::parse($r->cohort . '-01', self::TZ)->endOfMonth();
+            $n = (int) $r->first_time_buyers;
+            $pct = fn (int $x) => $n > 0 ? round($x / $n * 100, 1) : 0.0;
+
+            return [
+                'cohort'            => $r->cohort,
+                'first_time_buyers' => $n,
+                'returned_30'       => (int) $r->returned_30,
+                'returned_60'       => (int) $r->returned_60,
+                'returned_90'       => (int) $r->returned_90,
+                'rate_30_pct'       => $pct((int) $r->returned_30),
+                'rate_60_pct'       => $pct((int) $r->returned_60),
+                'rate_90_pct'       => $pct((int) $r->returned_90),
+                // A window is mature once EVERY member of the cohort has had
+                // that long to return — i.e. the month closed >= N days ago.
+                // An immature rate is a floor, not a fact.
+                'mature_30'         => $monthEnd->addDays(30)->lte($now),
+                'mature_60'         => $monthEnd->addDays(60)->lte($now),
+                'mature_90'         => $monthEnd->addDays(90)->lte($now),
+            ];
+        })->values()->all();
+
+        // ── Summary over the trailing 365 days of first purchases ───────────
+        $sum = DB::selectOne("{$cte}
+            SELECT COUNT(*) AS first_time_buyers,
+                   COUNT(*) FILTER (WHERE second_at IS NOT NULL) AS returned,
+                   PERCENTILE_CONT(0.5) WITHIN GROUP (
+                       ORDER BY EXTRACT(EPOCH FROM (second_at - first_at)) / 86400
+                   ) FILTER (WHERE second_at IS NOT NULL) AS median_days_to_second
+            FROM journeys
+            WHERE first_at >= NOW() - INTERVAL '365 days'
+        ");
+
+        // One-time buyers and the money shape of the opportunity. AVG skips the
+        // NULL kes of unconvertible currencies on its own.
+        $oneTime = DB::selectOne("{$cte}
+            SELECT COUNT(*) AS customers,
+                   AVG(k.kes) AS avg_first_order_kes
+            FROM journeys j
+            JOIN keyed k ON k.ckey = j.ckey
+            WHERE j.orders = 1
+              AND j.first_at >= NOW() - INTERVAL '365 days'
+        ");
+
+        $oneTimers   = (int) ($oneTime->customers ?? 0);
+        $avgFirstKes = $oneTime->avg_first_order_kes !== null ? (float) $oneTime->avg_first_order_kes : null;
+        $firstTimers = (int) ($sum->first_time_buyers ?? 0);
+        $returned    = (int) ($sum->returned ?? 0);
+
+        $summary = [
+            'window_days'           => 365,
+            'first_time_buyers'     => $firstTimers,
+            'returned'              => $returned,
+            'repeat_rate_pct'       => $firstTimers > 0 ? round($returned / $firstTimers * 100, 1) : 0.0,
+            'median_days_to_second' => $sum->median_days_to_second !== null
+                ? (int) round((float) $sum->median_days_to_second)
+                : null,
+            'one_time_buyers'       => $oneTimers,
+            'avg_first_order_kes'   => $avgFirstKes !== null ? round($avgFirstKes, 2) : null,
+            // The stake, stated conservatively: one customer in ten buying once
+            // more at their own average. Not a forecast — a yardstick for what
+            // an hour of calling the worklist is worth.
+            'opportunity_10pct_kes' => $avgFirstKes !== null
+                ? round(0.10 * $oneTimers * $avgFirstKes, 2)
+                : null,
+        ];
+
+        // ── The worklist: recent one-time buyers, biggest money first ───────
+        $workTotal = (int) (DB::selectOne("{$cte}
+            SELECT COUNT(*) AS n
+            FROM journeys j
+            WHERE j.orders = 1
+              AND j.first_at >= NOW() - make_interval(days => ?)
+        ", [$recentDays])->n ?? 0);
+
+        $work = DB::select("{$cte}
+            SELECT j.ckey, j.name, j.phone, j.email,
+                   k.id AS order_id, k.order_number,
+                   k.total_amount, k.currency_code, k.kes,
+                   (" . self::TODAY_SQL . " - j.first_at::date)::int AS days_since
+            FROM journeys j
+            JOIN keyed k ON k.ckey = j.ckey
+            WHERE j.orders = 1
+              AND j.first_at >= NOW() - make_interval(days => ?)
+            ORDER BY k.kes DESC NULLS LAST
+            LIMIT ?
+        ", [$recentDays, $worklistLimit]);
+
+        $worklist = collect($work)->map(fn ($r) => [
+            'name'          => trim((string) $r->name) !== '' ? $r->name : null,
+            'phone'         => $r->phone,
+            'email'         => $r->email,
+            'order_id'      => (int) $r->order_id,
+            'order_number'  => $r->order_number,
+            'total_amount'  => (float) $r->total_amount,
+            'currency_code' => strtoupper((string) $r->currency_code),
+            'total_kes'     => $r->kes !== null ? round((float) $r->kes, 2) : null,
+            'days_since'    => (int) $r->days_since,
+        ])->values()->all();
+
+        return [
+            'summary'        => $summary,
+            'cohorts'        => $cohorts,
+            'worklist'       => $worklist,
+            // Total one-time buyers in the window, whether or not they fit the
+            // row cap. A silent cap reads as "that's everyone" when it isn't;
+            // the UI compares this to the rows returned and says so.
+            'worklist_total' => $workTotal,
+            'recent_days'    => $recentDays,
+        ];
+    }
+
+    public function orderPipeline(string $sort = 'value', int $limit = 200): array
+    {
+        $base = fn () => DB::table('orders')
+            ->whereIn('status', \App\Models\Order::PIPELINE_STATUSES)
+            ->whereNotIn('payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES)
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds));
+
+        // Foreign carts are translated at the REPORTING rate (128 KES/USD),
+        // not the pricing rate (100) a customer is quoted at. A currency with
+        // no reporting rate is still listed as work but stays out of the
+        // totals — see ReportingCurrency.
+        $kesAmount = \App\Support\ReportingCurrency::kes('total_amount', 'currency_code');
+        $kes = fn () => $base()->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('currency_code'));
+
+        // ── Aging. Boundaries are inclusive-left, so every order lands in
+        //    exactly one bucket and the bucket counts sum to the total.
+        $buckets = [
+            ['key' => 'fresh',   'label' => '0–7 days',    'min' => 0,  'max' => 7],
+            ['key' => 'recent',  'label' => '8–30 days',   'min' => 8,  'max' => 30],
+            ['key' => 'stale',   'label' => '31–90 days',  'min' => 31, 'max' => 90],
+            ['key' => 'dormant', 'label' => 'Over 90 days','min' => 91, 'max' => null],
+        ];
+
+        $aging = [];
+        foreach ($buckets as $b) {
+            // Calendar days, not elapsed seconds: an aging report is read the
+            // way a credit controller reads one ("this is 31 days old"), and a
+            // seconds-based FLOOR disagrees with that by one for most of every
+            // day. Same expression as age_days below, so a row cannot land in
+            // a bucket that contradicts the age printed next to it.
+            $q = $kes()->whereRaw('(' . self::TODAY_SQL . " - orders.created_at::date) >= ?", [$b['min']]);
+            if ($b['max'] !== null) {
+                $q->whereRaw('(' . self::TODAY_SQL . " - orders.created_at::date) <= ?", [$b['max']]);
+            }
+            $row = $q->selectRaw("COUNT(*) AS orders, COALESCE(SUM({$kesAmount}), 0) AS value")->first();
+            $aging[] = [
+                'key'    => $b['key'],
+                'label'  => $b['label'],
+                'orders' => (int)   ($row->orders ?? 0),
+                'value'  => (float) ($row->value  ?? 0),
+            ];
+        }
+
+        // ── Per channel ──────────────────────────────────────────────────────
+        $byChannel = [];
+        foreach (\App\Models\Order::SALES_BUCKETS as $c) {
+            $row = \App\Models\Order::query()
+                ->salesChannel($c)
+                ->pipeline()
+                ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code'))
+                ->when($this->outletIds, fn ($q) => $q->whereIn('orders.outlet_id', $this->outletIds))
+                ->selectRaw('COUNT(*) AS orders, COALESCE(SUM('
+                    . \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code')
+                    . '), 0) AS value')
+                ->first();
+
+            $byChannel[] = [
+                'channel' => $c,
+                'label'   => ['till' => 'Till Sales', 'web' => 'Web Orders', 'chat' => 'Chat Orders', 'quoted' => 'Quoted Sales'][$c],
+                'orders'  => (int)   ($row->orders ?? 0),
+                'value'   => (float) ($row->value  ?? 0),
+            ];
+        }
+
+        // ── The queue itself ─────────────────────────────────────────────────
+        $orderBy = $sort === 'age' ? 'orders.created_at' : 'orders.total_amount';
+        $dir     = $sort === 'age' ? 'asc' : 'desc';   // age: oldest first
+
+        $rows = \App\Models\Order::query()
+            ->pipeline()
+            ->when($this->outletIds, fn ($q) => $q->whereIn('orders.outlet_id', $this->outletIds))
+            ->leftJoin('order_items as oi', 'oi.order_id', '=', 'orders.id')
+            ->groupBy('orders.id')
+            ->orderBy($orderBy, $dir)
+            ->limit($limit)
+            ->selectRaw("
+                orders.id,
+                orders.order_number,
+                orders.order_type,
+                orders.outlet_id,
+                orders.currency_code,
+                orders.total_amount,
+                orders.created_at,
+                orders.customer_first_name,
+                orders.customer_last_name,
+                orders.customer_phone,
+                orders.customer_email,
+                COUNT(oi.id) AS item_count,
+                (" . self::TODAY_SQL . " - orders.created_at::date)::int AS age_days,
+                " . \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code') . " AS total_kes
+            ")
+            ->get()
+            ->map(function ($r) {
+                $name = trim(($r->customer_first_name ?? '') . ' ' . ($r->customer_last_name ?? ''));
+
+                return [
+                    'id'             => (int) $r->id,
+                    'order_number'   => $r->order_number,
+                    'channel'        => $r->order_type,
+                    'currency_code'  => strtoupper((string) $r->currency_code),
+                    'total_amount'   => (float) $r->total_amount,
+                    // The same money stated in KES, so a USD row can be read
+                    // against a KES one. Null when the currency has no
+                    // reporting rate — the row is still work, it just cannot
+                    // honestly be added to a shilling total.
+                    'total_kes'      => $r->total_kes === null ? null : (float) $r->total_kes,
+                    'item_count'     => (int) $r->item_count,
+                    'age_days'       => (int) $r->age_days,
+                    'created_at'     => $r->created_at,
+                    'customer_name'  => $name !== '' ? $name : null,
+                    'customer_phone' => $r->customer_phone,
+                    'customer_email' => $r->customer_email,
+                ];
+            })
+            ->values()
+            ->all();
+
+        $totals   = $kes()->selectRaw("COUNT(*) AS orders, COALESCE(SUM({$kesAmount}), 0) AS value")->first();
+        // What remains outside the totals is now only what has NO reporting
+        // rate — not everything that merely isn't KES.
+        $nonKes   = (int) $base()
+            ->whereRaw('NOT ' . \App\Support\ReportingCurrency::convertibleFilter('currency_code'))
+            ->count();
+
+        return [
+            'summary' => [
+                'orders'                    => (int)   ($totals->orders ?? 0),
+                'value'                     => (float) ($totals->value  ?? 0),
+                'excluded_non_kes_orders'   => $nonKes,
+                'currency'                  => 'KES',
+            ],
+            'aging'      => $aging,
+            'by_channel' => $byChannel,
+            'orders'     => $rows,
         ];
     }
 }

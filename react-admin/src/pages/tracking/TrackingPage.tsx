@@ -138,7 +138,7 @@ function ProgressTrack({ milestones, status }: { milestones: TrackingMilestone[]
                             <span
                                 className={clsx(
                                     "mt-2 text-[10px] text-center leading-tight max-w-[68px]",
-                                    isActive ? "font-bold" : isDone ? "font-medium text-surface-600" : "font-medium text-surface-300",
+                                    isActive ? "font-bold" : isDone ? "font-medium text-surface-600" : "font-medium text-surface-500",
                                 )}
                                 style={{ color: isActive ? hex : undefined }}
                             >
@@ -254,7 +254,7 @@ function Lightbox({
                     onClick={(e) => e.stopPropagation()}
                     className="bg-white rounded-2xl shadow-2xl p-10 flex flex-col items-center gap-3 max-w-sm text-center"
                 >
-                    <svg className="w-10 h-10 text-surface-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <svg className="w-10 h-10 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
                     </svg>
                     <p className="text-sm font-medium text-surface-700 break-all">{name}</p>
@@ -354,7 +354,7 @@ function Timeline({ events }: { events: PublicTrackingEvent[] }) {
                         {/* Date */}
                         <div className="text-right pt-0.5">
                             <p className={clsx("text-xs font-semibold", isFirst ? "text-surface-900" : "text-surface-400")}>{dayStr}</p>
-                            <p className="text-[11px] text-surface-300 mt-0.5">{timeStr}</p>
+                            <p className="text-[11px] text-surface-500 mt-0.5">{timeStr}</p>
                         </div>
 
                         {/* Spine */}
@@ -745,7 +745,7 @@ export default function TrackingPage() {
                         </div>
                         {shipment.carrier && (
                             <p className="text-xs text-surface-400 mt-1.5 flex items-center gap-1.5">
-                                <svg className="w-3.5 h-3.5 text-surface-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <svg className="w-3.5 h-3.5 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 00-3.213-9.193 2.056 2.056 0 00-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 00-10.026 0 1.106 1.106 0 00-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12" />
                                 </svg>
                                 {shipment.carrier}
@@ -783,7 +783,7 @@ export default function TrackingPage() {
                         ) : (
                             <div className="py-8 text-center">
                                 <div className="w-10 h-10 rounded-full bg-surface-100 flex items-center justify-center mx-auto mb-3">
-                                    <svg className="w-5 h-5 text-surface-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                    <svg className="w-5 h-5 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                                     </svg>
                                 </div>
@@ -828,7 +828,7 @@ export default function TrackingPage() {
                 </Card>
 
                 {/* ── Footer ──────────────────────────────────────────────────── */}
-                <p className="text-center text-xs text-surface-300 flex items-center justify-center gap-1.5 pt-2">
+                <p className="text-center text-xs text-surface-500 flex items-center justify-center gap-1.5 pt-2">
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
                     </svg>

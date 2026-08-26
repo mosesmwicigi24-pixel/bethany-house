@@ -52,6 +52,10 @@ class PublicPaymentController extends Controller
                 if ($method->type === 'other' || $method->code === 'other') return false;
                 // Exclude cash — customers pay remotely, cash doesn't apply
                 if ($method->type === 'cash' || $method->code === 'cash') return false;
+                // A rail that doesn't operate in the customer's country is
+                // noise at best (Mukuru only takes senders in specific
+                // markets) — hide it rather than let the payment stall.
+                if (!self::methodWorksForCustomer($method, $order)) return false;
                 $supported = json_decode($method->supported_currencies ?? '[]', true);
                 return empty($supported) || in_array($order->currency_code, $supported);
             })
@@ -139,6 +143,11 @@ class PublicPaymentController extends Controller
         // M-Pesa-to-number): the customer pays out-of-band and uploads proof.
         // Record a pending payment for staff to verify — no gateway call.
         $methodRow = DB::table('payment_methods')->where('code', $method)->first();
+        // Same country gate show() applies — hiding an option is UX, refusing
+        // it is the contract (someone can still POST a hidden method's code).
+        if ($methodRow && !self::methodWorksForCustomer($methodRow, $order)) {
+            return response()->json(['message' => 'This payment method is not available in your country.'], 422);
+        }
         if ($methodRow && $methodRow->type === 'manual') {
             return $this->initiateManual($order, $method);
         }
@@ -816,5 +825,87 @@ class PublicPaymentController extends Controller
         $key = config('services.paystack.secret_key');
         if (!$key) return null;
         return ['secret_key' => $key];
+    }
+
+    /**
+     * Whether a payment rail actually operates where — and is worth offering
+     * to — this customer. Two configuration keys, both E.164 dialing-prefix
+     * lists: `sender_countries` is an ALLOWLIST (Mukuru: its send markets are
+     * a specific list) and `excluded_sender_countries` is a BLOCKLIST
+     * (Western Union: works nearly everywhere, but offering it to a Kenyan
+     * alongside M-Pesa is noise — owner's rule, 2026-08-22). Methods with
+     * neither key are ungated, and an order with no usable phone stays
+     * ungated too: "we cannot place you" is not "it will not work there".
+     */
+    private static function methodWorksForCustomer(object $method, $order): bool
+    {
+        $config   = json_decode($method->configuration ?? '{}', true) ?: [];
+        $allow    = $config['sender_countries'] ?? null;
+        $deny     = $config['excluded_sender_countries'] ?? null;
+        $hasAllow = is_array($allow) && $allow !== [];
+        $hasDeny  = is_array($deny) && $deny !== [];
+        if (!$hasAllow && !$hasDeny) {
+            return true;
+        }
+
+        $e164 = self::customerE164($order->customer_phone ?? $order->user?->phone);
+        if ($e164 === null) {
+            return true;
+        }
+
+        // Blocklist first: a rail that works almost everywhere (Western
+        // Union) names only where it should NOT be offered.
+        if ($hasDeny) {
+            foreach ($deny as $prefix) {
+                if ($prefix !== '' && str_starts_with($e164, (string) $prefix)) {
+                    return false;
+                }
+            }
+        }
+
+        if ($hasAllow) {
+            foreach ($allow as $prefix) {
+                if ($prefix !== '' && str_starts_with($e164, (string) $prefix)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * PHP mirror of the DB's normalize_phone() — the 2026_08_22 definition
+     * (letters reject, 00 international prefix, 0-led Kenyan form only at 10
+     * digits). Keep the two in lockstep. Country dialing codes are prefix-free
+     * (ITU E.164), so a startsWith against the allowlist cannot mis-match.
+     */
+    private static function customerE164(?string $raw): ?string
+    {
+        if ($raw === null || trim($raw) === '') {
+            return null;
+        }
+        if (preg_match('/[A-Za-z]/', $raw)) {
+            return null; // a note or a payment reference, not a phone
+        }
+        $hadPlus = str_starts_with(trim($raw), '+');
+        $digits  = preg_replace('/\D+/', '', $raw);
+        if (strlen($digits) < 9) {
+            return null;
+        }
+        if ($hadPlus || str_starts_with($digits, '254')) {
+            return '+' . $digits;
+        }
+        if (str_starts_with($digits, '00')) {
+            return '+' . substr($digits, 2); // 0044… is +44…, never +2540044…
+        }
+        if (str_starts_with($digits, '0') && strlen($digits) === 10) {
+            return '+254' . substr($digits, 1);
+        }
+        if (strlen($digits) === 9) {
+            return '+254' . $digits;
+        }
+        return '+' . $digits;
     }
 }

@@ -84,20 +84,32 @@ const NAV: NavGroup[] = [
                 permission: "pos.access",
             },
             {
-                label: "POS Orders",
+                label: "Till Sales",
                 href: "/sales/pos-orders",
                 icon: "orders",
                 permission: "orders.view",
             },
             {
-                label: "Online Orders",
+                label: "Web Orders",
                 href: "/sales/online-orders",
                 icon: "orders",
                 permission: "orders.view",
             },
             {
-                label: "WhatsApp Orders",
+                label: "Chat Orders",
                 href: "/sales/whatsapp-orders",
+                icon: "orders",
+                permission: "orders.view",
+            },
+            {
+                label: "Quoted Sales",
+                href: "/sales/quoted-orders",
+                icon: "orders",
+                permission: "orders.view",
+            },
+            {
+                label: "Pending Queue",
+                href: "/sales/pending-queue",
                 icon: "orders",
                 permission: "orders.view",
             },
@@ -402,6 +414,12 @@ const NAV: NavGroup[] = [
             {
                 label: "Sales",
                 href: "/reports/sales",
+                icon: "orders",
+                permission: "reports.view",
+            },
+            {
+                label: "Unconfirmed Orders",
+                href: "/reports/order-pipeline",
                 icon: "orders",
                 permission: "reports.view",
             },

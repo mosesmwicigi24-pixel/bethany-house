@@ -74,13 +74,26 @@ class InternationalCorridorTest extends TestCase
     }
 
     /** Configure a currency row with a base-relative rate (KES base = 1.0). */
-    private function rate(string $code, float $rate, bool $isBase = false): void
+    /**
+     * Configure a REPORTING rate: how many KES one unit of $code is worth.
+     *
+     * Read plainly — 128 KES per 1 USD — unlike currencies.exchange_rate,
+     * which is the base-relative PRICING rate (0.01 for the same currency) and
+     * is what a customer is quoted at, not what earned money is worth.
+     */
+    private function rate(string $code, float $kesPerUnit, bool $isBase = false): void
     {
-        DB::table('currencies')->insert([
-            'code' => $code, 'name' => $code, 'symbol' => $code,
-            'exchange_rate' => $rate, 'is_base' => $isBase, 'is_active' => true,
+        DB::table('currencies')->updateOrInsert(
+            ['code' => $code],
+            [ 'name' => $code, 'symbol' => $code,
+            // The pricing rate is left at its default here; this suite is about
+            // reporting, and the two must not be conflated.
+            'exchange_rate' => 1.0,
+            'reporting_rate_to_kes' => $kesPerUnit,
+            'is_base' => $isBase, 'is_active' => true,
             'created_at' => now(), 'updated_at' => now(),
         ]);
+        \App\Support\ReportingCurrency::forget();
     }
 
     private function reportsViewer(): User
@@ -162,7 +175,15 @@ class InternationalCorridorTest extends TestCase
 
     public function test_without_configured_rates_totals_are_native_only(): void
     {
-        // currencies table is empty → no rates exist for USD.
+        // No REPORTING rate for USD. The row exists (a migration guarantees the
+        // base currencies now), so the unset state has to be stated explicitly
+        // rather than relying on an empty table.
+        DB::table('currencies')->whereRaw("UPPER(code) <> 'KES'")
+            ->update(['reporting_rate_to_kes' => null]);
+        DB::table('currencies')->whereRaw("UPPER(code) = 'KES'")
+            ->update(['reporting_rate_to_kes' => null]);
+        \App\Support\ReportingCurrency::forget();
+
         $this->order('USD', 100, 10, ['customer_phone' => '+12025550101']);
 
         $report = $this->report();
@@ -175,13 +196,26 @@ class InternationalCorridorTest extends TestCase
         }
     }
 
-    public function test_default_rate_of_one_on_a_non_base_currency_is_not_a_rate(): void
+    public function test_an_unset_reporting_rate_is_not_a_rate(): void
     {
-        // The schema DEFAULTs exchange_rate to 1.0 — a non-base USD row
-        // sitting at exactly 1.0 is an unconfigured row, not a peg. Inventing
-        // 1:1 USD→KES would be worse than reporting native totals only.
+        // This used to test a workaround: currencies.exchange_rate DEFAULTs to
+        // 1.0, so a non-base row sitting at exactly 1.0 could not be told apart
+        // from an unconfigured one, and the code had to treat 1.0 as "unset".
+        //
+        // reporting_rate_to_kes is nullable with NO default, so "nobody has set
+        // this" is now expressible directly. The old heuristic is not just
+        // unnecessary, it is wrong — it would refuse to honour a currency a
+        // human deliberately pegged at 1:1.
         $this->rate('KES', 1.0, isBase: true);
-        $this->rate('USD', 1.0);
+        DB::table('currencies')->updateOrInsert(
+            ['code' => 'USD'],
+            [ 'name' => 'USD', 'symbol' => 'USD',
+            'exchange_rate' => 1.0, 'reporting_rate_to_kes' => null,
+            'is_base' => false, 'is_active' => true,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+        \App\Support\ReportingCurrency::forget();
+
         $this->order('USD', 100, 10, ['customer_phone' => '+12025550101']);
 
         $report = $this->report();
@@ -192,11 +226,10 @@ class InternationalCorridorTest extends TestCase
 
     public function test_configured_rates_produce_kes_equivalents(): void
     {
-        // Base-relative rates (Currency::convert semantics): base amount =
-        // amount / rate. 1 KES = 0.0077 USD → $100 ≈ KES 12,987.
+        // Reporting rates: KES per one unit. $100 at 128 = KES 12,800.
         $this->rate('KES', 1.0, isBase: true);
-        $this->rate('USD', 0.0077);
-        $this->rate('ZMW', 0.2);
+        $this->rate('USD', 128.0);
+        $this->rate('ZMW', 5.0);
 
         $this->order('USD', 100, 10, ['customer_phone' => '+12025550101']);
         $this->order('ZMW', 5000, 15, ['customer_phone' => '+260971112233']);
@@ -206,11 +239,11 @@ class InternationalCorridorTest extends TestCase
 
         $this->assertFalse($report['summary']['rates_unavailable']);
         $byCur = collect($report['currencies'])->keyBy('currency');
-        $this->assertEqualsWithDelta(12987.01, $byCur['USD']['kes_equivalent'], 0.5);
+        $this->assertEqualsWithDelta(12800.0, $byCur['USD']['kes_equivalent'], 0.01);
         $this->assertEqualsWithDelta(25000.0, $byCur['ZMW']['kes_equivalent'], 0.01);
         $this->assertEqualsWithDelta(8000.0, $byCur['KES']['kes_equivalent'], 0.01);
         $this->assertEqualsWithDelta(
-            12987.01 + 25000.0 + 8000.0,
+            12800.0 + 25000.0 + 8000.0,
             $report['summary']['kes_equivalent_total'],
             1.0,
         );

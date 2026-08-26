@@ -90,17 +90,17 @@ class SalesLedgerTest extends TestCase
 
         // The WhatsApp-outlet order belongs to WhatsApp, not POS — that is the
         // rule the three Sales pages use, and the report must agree.
-        $this->assertSame(2, $byChannel['pos']['orders']);
-        $this->assertEqualsWithDelta(1500.0, (float) $byChannel['pos']['sales'], 0.01);
-        $this->assertEqualsWithDelta(1200.0, (float) $byChannel['pos']['paid'], 0.01);
-        $this->assertEqualsWithDelta(300.0, (float) $byChannel['pos']['balance'], 0.01);
+        $this->assertSame(2, $byChannel['till']['orders']);
+        $this->assertEqualsWithDelta(1500.0, (float) $byChannel['till']['sales'], 0.01);
+        $this->assertEqualsWithDelta(1200.0, (float) $byChannel['till']['paid'], 0.01);
+        $this->assertEqualsWithDelta(300.0, (float) $byChannel['till']['balance'], 0.01);
 
-        $this->assertSame(1, $byChannel['online']['orders']);
-        $this->assertEqualsWithDelta(800.0, (float) $byChannel['online']['balance'], 0.01);
+        $this->assertSame(1, $byChannel['web']['orders']);
+        $this->assertEqualsWithDelta(800.0, (float) $byChannel['web']['balance'], 0.01);
 
-        $this->assertSame(2, $byChannel['whatsapp']['orders']);
-        $this->assertEqualsWithDelta(1000.0, (float) $byChannel['whatsapp']['sales'], 0.01);
-        $this->assertEqualsWithDelta(500.0, (float) $byChannel['whatsapp']['paid'], 0.01);
+        $this->assertSame(2, $byChannel['chat']['orders']);
+        $this->assertEqualsWithDelta(1000.0, (float) $byChannel['chat']['sales'], 0.01);
+        $this->assertEqualsWithDelta(500.0, (float) $byChannel['chat']['paid'], 0.01);
     }
 
     public function test_sales_equals_paid_plus_balance_on_every_row(): void
@@ -133,13 +133,44 @@ class SalesLedgerTest extends TestCase
         }
     }
 
+    public function test_an_overpaid_order_does_not_mask_another_orders_debt(): void
+    {
+        // The cross-subsidy defect. balance used to be clamped on the BUCKET sum
+        // — GREATEST(SUM(sales) - SUM(paid), 0) — so an order paid beyond its own
+        // total spent the excess cancelling a DIFFERENT order's balance, and a
+        // real receivable silently vanished. Capping paid per order (the rule
+        // MetricEngine::OWED already uses) keeps each order's debt its own.
+        //
+        // Same channel, same period. Expected values reasoned by hand, NOT read
+        // back from the implementation's own formula:
+        //   A: sold 1000, paid 1500 -> 500 overpaid; contributes 1000 paid, 0 owed
+        //   B: sold 1000, paid    0 ->               contributes    0 paid, 1000 owed
+        //   bucket: sales 2000, paid 1000 (NOT 1500), balance 1000 (NOT 500)
+        // Before the fix: paid 1500, balance GREATEST(2000-1500,0)=500 — B's debt gone.
+        $this->viewer();
+        $this->order('pos', 1000, 1500);   // overpaid
+        $this->order('pos', 1000, 0);      // unpaid
+
+        $till = collect($this->ledger()['channels'])->firstWhere('channel', 'till');
+
+        $this->assertEqualsWithDelta(2000.0, (float) $till['sales'], 0.01);
+        $this->assertEqualsWithDelta(1000.0, (float) $till['paid'], 0.01,
+            'an overpayment was counted as paying down more than its own order');
+        $this->assertEqualsWithDelta(1000.0, (float) $till['balance'], 0.01,
+            "the unpaid order's debt was masked by another order's overpayment");
+        $this->assertEqualsWithDelta(
+            (float) $till['sales'], (float) $till['paid'] + (float) $till['balance'], 0.01,
+            'sales = paid + balance broke under an overpayment',
+        );
+    }
+
     public function test_refunds_are_netted_off_the_paid_figure(): void
     {
         $this->viewer();
         $o = $this->order('pos', 1000, 1000);
         Payment::where('order_id', $o->id)->update(['refund_amount' => 400]);
 
-        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'pos');
+        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'till');
 
         $this->assertEqualsWithDelta(600.0, (float) $pos['paid'], 0.01);     // 1000 taken, 400 given back
         $this->assertEqualsWithDelta(400.0, (float) $pos['balance'], 0.01);
@@ -153,7 +184,7 @@ class SalesLedgerTest extends TestCase
 
         foreach (['weekly', 'monthly'] as $grain) {
             foreach ($this->ledger()[$grain] as $row) {
-                $this->assertSame(['pos', 'online', 'whatsapp'],
+                $this->assertSame(['till', 'web', 'chat', 'quoted'],
                     array_keys($row['by_channel']), "{$grain} row is missing a channel");
             }
         }
@@ -165,7 +196,7 @@ class SalesLedgerTest extends TestCase
         $this->order('pos', 1000, 0)->update(['status' => 'cancelled']);
         $this->order('pos', 250, 250);
 
-        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'pos');
+        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'till');
 
         $this->assertSame(1, $pos['orders']);
         $this->assertEqualsWithDelta(250.0, (float) $pos['sales'], 0.01);
@@ -183,7 +214,7 @@ class SalesLedgerTest extends TestCase
             'approval_status'   => 'pending',
         ]);
 
-        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'pos');
+        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'till');
 
         $this->assertEqualsWithDelta(0.0,    (float) $pos['paid'], 0.01);
         $this->assertEqualsWithDelta(1000.0, (float) $pos['balance'], 0.01);
@@ -198,7 +229,7 @@ class SalesLedgerTest extends TestCase
             'approval_status'   => 'approved',
         ]);
 
-        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'pos');
+        $pos = collect($this->ledger()['channels'])->firstWhere('channel', 'till');
 
         $this->assertEqualsWithDelta(1000.0, (float) $pos['paid'], 0.01);
         $this->assertEqualsWithDelta(0.0,    (float) $pos['balance'], 0.01);
@@ -364,14 +395,21 @@ class SalesLedgerTest extends TestCase
             'status' => 'confirmed', 'created_at' => now(),
         ]);
 
-        $excluded = $this->getJson('/api/v1/admin/reports/sales/summary'
+        // USD has a reporting rate now, so its trace moved: it is CONVERTED
+        // into the totals (and says so), no longer excluded. The invariant
+        // this test protects — no foreign order vanishes without a trace —
+        // still holds, one list over.
+        $body = $this->getJson('/api/v1/admin/reports/sales/summary'
             .'?start_date='.now()->subDays(7)->format('Y-m-d')
             .'&end_date='.now()->format('Y-m-d'))
-            ->assertOk()->json('excluded_currencies');
+            ->assertOk()->json();
 
-        $usd = collect($excluded)->firstWhere('currency_code', 'USD');
-        $this->assertNotNull($usd, 'a non-reporting-currency order vanished with no trace');
+        $usd = collect($body['converted_currencies'])->firstWhere('currency_code', 'USD');
+        $this->assertNotNull($usd, 'a foreign order vanished with no trace');
         $this->assertSame(1, (int) $usd['orders']);
+        $this->assertSame(128.0, (float) $usd['rate']);
+        $this->assertSame([], $body['excluded_currencies'],
+            'a convertible currency must not be called excluded');
     }
 
     public function test_unique_customers_counts_walk_ins_not_only_registered_users(): void

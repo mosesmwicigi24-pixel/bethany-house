@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, Fragment } from "react";
+import { useState, useCallback, useEffect, useRef, Fragment } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { clsx } from "clsx";
@@ -9,20 +9,29 @@ import { useTableState } from "@/hooks/useTableState";
 import { Spinner } from "@/components/ui/Spinner";
 import type { ApiError } from "@/types";
 import { groupRowsByDate, DateGroupHeaderRow } from "@/lib/dateGrouping";
+import { usePermissions } from "@/hooks/usePermissions";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-// Traffic-light semantics: anything still in flight is AMBER, anything finished
-// is a vivid green, anything stopped is red/grey. `confirmed` was missing
-// entirely, so every POS sale fell through to the neutral grey chip — the most
-// common status in the system rendered as though it had no meaning.
+// Order-stage semantics. An order's life is three stages and the colours say
+// which one it is at a glance down a list:
+//
+//   Confirmed  amber  — a human accepted it; it is income and it is waiting
+//   Processed  pink   — it is being worked (in production, shipped, delivered)
+//   Completed  green  — done
+//
+// `pending` is deliberately NOT one of them. It is an unconfirmed cart a
+// customer built and abandoned, it is NOT income, and it is excluded from the
+// sales report — so it reads as neutral-grey "Unconfirmed", not as a warning.
+// Calling it "Pending Payment" implied the only missing thing was money, which
+// is how 98 abandoned carts came to be counted as KES 1.1m of revenue.
 const STATUS_CONFIG: Record<string, { label: string; dot: string; badge: string }> = {
-    pending:         { label: "Pending Payment", dot: "bg-warning",       badge: "badge-warning" },
+    pending:         { label: "Unconfirmed",     dot: "bg-surface-400",   badge: "badge-neutral" },
     paid:            { label: "Paid",            dot: "bg-success-vivid", badge: "badge-success" },
-    confirmed:       { label: "Confirmed",       dot: "bg-success-vivid", badge: "badge-success" },
-    processing:      { label: "Processing",      dot: "bg-amber",         badge: "badge-amber"   },
-    shipped:         { label: "Shipped",         dot: "bg-amber",         badge: "badge-amber"   },
-    delivered:       { label: "Delivered",       dot: "bg-success-vivid", badge: "badge-success" },
+    confirmed:       { label: "Confirmed",       dot: "bg-amber",         badge: "badge-amber"   },
+    processing:      { label: "Processed",       dot: "bg-pink-vivid",    badge: "badge-pink"    },
+    shipped:         { label: "Shipped",         dot: "bg-pink-vivid",    badge: "badge-pink"    },
+    delivered:       { label: "Delivered",       dot: "bg-pink-vivid",    badge: "badge-pink"    },
     completed:       { label: "Completed",       dot: "bg-success-vivid", badge: "badge-success" },
     cancelled:       { label: "Cancelled",       dot: "bg-danger",        badge: "badge-danger"  },
     refunded:        { label: "Refunded",        dot: "bg-surface-400",   badge: "badge-neutral" },
@@ -30,8 +39,18 @@ const STATUS_CONFIG: Record<string, { label: string; dot: string; badge: string 
 };
 
 const CHANNEL_LABELS: Record<string, { label: string }> = {
-    online: { label: "Online" },
-    pos:    { label: "POS"    },
+    online:   { label: "Online"   },
+    pos:      { label: "POS"      },
+    whatsapp: { label: "WhatsApp" },
+};
+
+/** Which app a chat sale came from — the badge on Chat Orders rows. */
+const SOURCE_BADGES: Record<string, { label: string; badge: string }> = {
+    whatsapp:  { label: "WhatsApp",  badge: "badge-success" },
+    messenger: { label: "Messenger", badge: "badge-info"    },
+    instagram: { label: "Instagram", badge: "badge-pink"    },
+    website:   { label: "Website",   badge: "badge-neutral" },
+    walk_in:   { label: "Walk-in",   badge: "badge-neutral" },
 };
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
@@ -41,6 +60,126 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
     bank_transfer: "Bank Transfer",
     cash_on_delivery: "COD",
 };
+
+// ── Stage menu ────────────────────────────────────────────────────────────────
+// Moving an order along its life used to mean opening it, finding Update
+// Status, choosing from a dropdown and saving — four steps per order, which is
+// unworkable against a backlog of a hundred unconfirmed carts. This is the same
+// action, one click from the list.
+//
+// The options offered are only the LEGAL ones. This table mirrors
+// OrderStatusMachine::TRANSITIONS on the server; the server remains the
+// authority and rejects anything illegal regardless, so the mirror exists to
+// avoid offering a person a button that can only fail — not to enforce.
+const TRANSITIONS: Record<string, string[]> = {
+    pending:    ["processing", "confirmed", "shipped", "delivered", "completed", "cancelled"],
+    processing: ["confirmed", "shipped", "delivered", "completed", "cancelled"],
+    confirmed:  ["processing", "shipped", "delivered", "completed", "cancelled"],
+    shipped:    ["delivered", "completed", "cancelled"],
+    delivered:  ["completed", "refunded"],
+    completed:  ["refunded"],
+    cancelled:  [],
+    refunded:   [],
+};
+
+/** The three stages, in the order an order lives through them. */
+const STAGE_ACTIONS: { to: OrderStatus; label: string; hint: string; tone?: string }[] = [
+    { to: "confirmed"  as OrderStatus, label: "Confirm",         hint: "Accept the order — it counts as sales from now on" },
+    { to: "processing" as OrderStatus, label: "Mark processed",  hint: "Being worked on" },
+    { to: "completed"  as OrderStatus, label: "Mark completed",  hint: "Done and fully paid" },
+];
+
+function StageMenu({ order, onDone }: { order: Order; onDone: () => void }) {
+    const [open, setOpen] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const ref = useRef<HTMLDivElement>(null);
+    const toast = useToastStore();
+    const { can } = usePermissions();
+
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, []);
+
+    if (!can("orders.edit")) return null;
+
+    const allowed = TRANSITIONS[order.status] ?? [];
+    const stages  = STAGE_ACTIONS.filter(a => allowed.includes(a.to));
+    const canCancel = allowed.includes("cancelled") && can("orders.cancel");
+
+    // A completed order has nowhere left to go; an empty menu is worse than none.
+    if (!stages.length && !canCancel) return null;
+
+    const move = async (to: OrderStatus, label: string) => {
+        setBusy(true);
+        try {
+            await ordersApi.updateStatus(order.id, { status: to });
+            toast.success(`${order.order_number} — ${label.toLowerCase()}`);
+            onDone();
+        } catch (e) {
+            // The server's guards carry the reason (unpaid balance, production
+            // still open, payment awaiting approval). Surfacing its message
+            // verbatim tells the user what to do; a generic failure does not.
+            toast.error((e as ApiError).message ?? "Could not update the order");
+        } finally {
+            setBusy(false);
+            setOpen(false);
+        }
+    };
+
+    return (
+        <div className="relative" ref={ref} onClick={(e) => e.stopPropagation()}>
+            <button
+                onClick={() => setOpen(v => !v)}
+                disabled={busy}
+                aria-label="Order stage"
+                title="Move this order along"
+                className={clsx(
+                    "w-6 h-6 rounded-md flex items-center justify-center transition-colors",
+                    "text-surface-400 hover:text-surface-700 hover:bg-surface-100",
+                    open && "bg-surface-100 text-surface-700",
+                    busy && "opacity-50",
+                )}
+            >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <circle cx="10" cy="4" r="1.5" /><circle cx="10" cy="10" r="1.5" /><circle cx="10" cy="16" r="1.5" />
+                </svg>
+            </button>
+
+            {open && (
+                <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-white rounded-lg shadow-lg border border-surface-200 py-1">
+                    <p className="px-3 py-1.5 text-2xs font-semibold uppercase tracking-wide text-surface-400">
+                        Move to
+                    </p>
+                    {stages.map(a => (
+                        <button
+                            key={a.to}
+                            onClick={() => move(a.to, a.label)}
+                            className="w-full px-3 py-1.5 text-left hover:bg-surface-50"
+                        >
+                            <span className="block text-xs font-medium text-surface-700">{a.label}</span>
+                            <span className="block text-2xs text-surface-400">{a.hint}</span>
+                        </button>
+                    ))}
+                    {canCancel && (
+                        <>
+                            <div className="my-1 border-t border-surface-100" />
+                            <button
+                                onClick={() => move("cancelled" as OrderStatus, "Cancelled")}
+                                className="w-full px-3 py-1.5 text-left text-xs font-medium text-danger hover:bg-danger-light"
+                            >
+                                Cancel order
+                            </button>
+                        </>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 
@@ -196,12 +335,13 @@ function FiltersBar({ filters, onChange, onClear, hideChannel }: FiltersBarProps
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-type SalesChannel = "pos" | "online" | "whatsapp";
+type SalesChannel = "till" | "web" | "chat" | "quoted";
 
 const CHANNEL_TITLES: Record<SalesChannel, { title: string; subtitle: string }> = {
-    pos:      { title: "POS Orders",      subtitle: "orders taken at the point of sale" },
-    online:   { title: "Online Orders",   subtitle: "orders placed through the storefront" },
-    whatsapp: { title: "WhatsApp Orders", subtitle: "orders taken over WhatsApp" },
+    till:   { title: "Till Sales",   subtitle: "walk-in sales paid at the counter" },
+    web:    { title: "Web Orders",   subtitle: "self-service orders from the website" },
+    chat:   { title: "Chat Orders",  subtitle: "orders sold in conversation — WhatsApp, Messenger, Instagram" },
+    quoted: { title: "Quoted Sales", subtitle: "quotation → invoice → payable order" },
 };
 
 export default function OrdersPage({ channel }: { channel?: SalesChannel } = {}) {
@@ -211,6 +351,16 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
     const _ts = useTableState();
     const page = _ts.state.page;
     const setPage = _ts.setPage;
+
+    // After a stage change, refresh this list AND the figures that depend on it.
+    // Confirming an order moves money from pipeline into recognised sales, so a
+    // stale sales report or pipeline queue would contradict what the user just
+    // did on screen.
+    const refetchAfterStageChange = useCallback(() => {
+        qc.invalidateQueries({ queryKey: ["orders"] });
+        qc.invalidateQueries({ queryKey: ["order-pipeline"] });
+        qc.invalidateQueries({ queryKey: ["report-sales-ledger"] });
+    }, [qc]);
 
     // A channel-scoped view (POS / Online / WhatsApp Orders) locks sales_channel.
     const baseFilters = useCallback((): OrderFilters => ({
@@ -323,7 +473,10 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                                         // must fall through here too, not print a dangling separator.
                                         const email = order.customer_email && !order.customer_email.startsWith('noemail+') ? order.customer_email : null;
                                         const contact = email || order.customer_phone || null;
-                                        const channelLabel = CHANNEL_LABELS[order.order_type]?.label ?? order.order_type;
+                                        const src = order.source_channel ? SOURCE_BADGES[order.source_channel] : null;
+                                        const channelLabel = channel === "chat" && src
+                                            ? src.label
+                                            : CHANNEL_LABELS[order.order_type]?.label ?? order.order_type;
                                         const paymentLabel = PAYMENT_METHOD_LABELS[order.payment_method] ?? order.payment_method;
                                         // Contact if we have one, otherwise the payment method — never an empty tail.
                                         const detail = contact || paymentLabel || null;
@@ -439,7 +592,14 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                                                     ? <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round"><path d="M13.5 21v-7.5a.75.75 0 01.75-.75h3a.75.75 0 01.75.75V21m-4.5 0H2.36m11.14 0H18m0 0h3.64m-1.39 0V9.349m-16.5 11.65V9.35m0 0a3.001 3.001 0 003.75-.615A2.993 2.993 0 009.75 9.75c.896 0 1.7-.393 2.25-1.016a2.993 2.993 0 002.25 1.016c.896 0 1.7-.393 2.25-1.016a3.001 3.001 0 003.75.614m-16.5 0a3.004 3.004 0 01-.621-4.72L4.318 3.44A1.5 1.5 0 015.378 3h13.243a1.5 1.5 0 011.06.44l1.19 2.189a3 3 0 01-.621 4.72m-13.5 8.65h3.75a.75.75 0 00.75-.75V13.5a.75.75 0 00-.75-.75H6.75a.75.75 0 00-.75.75v3.75c0 .415.336.75.75.75z"/></svg>
                                                     : <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
                                                 }
-                                                {CHANNEL_LABELS[order.order_type]?.label ?? order.order_type}
+                                                {channel === "chat" && order.source_channel && SOURCE_BADGES[order.source_channel]
+                                                    ? SOURCE_BADGES[order.source_channel].label
+                                                    : CHANNEL_LABELS[order.order_type]?.label ?? order.order_type}
+                                                {channel === "quoted" && order.quotation_number && (
+                                                    <span className="block text-2xs text-surface-400 font-mono">
+                                                        {order.quotation_number}
+                                                    </span>
+                                                )}
                                             </span>
                                         </td>
                                         <td><StatusBadge status={order.status} /></td>
@@ -467,7 +627,7 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                                                     {order.cashier_name}
                                                 </span>
                                             ) : (
-                                                <span className="text-xs text-surface-300">—</span>
+                                                <span className="text-xs text-surface-500">—</span>
                                             )}
                                         </td>
                                         <td>
@@ -478,7 +638,8 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                                         <td>
                                             <div className="flex items-center gap-1.5 justify-end">
                                                 <PaymentLinkButton order={order} />
-                                                <svg className="w-4 h-4 text-surface-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <StageMenu order={order} onDone={refetchAfterStageChange} />
+                                                <svg className="w-4 h-4 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
                                                 </svg>
                                             </div>

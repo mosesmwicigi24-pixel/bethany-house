@@ -370,7 +370,7 @@ export default function PurchaseOrderDetailPage() {
                             <div className="flex items-center gap-2 mt-2 flex-wrap">
                                 <StatusBadge status={po.status} />
                                 {po.invoice_number && (
-                                    <span className="text-xs bg-white/10 text-surface-300 px-2 py-0.5 rounded-full">
+                                    <span className="text-xs bg-white/10 text-surface-500 px-2 py-0.5 rounded-full">
                                         Invoice: {po.invoice_number}
                                     </span>
                                 )}

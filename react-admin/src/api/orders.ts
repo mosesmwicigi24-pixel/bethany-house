@@ -99,6 +99,12 @@ export interface Order {
     id: number;
     order_number: string;
     order_type: OrderChannel;
+    /** Staff queue: till | web | chat | quoted. Null on rows older than the buckets. */
+    sales_bucket?: "till" | "web" | "chat" | "quoted" | null;
+    /** Where the customer came from (whatsapp/messenger/instagram/website/walk_in). */
+    source_channel?: string | null;
+    /** Set when this order was born from a quotation. */
+    quotation_number?: string | null;
     channel?: OrderChannel;
     /** The INVOICE document this order bills, if it came from a quotation. */
     invoice_document?: { id: number; number: string; documentable_id: number } | null;
@@ -197,7 +203,42 @@ export interface OrderFilters {
 
 // ── API ───────────────────────────────────────────────────────────────────────
 
+
+// ── Pending queue (the unconfirmed-order worklist) ───────────────────────────
+
+export interface PendingQueueRow {
+    id: number;
+    order_number: string;
+    customer_first_name: string | null;
+    customer_last_name: string | null;
+    customer_phone: string | null;
+    customer_email: string | null;
+    currency_code: string;
+    total_amount: string | number;
+    created_at: string;
+    updated_at: string;
+    source: string | null;
+    days_pending: number;
+    /** Null when the currency has no reporting rate — listed, never summed. */
+    kes_value: string | number | null;
+    possible_duplicate: boolean;
+}
+
+export interface PendingQueueSummary {
+    total_count: number;
+    total_kes: number;
+    fresh_count: number;
+    aging_count: number;
+    stale_count: number;
+    excluded_currencies: { code: string; n: number; amount: string | number }[];
+}
+
 export const ordersApi = {
+    /** The unconfirmed-order worklist, sorted by value x age. */
+    pendingQueue: () =>
+        get<{ summary: PendingQueueSummary; rows: PendingQueueRow[] }>(
+            "/v1/admin/orders/pending-queue"),
+
     list: (params?: OrderFilters) =>
         get<{
             data: Order[];

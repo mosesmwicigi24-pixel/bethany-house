@@ -12,6 +12,7 @@ use App\Models\InventoryItem;
 use App\Models\InventoryTransaction;
 use App\Models\CashRegister;
 use App\Models\CashRegisterTransaction;
+use App\Support\HtmlSanitizer;
 use App\Models\Outlet;
 use App\Models\TaxRate;
 use App\Models\Payment;
@@ -945,6 +946,8 @@ class PosController extends Controller
                 'outlet_id'            => $outletId,
                 'user_id'              => $linkedUserId,
                 'order_type'           => 'pos',
+                'sales_bucket'          => 'till',
+                'source_channel'        => 'walk_in',
                 // POS instant cash/card/mpesa: payment is confirmed but goods
                 // still need to be packed/handed over. Use 'confirmed' so staff
                 // can set 'completed' after handover. Deposit or a tender pending
@@ -1970,6 +1973,11 @@ class PosController extends Controller
 
         $now = now();
 
+        // sentiments is WYSIWYG HTML rendered in the admin console and the EoD
+        // email; sanitise to a safe allow-list on the way in so neither reader
+        // ever receives an executable payload (stored-XSS fix).
+        $cleanSentiments = HtmlSanitizer::sentiments($validated['sentiments'] ?? null);
+
         $existing = DB::table('cash_register_eod_reports')
             ->where('register_id', $registerId)
             ->where('user_id', $user->id)
@@ -1981,7 +1989,7 @@ class PosController extends Controller
                 ->where('id', $existing->id)
                 ->update([
                     'order_notes'  => json_encode($cleanNotes),
-                    'sentiments'   => $validated['sentiments'] ?? null,
+                    'sentiments'   => $cleanSentiments,
                     'submitted_at' => $now,
                     'updated_at'   => $now,
                 ]);
@@ -1993,7 +2001,7 @@ class PosController extends Controller
                 'outlet_id'    => $outletId,
                 'report_date'  => $date,
                 'order_notes'  => json_encode($cleanNotes),
-                'sentiments'   => $validated['sentiments'] ?? null,
+                'sentiments'   => $cleanSentiments,
                 'submitted_at' => $now,
                 'created_at'   => $now,
                 'updated_at'   => $now,
@@ -2006,7 +2014,7 @@ class PosController extends Controller
                 'outlet_id'      => $outletId,
                 'date'           => $date,
                 'note_count'     => count($cleanNotes),
-                'has_sentiments' => !empty($validated['sentiments']),
+                'has_sentiments' => !empty($cleanSentiments),
             ]);
         } catch (\Exception) {}
 
@@ -3424,6 +3432,10 @@ class PosController extends Controller
             // order groups under "WhatsApp Orders". Fulfilment still draws stock
             // from the order's outlet — channel and outlet are orthogonal.
             'channel'                              => 'nullable|in:pos,whatsapp,online',
+            // Which app a chat sale came from. Only meaningful with
+            // channel=whatsapp; Messenger and Instagram sales ride the same
+            // flow and differ only by this tag.
+            'source_channel'                       => 'nullable|in:whatsapp,messenger,instagram',
             // items[] contains regular (in-stock) lines only.
             // MTO lines travel exclusively via production_items[] and are
             // excluded from items[] by the frontend to avoid the stock check.
@@ -3744,6 +3756,15 @@ class PosController extends Controller
                 'outlet_id'           => $outletId,
                 'user_id'             => $linkedUserId,
                 'order_type'          => $channel,
+                // 'whatsapp' is a chat sale; the optional source lets the same
+                // flow carry Messenger and Instagram sales without a new
+                // pipeline — the bucket is the queue, the source is the app.
+                'sales_bucket'        => $channel === 'whatsapp' ? 'chat'
+                                          : ($channel === 'online' ? 'web' : 'till'),
+                'source_channel'      => $channel === 'whatsapp'
+                                          ? (in_array($validated['source_channel'] ?? null, ['whatsapp', 'messenger', 'instagram'], true)
+                                              ? $validated['source_channel'] : 'whatsapp')
+                                          : ($channel === 'online' ? 'website' : 'walk_in'),
                 'status'              => 'pending',
                 'payment_status'      => 'pending',
                 'currency_code'       => $currencyCode,

@@ -8,6 +8,101 @@ use Illuminate\Database\Eloquent\Model;
 
 class Order extends Model
 {
+    /* ── Revenue recognition ──────────────────────────────────────────────
+     *
+     * An order is income only once a HUMAN has accepted it. Customers add to a
+     * cart on the storefront or on WhatsApp and wander off; those carts land
+     * here as `pending` and are a sales *pipeline*, not revenue. Counting them
+     * overstated the last-30-day sales report by KES 1,136,060 — 33% of the
+     * reported figure, and 82% of the Online channel — because the only filter
+     * anywhere was `status NOT IN (voided, cancelled)`.
+     *
+     * The three stages a confirmed order moves through, and the labels the UI
+     * shows for each:
+     *
+     *   confirmed                        → "Confirmed"  (amber)
+     *   processing | shipped | delivered → "Processed"  (pink)
+     *   completed                        → "Completed"  (green)
+     *
+     * All three are recognised income. POS is unaffected in practice — a till
+     * sale is confirmed at the moment of payment — so this restates the online
+     * and WhatsApp channels only.
+     */
+
+    /** Income. A human accepted the order; the sale is real. */
+    public const RECOGNISED_STATUSES = ['confirmed', 'processing', 'shipped', 'delivered', 'completed'];
+
+    /** Pipeline. An unconfirmed cart — reportable, but NEVER as income. */
+    public const PIPELINE_STATUSES = ['pending'];
+
+    /**
+     * The four staff queues an order can live in — HOW it becomes money.
+     * Orthogonal to source_channel (WHERE the customer came from) and to
+     * order_type (untouched legacy field the public storefront lookup returns).
+     *
+     *   till    walk-in, paid at the counter
+     *   web     self-service storefront checkout
+     *   chat    sold in a conversation (WhatsApp / Messenger / Instagram)
+     *   quoted  quotation → invoice → payable order (the sales desk)
+     */
+    public const SALES_BUCKETS = ['till', 'web', 'chat', 'quoted'];
+
+    /** Old channel names still arrive from callers; they map, never 404. */
+    public const LEGACY_CHANNEL_MAP = ['pos' => 'till', 'online' => 'web', 'whatsapp' => 'chat'];
+
+    /** Neither: the order is dead and belongs in no sales figure. */
+    public const DEAD_STATUSES = ['cancelled', 'voided', 'refunded'];
+
+    /**
+     * Payment states that mean real money arrived.
+     *
+     * A customer who pays a payment link before any staff member opens the
+     * order leaves it `pending` while the cash is already banked. Money in the
+     * account is not a browsing cart, so payment is a second, independent route
+     * to recognition — whichever happens first, confirmation or payment.
+     */
+    public const SETTLED_PAYMENT_STATUSES = ['paid', 'partial', 'deposit'];
+
+    /** status → the stage label the three channel reports group by. */
+    public const STAGE_OF_STATUS = [
+        'confirmed'  => 'confirmed',
+        'processing' => 'processed',
+        'shipped'    => 'processed',
+        'delivered'  => 'processed',
+        'completed'  => 'completed',
+    ];
+
+    /**
+     * Recognised income only. The base for every sales figure.
+     *
+     * Recognised = a human confirmed it, OR money actually arrived — and the
+     * order is not dead. The dead check is not redundant: a cancelled order can
+     * still carry a settled payment (that is what a refund unwinds), and
+     * without it the payment arm would drag cancelled orders back into revenue.
+     */
+    public function scopeRecognised($query)
+    {
+        return $query
+            ->whereNotIn('orders.status', self::DEAD_STATUSES)
+            ->where(fn ($q) => $q
+                ->whereIn('orders.status', self::RECOGNISED_STATUSES)
+                ->orWhereIn('orders.payment_status', self::SETTLED_PAYMENT_STATUSES));
+    }
+
+    /**
+     * Unconfirmed carts — the pipeline report, never the sales report.
+     *
+     * The exact complement of recognised() within the live order book: pending
+     * AND no money received. A pending order that has been paid is income, not
+     * pipeline, so it must not appear in both.
+     */
+    public function scopePipeline($query)
+    {
+        return $query
+            ->whereIn('orders.status', self::PIPELINE_STATUSES)
+            ->whereNotIn('orders.payment_status', self::SETTLED_PAYMENT_STATUSES);
+    }
+
     use HasFactory;
     /**
      * Bounds every order query to what the caller may see — list, detail,
@@ -41,6 +136,8 @@ class Order extends Model
         'user_id',
         'outlet_id',
         'order_type',
+        'sales_bucket',
+        'source_channel',
         'status',
         'currency_code',
         'subtotal',
@@ -233,26 +330,51 @@ class Order extends Model
      */
     public function scopeSalesChannel($query, ?string $channel)
     {
-        if (! in_array($channel, ['pos', 'online', 'whatsapp'], true)) {
+        // Old names keep working: three list pages, the sales ledger and any
+        // bookmarked export URL predate the buckets.
+        $bucket = self::LEGACY_CHANNEL_MAP[$channel] ?? $channel;
+
+        if (! in_array($bucket, self::SALES_BUCKETS, true)) {
             return $query;
         }
 
+        // Bucket-first, with a legacy derivation for rows whose bucket is NULL
+        // (fixtures, or a writer added later that forgot — the guard test
+        // exists, but a forgotten row must degrade to the old behaviour, not
+        // vanish from every list).
         $whatsappOutletIds = \App\Models\Outlet::where('sales_channel', 'whatsapp')->pluck('id');
 
-        return match ($channel) {
-            'online'   => $query->where('order_type', 'online'),
-            'whatsapp' => $query->where(function ($q) use ($whatsappOutletIds) {
-                $q->whereIn('outlet_id', $whatsappOutletIds)
-                  ->orWhere('order_type', 'whatsapp');
+        // A WhatsApp-channel outlet belongs to chat, whatever else the row looks
+        // like — the precedence the backfill applied (its chat statement overwrote
+        // both the pos and the online-split rows). Every non-chat bucket must
+        // therefore EXCLUDE WhatsApp outlets, or an order recorded against one
+        // matches two buckets in the legacy fallback and double-counts in
+        // weekly/monthly totals. whereNotIn alone would DROP orders with a NULL
+        // outlet_id: in SQL `NULL NOT IN (1)` evaluates to NULL, not true, so a
+        // POS order without an outlet would silently vanish. The null branch is
+        // explicit, and this one predicate is shared by till, web and quoted.
+        $notWhatsappOutlet = fn ($qq) => $qq->whereNull('orders.outlet_id')
+                                            ->orWhereNotIn('orders.outlet_id', $whatsappOutletIds);
+
+        $legacy = match ($bucket) {
+            'web'    => fn ($q) => $q->where('orders.order_type', 'online')
+                                     ->whereNull('orders.created_by')
+                                     ->where($notWhatsappOutlet),
+            'quoted' => fn ($q) => $q->where('orders.order_type', 'online')
+                                     ->whereNotNull('orders.created_by')
+                                     ->where($notWhatsappOutlet),
+            'chat'   => fn ($q) => $q->where(function ($qq) use ($whatsappOutletIds) {
+                $qq->whereIn('orders.outlet_id', $whatsappOutletIds)
+                   ->orWhere('orders.order_type', 'whatsapp');
             }),
-            // whereNotIn alone would DROP orders with a NULL outlet_id: in SQL
-            // `NULL NOT IN (1)` evaluates to NULL, not true, so every POS order
-            // without an outlet silently vanished from the POS channel. The
-            // null branch is explicit.
-            'pos'      => $query->where('order_type', 'pos')
-                                ->where(fn ($q) => $q->whereNull('outlet_id')
-                                                     ->orWhereNotIn('outlet_id', $whatsappOutletIds)),
+            'till'   => fn ($q) => $q->where('orders.order_type', 'pos')
+                                     ->where($notWhatsappOutlet),
         };
+
+        return $query->where(function ($q) use ($bucket, $legacy) {
+            $q->where('orders.sales_bucket', $bucket)
+              ->orWhere(fn ($qq) => $qq->whereNull('orders.sales_bucket')->where($legacy));
+        });
     }
 
     public function scopePaid($query)

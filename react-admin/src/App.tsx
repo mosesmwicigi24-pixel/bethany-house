@@ -97,6 +97,7 @@ const EodReportSettingsPage = lazy(() => import("@/pages/pos/EodReportSettingsPa
 const OutstandingBalancesPage = lazy(() => import("@/pages/pos/OutstandingBalancesPage"));
 
 const OrdersPage = lazy(() => import("@/pages/sales/orders/OrdersListPage"));
+const PendingQueuePage = lazy(() => import("@/pages/sales/orders/PendingQueuePage"));
 const QuotationsPage = lazy(() => import("@/pages/sales/quotations/QuotationsPage"));
 const InvoicesPage = lazy(() => import("@/pages/sales/invoices/InvoicesPage"));
 const OrderDetailPage = lazy(
@@ -184,6 +185,7 @@ const PaymentTransactionsPage = lazy(
 // ── Reports module ───────────────────────────────────────────────────────────
 const ReportsPage        = lazy(() => import("@/pages/reports/ReportsPage"));
 const SalesReportPage       = lazy(() => import("@/pages/reports/SalesReportPage"));
+const OrderPipelinePage     = lazy(() => import("@/pages/reports/OrderPipelinePage"));
 const CustomersReportPage   = lazy(() => import("@/pages/reports/CustomersReportPage"));
 const InventoryReportPage   = lazy(() => import("@/pages/reports/InventoryReportPage"));
 const ProductionReportPage  = lazy(() => import("@/pages/reports/ProductionReportPage"));
@@ -467,6 +469,16 @@ export default function App() {
                                 </ProtectedRoute>
                             }
                         />
+                        <Route
+                            path="/sales/pending-queue"
+                            element={
+                                <ProtectedRoute permission="orders.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <PendingQueuePage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
                         {/* Channel-scoped order views (Sales nav). Distinct paths so
                             they don't collide with /sales/orders/:id. */}
                         <Route
@@ -474,7 +486,7 @@ export default function App() {
                             element={
                                 <ProtectedRoute permission="orders.view">
                                 <Suspense fallback={<PageLoader />}>
-                                    <OrdersPage channel="pos" />
+                                    <OrdersPage channel="till" />
                                 </Suspense>
                                 </ProtectedRoute>
                             }
@@ -484,7 +496,17 @@ export default function App() {
                             element={
                                 <ProtectedRoute permission="orders.view">
                                 <Suspense fallback={<PageLoader />}>
-                                    <OrdersPage channel="online" />
+                                    <OrdersPage channel="web" />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/sales/quoted-orders"
+                            element={
+                                <ProtectedRoute permission="orders.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <OrdersPage channel="quoted" />
                                 </Suspense>
                                 </ProtectedRoute>
                             }
@@ -494,7 +516,7 @@ export default function App() {
                             element={
                                 <ProtectedRoute permission="orders.view">
                                 <Suspense fallback={<PageLoader />}>
-                                    <OrdersPage channel="whatsapp" />
+                                    <OrdersPage channel="chat" />
                                 </Suspense>
                                 </ProtectedRoute>
                             }
@@ -907,6 +929,16 @@ export default function App() {
                                 <ProtectedRoute permission="reports.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <ReportsPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/reports/order-pipeline"
+                            element={
+                                <ProtectedRoute permission="reports.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <OrderPipelinePage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }

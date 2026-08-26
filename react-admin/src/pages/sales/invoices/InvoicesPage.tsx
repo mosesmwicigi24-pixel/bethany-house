@@ -75,7 +75,7 @@ export default function InvoicesPage() {
                 {isLoading ? (
                     <div className="flex justify-center py-16"><Spinner size="lg" /></div>
                 ) : rows.length === 0 ? (
-                    <div className="py-16 text-center text-sm text-muted">No invoices yet. Accept a quotation to create one.</div>
+                    <div className="py-16 text-center text-sm text-surface-500">No invoices yet. Accept a quotation to create one.</div>
                 ) : (
                     <div className="table-wrapper rounded-none border-0">
                     <table className="table">
@@ -96,7 +96,7 @@ export default function InvoicesPage() {
                                 <tr key={inv.id}>
                                     <td className="font-medium tabular-nums">{inv.invoice_number}</td>
                                     <td>{inv.customer_name ?? "—"}</td>
-                                    <td className="text-sm text-muted tabular-nums">{inv.quotation?.number ?? "—"}</td>
+                                    <td className="text-sm text-surface-500 tabular-nums">{inv.quotation?.number ?? "—"}</td>
                                     <td className="text-right tabular-nums">{money(inv.amount, inv.currency_code)}</td>
                                     <td>{inv.order ? <PaymentBadge status={inv.order.payment_status} /> : "—"}</td>
                                     <td className="text-sm">{inv.served_by ?? "—"}</td>
@@ -124,7 +124,7 @@ export default function InvoicesPage() {
 
             {data && data.last_page > 1 && (
                 <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted">{data.from ?? 0}–{data.to ?? 0} of {data.total}</span>
+                    <span className="text-surface-500">{data.from ?? 0}–{data.to ?? 0} of {data.total}</span>
                     <div className="flex gap-2">
                         <button className="btn-secondary btn-sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Prev</button>
                         <button className="btn-secondary btn-sm" disabled={page >= data.last_page} onClick={() => setPage((p) => p + 1)}>Next</button>

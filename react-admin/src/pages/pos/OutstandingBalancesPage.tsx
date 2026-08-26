@@ -9,6 +9,8 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Fragment } from "react";
+import { groupRowsByDate } from "@/lib/dateGrouping";
 import { get } from "@/api/client";
 import { Spinner } from "@/components/ui/Spinner";
 
@@ -59,6 +61,21 @@ export default function OutstandingBalancesPage() {
     const lastPage = data?.last_page ?? 1;
     const totalOwed = rows.reduce((sum, r) => sum + r.balance, 0);
 
+    // Grouped by the day the sale was made — Today first, then Yesterday, then
+    // dated sections — with each day's outstanding total on the header, summed
+    // per currency (adding KES to USD would make a number that means nothing).
+    const groups = groupRowsByDate(rows, (r) => r.created_at ?? "");
+    const dayOwed = (items: BalanceRow[]) => {
+        const perCurrency = new Map<string, number>();
+        for (const r of items) {
+            const c = (r.currency_code || "KES").toUpperCase();
+            perCurrency.set(c, (perCurrency.get(c) ?? 0) + r.balance);
+        }
+        return [...perCurrency.entries()]
+            .map(([c, v]) => fmt(v, c))
+            .join(" + ");
+    };
+
     return (
         <div className="flex flex-col h-full min-w-0 overflow-hidden">
             {/* Header */}
@@ -103,7 +120,20 @@ export default function OutstandingBalancesPage() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-line">
-                                {rows.map((r) => (
+                                {groups.map((group) => (
+                                    <Fragment key={group.key}>
+                                        <tr className="bg-surface-50/90 border-t border-line">
+                                            <td colSpan={4} className="px-4 py-2 text-2xs font-semibold text-surface-500 uppercase tracking-wide">
+                                                {group.label}
+                                                <span className="ml-2 font-normal text-surface-400 normal-case tracking-normal">
+                                                    · {group.items.length} {group.items.length === 1 ? "order" : "orders"}
+                                                </span>
+                                            </td>
+                                            <td colSpan={3} className="px-4 py-2 text-right text-2xs font-semibold text-danger tabular-nums">
+                                                {dayOwed(group.items)} outstanding
+                                            </td>
+                                        </tr>
+                                        {group.items.map((r) => (
                                     <tr key={r.id} className="hover:bg-surface-50">
                                         <td className="px-4 py-2.5 font-medium text-surface-900">{r.order_number}</td>
                                         <td className="px-4 py-2.5 text-surface-600">
@@ -118,6 +148,8 @@ export default function OutstandingBalancesPage() {
                                         <td className="px-4 py-2.5 text-right font-semibold text-danger">{fmt(r.balance, r.currency_code)}</td>
                                         <td className="px-4 py-2.5 text-surface-500">{r.balance_due_date ?? "—"}</td>
                                     </tr>
+                                        ))}
+                                    </Fragment>
                                 ))}
                             </tbody>
                         </table>

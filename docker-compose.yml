@@ -259,38 +259,6 @@ services:
     # ── Next.js Public Frontend ───────────────────────────────────────────────────
     # NOTE: NEXT_PUBLIC_* vars are baked into the image at build time by CI.
     # They are NOT read at container runtime - do not set them here.
-    nextjs:
-        image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-nextjs:latest
-        container_name: bethany_nextjs
-        restart: unless-stopped
-        environment:
-            NODE_ENV: production
-            # Runtime-only vars (not prefixed NEXT_PUBLIC_) can go here if needed
-            NEXT_PUBLIC_PAYSTACK_KEY: ${PAYSTACK_PUBLIC_KEY:-}
-            NEXT_PUBLIC_FLUTTERWAVE_KEY: ${FLUTTERWAVE_PUBLIC_KEY:-}
-        ports:
-            - "127.0.0.1:${NEXTJS_PORT:-3011}:3000"
-        depends_on:
-            laravel:
-                condition: service_healthy
-        networks:
-            - bethany_network
-        healthcheck:
-            # 127.0.0.1, not localhost: busybox wget tries ::1 first and the
-            # Next.js server binds IPv4 only — connection refused forever.
-            test:
-                [
-                    "CMD",
-                    "wget",
-                    "--no-verbose",
-                    "--tries=1",
-                    "--spider",
-                    "http://127.0.0.1:3000/",
-                ]
-            interval: 30s
-            timeout: 10s
-            retries: 3
-            start_period: 30s
 
     # ── React Admin Dashboard ─────────────────────────────────────────────────────
     # NOTE: VITE_* vars are baked into the image at build time by CI.

@@ -267,7 +267,7 @@ Route::prefix('v1')->group(function () {
         // accessible to every role (admin, tailor, pos_clerk, etc.) because
         // all staff members can receive messages and notifications.
 
-        Route::prefix('admin')->middleware('throttle:admin-api')->group(function () {
+        Route::prefix('admin')->middleware(['throttle:admin-api', 'ensure.staff'])->group(function () {
 
             // sidebar-badges stays open to all staff: it drives the nav badge
             // counts for every role, and its figures are already partly
@@ -279,7 +279,10 @@ Route::prefix('v1')->group(function () {
                 ->middleware('permission:dashboard.view,sanctum');
 
             // ── In-App Notifications ─────────────────────────────────────────
-            Route::prefix('notifications')->group(function () {
+            // notifications.view is in every STAFF role's bundle; the one role
+            // without it (walkin_customer) is a customer account and has no
+            // business on the staff bell.
+            Route::middleware('permission:notifications.view,sanctum')->prefix('notifications')->group(function () {
                 Route::get('/',             [NotificationController::class, 'index']);
                 Route::get('/unread-count', [NotificationController::class, 'unreadCount']);
                 Route::post('/read-all',    [NotificationController::class, 'markAllRead']);
@@ -347,7 +350,7 @@ Route::prefix('v1')->group(function () {
         // whole block had no permission check at all, so e.g. a tailor or
         // pos_clerk could read customer churn-risk data and budget overruns,
         // and could trigger auto-reorder purchase orders.
-        Route::middleware(['auth:sanctum', 'throttle:admin-api'])->prefix('admin/intelligence')->group(function () {
+        Route::middleware(['auth:sanctum', 'throttle:admin-api', 'ensure.staff'])->prefix('admin/intelligence')->group(function () {
             Route::middleware('permission:inventory.view,sanctum')->group(function () {
                 Route::get('/reorder-suggestions',           [IntelligenceController::class, 'reorderSuggestions']);
                 Route::get('/material-shortages',            [IntelligenceController::class, 'materialShortages']);
@@ -379,7 +382,7 @@ Route::prefix('v1')->group(function () {
         // This means any permission can be granted/revoked per user independently
         // of their role — full flexibility without code changes.
 
-        Route::middleware(['auth:sanctum', 'throttle:admin-api'])->prefix('admin')->group(function () {
+        Route::middleware(['auth:sanctum', 'throttle:admin-api', 'ensure.staff'])->prefix('admin')->group(function () {
 
             // ── Profile — every authenticated staff member ───────────────────
             Route::prefix('profile')->group(function () {
@@ -426,7 +429,11 @@ Route::prefix('v1')->group(function () {
             // permanently force-delete soft-deleted records across every
             // model in the system. Added the role check that was always
             // intended here.
-            Route::middleware(['role:super_admin'])->prefix('trash')->group(function () {
+            // settings.manage ("Manage Recycle Bin") is the advertised control.
+            // Nobody but the super_admin wildcard holds it today, so behaviour
+            // is identical — but the toggle on the Roles screen now actually
+            // governs this, instead of a role name buried in a route file.
+            Route::middleware(['permission:settings.manage,sanctum'])->prefix('trash')->group(function () {
                 Route::get('/',                          [TrashController::class, 'summary']);
                 Route::get('/{model}',                   [TrashController::class, 'index']);
                 Route::post('/{model}/restore-all',      [TrashController::class, 'restoreAll']);
@@ -565,6 +572,8 @@ Route::prefix('v1')->group(function () {
                 // Must come before GET /{id} - otherwise Laravel matches
                 // "export" as the {id} parameter and routes to show() instead.
                 Route::get('/export',                    [OrderController::class, 'exportCsv']);
+                // Also before /{id} for the same reason as /export.
+                Route::get('/pending-queue',             [OrderController::class, 'pendingQueue']);
                 Route::get('/{id}',                      [OrderController::class, 'show']);
                 Route::get('/{id}/audit-log',            [OrderController::class, 'auditLog']);
                 Route::get('/{id}/invoice',              [OrderController::class, 'generateInvoice']);
@@ -1248,6 +1257,8 @@ Route::prefix('v1')->group(function () {
                 Route::get('/institutions',             [\App\Http\Controllers\Api\ExecutiveReportController::class, 'institutions']);
                 Route::get('/international',            [\App\Http\Controllers\Api\ExecutiveReportController::class, 'international']);
                 Route::get('/win-back',                 [\App\Http\Controllers\Api\ExecutiveReportController::class, 'winBack']);
+                Route::get('/order-pipeline',           [\App\Http\Controllers\Api\ExecutiveReportController::class, 'orderPipeline']);
+                Route::get('/second-purchase',          [\App\Http\Controllers\Api\ExecutiveReportController::class, 'secondPurchase']);
                 Route::post('/win-back/outreach',       [\App\Http\Controllers\Api\ExecutiveReportController::class, 'winBackOutreach']);
                 Route::get('/outreach-log',             [\App\Http\Controllers\Api\ExecutiveReportController::class, 'outreachLog']);
                 Route::get('/financial-intelligence',   [\App\Http\Controllers\Api\ExecutiveReportController::class, 'financialIntelligence']);
@@ -1434,7 +1445,7 @@ Route::prefix('v1')->group(function () {
         // permission check now enforces (rather than a second, redundant
         // role:super_admin check that made the permission unassignable to
         // anyone else even on purpose).
-        Route::middleware(['throttle:admin-api'])->prefix('admin')->group(function () {
+        Route::middleware(['throttle:admin-api', 'ensure.staff'])->prefix('admin')->group(function () {
 
             Route::middleware('permission:roles.view,sanctum')->prefix('roles')->group(function () {
                 Route::get('/',                  [RoleController::class, 'index']);
@@ -1594,7 +1605,12 @@ Route::prefix('v1')->group(function () {
 
         // ═══ TAILOR ROUTES ═══════════════════════════════════════════════════
 
-        Route::middleware(['role:tailor|admin|super_admin'])->prefix('tailor')->group(function () {
+        // Gated by the PERMISSION the Roles screen advertises, not a hard-coded
+        // role list. production.worker sat in the catalogue governing nothing
+        // while this list did the real work — so granting it to a custom role
+        // changed nothing, which is how permissions rot. admin keeps access via
+        // an explicit grant in the catalogue; super_admin via the wildcard.
+        Route::middleware(['permission:production.worker,sanctum'])->prefix('tailor')->group(function () {
             Route::get('/tasks',                  [ProductionController::class, 'myTasks']);
             Route::get('/tasks/{id}',             [ProductionController::class, 'taskDetails']);
             Route::get('/tasks/{id}/history',     [ProductionController::class, 'taskHistory']);

@@ -364,7 +364,7 @@ function NewTransferModal({
                                                                 ),
                                                             )
                                                         }
-                                                        className="text-surface-300 hover:text-danger"
+                                                        className="text-surface-500 hover:text-danger"
                                                         aria-label="Close"
                                                     >
                                                         <svg
@@ -666,7 +666,7 @@ function TransferDetailModal({
                             {transfer.from_outlet?.name}
                         </p>
                     </div>
-                    <div className="flex items-center justify-center text-surface-300">
+                    <div className="flex items-center justify-center text-surface-500">
                         <svg
                             className="w-6 h-6"
                             fill="none"
@@ -1101,7 +1101,7 @@ export default function StockTransfersPage() {
                                                     {t.from_outlet?.name}
                                                 </span>
                                                 <svg
-                                                    className="w-3.5 h-3.5 text-surface-300 shrink-0"
+                                                    className="w-3.5 h-3.5 text-surface-500 shrink-0"
                                                     fill="none"
                                                     viewBox="0 0 24 24"
                                                     stroke="currentColor"

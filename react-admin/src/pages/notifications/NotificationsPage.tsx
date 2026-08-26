@@ -173,7 +173,7 @@ function NotifRow({
                 )}
                 <button
                     onClick={e => { e.stopPropagation(); onDelete(n.id); }}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity text-surface-300 hover:text-danger p-1 rounded-lg hover:bg-danger-light"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity text-surface-500 hover:text-danger p-1 rounded-lg hover:bg-danger-light"
                     title="Dismiss"
                 >
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

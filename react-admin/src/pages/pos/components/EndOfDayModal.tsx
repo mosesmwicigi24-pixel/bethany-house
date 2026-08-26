@@ -140,7 +140,7 @@ export default function EndOfDayModal({ outletId, outletName, onClose }: Props) 
                                                             style={{ height: `${pct}%`, marginTop: `${100 - pct}%` }}
                                                         />
                                                     </div>
-                                                    <span className="text-2xs text-surface-300">{h.hour}</span>
+                                                    <span className="text-2xs text-surface-500">{h.hour}</span>
                                                 </div>
                                             );
                                         })}

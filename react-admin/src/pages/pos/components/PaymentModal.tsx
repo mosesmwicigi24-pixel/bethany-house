@@ -1206,7 +1206,7 @@ aria-label="Close">
                                                 </div>
                                                 <span className="text-sm font-bold text-surface-900">{currency} {fmtAmt(p.amount)}</span>
                                                 <button onClick={() => removePayment(p.id)}
-                                                    className="w-5 h-5 rounded-full flex items-center justify-center text-surface-300 hover:text-danger hover:bg-danger-light transition-all"
+                                                    className="w-5 h-5 rounded-full flex items-center justify-center text-surface-500 hover:text-danger hover:bg-danger-light transition-all"
                                                     aria-label="Close">
                                                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
                                                 </button>
@@ -1257,7 +1257,7 @@ aria-label="Close">
                                             {methodIcon(m)}
                                             <span className="text-2xs font-semibold truncate max-w-full px-1">{m.name}</span>
                                             {m.is_default && !isSelected && (
-                                                <span className="text-2xs text-surface-300">Default</span>
+                                                <span className="text-2xs text-surface-500">Default</span>
                                             )}
                                         </button>
                                     );

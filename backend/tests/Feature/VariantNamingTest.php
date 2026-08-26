@@ -144,8 +144,9 @@ class VariantNamingTest extends TestCase
 
     public function test_generator_auto_names_the_variant_server_side(): void
     {
-        DB::table('currencies')->insert([
-            'code' => 'KES', 'name' => 'Kenyan Shilling', 'symbol' => 'KSh',
+        DB::table('currencies')->updateOrInsert(
+            ['code' => 'KES'],
+            [ 'name' => 'Kenyan Shilling', 'symbol' => 'KSh',
             'created_at' => now(), 'updated_at' => now(),
         ]);
         $user = User::factory()->create();

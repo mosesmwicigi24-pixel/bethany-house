@@ -148,6 +148,9 @@ class QuotationService
                 'user_id'                  => $quotation->user_id,
                 'outlet_id'                => $quotation->outlet_id,
                 'order_type'               => 'online',
+                // Born from a quotation: this IS the sales desk. The legacy
+                // 'online' order_type above is kept for wire compatibility.
+                'sales_bucket'             => 'quoted',
                 'status'                   => 'pending',
                 'payment_status'           => 'pending',
                 'currency_code'            => $quotation->currency_code,

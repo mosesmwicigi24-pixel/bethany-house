@@ -75,9 +75,95 @@ class OrderController extends Controller
         }
     }
 
+    /**
+     * The pending-queue worklist: every order no human has confirmed and no
+     * money has touched — the limbo the recognition rule (correctly) keeps
+     * out of every financial report. Staff work it top-down; each row exits
+     * by exactly one of confirm / record-payment / cancel.
+     *
+     * Ordered by value x age (KES x sqrt(days+1)): a big order going stale
+     * outranks a bigger one placed this morning. Rate-less currencies get no
+     * KES value and sink to the bottom rather than being priced at a guess —
+     * the same listed-never-summed rule the reports follow.
+     */
+    public function pendingQueue(Request $request)
+    {
+        $kes = \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code');
+        // created_at is written Nairobi-local-naive while Postgres now() is
+        // UTC — bare now() understates every age by 3 hours (the same clock
+        // mismatch MetricEngine::TODAY_SQL exists for), so age against the
+        // clock the timestamps were written with.
+        $ageDays = "EXTRACT(epoch FROM ((now() AT TIME ZONE 'Africa/Nairobi') - orders.created_at)) / 86400.0";
+
+        $base = Order::query()
+            ->whereRaw("LOWER(orders.status) = 'pending'")
+            ->whereRaw("LOWER(COALESCE(orders.payment_status, '')) NOT IN ('paid', 'partial', 'deposit')");
+
+        $rows = (clone $base)
+            ->selectRaw(<<<SQL
+                orders.id, orders.order_number,
+                orders.customer_first_name, orders.customer_last_name,
+                orders.customer_phone, orders.customer_email,
+                orders.currency_code, orders.total_amount,
+                orders.created_at, orders.updated_at,
+                COALESCE(orders.sales_bucket, orders.order_type) AS source,
+                FLOOR({$ageDays}) AS days_pending,
+                ROUND(({$kes})::numeric, 2) AS kes_value,
+                (({$kes}) * sqrt({$ageDays} + 1.0)) AS priority,
+                -- Same normalize_phone the unique-customer count uses: two
+                -- pending orders from one number are usually one sale quoted
+                -- twice, and confirming both double-counts the pipeline.
+                -- Guard on the NORMALIZED value: the function returns NULL for
+                -- junk ("n/a", short strings), and PARTITION BY lumps all NULLs
+                -- into one group — junk must never flag junk as a duplicate.
+                CASE WHEN normalize_phone(orders.customer_phone) IS NULL THEN FALSE
+                     ELSE COUNT(*) OVER (PARTITION BY normalize_phone(orders.customer_phone)) > 1
+                END AS possible_duplicate
+                SQL)
+            ->orderByRaw('priority DESC NULLS LAST, orders.created_at ASC')
+            ->limit(500)
+            ->get();
+
+        $summary = (clone $base)
+            ->selectRaw(<<<SQL
+                COUNT(*) AS total_count,
+                ROUND(SUM({$kes})::numeric, 2) AS total_kes,
+                COUNT(*) FILTER (WHERE {$ageDays} < 7)                        AS fresh_count,
+                COUNT(*) FILTER (WHERE {$ageDays} >= 7 AND {$ageDays} < 30)   AS aging_count,
+                COUNT(*) FILTER (WHERE {$ageDays} >= 30)                      AS stale_count
+                SQL)
+            ->first();
+
+        // Currencies with no reporting rate are listed, never summed — the
+        // total above must only ever contain money we can actually convert.
+        $excluded = (clone $base)
+            ->whereRaw('NOT ' . \App\Support\ReportingCurrency::convertibleFilter('orders.currency_code'))
+            ->selectRaw('UPPER(orders.currency_code) AS code, COUNT(*) AS n, SUM(orders.total_amount) AS amount')
+            ->groupBy('code')
+            ->get();
+
+        return response()->json([
+            'summary' => [
+                'total_count' => (int) $summary->total_count,
+                'total_kes'   => (float) ($summary->total_kes ?? 0),
+                'fresh_count' => (int) $summary->fresh_count,
+                'aging_count' => (int) $summary->aging_count,
+                'stale_count' => (int) $summary->stale_count,
+                'excluded_currencies' => $excluded,
+            ],
+            'rows' => $rows,
+        ]);
+    }
+
     public function index(Request $request)
     {
-        $query = Order::with(['user', 'items', 'outlet', 'creator:id,first_name,last_name']);
+        $query = Order::with(['user', 'items', 'outlet', 'creator:id,first_name,last_name'])
+            // The Quoted Sales page shows which quotation an order was born
+            // from; one scalar sub-select beats N lookups from the client.
+            ->select('orders.*')
+            ->addSelect(['quotation_number' => \App\Models\Quotation::select('quote_number')
+                ->whereColumn('converted_order_id', 'orders.id')
+                ->limit(1)]);
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
@@ -544,6 +630,12 @@ class OrderController extends Controller
                 'order_number'             => $orderNumber,
                 'user_id'                  => $user->id,
                 'order_type'               => 'online',
+                // Staff raised this from the admin — it is sales-desk work
+                // (usually a quotation conversion), never a self-service web
+                // order. Historically these wore 'online' and sat on the
+                // Online Orders screen "Served by" someone, which is the
+                // conflation the buckets exist to end.
+                'sales_bucket'             => 'quoted',
                 'status'                   => 'pending',
                 'payment_status'           => 'pending',
                 'currency_code'            => $currency,
@@ -733,25 +825,34 @@ class OrderController extends Controller
             }
         }
 
-        // ── Guard: cannot confirm if not fully paid ──────────────────────────
-        // "confirmed" means payment is verified and the order is ready to fulfil.
-        // Staff should not manually set it if the order still has an outstanding balance.
+        // ── Confirming is a COMMERCIAL act, not a payment receipt ────────────
+        // This used to refuse to confirm an order that was not paid in full.
+        // That rule quietly broke the business it was meant to protect: a
+        // vestment ordered on a deposit, or a WhatsApp order agreed with a
+        // customer who pays on delivery, could never be confirmed — so it sat
+        // at 'pending' forever, looking to everyone like an abandoned cart. 85
+        // WhatsApp orders were in exactly that state.
+        //
+        // Confirmation now means what the word means: a human accepted the
+        // order. That is what makes it recognised income (see
+        // Order::RECOGNISED_STATUSES); any unpaid remainder is a receivable and
+        // shows as the order's balance, which is the accountant's answer, not a
+        // reason to pretend the sale did not happen.
+        //
+        // The money guards that genuinely protect the business are untouched:
+        // 'completed' still requires full payment, and nothing may advance past
+        // a payment awaiting approval.
         if ($newStatus === 'confirmed') {
+            // Intelligence #5 — auto-draft production orders for producible items.
+            // Still gated on full payment: confirming a sale is cheap to undo,
+            // but cutting cloth for an unpaid order is not.
             $totalPaid = $order->payments->where('status', 'paid')->sum('amount');
-            if ($totalPaid < $order->total_amount - 0.01) {
-                return response()->json([
-                    'message'     => 'Cannot confirm this order - it has not been fully paid.',
-                    'reason'      => 'unpaid_balance',
-                    'outstanding' => round($order->total_amount - $totalPaid, 2),
-                ], 422);
+            if ($totalPaid >= $order->total_amount - 0.01) {
+                try {
+                    $order->loadMissing('items');
+                    IntelligenceService::autoLinkOrderToProduction($order);
+                } catch (\Exception) {}
             }
-
-            // Intelligence #5 — auto-draft production orders for producible items
-            // Runs after payment is verified so production only starts for paid orders.
-            try {
-                $order->loadMissing('items');
-                IntelligenceService::autoLinkOrderToProduction($order);
-            } catch (\Exception) {}
         }
 
         // ── Guard: cannot complete if there are pending production orders ─────

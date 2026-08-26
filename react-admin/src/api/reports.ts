@@ -180,6 +180,21 @@ export const reportsApi = {
      * Period message volume comes from daily snapshots that collect from deploy
      * day onward (`message_volume.daily_since`); all-time totals are cumulative.
      */
+    /**
+     * Second-purchase engine: the first→second purchase funnel plus the
+     * worklist of recent one-time buyers. 86.5% of trailing-year revenue came
+     * from customers who bought once — this is the conversion that moves it.
+     */
+    secondPurchase: (params?: { outlet_id?: number; recent_days?: number }) =>
+        get<SecondPurchaseReport>(`${BASE}/second-purchase`, { params }),
+
+    /**
+     * The unconfirmed order queue. `sort` defaults to 'value' — staff working a
+     * backlog should spend their first hour on the largest recoverable money.
+     */
+    orderPipeline: (params?: { outlet_id?: number; sort?: "value" | "age"; limit?: number }) =>
+        get<OrderPipelineReport>(`${BASE}/order-pipeline`, { params }),
+
     salesNeema: (params: DateRangeParams) =>
         get<NeemaSalesReport>(`${BASE}/sales/neema`, { params }),
 
@@ -527,11 +542,108 @@ export interface LedgerFigures {
 export interface LedgerBucket {
     period: string;
     total: LedgerFigures;
-    by_channel: Record<"pos" | "online" | "whatsapp", LedgerFigures>;
+    by_channel: Record<"till" | "web" | "chat" | "quoted", LedgerFigures>;
 }
+// ── Second-purchase engine ────────────────────────────────────────────────────
+
+export interface SecondPurchaseCohort {
+    cohort: string;                 // "2026-07"
+    first_time_buyers: number;
+    returned_30: number; returned_60: number; returned_90: number;
+    rate_30_pct: number; rate_60_pct: number; rate_90_pct: number;
+    /** false = the cohort hasn't had this long yet; its rate is a floor, not a fact */
+    mature_30: boolean; mature_60: boolean; mature_90: boolean;
+}
+
+export interface SecondPurchaseWorklistRow {
+    name: string | null;
+    phone: string | null;
+    email: string | null;
+    order_id: number;
+    order_number: string;
+    total_amount: number;
+    currency_code: string;
+    total_kes: number | null;
+    days_since: number;
+}
+
+export interface SecondPurchaseReport {
+    summary: {
+        window_days: number;
+        first_time_buyers: number;
+        returned: number;
+        repeat_rate_pct: number;
+        median_days_to_second: number | null;
+        one_time_buyers: number;
+        avg_first_order_kes: number | null;
+        opportunity_10pct_kes: number | null;
+    };
+    cohorts: SecondPurchaseCohort[];
+    worklist: SecondPurchaseWorklistRow[];
+    /** One-time buyers in the window, whether or not they fit the row cap. */
+    worklist_total: number;
+    recent_days: number;
+}
+
+// ── Unconfirmed order queue ───────────────────────────────────────────────────
+// The work list behind the pipeline figure: carts nobody has confirmed. Aged,
+// because age is the signal that says whether a cart is a live lead or a number
+// that has been sitting in the order book pretending to be one.
+
+export interface PipelineOrder {
+    id: number;
+    order_number: string;
+    channel: string;
+    currency_code: string;
+    total_amount: number;
+    /** The same money stated in KES at the reporting rate (128/USD).
+        Null when the currency has no reporting rate — listed, not counted. */
+    total_kes: number | null;
+    item_count: number;
+    age_days: number;
+    created_at: string;
+    customer_name: string | null;
+    customer_phone: string | null;
+    customer_email: string | null;
+}
+
+export interface OrderPipelineReport {
+    summary: {
+        orders: number;
+        value: number;
+        excluded_non_kes_orders: number;
+        currency: string;
+    };
+    aging: { key: "fresh" | "recent" | "stale" | "dormant"; label: string; orders: number; value: number }[];
+    by_channel: { channel: "till" | "web" | "chat" | "quoted"; label: string; orders: number; value: number }[];
+    orders: PipelineOrder[];
+}
+
+/** The three stages of a confirmed order's life. Unconfirmed carts are not a
+    stage — they are pipeline, and never appear here. */
+export type OrderStage = "confirmed" | "processed" | "completed";
+
 export interface SalesLedger {
     period: { start: string; end: string; currency: string };
-    channels: (LedgerFigures & { channel: "pos" | "online" | "whatsapp"; label: string })[];
+    channels: (LedgerFigures & { channel: "till" | "web" | "chat" | "quoted"; label: string })[];
+    /** Per-channel split across the three stages. Stages sum to the channel total. */
+    by_stage: {
+        channel: "till" | "web" | "chat" | "quoted";
+        label: string;
+        stages: Record<OrderStage, LedgerFigures>;
+    }[];
+    /** Unconfirmed carts. Reportable, never income. */
+    pipeline: {
+        total: { orders: number; sales: number };
+        by_channel: Record<"till" | "web" | "chat" | "quoted", { orders: number; sales: number }>;
+    };
+    /** recognised + pipeline = gross. Bridges this report to older printouts. */
+    reconciliation: {
+        recognised_sales: number;
+        pipeline_sales: number;
+        gross_order_book: number;
+        note: string;
+    };
     daily: { date: string; orders: number; sales: number; paid: number; credit: number }[];
     weekly: LedgerBucket[];
     monthly: LedgerBucket[];

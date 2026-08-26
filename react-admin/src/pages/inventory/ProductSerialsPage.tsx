@@ -172,7 +172,7 @@ export default function ProductSerialsPage() {
                                                 )}
                                             </>
                                         ) : (
-                                            <span className="text-surface-300">—</span>
+                                            <span className="text-surface-500">—</span>
                                         )}
                                     </td>
                                     <td className="px-4 py-3 font-mono text-2xs text-surface-500">{s.production_order_number ?? "—"}</td>
@@ -194,7 +194,7 @@ export default function ProductSerialsPage() {
                                                 )}
                                             </>
                                         ) : (
-                                            <span className="text-surface-300">—</span>
+                                            <span className="text-surface-500">—</span>
                                         )}
                                     </td>
                                 </tr>

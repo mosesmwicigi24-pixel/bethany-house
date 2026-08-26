@@ -635,7 +635,7 @@ export default function ProfilePage() {
                             <p className="text-sm text-surface-800">{entry.description || actionLabel(entry.action)}</p>
                             <div className="flex items-center gap-2 mt-0.5">
                               <span className="text-xs text-surface-400">{timeAgo(entry.created_at)}</span>
-                              {entry.ip_address && <span className="text-xs text-surface-300 font-mono">{entry.ip_address}</span>}
+                              {entry.ip_address && <span className="text-xs text-surface-500 font-mono">{entry.ip_address}</span>}
                             </div>
                           </div>
                           <span className="badge badge-neutral text-2xs shrink-0">{actionLabel(entry.action)}</span>
