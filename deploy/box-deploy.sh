@@ -179,9 +179,27 @@ else
     echo "GITHUB_REPOSITORY=${REPO}" >> .env
 fi
 
+# Run the images we just VERIFIED, by digest-stable tag rather than :latest.
+#
+# Step 3 above checks that ${img}:${sha} exists and then this step used to pull
+# :latest — a different thing that only usually agrees. When it does not, the
+# box runs one commit while .deployed-sha records another, and because the next
+# tick sees the pointer already at main's sha it exits happy: the stack stays
+# wrong until somebody looks inside a container. Compose now reads IMAGE_TAG,
+# so what gets verified, pulled, migrated and started are all the same build.
+if grep -q '^IMAGE_TAG=' .env; then
+    sed -i "s|^IMAGE_TAG=.*|IMAGE_TAG=${sha}|" .env
+else
+    echo "IMAGE_TAG=${sha}" >> .env
+fi
+
 # Pull BEFORE touching running containers — a failed pull leaves the stack
-# exactly as it was.
-timeout 900 docker compose pull laravel react-admin
+# exactly as it was. Its exit status was previously ignored, so a failed pull
+# quietly deployed whatever was already on disk.
+if ! timeout 900 docker compose pull laravel react-admin; then
+    echo "$(ts) ***** PULL FAILED for ${sha} — .deployed-sha NOT advanced; will retry next tick. Containers were NOT recreated. *****"
+    exit 1
+fi
 
 # -T + </dev/null: without them `compose run` eats stdin and the script dies
 # here "successfully" (same guard as the old workflow).
