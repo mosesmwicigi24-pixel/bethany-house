@@ -2092,68 +2092,148 @@ function MeasurementsTab({
 // All currency price rows rendered together so the base row can hold refs to
 // the other rows' inputs and update them directly via DOM — zero re-renders,
 // zero focus loss.
+/**
+ * A currency's rate, or null when nobody has actually set one.
+ *
+ * currencies.exchange_rate DEFAULTs to 1.0, so a NON-base row still sitting at
+ * exactly 1.0 is an unconfigured row and not a peg — the same rule the server
+ * applies in CurrencyPricing and MetricEngine. It matters twice as much here:
+ * cascading through a 1.0 would fill USD with the shilling figure, which is
+ * precisely the mislabelled pricing the hub was just cleaned of.
+ */
+function configuredRate(currency: any, baseCurrency: any): number | null {
+    const rate = Number(currency?.exchange_rate ?? 0);
+    if (!(rate > 0)) return null;
+    if (currency?.code === baseCurrency?.code) return rate;
+
+    return Math.abs(rate - 1) < 1e-9 ? null : rate;
+}
+
+/**
+ * A money box that can be typed in AND written to.
+ *
+ * It has to be both, and that is the whole difficulty. `type="number"` blanks
+ * its own .value halfway through a decimal — "28000." reads as "" — so binding
+ * one straight to form state deletes the digits as they are typed. Uncontrolled
+ * dodges that but then never shows a value written by anything else, which is
+ * why the cascade below used to reach into sibling DOM nodes. So: hold the raw
+ * text locally, publish the parsed number upward, and adopt an incoming value
+ * only when this field is not the one being typed into.
+ *
+ * text + inputMode="decimal" rather than type="number": it keeps the value
+ * unsanitised so a half-typed decimal survives, and it is what raises the
+ * numeric keypad on a phone instead of a full QWERTY for a price.
+ */
+function MoneyInput({
+    value, onValue, onBlur, name, inputRef, placeholder, className,
+}: {
+    value: number | string | null | undefined;
+    onValue: (v: number | null) => void;
+    onBlur?: () => void;
+    name?: string;
+    inputRef?: (el: HTMLInputElement | null) => void;
+    placeholder?: string;
+    className?: string;
+}) {
+    const asText = (v: number | string | null | undefined) =>
+        v === null || v === undefined || v === "" ? "" : String(v);
+
+    const [text, setText] = useState(() => asText(value));
+    const typing = useRef(false);
+
+    useEffect(() => {
+        if (typing.current) return;   // never fight the person at the keyboard
+        const next = asText(value);
+        setText((prev) =>
+            (prev.trim() === "" && next.trim() === "") || Number(prev) === Number(next)
+                ? prev
+                : next,
+        );
+    }, [value]);
+
+    return (
+        <FieldInput
+            className={className ?? "input"}
+            type="text"
+            inputMode="decimal"
+            placeholder={placeholder}
+            name={name}
+            ref={inputRef}
+            value={text}
+            onFocus={() => { typing.current = true; }}
+            onBlur={() => { typing.current = false; onBlur?.(); }}
+            onChange={(e) => {
+                // digits and a single decimal point
+                const raw = e.target.value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1");
+                setText(raw);
+                onValue(raw === "" ? null : Number(raw));
+            }}
+        />
+    );
+}
+
 const PriceRows = React.memo(function PriceRows({
     fields,
     currencies,
     baseCurrency,
     control,
+    setValue,
     onRecalculate,
 }: {
     fields: any[];
     currencies: any[];
     baseCurrency: any;
     control: any;
+    setValue: (name: any, value: any, opts?: any) => void;
     onRecalculate: (i: number) => void;
 }) {
-    // Refs to every non-base regular_price and sale_price input DOM node
-    // keyed by field index so the base onChange can update them directly.
-    const regularRefs = useRef<Record<number, HTMLInputElement | null>>({});
-    const saleRefs    = useRef<Record<number, HTMLInputElement | null>>({});
+    const baseRate = Number(baseCurrency?.exchange_rate ?? 1);
 
-    const baseRate = (baseCurrency?.exchange_rate ?? 1) as number;
+    // Typing a price in the default currency fills in every other currency.
+    //
+    // This used to hold refs to the sibling <input> nodes, set .value on them
+    // and dispatch a synthetic "input" event to tell react-hook-form. It was
+    // keyed by the CURRENCIES index while the refs were stored by the FIELDS
+    // index, so the moment those two arrays disagreed it wrote into the wrong
+    // box or nothing at all — and because the inputs were uncontrolled, form
+    // state and what you could see were free to drift apart anyway. Ask the
+    // form to change instead of reaching around it: setValue is the mechanism
+    // that exists for this, and the inputs below are controlled, so the value
+    // it writes is the value on screen and the value that saves.
+    const cascade = useCallback((field: "regular_price" | "sale_price", amount: number | null) => {
+        const blank = amount === null || !Number.isFinite(amount);
 
-    const handleBaseRegularChange = useCallback((e: React.ChangeEvent<HTMLInputElement>, baseFieldOnChange: (v: any) => void) => {
-        const baseAmount = Number(e.target.value) || 0;
-        baseFieldOnChange(baseAmount);
-        if (baseRate <= 0) return;
-        currencies.forEach((cur: any, j: number) => {
-            if (cur.code === baseCurrency?.code) return;
-            const oRate = (cur.exchange_rate ?? 1) as number;
-            if (oRate <= 0) return;
-            const converted = Math.round((baseAmount / baseRate) * oRate * 100) / 100;
-            const el = regularRefs.current[j];
-            if (el) {
-                el.value = converted ? String(converted) : "";
-                // Notify react-hook-form without triggering a re-render
-                el.dispatchEvent(new Event("input", { bubbles: true }));
-            }
+        fields.forEach((f: any, idx: number) => {
+            if (f.currency_code === baseCurrency?.code) return;
+
+            const rate = configuredRate(
+                currencies.find((c: any) => c.code === f.currency_code),
+                baseCurrency,
+            );
+            // No rate to convert with: leave the field alone rather than copy
+            // the shilling figure into it under another currency's label.
+            if (rate === null || !(baseRate > 0)) return;
+
+            setValue(
+                `prices.${idx}.${field}`,
+                blank || amount === 0
+                    ? (field === "sale_price" ? null : 0)
+                    : Math.round(((amount as number) / baseRate) * rate * 100) / 100,
+                { shouldDirty: true },
+            );
         });
-    }, [currencies, baseCurrency, baseRate]);
-
-    const handleBaseSaleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>, baseFieldOnChange: (v: any) => void) => {
-        const baseAmount = Number(e.target.value) || 0;
-        baseFieldOnChange(baseAmount || null);
-        if (baseRate <= 0) return;
-        currencies.forEach((cur: any, j: number) => {
-            if (cur.code === baseCurrency?.code) return;
-            const oRate = (cur.exchange_rate ?? 1) as number;
-            if (oRate <= 0) return;
-            const el = saleRefs.current[j];
-            if (el) {
-                el.value = baseAmount ? String(Math.round((baseAmount / baseRate) * oRate * 100) / 100) : "";
-                el.dispatchEvent(new Event("input", { bubbles: true }));
-            }
-        });
-    }, [currencies, baseCurrency, baseRate]);
+    }, [fields, currencies, baseCurrency, baseRate, setValue]);
 
     return (
         <>
         {fields.map((field, i) => {
             const currency = currencies.find((c: any) => c.code === field.currency_code);
             const isBase   = field.currency_code === baseCurrency?.code;
-            const thisRate = ((currency as any)?.exchange_rate ?? 1) as number;
+            const rate     = configuredRate(currency, baseCurrency);
             const rateLabel = !isBase && baseCurrency
-                ? `Rate: 1 ${baseCurrency.code} = ${(thisRate / baseRate).toFixed(4)} ${field.currency_code}`
+                ? (rate === null
+                    ? `No ${field.currency_code} rate set — type this price yourself`
+                    : `Rate: 1 ${baseCurrency.code} = ${(rate / baseRate).toFixed(4)} ${field.currency_code}`)
                 : null;
 
             return (
@@ -2173,12 +2253,12 @@ const PriceRows = React.memo(function PriceRows({
                                 </span>
                             )}
                             {rateLabel && (
-                                <span className="text-2xs text-surface-400 bg-surface-100 px-2 py-0.5 rounded-full">
+                                <span className={`text-2xs px-2 py-0.5 rounded-full ${rate === null ? "text-amber-700 bg-amber-50" : "text-surface-400 bg-surface-100"}`}>
                                     {rateLabel}
                                 </span>
                             )}
                         </div>
-                        {!isBase && (
+                        {!isBase && rate !== null && (
                             <button type="button" className="text-2xs text-brand-500 hover:text-brand-700 hover:underline" onClick={() => onRecalculate(i)}>
                                 ↺ Recalculate from {baseCurrency?.code}
                             </button>
@@ -2188,18 +2268,13 @@ const PriceRows = React.memo(function PriceRows({
                         <Field label="Regular Price" required>
                             <Controller control={control} name={`prices.${i}.regular_price`}
                                 render={({ field: f }) => (
-                                    <FieldInput className="input" type="number" step="0.01" min="0"
-                                        name={f.name}
-                                        ref={(el: HTMLInputElement | null) => {
-                                            f.ref(el);
-                                            if (!isBase) regularRefs.current[i] = el;
+                                    <MoneyInput
+                                        name={f.name} inputRef={f.ref} onBlur={f.onBlur}
+                                        value={f.value}
+                                        onValue={(v) => {
+                                            f.onChange(v ?? 0);
+                                            if (isBase) cascade("regular_price", v);
                                         }}
-                                        defaultValue={f.value ?? ""}
-                                        onBlur={f.onBlur}
-                                        onChange={isBase
-                                            ? (e: React.ChangeEvent<HTMLInputElement>) => handleBaseRegularChange(e, f.onChange)
-                                            : (e: React.ChangeEvent<HTMLInputElement>) => f.onChange(Number(e.target.value) || 0)
-                                        }
                                     />
                                 )}
                             />
@@ -2207,18 +2282,13 @@ const PriceRows = React.memo(function PriceRows({
                         <Field label="Sale Price">
                             <Controller control={control} name={`prices.${i}.sale_price`}
                                 render={({ field: f }) => (
-                                    <FieldInput className="input" type="number" step="0.01" min="0" placeholder="-"
-                                        name={f.name}
-                                        ref={(el: HTMLInputElement | null) => {
-                                            f.ref(el);
-                                            if (!isBase) saleRefs.current[i] = el;
+                                    <MoneyInput
+                                        name={f.name} inputRef={f.ref} onBlur={f.onBlur} placeholder="-"
+                                        value={f.value}
+                                        onValue={(v) => {
+                                            f.onChange(v);
+                                            if (isBase) cascade("sale_price", v);
                                         }}
-                                        defaultValue={f.value ?? ""}
-                                        onBlur={f.onBlur}
-                                        onChange={isBase
-                                            ? (e: React.ChangeEvent<HTMLInputElement>) => handleBaseSaleChange(e, f.onChange)
-                                            : (e: React.ChangeEvent<HTMLInputElement>) => f.onChange(e.target.value ? Number(e.target.value) : null)
-                                        }
                                     />
                                 )}
                             />
@@ -2226,10 +2296,10 @@ const PriceRows = React.memo(function PriceRows({
                         <Field label="Cost Price">
                             <Controller control={control} name={`prices.${i}.cost_price`}
                                 render={({ field: f }) => (
-                                    <FieldInput className="input" type="number" step="0.01" min="0" placeholder="-"
-                                        name={f.name} ref={f.ref} defaultValue={f.value ?? ""}
-                                        onBlur={f.onBlur}
-                                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => f.onChange(e.target.value ? Number(e.target.value) : null)}
+                                    <MoneyInput
+                                        name={f.name} inputRef={f.ref} onBlur={f.onBlur} placeholder="-"
+                                        value={f.value}
+                                        onValue={f.onChange}
                                     />
                                 )}
                             />
@@ -2495,18 +2565,27 @@ export default function ProductFormPage() {
         [currencies],
     );
 
+    // targetIndex indexes the PRICES field array, not `currencies` — the two
+    // are built in the same order today, but reading one with the other's index
+    // is how this silently wrote into the wrong currency the day they differ.
     const handleRecalculate = useCallback(
         (targetIndex: number) => {
-            const baseIndex = currencies.findIndex((c: any) => c.is_base || c.is_default);
+            const prices    = getValues("prices") ?? [];
+            const baseIndex = prices.findIndex((p: any) => p.currency_code === baseCurrency?.code);
             if (baseIndex < 0) return;
-            const baseRate   = (baseCurrency?.exchange_rate ?? 1) as number;
-            const targetRate = (currencies[targetIndex]?.exchange_rate ?? 1) as number;
-            if (baseRate <= 0 || targetRate <= 0) return;
+
+            const baseRate = Number(baseCurrency?.exchange_rate ?? 1);
+            const target   = currencies.find((c: any) => c.code === prices[targetIndex]?.currency_code);
+            const rate     = configuredRate(target, baseCurrency);
+            if (rate === null || !(baseRate > 0)) return;
+
             const baseRegular = Number(getValues(`prices.${baseIndex}.regular_price`) ?? 0);
             const baseSale    = Number(getValues(`prices.${baseIndex}.sale_price`) ?? 0);
-            setValue(`prices.${targetIndex}.regular_price`, Math.round((baseRegular / baseRate) * targetRate * 100) / 100 as any);
+            const convert     = (v: number) => Math.round((v / baseRate) * rate * 100) / 100;
+
+            setValue(`prices.${targetIndex}.regular_price`, convert(baseRegular) as any, { shouldDirty: true });
             if (baseSale) {
-                setValue(`prices.${targetIndex}.sale_price`, Math.round((baseSale / baseRate) * targetRate * 100) / 100 as any);
+                setValue(`prices.${targetIndex}.sale_price`, convert(baseSale) as any, { shouldDirty: true });
             }
         },
         [currencies, baseCurrency, getValues, setValue],
@@ -3430,6 +3509,7 @@ export default function ProductFormPage() {
                                     currencies={currencies}
                                     baseCurrency={baseCurrency}
                                     control={control}
+                                    setValue={setValue}
                                     onRecalculate={handleRecalculate}
                                 />
                                 </div>
