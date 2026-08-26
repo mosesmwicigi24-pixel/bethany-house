@@ -64,13 +64,28 @@ class HtmlSanitizer
      *      than looser: the one thing that must never happen is unsanitised
      *      HTML reaching a manager's browser because a container was odd.
      */
-    private static function purify(string $raw): string
+    /**
+     * Is the real engine usable in this container?
+     *
+     * Public because the difference matters to callers. Degrading to plain text
+     * is right for a NEW value — the person is at the keyboard and the note is
+     * safe either way. It is wrong for rewriting rows written months ago, where
+     * the formatting cannot be typed back and the migration's down() restores
+     * nothing. The backfill asks first and stands down; the write path does not
+     * need to.
+     */
+    public static function engineAvailable(): bool
     {
         if (!app()->bound('purifier') && class_exists(\Mews\Purifier\PurifierServiceProvider::class)) {
             app()->register(\Mews\Purifier\PurifierServiceProvider::class);
         }
 
-        if (app()->bound('purifier')) {
+        return app()->bound('purifier');
+    }
+
+    private static function purify(string $raw): string
+    {
+        if (self::engineAvailable()) {
             return Purifier::clean($raw, self::SENTIMENTS_CONFIG);
         }
 

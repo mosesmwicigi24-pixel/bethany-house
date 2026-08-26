@@ -1,8 +1,7 @@
 <?php
 
-use App\Support\HtmlSanitizer;
 use Illuminate\Database\Migrations\Migration;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -27,17 +26,15 @@ return new class extends Migration
             return;
         }
 
-        DB::table('cash_register_eod_reports')
-            ->whereNotNull('sentiments')
-            ->where('sentiments', '!=', '')
-            ->orderBy('id')
-            ->chunkById(200, function ($rows) {
-                foreach ($rows as $row) {
-                    DB::table('cash_register_eod_reports')
-                        ->where('id', $row->id)
-                        ->update(['sentiments' => HtmlSanitizer::sentiments($row->sentiments)]);
-                }
-            });
+        // The work lives in eod:sanitize-sentiments so it can be run AGAIN. A
+        // migration gets one attempt — marked as run whether it did the work or
+        // stood down — and this one has a reason to stand down: it will not
+        // rewrite months-old notes with the plain-text fallback when the
+        // purifier package is missing from the container, because down()
+        // restores nothing and that formatting cannot be typed back. When that
+        // happens the command says so and stays available to re-run; the deploy
+        // is not held up either way, which is the whole point.
+        Artisan::call('eod:sanitize-sentiments');
     }
 
     public function down(): void
