@@ -24,6 +24,21 @@ if [ "$APP_ENV" = "production" ]; then
     php artisan config:clear
     php artisan cache:clear
 
+    # ─── Re-discover packages INTO the volume ─────────────────────────────────
+    # bootstrap/cache is a named volume (laravel_bootstrap), so it shadows the
+    # package manifest the image built. The volume keeps whatever it held on the
+    # day it was created, which means a package added to composer.json later is
+    # present in vendor/ and absent from the container: mews/purifier landed in
+    # #335 and its migration died on "Target class [purifier] does not exist",
+    # stopping the deploy before any container was recreated.
+    #
+    # Discovery reads vendor/composer/installed.json — which IS from the image —
+    # and rewrites the manifest in the volume, so the two agree again on every
+    # boot rather than only on the day the volume was made. Non-fatal: a failure
+    # here must not be what stops a deploy, which is the whole complaint.
+    echo "==> Re-discovering packages (bootstrap/cache is a volume)..."
+    php artisan package:discover --ansi || echo "WARN: package:discover failed (non-fatal)"
+
     echo "==> Running database migrations..."
     php artisan migrate --force
 
