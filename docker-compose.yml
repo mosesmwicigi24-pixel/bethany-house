@@ -42,7 +42,7 @@ services:
 
     # ── Laravel API ───────────────────────────────────────────────────────────────
     laravel:
-        image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-laravel:latest
+        image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-laravel:${IMAGE_TAG:-latest}
         container_name: bethany_laravel
         restart: unless-stopped
         working_dir: /var/www
@@ -138,7 +138,7 @@ services:
 
     # ── Queue Worker ──────────────────────────────────────────────────────────────
     queue:
-        image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-laravel:latest
+        image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-laravel:${IMAGE_TAG:-latest}
         container_name: bethany_queue
         restart: unless-stopped
         working_dir: /var/www
@@ -209,7 +209,7 @@ services:
 
     # ── Scheduler (Cron) ──────────────────────────────────────────────────────────
     scheduler:
-        image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-laravel:latest
+        image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-laravel:${IMAGE_TAG:-latest}
         container_name: bethany_scheduler
         restart: unless-stopped
         working_dir: /var/www
@@ -264,7 +264,7 @@ services:
     # NOTE: VITE_* vars are baked into the image at build time by CI.
     # They are NOT read at container runtime - do not set them here.
     react-admin:
-        image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-react-admin:latest
+        image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-react-admin:${IMAGE_TAG:-latest}
         container_name: bethany_react_admin
         restart: unless-stopped
         ports:
@@ -290,7 +290,7 @@ services:
 
     # ── Reverb WebSocket Server ───────────────────────────────────────────────────
     reverb:
-        image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-laravel:latest
+        image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-laravel:${IMAGE_TAG:-latest}
         container_name: bethany_reverb
         restart: unless-stopped
         working_dir: /var/www

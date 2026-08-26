@@ -72,4 +72,60 @@ class EodSentimentsSanitisationTest extends TestCase
         $this->assertStringNotContainsStringIgnoringCase('<script', $after);
         $this->assertStringContainsString('<p>ok</p>', $after);
     }
+
+    /**
+     * The backfill now lives in a command so it can be run a second time — a
+     * migration gets one attempt, and this one stands down rather than flatten
+     * months-old notes when the purifier package is missing from the container.
+     */
+    public function test_the_backfill_command_is_re_runnable_and_reports_what_it_changed(): void
+    {
+        $id = $this->rowWithSentiments('<p>ok</p><script>alert(1)</script>');
+
+        $this->artisan('eod:sanitize-sentiments')
+            ->expectsOutputToContain('1 of 1 stored notes sanitised')
+            ->assertSuccessful();
+
+        $after = DB::table('cash_register_eod_reports')->where('id', $id)->value('sentiments');
+        $this->assertStringNotContainsStringIgnoringCase('<script', $after);
+
+        // Running it again changes nothing — clean HTML sanitises to itself.
+        $this->artisan('eod:sanitize-sentiments')
+            ->expectsOutputToContain('0 of 1 stored notes sanitised')
+            ->assertSuccessful();
+
+        $this->assertSame($after, DB::table('cash_register_eod_reports')->where('id', $id)->value('sentiments'));
+    }
+
+    public function test_a_dry_run_reports_without_writing(): void
+    {
+        $id  = $this->rowWithSentiments('<p>ok</p><script>alert(1)</script>');
+        $raw = DB::table('cash_register_eod_reports')->where('id', $id)->value('sentiments');
+
+        $this->artisan('eod:sanitize-sentiments --dry-run')
+            ->expectsOutputToContain('would change')
+            ->assertSuccessful();
+
+        $this->assertSame($raw, DB::table('cash_register_eod_reports')->where('id', $id)->value('sentiments'));
+    }
+
+    /** A row stored the old way — raw — inserted directly to bypass the write path. */
+    private function rowWithSentiments(string $raw): int
+    {
+        $outlet     = Outlet::factory()->create();
+        $user       = User::factory()->create();
+        $registerId = DB::table('cash_registers')->insertGetId([
+            'register_number' => 'REG-' . $user->id, 'outlet_id' => $outlet->id,
+            'register_name' => 'Till 1', 'status' => 'closed',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        return DB::table('cash_register_eod_reports')->insertGetId([
+            'register_id' => $registerId, 'user_id' => $user->id, 'outlet_id' => $outlet->id,
+            'report_date' => today()->toDateString(),
+            'order_notes' => json_encode([]),
+            'sentiments'  => $raw,
+            'submitted_at' => now(), 'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
 }
