@@ -31,13 +31,17 @@ const baseUserSchema = z.object({
     email: z.string().email("Enter a valid email"),
     phone: z.string(),
     status: z.enum(["active", "inactive"]),
-    role_ids: z.array(z.number()).min(1, "Assign at least one role"),
+    // Zero roles is a legal save (owner, 2026-08-27): an inactive staff
+    // member needs no role, and unselect-all must save. Creation still
+    // requires one — see createSchema.
+    role_ids: z.array(z.number()),
     outlet_id: z.number().nullable(),
     must_setup_2fa: z.boolean(),
 });
 
 const createSchema = baseUserSchema
     .extend({
+        role_ids: z.array(z.number()).min(1, "Assign at least one role"),
         password: z.string().min(8, "Minimum 8 characters"),
         password_confirmation: z.string().min(1, "Please confirm the password"),
     })
@@ -98,14 +102,20 @@ interface RolePickerProps {
     roleIds: number[];
     onToggle: (id: number) => void;
     error?: string;
+    required?: boolean;
 }
 
-function RolePicker({ roles, roleIds, onToggle, error }: RolePickerProps) {
+function RolePicker({ roles, roleIds, onToggle, error, required = false }: RolePickerProps) {
     return (
         <div className="border-t border-line pt-4">
             <p className="label mb-2">
-                Roles <span className="text-danger">*</span>
+                Roles {required && <span className="text-danger">*</span>}
                 {error && <span className="field-error ml-2">{error}</span>}
+                {!required && roleIds.length === 0 && (
+                    <span className="text-surface-400 text-xs ml-2 font-normal">
+                        No roles — this user will have no access until roles are assigned.
+                    </span>
+                )}
             </p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {roles
@@ -705,6 +715,7 @@ export default function UsersPage() {
                         roles={roles}
                         roleIds={createForm.watch("role_ids")}
                         onToggle={toggleCreateRole}
+                        required
                         error={
                             createForm.formState.errors.role_ids
                                 ?.message as string

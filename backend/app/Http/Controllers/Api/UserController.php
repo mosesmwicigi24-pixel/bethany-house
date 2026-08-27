@@ -129,12 +129,12 @@ class UserController extends Controller
         $recentActivity = [];
         try {
             $recentActivity = DB::table('activity_log')
-                ->where('user_id', $user->id)
+                ->where('causer_id', $user->id)
                 ->orderBy('created_at', 'desc')
                 ->limit(10)
                 ->get();
-        } catch (\Exception) {
-            // activity_log table not yet migrated - ignore
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::warning('activity_log read failed', ['error' => $e->getMessage()]);
         }
 
         return response()->json([
@@ -250,6 +250,37 @@ class UserController extends Controller
             'password'             => 'sometimes|string|min:8',
             'password_confirmation'=> 'required_with:password|same:password',
         ]);
+
+        // ── Lockout guards ────────────────────────────────────────────────────
+        // Zero roles is now a legal save (owner, 2026-08-27: deactivating staff
+        // must not force a role, and unselect-all must save). What must stay
+        // impossible is administering the business into a locked room: the
+        // legacy updateRole() endpoint always guarded self-super_admin removal,
+        // and this path gets the same guard plus the last-super_admin class.
+        $isSuperAdmin = $user->roles()->where('name', 'super_admin')->exists();
+        if ($isSuperAdmin) {
+            $stripsSuper = isset($validated['role_ids']) && !DB::table('roles')
+                ->whereIn('id', array_map('intval', $validated['role_ids']))
+                ->where('name', 'super_admin')->exists();
+            $deactivates = isset($validated['status']) && $validated['status'] !== 'active';
+
+            if ($stripsSuper && $user->id === $request->user()->id) {
+                return response()->json([
+                    'message' => 'You cannot remove your own Super Admin role.',
+                ], 422);
+            }
+            if ($stripsSuper || $deactivates) {
+                $anotherActiveSuper = User::where('id', '!=', $user->id)
+                    ->where('status', 'active')
+                    ->whereHas('roles', fn ($q) => $q->where('name', 'super_admin'))
+                    ->exists();
+                if (!$anotherActiveSuper) {
+                    return response()->json([
+                        'message' => 'This is the last active Super Admin — removing the role or deactivating them would lock everyone out.',
+                    ], 422);
+                }
+            }
+        }
 
         DB::beginTransaction();
         try {
@@ -727,14 +758,18 @@ class UserController extends Controller
     {
         try {
             DB::table('activity_log')->insert([
-                'user_id'     => $request->user()->id,
+                'causer_type' => \App\Models\User::class,
+                'causer_id'   => $request->user()->id,
                 'action'      => $action,
                 'description' => $description,
                 'ip_address'  => $request->ip(),
                 'created_at'  => now(),
             ]);
-        } catch (\Exception) {
-            // activity_log table not yet migrated - ignore silently
+        } catch (\Exception $e) {
+            // Non-fatal by design — but never silent again: the old empty
+            // catch hid a wrong column name (user_id vs causer_id) for months
+            // and the audit trail was dead without anyone knowing.
+            \Illuminate\Support\Facades\Log::warning('activity_log write failed', ['error' => $e->getMessage()]);
         }
     }
 
