@@ -98,8 +98,12 @@ class RolelessUserSaveTest extends TestCase
         $me   = $this->admin();
         $last = User::factory()->create(['status' => 'active']);
         $last->assignRole(Role::findOrCreate('super_admin', 'sanctum'));
-        // Deactivate myself out of the pool so $last is the only ACTIVE one.
-        $me->update(['status' => 'inactive']);
+        // Make $last genuinely the last ACTIVE super admin. That includes
+        // the owner account a migration seeds into every fresh database
+        // (make_owner_super_admin) — the guard correctly counted it.
+        User::where('id', '!=', $last->id)
+            ->whereHas('roles', fn ($q) => $q->where('name', 'super_admin'))
+            ->update(['status' => 'inactive']);
 
         $this->actingAs($me, 'sanctum')
             ->putJson("/api/v1/admin/users/{$last->id}", ['role_ids' => []])
@@ -113,7 +117,9 @@ class RolelessUserSaveTest extends TestCase
         $me   = $this->admin();
         $last = User::factory()->create(['status' => 'active']);
         $last->assignRole(Role::findOrCreate('super_admin', 'sanctum'));
-        $me->update(['status' => 'inactive']);
+        User::where('id', '!=', $last->id)
+            ->whereHas('roles', fn ($q) => $q->where('name', 'super_admin'))
+            ->update(['status' => 'inactive']);
 
         $this->actingAs($me, 'sanctum')
             ->putJson("/api/v1/admin/users/{$last->id}", ['status' => 'inactive'])
