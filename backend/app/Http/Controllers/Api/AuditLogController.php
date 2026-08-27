@@ -94,7 +94,8 @@ class AuditLogController extends Controller
 
             // Log the clear action itself
             DB::table('activity_log')->insert([
-                'user_id'     => $request->user()->id,
+                'causer_type' => \App\Models\User::class,
+                'causer_id'   => $request->user()->id,
                 'action'      => 'logs_cleared',
                 'description' => "Cleared {$deleted} log entries older than {$validated['days']} days",
                 'ip_address'  => $request->ip(),

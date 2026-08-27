@@ -522,14 +522,15 @@ class SettingController extends Controller
     {
         try {
             DB::table('activity_log')->insert([
-                'user_id'     => $request->user()->id,
+                'causer_type' => \App\Models\User::class,
+                'causer_id'   => $request->user()->id,
                 'action'      => $action,
                 'description' => $description,
                 'ip_address'  => $request->ip(),
                 'created_at'  => now(),
             ]);
-        } catch (\Exception) {
-            // activity_log table not yet migrated - ignore
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::warning('activity_log write failed', ['error' => $e->getMessage()]);
         }
     }
 }

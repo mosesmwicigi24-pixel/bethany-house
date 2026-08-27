@@ -129,12 +129,12 @@ class UserController extends Controller
         $recentActivity = [];
         try {
             $recentActivity = DB::table('activity_log')
-                ->where('user_id', $user->id)
+                ->where('causer_id', $user->id)
                 ->orderBy('created_at', 'desc')
                 ->limit(10)
                 ->get();
-        } catch (\Exception) {
-            // activity_log table not yet migrated - ignore
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::warning('activity_log read failed', ['error' => $e->getMessage()]);
         }
 
         return response()->json([
@@ -758,14 +758,18 @@ class UserController extends Controller
     {
         try {
             DB::table('activity_log')->insert([
-                'user_id'     => $request->user()->id,
+                'causer_type' => \App\Models\User::class,
+                'causer_id'   => $request->user()->id,
                 'action'      => $action,
                 'description' => $description,
                 'ip_address'  => $request->ip(),
                 'created_at'  => now(),
             ]);
-        } catch (\Exception) {
-            // activity_log table not yet migrated - ignore silently
+        } catch (\Exception $e) {
+            // Non-fatal by design — but never silent again: the old empty
+            // catch hid a wrong column name (user_id vs causer_id) for months
+            // and the audit trail was dead without anyone knowing.
+            \Illuminate\Support\Facades\Log::warning('activity_log write failed', ['error' => $e->getMessage()]);
         }
     }
 

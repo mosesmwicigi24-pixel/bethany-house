@@ -40,6 +40,16 @@ class RolelessUserSaveTest extends TestCase
 
         $this->assertSame(0, $staff->fresh()->roles()->count(),
             'unselect-all must actually clear the roles');
+
+        // The audit write must actually LAND. It never had before this
+        // change: four controllers inserted a user_id column the table does
+        // not have, a silent catch ate the error, and production carried
+        // 2,534 audit rows with ZERO from any of them.
+        $this->assertTrue(
+            \Illuminate\Support\Facades\DB::table('activity_log')
+                ->where('action', 'user_updated')->where('causer_id', '>', 0)->exists(),
+            'the user_updated audit row must be written'
+        );
     }
 
     public function test_deactivating_without_touching_roles_works(): void

@@ -246,7 +246,8 @@ class ProfileController extends Controller
     {
         try {
             DB::table('activity_log')->insert([
-                'user_id'     => $request->user()->id,
+                'causer_type' => \App\Models\User::class,
+                'causer_id'   => $request->user()->id,
                 'action'      => $action,
                 'description' => $description,
                 'ip_address'  => $request->ip(),
