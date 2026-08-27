@@ -251,6 +251,37 @@ class UserController extends Controller
             'password_confirmation'=> 'required_with:password|same:password',
         ]);
 
+        // ── Lockout guards ────────────────────────────────────────────────────
+        // Zero roles is now a legal save (owner, 2026-08-27: deactivating staff
+        // must not force a role, and unselect-all must save). What must stay
+        // impossible is administering the business into a locked room: the
+        // legacy updateRole() endpoint always guarded self-super_admin removal,
+        // and this path gets the same guard plus the last-super_admin class.
+        $isSuperAdmin = $user->roles()->where('name', 'super_admin')->exists();
+        if ($isSuperAdmin) {
+            $stripsSuper = isset($validated['role_ids']) && !DB::table('roles')
+                ->whereIn('id', array_map('intval', $validated['role_ids']))
+                ->where('name', 'super_admin')->exists();
+            $deactivates = isset($validated['status']) && $validated['status'] !== 'active';
+
+            if ($stripsSuper && $user->id === $request->user()->id) {
+                return response()->json([
+                    'message' => 'You cannot remove your own Super Admin role.',
+                ], 422);
+            }
+            if ($stripsSuper || $deactivates) {
+                $anotherActiveSuper = User::where('id', '!=', $user->id)
+                    ->where('status', 'active')
+                    ->whereHas('roles', fn ($q) => $q->where('name', 'super_admin'))
+                    ->exists();
+                if (!$anotherActiveSuper) {
+                    return response()->json([
+                        'message' => 'This is the last active Super Admin — removing the role or deactivating them would lock everyone out.',
+                    ], 422);
+                }
+            }
+        }
+
         DB::beginTransaction();
         try {
             // Update scalar fields
