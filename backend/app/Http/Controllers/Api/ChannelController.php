@@ -8,6 +8,7 @@ use App\Models\ChannelMessage;
 use App\Models\User;
 use App\Events\ChannelMessageSent;
 use App\Events\ChannelReactionUpdated;
+use App\Events\ChannelReadUpdated;
 use App\Services\NotificationService;
 use App\Services\IntelligenceService;
 use Illuminate\Http\Request;
@@ -245,10 +246,27 @@ class ChannelController extends Controller
 
         $messages = $query->get()->reverse()->values()->map(fn ($m) => $this->formatMessage($m));
 
+        // Every member's read pointer, for WhatsApp-style ticks. One row per
+        // member — a message is read by a member exactly when their pointer is
+        // ≥ its id, so the client derives per-message state from this alone.
+        $reads = DB::table('channel_members')
+            ->join('users', 'users.id', '=', 'channel_members.user_id')
+            ->where('channel_members.channel_id', $id)
+            ->get([
+                'users.id as user_id', 'users.first_name', 'users.last_name',
+                'channel_members.last_read_message_id',
+            ])
+            ->map(fn ($r) => [
+                'user_id'              => (int) $r->user_id,
+                'name'                 => trim("{$r->first_name} {$r->last_name}"),
+                'last_read_message_id' => $r->last_read_message_id ? (int) $r->last_read_message_id : null,
+            ]);
+
         return response()->json([
             'messages'   => $messages,
             'has_more'   => $messages->count() === $perPage,
             'oldest_id'  => $messages->first() ? $messages->first()['id'] : null,
+            'reads'      => $reads,
         ]);
     }
 
@@ -426,10 +444,27 @@ class ChannelController extends Controller
             ->orderByDesc('id')
             ->value('id');
 
-        DB::table('channel_members')
+        // Guarded UPDATE: only rows where the pointer actually moves forward.
+        // The affected-row count then doubles as the "did anything change?"
+        // signal, so reopening an already-read thread broadcasts nothing and
+        // a stale client can never drag another device's pointer backwards.
+        $advanced = $lastMessageId !== null && DB::table('channel_members')
             ->where('channel_id', $id)
             ->where('user_id', $request->user()->id)
-            ->update(['last_read_message_id' => $lastMessageId]);
+            ->where(fn ($q) => $q
+                ->whereNull('last_read_message_id')
+                ->orWhere('last_read_message_id', '<', $lastMessageId))
+            ->update(['last_read_message_id' => $lastMessageId]) > 0;
+
+        if ($advanced) {
+            // Live tick flip for everyone with the thread open. Same guard as
+            // the message broadcast: Reverb being down must not fail the read.
+            try {
+                broadcast(new ChannelReadUpdated((int) $id, $request->user()->id, (int) $lastMessageId));
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\Log::warning('Reverb read broadcast failed: ' . $e->getMessage());
+            }
+        }
 
         return response()->json(['message' => 'Marked as read.']);
     }

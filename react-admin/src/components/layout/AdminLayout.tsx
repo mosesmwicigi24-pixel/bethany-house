@@ -1,10 +1,14 @@
 import { Component, useState, useEffect, type ReactNode } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { BottomTabBar } from './BottomTabBar'
 import { PWAInstallBanner } from '@/components/pwa/PWAInstallBanner'
 import { CommandPalette } from '@/components/ui/CommandPalette'
+import { useAuthStore } from '@/store/auth.store'
+import { subscribeToUserChannel, getEcho } from '@/lib/echo'
+import { primeAudio, messageAlert } from '@/lib/alertSound'
 
 const COLLAPSE_KEY = 'bh_sidebar_collapsed'
 
@@ -126,6 +130,29 @@ function buildBreadcrumbs(pathname: string) {
 
 export function AdminLayout() {
     const location = useLocation()
+    const { user } = useAuthStore()
+    const qc = useQueryClient()
+
+    // ── Live message alerts ────────────────────────────────────────────────
+    // The backend broadcasts notification.pushed on user.{id} for every
+    // notification, chat messages included. While the app is open we ring
+    // and vibrate here (the device's own mechanisms, not a silent badge) and
+    // refresh the bell/sidebar counts without waiting for the 30s poll.
+    // When the app is closed, the service worker's Web Push handler takes
+    // over — the OS banner carries its own sound and vibration.
+    useEffect(() => {
+        primeAudio()
+        if (!user?.id) return
+        subscribeToUserChannel(user.id, data => {
+            qc.invalidateQueries({ queryKey: ['notif-count'] })
+            const d = (data as { data?: Record<string, unknown> }).data
+            if (d && 'channel_message_id' in d) {
+                messageAlert()
+                qc.invalidateQueries({ queryKey: ['channels'] })
+            }
+        })
+        return () => { getEcho().leave(`user.${user.id}`) }
+    }, [user?.id])
 
     // Desktop: collapsed state (persisted)
     const [collapsed, setCollapsed] = useState<boolean>(() => {

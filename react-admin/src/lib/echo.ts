@@ -115,6 +115,23 @@ export function subscribeToReaction(
         .listen(".reaction.updated", onReaction as (data: Record<string, unknown>) => void);
 }
 
+/**
+ * Subscribe to read-pointer updates on a channel.
+ *
+ * The backend broadcasts `read.updated` on the same private channel whenever
+ * a member's last_read_message_id advances. Payload:
+ *   { channel_id: number; user_id: number; last_read_message_id: number }
+ * One integer flips the ticks on every message that member has now read.
+ */
+export function subscribeToRead(
+    channelId: number,
+    onRead: (data: { channel_id: number; user_id: number; last_read_message_id: number }) => void,
+) {
+    return getEcho()
+        .private(`channel.${channelId}`)
+        .listen(".read.updated", onRead as (data: Record<string, unknown>) => void);
+}
+
 /** Join a presence channel for typing indicators and online status. */
 export function joinPresenceChannel(
     channelId: number,
