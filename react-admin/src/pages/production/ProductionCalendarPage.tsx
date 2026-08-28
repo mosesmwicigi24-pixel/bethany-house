@@ -47,6 +47,12 @@ interface UpcomingOrder {
     estimated_completion_date?: string | null;
     status: string;
     priority: "low" | "normal" | "high" | "urgent";
+    // Lean board fields — names and progress, never money.
+    product_name?: string | null;
+    quantity?: number | null;
+    customer_name?: string | null;
+    created_by_name?: string | null;
+    completion_percentage?: number | null;
 }
 
 interface ProductionOrder {
@@ -61,6 +67,8 @@ interface ProductionOrder {
     collection_date?: string | null;
     completion_percentage: number;
     customer_order_id?: number | null;
+    customer_name?: string | null;
+    created_by_name?: string | null;
 }
 
 type ViewMode = "month" | "week";
@@ -250,10 +258,14 @@ function UpcomingRow({ order, isSales }: { order: ProductionOrder; isSales: bool
         >
             <div className={clsx("w-2 h-2 rounded-full mt-1.5 shrink-0", STATUS_DOT[order.status] ?? "bg-surface-400")} />
             <div className="flex-1 min-w-0">
-                {!isSales && (
-                    <p className="text-xs font-semibold text-surface-900 font-mono">{order.order_number}</p>
-                )}
+                <p className="text-xs font-semibold text-surface-900 font-mono">{order.order_number}</p>
                 <p className={clsx("text-xs text-surface-600 truncate", isSales && "font-medium")}>{order.product_name}</p>
+                {(order.customer_name || order.created_by_name) && (
+                    <p className="text-2xs text-surface-500 truncate">
+                        {order.customer_name ?? "Stock"}
+                        {order.created_by_name ? ` · raised by ${order.created_by_name}` : ""}
+                    </p>
+                )}
                 <p className={clsx("text-2xs mt-0.5", overdue ? "text-danger font-semibold" : "text-surface-400")}>
                     {overdue
                         ? `Overdue by ${Math.abs(d)}d`
@@ -608,6 +620,38 @@ function DayPanel({
                                 {orders.length >= 3 && orders.length <= 4 && <p>⚠️ Moderate load - discuss with production before confirming this date.</p>}
                                 {orders.length >= 5 && <p>🚫 Workshop is heavily loaded - avoid promising this delivery date. Suggest a later date.</p>}
                             </div>
+                            {/* The day's jobs — order, product, whose it is and
+                                who raised it. Names and progress, no prices,
+                                and no click-through. */}
+                            {orders.length > 0 && (
+                                <div className="divide-y divide-line rounded-xl border border-line overflow-hidden">
+                                    {orders.map(o => (
+                                        <div key={o.id} className="px-4 py-3">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <span className="font-mono text-xs font-bold text-surface-900">{o.order_number}</span>
+                                                <span className={clsx("text-2xs px-2 py-0.5 rounded-full font-medium", STATUS_COLORS[o.status] ?? "bg-surface-100 text-surface-600")}>
+                                                    {o.status.replace("_", " ")}
+                                                </span>
+                                            </div>
+                                            {o.product_name && <p className="text-xs text-surface-600 mt-0.5 truncate">{o.product_name}</p>}
+                                            {(o.customer_name || o.created_by_name) && (
+                                                <p className="text-2xs text-surface-500 truncate">
+                                                    {o.customer_name ?? "Stock"}
+                                                    {o.created_by_name ? ` · raised by ${o.created_by_name}` : ""}
+                                                </p>
+                                            )}
+                                            {o.completion_percentage > 0 && (
+                                                <div className="mt-2 flex items-center gap-2">
+                                                    <div className="flex-1 h-1.5 bg-surface-100 rounded-full overflow-hidden">
+                                                        <div className="h-full bg-brand-400 rounded-full" style={{ width: `${o.completion_percentage}%` }} />
+                                                    </div>
+                                                    <span className="text-2xs text-surface-500 tabular-nums">{o.completion_percentage}%</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     ) : (
                         /* Full view - order list */
@@ -665,7 +709,14 @@ export default function ProductionCalendarPage() {
     // Determine which audience this user belongs to
     const canViewFull = can("production.view");
     const canRaiseOrder = can("production.raise_order");
-    const isSales = !canViewFull && canRaiseOrder;
+    // A coordinator RUNS the floor; a raiser only feeds it. The raiser — the
+    // till clerk — gets the sales calendar: the whole schedule from the lean
+    // schedule feed, none of the money, and no click-through into orders that
+    // are not hers. (Clerks hold production.view for their own-orders list,
+    // so the old !canViewFull test no longer identifies the sales view.)
+    const isCoordinator = can("production.manage_assignees") || can("production.confirm_order");
+    const isSales = canRaiseOrder && !isCoordinator;
+    const fullBoard = canViewFull && !isSales;
 
     const today = isoDate(new Date());
     const [viewMode, setViewMode] = useState<ViewMode>("month");
@@ -681,7 +732,7 @@ export default function ProductionCalendarPage() {
     // themselves so they see their own tasks immediately, but can switch to any user.
     const isWorker = !canViewFull && !canRaiseOrder && can("production.worker");
     const [selectedUserId, setSelectedUserId] = useState<"all" | "mine" | string>(
-        isWorker ? "mine" : currentUserId ? String(currentUserId) : "all"
+        isWorker ? "mine" : isSales ? "all" : currentUserId ? String(currentUserId) : "all"
     );
 
     // ── Data fetching ────────────────────────────────────────────────────────
@@ -705,7 +756,7 @@ export default function ProductionCalendarPage() {
                 sort_order: "asc",
             },
         }),
-        enabled: canViewFull && selectedUserId === "all",
+        enabled: fullBoard && selectedUserId === "all",
         staleTime: 2 * 60_000,
         refetchInterval: 5 * 60_000,
     });
@@ -717,7 +768,7 @@ export default function ProductionCalendarPage() {
         queryFn: () => get<{ data: ProductionUser[] }>("/v1/admin/users", {
             params: { per_page: "100", exclude_type: "customer" } as any,
         }),
-        enabled: canViewFull && canViewUsers,
+        enabled: fullBoard && canViewUsers,
         staleTime: 5 * 60_000,
         retry: false,
     });
@@ -741,7 +792,23 @@ export default function ProductionCalendarPage() {
     const userTasks: CalendarTask[] = Array.isArray(userTasksData) ? userTasksData : (userTasksData as any ?? []);
 
     const orders: ProductionOrder[] = ordersData?.data ?? [];
-    const isLoading = scheduleLoading || (canViewFull && ordersLoading) || userTasksLoading;
+
+    // Sales-mode board rows, built from the lean schedule feed. Negative ids:
+    // display rows, not navigable orders.
+    const scheduleOrders: ProductionOrder[] = useMemo(() =>
+        (scheduleData?.upcoming_orders ?? []).map((o, i) => ({
+            id: -(i + 1),
+            order_number: o.order_number,
+            product_name: o.product_name ?? "",
+            status: o.status,
+            priority: o.priority,
+            due_date: o.due_date,
+            estimated_completion_date: o.estimated_completion_date,
+            completion_percentage: o.completion_percentage ?? 0,
+            customer_name: o.customer_name ?? null,
+            created_by_name: o.created_by_name ?? null,
+        })), [scheduleData]);
+    const isLoading = scheduleLoading || (fullBoard && ordersLoading) || userTasksLoading;
 
     // ── Build ordersByDate map ───────────────────────────────────────────────
     // Three data sources depending on role + filter selection:
@@ -764,7 +831,7 @@ export default function ProductionCalendarPage() {
                     existing.push(taskToOrder(t));
                 }
             }
-        } else if (canViewFull) {
+        } else if (fullBoard) {
             for (const o of orders) {
                 const key = o.due_date?.slice(0, 10);
                 if (!key) continue;
@@ -772,30 +839,22 @@ export default function ProductionCalendarPage() {
                 map.get(key)!.push(o);
             }
         } else {
-            // Sales view — populate from schedule data
-            for (const o of scheduleData?.upcoming_orders ?? []) {
+            // Sales view — the whole floor from the lean schedule feed
+            for (const o of scheduleOrders) {
                 const key = o.due_date?.slice(0, 10);
                 if (!key) continue;
                 if (!map.has(key)) map.set(key, []);
-                map.get(key)!.push({
-                    id: 0,
-                    order_number: o.order_number,
-                    product_name: "",
-                    status: o.status,
-                    priority: o.priority,
-                    due_date: o.due_date,
-                    completion_percentage: 0,
-                } as ProductionOrder);
+                map.get(key)!.push(o);
             }
         }
         return map;
-    }, [orders, scheduleData, canViewFull, selectedUserId, userTasks]);
+    }, [orders, scheduleOrders, fullBoard, selectedUserId, userTasks]);
 
     // Customer appointments: fittings and collections, keyed by day. Full-view
     // only — the sales availability view has no business seeing order details.
     const appointmentsByDate = useMemo(() => {
         const map = new Map<string, { type: "fitting" | "collection"; order: ProductionOrder }[]>();
-        if (!canViewFull) return map;
+        if (!fullBoard) return map;
         for (const o of orders) {
             for (const [type, date] of [["fitting", o.fitting_date], ["collection", o.collection_date]] as const) {
                 const key = date?.slice(0, 10);
@@ -805,7 +864,7 @@ export default function ProductionCalendarPage() {
             }
         }
         return map;
-    }, [orders, canViewFull]);
+    }, [orders, fullBoard]);
 
     // ── Navigation ───────────────────────────────────────────────────────────
 
@@ -837,11 +896,10 @@ export default function ProductionCalendarPage() {
     // Upcoming orders for sidebar (next 14 days)
     const upcoming = useMemo(() => {
         const cutoff = isoDate(addDays(new Date(), 14));
-        if (!canViewFull && selectedUserId === "all") return [];
 
         const source: ProductionOrder[] = selectedUserId !== "all"
             ? userTasks.map(taskToOrder)
-            : orders;
+            : fullBoard ? orders : scheduleOrders;
 
         // De-duplicate by id when coming from tasks (multiple tasks per order)
         const seen = new Set<number>();
@@ -852,21 +910,20 @@ export default function ProductionCalendarPage() {
                 return o.due_date >= today && o.due_date <= cutoff;
             })
             .sort((a, b) => a.due_date.localeCompare(b.due_date));
-    }, [orders, userTasks, today, canViewFull, selectedUserId]);
+    }, [orders, scheduleOrders, userTasks, today, fullBoard, selectedUserId]);
 
     // ── Overdue count (full view) ────────────────────────────────────────────
     const overdueCount = useMemo(() => {
-        if (!canViewFull && selectedUserId === "all") return 0;
         const source = selectedUserId !== "all"
             ? userTasks.map(taskToOrder)
-            : orders;
+            : fullBoard ? orders : scheduleOrders;
         const seen = new Set<number>();
         return source.filter(o => {
             if (seen.has(o.id)) return false;
             seen.add(o.id);
             return o.due_date < today && !["completed","cancelled"].includes(o.status);
         }).length;
-    }, [orders, userTasks, today, canViewFull, selectedUserId]);
+    }, [orders, scheduleOrders, userTasks, today, fullBoard, selectedUserId]);
 
     const selectedOrders = selectedDay ? (ordersByDate.get(selectedDay) ?? []) : [];
 
@@ -913,7 +970,7 @@ export default function ProductionCalendarPage() {
                             isWorker             → static "My Tasks" pill
                         ──────────────────────────────────────────────────── */}
 
-                        {canViewFull && canViewUsers && (
+                        {fullBoard && canViewUsers && (
                             <div className="relative">
                                 <select
                                     value={selectedUserId}
@@ -953,8 +1010,8 @@ export default function ProductionCalendarPage() {
                             </div>
                         )}
 
-                        {/* Has production.view but NOT users.view — static name pill */}
-                        {canViewFull && !canViewUsers && currentUser && (
+                        {/* Has the full board but NOT users.view — static name pill */}
+                        {fullBoard && !canViewUsers && currentUser && (
                             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand-500 text-white text-xs font-semibold">
                                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/>

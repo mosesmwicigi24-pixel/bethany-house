@@ -135,7 +135,9 @@ const NAV: NavGroup[] = [
                 label: "Customers",
                 href: "/sales/customers",
                 icon: "customers",
-                permission: "customers.view",
+                // The DIRECTORY — addresses, credit, spend. A till clerk
+                // holds customers.view for the POS picker, not this page.
+                permission: "customers.insights",
             },
             {
                 label: "Balances",
@@ -206,9 +208,9 @@ const NAV: NavGroup[] = [
                 label: "Bill of Materials",
                 href: "/production/bom",
                 icon: "bom",
-                // Coordinators define BOMs; a worker sees the materials for
-                // THEIR job on the task itself.
-                anyOfPermissions: ["production.raise_order", "production.manage_assignees"],
+                // BOMs carry material costs. raise_order used to sit here,
+                // which handed the costing page to every till clerk.
+                permission: "production.view_bom",
             },
         ],
     },
@@ -311,7 +313,10 @@ const NAV: NavGroup[] = [
                 label: "Analytics",
                 href: "/expenses/analytics",
                 icon: "reports",
-                permission: "expenses.view",
+                // Spend analytics is management reporting: a clerk with
+                // expenses.view records her own costs, she doesn't chart
+                // the company's.
+                permission: "reports.view",
             },
         ],
     },

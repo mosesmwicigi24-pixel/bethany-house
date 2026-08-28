@@ -2,13 +2,31 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Restricted;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Expense extends Model
 {
-    use HasFactory, SoftDeletes;
+    use HasFactory, Restricted, SoftDeletes;
+
+    /**
+     * Rows follow the caller's data scope: a till clerk (role scope 'own')
+     * sees the expenses SHE recorded — list, detail, summary cards — while
+     * managers, finance and approvers (role scope 'all') keep the full book.
+     * created_by, not submitted_by: drafts have no submitter yet, and a
+     * clerk must be able to see her own draft.
+     */
+    public static function viewPermission(): string
+    {
+        return 'expenses.view';
+    }
+
+    public function ownerColumn(): string
+    {
+        return 'created_by';
+    }
 
     protected $fillable = [
         'reference_number',
@@ -71,8 +89,11 @@ class Expense extends Model
 
         static::creating(function ($expense) {
             if (empty($expense->reference_number)) {
+                // The day's sequence counts EVERYONE's expenses. Under a
+                // viewer-scoped session the plain query would count only the
+                // caller's rows and mint colliding reference numbers.
                 $expense->reference_number = 'EXP-' . date('Ymd') . '-'
-                    . str_pad(static::whereDate('created_at', today())->count() + 1, 4, '0', STR_PAD_LEFT);
+                    . str_pad(static::withoutViewerScope()->whereDate('created_at', today())->count() + 1, 4, '0', STR_PAD_LEFT);
             }
             if (empty($expense->status)) {
                 $expense->status = 'draft';

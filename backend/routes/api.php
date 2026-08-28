@@ -449,8 +449,17 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{id}',                           [ProductController::class, 'adminShow']);
                 Route::get('/{productId}/tax-rates',          [TaxRateController::class, 'productRates']);
                 Route::prefix('/{productId}/bom')->group(function () {
-                    Route::get('/',                    [BomController::class, 'index']);
-                    Route::get('/{bomId}',             [BomController::class, 'show']);
+                    // Cost-bearing reads (material unit costs, total BOM cost)
+                    // need their own gate: products.view reaches every till
+                    // clerk via the raise_order dependency, and a clerk has no
+                    // business seeing what a cassock costs to make.
+                    Route::get('/',                    [BomController::class, 'index'])
+                        ->middleware('permission:production.view_bom,sanctum');
+                    Route::get('/{bomId}',             [BomController::class, 'show'])
+                        ->middleware('permission:production.view_bom,sanctum');
+                    // Feasibility is "can we make N of this" — shortages, not
+                    // costs — and the raise-order flow needs it, so it stays on
+                    // products.view.
                     Route::get('/{bomId}/feasibility', [BomController::class, 'feasibility']);
                 });
 
@@ -694,10 +703,17 @@ Route::prefix('v1')->group(function () {
 
             // ── Customers ────────────────────────────────────────────────────
             Route::middleware('permission:customers.view,sanctum')->prefix('customers')->group(function () {
+                // customers.view is the PICKER: enough to find and attach a
+                // customer to a sale. The controller strips addresses, credit
+                // and balances from index/show for callers without insights.
                 Route::get('/',              [CustomerController::class, 'index']);
                 Route::get('/{id}',          [CustomerController::class, 'show']);
-                Route::get('/{id}/orders',   [CustomerController::class, 'customerOrders']);
-                Route::get('/{id}/statistics', [CustomerController::class, 'statistics']);
+                // Purchase history is the customer's financial profile —
+                // manager territory, not the till's. (A /{id}/statistics route
+                // used to sit here pointing at a method that never existed —
+                // a guaranteed 500 with no frontend caller — now removed.)
+                Route::get('/{id}/orders',   [CustomerController::class, 'customerOrders'])
+                    ->middleware('permission:customers.insights,sanctum');
 
                 Route::post('/',                      [CustomerController::class, 'store'])
                     ->middleware('permission:customers.create,sanctum');

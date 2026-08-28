@@ -30,7 +30,9 @@ class ProductionCustomerIdentityTest extends TestCase
     {
         $user = User::factory()->create();
         $user->assignRole(Role::findOrCreate('production_manager', 'sanctum'));
-        foreach (['production.view', 'production.raise_order'] as $p) {
+        // confirm_order is what makes this a floor coordinator: raising an
+        // order alone no longer grants reading the whole book.
+        foreach (['production.view', 'production.raise_order', 'production.confirm_order'] as $p) {
             $user->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();

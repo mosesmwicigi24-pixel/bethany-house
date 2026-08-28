@@ -10,6 +10,7 @@ import type {
     CustomerFilters,
 } from "@/api/customers";
 import { useToastStore } from "@/store/toast.store";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
 import { Modal } from "@/components/ui/Modal";
 import { Field, useFieldAriaProps, FieldInput, FieldSelect, FieldTextarea } from "@/components/setup/FormComponents";
@@ -329,6 +330,7 @@ function CustomerFormModal({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function CustomersPage() {
+    const { can } = usePermissions();
     const navigate = useNavigate();
     const toast = useToastStore();
     const qc = useQueryClient();
@@ -655,6 +657,7 @@ export default function CustomersPage() {
                                     button, never nested inside it — a button
                                     inside a button is invalid HTML and the
                                     inner one stops firing. 44px tap target. */}
+                                {can("customers.edit") && (
                                 <button
                                     onClick={() => setEditingCustomer(customer)}
                                     className="shrink-0 w-11 flex items-center justify-center text-surface-400 active:bg-surface-50 transition-colors"
@@ -675,6 +678,7 @@ export default function CustomersPage() {
                                         />
                                     </svg>
                                 </button>
+                                )}
                                 </div>
                             );
                         })}
@@ -842,6 +846,7 @@ export default function CustomersPage() {
                                                             </svg>
                                                         </button>
                                                     )}
+                                                    {can("customers.edit") && (
                                                     <button
                                                         onClick={() =>
                                                             setEditingCustomer(
@@ -866,6 +871,8 @@ export default function CustomersPage() {
                                                             />
                                                         </svg>
                                                     </button>
+                                                    )}
+                                                    {can("customers.edit") && (
                                                     <button
                                                         onClick={() =>
                                                             statusMutation.mutate(
@@ -909,6 +916,8 @@ export default function CustomersPage() {
                                                             )}
                                                         </svg>
                                                     </button>
+                                                    )}
+                                                    {can("customers.delete") && (
                                                     <button
                                                         onClick={() => {
                                                             if (
@@ -939,6 +948,7 @@ export default function CustomersPage() {
                                                             />
                                                         </svg>
                                                     </button>
+                                                    )}
                                                 </div>
                                             </td>
                                         </tr>

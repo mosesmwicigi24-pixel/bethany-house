@@ -5,6 +5,7 @@ import { clsx } from "clsx";
 import { customersApi } from "@/api/customers";
 import type { Customer } from "@/api/customers";
 import { useToastStore } from "@/store/toast.store";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
 import type { ApiError } from "@/types";
 
@@ -59,6 +60,7 @@ const ORDER_STATUS_COLORS: Record<string, string> = {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function CustomerDetailPage() {
+    const { can } = usePermissions();
     const { id }   = useParams<{ id: string }>();
     const navigate = useNavigate();
     const toast    = useToastStore();
@@ -78,7 +80,8 @@ export default function CustomerDetailPage() {
     const { data: ordersData } = useQuery({
         queryKey: ["customer-orders", id],
         queryFn:  () => customersApi.orders(Number(id)),
-        enabled:  !!id && activeTab === "orders",
+        // Purchase history is insights territory — the API 403s without it.
+        enabled:  !!id && activeTab === "orders" && can("customers.insights"),
     });
     const orders = ordersData?.data ?? [];
 

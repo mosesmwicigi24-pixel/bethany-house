@@ -94,6 +94,8 @@ class PermissionDependencyService
         'production.configure_auto_assignees' => ['production.view'],
         // Raising a made-to-order production order means picking a product.
         'production.raise_order' => ['production.view', 'products.view'],
+        // The BOM read routes are nested inside the products.view group.
+        'production.view_bom'    => ['products.view'],
 
         // ── Shipments ────────────────────────────────────────────────────── 
         'shipment.edit'            => ['shipment.view'],
@@ -108,6 +110,8 @@ class PermissionDependencyService
         'customers.delete'               => ['customers.view'],
         'customers.create_without_email' => ['customers.view'],
         'customers.invite'               => ['customers.view'],
+        // Insights (statistics, order history) render on the customer profile.
+        'customers.insights'             => ['customers.view'],
 
         // ── Procurement ──────────────────────────────────────────────────── 
         'procurement.approve' => ['procurement.view'],

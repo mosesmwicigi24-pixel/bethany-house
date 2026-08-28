@@ -2,9 +2,12 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\DataScope;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\SalesDocument;
+use App\Services\DataScopeResolver;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -16,11 +19,37 @@ use Illuminate\Http\Request;
  */
 class InvoiceController extends Controller
 {
+    /**
+     * Bound an invoice query to the caller's data scope.
+     *
+     * Scoped HERE, not with a global ViewerScope on SalesDocument: that model
+     * is also the document LEDGER — ReceiptService and the quotation lifecycle
+     * read it to derive the next document number, and a global scope under a
+     * narrow session would silently compute wrong sequences. The invoice
+     * SCREENS are the only reads that should follow the viewer, so only they
+     * do. Own-scope keys on created_by — the user shown as "served by".
+     */
+    private function scopeToViewer(Builder $query, Request $request): Builder
+    {
+        $scope = DataScopeResolver::for($request->user(), 'orders.view');
+
+        if ($scope !== DataScope::All) {
+            // Outlet scope collapses to Own here: sales_documents carries no
+            // outlet column. No outlet-scoped role holds orders.view today; if
+            // one ever does, this errs on showing less, never more.
+            $query->where('created_by', $request->user()->id);
+        }
+
+        return $query;
+    }
+
     public function index(Request $request): JsonResponse
     {
         $perPage = min((int) $request->integer('per_page', 25), 100);
 
-        $query = SalesDocument::where('type', SalesDocument::INVOICE)
+        $query = $this->scopeToViewer(
+            SalesDocument::query(), $request
+        )->where('type', SalesDocument::INVOICE)
             ->with([
                 // documentable is a morphTo, so the creator has to be loaded
                 // per type — Quotation has no such relation and a plain
@@ -49,9 +78,10 @@ class InvoiceController extends Controller
         return response()->json($docs);
     }
 
-    public function show(int $id): JsonResponse
+    public function show(int $id, Request $request): JsonResponse
     {
-        $doc = SalesDocument::where('type', SalesDocument::INVOICE)
+        $doc = $this->scopeToViewer(SalesDocument::query(), $request)
+            ->where('type', SalesDocument::INVOICE)
             ->with([
                 'documentable' => fn ($m) => $m->morphWith([
                     Order::class => ['items', 'creator:id,first_name,last_name'],

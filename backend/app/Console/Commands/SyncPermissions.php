@@ -75,6 +75,14 @@ class SyncPermissions extends Command
         // hold it. The feature was super-admin-only by accident rather than by
         // decision. Declared here so it can be granted deliberately.
         'production.delete_order'          => ['Delete Production Order',       'Permanently delete a production order that is past draft', 'Production'],
+        // BOM reads sit inside the products.view route group, which the
+        // dependency map hands to every till clerk (raise_order needs the
+        // product picker). Without this gate a cashier could open any
+        // product's bill of materials — unit costs, total cost, material
+        // stock — from the till login. Named production.* so admin's
+        // wildcard picks it up; granted below to the roles that genuinely
+        // cost garments: managers and procurement.
+        'production.view_bom'              => ['View Bill of Materials',        'View product BOMs including material unit costs',    'Production'],
 
         // ── Shipments ───────────────────────────────────────────────────────
         'shipment.view'            => ['View Shipments',           'View shipment records and tracking',         'Shipments'],
@@ -89,6 +97,12 @@ class SyncPermissions extends Command
         'customers.delete'                 => ['Delete Customers',             'Delete customer records',                    'Customers'],
         'customers.create_without_email'   => ['Create Walk-in Customers',     'Create customers without an email address',  'Customers'],
         'customers.invite'                 => ['Invite Customers to Portal',   'Send portal invitation emails to customers',  'Customers'],
+        // Splits the customer DIRECTORY from the customer PICKER. customers.view
+        // is what a till clerk needs to attach a walk-in to a sale: name, phone,
+        // email. This permission is everything beyond that — addresses, credit
+        // and balance figures, loyalty points, per-customer spend statistics and
+        // order history. Admin inherits via customers.*.
+        'customers.insights'               => ['View Customer Insights',       'Addresses, credit, spend statistics and order history on customer profiles', 'Customers'],
 
         // ── Procurement ─────────────────────────────────────────────────────
         'procurement.view'     => ['View Procurement',     'View purchase orders, suppliers and GRN',    'Procurement'],
@@ -319,9 +333,13 @@ class SyncPermissions extends Command
             'orders.edit', 'orders.manage_returns',
             'orders.set_shipping_fee', 'orders.set_deposit',
             'customers.edit',
+            // The full customer profile — addresses, credit, spend statistics.
+            // A manager chasing receivables needs the numbers a cashier doesn't.
+            'customers.insights',
             // Production - manage orders and QC but not system configuration
             'production.view', 'production.raise_order', 'production.confirm_order',
             'production.manage_assignees', 'production.submit_qc', 'production.approve_qc',
+            'production.view_bom',
             'shipment.view', 'shipment.create', 'shipment.manage_tracking',
             'products.view',
             'reports.view',
@@ -351,6 +369,11 @@ class SyncPermissions extends Command
             'quotations.view', 'quotations.create',
             // Can raise a made-to-order job at the till
             'production.raise_order',
+            // A clerk records the till's running costs — packaging, bags,
+            // airtime — and sees what THEY entered: the role's 'own' data
+            // scope narrows the expenses list and summary to their rows.
+            // Approval, budgets, export and the analytics page stay withheld.
+            'expenses.view', 'expenses.create',
         ],
 
         // Production worker workspace only.
@@ -362,6 +385,8 @@ class SyncPermissions extends Command
             '@self', '@workspace', '@buying', '@stock',
             // Catalogue - view to reference products when purchasing
             'products.view',
+            // Costing materials against product BOMs is procurement's job
+            'production.view_bom',
             // Payments - view transaction history for PO-related payments
             'payments.view',
             // Reports - procurement officers need spend reports
@@ -389,6 +414,7 @@ class SyncPermissions extends Command
         'procurement_manager' => [
             '@self', '@workspace', '@buying', '@stock',
             'products.view',
+            'production.view_bom',
             'payments.view',
             'reports.view', 'reports.export',
             'expenses.view',
