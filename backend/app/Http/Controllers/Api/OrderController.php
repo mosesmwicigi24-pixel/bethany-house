@@ -1536,22 +1536,10 @@ class OrderController extends Controller
             return response()->json(['message' => 'This order is already fully paid.'], 422);
         }
 
-        // Regenerate token if missing or expired
-        $needsToken = empty($order->payment_token)
-            || ($order->payment_token_expires_at && $order->payment_token_expires_at->isPast());
-
-        if ($needsToken) {
-            $tokenPayload = $order->order_number . $order->created_at->toISOString() . Str::random(8);
-            $token        = hash_hmac('sha256', $tokenPayload, config('app.key'));
-
-            $order->update([
-                'payment_token'            => $token,
-                'payment_token_expires_at' => now()->addHours(72),
-            ]);
-            $order->refresh();
-        }
-
-        $url = rtrim(config('app.frontend_url'), '/') . "/pay/{$order->payment_token}";
+        // ONE copy of the minting rule — the public order page re-arms its own
+        // checkout through the same service (App\Services\PaymentLinkService).
+        $session = \App\Services\PaymentLinkService::mint($order);
+        $url     = $session['url'];
 
         ActivityLogService::log('payment_link_generated', $order, [
             'order_number' => $order->order_number,

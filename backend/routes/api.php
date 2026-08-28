@@ -124,6 +124,16 @@ Route::prefix('v1')->group(function () {
         Route::post('/{token}/paystack-verify', [PublicPaymentController::class, 'verifyPaystack']);
     });
 
+    // ═══ PUBLIC ORDER PAGE (no auth) ═════════════════════════════════════════
+    // /order/{public_token} — the customer's own view of ONE order: the receipt
+    // when it is paid, the checkout when it is not. Keyed on the order's durable
+    // public_token, NEVER on an id or an order number (see PublicOrderController
+    // for why that distinction is the whole security model here).
+    Route::prefix('order')->middleware('throttle:60,1')->group(function () {
+        Route::get('/{token}',              [\App\Http\Controllers\Api\PublicOrderController::class, 'show']);
+        Route::post('/{token}/pay-session', [\App\Http\Controllers\Api\PublicOrderController::class, 'startPayment']);
+    });
+
     // ═══ PUBLIC QUOTATION LINK (no auth) ═════════════════════════════════════
     // Customer-facing quote page served at /quote/{token}.
     Route::prefix('quote')->middleware('throttle:60,1')->group(function () {

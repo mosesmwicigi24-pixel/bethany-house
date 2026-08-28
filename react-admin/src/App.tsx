@@ -153,6 +153,7 @@ const TailorWorkspacePage = lazy(
 );
 const TrackingPage = lazy(() => import("@/pages/tracking/TrackingPage"));
 const PaymentLinkPage = lazy(() => import("@/pages/PaymentLinkPage"));
+const OrderPage = lazy(() => import("@/pages/OrderPage"));
 const PublicQuotationPage = lazy(() => import("@/pages/PublicQuotationPage"));
 const NotificationsPage = lazy(
     () => import("@/pages/notifications/NotificationsPage"),
@@ -279,8 +280,9 @@ function PageLoader() {
 export default function App() {
     // Detect public pages before React Router initialises so we can render
     // a minimal router (basename="/") instead of the full admin app.
-    // Matches both /pay/... and /admin/pay/... (Nginx rewrite path).
-    const isPublicPage = /^\/(admin\/)?(pay|track)\//.test(window.location.pathname);
+    // Matches /pay/..., /track/..., /order/... and their /admin/ Nginx-rewrite twins.
+    // /order/{public_token} is the customer's durable receipt — public by design.
+    const isPublicPage = /^\/(admin\/)?(pay|track|order)\//.test(window.location.pathname);
 
     return (
         <QueryClientProvider client={queryClient}>
@@ -303,6 +305,24 @@ export default function App() {
                             element={
                                 <Suspense fallback={<PageLoader />}>
                                     <PublicQuotationPage />
+                                </Suspense>
+                            }
+                        />
+                        {/* The customer's own order: receipt when paid, checkout
+                            when not. Durable — unlike /pay/:token it never expires. */}
+                        <Route
+                            path="/order/:token"
+                            element={
+                                <Suspense fallback={<PageLoader />}>
+                                    <OrderPage />
+                                </Suspense>
+                            }
+                        />
+                        <Route
+                            path="/admin/order/:token"
+                            element={
+                                <Suspense fallback={<PageLoader />}>
+                                    <OrderPage />
                                 </Suspense>
                             }
                         />

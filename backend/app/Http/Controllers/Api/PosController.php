@@ -3488,6 +3488,11 @@ class PosController extends Controller
                 'deposit_amount'    => null,
                 'order'             => $this->transformSaleOrder($replay->load(['items', 'payments'])),
                 'production_orders' => [],
+                // REAL values on the replay path, not constants like the three
+                // fields above: a retried push must still hand back a working
+                // customer link, or the retry silently costs the buyer their receipt.
+                'public_token'      => $replay->public_token,
+                'public_url'        => \App\Services\PaymentLinkService::publicUrl($replay),
                 'replay'            => true,
             ], 200);
         }
@@ -3871,6 +3876,11 @@ class PosController extends Controller
                 'deposit_amount'    => $depositAmt,
                 'order'             => $this->transformSaleOrder($order->load(['items', 'payments'])),  // FIX 6
                 'production_orders' => $raisedProductionOrders,
+                // The durable customer-facing link. Neema stores this at push
+                // time and sends it to the buyer, so the link keeps working
+                // long after any 72-hour pay session has lapsed.
+                'public_token'      => $order->public_token,
+                'public_url'        => \App\Services\PaymentLinkService::publicUrl($order),
             ], 201);
 
         } catch (\Illuminate\Database\UniqueConstraintViolationException $e) {
