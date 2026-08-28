@@ -2171,9 +2171,26 @@ class ProductionController extends Controller
 
     public function schedule()
     {
-        $active = ProductionOrder::visibleTo(request()->user())
+        // The DELIVERY-PROMISE BOARD, and the one deliberate exception to
+        // per-viewer narrowing: a clerk promising a completion date needs to
+        // see the whole floor's workload — every active job, whose it is and
+        // who raised it — or she promises dates the workshop cannot keep.
+        // What makes that safe is what the board carries: schedule facts
+        // only. No prices, no costs, no contact details.
+        $active = ProductionOrder::query()
             ->whereIn('status', ['pending', 'in_progress', 'on_hold', 'qc_pending'])
-            ->with('tasks.stage')
+            ->with([
+                'tasks.stage',
+                'product:id,sku',
+                'product.translations' => fn ($q) => $q
+                    ->where('language_code', 'en')->select('product_id', 'name'),
+                'createdBy:id,first_name,last_name',
+                // Both customer routes, so the customer_label accessor
+                // resolves without N+1 (same loading as index).
+                'customer:id,first_name,last_name,phone',
+                'customerOrder:id,order_number,customer_id,customer_first_name,customer_last_name,customer_phone,customer_email',
+                'customerOrder.customer:id,first_name,last_name,phone',
+            ])
             ->orderBy('due_date')
             ->get();
 
@@ -2183,16 +2200,32 @@ class ProductionController extends Controller
             ->groupBy('production_stage_id')
             ->map(fn ($tasks) => $tasks->count());
 
+        // Every active order with a due date — including the overdue ones. A
+        // promise made while blind to the backlog is the worst promise.
         $upcoming = $active
-            ->where('due_date', '>=', now())
-            ->where('due_date', '<=', now()->addDays(14))
-            ->map(fn ($o) => [
-                'order_number'              => $o->order_number,
-                'due_date'                  => $o->due_date,
-                'estimated_completion_date' => $o->estimated_completion_date,
-                'status'                    => $o->status,
-                'priority'                  => $o->priority,
-            ]);
+            ->whereNotNull('due_date')
+            ->map(function ($o) {
+                $total = $o->tasks->count();
+                $done  = $o->tasks->where('status', 'completed')->count();
+
+                return [
+                    'order_number'              => $o->order_number,
+                    'due_date'                  => $o->due_date,
+                    'estimated_completion_date' => $o->estimated_completion_date,
+                    'status'                    => $o->status,
+                    'priority'                  => $o->priority,
+                    'product_name'              => $o->product?->translations?->first()?->name
+                                                    ?? $o->product?->sku,
+                    'quantity'                  => $o->quantity,
+                    'customer_name'             => $o->customer_label,
+                    'created_by_name'           => $o->createdBy
+                        ? trim("{$o->createdBy->first_name} {$o->createdBy->last_name}")
+                        : null,
+                    'completion_percentage'     => $total > 0
+                        ? (int) round($done / $total * 100)
+                        : 0,
+                ];
+            });
 
         $earliestFree = $active->max('due_date')
             ? \Carbon\Carbon::parse($active->max('due_date'))->addDays(3)->toDateString()

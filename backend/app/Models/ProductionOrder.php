@@ -241,15 +241,23 @@ class ProductionOrder extends Model
      */
     public function scopeVisibleTo($query, \App\Models\User $user)
     {
+        // Floor-wide visibility belongs to the people who RUN the floor —
+        // managers who assign and confirm work. Deliberately NOT
+        // production.raise_order: raising a made-to-order job at the till is
+        // a sales action, and it used to drag the whole order book (every
+        // customer's job, every deadline) into a cashier's login.
         if ($user->hasAnyRole(['admin', 'super_admin'])
             || $user->can('production.manage_assignees')
-            || $user->can('production.raise_order')
             || $user->can('production.confirm_order')) {
             return $query;
         }
 
+        // Everyone else sees the orders that are THEIRS: work assigned to
+        // them (tailors), or orders they raised (a clerk following up the
+        // job she promised a customer).
         return $query->where(function ($q) use ($user) {
-            $q->whereHas('tasks', fn ($t) => $t->where('assigned_to', $user->id))
+            $q->where('created_by', $user->id)
+              ->orWhereHas('tasks', fn ($t) => $t->where('assigned_to', $user->id))
               ->orWhereHas('assignees', fn ($a) => $a->where('user_id', $user->id));
         });
     }

@@ -29,9 +29,45 @@ class CustomerController extends Controller
     /**
      * Get all customers (Admin)
      */
+    /**
+     * Fields a caller WITHOUT customers.insights may see. customers.view is
+     * the picker — find a person, attach them to a sale. Addresses, credit
+     * limits, balances, loyalty points, tax ids and notes are the customer's
+     * private and financial profile, and stay with insights holders.
+     */
+    private const LITE_FIELDS = [
+        'id', 'customer_number', 'user_id', 'first_name', 'last_name',
+        'email', 'phone', 'company', 'customer_type', 'status', 'created_at',
+    ];
+
+    private function callerHasInsights(Request $request): bool
+    {
+        return (bool) $request->user()?->can('customers.insights');
+    }
+
+    /** Reduce a customer payload to the picker fields (plus a minimal user). */
+    private function liteCustomer(Customer $c): array
+    {
+        $row = collect($c->toArray())->only(self::LITE_FIELDS)->all();
+        if ($c->relationLoaded('user') && $c->user) {
+            $row['user'] = [
+                'id'         => $c->user->id,
+                'first_name' => $c->user->first_name,
+                'last_name'  => $c->user->last_name,
+                'email'      => $c->user->email,
+                'phone'      => $c->user->phone,
+                'status'     => $c->user->status,
+            ];
+        } else {
+            $row['user'] = null;
+        }
+        return $row;
+    }
+
     public function index(Request $request)
     {
-        $query = Customer::with(['user', 'addresses']);
+        $rich  = $this->callerHasInsights($request);
+        $query = Customer::with($rich ? ['user', 'addresses'] : ['user']);
 
         // Search by name, email, or phone.
         // Handles both customers with a linked User and phone-only walk-in
@@ -86,14 +122,31 @@ class CustomerController extends Controller
         $perPage = $request->get('per_page', 20);
         $customers = $query->paginate($perPage);
 
+        if (!$rich) {
+            $customers->getCollection()->transform(
+                fn (Customer $c) => $this->liteCustomer($c)
+            );
+        }
+
         return response()->json($customers);
     }
 
     /**
      * Get single customer (Admin)
      */
-    public function show($id)
+    public function show($id, Request $request)
     {
+        // Without insights the profile is the picker view: identity and
+        // contact only — no addresses, no spend history, no credit figures.
+        if (!$this->callerHasInsights($request)) {
+            $customer = Customer::with('user')->findOrFail($id);
+
+            return response()->json([
+                'customer' => $this->liteCustomer($customer),
+                'stats'    => null,
+            ]);
+        }
+
         $customer = Customer::with(['user', 'addresses'])->findOrFail($id);
 
         // Orders link via user_id, not customer_id - query directly
