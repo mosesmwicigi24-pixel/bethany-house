@@ -26,32 +26,71 @@ class ChatOrderChannelTest extends TestCase
 {
     use RefreshDatabase;
 
+    private ?Outlet $outlet = null;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        \App\Services\CurrencyPricing::forget();
+        \Illuminate\Support\Facades\DB::table('currencies')->updateOrInsert(
+            ['code' => 'KES'],
+            ['name' => 'KES', 'symbol' => 'KES', 'exchange_rate' => 1,
+             'is_base' => true, 'is_active' => true,
+             'created_at' => now(), 'updated_at' => now()],
+        );
+        \App\Services\CurrencyPricing::forget();
+    }
+
+    private function outlet(): Outlet
+    {
+        return $this->outlet ??= Outlet::factory()->create([
+            'sales_channel' => 'whatsapp', 'country_code' => 'KE',
+        ]);
+    }
+
+    /** A clerk the till will accept: the permission AND an outlet assignment. */
     private function clerk(): User
     {
         $user = User::factory()->create();
-        $user->assignRole(Role::findOrCreate('admin', 'sanctum'));
-        foreach (['orders.create', 'orders.view', 'pos.access'] as $p) {
-            $user->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
-        }
+        $user->givePermissionTo(Permission::findOrCreate('pos.access', 'sanctum'));
+        $user->outlets()->sync([$this->outlet()->id]);
+        app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
+        \Laravel\Sanctum\Sanctum::actingAs($user);
 
         return $user;
     }
 
+    /** A sellable product: priced, and in stock at the fixture outlet. */
+    private function product(): Product
+    {
+        $product = Product::factory()->create(['status' => Product::STATUS_ACTIVE]);
+        \App\Models\ProductPrice::create([
+            'product_id' => $product->id, 'product_variant_id' => null,
+            'currency_code' => 'KES', 'regular_price' => 7000,
+        ]);
+        \App\Models\InventoryItem::create([
+            'product_id' => $product->id, 'product_variant_id' => null,
+            'outlet_id' => $this->outlet()->id, 'quantity_on_hand' => 25,
+            'quantity_reserved' => 0, 'reorder_point' => 0,
+        ]);
+
+        return $product;
+    }
+
     private function push(array $overrides = [])
     {
-        $outlet  = Outlet::factory()->create();
-        $product = Product::factory()->create();
+        $this->clerk();
 
-        return $this->actingAs($this->clerk(), 'sanctum')
-            ->postJson('/api/v1/admin/pos/pending-order', array_merge([
-                'outlet_id'         => $outlet->id,
-                'channel'           => 'whatsapp',
-                'client_request_id' => 'req-' . bin2hex(random_bytes(6)),
-                'new_customer'      => ['first_name' => 'Stella', 'phone' => '+23672582495'],
-                'items'             => [[
-                    'product_id' => $product->id, 'quantity' => 1, 'unit_price' => 1000,
-                ]],
-            ], $overrides));
+        return $this->postJson('/api/v1/admin/pos/pending-order', array_merge([
+            'outlet_id'         => $this->outlet()->id,
+            'channel'           => 'whatsapp',
+            'client_request_id' => 'req-' . bin2hex(random_bytes(6)),
+            'items'             => [[
+                'product_id' => $this->product()->id,
+                'quantity'   => 1,
+                'unit_price' => 7000,
+            ]],
+        ], $overrides));
     }
 
     public function test_a_messenger_order_is_remembered_as_messenger(): void
