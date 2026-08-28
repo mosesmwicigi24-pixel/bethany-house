@@ -52,7 +52,23 @@ class SettingController extends Controller
                 ->toArray();
         });
 
-        return array_merge(self::DEFAULTS, $fromDb);
+        // ONE cache key, TWO shapes. index() caches a Collection (and busts any
+        // array it finds); this method caches an array. They overwrite each
+        // other, so whichever ran last decides what the next reader gets — and
+        // this method used to array_merge() whatever it found.
+        //
+        // The cost was a customer-facing 500: every time a staff member opened
+        // Settings, the next 300 seconds of /pay/{token} requests died with
+        // "array_merge(): Argument #2 must be of type array". 221 of them in
+        // this log, in bursts, since 17 June.
+        //
+        // index() and PdfService already tolerate both shapes; this was the one
+        // reader that did not. Coerce rather than fight over the key.
+        if ($fromDb instanceof \Illuminate\Support\Collection) {
+            $fromDb = $fromDb->toArray();
+        }
+
+        return array_merge(self::DEFAULTS, (array) $fromDb);
     }
 
     public function index()
