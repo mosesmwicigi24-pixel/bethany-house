@@ -111,6 +111,23 @@ class Order extends Model
      */
     use Restricted;
 
+    /**
+     * Every order gets its durable customer-facing token AT CREATION, on the
+     * model — not in a controller. Orders are raised from at least five places
+     * (POS, storefront checkout, admin, quotation conversion, Neema's
+     * pending-order push); minting per-controller would give four of them a
+     * token and leave the fifth with a customer who cannot see their receipt.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (self $order) {
+            if (empty($order->public_token)) {
+                $order->public_token           = bin2hex(random_bytes(24));
+                $order->public_token_issued_at = now();
+            }
+        });
+    }
+
     /** The capability that governs reading an order. */
     public static function viewPermission(): string
     {
@@ -187,6 +204,23 @@ class Order extends Model
         'payment_token_expires_at',
         'is_international',
         'created_by',
+    ];
+
+    /**
+     * public_token IS the authorisation to read an order — anyone holding it
+     * sees the customer's name, phone, items and total. It must therefore
+     * never ride along in an admin list, a detail payload, a search result or
+     * a notification body, where it would be logged, forwarded and cached.
+     * The two places that legitimately hand it out (the pending-order response
+     * and PublicOrderController) add it explicitly.
+     *
+     * payment_token is deliberately NOT hidden here: nothing consumes it from a
+     * serialized order today, but hiding it is a separate change with its own
+     * blast radius, and it grants only a 72-hour pay session to a staff member
+     * who could mint one from the API anyway.
+     */
+    protected $hidden = [
+        'public_token',
     ];
 
     protected $casts = [

@@ -51,6 +51,8 @@ interface OrderInfo {
     business_logo:      string | null;
     business_tagline:   string | null;
     continue_url?:      string | null;
+    /** The order's durable receipt — where a paid customer should land. */
+    public_url?:        string | null;
     customer_first_name?: string | null;
     customer_name?:       string | null;
     customer_phone?:      string | null;
@@ -212,13 +214,16 @@ function ErrorScreen({ message, onRetry }: { message: string; onRetry?: () => vo
     );
 }
 
-function PaidScreen({ orderNumber, businessName, continueUrl }: { orderNumber: string; businessName: string; continueUrl?: string | null }) {
-    // Take the customer back to their order automatically once paid.
+function PaidScreen({ orderNumber, businessName, continueUrl, receiptUrl }: { orderNumber: string; businessName: string; continueUrl?: string | null; receiptUrl?: string | null }) {
+    // Send the customer to their RECEIPT, which itemises what they bought and
+    // what they paid. Falling back to the storefront's own order page keeps the
+    // pre-existing behaviour for storefront buyers.
+    const onwards = receiptUrl || continueUrl || null;
     useEffect(() => {
-        if (!continueUrl) return;
-        const t = setTimeout(() => { window.location.href = continueUrl; }, 4000);
+        if (!onwards) return;
+        const t = setTimeout(() => { window.location.href = onwards; }, 4000);
         return () => clearTimeout(t);
-    }, [continueUrl]);
+    }, [onwards]);
     return (
         <div className="min-h-screen bg-surface-50 flex items-center justify-center p-4">
             <Card className="max-w-sm w-full p-8 text-center">
@@ -232,13 +237,13 @@ function PaidScreen({ orderNumber, businessName, continueUrl }: { orderNumber: s
                     Order <span className="font-mono font-semibold text-surface-800">{orderNumber}</span> is paid.
                 </p>
                 <p className="text-xs text-surface-400">{businessName} will be in touch shortly. Thank you!</p>
-                {continueUrl && (
+                {onwards && (
                     <>
-                        <a href={continueUrl}
+                        <a href={onwards}
                            className="mt-5 inline-block w-full rounded-full bg-surface-900 text-white text-sm font-semibold py-3 hover:bg-surface-700 transition-colors">
-                            View your order →
+                            View your receipt →
                         </a>
-                        <p className="text-[11px] text-surface-400 mt-2">Taking you back to your order…</p>
+                        <p className="text-[11px] text-surface-400 mt-2">Taking you to your receipt…</p>
                     </>
                 )}
             </Card>
@@ -1268,7 +1273,7 @@ export default function PaymentLinkPage() {
     if (stage === "loading") return <LoadingScreen />;
     if (stage === "error")   return <ErrorScreen message={error} onRetry={initialLoad} />;
     if (stage === "expired") return <ErrorScreen message="This payment link has expired. Please contact the business for a new link." />;
-    if (stage === "paid")    return <PaidScreen orderNumber={order?.order_number ?? ""} businessName={order?.business_name ?? ""} continueUrl={order?.continue_url} />;
+    if (stage === "paid")    return <PaidScreen orderNumber={order?.order_number ?? ""} businessName={order?.business_name ?? ""} continueUrl={order?.continue_url} receiptUrl={order?.public_url} />;
     if (!order) return <LoadingScreen />;
 
     const handleMethodSelect = (m: PaymentMethod) => {

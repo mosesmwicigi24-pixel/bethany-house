@@ -38,43 +38,7 @@ class PublicPaymentController extends Controller
         // Business branding — DEFAULTS merged with DB values via shared helper
         $settings = \App\Http\Controllers\Api\SettingController::getAll();
 
-        // Available payment methods — filtered by active, and the order's currency
-        // "other" type methods are staff-only (manual record-keeping).
-        // Customers only see: cash (if applicable), mpesa, card gateways, bank_transfer.
-        $customerMethodTypes = ['cash', 'mobile_money', 'card', 'bank_transfer'];
-
-        $availableMethods = DB::table('payment_methods')
-            ->where('is_active', true)
-            ->orderBy('sort_order')
-            ->get()
-            ->filter(function ($method) use ($order, $customerMethodTypes) {
-                // Exclude "other" type — these are staff-only
-                if ($method->type === 'other' || $method->code === 'other') return false;
-                // Exclude cash — customers pay remotely, cash doesn't apply
-                if ($method->type === 'cash' || $method->code === 'cash') return false;
-                // A rail that doesn't operate in the customer's country is
-                // noise at best (Mukuru only takes senders in specific
-                // markets) — hide it rather than let the payment stall.
-                if (!self::methodWorksForCustomer($method, $order)) return false;
-                $supported = json_decode($method->supported_currencies ?? '[]', true);
-                return empty($supported) || in_array($order->currency_code, $supported);
-            })
-            ->values()
-            ->map(function ($m) {
-                $config = json_decode($m->configuration ?? '{}', true) ?: [];
-                return [
-                    'id'          => $m->id,
-                    'code'        => $m->code,
-                    'name'        => $m->name,
-                    'type'        => $m->type,
-                    'provider'    => $m->provider,
-                    'description' => $m->description,
-                    // Manual/instructional methods (Mukuru, Western Union/MoneyGram,
-                    // M-Pesa-to-number) carry pay-to details the customer follows
-                    // before uploading proof. Null for gateway methods.
-                    'instructions'=> $config['instructions'] ?? null,
-                ];
-            });
+        $availableMethods = self::availableMethodsFor($order);
 
         // Calculate remaining balance (customer may only owe a partial amount)
         $totalPaid      = Payment::where('order_id', $order->id)->where('status', 'paid')->sum('amount');
@@ -108,6 +72,12 @@ class PublicPaymentController extends Controller
             'is_international'  => (bool) ($order->is_international ?? false),
             'expires_at'        => $order->payment_token_expires_at?->toISOString(),
             'is_expired'        => $this->isExpired($order),
+            // The customer's durable receipt. THIS is where a paid customer
+            // should land — the old paid screen showed a green tick and an
+            // order number and nothing else, which is not a receipt.
+            'public_url'        => $order->public_token
+                ? \App\Services\PaymentLinkService::publicUrl($order)
+                : null,
             // "Back to your order" target on the storefront (null when no
             // storefront is configured) — the customer's live receipt page.
             'continue_url'      => ($sf = rtrim((string) config('app.storefront_url'), '/'))
@@ -825,6 +795,52 @@ class PublicPaymentController extends Controller
         $key = config('services.paystack.secret_key');
         if (!$key) return null;
         return ['secret_key' => $key];
+    }
+
+    /**
+     * The payment rails this customer may actually use: active, priced in the
+     * order's currency, and operating in their country. ONE copy of this rule —
+     * the public order page (PublicOrderController) renders the same list, and
+     * a second copy would drift the moment a rail is gated.
+     */
+    public static function availableMethodsFor($order)
+    {
+        // "other" type methods are staff-only (manual record-keeping).
+        // Customers only see: cash (if applicable), mpesa, card gateways, bank_transfer.
+        $customerMethodTypes = ['cash', 'mobile_money', 'card', 'bank_transfer'];
+
+        return DB::table('payment_methods')
+            ->where('is_active', true)
+            ->orderBy('sort_order')
+            ->get()
+            ->filter(function ($method) use ($order, $customerMethodTypes) {
+                // Exclude "other" type — these are staff-only
+                if ($method->type === 'other' || $method->code === 'other') return false;
+                // Exclude cash — customers pay remotely, cash doesn't apply
+                if ($method->type === 'cash' || $method->code === 'cash') return false;
+                // A rail that doesn't operate in the customer's country is
+                // noise at best (Mukuru only takes senders in specific
+                // markets) — hide it rather than let the payment stall.
+                if (!self::methodWorksForCustomer($method, $order)) return false;
+                $supported = json_decode($method->supported_currencies ?? '[]', true);
+                return empty($supported) || in_array($order->currency_code, $supported);
+            })
+            ->values()
+            ->map(function ($m) {
+                $config = json_decode($m->configuration ?? '{}', true) ?: [];
+                return [
+                    'id'          => $m->id,
+                    'code'        => $m->code,
+                    'name'        => $m->name,
+                    'type'        => $m->type,
+                    'provider'    => $m->provider,
+                    'description' => $m->description,
+                    // Manual/instructional methods (Mukuru, Western Union/MoneyGram,
+                    // M-Pesa-to-number) carry pay-to details the customer follows
+                    // before uploading proof. Null for gateway methods.
+                    'instructions'=> $config['instructions'] ?? null,
+                ];
+            });
     }
 
     /**

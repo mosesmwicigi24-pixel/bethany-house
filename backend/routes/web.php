@@ -338,14 +338,14 @@ Route::middleware(['auth'])
     });
 /*
 |--------------------------------------------------------------------------
-| Public SPA pages — /pay/{token} and /track/{token}
+| Public SPA pages — /pay/{token}, /track/{token} and /order/{token}
 |--------------------------------------------------------------------------
 | In production Nginx rewrites these to the react-admin bundle; this
 | fallback covers nginx-less deploys (single-container / local sandbox)
 | where the built frontend is copied into public/. Guarded so nothing
 | changes when no bundle is present.
 */
-foreach (['/pay/{token}', '/track/{token}'] as $spaRoute) {
+foreach (['/pay/{token}', '/track/{token}', '/order/{token}'] as $spaRoute) {
     Route::get($spaRoute, function () {
         $index = public_path('index.html');
         abort_unless(file_exists($index), 404);
