@@ -16,13 +16,13 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { get } from "@/api/client";
-import { channelApi, type Channel, type ChannelMessage, type ChannelUser, type ChannelAttachment, type LinkedEntity, type EntitySearchResult, type EntityPreview } from "@/api/channels";
+import { channelApi, type Channel, type ChannelMessage, type ChannelUser, type ChannelAttachment, type ChannelRead, type LinkedEntity, type EntitySearchResult, type EntityPreview } from "@/api/channels";
 import { EntityChipWithPreview, ENTITY_CHIP } from "@/components/comms/EntityChipWithPreview";
 import { commentApi, type MentionUser } from "@/api/comments";
 import { useAuthStore } from "@/store/auth.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToastStore } from "@/store/toast.store";
-import { subscribeToChannel, subscribeToReaction, joinPresenceChannel, whisperTyping, getEcho } from "@/lib/echo";
+import { subscribeToChannel, subscribeToReaction, subscribeToRead, joinPresenceChannel, whisperTyping, getEcho } from "@/lib/echo";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1548,15 +1548,58 @@ function EntityChip({ entity, isOwn }: { entity: LinkedEntity; isOwn: boolean })
     );
 }
 
+// ─── Read ticks ───────────────────────────────────────────────────────────────
+// WhatsApp's language, this app's colours (owner, 2026-08-28): a single grey
+// tick = sent but read by nobody yet; a green dot + double tick in the
+// luminous success green = read. In a Space the reader COUNT sits beside the
+// ticks (a group has many readers, not one), and long-press / hover names
+// them via the title. Derived entirely from each member's read pointer —
+// nothing is stored per message.
+
+function Ticks({ readers, others }: {
+    /** Names of the OTHER members whose pointer has passed this message. */
+    readers: string[];
+    /** How many other members there are in total (1 in a DM). */
+    others: number;
+}) {
+    const read = readers.length > 0;
+    return (
+        <span
+            className={clsx(
+                "inline-flex items-center gap-1",
+                read ? "text-success-vivid" : "text-white/60",
+            )}
+            title={read ? `Read by ${readers.join(", ")}` : "Sent · not read yet"}
+        >
+            {read && <span className="w-1.5 h-1.5 rounded-full bg-success-vivid" aria-hidden="true" />}
+            {read ? (
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-label="Read">
+                    <path d="M2.5 13.5l3.5 3.5L13 9.5" />
+                    <path d="M9.5 13.5l3.5 3.5L21.5 9" />
+                </svg>
+            ) : (
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-label="Sent">
+                    <path d="M5 13.5l4 4L19 7.5" />
+                </svg>
+            )}
+            {read && others > 1 && (
+                <span className="text-2xs font-bold tabular-nums">{readers.length}</span>
+            )}
+        </span>
+    );
+}
+
 // ─── Message content - splits text bubble from bare attachments ───────────────
 
-function MessageContent({ body, isOwn, linkedEntities, entityPreviews, timeLabel }: {
+function MessageContent({ body, isOwn, linkedEntities, entityPreviews, timeLabel, ticks }: {
     body: string;
     isOwn: boolean;
     linkedEntities?: LinkedEntity[];
     entityPreviews?: Record<string, EntityPreview>;
     /** Clock time rendered bottom-right inside the bubble, as Nuru does it. */
     timeLabel?: string;
+    /** Read-receipt ticks (own messages only), rendered beside the time. */
+    ticks?: React.ReactNode;
 }) {
     const { textContent, images, files } = parseBody(body);
     const hasText        = textContent.length > 0;
@@ -1590,9 +1633,9 @@ function MessageContent({ body, isOwn, linkedEntities, entityPreviews, timeLabel
                     )}
                     {timeLabel && (
                         <div className={clsx(
-                            "flex items-center justify-end mt-1 text-2xs tabular-nums",
+                            "flex items-center justify-end gap-1.5 mt-1 text-2xs tabular-nums",
                             isOwn ? "text-white/60" : "text-surface-500",
-                        )}>{timeLabel}</div>
+                        )}>{timeLabel}{ticks}</div>
                     )}
                 </div>
             )}
@@ -1657,7 +1700,7 @@ function RenderTextOnly({ body, isOwn }: { body: string; isOwn: boolean }) {
 
 // ─── Message bubble ───────────────────────────────────────────────────────────
 
-function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, onEdited, onReaction, continued = false }: {
+function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, onEdited, onReaction, continued = false, ticks }: {
     message: ChannelMessage; channelId: number; currentUserId?: number;
     onReply: (m: ChannelMessage) => void; onDeleted: (id: number) => void;
     /** Called with the server-confirmed message after a successful edit. */
@@ -1666,6 +1709,8 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
     onReaction: (messageId: number, reactions: Record<string, number[]>) => void;
     /** Same author, moments after the previous message: drop the avatar and header. */
     continued?: boolean;
+    /** Read-receipt ticks, provided for the viewer's own messages. */
+    ticks?: React.ReactNode;
 }) {
     const [hovering, setHovering]           = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1870,7 +1915,7 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                         </div>
                     ) : (
                     <MessageContent body={message.body} isOwn={isOwn} timeLabel={fmtClock(message.created_at)}
-                        linkedEntities={message.linked_entities} entityPreviews={message.entity_previews} />
+                        linkedEntities={message.linked_entities} entityPreviews={message.entity_previews} ticks={ticks} />
                     )}
                     {/* Same as above, mirrored to the right of the bubble. */}
                     {!isOwn && (
@@ -2285,6 +2330,9 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
     const navigate   = useNavigate();
     const [messages, setMessages]       = useState<ChannelMessage[]>([]);
     const [hasMore, setHasMore]         = useState(false);
+    // Every member's read pointer — the whole read-receipt state. A message is
+    // read by a member exactly when their pointer ≥ its id.
+    const [reads, setReads]             = useState<ChannelRead[]>([]);
     const [replyTo, setReplyTo]         = useState<ChannelMessage | null>(null);
     const [typing, setTyping]           = useState<string[]>([]);
     const [onlineIds, setOnlineIds]     = useState<number[]>([]);
@@ -2317,6 +2365,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
             const data = await channelApi.messages(channel.id);
             setMessages(data.messages);
             setHasMore(data.has_more);
+            setReads(data.reads ?? []);
             return data;
         },
         staleTime: 0,
@@ -2325,6 +2374,28 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
     useEffect(() => {
         subscribeToChannel(channel.id, msg => {
             setMessages(prev => { const m2 = msg as unknown as ChannelMessage; return prev.some(m => String(m.id) === String(m2.id)) ? prev : [...prev, m2]; });
+            // Reading is being HERE when it lands: advance my pointer so the
+            // sender's tick goes green now, not on my next visit. Skip when the
+            // tab is hidden — a background tab has read nothing.
+            const m2 = msg as unknown as ChannelMessage;
+            if (m2.user?.id !== user?.id && document.visibilityState === "visible") {
+                channelApi.markRead(channel.id).catch(() => {});
+            }
+        });
+
+        // Tick flips from everyone else (and my own other devices).
+        subscribeToRead(channel.id, ({ user_id, last_read_message_id }) => {
+            setReads(prev => {
+                const known = prev.some(r => r.user_id === user_id);
+                if (!known) {
+                    // Member joined after the thread loaded — name arrives with
+                    // the next full fetch; the pointer must not be dropped.
+                    return [...prev, { user_id, name: "", last_read_message_id }];
+                }
+                return prev.map(r => r.user_id === user_id
+                    ? { ...r, last_read_message_id: Math.max(r.last_read_message_id ?? 0, last_read_message_id) }
+                    : r);
+            });
         });
 
         // Reaction updates: patch only the reactions field of the affected message.
@@ -2357,6 +2428,19 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
     const isSpace      = channel.type === "space";
     const memberCount  = typeof channel.members === "number" ? channel.members : (channel.members as ChannelUser[]).length;
     const grouped      = groupByDate(messages);
+
+    // Ticks for MY messages: which other members' pointers have passed each
+    // one. Everyone else's messages carry no ticks — receipts answer "have
+    // they seen what I sent", nothing more.
+    const ticksFor = (m: ChannelMessage): React.ReactNode => {
+        if (m.type === "system" || !user?.id || m.user?.id !== user.id) return undefined;
+        const others = reads.filter(r => r.user_id !== user.id);
+        if (others.length === 0) return undefined;
+        const readers = others
+            .filter(r => (r.last_read_message_id ?? 0) >= m.id)
+            .map(r => r.name || "Someone");
+        return <Ticks readers={readers} others={others.length} />;
+    };
 
     return (
         <div className="flex h-full overflow-hidden">
@@ -2533,7 +2617,8 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                     onEdited={updated => setMessages(prev => prev.map(m => m.id === updated.id ? updated : m))}
                                     onReaction={(msgId, reactions) =>
                                         setMessages(prev => prev.map(m => m.id === msgId ? { ...m, reactions } : m))
-                                    } />
+                                    }
+                                    ticks={ticksFor(msg)} />
                             ))}
                         </div>
                     ))}

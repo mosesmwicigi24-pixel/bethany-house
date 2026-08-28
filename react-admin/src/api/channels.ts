@@ -102,6 +102,17 @@ export interface ChannelAttachment {
     url:       string;
 }
 
+/**
+ * One member's read pointer. A message is read by this member exactly when
+ * last_read_message_id ≥ the message id — per-message ticks derive from this
+ * one integer, and the read.updated broadcast advances it live.
+ */
+export interface ChannelRead {
+    user_id:              number;
+    name:                 string;
+    last_read_message_id: number | null;
+}
+
 // ─── API ──────────────────────────────────────────────────────────────────────
 
 export const channelApi = {
@@ -141,9 +152,9 @@ export const channelApi = {
     removeMember: (channelId: number, userId: number) =>
         del<{ message: string }>(`/v1/admin/channels/${channelId}/members/${userId}`),
 
-    /** Paginated message history. */
+    /** Paginated message history. Includes every member's read pointer. */
     messages: (channelId: number, before?: number) =>
-        get<{ messages: ChannelMessage[]; has_more: boolean; oldest_id: number | null }>(
+        get<{ messages: ChannelMessage[]; has_more: boolean; oldest_id: number | null; reads?: ChannelRead[] }>(
             `/v1/admin/channels/${channelId}/messages`,
             { params: { per_page: 50, ...(before ? { before } : {}) } }
         ),

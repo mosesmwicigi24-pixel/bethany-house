@@ -221,7 +221,10 @@ self.addEventListener("push", (event: PushEvent) => {
         icon:               payload.icon  ?? "/icons/icon-192.png",
         badge:              payload.badge ?? "/icons/badge-72.png",
         tag:                payload.tag   ?? "bh-notification",
-        vibrate:            [50, 30, 100],
+        // A pattern you can feel in a pocket on a workshop floor — the old
+        // [50,30,100] flutter was indistinguishable from nothing on most
+        // phones. (Android honours this; iOS uses the OS banner's own haptic.)
+        vibrate:            [200, 100, 200],
         requireInteraction: false,
         data: {
             url: payload.url ?? "/",
