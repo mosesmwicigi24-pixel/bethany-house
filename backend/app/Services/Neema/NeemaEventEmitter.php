@@ -29,6 +29,19 @@ class NeemaEventEmitter
             'customer_phone' => $order->customer_phone,
             'amount'         => $order->total_amount !== null ? (float) $order->total_amount : null,
             'currency'       => $order->currency_code ?: 'KES',
+
+            // Enough state for Neema to MIRROR the order without calling back.
+            // She previously had to match an event to a conversation to use it
+            // at all, and 23 of 27 order.paid events in a month were dropped as
+            // 'no_conversation' — the state now rides along, so a missing
+            // conversation costs a customer message, never the status.
+            'hub_order_id'       => $order->id,
+            'status'             => $order->status,
+            'payment_status'     => $order->payment_status,
+            'fulfillment_status' => $order->fulfillment_status ?? null,
+            'public_url'         => $order->public_token
+                ? \App\Services\PaymentLinkService::publicUrl($order)
+                : null,
         ], $extra));
     }
 

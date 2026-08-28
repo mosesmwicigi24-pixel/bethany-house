@@ -154,6 +154,7 @@ const TailorWorkspacePage = lazy(
 const TrackingPage = lazy(() => import("@/pages/tracking/TrackingPage"));
 const PaymentLinkPage = lazy(() => import("@/pages/PaymentLinkPage"));
 const OrderPage = lazy(() => import("@/pages/OrderPage"));
+const HandoffPage = lazy(() => import("@/pages/HandoffPage"));
 const PublicQuotationPage = lazy(() => import("@/pages/PublicQuotationPage"));
 const NotificationsPage = lazy(
     () => import("@/pages/notifications/NotificationsPage"),
@@ -282,7 +283,7 @@ export default function App() {
     // a minimal router (basename="/") instead of the full admin app.
     // Matches /pay/..., /track/..., /order/... and their /admin/ Nginx-rewrite twins.
     // /order/{public_token} is the customer's durable receipt — public by design.
-    const isPublicPage = /^\/(admin\/)?(pay|track|order)\//.test(window.location.pathname);
+    const isPublicPage = /^\/(admin\/)?(pay|track|order|handoff)\//.test(window.location.pathname);
 
     return (
         <QueryClientProvider client={queryClient}>
@@ -315,6 +316,26 @@ export default function App() {
                             element={
                                 <Suspense fallback={<PageLoader />}>
                                     <OrderPage />
+                                </Suspense>
+                            }
+                        />
+                        {/* Neema → hub bridge. Public route by necessity: it must
+                            decide BEFORE any auth wall whether the viewer has a hub
+                            session (→ admin page) or only the order's own token
+                            (→ customer view). See HandoffPage. */}
+                        <Route
+                            path="/handoff/orders/:id"
+                            element={
+                                <Suspense fallback={<PageLoader />}>
+                                    <HandoffPage />
+                                </Suspense>
+                            }
+                        />
+                        <Route
+                            path="/admin/handoff/orders/:id"
+                            element={
+                                <Suspense fallback={<PageLoader />}>
+                                    <HandoffPage />
                                 </Suspense>
                             }
                         />

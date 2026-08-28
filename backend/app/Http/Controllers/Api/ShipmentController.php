@@ -272,10 +272,11 @@ class ShipmentController extends Controller
             ]);
 
             // Advance order to shipped
-            DB::table('orders')->where('id', $orderId)->update([
-                'status'     => 'shipped',
-                'updated_at' => now(),
-            ]);
+            // Eloquent, not DB::table: a raw update fires no model events, so
+            // every shipment transition here was invisible to Neema (and to any
+            // future observer). See OrderObserver.
+            \App\Models\Order::withoutViewerScope()->find($orderId)
+                ?->forceFill(['status' => 'shipped'])->save();
 
             DB::commit();
 
@@ -427,11 +428,8 @@ class ShipmentController extends Controller
             // Auto-complete the order on delivery
             if ($validated['status'] === 'delivered') {
                 DB::table('order_shipments')->where('id', $id)->update(['delivered_at' => now()]);
-                DB::table('orders')->where('id', $shipment->order_id)->update([
-                    'status'       => 'completed',
-                    'completed_at' => now(),
-                    'updated_at'   => now(),
-                ]);
+                \App\Models\Order::withoutViewerScope()->find($shipment->order_id)
+                    ?->forceFill(['status' => 'completed', 'completed_at' => now()])->save();
             }
 
             DB::commit();
@@ -709,10 +707,8 @@ class ShipmentController extends Controller
 
             // Delivery means goods are in customer's hands - order moves to 'delivered',
             // not 'completed'. Staff explicitly sets 'completed' to close the order.
-            DB::table('orders')->where('id', $shipment->order_id)->update([
-                'status'     => 'delivered',
-                'updated_at' => now(),
-            ]);
+            \App\Models\Order::withoutViewerScope()->find($shipment->order_id)
+                ?->forceFill(['status' => 'delivered'])->save();
 
             DB::commit();
 
@@ -773,10 +769,8 @@ class ShipmentController extends Controller
 
             // Revert order to 'confirmed' - it was confirmed before the shipment,
             // so cancelling the shipment returns it to that state, not 'processing'.
-            DB::table('orders')->where('id', $shipment->order_id)->update([
-                'status'     => 'confirmed',
-                'updated_at' => now(),
-            ]);
+            \App\Models\Order::withoutViewerScope()->find($shipment->order_id)
+                ?->forceFill(['status' => 'confirmed'])->save();
 
             DB::commit();
 
