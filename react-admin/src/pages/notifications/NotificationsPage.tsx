@@ -133,8 +133,14 @@ function NotifRow({
         <div
             onClick={handleClick}
             className={clsx(
-                "group flex items-start gap-4 px-5 py-4 cursor-pointer transition-colors border-b border-surface-50 last:border-0",
-                n.is_read ? "hover:bg-surface-50/60" : "bg-brand-50/40 hover:bg-brand-50/70",
+                // Unread carries a brand accent bar down its left edge plus a
+                // fuller tint; read rows stay flat white. The bar is what makes
+                // the split legible on a phone in daylight — the old 40% tint
+                // alone was indistinguishable from the read rows beside it.
+                "group flex items-start gap-4 px-4 sm:px-5 py-4 cursor-pointer transition-colors border-b border-surface-100 last:border-0 border-l-[3px]",
+                n.is_read
+                    ? "border-l-transparent bg-white hover:bg-surface-50/60"
+                    : "border-l-brand-500 bg-brand-50/70 hover:bg-brand-50",
             )}
         >
             {/* Icon */}
@@ -150,16 +156,22 @@ function NotifRow({
                 <div className="flex items-start justify-between gap-2">
                     <p className={clsx(
                         "text-sm leading-snug",
-                        n.is_read ? "text-surface-700 font-normal" : "text-surface-900 font-semibold",
+                        n.is_read ? "text-surface-600 font-normal" : "text-surface-900 font-bold",
                     )}>
                         {n.title}
                     </p>
-                    <span className="text-2xs text-surface-400 shrink-0 mt-0.5 whitespace-nowrap">
+                    <span className={clsx(
+                        "text-2xs shrink-0 mt-0.5 whitespace-nowrap",
+                        n.is_read ? "text-surface-400" : "text-brand-700 font-semibold",
+                    )}>
                         {timeAgo(n.created_at)}
                     </span>
                 </div>
                 {n.body && (
-                    <p className="text-xs text-surface-500 mt-1 line-clamp-2">{n.body}</p>
+                    <p className={clsx(
+                        "text-xs mt-1 line-clamp-2",
+                        n.is_read ? "text-surface-500" : "text-surface-700",
+                    )}>{n.body}</p>
                 )}
                 {hasValidLink && (
                     <p className="text-2xs text-brand-500 mt-1.5">Tap to view →</p>
@@ -171,9 +183,12 @@ function NotifRow({
                 {!n.is_read && (
                     <div className="w-2.5 h-2.5 rounded-full bg-brand-500" />
                 )}
+                {/* Visible (dimmed) by default: phones have no hover, so the old
+                    opacity-0/group-hover pattern made dismiss unreachable on the
+                    exact device this page is mostly read on. */}
                 <button
                     onClick={e => { e.stopPropagation(); onDelete(n.id); }}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity text-surface-500 hover:text-danger p-1 rounded-lg hover:bg-danger-light"
+                    className="opacity-40 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity text-surface-500 hover:text-danger p-1.5 rounded-lg hover:bg-danger-light tap-target"
                     title="Dismiss"
                 >
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -305,8 +320,8 @@ export default function NotificationsPage() {
                     <div>
                         {groups.map(([date, items]) => (
                             <div key={date}>
-                                <div className="px-5 py-2.5 bg-surface-50 border-b border-line">
-                                    <p className="text-2xs font-semibold text-surface-400 uppercase tracking-wide">{date}</p>
+                                <div className="px-4 sm:px-5 py-2.5 bg-surface-100 border-b border-line">
+                                    <p className="text-2xs font-bold text-surface-600 uppercase tracking-wide">{date}</p>
                                 </div>
                                 {items.map(n => (
                                     <NotifRow
