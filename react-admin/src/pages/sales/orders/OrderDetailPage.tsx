@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, Link, Navigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { ordersApi } from "@/api/orders";
@@ -3668,7 +3668,24 @@ export default function OrderDetailPage() {
     });
 
     if (isLoading) return <div className="flex items-center justify-center h-64"><Spinner size="lg" /></div>;
-    if (!order)   return <div className="text-center text-surface-400 py-20">Order not found.</div>;
+    if (!order) {
+        // Arrived from Neema's "Open in hub" with the order's own token, but
+        // this hub account cannot read orders (403 from the API). Show them
+        // what the CUSTOMER sees rather than a dead end — the token is the
+        // authorisation, and they were handed it by an authenticated Neema
+        // session. See HandoffPage for the security model.
+        let handoff: string | null = null;
+        try { handoff = sessionStorage.getItem(`ho:${id}`); } catch { /* private mode */ }
+        if (handoff) {
+            try { sessionStorage.removeItem(`ho:${id}`); } catch { /* ignore */ }
+            return <Navigate to={`/order/${handoff}`} replace />;
+        }
+        return (
+            <div className="text-center text-surface-400 py-20">
+                Order not found, or you don’t have permission to view it.
+            </div>
+        );
+    }
 
     const nextStatuses   = STATUS_FLOW[order.status]?.next ?? [];
     const canUpdateStatus = nextStatuses.length > 0;

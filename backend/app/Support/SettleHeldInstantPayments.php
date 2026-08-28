@@ -111,7 +111,14 @@ class SettleHeldInstantPayments
                 $update['payment_status'] = 'partial';
             }
 
-            DB::table('orders')->where('id', $orderId)->update($update);
+            // Eloquent so the settlement actually announces itself: a raw
+            // update fires no model events, so held payments settling to 'paid'
+            // — real money arriving — reached Neema through no path at all.
+            unset($update['updated_at']);   // Eloquent maintains it
+            if ($update !== []) {
+                \App\Models\Order::withoutViewerScope()->find($orderId)
+                    ?->forceFill($update)->save();
+            }
             $result['orders']++;
         }
 

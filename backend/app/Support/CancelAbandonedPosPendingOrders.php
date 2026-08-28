@@ -55,11 +55,10 @@ class CancelAbandonedPosPendingOrders
             $order = DB::table('orders')->where('id', $orderId)->first();
             $note  = trim(($order->notes ?? '') . "\n[system] Auto-cancelled: abandoned unpaid POS order.");
 
-            DB::table('orders')->where('id', $orderId)->update([
-                'status'     => 'cancelled',
-                'notes'      => $note,
-                'updated_at' => now(),
-            ]);
+            // Eloquent: this is a status change, and a raw update announces
+            // nothing. Same class as the shipment writes — see OrderObserver.
+            \App\Models\Order::withoutViewerScope()->find($orderId)
+                ?->forceFill(['status' => 'cancelled', 'notes' => $note])->save();
             $result['cancelled']++;
         }
 
