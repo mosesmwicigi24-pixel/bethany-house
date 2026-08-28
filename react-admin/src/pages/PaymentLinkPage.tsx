@@ -824,10 +824,11 @@ function PaystackReturnPanel({
 // ── Bank transfer panel ───────────────────────────────────────────────────────
 
 function BankTransferPanel({
-    token, amountDue, currency, businessName, onDone, onBack,
+    token, amountDue, currency, businessName, instructions, onDone, onBack,
 }: {
     token: string; amountDue: number; currency: string;
-    businessName: string; onDone: () => void; onBack: () => void;
+    businessName: string; instructions?: ManualInstructions | null;
+    onDone: () => void; onBack: () => void;
 }) {
     const [step,        setStep]        = useState<"instructions" | "upload">("instructions");
     const [paymentId,   setPaymentId]   = useState<number | null>(null);
@@ -893,8 +894,24 @@ function BankTransferPanel({
                     <p className="font-semibold">Bank Transfer Instructions</p>
                     <p>
                         Transfer <strong>{fmt(amountDue, currency)}</strong> to{" "}
-                        <strong>{businessName}</strong>.
+                        <strong>{instructions?.recipient_name || businessName}</strong>.
                     </p>
+                    {/* The account details, from the payment method's own
+                        configuration. The backend has always returned these for
+                        EVERY method; only the manual panel rendered them, so a
+                        customer told to "transfer to Bethany House" was never
+                        told which account. */}
+                    {instructions?.recipient_phone && (
+                        <p className="font-mono text-xs">{instructions.recipient_phone}</p>
+                    )}
+                    {instructions?.steps?.length ? (
+                        <ol className="list-decimal ml-4 space-y-1 text-xs">
+                            {instructions.steps.map((step, i) => <li key={i}>{step}</li>)}
+                        </ol>
+                    ) : null}
+                    {instructions?.note && (
+                        <p className="text-xs italic text-accent-700">{instructions.note}</p>
+                    )}
                     <p className="text-xs text-accent-600">
                         Use your order number as the payment reference. Once you've made
                         the transfer, click below and upload your receipt so our team can verify it.
@@ -1389,6 +1406,9 @@ export default function PaymentLinkPage() {
                                 amountDue={order.amount_due}
                                 currency={order.currency_code}
                                 businessName={order.business_name}
+                                instructions={
+                                    order.available_methods?.find((m) => m.code === "bank_transfer")?.instructions
+                                }
                                 onDone={() => updateStage("bank_pending")}
                                 onBack={() => updateStage("select_method")}
                             />

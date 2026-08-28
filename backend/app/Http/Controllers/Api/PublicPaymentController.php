@@ -306,7 +306,7 @@ class PublicPaymentController extends Controller
                     'Password'          => $password,
                     'Timestamp'         => $timestamp,
                     'TransactionType'   => 'CustomerPayBillOnline',
-                    'Amount'            => (int) ceil($order->total_amount),
+                    'Amount'            => (int) ceil(self::amountDue($order)),
                     'PartyA'            => $phone,
                     'PartyB'            => $config['shortcode'],
                     'PhoneNumber'       => $phone,
@@ -326,7 +326,7 @@ class PublicPaymentController extends Controller
             Payment::create([
                 'order_id'           => $order->id,
                 'payment_method'     => 'mpesa',
-                'amount'             => $order->total_amount,
+                'amount'             => self::amountDue($order),
                 'currency_code'      => $order->currency_code,
                 'status'             => 'pending',
                 'provider_reference' => $checkoutRequestId,
@@ -361,7 +361,7 @@ class PublicPaymentController extends Controller
                 ->timeout(15)
                 ->post('https://api.paystack.co/transaction/initialize', [
                     'email'        => $email,
-                    'amount'       => (int) round($order->total_amount * 100),
+                    'amount'       => (int) round(self::amountDue($order) * 100),
                     'currency'     => $order->currency_code,
                     'reference'    => $order->order_number . '-' . time(),
                     'callback_url' => $callbackUrl,
@@ -381,7 +381,7 @@ class PublicPaymentController extends Controller
             Payment::create([
                 'order_id'           => $order->id,
                 'payment_method'     => 'card',
-                'amount'             => $order->total_amount,
+                'amount'             => self::amountDue($order),
                 'currency_code'      => $order->currency_code,
                 'status'             => 'pending',
                 'provider_reference' => $data['reference'],
@@ -416,7 +416,7 @@ class PublicPaymentController extends Controller
         $payment = Payment::create([
             'order_id'        => $order->id,
             'payment_method'  => $methodCode,
-            'amount'          => $order->total_amount,
+            'amount'          => self::amountDue($order),
             'currency_code'   => $order->currency_code,
             'status'          => 'pending',
             'requires_approval'=> true,
@@ -538,7 +538,7 @@ class PublicPaymentController extends Controller
                 Payment::create([
                     'order_id'           => $order->id,
                     'payment_method'     => 'mpesa',
-                    'amount'             => $order->total_amount,
+                    'amount'             => self::amountDue($order),
                     'currency_code'      => $order->currency_code,
                     'status'             => 'pending',
                     'provider_reference' => $code,
@@ -664,8 +664,15 @@ class PublicPaymentController extends Controller
 
             // Amount + currency must match the order. Paystack reports amount in the
             // minor unit (kobo/cents); our order total is in the major unit.
-            $paidMinor     = (int) round((float) ($data['amount'] ?? 0));
-            $expectedMinor = (int) round(((float) $order->total_amount) * 100);
+            $paidMinor = (int) round((float) ($data['amount'] ?? 0));
+            // Compare against what this customer was actually ASKED to pay —
+            // the pending payment raised at initiate — not the order total.
+            // On a part-paid order those differ, and using the total rejected
+            // a correct payment of the balance.
+            $expectedMajor = $payment && $payment->amount !== null
+                ? (float) $payment->amount
+                : self::amountDue($order);
+            $expectedMinor = (int) round($expectedMajor * 100);
             $currencyOk    = strtoupper((string) ($data['currency'] ?? '')) === strtoupper((string) $order->currency_code);
             if (!$currencyOk || $paidMinor < $expectedMinor) {
                 return response()->json([
@@ -675,7 +682,7 @@ class PublicPaymentController extends Controller
             }
 
             // Mark payment paid
-            DB::transaction(function () use ($payment, $order, $reference, $data) {
+            DB::transaction(function () use ($payment, $order, $reference, $data, $paidMinor) {
                 if ($payment) {
                     $payment->update([
                         'status'             => 'paid',
@@ -687,7 +694,9 @@ class PublicPaymentController extends Controller
                     Payment::create([
                         'order_id'           => $order->id,
                         'payment_method'     => 'card_paystack',
-                        'amount'             => $order->total_amount,
+                        // What Paystack says actually arrived — the factual
+                        // amount, not an assumption about the order total.
+                        'amount'             => $paidMinor / 100,
                         'currency_code'      => $order->currency_code,
                         'status'             => 'paid',
                         'provider_reference' => $reference,
@@ -795,6 +804,23 @@ class PublicPaymentController extends Controller
         $key = config('services.paystack.secret_key');
         if (!$key) return null;
         return ['secret_key' => $key];
+    }
+
+    /**
+     * What this customer still owes — and therefore what every rail must charge.
+     *
+     * The page has always SHOWN amount_due while every initiator charged
+     * total_amount, so a customer who had paid a deposit was shown one number
+     * and billed another. Deposits are routine here (there is a whole
+     * Outstanding Balances screen for them), so this was reachable, not
+     * theoretical.
+     */
+    private static function amountDue($order): float
+    {
+        $paid = (float) Payment::where('order_id', $order->id)
+            ->where('status', 'paid')->sum('amount');
+
+        return max(0, (float) $order->total_amount - $paid);
     }
 
     /**
