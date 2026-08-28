@@ -69,12 +69,14 @@ class PublicOrderPageTest extends TestCase
         $body = $this->getJson("/api/v1/order/{$order->public_token}")
             ->assertOk()
             ->assertJsonPath('order_number', $order->order_number)
-            ->assertJsonPath('amount_due', 10000.0)
             ->json();
 
         // The receipt must itemise. The old paid screen showed a green tick and
         // an order number — that is what made "the link is wrong" true even
         // when the link resolved.
+        // json_encode renders 10000.0 as 10000, so the decoded value is an int:
+        // compare as floats rather than asserting a type the wire cannot carry.
+        $this->assertSame(10000.0, (float) $body['amount_due']);
         $this->assertCount(1, $body['items']);
         $this->assertSame('Communion Cups', $body['items'][0]['name']);
         $this->assertSame(200, $body['items'][0]['quantity']);
@@ -92,8 +94,8 @@ class PublicOrderPageTest extends TestCase
 
         $body = $this->getJson("/api/v1/order/{$order->public_token}")->assertOk()->json();
 
-        $this->assertSame(10000.0, $body['amount_paid']);
-        $this->assertSame(0.0, $body['amount_due']);
+        $this->assertSame(10000.0, (float) $body['amount_paid']);
+        $this->assertSame(0.0, (float) $body['amount_due']);
         $this->assertCount(1, $body['payments']);
         $this->assertSame('QWE123', $body['payments'][0]['provider_reference']);
         $this->assertSame([], $body['available_methods'], 'nothing left to pay, nothing to offer');
