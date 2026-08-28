@@ -1573,9 +1573,11 @@ function MessageContent({ body, isOwn, linkedEntities, entityPreviews, timeLabel
                     // surface-900), everyone else = a white card on the tinted canvas.
                     // The brand amber stays an ACCENT (send, chips, reply rule) and is
                     // never a bubble fill — a page of amber blocks is what went wrong.
+                    // shadow-sm + the deeper border keep the white card legible even
+                    // on washed-out outdoor phone screens where the tint flattens.
                     isOwn
-                        ? "bg-surface-900 text-white"
-                        : "bg-white border border-surface-200 text-surface-800",
+                        ? "bg-surface-900 text-white shadow-sm"
+                        : "bg-white border border-surface-300/80 text-surface-900 shadow-sm",
                     // Tail on the BOTTOM corner, pointing at the speaker's side.
                     isOwn ? "rounded-br-[5px]" : "rounded-bl-[5px]",
                 )}>
@@ -1589,7 +1591,7 @@ function MessageContent({ body, isOwn, linkedEntities, entityPreviews, timeLabel
                     {timeLabel && (
                         <div className={clsx(
                             "flex items-center justify-end mt-1 text-2xs tabular-nums",
-                            isOwn ? "text-white/60" : "text-surface-400",
+                            isOwn ? "text-white/60" : "text-surface-500",
                         )}>{timeLabel}</div>
                     )}
                 </div>
@@ -2482,9 +2484,10 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                 {/* Messages */}
                 {/* Tinted canvas, as Nuru does it (their --background #f6f4ee). White
                     bubbles were previously invisible against a white thread — this is
-                    what made the page read flat. brand-50 (#fdf8f0) is this app's own
-                    warm cream, so the bubbles now sit ON something. */}
-                <div className="flex-1 overflow-y-auto py-4 scroll-touch overscroll-contain bg-brand-50/60">
+                    what made the page read flat. brand-50/60 turned out to still be
+                    within a hair of white on real phone screens, so the tint is now
+                    brand-100/50: a definite warm ground the white cards sit ON. */}
+                <div className="flex-1 overflow-y-auto py-4 scroll-touch overscroll-contain bg-brand-100/50">
                     {hasMore && (
                         <div className="flex justify-center pb-2">
                             <button onClick={async () => {

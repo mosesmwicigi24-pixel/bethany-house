@@ -744,6 +744,80 @@ function CompletionScreen({
     );
 }
 
+// ── Inline detail sections ────────────────────────────────────────────────────
+// The specs drawer's content, foldable and in place. A tailor at the machine
+// reads measurements constantly but fabric specs and preferences only at the
+// start of a job — so measurements open by default and the rest sit collapsed
+// as one labelled row each. One tap opens them where the eye already is,
+// instead of a round-trip through the side drawer.
+
+function InlineDetail({
+    label,
+    count,
+    defaultOpen = false,
+    alert,
+    children,
+}: {
+    label: string;
+    count: number;
+    defaultOpen?: boolean;
+    /** Short warning chip shown on the header even while collapsed. */
+    alert?: string | null;
+    children: React.ReactNode;
+}) {
+    const [open, setOpen] = useState(defaultOpen);
+    if (count === 0) return null;
+    return (
+        <div className="bg-white/80 border border-line rounded-xl overflow-hidden">
+            <button
+                type="button"
+                onClick={() => setOpen((o) => !o)}
+                className="w-full flex items-center gap-2 px-3 py-2 tap-target"
+            >
+                <span className="text-2xs font-bold text-surface-600 uppercase tracking-widest">
+                    {label}
+                </span>
+                <span className="text-2xs font-semibold text-surface-400">
+                    {count}
+                </span>
+                {alert && (
+                    <span className="text-2xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-1.5 py-0.5">
+                        {alert}
+                    </span>
+                )}
+                <svg
+                    className={clsx(
+                        "w-3.5 h-3.5 text-surface-400 ml-auto transition-transform",
+                        open && "rotate-180"
+                    )}
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+                >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+            {open && <div className="px-3 pb-2.5">{children}</div>}
+        </div>
+    );
+}
+
+/** Label-left / value-right rows for free-text pairs (specs, preferences). */
+function KvRows({ entries }: { entries: [string, string][] }) {
+    return (
+        <div className="space-y-1">
+            {entries.map(([k, v]) => (
+                <div key={k} className="flex items-baseline justify-between gap-3">
+                    <span className="text-2xs text-surface-500 capitalize shrink-0">
+                        {k.replace(/_/g, " ")}
+                    </span>
+                    <span className="text-xs font-semibold text-surface-800 text-right break-words min-w-0">
+                        {v}
+                    </span>
+                </div>
+            ))}
+        </div>
+    );
+}
+
 // ── Focus card ────────────────────────────────────────────────────────────────
 // Shows the order summary at the top, then a stage checklist for all tasks
 // in this order. The active task is highlighted with its action button inline.
@@ -798,6 +872,14 @@ function FocusCard({
     const bodyMeasurements = Object.entries(order?.measurements ?? {}).filter(
         ([k]) => k.toLowerCase().replace(/[^a-z]/g, "") !== "gender");
     const hasMeasurements = bodyMeasurements.length > 0;
+
+    // The rest of the drawer's content, ready for the inline sections below.
+    const specs = Object.entries(order?.specifications ?? {}).filter(([, v]) => v);
+    const prefs = Object.entries(order?.customer_preferences ?? {}).filter(([, v]) => v);
+    const materials = order?.material_allocations ?? [];
+    const shortCount = materials.filter(
+        (a) => Number(a.quantity_required ?? 0) > Number(a.quantity_allocated ?? 0)
+    ).length;
 
     return (
         <div className="space-y-3">
@@ -876,39 +958,75 @@ function FocusCard({
                     </div>
                 )}
 
-                {/* Measurements grid */}
-                {hasMeasurements && (
-                    <div className="mx-4 mb-4">
-                        <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M21 6.5H3a1 1 0 00-1 1v9a1 1 0 001 1h18a1 1 0 001-1v-9a1 1 0 00-1-1z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M7 6.5v4M12 6.5v6M17 6.5v4" />
-                            </svg>
-                            Measurements
-                        </p>
-                        {/* ONE card, not one per measurement. Nine bordered tiles
-                            each stacking label over value burned roughly 220px of
-                            vertical space to carry nine short numbers. A single
-                            panel with label-left / value-right rows says the same
-                            thing in about a third of the height, and the values
-                            still line up in scannable columns. */}
-                        <div className="bg-white/80 border border-line rounded-xl px-3 py-2">
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-0.5">
-                                {bodyMeasurements.map(([k, v]) => (
-                                    <div
-                                        key={k}
-                                        className="flex items-baseline justify-between gap-2 min-w-0 py-0.5"
-                                    >
-                                        <span className="text-2xs text-surface-500 truncate">
-                                            {k}
-                                        </span>
-                                        <span className="text-[13px] font-bold text-surface-900 tabular-nums shrink-0">
-                                            {v}
-                                        </span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
+                {/* Order details — measurements open, the rest folded. What used
+                    to need the side drawer (fabric specs, customer preferences,
+                    materials) now sits one tap away under the same card. */}
+                {(hasMeasurements || specs.length > 0 || prefs.length > 0 || materials.length > 0) && (
+                    <div className="mx-4 mb-4 space-y-2">
+                        {hasMeasurements && (
+                            <InlineDetail label="Measurements" count={bodyMeasurements.length} defaultOpen>
+                                {/* ONE panel, label-left / value-right, two scannable
+                                    columns — nine numbers in a third of the height
+                                    the old bordered tiles burned. */}
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-0.5">
+                                    {bodyMeasurements.map(([k, v]) => (
+                                        <div
+                                            key={k}
+                                            className="flex items-baseline justify-between gap-2 min-w-0 py-0.5"
+                                        >
+                                            <span className="text-2xs text-surface-500 truncate">
+                                                {k}
+                                            </span>
+                                            <span className="text-[13px] font-bold text-surface-900 tabular-nums shrink-0">
+                                                {v}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </InlineDetail>
+                        )}
+
+                        {specs.length > 0 && (
+                            <InlineDetail label="Specifications" count={specs.length}>
+                                <KvRows entries={specs} />
+                            </InlineDetail>
+                        )}
+
+                        {prefs.length > 0 && (
+                            <InlineDetail label="Preferences" count={prefs.length}>
+                                <KvRows entries={prefs} />
+                            </InlineDetail>
+                        )}
+
+                        {materials.length > 0 && (
+                            <InlineDetail
+                                label="Materials"
+                                count={materials.length}
+                                alert={shortCount > 0 ? `${shortCount} short` : null}
+                            >
+                                <div className="space-y-1">
+                                    {materials.map((a, i) => {
+                                        const req   = Number(a.quantity_required ?? 0);
+                                        const alloc = Number(a.quantity_allocated ?? 0);
+                                        const short = req > alloc;
+                                        return (
+                                            <div key={i} className="flex items-baseline justify-between gap-3">
+                                                <span className="text-2xs text-surface-500 min-w-0 truncate">
+                                                    {a.material.name}
+                                                </span>
+                                                <span className={clsx(
+                                                    "text-xs font-semibold tabular-nums shrink-0",
+                                                    short ? "text-amber-700" : "text-surface-800",
+                                                )}>
+                                                    {alloc}/{req} {a.material.unit_of_measure}
+                                                    {short && " · short"}
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </InlineDetail>
+                        )}
                     </div>
                 )}
             </div>
@@ -986,11 +1104,15 @@ function FocusCard({
                                     <div className="w-5 h-5 rounded-full border-2 border-surface-200 bg-surface-50 shrink-0" />
                                 )}
 
-                                {/* Stage name — min-w-0 so it yields space to the
-                                    badge instead of forcing it off the edge. */}
+                                {/* Stage name — a floor of 7.5rem. With plain
+                                    min-w-0 the "Waiting on …" badge plus the
+                                    batch steppers could squeeze the name down to
+                                    a single letter ("F." for Finishing); with a
+                                    floor, the trailing controls wrap to the next
+                                    line and the name stays readable. */}
                                 <span
                                     className={clsx(
-                                        "flex-1 min-w-0 truncate text-[13px]",
+                                        "flex-1 min-w-[7.5rem] truncate text-[13px]",
                                         isDone
                                             ? "line-through text-surface-500"
                                             : isActive
