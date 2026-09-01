@@ -27,6 +27,8 @@ export type PaymentStatus =
     | "failed";
 
 export interface OrderItem {
+    /** Can this line actually be MADE? Gates the MTO action. */
+    is_producible?: boolean;
     id: number;
     variant_id: number;
     product_name: string;
