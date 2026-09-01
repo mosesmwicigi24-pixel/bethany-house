@@ -3533,6 +3533,10 @@ export default function OrderDetailPage() {
     // MTO toggle, so this is where a paid line gets sent to the workshop.
     const [productionItem, setProductionItem] = useState<any | null>(null);
     const paymentReceived = ["paid", "partial", "deposit"].includes(order?.payment_status ?? "");
+    // Order-level eligibility only. The PER-LINE rule is item.is_producible:
+    // the owner's instruction is that a product not marked producible at the hub
+    // must not offer "MTO · Send to production" at all — it was showing on
+    // bought-in stock like wafer bread, where a workshop task means nothing.
     const canRaiseProduction = paymentReceived && canDo("production.raise_order")
         && !["cancelled", "refunded", "voided"].includes(order?.status ?? "");
 
@@ -4190,7 +4194,7 @@ export default function OrderDetailPage() {
                                                                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 4h2m-1 0v4m0 0a4 4 0 100 8 4 4 0 000-8zm-6.5 8H4m16 0h-1.5"/></svg>
                                                                     In production →
                                                                 </Link>
-                                                            ) : canRaiseProduction ? (
+                                                            ) : canRaiseProduction && item.is_producible ? (
                                                                 <button onClick={() => setProductionItem(item)}
                                                                     className="inline-flex items-center gap-1 mt-1.5 text-2xs font-semibold text-brand-600 hover:text-white hover:bg-brand-600 border border-brand-300 rounded-full px-2 py-0.5 transition-colors">
                                                                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>

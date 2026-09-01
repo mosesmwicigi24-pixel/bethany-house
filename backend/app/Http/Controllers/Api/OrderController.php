@@ -396,9 +396,22 @@ class OrderController extends Controller
         // Annotate each item with its effective tax rate (as a percentage, e.g. 16.0)
         // so the frontend can display per-line rates without a separate lookup.
         $taxByRate = [];
+        // Which of these lines can actually be MADE. A line for wafer bread or a
+        // ready-made shawl must not offer "send to production" — the owner's
+        // rule: if a product is not marked producible at the hub, the MTO action
+        // does not belong on it. One query for the whole order, not one per row.
+        $producibleIds = [];
+        if (isset($data['items']) && is_array($data['items'])) {
+            $ids = array_values(array_filter(array_column($data['items'], 'product_id')));
+            $producibleIds = $ids
+                ? DB::table('products')->whereIn('id', $ids)
+                    ->where('is_producible', true)->pluck('id')->all()
+                : [];
+        }
         if (isset($data['items']) && is_array($data['items'])) {
             foreach ($data['items'] as &$item) {
                 $productId   = $item['product_id'] ?? 0;
+                $item['is_producible'] = $productId && in_array($productId, $producibleIds);
                 $rateDecimal = $productId ? \App\Services\TaxCalculationService::rateForProduct($productId) : 0.0;
                 $item['tax_rate'] = round($rateDecimal * 100, 4); // e.g. 16.0
                 // Human-readable tax category label for receipt/invoice display
@@ -2366,6 +2379,17 @@ class OrderController extends Controller
         }
         if (!$item->product_id) {
             return response()->json(['message' => 'This line has no product to produce.'], 422);
+        }
+        // The product must be MARKED producible at the hub. Hiding the button is
+        // UX; refusing here is the contract — the endpoint is reachable directly,
+        // and a production order for a bought-in consumable is a workshop task
+        // nobody can complete.
+        if (!DB::table('products')->where('id', $item->product_id)->value('is_producible')) {
+            return response()->json([
+                'message' => 'This product is not marked as producible, so it cannot be sent to production. '
+                           . 'Mark it made-to-order in the catalogue first.',
+                'reason'  => 'not_producible',
+            ], 422);
         }
 
         // Colour rides in the measurements map so it displays and edits alongside

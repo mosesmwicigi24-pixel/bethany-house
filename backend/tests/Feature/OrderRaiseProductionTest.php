@@ -39,7 +39,9 @@ class OrderRaiseProductionTest extends TestCase
             'status'         => 'processing',
             'payment_status' => 'paid',
         ]);
-        $product = Product::factory()->create();
+        // Production is now refused for anything not marked producible at the
+        // hub (owner's rule: the MTO action belongs only on things we make).
+        $product = Product::factory()->create(['is_producible' => true]);
         $item = OrderItem::create([
             'order_id'     => $order->id,
             'product_id'   => $product->id,

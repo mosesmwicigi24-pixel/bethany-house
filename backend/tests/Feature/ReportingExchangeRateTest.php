@@ -268,7 +268,11 @@ class ReportingExchangeRateTest extends TestCase
             'total_amount'   => 100,            // => KES 12,800
             'customer_phone' => '254722000999',
             'customer_first_name' => 'Dollar', 'customer_last_name' => 'Customer',
-            'created_at'     => now()->subDays(3),
+            // Three days back, but NEVER out of the current month: the executive
+            // dashboard's "current" period is startOfMonth()..endOfDay(), so on
+            // the 1st this fixture used to land in LAST month and the dashboard
+            // correctly reported nothing. The test failed every month-start.
+            'created_at'     => now()->subDays(3)->max(now()->startOfMonth()),
         ]);
 
         $viewer = $this->viewer();
