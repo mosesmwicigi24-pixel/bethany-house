@@ -47,17 +47,20 @@ Schedule::call(function () {
     ->timezone('Africa/Nairobi')
     ->withoutOverlapping();
 
-// ── Reap abandoned POS orders — hourly ───────────────────────────────────────
-// Cancels unpaid pending POS orders older than 24h and restores their reserved
-// stock, so abandoned carts never silently drain the shelf count.
-// Manual run: php artisan pos:reap-abandoned-orders
-Schedule::command(\App\Console\Commands\ReapAbandonedOrders::class)
-    ->hourly()
-    ->withoutOverlapping()
-    ->runInBackground()
-    ->onFailure(function () {
-        \Illuminate\Support\Facades\Log::error('[POS] Abandoned-order reap failed.');
-    });
+// ── Abandoned POS orders — NO LONGER CANCELLED AUTOMATICALLY ────────────────
+// This used to run hourly, cancelling unpaid pending POS orders older than 24h.
+// It cancelled 12 real orders worth KES 170,400 between July and August —
+// including a KES 49,500 sale — each of them a customer a human had served and
+// might still have closed.
+//
+// Owner's rule (2026-09-01): "The system should not cancel the receipts, only
+// human should." So nothing here cancels anything. The signal the reaper
+// existed for — which carts have gone stale — is better served by the Pending
+// Queue (/sales/pending-queue), where a person sees the order, the customer and
+// the age, and decides.
+//
+// The command survives for a human to run deliberately, and now refuses to
+// cancel without --force. DO NOT re-add a schedule for it.
 
 // ── Stock aging check — daily at 08:00 ───────────────────────────────────────
 // Notifies procurement/owners when tracked units have sat unsold too long.
