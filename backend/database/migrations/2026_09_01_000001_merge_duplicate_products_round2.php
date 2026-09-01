@@ -47,18 +47,23 @@ use Illuminate\Support\Facades\DB;
  */
 return new class extends Migration
 {
-    /** [survivor_id => loser_id] */
+    /**
+     * [survivor_sku => loser_sku]. Keyed on SKU, never on id: ids differ
+     * between environments, and archiving whatever happens to sit at id 11 in
+     * a staging database would be a silent act of vandalism. The 2026-07-30
+     * merge uses SKUs for exactly this reason.
+     */
     private const MERGES = [
-        109 => 137,   // the children's book
-        73  => 101,   // double sided stole
-        11  => 112,   // pectoral cross
+        'CHI-FC-001'  => 'GEN-CS-001',   // 102 Favorite Children's Bible stories <- 102 childrens stories
+        'CLE-DSS-001' => 'SF-STL-01',    // Double sided stole                    <- Double Sided Stoles
+        'CSMHIJ6R8'   => 'CLE-C-123',    // Pectoral Cross (pectoral-cross-gold)  <- Pectoral Cross (cross)
     ];
 
     public function up(): void
     {
-        foreach (self::MERGES as $survivorId => $loserId) {
-            $survivor = $this->liveProduct($survivorId);
-            $loser    = $this->liveProduct($loserId);
+        foreach (self::MERGES as $survivorSku => $loserSku) {
+            $survivor = $this->liveProduct($survivorSku);
+            $loser    = $this->liveProduct($loserSku);
             if (!$survivor || !$loser) {
                 continue;                       // already merged, or gone — re-run safe
             }
@@ -71,21 +76,22 @@ return new class extends Migration
 
     public function down(): void
     {
-        foreach (self::MERGES as $survivorId => $loserId) {
-            DB::table('products')->where('id', $loserId)
-                ->update(['status' => 'active', 'updated_at' => now()]);
-            $slug = DB::table('products')->where('id', $loserId)->value('slug');
-            if ($slug) {
-                DB::table('product_slug_redirects')->where('old_slug', $slug)->delete();
+        foreach (self::MERGES as $loserSku) {
+            $loser = DB::table('products')->where('sku', $loserSku)->first();
+            if (!$loser) {
+                continue;
             }
+            DB::table('products')->where('id', $loser->id)
+                ->update(['status' => 'active', 'updated_at' => now()]);
+            DB::table('product_slug_redirects')->where('old_slug', $loser->slug)->delete();
         }
     }
 
-    private function liveProduct(int $id): ?object
+    private function liveProduct(string $sku): ?object
     {
-        $p = DB::table('products')->where('id', $id)->whereNull('deleted_at')->first();
+        $p = DB::table('products')->where('sku', $sku)->whereNull('deleted_at')->first();
 
-        return ($p && $p->status !== 'archived') ? $p : null;
+        return ($p && $p->status !== 'archived') ? $p : null;   // re-run safe
     }
 
     private function archiveInto(object $loser, int $survivorId): void

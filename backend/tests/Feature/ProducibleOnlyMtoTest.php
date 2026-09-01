@@ -68,7 +68,7 @@ class ProducibleOnlyMtoTest extends TestCase
         $this->actingAs($this->staff(), 'sanctum')
             ->getJson("/api/v1/admin/orders/{$order->id}")
             ->assertOk()
-            ->assertJsonPath('items.0.is_producible', true);
+            ->assertJsonPath('order.items.0.is_producible', true);
     }
 
     public function test_the_payload_marks_a_bought_in_line_as_not_producible(): void
@@ -79,7 +79,7 @@ class ProducibleOnlyMtoTest extends TestCase
         $this->actingAs($this->staff(), 'sanctum')
             ->getJson("/api/v1/admin/orders/{$order->id}")
             ->assertOk()
-            ->assertJsonPath('items.0.is_producible', false);
+            ->assertJsonPath('order.items.0.is_producible', false);
     }
 
     public function test_production_is_refused_for_a_non_producible_product(): void
