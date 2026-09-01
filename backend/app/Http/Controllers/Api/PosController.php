@@ -3111,8 +3111,16 @@ class PosController extends Controller
             // has nothing to give back: releasing its quantities would decrement
             // quantity_reserved out of reservations belonging to other pending
             // orders on the same row. Same guard as PosInventoryService::unwind.
-            $legacyCommitted = $order->stock_committed_at && !$order->stock_reserved_at;
-            $holdsStock      = $legacyCommitted || (bool) $order->stock_reserved_at;
+            // stock_unwound_at means the goods were ALREADY given back — so this
+            // order holds nothing, whatever the other two flags say. Without this
+            // clause an order that was unwound (a cancel, or the reaper) and then
+            // edited returned its units a SECOND time, inventing stock that is
+            // not on the shelf. OrderLineEditor::stockMode() has always read the
+            // flag; this path did not, and the two disagreed.
+            $legacyCommitted = !$order->stock_unwound_at
+                && $order->stock_committed_at && !$order->stock_reserved_at;
+            $holdsStock      = !$order->stock_unwound_at
+                && ($legacyCommitted || (bool) $order->stock_reserved_at);
             foreach ($holdsStock ? $order->items : [] as $oldItem) {
                 if (str_starts_with($oldItem->notes ?? '', '__MTO__')) continue;
                 if (!$oldItem->product_variant_id) continue;
@@ -3384,7 +3392,11 @@ class PosController extends Controller
                     $item['inventory']->reserveUnits((int) round($item['quantity']));
                 }
             }
-            $order->forceFill(['stock_reserved_at' => now()])->save();
+            // This order is holding stock again, so it is no longer unwound.
+            // Leaving the flag set made the hold permanent: a later human cancel
+            // would early-return in unwindForOrder and never release it, so the
+            // shelf stayed short with no order to explain it.
+            $order->forceFill(['stock_reserved_at' => now(), 'stock_unwound_at' => null])->save();
 
             DB::commit();
 
@@ -3929,6 +3941,22 @@ class PosController extends Controller
 
         if (!in_array($order->payment_status, ['pending', 'partial', 'deposit'])) {
             return response()->json(['message' => 'Order is already paid or cannot accept further payments.'], 422);
+        }
+
+        // A LIVE order that is also marked unwound is telling two stories: the
+        // goods were given back, yet the order still expects to sell them. Taking
+        // payment here would either deduct nothing (the goods walk out and the
+        // count never moves) or commit a reservation that was released long ago,
+        // stealing units earmarked for somebody else's order.
+        //
+        // Refuse and say so. A silent skip is the worse bug: it looks like a
+        // completed sale and quietly breaks the shelf.
+        if ($order->stock_unwound_at && !in_array($order->status, Order::DEAD_STATUSES, true)) {
+            return response()->json([
+                'message' => "This order's stock hold is stale — its goods were returned to the shelf. "
+                           . 'Open the order, re-save it to take the stock again, then accept payment.',
+                'reason'  => 'stale_stock_hold',
+            ], 422);
         }
 
         $validated = $request->validate([
