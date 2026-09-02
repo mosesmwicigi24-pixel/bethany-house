@@ -538,6 +538,14 @@ class SyncPermissions extends Command
                 'settings.manage_database',
                 'settings.manage',
                 'production.delete_order',
+                // A SERVICE-ACCOUNT capability: it lets the sales agent carry
+                // an owner-declared campaign discount past the cashier ceiling.
+                // admin holds 'pos.*', so without this line the very next
+                // container start hands a human role the agent's pass-through —
+                // which is what happened the day it was added. admin already
+                // has pos.discount_override, so it loses nothing; the point is
+                // that this is not a thing people should hold by accident.
+                'pos.discount_campaign',
             ];
 
             // Resolve "@bundle" references first, so wildcard expansion and
