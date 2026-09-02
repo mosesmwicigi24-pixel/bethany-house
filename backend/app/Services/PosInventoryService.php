@@ -89,6 +89,15 @@ class PosInventoryService
     /** Commit the reservation on payment — goods leave the shelf. Idempotent. */
     public static function commitForOrder(Order $order, ?int $userId = null): void
     {
+        // A live order that has already given its goods back cannot deduct them
+        // again. Refuse loudly: the two silent outcomes are worse — deduct
+        // nothing (goods walk out, the count never moves) or consume a
+        // reservation that now belongs to another order. Dead orders keep the
+        // flag legitimately, so only live ones are a contradiction.
+        if ($order->stock_unwound_at && !in_array($order->status, Order::DEAD_STATUSES, true)) {
+            throw new \App\Exceptions\StaleStockHoldException($order->id, (string) $order->order_number);
+        }
+
         // Only commit a reservation once, and never re-deduct an order created
         // under the old model (already marked committed by the migration).
         if ($order->stock_committed_at || !$order->stock_reserved_at) {

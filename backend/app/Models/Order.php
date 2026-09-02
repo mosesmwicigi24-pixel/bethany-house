@@ -505,6 +505,51 @@ class Order extends Model
         }
 
         $this->update(['payment_status' => $status]);
+
+        if ($status === 'paid') {
+            $this->commitStockOnceFullyPaid();
+        }
+    }
+
+    /**
+     * Fully paid means the goods leave the shelf. This lives HERE, on the one
+     * method every payment door already calls, because putting it at each call
+     * site meant a door could forget — and one did.
+     *
+     * PosController and ReceiptService committed; PublicPaymentController never
+     * did. So every order a CUSTOMER paid for themselves — the flow the durable
+     * order link was built to make primary — took the money and left the shelf
+     * count untouched: 82 orders, KES 1.16m, still happening. commitForOrder is
+     * idempotent, so the doors that already commit are unaffected.
+     *
+     * NEVER throws outward. By the time this runs the money has arrived, and a
+     * stock-bookkeeping problem must not undo a customer's payment. A stale
+     * hold is logged loudly for staff instead — the till refuses that order
+     * BEFORE taking payment (PosController::recordPosPay), which is the right
+     * place to stop it.
+     */
+    private function commitStockOnceFullyPaid(): void
+    {
+        if (in_array($this->status, self::DEAD_STATUSES, true)) {
+            return;
+        }
+
+        try {
+            \App\Services\PosInventoryService::commitForOrder($this, $this->created_by);
+            \App\Services\ProductSerialService::syncSoldForOrder($this);
+        } catch (\App\Exceptions\StaleStockHoldException $e) {
+            \Illuminate\Support\Facades\Log::error('stock not deducted on payment — stale hold', [
+                'order_id'     => $this->id,
+                'order_number' => $this->order_number,
+                'message'      => $e->getMessage(),
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('stock commit failed after payment', [
+                'order_id'     => $this->id,
+                'order_number' => $this->order_number,
+                'message'      => $e->getMessage(),
+            ]);
+        }
     }
 
 }
