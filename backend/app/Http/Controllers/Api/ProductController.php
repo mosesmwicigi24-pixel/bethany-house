@@ -12,6 +12,7 @@ use App\Models\ProductTranslation;
 use App\Services\TaxCalculationService;
 use App\Services\ActivityLogService;
 use App\Services\ImageService;
+use App\Services\ProductVideoService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -861,6 +862,64 @@ class ProductController extends Controller
         return response()->json(['message' => 'Image deleted.']);
     }
 
+    // ── Video ──────────────────────────────────────────────────────────────────
+
+    /**
+     * POST /api/v1/admin/products/{id}/video
+     *
+     * One short, silent clip per product. The storefront plays it over the
+     * still when a card is hovered (scrolled into view on phones) and leads
+     * the product gallery with it. Uploading again replaces the clip and
+     * removes the old file. Conversion (phone HEVC → small H.264 MP4) is
+     * ProductVideoService's job; the product row only ever stores the URL.
+     */
+    public function uploadVideo(Request $request, $id)
+    {
+        $request->validate([
+            // 20 MB is the edge ceiling (nginx client_max_body_size and PHP
+            // post_max_size in docker/). A larger file is rejected before
+            // Laravel runs, so promising more here would only mislead.
+            // Format is checked by extension in the service (phone .mov
+            // uploads are routinely mislabelled by finfo).
+            'video' => ['required', 'file', 'max:20480'],
+        ]);
+
+        $product = Product::findOrFail($id);
+        $service = app(ProductVideoService::class);
+
+        $result = $service->process($request->file('video'), "products/{$product->id}");
+
+        $previous = $product->video_url;
+        $product->update(['video_url' => $result['url']]);
+        if ($previous && $previous !== $result['url']) {
+            $service->delete($previous);
+        }
+
+        return response()->json([
+            'message'   => $result['converted']
+                ? 'Video uploaded and converted for the web.'
+                : 'Video uploaded.',
+            'video_url' => $result['url'],
+            'converted' => $result['converted'],
+            'size'      => $result['size'],
+        ]);
+    }
+
+    /**
+     * DELETE /api/v1/admin/products/{id}/video
+     */
+    public function deleteVideo($id)
+    {
+        $product = Product::findOrFail($id);
+
+        if ($product->video_url) {
+            app(ProductVideoService::class)->delete($product->video_url);
+            $product->update(['video_url' => null]);
+        }
+
+        return response()->json(['message' => 'Video removed.']);
+    }
+
     // ── Variants ───────────────────────────────────────────────────────────────
 
     /**
@@ -1337,6 +1396,8 @@ class ProductController extends Controller
                 'images'       => $v->images->values(),
             ])->values(),
             'images'              => $product->images->whereNull('product_variant_id')->sortBy('sort_order')->values(),
+            // Short product clip (hover-to-play on storefront cards). Null when none.
+            'video_url'           => $product->video_url,
             'seo'                 => $product->seo->values(),
             'measurements'        => $product->measurements ?? [],
             // features/aliases were populated for the whole catalog on

@@ -494,6 +494,10 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:products.edit,sanctum');
                 Route::delete('/{id}/images/{imageId}',       [ProductController::class, 'deleteImage'])
                     ->middleware('permission:products.edit,sanctum');
+                Route::post('/{id}/video',                    [ProductController::class, 'uploadVideo'])
+                    ->middleware('permission:products.edit,sanctum');
+                Route::delete('/{id}/video',                  [ProductController::class, 'deleteVideo'])
+                    ->middleware('permission:products.edit,sanctum');
                 Route::post('/{id}/variants',                 [ProductController::class, 'addVariant'])
                     ->middleware('permission:products.edit,sanctum');
                 Route::put('/{productId}/variants/{variantId}',    [ProductController::class, 'updateVariant'])

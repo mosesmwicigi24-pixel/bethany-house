@@ -40,6 +40,7 @@ class Product extends Model
         'features',
         'production_stage_ids',
         'aliases',
+        'video_url',
     ];
 
     /*
