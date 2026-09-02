@@ -18,7 +18,8 @@ RUN apk add --no-cache \
     oniguruma-dev \
     libxml2-dev \
     supervisor \
-    nginx
+    nginx \
+    ffmpeg
 
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
     && docker-php-ext-install -j$(nproc) \

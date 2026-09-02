@@ -2452,8 +2452,11 @@ export default function ProductFormPage() {
     const [deletingVariant, setDeletingVariant] =
         useState<ProductVariant | null>(null);
     const [uploading, setUploading] = useState(false);
+    const [videoUrl, setVideoUrl] = useState<string | null>(null);
+    const [videoBusy, setVideoBusy] = useState(false);
     const [skuManual, setSkuManual] = useState(false);
     const imageRef = useRef<HTMLInputElement>(null);
+    const videoRef = useRef<HTMLInputElement>(null);
 
     // Phase 2 - per-product tax rate selection
     const [taxRateIds, setTaxRateIds] = useState<number[]>([]);
@@ -2676,6 +2679,7 @@ export default function ProductFormPage() {
                     .slice()
                     .sort((a: any, b: any) => a.sort_order - b.sort_order),
             );
+            setVideoUrl(product.video_url ?? null);
             // Phase 2 - restore tax rate selections from loaded product
             setTaxRateIds(product.tax_rate_ids ?? []);
             setSkuManual(true); // existing product SKU - treat as manual
@@ -2835,6 +2839,49 @@ export default function ProductFormPage() {
         },
         [id, isEditing, toast],
     );
+
+    // ── Video handlers ────────────────────────────────────────────────────────
+
+    // The clip is sent as-is (no browser compression — that helper is for
+    // photos); the Hub converts it to a small web MP4 on the server.
+    const handleVideoUpload = useCallback(
+        async (file: File) => {
+            if (!isEditing) {
+                toast.error("Save the product first before uploading a video.");
+                return;
+            }
+            if (file.size > 20 * 1024 * 1024) {
+                toast.error("Video must be under 20 MB. Trim it to a few seconds or export at 720p.");
+                return;
+            }
+            setVideoBusy(true);
+            try {
+                const res = await productsApi.uploadVideo(Number(id), file);
+                setVideoUrl(res.video_url);
+                toast.success(res.message);
+            } catch (e: any) {
+                toast.error(e.errors?.video?.[0] ?? e.message ?? "Upload failed.");
+            } finally {
+                setVideoBusy(false);
+                if (videoRef.current) videoRef.current.value = "";
+            }
+        },
+        [id, isEditing, toast],
+    );
+
+    const handleVideoDelete = useCallback(async () => {
+        if (!window.confirm("Remove this product's video?")) return;
+        setVideoBusy(true);
+        try {
+            await productsApi.deleteVideo(Number(id));
+            setVideoUrl(null);
+            toast.success("Video removed.");
+        } catch (e: any) {
+            toast.error(e.message ?? "Could not remove the video.");
+        } finally {
+            setVideoBusy(false);
+        }
+    }, [id, toast]);
 
     const handleSetPrimary = useCallback(
         async (imageId: number) => {
@@ -3430,6 +3477,118 @@ export default function ProductFormPage() {
                                             </div>
                                         </SortableContext>
                                     </DndContext>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === "media" && (
+                        <div className="card mt-4">
+                            <div className="card-header flex items-center justify-between">
+                                <div>
+                                    <h3 className="text-sm font-semibold text-surface-900">
+                                        Product Video
+                                    </h3>
+                                    <p className="text-xs text-surface-400 mt-0.5">
+                                        A short silent clip that plays over the photo when a shopper hovers the product (or scrolls to it on a phone)
+                                    </p>
+                                </div>
+                                {canEditImagesAndVariants && (
+                                    <div className="flex items-center gap-2">
+                                        {videoUrl && (
+                                            <button
+                                                type="button"
+                                                onClick={handleVideoDelete}
+                                                disabled={videoBusy}
+                                                className="btn-secondary btn-sm"
+                                            >
+                                                Remove
+                                            </button>
+                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={() => videoRef.current?.click()}
+                                            disabled={!isEditing || videoBusy}
+                                            className="btn-primary btn-sm"
+                                        >
+                                            {videoBusy ? (
+                                                <Spinner
+                                                    size="xs"
+                                                    className="border-white/30 border-t-white"
+                                                />
+                                            ) : null}
+                                            {videoUrl ? "Replace" : "Upload"}
+                                        </button>
+                                    </div>
+                                )}
+                                <input
+                                    ref={videoRef}
+                                    type="file"
+                                    accept="video/mp4,video/quicktime,video/x-m4v,video/webm,.mp4,.mov,.m4v,.webm"
+                                    className="hidden"
+                                    onChange={(e) =>
+                                        e.target.files?.[0] &&
+                                        handleVideoUpload(e.target.files[0])
+                                    }
+                                />
+                            </div>
+                            <div className="card-body">
+                                {videoUrl ? (
+                                    <div className="flex flex-col sm:flex-row gap-4 items-start">
+                                        <video
+                                            key={videoUrl}
+                                            src={videoUrl}
+                                            controls
+                                            muted
+                                            loop
+                                            playsInline
+                                            preload="metadata"
+                                            className="w-full sm:w-64 rounded-xl bg-surface-100"
+                                        />
+                                        <div className="text-xs text-surface-500 space-y-1">
+                                            <p>
+                                                Shoppers see this on the product card and as the first slide of the gallery.
+                                            </p>
+                                            <a
+                                                href={videoUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="text-brand-600 hover:underline break-all"
+                                            >
+                                                {videoUrl}
+                                            </a>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div
+                                        onClick={() =>
+                                            isEditing &&
+                                            canEditImagesAndVariants &&
+                                            !videoBusy &&
+                                            videoRef.current?.click()
+                                        }
+                                        className="border-2 border-dashed border-surface-200 rounded-xl p-8 text-center cursor-pointer hover:border-brand-300 hover:bg-brand-50 transition-colors"
+                                    >
+                                        <svg
+                                            className="w-8 h-8 text-surface-500 mx-auto mb-2"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                            strokeWidth={1.5}
+                                        >
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z"
+                                            />
+                                        </svg>
+                                        <p className="text-sm text-surface-400">
+                                            {isEditing ? "Click to upload a video" : "Save the product first, then upload a video"}
+                                        </p>
+                                        <p className="text-xs text-surface-500 mt-1">
+                                            MP4, MOV or WebM · under 20 MB · a steady 5–10 second clip framed like the main photo works best · converted for the web automatically
+                                        </p>
+                                    </div>
                                 )}
                             </div>
                         </div>

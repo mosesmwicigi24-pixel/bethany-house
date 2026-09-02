@@ -90,6 +90,8 @@ export interface Product {
     updated_at: string;
     measurements: { name: string; unit?: string; required: boolean }[];
     features?: { icon?: string; text: string }[];
+    /** Short product clip (hover-to-play on storefront cards); null when none. */
+    video_url?: string | null;
     // Relations
     category: { id: number; name_en: string } | null;
     translations: ProductTranslation[];
@@ -225,6 +227,23 @@ export const productsApi = {
         del<{ message: string }>(
             `/v1/admin/products/${productId}/images/${imageId}`,
         ),
+
+    // ── Video ──────────────────────────────────────────────────────────────────
+
+    // One clip per product; uploading again replaces it. The Hub converts a
+    // raw phone recording to a small web MP4 (when ffmpeg is installed).
+    uploadVideo: (id: number, file: File) => {
+        const form = new FormData();
+        form.append("video", file);
+        return post<{ message: string; video_url: string; converted: boolean; size: number }>(
+            `/v1/admin/products/${id}/video`,
+            form,
+            { headers: { "Content-Type": undefined } },
+        );
+    },
+
+    deleteVideo: (id: number) =>
+        del<{ message: string }>(`/v1/admin/products/${id}/video`),
 
     // ── Variants ───────────────────────────────────────────────────────────────
 
