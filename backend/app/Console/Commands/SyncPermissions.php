@@ -128,6 +128,7 @@ class SyncPermissions extends Command
         'pos.access'           => ['POS Access',           'Use the point-of-sale terminal',              'POS'],
         'pos.discount'         => ['Apply Discounts',      'Apply manual discounts at POS, up to the configured ceiling', 'POS'],
         'pos.discount_override' => ['Discount Beyond the Ceiling', 'Apply a POS discount larger than the percentage ceiling that limits cashiers', 'POS'],
+        'pos.discount_campaign' => ['Pass Through a Campaign Discount', 'Carry an owner-declared campaign discount into an order, bounded by the agent ceiling rather than the cashier one. For the sales agent\'s service account, not for people.', 'POS'],
         'pos.void'             => ['Void Transactions',    'Void completed POS transactions',             'POS'],
         'pos.open_register'    => ['Open Cash Register',   'Open a new cash register session',            'POS'],
         'pos.close_register'   => ['Close Cash Register',  'Close and reconcile a cash register',         'POS'],

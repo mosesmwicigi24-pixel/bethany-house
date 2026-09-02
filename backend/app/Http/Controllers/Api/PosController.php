@@ -3662,7 +3662,11 @@ class PosController extends Controller
                 // exercising discretion over the till, and the storefront does
                 // not police it either.
                 PosDiscountPolicy::assertAllowed(auth()->user(), $askedFor, $lineBase, 'line');
-                $lineDiscount = round($askedFor + $catalogueSaving, 2);
+                // Deliberately NOT rounded here. resolveDiscount's full
+                // precision has always flowed into the line subtotal, and
+                // rounding the sum moved a characterised total by a cent. The
+                // catalogue saving is already rounded to the currency.
+                $lineDiscount = $askedFor + $catalogueSaving;
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
