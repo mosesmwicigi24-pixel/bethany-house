@@ -61,7 +61,7 @@ final class PosDiscountPolicy
             return;
         }
 
-        $cap = self::capPercent();
+        $cap = self::capFor($user);
 
         // Rounded to the column before comparing, so float noise in
         // ($base * $cap / 100) cannot refuse a discount that is exactly at the
@@ -84,5 +84,35 @@ final class PosDiscountPolicy
     public static function capPercent(): float
     {
         return (float) config('pos.discount_cap_percent', 5.0);
+    }
+
+    /**
+     * The ceiling that applies to THIS caller.
+     *
+     * The 5% cap above is about clerk discretion: a person at a till deciding,
+     * in the moment, to let a sale go for less. Neema is not exercising
+     * discretion — she is executing a campaign the owner declared, and the
+     * price she states is computed by code, not chosen. Holding her to the
+     * clerk ceiling meant a 10% campaign refused every order it touched, which
+     * is why the discount travelled as a NOTE for a human to apply by hand and
+     * the customer could pay the undiscounted link before anyone read it.
+     *
+     * So the pass-through is a capability, never a channel string: `channel`
+     * is caller-supplied, and keying off it would have let any clerk walk past
+     * the ceiling by posting channel=whatsapp. `pos.discount_campaign` is
+     * granted to the agent's service account and to nobody at a till, and it
+     * is still bounded — by the agent ceiling, which matches the hard 70% limit
+     * Neema's own campaign parser enforces.
+     */
+    public static function capFor(?User $user): float
+    {
+        return $user?->can('pos.discount_campaign')
+            ? self::agentCapPercent()
+            : self::capPercent();
+    }
+
+    public static function agentCapPercent(): float
+    {
+        return (float) config('pos.agent_discount_cap_percent', 70.0);
     }
 }

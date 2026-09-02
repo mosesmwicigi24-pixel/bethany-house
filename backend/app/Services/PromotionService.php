@@ -108,6 +108,12 @@ class PromotionService
             $final = $this->discountedUnit($base, $promo);
             if ($final < $regular) {
                 $row->sale_price = $final; // in-memory overlay for display
+                // The PROMOTION's own window already decided this applies (see
+                // promotionFor). Any window still hanging off the row belongs to
+                // a manual sale that is no longer the price, and leaving it
+                // would make effective_price read the promotion as expired.
+                $row->sale_start_date = null;
+                $row->sale_end_date   = null;
             }
         }
     }

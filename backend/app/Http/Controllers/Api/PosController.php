@@ -3264,7 +3264,11 @@ class PosController extends Controller
                                 'message' => CurrencyPricing::unpriceableReason($mtoName, $resolvedCurrency),
                             ], 422);
                         }
-                        $mtoUnitPrice = $priced['regular_price'];
+                        // The advertised selling price, like the stocked
+                        // lines. A production line carries no discount column,
+                        // so the saving lands in the unit price itself rather
+                        // than as a struck-through 'was'.
+                        $mtoUnitPrice = $priced['effective_price'];
                     }
                 }
 
@@ -3545,6 +3549,10 @@ class PosController extends Controller
         // unit_price is exactly how KES figures ended up wearing a USD label.
         $channel   = $validated['channel'] ?? 'pos';
         $hubPrices = $channel !== 'pos';
+        // Same resolver the website charges from, so an agent-taken order and a
+        // web order for the same item come to the same money.
+        $promoService  = new \App\Services\PromotionService();
+        $promoProducts = [];
 
         DB::beginTransaction();
         try {
@@ -3609,7 +3617,8 @@ class PosController extends Controller
 
                 // Agent-taken order: the hub's own price for this currency, or
                 // nothing. Refusing beats charging a KES number as USD.
-                $unitPrice = (float) $item['unit_price'];
+                $unitPrice       = (float) $item['unit_price'];
+                $catalogueSaving = 0.0;   // a till operator types the price they mean
                 if ($hubPrices) {
                     $priced = CurrencyPricing::catalogue($productId, $variantId, $currencyCode);
                     if (!$priced) {
@@ -3621,16 +3630,43 @@ class PosController extends Controller
                             'message' => CurrencyPricing::unpriceableReason($name, $currencyCode),
                         ], 422);
                     }
+                    // The line carries the LIST price and the saving shows as
+                    // a discount, exactly as StorefrontCheckoutController does
+                    // — so the website and the chat charge the same number and
+                    // the receipt still says what the item normally costs.
+                    //
+                    // This used to be regular_price flat, ignoring the hub's
+                    // own selling price. Neema quotes effective_price off the
+                    // catalogue feed, so she said 18,000 for a Preaching Gown
+                    // and the hub billed 20,000 — on 60 products.
                     $unitPrice = $priced['regular_price'];
+
+                    $sellingUnit = $priced['effective_price'];
+                    $promoProduct = $productId
+                        ? ($promoProducts[$productId] ??= Product::find($productId))
+                        : null;
+                    if ($promoProduct && ($promo = $promoService->promotionFor($promoProduct))) {
+                        $sellingUnit = $promoService->discountedUnit($sellingUnit, $promo);
+                    }
+                    $catalogueSaving = round(max(0, $unitPrice - $sellingUnit) * $item['quantity'], 2);
                 }
 
                 $lineBase     = $unitPrice * $item['quantity'];
                 $discType     = $item['discount_type'] ?? 'none';
                 $discVal      = (float)($item['discount_value'] ?? 0);
-                $lineDiscount = OrderTotals::resolveDiscount($discType, $discVal, $lineBase);
+                $askedFor     = OrderTotals::resolveDiscount($discType, $discVal, $lineBase);
                 // pos.discount is checked here, against the RESOLVED amount, so
                 // a flat discount cannot walk around the percentage ceiling.
-                PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, 'line');
+                // Only what the CALLER asked for is policed: the catalogue
+                // saving below is the shop's own advertised price, not somebody
+                // exercising discretion over the till, and the storefront does
+                // not police it either.
+                PosDiscountPolicy::assertAllowed(auth()->user(), $askedFor, $lineBase, 'line');
+                // Deliberately NOT rounded here. resolveDiscount's full
+                // precision has always flowed into the line subtotal, and
+                // rounding the sum moved a characterised total by a cent. The
+                // catalogue saving is already rounded to the currency.
+                $lineDiscount = $askedFor + $catalogueSaving;
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -3692,7 +3728,11 @@ class PosController extends Controller
                                 'message' => CurrencyPricing::unpriceableReason($mtoName, $currencyCode),
                             ], 422);
                         }
-                        $mtoUnitPrice = $priced['regular_price'];
+                        // The advertised selling price, like the stocked
+                        // lines. A production line carries no discount column,
+                        // so the saving lands in the unit price itself rather
+                        // than as a struck-through 'was'.
+                        $mtoUnitPrice = $priced['effective_price'];
                     }
                 }
 

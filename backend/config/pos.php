@@ -19,4 +19,20 @@ return [
 
     'discount_cap_percent' => (float) env('POS_DISCOUNT_CAP_PERCENT', 5.0),
 
+    /*
+     * The ceiling for a caller holding `pos.discount_campaign` — the agent's
+     * service account passing through an owner-declared campaign, not a person
+     * exercising discretion at a till. Matches the hard 70% limit Neema's own
+     * campaign parser enforces, so this bounds the blast radius rather than
+     * setting policy: the real limit is the campaign the owner declares.
+     */
+    'agent_discount_cap_percent' => (float) env('POS_AGENT_DISCOUNT_CAP_PERCENT', 70.0),
+
+    /*
+     * The sales agent's service account. It is the only holder of
+     * `pos.discount_campaign`, so naming it here is what keeps the grant
+     * reproducible instead of a thing somebody once typed into production.
+     */
+    'agent_user_email' => env('POS_AGENT_USER_EMAIL', 'neema-bot@bethanyhouse.co.ke'),
+
 ];

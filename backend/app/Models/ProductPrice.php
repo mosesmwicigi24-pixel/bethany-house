@@ -87,6 +87,31 @@ class ProductPrice extends Model
         return $this->belongsTo(ProductVariant::class, 'product_variant_id');
     }
 
+    /**
+     * The selling price, published with every price row.
+     *
+     * Neema read `sale_price or regular_price` off this feed while the hub's
+     * order path charged `regular_price` — so she quoted the Preaching Gown at
+     * 18,000 and the hub billed 20,000, on 60 products. Publishing ONE number,
+     * computed here, is what stops the quote and the charge being two different
+     * calculations that can drift apart again.
+     *
+     * Window-aware, and never above the regular price.
+     */
+    protected $appends = ['effective_price'];
+
+    public function getEffectivePriceAttribute(): float
+    {
+        $regular = (float) $this->regular_price;
+        $sale    = $this->sale_price !== null ? (float) $this->sale_price : null;
+
+        if ($sale === null || $sale <= 0 || $sale >= $regular) {
+            return round($regular, 2);
+        }
+
+        return round($this->isOnSale() ? $sale : $regular, 2);
+    }
+
     public function getEffectivePrice()
     {
         if ($this->sale_price && $this->isOnSale()) {
