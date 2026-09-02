@@ -24,9 +24,58 @@ class ProductPrice extends Model
         'regular_price' => 'decimal:2',
         'sale_price' => 'decimal:2',
         'cost_price' => 'decimal:2',
-        'sale_start_date' => 'datetime',
-        'sale_end_date' => 'datetime',
+        // A sale WINDOW is a pair of days, not instants. Cast as datetime these
+        // serialised as "2026-06-08T18:00:00.000000Z" — a value no <input
+        // type="date"> can render, so the Pricing screen showed an EMPTY box
+        // for a window that existed, and the UTC shift moved the day by one.
+        // Date-only round-trips exactly as typed, in any timezone.
+        'sale_start_date' => 'date:Y-m-d',
+        'sale_end_date' => 'date:Y-m-d',
     ];
+
+    /**
+     * A sale price that is not a discount is not a sale price.
+     *
+     * This lives on the MODEL and not in a controller because prices are
+     * written from a dozen places — four API endpoints, three Livewire screens,
+     * variant bulk-edit — and a rule kept at the call site is a rule the next
+     * door forgets. On production this had already produced 180 rows whose sale
+     * price equalled the regular price (a permanent "sale" at no discount,
+     * since a window-less sale_price is on sale forever) and two that were
+     * ABOVE it: a Cassock listed at 13,000 with a 20,000 "sale", which the
+     * storefront would have charged because it bills effective_price while the
+     * till bills regular_price. Same product, two prices, depending on the door.
+     *
+     * ValidationException rather than a bare exception, so the API answers 422
+     * with a usable message and Livewire shows it against the field.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (self $price) {
+            if ($price->sale_price === null) {
+                return;                       // no sale is always allowed
+            }
+
+            $sale    = (float) $price->sale_price;
+            $regular = (float) $price->regular_price;
+
+            if ($sale <= 0.0) {
+                $price->sale_price = null;    // 0 means "none", not "free"
+                return;
+            }
+
+            if ($sale >= $regular) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'sale_price' => sprintf(
+                        'The %s sale price (%s) must be lower than the regular price (%s). Leave it empty when the item is not on sale.',
+                        $price->currency_code,
+                        number_format($sale, 2),
+                        number_format($regular, 2),
+                    ),
+                ]);
+            }
+        });
+    }
 
     public function product()
     {
@@ -49,16 +98,20 @@ class ProductPrice extends Model
     public function isOnSale()
     {
         $now = now();
-        
+
         if (!$this->sale_price) {
             return false;
         }
 
-        if ($this->sale_start_date && $now->lt($this->sale_start_date)) {
+        if ($this->sale_start_date && $now->lt($this->sale_start_date->startOfDay())) {
             return false;
         }
 
-        if ($this->sale_end_date && $now->gt($this->sale_end_date)) {
+        // "Sale Until 5 Sept" includes the 5th. The end date is stored at
+        // midnight, so comparing against it raw ended the sale at the START of
+        // the day named on the label — the shop advertised a last day it never
+        // actually sold on.
+        if ($this->sale_end_date && $now->gt($this->sale_end_date->endOfDay())) {
             return false;
         }
 

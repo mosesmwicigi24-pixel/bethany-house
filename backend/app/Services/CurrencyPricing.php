@@ -253,15 +253,25 @@ class CurrencyPricing
             return null;
         }
 
+        // A "sale" at or above the regular price is not a sale, and this is the
+        // method that decides what a customer is CHARGED — effective_price is
+        // read straight from it. ProductPrice refuses to store such a row and a
+        // migration cleared the ones that predate that rule; this is the floor
+        // that means no row, however it arrived, can bill above list.
+        if ((float) $sale >= (float) $row->regular_price) {
+            return null;
+        }
+
         $now   = now();
         $start = $row->sale_start_date ?? null;
         $end   = $row->sale_end_date   ?? null;
 
-        if ($start && $now->lt(Carbon::parse($start))) {
+        if ($start && $now->lt(Carbon::parse($start)->startOfDay())) {
             return null;
         }
 
-        if ($end && $now->gt(Carbon::parse($end))) {
+        // Inclusive of the day named on the label — see ProductPrice::isOnSale.
+        if ($end && $now->gt(Carbon::parse($end)->endOfDay())) {
             return null;
         }
 

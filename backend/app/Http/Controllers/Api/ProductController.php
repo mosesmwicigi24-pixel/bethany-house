@@ -511,7 +511,9 @@ class ProductController extends Controller
             'prices.*.sale_price'              => 'nullable|numeric|min:0',
             'prices.*.cost_price'              => 'nullable|numeric|min:0',
             'prices.*.sale_start_date'         => 'nullable|date',
-            'prices.*.sale_end_date'           => 'nullable|date',
+            // The create path has always required this; the EDIT path did not,
+            // so a window could be saved end-before-start and never open.
+            'prices.*.sale_end_date'           => 'nullable|date|after_or_equal:prices.*.sale_start_date',
             'seo'                              => 'sometimes|array',
             'seo.*.language_code'              => 'required|string',
             'seo.*.meta_title'                 => 'nullable|string|max:255',
