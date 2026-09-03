@@ -40,26 +40,34 @@ class InterestCart extends Model
     public const CONVERTED       = ['online_order', 'whatsapp_order'];
 
     /**
-     * The status ladder (§7a: "never drop a status backwards"). Converted
-     * outcomes outrank everything; abandoned outranks the live states but
-     * must never overwrite a conversion — a sale already closed stays closed.
+     * Would moving to $incoming regress this row's status?
+     *
+     * Three rules, in order of what the statuses actually mean:
+     *  - CONVERTED IS TERMINAL: a sale that closed stays closed — neither a
+     *    stale browser tab syncing active_cart nor an abandonment sweep can
+     *    undo it (§7a/§7c).
+     *  - ABANDONED IS DORMANT, NOT DEAD: the token lives in the customer's
+     *    browser until an order rotates it, so "customer comes back after
+     *    three weeks" is the NORMAL path — any new touch revives the cart.
+     *  - AMONG LIVE STATES, FORWARD ONLY: checkout_started never drops back
+     *    to active_cart ("never drop a status backwards").
      */
-    private const STATUS_RANK = [
-        'active_cart'      => 0,
-        'checkout_started' => 1,
-        'abandoned'        => 2,
-        'online_order'     => 3,
-        'whatsapp_order'   => 3,
-    ];
-
-    /** Would moving to $incoming regress this row's status? */
     public function statusWouldRegress(string $incoming): bool
     {
-        $current = self::STATUS_RANK[$this->status] ?? 0;
-        $next    = self::STATUS_RANK[$incoming] ?? 0;
+        if (in_array($this->status, self::CONVERTED, true)) {
+            return !in_array($incoming, self::CONVERTED, true);
+        }
+        if ($this->status === 'abandoned') {
+            return false;
+        }
 
-        return $next < $current
-            || (in_array($this->status, self::CONVERTED, true) && $incoming === 'abandoned');
+        return $this->status === self::STATUS_CHECKOUT && $incoming === self::STATUS_ACTIVE;
+    }
+
+    /** Converted carts are history — the record of what was bought. */
+    public function isConverted(): bool
+    {
+        return in_array($this->status, self::CONVERTED, true);
     }
 
     /** Stamp phone + its canonical join key together, never one without the other. */

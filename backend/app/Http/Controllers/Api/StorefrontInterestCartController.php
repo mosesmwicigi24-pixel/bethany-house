@@ -63,12 +63,26 @@ class StorefrontInterestCartController extends Controller
 
         $incomingStatus = $validated['status'] ?? InterestCart::STATUS_ACTIVE;
 
-        $cart    = InterestCart::where('token', $validated['token'])->first();
+        $cart    = $this->findByToken($validated['token']);
         $created = false;
 
         if (!$cart) {
             $cart    = new InterestCart(['token' => $validated['token'], 'channel' => $channel]);
             $created = true;
+        }
+
+        // A converted row is history — the record of what was actually bought.
+        // The storefront rotates the token after an order, but a tab opened
+        // before the rotation can still fire a debounced sync with the old
+        // token; that write must not rewrite the closed cart. Identity may
+        // still be enriched (a name learned late is still true).
+        if (!$created && $cart->isConverted()) {
+            $this->attachCustomer($cart, $validated['customer'] ?? null);
+            $cart->save();
+
+            return response()->json([
+                'interest_cart' => ['token' => $cart->token, 'status' => $cart->status],
+            ], 200);
         }
 
         $cart->last_channel      = $channel;
@@ -117,7 +131,7 @@ class StorefrontInterestCartController extends Controller
         ]);
 
         if (!empty($validated['token'])) {
-            $cart = InterestCart::where('token', $validated['token'])->first();
+            $cart = $this->findByToken($validated['token']);
             if (!$cart) {
                 return response()->json(['message' => 'No such cart.'], 404);
             }
@@ -157,7 +171,7 @@ class StorefrontInterestCartController extends Controller
             'customer.church' => 'nullable|string|max:160',
         ]);
 
-        $cart = InterestCart::where('token', $token)->first();
+        $cart = $this->findByToken($token);
         if (!$cart) {
             return response()->json(['message' => 'No such cart.'], 404);
         }
@@ -170,8 +184,13 @@ class StorefrontInterestCartController extends Controller
         // "Won't regress a converted cart": abandoned never undoes a sale.
         if (!$cart->statusWouldRegress($validated['status'])) {
             $cart->status = $validated['status'];
-            if (in_array($validated['status'], InterestCart::CONVERTED, true) && !$cart->converted_at) {
-                $cart->converted_at = now();
+            if (in_array($validated['status'], InterestCart::CONVERTED, true)) {
+                if (!$cart->converted_at) {
+                    $cart->converted_at = now();
+                }
+                // "last_channel — where it was last touched": closing IS a
+                // touch, and the outcome names the channel that closed it.
+                $cart->last_channel = $validated['status'] === 'whatsapp_order' ? 'whatsapp' : 'web';
             }
         }
 
@@ -183,6 +202,16 @@ class StorefrontInterestCartController extends Controller
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Tokens are minted uppercase (Crockford base32, chosen so a human can
+     * read one off a WhatsApp message) — but humans and bots re-type them,
+     * so matching is case-insensitive everywhere.
+     */
+    private function findByToken(string $token): ?InterestCart
+    {
+        return InterestCart::whereRaw('UPPER(token) = ?', [strtoupper(trim($token))])->first();
+    }
 
     /** Fill identity fields as they become known; never blank an existing one. */
     private function attachCustomer(InterestCart $cart, ?array $customer): void

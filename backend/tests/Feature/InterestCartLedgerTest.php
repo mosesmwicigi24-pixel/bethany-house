@@ -99,6 +99,83 @@ class InterestCartLedgerTest extends TestCase
         $this->assertSame(1, InterestCart::count());
     }
 
+    public function test_an_abandoned_cart_revives_when_the_customer_returns(): void
+    {
+        // The token lives in the customer's browser until an order rotates it,
+        // so coming back weeks later to the same cart is the NORMAL path.
+        $this->upsert();
+        InterestCart::query()->update(['status' => 'abandoned']);
+
+        $this->upsert(['items' => [['slug' => 'preaching-gown-men', 'quantity' => 1]]])
+            ->assertOk()
+            ->assertJsonPath('interest_cart.status', 'active_cart');
+
+        $this->assertSame('active_cart', InterestCart::first()->status);
+    }
+
+    public function test_a_converted_cart_is_frozen_except_identity_enrichment(): void
+    {
+        $this->upsert();
+        $this->patchJson('/api/v1/storefront/interest-carts/BH-0QVP2358', [
+            'status' => 'online_order', 'order_ref' => 'BH-WEBORD01',
+        ])->assertOk();
+
+        // A tab opened before the token rotated syncs its stale cart: the
+        // bought items must stay as bought, but a late-learned name is true.
+        $this->upsert([
+            'items'    => [['slug' => 'something-else', 'quantity' => 9]],
+            'subtotal' => 1,
+            'customer' => ['name' => 'Grace Wanjiru'],
+        ])->assertOk()->assertJsonPath('interest_cart.status', 'online_order');
+
+        $cart = InterestCart::first();
+        $this->assertSame('preaching-gown-men', $cart->items[0]['slug']);
+        $this->assertEquals(9000, (float) $cart->subtotal);
+        $this->assertSame('Grace Wanjiru', $cart->name);
+    }
+
+    public function test_a_whatsapp_close_stamps_the_channel_that_closed_it(): void
+    {
+        $this->upsert();
+        $this->patchJson('/api/v1/storefront/interest-carts/BH-0QVP2358', ['status' => 'whatsapp_order'])
+            ->assertOk();
+
+        $cart = InterestCart::first();
+        $this->assertSame('whatsapp', $cart->last_channel);
+        $this->assertSame('web', $cart->channel, 'Origin channel must stay where the interest began.');
+    }
+
+    public function test_token_lookup_is_case_insensitive(): void
+    {
+        // Humans re-type tokens off a WhatsApp message; case must not matter.
+        $this->upsert();
+        $this->getJson('/api/v1/storefront/interest-carts?token=bh-0qvp2358')
+            ->assertOk()
+            ->assertJsonPath('interest_cart.token', 'BH-0QVP2358');
+    }
+
+    public function test_the_sweep_abandons_stale_live_carts_but_never_a_sale(): void
+    {
+        $this->upsert(['token' => 'BH-STALE001']);
+        $this->upsert(['token' => 'BH-FRESH001']);
+        $this->upsert(['token' => 'BH-SOLD0001']);
+        $this->patchJson('/api/v1/storefront/interest-carts/BH-SOLD0001', ['status' => 'whatsapp_order'])
+            ->assertOk();
+
+        // Age the stale cart and the sold cart beyond the window.
+        InterestCart::whereIn('token', ['BH-STALE001', 'BH-SOLD0001'])
+            ->update(['updated_at' => now()->subDays(20)]);
+
+        $this->artisan('interest-carts:sweep-abandoned', ['--days' => 14])->assertExitCode(0);
+
+        $this->assertSame('abandoned', InterestCart::where('token', 'BH-STALE001')->value('status'));
+        $this->assertSame('active_cart', InterestCart::where('token', 'BH-FRESH001')->value('status'));
+        $this->assertSame('whatsapp_order', InterestCart::where('token', 'BH-SOLD0001')->value('status'), 'The sweep abandoned a closed sale.');
+
+        // Kept, never deleted — all three rows survive the sweep.
+        $this->assertSame(3, InterestCart::count());
+    }
+
     public function test_the_storefront_key_gates_every_bridge_endpoint_when_set(): void
     {
         config(['services.storefront.key' => 'secret-key']);

@@ -69,3 +69,12 @@ Schedule::command(\App\Console\Commands\CheckStockAging::class)
     ->dailyAt('08:00')
     ->withoutOverlapping()
     ->runInBackground();
+
+// ── Interest-cart abandonment sweep — daily at 03:30 ─────────────────────────
+// Live carts untouched for 14 days become `abandoned` (kept, never deleted —
+// HUB_CONTRACT §7c). A returning customer's next cart sync revives the row.
+// Manual run: php artisan interest-carts:sweep-abandoned --days=14
+Schedule::command(\App\Console\Commands\SweepAbandonedInterestCarts::class)
+    ->dailyAt('03:30')
+    ->withoutOverlapping()
+    ->runInBackground();
