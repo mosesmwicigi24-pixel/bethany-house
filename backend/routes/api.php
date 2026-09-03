@@ -199,6 +199,19 @@ Route::prefix('v1')->group(function () {
         Route::get('/storefront/shipping/estimate', [\App\Http\Controllers\Api\StorefrontLeadController::class, 'shippingEstimate'])
             ->middleware('throttle:60,1');
 
+        // Interest ledger — the cross-channel cart (HUB_CONTRACT §7). The
+        // storefront upserts every Neema cart here keyed on its BH-XXXX token
+        // (the one the WhatsApp handoff message carries); neema-ai reads the
+        // same rows to resume a cart and transitions the outcome when it
+        // closes. Server-side callers only; same optional X-Storefront-Key
+        // gate as the leads bridge. Pipeline truth — never revenue.
+        Route::post('/storefront/interest-carts', [\App\Http\Controllers\Api\StorefrontInterestCartController::class, 'store'])
+            ->middleware('throttle:60,1');
+        Route::get('/storefront/interest-carts', [\App\Http\Controllers\Api\StorefrontInterestCartController::class, 'lookup'])
+            ->middleware('throttle:60,1');
+        Route::patch('/storefront/interest-carts/{token}', [\App\Http\Controllers\Api\StorefrontInterestCartController::class, 'transition'])
+            ->middleware('throttle:30,1');
+
         // Passwordless "Find my orders": a one-time code (WhatsApp / email) then
         // a 24h cache-backed session. Never gates checkout — pure lookup. See
         // StorefrontLookupController.
@@ -714,6 +727,13 @@ Route::prefix('v1')->group(function () {
                 Route::get('/',      [InvoiceController::class, 'index']);
                 Route::get('/{id}',  [InvoiceController::class, 'show']);
             });
+
+            // ── Interest carts (pipeline, not sales) ─────────────────────────
+            // Staff lookup for the "cart BH-XXXX" tokens Neema's WhatsApp
+            // handoff hands customers. orders.view: whoever answers the till
+            // answers the handoff.
+            Route::get('/interest-carts', [\App\Http\Controllers\Api\InterestCartAdminController::class, 'index'])
+                ->middleware('permission:orders.view,sanctum');
 
             // ── Customers ────────────────────────────────────────────────────
             Route::middleware('permission:customers.view,sanctum')->prefix('customers')->group(function () {
