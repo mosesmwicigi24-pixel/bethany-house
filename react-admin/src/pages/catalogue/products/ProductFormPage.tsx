@@ -2454,6 +2454,7 @@ export default function ProductFormPage() {
     const [uploading, setUploading] = useState(false);
     const [videoUrl, setVideoUrl] = useState<string | null>(null);
     const [videoBusy, setVideoBusy] = useState(false);
+    const [videoConverting, setVideoConverting] = useState(false);
     const [skuManual, setSkuManual] = useState(false);
     const imageRef = useRef<HTMLInputElement>(null);
     const videoRef = useRef<HTMLInputElement>(null);
@@ -2680,6 +2681,9 @@ export default function ProductFormPage() {
                     .sort((a: any, b: any) => a.sort_order - b.sort_order),
             );
             setVideoUrl(product.video_url ?? null);
+            // Opened while the queue is still working on it — pick the watch
+            // back up rather than showing an empty box.
+            setVideoConverting(product.video_status === "processing");
             // Phase 2 - restore tax rate selections from loaded product
             setTaxRateIds(product.tax_rate_ids ?? []);
             setSkuManual(true); // existing product SKU - treat as manual
@@ -2857,8 +2861,16 @@ export default function ProductFormPage() {
             setVideoBusy(true);
             try {
                 const res = await productsApi.uploadVideo(Number(id), file);
-                setVideoUrl(res.video_url);
                 toast.success(res.message);
+                // The Hub answers 202 the moment the file is parked; ffmpeg
+                // runs on the queue. Watch for it to finish rather than
+                // leaving the owner looking at an empty box wondering whether
+                // the upload took.
+                if (res.video_status === "processing") {
+                    setVideoConverting(true);
+                } else {
+                    setVideoUrl(res.video_url);
+                }
             } catch (e: any) {
                 toast.error(e.errors?.video?.[0] ?? e.message ?? "Upload failed.");
             } finally {
@@ -2868,6 +2880,46 @@ export default function ProductFormPage() {
         },
         [id, isEditing, toast],
     );
+
+    // Poll while a conversion is running. Stops on the first settled answer,
+    // on unmount, and after a ceiling — a spinner that never ends tells the
+    // owner less than an honest "that did not work".
+    useEffect(() => {
+        if (!videoConverting || !id) return;
+
+        let stop = false;
+        let tries = 0;
+        const tick = async () => {
+            if (stop) return;
+            tries += 1;
+            try {
+                const s = await productsApi.videoStatus(Number(id));
+                if (stop) return;
+                if (s.video_status === "processing") {
+                    if (tries >= 60) {          // ~3 minutes
+                        setVideoConverting(false);
+                        toast.error("The video is still converting. Reopen this product shortly to check.");
+                        return;
+                    }
+                    window.setTimeout(tick, 3000);
+                    return;
+                }
+                setVideoConverting(false);
+                if (s.video_status === "failed") {
+                    toast.error("The clip could not be converted. Export it as an MP4 (H.264) and upload again.");
+                } else {
+                    setVideoUrl(s.video_url);
+                    toast.success("Video converted for the web.");
+                }
+            } catch {
+                if (stop) return;
+                setVideoConverting(false);      // never strand the UI on a blip
+            }
+        };
+        const t = window.setTimeout(tick, 2000);
+
+        return () => { stop = true; window.clearTimeout(t); };
+    }, [videoConverting, id, toast]);
 
     const handleVideoDelete = useCallback(async () => {
         if (!window.confirm("Remove this product's video?")) return;
@@ -3508,7 +3560,7 @@ export default function ProductFormPage() {
                                         <button
                                             type="button"
                                             onClick={() => videoRef.current?.click()}
-                                            disabled={!isEditing || videoBusy}
+                                            disabled={!isEditing || videoBusy || videoConverting}
                                             className="btn-primary btn-sm"
                                         >
                                             {videoBusy ? (
@@ -3533,7 +3585,24 @@ export default function ProductFormPage() {
                                 />
                             </div>
                             <div className="card-body">
-                                {videoUrl ? (
+                                {videoConverting ? (
+                                    // The upload is done; ffmpeg is running on the
+                                    // queue. Saying so is the difference between
+                                    // "wait a moment" and "that didn't work" —
+                                    // which is what an empty box used to imply.
+                                    <div className="flex items-center gap-3 border border-surface-200 rounded-xl p-6">
+                                        <Spinner size="sm" />
+                                        <div className="text-sm">
+                                            <p className="font-medium text-surface-900">
+                                                Converting for the web…
+                                            </p>
+                                            <p className="text-xs text-surface-500">
+                                                This takes a few seconds. You can keep working — it will
+                                                appear here when it is ready.
+                                            </p>
+                                        </div>
+                                    </div>
+                                ) : videoUrl ? (
                                     <div className="flex flex-col sm:flex-row gap-4 items-start">
                                         <video
                                             key={videoUrl}
@@ -3565,6 +3634,7 @@ export default function ProductFormPage() {
                                             isEditing &&
                                             canEditImagesAndVariants &&
                                             !videoBusy &&
+                                            !videoConverting &&
                                             videoRef.current?.click()
                                         }
                                         className="border-2 border-dashed border-surface-200 rounded-xl p-8 text-center cursor-pointer hover:border-brand-300 hover:bg-brand-50 transition-colors"

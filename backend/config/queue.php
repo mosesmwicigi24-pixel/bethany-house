@@ -68,7 +68,14 @@ return [
             'driver' => 'redis',
             'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
             'queue' => env('REDIS_QUEUE', 'default'),
-            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 90),
+            /*
+             * Must exceed the LONGEST job timeout, or Redis hands the job to a
+             * second worker while the first is still running it. It was 90
+             * while SendEodReportEmail declared a 120s timeout — an EoD report
+             * that took over 90s was mailed twice. ConvertProductVideo needs
+             * longer still, so this is now sized above every job in app/Jobs.
+             */
+            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 360),
             'block_for' => null,
             'after_commit' => false,
         ],

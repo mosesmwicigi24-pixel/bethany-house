@@ -509,6 +509,10 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:products.edit,sanctum');
                 Route::post('/{id}/video',                    [ProductController::class, 'uploadVideo'])
                     ->middleware('permission:products.edit,sanctum');
+                // Polled while a conversion runs — a read, so it takes the
+                // view permission rather than edit.
+                Route::get('/{id}/video',                     [ProductController::class, 'videoStatus'])
+                    ->middleware('permission:products.view,sanctum');
                 Route::delete('/{id}/video',                  [ProductController::class, 'deleteVideo'])
                     ->middleware('permission:products.edit,sanctum');
                 Route::post('/{id}/variants',                 [ProductController::class, 'addVariant'])

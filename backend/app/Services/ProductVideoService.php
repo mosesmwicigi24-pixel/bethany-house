@@ -31,7 +31,107 @@ class ProductVideoService
     private const WEB_READY_EXT = ['mp4', 'webm'];
 
     /**
-     * Convert + store an uploaded clip.
+     * Park a raw upload for the queue, without touching ffmpeg.
+     *
+     * This is all the WEB REQUEST does. Conversion used to run here, holding a
+     * php-fpm worker for up to the ffmpeg timeout — long past the point the
+     * browser gave up, and with enough concurrent uploads, long enough to take
+     * the whole hub down. The file goes to the private disk because it is not
+     * playable yet and nothing should be able to link to it.
+     *
+     * Returns: path (on $disk), ext.
+     *
+     * @throws ValidationException on an unsupported file
+     */
+    public function stash(UploadedFile $file, string $disk = 'local'): array
+    {
+        $ext = strtolower($file->getClientOriginalExtension());
+        if (! in_array($ext, self::ALLOWED_EXT, true)) {
+            throw ValidationException::withMessages([
+                'video' => 'Upload an MP4, MOV, M4V or WebM clip.',
+            ]);
+        }
+
+        // Refuse here what the queue would only discover minutes later.
+        if ($this->ffmpegBinary() === null && ! in_array($ext, self::WEB_READY_EXT, true)) {
+            throw ValidationException::withMessages([
+                'video' => "This server cannot convert .{$ext} clips. Export it as an MP4 (H.264) and upload again.",
+            ]);
+        }
+
+        $name = (string) Str::uuid();
+        $path = "product-videos/incoming/{$name}.{$ext}";
+        Storage::disk($disk)->putFileAs('product-videos/incoming', $file, "{$name}.{$ext}");
+
+        return ['path' => $path, 'ext' => $ext];
+    }
+
+    /**
+     * Convert a stashed upload into the storefront clip. Runs ON THE QUEUE.
+     *
+     * Returns: path, url, converted (bool), size (bytes).
+     *
+     * @throws \RuntimeException when the clip cannot be converted
+     */
+    public function convertStashed(
+        string $stashPath,
+        string $directory,
+        string $stashDisk = 'local',
+        string $disk = 'public',
+    ): array {
+        $source = Storage::disk($stashDisk)->path($stashPath);
+        if (! is_file($source)) {
+            throw new \RuntimeException("stashed clip is gone: {$stashPath}");
+        }
+
+        $ext    = strtolower(pathinfo($stashPath, PATHINFO_EXTENSION));
+        $name   = (string) Str::uuid();
+        $ffmpeg = $this->ffmpegBinary();
+
+        if ($ffmpeg === null) {
+            // Already browser-native — stash() refused anything else.
+            $path = "{$directory}/{$name}.{$ext}";
+            Storage::disk($disk)->put($path, Storage::disk($stashDisk)->get($stashPath));
+
+            return [
+                'path' => $path,
+                'url' => $this->toUrl($path, $disk),
+                'converted' => false,
+                'size' => Storage::disk($disk)->size($path),
+            ];
+        }
+
+        $tmp = rtrim(sys_get_temp_dir(), '/')."/bh-video-{$name}.mp4";
+        try {
+            $process = new Process($this->ffmpegCommand($ffmpeg, $source, $tmp));
+            $process->setTimeout((int) config('video.timeout', 240));
+            $process->run();
+
+            if (! $process->isSuccessful() || ! is_file($tmp) || filesize($tmp) === 0) {
+                throw new \RuntimeException('ffmpeg failed: '.trim($process->getErrorOutput()));
+            }
+
+            $path = "{$directory}/{$name}.mp4";
+            Storage::disk($disk)->put($path, file_get_contents($tmp));
+        } finally {
+            if (is_file($tmp)) {
+                @unlink($tmp);
+            }
+        }
+
+        return [
+            'path' => $path,
+            'url' => $this->toUrl($path, $disk),
+            'converted' => true,
+            'size' => Storage::disk($disk)->size($path),
+        ];
+    }
+
+    /**
+     * Convert + store an uploaded clip, synchronously.
+     *
+     * Kept for callers outside the upload endpoint (and tests). The web request
+     * uses stash() + the queue instead — see ConvertProductVideo.
      *
      * Returns: path, url, converted (bool), size (bytes).
      *
@@ -135,6 +235,13 @@ class ProductVideoService
 
         return [
             $ffmpeg, '-y', '-v', 'error', '-nostdin',
+            // The input is a file somebody uploaded. Containers can name other
+            // inputs (HLS playlists, the concat demuxer), and ffmpeg will
+            // happily open http:// or file:// on their behalf — which turns an
+            // upload box into a reader of this server's disk and network.
+            // Whitelisting the one protocol we need closes that off; the
+            // formats we accept are all plain local files.
+            '-protocol_whitelist', 'file',
             '-i', $input,
             '-t', (string) $sec,
             '-vf', "scale='if(gt(iw,ih),{$px},-2)':'if(gt(iw,ih),-2,{$px})',fps=30,setsar=1,format=yuv420p",

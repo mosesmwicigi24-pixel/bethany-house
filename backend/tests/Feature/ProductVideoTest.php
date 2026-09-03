@@ -23,6 +23,13 @@ use Tests\TestCase;
  * product; the public product payload exposes it as `video_url` (null when
  * there is none); replacing removes the old file; deleting clears both.
  *
+ * The END STATE below is unchanged by moving conversion onto the queue — what
+ * changed is when it arrives. The request now answers 202 with the clip still
+ * converting, so these read the settled url off the PRODUCT rather than the
+ * response. QUEUE_CONNECTION is `sync` here, so the job has run by the time
+ * the request returns; ProductVideoConversionTest covers the queued behaviour
+ * itself.
+ *
  * CI has no ffmpeg, so these tests exercise the store-as-is path. When
  * ffmpeg IS present the conversion path is covered by
  * test_ffmpeg_converts_to_a_small_mp4 (skipped otherwise).
@@ -35,6 +42,9 @@ class ProductVideoTest extends TestCase
     {
         parent::setUp();
         Storage::fake('public');
+        // The raw upload is parked here before the job converts it — faked so a
+        // test run leaves nothing behind in storage/app.
+        Storage::fake('local');
         // Store-as-is path by default: the fake clips below are not real
         // video, so conversion would (rightly) refuse them. The one test that
         // exercises ffmpeg opts back in with a real generated clip.
@@ -70,6 +80,16 @@ class ProductVideoTest extends TestCase
         );
     }
 
+    /** The url once the (synchronous, in tests) conversion job has run. */
+    private function settledUrl(Product $product): string
+    {
+        $product->refresh();
+        $this->assertNull($product->video_status, 'conversion did not settle');
+        $this->assertNotNull($product->video_url);
+
+        return $product->video_url;
+    }
+
     /** Storage path of a public-disk URL the way ImageService/ProductVideoService bake them. */
     private function pathOf(string $url): string
     {
@@ -81,9 +101,9 @@ class ProductVideoTest extends TestCase
         $product = $this->product();
 
         $res = $this->upload($product, UploadedFile::fake()->create('clip.mp4', 512, 'video/mp4'));
-        $res->assertOk()->assertJsonStructure(['message', 'video_url', 'converted', 'size']);
+        $res->assertStatus(202)->assertJsonStructure(['message', 'video_status', 'video_url']);
 
-        $url = $res->json('video_url');
+        $url = $this->settledUrl($product);
         $this->assertStringStartsWith(rtrim(config('app.url'), '/')."/storage/products/{$product->id}/", $url);
         $this->assertMatchesRegularExpression('#\.(mp4|webm)$#', $url);
         Storage::disk('public')->assertExists($this->pathOf($url));
@@ -99,7 +119,8 @@ class ProductVideoTest extends TestCase
             ->assertOk()
             ->assertJsonPath('product.video_url', null);
 
-        $url = $this->upload($product, UploadedFile::fake()->create('clip.mp4', 256, 'video/mp4'))->json('video_url');
+        $this->upload($product, UploadedFile::fake()->create('clip.mp4', 256, 'video/mp4'));
+        $url = $this->settledUrl($product);
 
         $this->getJson("/api/v1/products/{$product->slug}")
             ->assertOk()
@@ -117,8 +138,10 @@ class ProductVideoTest extends TestCase
     {
         $product = $this->product();
 
-        $first = $this->upload($product, UploadedFile::fake()->create('one.mp4', 256, 'video/mp4'))->json('video_url');
-        $second = $this->upload($product, UploadedFile::fake()->create('two.mp4', 256, 'video/mp4'))->json('video_url');
+        $this->upload($product, UploadedFile::fake()->create('one.mp4', 256, 'video/mp4'));
+        $first = $this->settledUrl($product);
+        $this->upload($product, UploadedFile::fake()->create('two.mp4', 256, 'video/mp4'));
+        $second = $this->settledUrl($product);
 
         $this->assertNotSame($first, $second);
         Storage::disk('public')->assertMissing($this->pathOf($first));
@@ -129,7 +152,8 @@ class ProductVideoTest extends TestCase
     public function test_delete_clears_the_url_and_removes_the_file(): void
     {
         $product = $this->product();
-        $url = $this->upload($product, UploadedFile::fake()->create('clip.mp4', 256, 'video/mp4'))->json('video_url');
+        $this->upload($product, UploadedFile::fake()->create('clip.mp4', 256, 'video/mp4'));
+        $url = $this->settledUrl($product);
 
         $this->delete("/api/v1/admin/products/{$product->id}/video")->assertOk();
 
@@ -205,10 +229,10 @@ class ProductVideoTest extends TestCase
         $this->assertTrue($gen->isSuccessful(), $gen->getErrorOutput());
 
         $product = $this->product();
-        $res = $this->upload($product, new UploadedFile($src, 'phone.mov', 'video/quicktime', null, true));
-        $res->assertOk()->assertJsonPath('converted', true);
+        $this->upload($product, new UploadedFile($src, 'phone.mov', 'video/quicktime', null, true))
+            ->assertStatus(202);
 
-        $path = $this->pathOf($res->json('video_url'));
+        $path = $this->pathOf($this->settledUrl($product));
         $this->assertStringEndsWith('.mp4', $path);
         Storage::disk('public')->assertExists($path);
         $this->assertLessThan(filesize($src) + 1, Storage::disk('public')->size($path));

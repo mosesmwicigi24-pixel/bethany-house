@@ -12,6 +12,7 @@ use App\Models\ProductTranslation;
 use App\Services\TaxCalculationService;
 use App\Services\ActivityLogService;
 use App\Services\ImageService;
+use App\Jobs\ConvertProductVideo;
 use App\Services\ProductVideoService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -887,23 +888,40 @@ class ProductController extends Controller
         ]);
 
         $product = Product::findOrFail($id);
-        $service = app(ProductVideoService::class);
 
-        $result = $service->process($request->file('video'), "products/{$product->id}");
+        // Park the file and hand the encoding to the queue. Doing it here held
+        // a php-fpm worker for up to the ffmpeg budget — far past the browser's
+        // patience, and with a few uploads at once, past the hub's.
+        $stash = app(ProductVideoService::class)->stash($request->file('video'));
 
-        $previous = $product->video_url;
-        $product->update(['video_url' => $result['url']]);
-        if ($previous && $previous !== $result['url']) {
-            $service->delete($previous);
-        }
+        // The old clip stays live and playable until the new one is ready; the
+        // job swaps them and deletes it. A conversion that fails leaves the
+        // product exactly as it was.
+        $product->forceFill(['video_status' => 'processing'])->save();
+
+        ConvertProductVideo::dispatch($product->id, $stash['path']);
 
         return response()->json([
-            'message'   => $result['converted']
-                ? 'Video uploaded and converted for the web.'
-                : 'Video uploaded.',
-            'video_url' => $result['url'],
-            'converted' => $result['converted'],
-            'size'      => $result['size'],
+            'message'      => 'Video uploaded — converting for the web. It will appear here shortly.',
+            'video_status' => 'processing',
+            'video_url'    => $product->video_url,
+        ], 202);
+    }
+
+    /**
+     * GET /api/v1/admin/products/{id}/video
+     *
+     * Where a queued conversion has got to. The admin polls this rather than
+     * refetching the whole product with its images, prices and translations
+     * every couple of seconds.
+     */
+    public function videoStatus($id)
+    {
+        $product = Product::findOrFail($id);
+
+        return response()->json([
+            'video_url'    => $product->video_url,
+            'video_status' => $product->video_status,
         ]);
     }
 
@@ -916,8 +934,10 @@ class ProductController extends Controller
 
         if ($product->video_url) {
             app(ProductVideoService::class)->delete($product->video_url);
-            $product->update(['video_url' => null]);
         }
+        // Clears 'processing' too: removing the video is also how an owner
+        // gets out of a conversion that failed.
+        $product->forceFill(['video_url' => null, 'video_status' => null])->save();
 
         return response()->json(['message' => 'Video removed.']);
     }

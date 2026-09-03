@@ -41,6 +41,7 @@ class Product extends Model
         'production_stage_ids',
         'aliases',
         'video_url',
+        'video_status',
     ];
 
     /*

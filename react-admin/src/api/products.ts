@@ -92,6 +92,8 @@ export interface Product {
     features?: { icon?: string; text: string }[];
     /** Short product clip (hover-to-play on storefront cards); null when none. */
     video_url?: string | null;
+    /** 'processing' while the queue converts the clip, 'failed', or null when settled. */
+    video_status?: string | null;
     // Relations
     category: { id: number; name_en: string } | null;
     translations: ProductTranslation[];
@@ -231,11 +233,14 @@ export const productsApi = {
     // ── Video ──────────────────────────────────────────────────────────────────
 
     // One clip per product; uploading again replaces it. The Hub converts a
-    // raw phone recording to a small web MP4 (when ffmpeg is installed).
+    // raw phone recording to a small web MP4 on the QUEUE and answers 202
+    // straight away — encoding used to happen inside this request, which the
+    // browser abandoned long before ffmpeg finished. Poll the product for
+    // video_status until it settles.
     uploadVideo: (id: number, file: File) => {
         const form = new FormData();
         form.append("video", file);
-        return post<{ message: string; video_url: string; converted: boolean; size: number }>(
+        return post<{ message: string; video_status: string; video_url: string | null }>(
             `/v1/admin/products/${id}/video`,
             form,
             { headers: { "Content-Type": undefined } },
@@ -244,6 +249,12 @@ export const productsApi = {
 
     deleteVideo: (id: number) =>
         del<{ message: string }>(`/v1/admin/products/${id}/video`),
+
+    /** Where a queued conversion has got to: 'processing' | 'failed' | null (settled). */
+    videoStatus: (id: number) =>
+        get<{ video_url: string | null; video_status: string | null }>(
+            `/v1/admin/products/${id}/video`,
+        ),
 
     // ── Variants ───────────────────────────────────────────────────────────────
 
