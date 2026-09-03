@@ -23,6 +23,8 @@ use Illuminate\Support\Str;
  */
 class StorefrontLeadController extends Controller
 {
+    use \App\Http\Controllers\Api\Concerns\ChecksStorefrontKey;
+
     /** POST /storefront/leads — persist a Neema-captured lead (§1). */
     public function store(Request $request)
     {
@@ -183,19 +185,5 @@ class StorefrontLeadController extends Controller
         return $currency . ' ' . number_format($amount);
     }
 
-    /**
-     * When HUB_STOREFRONT_KEY is configured, require a matching X-Storefront-Key.
-     * Returns a 401 response to short-circuit, or null to proceed.
-     */
-    private function rejectBadKey(Request $request)
-    {
-        $secret = config('services.storefront.key');
-        if (!$secret) {
-            return null; // open until a key is configured (§6)
-        }
-        if (!hash_equals($secret, (string) $request->header('X-Storefront-Key'))) {
-            return response()->json(['message' => 'Unauthorized.'], 401);
-        }
-        return null;
-    }
+    // rejectBadKey() lives in the shared ChecksStorefrontKey trait.
 }

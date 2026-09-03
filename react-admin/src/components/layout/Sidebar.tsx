@@ -126,6 +126,14 @@ const NAV: NavGroup[] = [
                 permission: "orders.view",
             },
             {
+                label: "Interest Carts",
+                href: "/sales/interest-carts",
+                icon: "orders",
+                // Pipeline lookup for Neema's "cart BH-…" WhatsApp handoffs —
+                // whoever answers the till answers the handoff.
+                permission: "orders.view",
+            },
+            {
                 label: "Shipments",
                 href: "/sales/shipments",
                 icon: "shipments",
