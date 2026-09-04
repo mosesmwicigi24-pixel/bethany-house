@@ -206,6 +206,18 @@ export function AdminLayout() {
             // common here than pinching.
             const h = window.visualViewport?.height ?? window.innerHeight
             document.documentElement.style.setProperty('--vh', `${h * 0.01}px`)
+
+            // iOS "reveals" a focused field by PANNING THE WINDOW — even though
+            // this shell is overflow-hidden and the window has nothing to
+            // legitimately scroll to. Resizing the shell (above) does not undo
+            // that pan, so the whole app ended up shoved off the top of the
+            // screen: composer over the status bar, tab bar mid-screen, a band
+            // of dead canvas above the keyboard. In this app-shell layout a
+            // non-zero window scroll is ALWAYS wrong — every pane scrolls
+            // internally — so pin the window back whenever iOS moves it.
+            if (window.scrollY > 0 || document.documentElement.scrollTop > 0) {
+                window.scrollTo(0, 0)
+            }
         }
 
         // The keyboard ANIMATES in, and iOS reports the viewport partway
