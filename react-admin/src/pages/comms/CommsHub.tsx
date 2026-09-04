@@ -1073,7 +1073,7 @@ function htmlToMarkdown(html: string): string {
 }
 
 
-function Composer({ channelId, channelName, channelType, channelMemberIds, replyTo, onClearReply, onSent, bottomRef }: {
+function Composer({ channelId, channelName, channelType, channelMemberIds, replyTo, onClearReply, onSent, scrollToBottom }: {
     channelId: number;
     channelName?: string;
     channelType?: string;
@@ -1081,7 +1081,8 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
     channelMemberIds?: Set<number>;
     replyTo?: ChannelMessage | null;
     onClearReply?: () => void; onSent: (msg: ChannelMessage) => void;
-    bottomRef?: React.RefObject<HTMLDivElement>;
+    /** Scrolls the THREAD PANE (never the window) to its newest message. */
+    scrollToBottom?: () => void;
 }) {
     const [body, setBody]               = useState("");
     const [mentionQ, setMentionQ]       = useState<string | null>(null);
@@ -1119,16 +1120,14 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
     // still used, to scroll the thread down once the keyboard has settled.
     const { keyboardOpen } = useVisualViewport();
 
-    // Auto-scroll to bottom when keyboard opens so the latest message is visible
-    const scrollRef = useRef<HTMLElement | null>(null);
-    useEffect(() => {
-        if (bottomRef?.current) scrollRef.current = bottomRef.current;
-    }, [bottomRef]);
-
+    // Auto-scroll to bottom when the keyboard opens so the latest message is
+    // visible. Via the pane's own scrollTop — scrollIntoView walks EVERY
+    // scrollable ancestor, window included, and on iOS that window pan is
+    // exactly what used to shove the whole shell off the top of the screen.
     useEffect(() => {
         if (keyboardOpen) {
             // Small delay so the keyboard animation finishes first
-            setTimeout(() => scrollRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+            setTimeout(() => scrollToBottom?.(), 100);
         }
     }, [keyboardOpen]);
 
@@ -2337,8 +2336,14 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
     const [typing, setTyping]           = useState<string[]>([]);
     const [onlineIds, setOnlineIds]     = useState<number[]>([]);
     const [showSettings, setShowSettings] = useState(false);
-    const bottomRef  = useRef<HTMLDivElement>(null);
+    // The thread pane scrolls via its own scrollTop, NEVER scrollIntoView:
+    // scrollIntoView also scrolls the window, and on iOS that pan is what
+    // wrecked the whole layout the moment the composer was focused.
     const scrollAreaRef = useRef<HTMLDivElement>(null);
+    const scrollToBottom = useCallback((smooth = true) => {
+        const el = scrollAreaRef.current;
+        if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+    }, []);
     const timers     = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
     // Live order data for context channels — always fresh, never stale from creation time
     const orderCtx   = useOrderContext(channel);
@@ -2423,7 +2428,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
         return () => { getEcho().leave(`channel.${channel.id}`); getEcho().leave(`presence.channel.${channel.id}`); };
     }, [channel.id]);
 
-    useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages.length]);
+    useEffect(() => { scrollToBottom(); }, [messages.length, scrollToBottom]);
 
     const isSpace      = channel.type === "space";
     const memberCount  = typeof channel.members === "number" ? channel.members : (channel.members as ChannelUser[]).length;
@@ -2571,7 +2576,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                     what made the page read flat. brand-50/60 turned out to still be
                     within a hair of white on real phone screens, so the tint is now
                     brand-100/50: a definite warm ground the white cards sit ON. */}
-                <div className="flex-1 overflow-y-auto py-4 scroll-touch overscroll-contain bg-brand-100/50">
+                <div ref={scrollAreaRef} className="flex-1 overflow-y-auto py-4 scroll-touch overscroll-contain bg-brand-100/50">
                     {hasMore && (
                         <div className="flex justify-center pb-2">
                             <button onClick={async () => {
@@ -2637,7 +2642,6 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                             </span>
                         </div>
                     )}
-                    <div ref={bottomRef} />
                 </div>
 
                 <Composer
@@ -2647,8 +2651,8 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                     channelMemberIds={channelMemberIds}
                     replyTo={replyTo}
                     onClearReply={() => setReplyTo(null)}
-                    onSent={msg => { setMessages(prev => prev.some(m => String(m.id) === String(msg.id)) ? prev : [...prev, msg]); setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 50); }}
-                    bottomRef={bottomRef} />
+                    onSent={msg => { setMessages(prev => prev.some(m => String(m.id) === String(msg.id)) ? prev : [...prev, msg]); setTimeout(() => scrollToBottom(), 50); }}
+                    scrollToBottom={scrollToBottom} />
             </div>
 
             {showSettings && isSpace && (
