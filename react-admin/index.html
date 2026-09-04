@@ -9,9 +9,16 @@
         - required for full-bleed layouts behind iOS status bar
       initial-scale=1.0 preserved from original.
     -->
+        <!-- interactive-widget=resizes-content pins Android Chrome to its
+             classic behaviour: the software keyboard RESIZES the page rather
+             than overlaying it, so the app shell (h-screen-safe) ends at the
+             keyboard natively. Newer Chrome versions may default to the
+             overlay behaviour; this keeps it deterministic. iOS ignores the
+             property — its keyboard handling lives in AdminLayout's --vh
+             machinery. -->
         <meta
             name="viewport"
-            content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+            content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
         />
 
         <meta name="robots" content="noindex, nofollow" />
