@@ -157,7 +157,16 @@ export default function LoginPage() {
         defaultValues: { password: "", password_confirmation: "" },
     });
 
-    const from = (location.state as { from?: Location })?.from?.pathname ?? "/dashboard";
+    // Router state when we arrived by a client-side redirect; ?next= when we
+    // arrived by a full page load, which is how the Neema handoff reaches us —
+    // state cannot cross a document boundary. Only a same-site absolute path is
+    // honoured: "//evil.com" and "https://evil.com" are paths a redirect would
+    // happily follow off this site, so they are refused.
+    const nextParam = new URLSearchParams(location.search).get("next");
+    const safeNext =
+        nextParam && /^\/(?!\/)/.test(nextParam) ? nextParam : null;
+    const from =
+        (location.state as { from?: Location })?.from?.pathname ?? safeNext ?? "/dashboard";
 
     // ── Handle reset link from email (?token=...&email=...) ──────────────────
     // Laravel's password reset email links to APP_URL — configure APP_URL to
