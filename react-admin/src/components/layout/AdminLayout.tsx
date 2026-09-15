@@ -256,6 +256,18 @@ export function AdminLayout() {
 
     const breadcrumbs = buildBreadcrumbs(location.pathname)
 
+    // Messages is an APP surface, not a document: it must fill the window and
+    // scroll inside its own panes, with the composer pinned at the bottom.
+    //
+    // #218 moved the page gutter off <main> onto the height-less wrapper below.
+    // Every other page is a document and did not care; Messages' `h-full` began
+    // resolving against that wrapper's AUTO height, so the page grew as tall as
+    // its whole history and <main> scrolled instead of the thread. It stayed
+    // hidden because the thread used scrollIntoView, which scrolls every
+    // ancestor — until #360 rightly stopped that (it panned the iOS layout off
+    // screen), and the newest message was left sitting below the fold.
+    const fillsWindow = /^\/comms(\/|$)/.test(location.pathname)
+
     return (
         // h-screen-safe, not h-screen: the --vh machinery below has always been
         // wired up, but the shell never consumed it. On iOS `100vh` is the LARGE
@@ -339,7 +351,7 @@ export function AdminLayout() {
                         touches the bezel on a large monitor, and phones and
                         tablets are untouched: the cap never bound below 1200px,
                         so nothing about their layout changes. */}
-                    <div className="w-full px-3 py-3 md:px-8 md:py-8 2xl:px-10">
+                    <div className={`w-full px-3 py-3 md:px-8 md:py-8 2xl:px-10${fillsWindow ? " h-full" : ""}`}>
                         {/* key: a crash on one page must not follow you to the next */}
                         <PageErrorBoundary key={location.pathname}>
                             <Outlet />
