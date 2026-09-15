@@ -10,7 +10,7 @@
  *   - Channel header shows member count + settings cog for space admins
  */
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import { useVisualViewport } from "@/lib/useVisualViewport";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -2327,11 +2327,15 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
     const { user }   = useAuthStore();
     const qc         = useQueryClient();
     const navigate   = useNavigate();
-    const [messages, setMessages]       = useState<ChannelMessage[]>([]);
-    const [hasMore, setHasMore]         = useState(false);
+    // Remounted per conversation (keyed in CommsHub), so a revisited thread
+    // seeds from its own cached page instead of flashing "No messages yet" —
+    // or, as before the key, the PREVIOUS person's messages under this name.
+    const cached = qc.getQueryData<Awaited<ReturnType<typeof channelApi.messages>>>(["channel-messages", channel.id]);
+    const [messages, setMessages]       = useState<ChannelMessage[]>(() => cached?.messages ?? []);
+    const [hasMore, setHasMore]         = useState(() => cached?.has_more ?? false);
     // Every member's read pointer — the whole read-receipt state. A message is
     // read by a member exactly when their pointer ≥ its id.
-    const [reads, setReads]             = useState<ChannelRead[]>([]);
+    const [reads, setReads]             = useState<ChannelRead[]>(() => cached?.reads ?? []);
     const [replyTo, setReplyTo]         = useState<ChannelMessage | null>(null);
     const [typing, setTyping]           = useState<string[]>([]);
     const [onlineIds, setOnlineIds]     = useState<number[]>([]);
@@ -2340,10 +2344,50 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
     // scrollIntoView also scrolls the window, and on iOS that pan is what
     // wrecked the whole layout the moment the composer was focused.
     const scrollAreaRef = useRef<HTMLDivElement>(null);
+    // Is the reader at the newest message? Only then do we follow new messages
+    // and growing content down — someone scrolled up reading history is left
+    // exactly where they are.
+    const pinnedRef  = useRef(true);
+    const lastTopRef = useRef(0);
+    const landedRef  = useRef(false);   // opened on the newest message yet?
     const scrollToBottom = useCallback((smooth = true) => {
         const el = scrollAreaRef.current;
+        pinnedRef.current = true;       // asking for the bottom means staying there
         if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
     }, []);
+    // Only an UPWARD move unpins. A smooth scroll heading down passes through
+    // positions short of the bottom, and must not talk itself out of arriving.
+    const onThreadScroll = useCallback(() => {
+        const el = scrollAreaRef.current;
+        if (!el) return;
+        if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) pinnedRef.current = true;
+        else if (el.scrollTop < lastTopRef.current) pinnedRef.current = false;
+        lastTopRef.current = el.scrollTop;
+    }, []);
+    // One observer, two things it watches: the CONTENT, because screenshots
+    // decode after the text and push the newest message back down (a 128px
+    // placeholder becomes a 208px image); and the PANE, because the phone
+    // keyboard shrinks it from below.
+    const roRef       = useRef<ResizeObserver | null>(null);
+    const contentNode = useRef<HTMLDivElement | null>(null);
+    useEffect(() => {
+        if (typeof ResizeObserver === "undefined") return;
+        const ro = new ResizeObserver(() => {
+            const el = scrollAreaRef.current;
+            if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
+        });
+        roRef.current = ro;
+        if (scrollAreaRef.current) ro.observe(scrollAreaRef.current);
+        if (contentNode.current) ro.observe(contentNode.current);
+        return () => { ro.disconnect(); roRef.current = null; };
+    }, []);
+    const contentRef = useCallback((node: HTMLDivElement | null) => {
+        if (contentNode.current && roRef.current) roRef.current.unobserve(contentNode.current);
+        contentNode.current = node;
+        if (node && roRef.current) roRef.current.observe(node);
+    }, []);
+    // "Load earlier messages" keeps your place: the page that arrives is ABOVE.
+    const restoreRef = useRef<{ h: number; t: number } | null>(null);
     const timers     = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
     // Live order data for context channels — always fresh, never stale from creation time
     const orderCtx   = useOrderContext(channel);
@@ -2428,7 +2472,34 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
         return () => { getEcho().leave(`channel.${channel.id}`); getEcho().leave(`presence.channel.${channel.id}`); };
     }, [channel.id]);
 
-    useEffect(() => { scrollToBottom(); }, [messages.length, scrollToBottom]);
+    // Open on the NEWEST message — once, the first time the messages are
+    // actually on screen. This used to fire on messages.length, but setMessages
+    // runs INSIDE the query function, so the count changed while the pane was
+    // still showing "Loading…": the jump was spent on an empty pane and never
+    // repeated when the messages appeared.
+    useLayoutEffect(() => {
+        if (landedRef.current || isLoading || messages.length === 0) return;
+        landedRef.current = true;
+        scrollToBottom(false);
+    }, [isLoading, messages.length, scrollToBottom]);
+
+    // A message arriving at the END. Keyed on the last id, not the count, so
+    // loading OLDER messages above does not throw the reader to the bottom.
+    const lastId = messages.length ? String(messages[messages.length - 1].id) : "";
+    useEffect(() => {
+        if (!landedRef.current || !lastId) return;
+        if (pinnedRef.current) scrollToBottom(true);
+    }, [lastId, scrollToBottom]);
+
+    // After an older page lands above, put the reader back on the message they
+    // were looking at, before the browser paints the jump.
+    const firstId = messages.length ? String(messages[0].id) : "";
+    useLayoutEffect(() => {
+        const r = restoreRef.current, el = scrollAreaRef.current;
+        if (!r || !el) return;
+        restoreRef.current = null;
+        el.scrollTop = el.scrollHeight - r.h + r.t;
+    }, [firstId]);
 
     const isSpace      = channel.type === "space";
     const memberCount  = typeof channel.members === "number" ? channel.members : (channel.members as ChannelUser[]).length;
@@ -2576,12 +2647,15 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                     what made the page read flat. brand-50/60 turned out to still be
                     within a hair of white on real phone screens, so the tint is now
                     brand-100/50: a definite warm ground the white cards sit ON. */}
-                <div ref={scrollAreaRef} className="flex-1 overflow-y-auto py-4 scroll-touch overscroll-contain bg-brand-100/50">
+                <div ref={scrollAreaRef} onScroll={onThreadScroll} className="flex-1 overflow-y-auto py-4 scroll-touch overscroll-contain bg-brand-100/50">
                     {hasMore && (
                         <div className="flex justify-center pb-2">
                             <button onClick={async () => {
                                 if (!messages.length) return;
                                 const data = await channelApi.messages(channel.id, messages[0].id);
+                                const el = scrollAreaRef.current;
+                                if (el) restoreRef.current = { h: el.scrollHeight, t: el.scrollTop };
+                                pinnedRef.current = false;   // reading history now
                                 setMessages(prev => [...data.messages, ...prev]);
                                 setHasMore(data.has_more);
                             }} className="text-xs text-brand-600 hover:underline px-4 py-1.5 rounded-full bg-brand-50 border border-brand-100">
@@ -2605,7 +2679,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                 </p>
                             </div>
                         </div>
-                    ) : grouped.map(({ date, messages: msgs }) => (
+                    ) : (<div ref={contentRef}>{grouped.map(({ date, messages: msgs }) => (
                         <div key={date}>
                             {/* Sticky pill: scroll back through a long day and you never
                                 lose track of which day you're reading. */}
@@ -2626,7 +2700,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                     ticks={ticksFor(msg)} />
                             ))}
                         </div>
-                    ))}
+                    ))}</div>)}
                     {typing.filter(n => n !== (user?.first_name ?? "")).length > 0 && (
                         <div className="flex items-center gap-2 px-4 py-2">
                             {/* Three breathing dots read as "someone is there" far faster
@@ -3378,7 +3452,9 @@ export default function CommsHub() {
             {/* Main */}
             <div className="flex-1 min-w-0 flex flex-col">
                 {activeChannel ? (
-                    <ChannelView channel={activeChannel} onOpenSidebar={() => setMobileSidebarOpen(true)} />
+                    // Keyed: one conversation's messages, scroll position and refs
+                    // must never carry over into the next person's thread.
+                    <ChannelView key={activeChannel.id} channel={activeChannel} onOpenSidebar={() => setMobileSidebarOpen(true)} />
                 ) : (
                     <div className="flex flex-col items-center justify-center h-full gap-5 p-8 bg-gradient-to-b from-surface-50/60 to-white">
                         {/* A conversation, not an icon: the empty state speaks the same
