@@ -2238,7 +2238,18 @@ const PriceRows = React.memo(function PriceRows({
 
             return (
                 <div
-                    key={field.id}
+                    // Keyed by CURRENCY, never field.id. In react-hook-form
+                    // 7.76, setValue on a nested path (prices.1.regular_price)
+                    // also notifies the parent field array, and useFieldArray
+                    // answers by REGENERATING every row's id. Since #309 the
+                    // default-currency cascade below calls setValue on every
+                    // other row on each keystroke — so all three rows got new
+                    // keys, React remounted them, and the input being typed
+                    // into was destroyed: one character in, focus gone, and
+                    // the rest landed nowhere or half a price was saved.
+                    // A currency appears once and rows are never added or
+                    // reordered here, so the code is a stable key.
+                    key={field.currency_code}
                     className={`border rounded-xl overflow-hidden ${isBase ? "border-brand-300 ring-1 ring-brand-200" : "border-line"}`}
                 >
                     <div className={`flex items-center justify-between px-4 py-2.5 border-b ${isBase ? "bg-brand-50 border-brand-200" : "bg-surface-50 border-line"}`}>
