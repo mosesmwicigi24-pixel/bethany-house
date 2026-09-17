@@ -591,10 +591,21 @@ export function Topbar({
             {breadcrumbs && breadcrumbs.length > 0 && (
                 <nav
                     aria-label="Breadcrumb"
-                    className="flex items-center gap-1.5 text-sm"
+                    // min-w-0 + overflow-hidden drop the nav's automatic minimum
+                    // size to 0 so it SHRINKS instead of shoving the ml-auto
+                    // actions past the header's overflow-hidden clip edge (which
+                    // hid the user-menu button entirely on phones). The trailing
+                    // crumb truncates; ancestor crumbs give way first.
+                    className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-sm"
                 >
                     {breadcrumbs.map((crumb, i) => (
-                        <span key={i} className="flex items-center gap-1.5">
+                        <span
+                            key={i}
+                            className={clsx(
+                                "flex items-center gap-1.5",
+                                i === breadcrumbs.length - 1 && "min-w-0",
+                            )}
+                        >
                             {i > 0 && (
                                 <span className="text-surface-500">/</span>
                             )}
@@ -609,7 +620,7 @@ export function Topbar({
                                 <span
                                     className={clsx(
                                         i === breadcrumbs.length - 1
-                                            ? "text-surface-900 font-medium"
+                                            ? "truncate text-surface-900 font-medium"
                                             : "text-surface-500",
                                     )}
                                 >
