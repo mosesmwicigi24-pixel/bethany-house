@@ -195,12 +195,10 @@ class SyncPermissions extends Command
         'roles.edit'           => ['Edit Roles',           'Create, edit and assign permissions to roles','Users & Roles'],
 
         // ── Activity / Audit Log ───────────────────────────────────────────
-        // Viewing and exporting the audit log is covered by users.view (the
-        // /admin/activity-logs route group's outer gate). This is separate
-        // because it guards the one destructive action in that group -
-        // permanently deleting log history - which shouldn't ride along
-        // with a plain "look at the user list" permission.
-        'activity_logs.manage' => ['Manage Activity Log',  'Permanently delete audit log entries older than a given date', 'Users & Roles'],
+        // No permission here, deliberately. The audit trail is super_admin
+        // only (role gate on /admin/activity-logs) and append-only — nothing
+        // can delete it — so activity_logs.manage ("permanently delete log
+        // entries") governed nothing and was retired (2026_09_21 migration).
 
         // ── Profile ─────────────────────────────────────────────────────────
         'profile.view'         => ['View Own Profile',    'View own profile, sessions and activity log', 'Profile'],
@@ -316,7 +314,6 @@ class SyncPermissions extends Command
             'outlets.*',
             'settings.*',
             'users.*', 'roles.*',
-            'activity_logs.manage',
             'attendance.*',
             'notifications.view',
         ],

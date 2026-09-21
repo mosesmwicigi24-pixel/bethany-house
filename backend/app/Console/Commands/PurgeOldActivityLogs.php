@@ -2,45 +2,53 @@
 
 namespace App\Console\Commands;
 
+use App\Services\ActivityLogService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
 /**
- * DEPLOY TO: app/Console/Commands/PurgeOldActivityLogs.php
- * REGISTER: $schedule->command('logs:purge-old')->weekly();
+ * Weekly retention (bootstrap/app.php → logs:purge-old).
+ *
+ * It used to delete every activity_log row older than 90 days, the 90 read
+ * from a settings row a super admin could lower to 30 — so the trail of what
+ * someone did could be made to disappear by changing a number and waiting a
+ * week. It had not yet deleted anything (the oldest row was exactly 90 days
+ * old when this was rewritten), but the next run would have.
+ *
+ * Now:
+ *  - activity_log is never pruned (config audit.activity_log_prunable). The
+ *    database refuses the DELETE anyway.
+ *  - request_logs keeps audit.request_log.retention_days (default 365, floor
+ *    90, from the server environment — not from a setting). The delete runs
+ *    in a transaction that sets audit.allow_prune, the single exception the
+ *    append-only trigger makes.
  */
 class PurgeOldActivityLogs extends Command
 {
-    protected $signature   = 'logs:purge-old {--days= : Override retention days}';
-    protected $description = 'Delete activity logs older than the configured retention period';
+    protected $signature   = 'logs:purge-old';
+    protected $description = 'Prune request_logs past retention. The activity log itself is never pruned.';
 
     public function handle(): int
     {
-        $days = (int) ($this->option('days')
-            ?? DB::table('settings')->where('key', 'audit_log_retention_days')->value('value')
-            ?? 90);
+        $days   = (int) config('audit.request_log.retention_days', 365);
+        $cutoff = now()->subDays($days);
 
-        if ($days < 30) {
-            $this->warn("Retention days must be at least 30. Defaulting to 90.");
-            $days = 90;
-        }
+        $deleted = DB::transaction(function () use ($cutoff) {
+            if (DB::getDriverName() === 'pgsql') {
+                DB::statement("SET LOCAL audit.allow_prune = 'on'");
+            }
+            return DB::table('request_logs')->where('occurred_at', '<', $cutoff)->delete();
+        });
 
-        $cutoff  = now()->subDays($days);
-        $deleted = DB::table('activity_log')
-            ->where('created_at', '<', $cutoff)
-            ->delete();
+        ActivityLogService::log('logs_purged', null, [
+            'table'          => 'request_logs',
+            'deleted_count'  => $deleted,
+            'retention_days' => $days,
+            'activity_log'   => 'never pruned',
+        ], "Retention: pruned {$deleted} request-log rows older than {$days} days (activity log is kept permanently)");
 
-        // Log the purge itself (so there's a record of it)
-        DB::table('activity_log')->insert([
-            'log_name'    => 'default',
-            'description' => "Automated purge: deleted {$deleted} log entries older than {$days} days",
-            'event'       => 'logs_purged',
-            'properties'  => json_encode(['deleted_count' => $deleted, 'retention_days' => $days]),
-            'created_at'  => now(),
-            'updated_at'  => now(),
-        ]);
+        $this->info("Pruned {$deleted} request_logs rows older than {$days} days. activity_log is never pruned.");
 
-        $this->info("Purged {$deleted} log entries older than {$days} days.");
         return self::SUCCESS;
     }
 }

@@ -1250,7 +1250,7 @@ export default function App() {
                         <Route
                             path="/settings/activity-logs"
                             element={
-                                <ProtectedRoute permission="users.view">
+                                <ProtectedRoute role="super_admin">
                                 <Suspense fallback={<PageLoader />}>
                                     <ActivityLogsPage />
                                 </Suspense>

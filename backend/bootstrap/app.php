@@ -63,6 +63,12 @@ return Application::configure(basePath: dirname(__DIR__))
             'ensure.staff' => EnsureStaff::class,
         ]);
 
+        // Every staff API call → request_logs (who looked at what). Staff-only
+        // and written after the response is sent; see the class docblock.
+        $middleware->api(append: [
+            \App\Http\Middleware\AuditStaffRequests::class,
+        ]);
+
         // Configure authentication redirects
         $middleware->redirectGuestsTo(function ($request) {
             if ($request->is('admin/*') || $request->is('admin')) {
@@ -77,6 +83,8 @@ return Application::configure(basePath: dirname(__DIR__))
         \App\Console\Commands\SendOverdueProductionNotifications::class,
         \App\Console\Commands\PurgeOldActivityLogs::class,
         \App\Console\Commands\RunScheduledBackups::class,
+        \App\Console\Commands\SealAuditTrail::class,
+        \App\Console\Commands\VerifyAuditTrail::class,
     ])
     ->withSchedule(function (\Illuminate\Console\Scheduling\Schedule $schedule): void {
         // EoD report delivery — runs every minute, command handles time-of-day
@@ -84,7 +92,14 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('eod:send-reports')->everyMinute();
 
         $schedule->command('notifications:overdue-production')->dailyAt('08:00');
+        // Retention prunes request_logs only; the activity log is permanent.
         $schedule->command('logs:purge-old')->weekly();
+
+        // Audit-trail seal chain: seal last night's rows, re-check the last
+        // week nightly and the whole history weekly (AuditSealer).
+        $schedule->command('audit:seal')->dailyAt('00:20')->withoutOverlapping();
+        $schedule->command('audit:verify --days=7')->dailyAt('00:40')->withoutOverlapping();
+        $schedule->command('audit:verify')->weeklyOn(0, '01:30')->withoutOverlapping();
 
         // Scheduled database backups — runs every minute, the command itself
         // checks the backup_schedules config row and only actually performs a

@@ -177,7 +177,6 @@ class PermissionDependencyService
         // activity-logs/clear lives inside the permission:users.view route
         // group (same as read-only log viewing/export) - unreachable
         // without it.
-        'activity_logs.manage' => ['users.view'],
 
         // ── Attendance ───────────────────────────────────────────────────── 
         'attendance.manage' => ['attendance.view_team'],

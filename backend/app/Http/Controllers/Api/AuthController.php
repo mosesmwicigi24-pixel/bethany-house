@@ -404,22 +404,31 @@ class AuthController extends Controller
 
         $user = User::where('email', $validated['email'])->first();
 
+        // Every refused admin login is on the trail — the attempted address,
+        // the reason and (via ActivityLogService) the IP and device. Repeated
+        // failures against one account, or from one place, are how a password
+        // attack shows up. The password itself is never recorded.
+        $refuse = function (string $reason, string $message) use ($validated, $user) {
+            ActivityLogService::log('admin_login_failed', $user, [
+                'attempted_email' => strtolower($validated['email']),
+                'reason'          => $reason,
+            // Subject = the targeted account; no causer — whoever typed the
+            // password is exactly what is unknown.
+            ], "Admin login refused ({$reason}): " . strtolower($validated['email']));
+
+            throw ValidationException::withMessages(['email' => [$message]]);
+        };
+
         if (!$user || !Hash::check($validated['password'], $user->password)) {
-            throw ValidationException::withMessages([
-                'email' => ['The provided credentials are incorrect.'],
-            ]);
+            $refuse($user ? 'wrong_password' : 'unknown_account', 'The provided credentials are incorrect.');
         }
 
         if ($user->status !== 'active') {
-            throw ValidationException::withMessages([
-                'email' => ['Your account has been deactivated.'],
-            ]);
+            $refuse('account_deactivated', 'Your account has been deactivated.');
         }
 
         if (!$user->canAccessAdmin()) {
-            throw ValidationException::withMessages([
-                'email' => ['Only staff and system users may access the admin panel.'],
-            ]);
+            $refuse('not_staff', 'Only staff and system users may access the admin panel.');
         }
 
         // 2FA checkpoint - client follows up with adminVerify2fa()
@@ -492,6 +501,10 @@ class AuthController extends Controller
         $google2fa = new Google2FA();
 
         if (!$google2fa->verifyKey($secret, $validated['code'])) {
+            // A wrong second factor means the password was right: the most
+            // telling failure there is. Recorded against the account.
+            ActivityLogService::log('admin_login_2fa_failed', $user, ['reason' => 'invalid_code'],
+                'Admin 2FA code refused: ' . strtolower((string) $user->email));
             throw ValidationException::withMessages([
                 'code' => ['The verification code is invalid or has expired.'],
             ]);

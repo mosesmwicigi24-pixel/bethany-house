@@ -26,13 +26,48 @@ export interface ProfileData {
 
 export interface ActivityLogEntry {
     id: number;
-    user_id: number;
+    user_id?: number;
+    causer_id?: number | null;
     action: string;
+    event?: string | null;
     description: string;
+    subject_type?: string | null;
+    subject_id?: number | null;
+    /** JSON text: {changes: {field: {old, new}}} | {attributes: {...}} | free-form context */
+    properties?: string | Record<string, unknown> | null;
     ip_address: string | null;
+    user_agent?: string | null;
+    request_id?: string | null;
     created_at: string;
     user_name?: string;
     user_email?: string;
+}
+
+/** One staff API call (request_logs). */
+export interface RequestLogEntry {
+    id: number;
+    occurred_at: string;
+    user_id: number | null;
+    user_name?: string | null;
+    user_email?: string | null;
+    method: string;
+    path: string;
+    route: string | null;
+    status: number;
+    duration_ms: number | null;
+    ip_address: string | null;
+    user_agent: string | null;
+    request_id: string | null;
+    rows_returned: number | null;
+    query: string | null;
+}
+
+export interface AuditIntegrity {
+    tables: Record<string, {
+        last_seal: { last_id: number; row_count: number; hash: string; sealed_at: string } | null;
+        unsealed_rows: number;
+    }>;
+    last_check: { ok: boolean; checked_at: string; details: unknown } | null;
 }
 
 export const profileApi = {
@@ -129,12 +164,22 @@ export const activityLogApi = {
     get: (id: number) =>
         get<{ log: ActivityLogEntry }>(`/v1/admin/activity-logs/${id}`),
 
-    // Clear old logs
-    clear: (days: number) =>
-        post<{ message: string; deleted_count: number }>(
-            "/v1/admin/activity-logs/clear",
-            { days },
+    // Staff API calls — who looked at what (request_logs)
+    requests: (params?: Record<string, string>) =>
+        get<{ data: RequestLogEntry[]; current_page: number; last_page: number; total: number; from: number; to: number }>(
+            "/v1/admin/activity-logs/requests",
+            { params },
         ),
+
+    // Every change to one record, newest first. type = short model name ("order").
+    record: (type: string, id: number, params?: Record<string, string>) =>
+        get<{ data: ActivityLogEntry[]; current_page: number; last_page: number; total: number }>(
+            `/v1/admin/activity-logs/record/${type}/${id}`,
+            { params },
+        ),
+
+    // Seal chain status + last verification
+    integrity: () => get<AuditIntegrity>("/v1/admin/activity-logs/integrity"),
 
     // Export logs
     export: (params?: Record<string, string>) =>

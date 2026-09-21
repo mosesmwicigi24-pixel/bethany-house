@@ -21,6 +21,7 @@ import { commentApi, type MentionUser } from "@/api/comments";
 import { subscribeToChannel, getEcho } from "@/lib/echo";
 import { neemaChatUrl, neemaCallsUrl, chatChannelLabel } from "@/lib/neema";
 import { useAuthStore } from "@/store/auth.store";
+import { RecordHistory } from "@/components/audit/AuditParts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -4976,6 +4977,9 @@ export default function OrderDetailPage() {
             )}
 
             {showCurrencyModal && <ChangeCurrencyModal order={order} onClose={() => setShowCurrencyModal(false)} onDone={refresh} />}
+
+            {/* Every change to this order, who made it and when (super admins) */}
+            <RecordHistory type="order" id={order?.id} />
         </div>
     );
 }

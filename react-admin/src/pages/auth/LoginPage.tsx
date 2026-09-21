@@ -345,6 +345,12 @@ export default function LoginPage() {
                                         }
                                     </button>
                                 </form>
+                                {/* Owner decision 2026-09-21: staff are told plainly that the
+                                    hub keeps an audit trail (Kenya DPA 2019 — monitoring of
+                                    employees is disclosed). Individual reviews stay silent. */}
+                                <p className="mt-4 text-center text-[11px] leading-relaxed text-surface-400">
+                                    Activity on Bethany Hub is logged and reviewed.
+                                </p>
                             </>
                         )}
 

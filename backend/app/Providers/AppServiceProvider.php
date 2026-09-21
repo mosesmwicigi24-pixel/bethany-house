@@ -11,6 +11,10 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(NeemaAnalyticsClient::class, HttpNeemaAnalyticsClient::class);
+
+        // Scoped, not singleton: forgotten between queue jobs, so a worker
+        // never carries one job's request id into the next.
+        $this->app->scoped(\App\Support\Audit\AuditContext::class);
     }
 
     public function boot(): void
@@ -30,6 +34,14 @@ class AppServiceProvider extends ServiceProvider
             \App\Models\ProductImage::class,
         ] as $catalogModel) {
             $catalogModel::observe(\App\Observers\CatalogObserver::class);
+        }
+
+        // The audit trail: before-and-after of every write to a business
+        // record, whichever controller, job or webhook made it (config/audit.php).
+        foreach ((array) config('audit.observed_models', []) as $audited) {
+            if (class_exists($audited)) {
+                $audited::observe(\App\Observers\AuditObserver::class);
+            }
         }
     }
 }

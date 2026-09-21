@@ -93,24 +93,21 @@ class ActivityLogs extends Component
         }
     }
 
+    /**
+     * The audit trail is append-only (2026_09_21 migration: the database
+     * refuses the DELETE). This legacy screen is not routed in production —
+     * nginx sends /admin to the React console — but if it is ever reached,
+     * it refuses plainly and records the attempt instead of erroring.
+     */
     public function clearOldLogs(): void
     {
-        $this->validate(['clearDays' => 'required|integer|min:30']);
-
-        $cutoff = now()->subDays($this->clearDays);
-        $count  = Activity::where('created_at', '<', $cutoff)->count();
-
-        Activity::where('created_at', '<', $cutoff)->delete();
-
-        // Log that a clear happened (with a fresh entry)
-        activity()
-            ->causedBy(auth()->user())
-            ->withProperties(['deleted_before' => $cutoff->toDateString(), 'count' => $count])
-            ->log('audit_logs_cleared');
+        \App\Services\ActivityLogService::log('audit_clear_refused', null, [
+            'requested_days' => $this->clearDays,
+            'surface'        => 'livewire',
+        ], 'Refused a request to clear the audit trail (it is append-only)', auth()->user());
 
         $this->showClearModal = false;
-        $this->resetPage();
-        $this->toast("{$count} old log(s) cleared.");
+        $this->toast('The activity log is a permanent record and cannot be cleared.');
     }
 
     public function clearFilters(): void

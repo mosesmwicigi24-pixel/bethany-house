@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Services\ActivityLogService;
+use App\Services\Audit\AuditSealer;
 
 class AuditLogController extends Controller
 {
@@ -79,36 +81,122 @@ class AuditLogController extends Controller
 
     /**
      * POST /api/v1/admin/activity-logs/clear
-     * Delete logs older than N days.
+     *
+     * Used to delete entries older than N days. The audit trail is append-only
+     * now — the database refuses the DELETE — so this answers 403 and records
+     * that someone asked, which is itself worth knowing.
      */
     public function clear(Request $request)
     {
-        $validated = $request->validate([
-            'days' => 'required|integer|min:30',
-        ]);
+        ActivityLogService::log('audit_clear_refused', null, [
+            'requested_days' => $request->input('days'),
+        ], 'Refused a request to clear the audit trail (it is append-only)', $request->user());
 
-        try {
-            $deleted = DB::table('activity_log')
-                ->where('created_at', '<', now()->subDays($validated['days']))
-                ->delete();
+        return response()->json([
+            'message' => 'The activity log is a permanent record and cannot be cleared.',
+        ], 403);
+    }
 
-            // Log the clear action itself
-            DB::table('activity_log')->insert([
-                'causer_type' => \App\Models\User::class,
-                'causer_id'   => $request->user()->id,
-                'action'      => 'logs_cleared',
-                'description' => "Cleared {$deleted} log entries older than {$validated['days']} days",
-                'ip_address'  => $request->ip(),
-                'created_at'  => now(),
-            ]);
+    /**
+     * GET /api/v1/admin/activity-logs/requests
+     * Staff API calls (request_logs): who looked at what, when, from where.
+     * Filters: user_id, method, status, path (contains), start_date, end_date,
+     * min_rows (list responses carrying at least N records).
+     */
+    public function requests(Request $request)
+    {
+        $q = DB::table('request_logs')
+            ->leftJoin('users', 'request_logs.user_id', '=', 'users.id')
+            ->select('request_logs.*',
+                DB::raw("CONCAT(users.first_name, ' ', users.last_name) as user_name"),
+                'users.email as user_email');
 
-            return response()->json([
-                'message'       => "Deleted {$deleted} log entries older than {$validated['days']} days.",
-                'deleted_count' => $deleted,
-            ]);
-        } catch (\Exception $e) {
-            return response()->json(['message' => 'Failed to clear logs.', 'error' => $e->getMessage()], 500);
+        if ($request->filled('user_id'))    $q->where('request_logs.user_id', (int) $request->input('user_id'));
+        if ($request->filled('method'))     $q->where('request_logs.method', strtoupper((string) $request->input('method')));
+        if ($request->filled('status'))     $q->where('request_logs.status', (int) $request->input('status'));
+        if ($request->filled('path'))       $q->where('request_logs.path', 'ILIKE', '%' . $request->input('path') . '%');
+        if ($request->filled('start_date')) $q->whereDate('request_logs.occurred_at', '>=', $request->input('start_date'));
+        if ($request->filled('end_date'))   $q->whereDate('request_logs.occurred_at', '<=', $request->end_date);
+        if ($request->filled('min_rows'))   $q->where('request_logs.rows_returned', '>=', (int) $request->min_rows);
+
+        $perPage = min((int) $request->get('per_page', 50), 100);
+
+        return response()->json($q->orderByDesc('request_logs.occurred_at')->paginate($perPage));
+    }
+
+    /**
+     * GET /api/v1/admin/activity-logs/record/{type}/{id}
+     * The full history of one record — every change with before and after.
+     * {type} is a short model name from config('audit.observed_models')
+     * ("order", "product", "customer", "product-price" …); anything else 404s,
+     * so the endpoint cannot be pointed at arbitrary classes.
+     */
+    public function record(Request $request, string $type, int $id)
+    {
+        $class = $this->observedTypes()[strtolower($type)] ?? null;
+        if (!$class) {
+            return response()->json(['message' => 'Unknown record type.'], 404);
         }
+
+        $logs = DB::table('activity_log')
+            ->leftJoin('users', 'activity_log.causer_id', '=', 'users.id')
+            ->where('activity_log.subject_type', $class)
+            ->where('activity_log.subject_id', $id)
+            ->select('activity_log.*',
+                DB::raw("CONCAT(users.first_name, ' ', users.last_name) as user_name"),
+                'users.email as user_email')
+            ->orderByDesc('activity_log.created_at')
+            ->orderByDesc('activity_log.id')
+            ->paginate(min((int) $request->get('per_page', 50), 100));
+
+        return response()->json($logs);
+    }
+
+    /**
+     * GET /api/v1/admin/activity-logs/integrity
+     * The newest seal per table, how many rows await the next seal, and the
+     * result of the last verification run.
+     */
+    public function integrity(AuditSealer $sealer)
+    {
+        $tables = [];
+        foreach (array_keys(AuditSealer::TABLES) as $table) {
+            $seal = $sealer->lastSeal($table);
+            $tables[$table] = [
+                'last_seal' => $seal ? [
+                    'last_id'   => (int) $seal->last_id,
+                    'row_count' => (int) $seal->row_count,
+                    'hash'      => $seal->hash,
+                    'sealed_at' => $seal->sealed_at,
+                ] : null,
+                'unsealed_rows' => DB::table($table)->where('id', '>', (int) ($seal->last_id ?? 0))->count(),
+            ];
+        }
+
+        $lastCheck = DB::table('activity_log')
+            ->whereIn('event', ['audit_verified', 'audit_verification_failed'])
+            ->orderByDesc('id')->first(['event', 'created_at', 'properties']);
+
+        return response()->json([
+            'tables'     => $tables,
+            'last_check' => $lastCheck ? [
+                'ok'         => $lastCheck->event === 'audit_verified',
+                'checked_at' => $lastCheck->created_at,
+                'details'    => json_decode($lastCheck->properties ?? 'null', true),
+            ] : null,
+        ]);
+    }
+
+    /** "order" / "product-price" / "productprice" => FQCN, from the observed list only. */
+    private function observedTypes(): array
+    {
+        $map = [];
+        foreach ((array) config('audit.observed_models', []) as $class) {
+            $base = class_basename($class);
+            $map[strtolower($base)] = $class;
+            $map[\Illuminate\Support\Str::kebab($base)] = $class;
+        }
+        return $map;
     }
 
     /**

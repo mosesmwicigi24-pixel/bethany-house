@@ -8,6 +8,7 @@ import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
 import type { ApiError } from "@/types";
+import { RecordHistory } from "@/components/audit/AuditParts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -283,6 +284,9 @@ export default function CustomerDetailPage() {
                     )}
                 </div>
             )}
+
+            {/* Every change to this customer, who made it and when (super admins) */}
+            <RecordHistory type="customer" id={Number(id)} />
         </div>
     );
 }

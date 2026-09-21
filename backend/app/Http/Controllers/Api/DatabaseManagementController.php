@@ -390,6 +390,8 @@ class DatabaseManagementController extends Controller
             $validated['backup_s3_use_path_style'] = $validated['backup_s3_use_path_style'] ? '1' : '0';
         }
 
+        $before = ActivityLogService::settingsSnapshot(array_keys($validated));
+
         $now = now();
         DB::transaction(function () use ($validated, $now) {
             foreach ($validated as $key => $value) {
@@ -423,6 +425,8 @@ class DatabaseManagementController extends Controller
             'changed_keys'   => array_keys(array_diff_key($validated, ['backup_s3_secret' => true])),
             'secret_changed' => array_key_exists('backup_s3_secret', $validated),
         ], 'Backup storage destination settings updated', $request->user());
+        // Where backups go, and who is told about them: old → new (secret redacted).
+        ActivityLogService::settingsSaved($before, $validated, 'backup storage', $request->user());
 
         return response()->json(['message' => 'Backup storage settings saved.']);
     }
