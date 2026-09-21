@@ -190,6 +190,32 @@ class AuditTrailTest extends TestCase
         $this->assertSame(2, DB::table('request_logs')->where('user_id', $admin->id)->where('method', 'POST')->count());
     }
 
+    public function test_request_times_are_hub_local_like_every_other_timestamp(): void
+    {
+        $admin = $this->superAdmin();
+        Sanctum::actingAs($admin);
+
+        $this->getJson('/api/v1/admin/activity-logs')->assertOk();
+
+        // timestamptz read Laravel's local wall-clock string as UTC: every call
+        // showed three hours late in Nairobi. The column is plain local time now.
+        $at = \Carbon\Carbon::parse(DB::table('request_logs')->where('user_id', $admin->id)->value('occurred_at'));
+        $this->assertLessThan(120, abs(now()->diffInSeconds($at, false)), "occurred_at {$at} vs now " . now());
+        $this->assertSame('timestamp without time zone', DB::selectOne(
+            "SELECT data_type FROM information_schema.columns WHERE table_name='request_logs' AND column_name='occurred_at'"
+        )->data_type);
+    }
+
+    public function test_the_websocket_handshake_is_not_recorded_as_a_staff_call(): void
+    {
+        $admin = $this->superAdmin();
+        Sanctum::actingAs($admin);
+
+        $this->postJson('/api/broadcasting/auth', ['socket_id' => '1.1', 'channel_name' => 'private-x']);
+
+        $this->assertSame(0, DB::table('request_logs')->where('path', '/api/broadcasting/auth')->count());
+    }
+
     public function test_customers_are_not_recorded_as_staff_calls(): void
     {
         $customer = User::factory()->customer()->create();
