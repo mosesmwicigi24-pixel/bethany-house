@@ -46,6 +46,8 @@ const UsersPage = lazy(() => import("@/pages/setup/users/UsersPage"));
 const ActivityLogsPage = lazy(
     () => import("@/pages/setup/activity-logs/ActivityLogsPage"),
 );
+const MyDownloadsPage = lazy(() => import("@/pages/downloads/MyDownloadsPage"));
+const DownloadApprovalsPage = lazy(() => import("@/pages/downloads/DownloadApprovalsPage"));
 const TrashPage = lazy(
     () => import("@/pages/setup/trash/TrashPage"),
 );
@@ -1255,6 +1257,25 @@ export default function App() {
                                     <ActivityLogsPage />
                                 </Suspense>
                                 </ProtectedRoute>
+                            }
+                        />
+                        {/* Download approval: every staff member has "My downloads"; the
+                            approvals page checks the server's capabilities itself (owner +
+                            delegates — not a role or permission). */}
+                        <Route
+                            path="/settings/my-downloads"
+                            element={
+                                <Suspense fallback={<PageLoader />}>
+                                    <MyDownloadsPage />
+                                </Suspense>
+                            }
+                        />
+                        <Route
+                            path="/settings/downloads"
+                            element={
+                                <Suspense fallback={<PageLoader />}>
+                                    <DownloadApprovalsPage />
+                                </Suspense>
                             }
                         />
                         <Route

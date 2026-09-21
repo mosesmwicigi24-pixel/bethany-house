@@ -16,6 +16,8 @@ import {
 } from "recharts";
 import { Fragment } from "react";
 import { groupRowsByDate, DateGroupHeaderRow } from "@/lib/dateGrouping";
+import { downloadFile } from "@/api/downloads";
+import { useToastStore } from "@/store/toast.store";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -122,6 +124,7 @@ export default function PaymentTransactionsPage() {
         max_amount: maxAmount ? parseFloat(maxAmount) : undefined,
     };
 
+    const toast = useToastStore();
     const { data: listData,  isLoading: listLoading }      = useQuery({ queryKey: ["payment-transactions", listParams], queryFn: () => transactionsApi.list(listParams) });
     const { data: analytics, isLoading: analyticsLoading } = useQuery({ queryKey: ["payment-transactions-analytics", dr.start, dr.end], queryFn: () => transactionsApi.analytics({ start_date: dr.start, end_date: dr.end }) });
     const { data: detailData } = useQuery({ queryKey: ["payment-transaction", selectedId], queryFn: () => transactionsApi.show(selectedId!), enabled: selectedId !== null });
@@ -135,22 +138,15 @@ export default function PaymentTransactionsPage() {
     // filters are untouched - this only re-partitions the rows already fetched.
     const transactionGroups = groupRowsByDate(transactions, (txn) => txn.created_at);
 
+    // The server builds the CSV (same filters as this list), so the file passes
+    // the download gate like every other export — approval, export id, owner's copy.
     const handleExport = useCallback(async () => {
-        const res = await transactionsApi.export(listParams);
-        if (!res?.data?.length) return;
-        const head = ["#", "Reference", "Order", "Customer", "Method", "Amount", "Currency", "Status", "Date"];
-        const csv  = [head, ...res.data.map((p, i) => [
-            i + 1, p.payment_number, p.order?.order_number ?? "",
-            p.order ? `${p.order.customer_first_name} ${p.order.customer_last_name}` : "",
-            METHOD_LABELS[p.payment_method] ?? p.payment_method,
-            p.amount, p.currency_code, p.status, p.created_at,
-        ])].map(r => r.map(String).join(",")).join("\n");
-        const a = Object.assign(document.createElement("a"), {
-            href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })),
-            download: `transactions-${dr.start}-${dr.end}.csv`,
-        });
-        a.click();
-    }, [listParams, dr.start, dr.end]);
+        try {
+            await downloadFile("/v1/admin/payment-transactions/export", listParams, `transactions-${dr.start}-${dr.end}.csv`);
+        } catch (e: any) {
+            toast.error(e?.message ?? "Export failed.");
+        }
+    }, [listParams, dr.start, dr.end, toast]);
 
     return (
         <>

@@ -9,6 +9,7 @@ import { CommandPalette } from '@/components/ui/CommandPalette'
 import { useAuthStore } from '@/store/auth.store'
 import { subscribeToUserChannel, getEcho } from '@/lib/echo'
 import { primeAudio, messageAlert } from '@/lib/alertSound'
+import { DownloadApprovalDialog } from '@/components/downloads/DownloadApprovalDialog'
 
 const COLLAPSE_KEY = 'bh_sidebar_collapsed'
 
@@ -355,6 +356,8 @@ export function AdminLayout() {
                         {/* key: a crash on one page must not follow you to the next */}
                         <PageErrorBoundary key={location.pathname}>
                             <Outlet />
+                            {/* Opens wherever a download is held for approval */}
+                            <DownloadApprovalDialog />
                         </PageErrorBoundary>
                     </div>
                 </main>

@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import React from "react";
 import { useToastStore } from "@/store/toast.store";
 import { tokenStorage } from "@/api/client";
+import { heldFromFetch } from "@/api/downloads";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -57,6 +58,9 @@ export function usePdfDownload(): UsePdfDownloadResult {
                         Accept: "application/pdf",
                     },
                 });
+
+                // Held for approval: the approval dialog takes over.
+                if (await heldFromFetch(res)) return false;
 
                 if (!res.ok) {
                     const err = await res

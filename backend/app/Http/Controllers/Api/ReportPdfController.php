@@ -45,6 +45,9 @@ class ReportPdfController extends Controller
     {
         $safe = preg_replace('/[^A-Za-z0-9_\-]/', '_', $filename);
 
+        // Gated downloads carry their export id on every page (DownloadGate).
+        $html = \App\Services\Downloads\ExportWatermark::apply($html);
+
         $pdf = Pdf::loadHTML($html)
             ->setPaper('A4', 'portrait')
             ->setOption('isHtml5ParserEnabled', true)

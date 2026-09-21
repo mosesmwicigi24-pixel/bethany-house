@@ -77,11 +77,33 @@ function createApiClient(): AxiosInstance {
             }
 
             if (status === 403) {
-                return Promise.reject({
-                    message:
-                        "You do not have permission to perform this action.",
-                    errors: {},
-                } satisfies ApiError);
+                // The download gate holds files for approval with a 403 whose
+                // body says so. File downloads ask for a Blob, so the body may
+                // need reading first. Announce it (DownloadApprovalDialog opens)
+                // instead of flattening it into "no permission".
+                return readJson(data).then((body) => {
+                    if (body?.code === "download_approval_required") {
+                        window.dispatchEvent(new CustomEvent("download:held", { detail: body }));
+                        return Promise.reject({
+                            message: "This download needs approval. Add a reason to send the request.",
+                            errors: {},
+                            reason: "download_approval_required",
+                        } satisfies ApiError);
+                    }
+                    if (body?.code === "download_token_invalid") {
+                        return Promise.reject({
+                            message: body.message ?? "This download link cannot be used.",
+                            errors: {},
+                            reason: "download_token_invalid",
+                        } satisfies ApiError);
+                    }
+                    return Promise.reject({
+                        message: body?.message && body.message !== "This action is unauthorized."
+                            ? body.message
+                            : "You do not have permission to perform this action.",
+                        errors: {},
+                    } satisfies ApiError);
+                });
             }
 
             if (status === 422 && data.errors) {
@@ -112,6 +134,17 @@ function createApiClient(): AxiosInstance {
     );
 
     return client;
+}
+
+/** A response body as JSON, whether axios gave an object, a string or a Blob. */
+async function readJson(data: unknown): Promise<any> {
+    try {
+        if (data instanceof Blob) return JSON.parse(await data.text());
+        if (typeof data === "string") return JSON.parse(data);
+        return data ?? null;
+    } catch {
+        return null;
+    }
 }
 
 export const api = createApiClient();

@@ -6,6 +6,7 @@ import { get, post, del } from "@/api/client";
 import { CommandPaletteButton } from "@/components/ui/CommandPalette";
 import { useAuthStore } from "@/store/auth.store";
 import { useToastStore } from "@/store/toast.store";
+import { downloadsApi } from "@/api/downloads";
 
 // ─── Role name formatter ───────────────────────────────────────────────────────
 function formatRoleName(raw: string): string {
@@ -45,6 +46,7 @@ const NotifIcon = ({ name }: { name: string }) => {
     if (name === "shipment")   return <svg {...s}><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>;
     if (name === "qc")         return <svg {...s}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>;
     if (name === "orders")     return <svg {...s}><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>;
+    if (name === "download")   return <svg {...s}><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>;
     if (name === "stock")      return <svg {...s}><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>;
     return <svg {...s}><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>;
 };
@@ -539,6 +541,14 @@ export function Topbar({
         return () => document.removeEventListener("mousedown", handler);
     }, []);
 
+    // Download approval: approvers see what is waiting for them.
+    const { data: dlCaps } = useQuery({
+        queryKey: ["download-capabilities"],
+        queryFn: () => downloadsApi.capabilities(),
+        staleTime: 60_000,
+        refetchInterval: 120_000,
+    });
+
     const handleLogout = async () => {
         setIsLoggingOut(true);
         try {
@@ -691,6 +701,25 @@ export function Topbar({
                             >
                                 My Profile
                             </MenuLink>
+                            <MenuLink
+                                href="/settings/my-downloads"
+                                onClick={() => setUserMenuOpen(false)}
+                            >
+                                My downloads
+                            </MenuLink>
+                            {dlCaps?.can_approve && (
+                                <MenuLink
+                                    href="/settings/downloads"
+                                    onClick={() => setUserMenuOpen(false)}
+                                >
+                                    Download approvals
+                                    {dlCaps.pending > 0 && (
+                                        <span className="ml-2 inline-flex min-w-[18px] justify-center rounded-full bg-danger px-1.5 text-2xs font-semibold text-white">
+                                            {dlCaps.pending}
+                                        </span>
+                                    )}
+                                </MenuLink>
+                            )}
                             <div className="my-1 border-t border-line" />
                             <button
                                 onClick={handleLogout}

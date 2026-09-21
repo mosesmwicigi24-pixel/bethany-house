@@ -65,8 +65,12 @@ return Application::configure(basePath: dirname(__DIR__))
 
         // Every staff API call → request_logs (who looked at what). Staff-only
         // and written after the response is sent; see the class docblock.
+        // Then every file a staff member takes → DownloadGate (approval,
+        // export id, archive, the owner's silent copy). After the request
+        // logger, so a held attempt still shows as a staff call.
         $middleware->api(append: [
             \App\Http\Middleware\AuditStaffRequests::class,
+            \App\Http\Middleware\DownloadGate::class,
         ]);
 
         // Configure authentication redirects
@@ -85,6 +89,8 @@ return Application::configure(basePath: dirname(__DIR__))
         \App\Console\Commands\RunScheduledBackups::class,
         \App\Console\Commands\SealAuditTrail::class,
         \App\Console\Commands\VerifyAuditTrail::class,
+        \App\Console\Commands\SendAuditDigest::class,
+        \App\Console\Commands\PruneDownloadArchive::class,
     ])
     ->withSchedule(function (\Illuminate\Console\Scheduling\Schedule $schedule): void {
         // EoD report delivery — runs every minute, command handles time-of-day
@@ -100,6 +106,12 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('audit:seal')->dailyAt('00:20')->withoutOverlapping();
         $schedule->command('audit:verify --days=7')->dailyAt('00:40')->withoutOverlapping();
         $schedule->command('audit:verify')->weeklyOn(0, '01:30')->withoutOverlapping();
+
+        // The owner's morning email: yesterday's downloads (invoices, quotations
+        // and receipts listed here rather than one email each), requests waiting,
+        // security events, and the seal fingerprints — a copy off the server.
+        $schedule->command('audit:daily-digest')->dailyAt('06:30')->withoutOverlapping();
+        $schedule->command('downloads:prune-archive')->weeklyOn(0, '02:00')->withoutOverlapping();
 
         // Scheduled database backups — runs every minute, the command itself
         // checks the backup_schedules config row and only actually performs a

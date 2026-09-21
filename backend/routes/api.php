@@ -27,6 +27,7 @@ use App\Http\Controllers\Api\{
     RoleController,
     PermissionController,
     AuditLogController,
+    DownloadRequestController,
     ShipmentController,
     ReturnController,
     ContentPageController,
@@ -449,6 +450,26 @@ Route::prefix('v1')->group(function () {
                 Route::get('/export',             [AuditLogController::class, 'export']);
                 Route::post('/clear',             [AuditLogController::class, 'clear']);
                 Route::get('/{id}',               [AuditLogController::class, 'show'])->whereNumber('id');
+            });
+
+            // ── Downloads: approval, my requests, the owner's ledger ─────────
+            // Every file a staff member takes passes App\Http\Middleware\DownloadGate.
+            // Who may decide is enforced in the controller (owner + the managers
+            // he delegates to — not a permission, which super_admin would bypass).
+            Route::prefix('downloads')->group(function () {
+                Route::get('/capabilities',             [DownloadRequestController::class, 'capabilities']);
+                Route::get('/mine',                     [DownloadRequestController::class, 'mine']);
+                Route::post('/requests',                [DownloadRequestController::class, 'store']);
+                Route::get('/requests',                 [DownloadRequestController::class, 'index']);
+                Route::post('/requests/{uuid}/cancel',  [DownloadRequestController::class, 'cancel'])->whereUuid('uuid');
+                Route::post('/requests/{uuid}/token',   [DownloadRequestController::class, 'token'])->whereUuid('uuid');
+                Route::post('/requests/{uuid}/approve', [DownloadRequestController::class, 'approve'])->whereUuid('uuid');
+                Route::post('/requests/{uuid}/deny',    [DownloadRequestController::class, 'deny'])->whereUuid('uuid');
+                Route::get('/all',                      [DownloadRequestController::class, 'all']);
+                Route::get('/approvers',                [DownloadRequestController::class, 'approvers']);
+                Route::post('/approvers',               [DownloadRequestController::class, 'addApprover']);
+                Route::delete('/approvers/{userId}',    [DownloadRequestController::class, 'removeApprover'])->whereNumber('userId');
+                Route::get('/{uuid}/archive',           [DownloadRequestController::class, 'archive'])->whereUuid('uuid');
             });
 
             // ── Trash / Recycle Bin (super_admin only) ────────────────────────
