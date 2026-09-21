@@ -146,6 +146,8 @@ export interface NavItem {
   icon: string
   permission?: string
   anyOfPermissions?: string[]
+  /** Visible to super admins only — no permission can grant it (e.g. the audit trail). */
+  superAdminOnly?: boolean
   badge?: string | number
   children?: NavItem[]
 }

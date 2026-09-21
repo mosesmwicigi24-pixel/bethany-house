@@ -593,7 +593,8 @@ const NAV: NavGroup[] = [
                 label: "Activity Logs",
                 href: "/settings/activity-logs",
                 icon: "activity-logs",
-                permission: "settings.view",
+                // The audit trail is the owner's: the API is role:super_admin.
+                superAdminOnly: true,
             },
             {
                 label: "Recycle Bin",
@@ -1175,6 +1176,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
                     // Filter items by permission
                     const visibleItems = group.items.filter((item) => {
                         if (isSuperAdmin) return true;
+                        if (item.superAdminOnly) return false;
                         if (item.anyOfPermissions?.length) {
                             return item.anyOfPermissions.some((p) => can(p));
                         }

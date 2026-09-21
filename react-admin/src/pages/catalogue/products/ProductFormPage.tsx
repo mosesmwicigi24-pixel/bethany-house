@@ -43,6 +43,7 @@ import { settingsApi } from "@/api/setup";
 import type { ApiError } from "@/types";
 import type { ProductTaxRate } from "@/api/products";
 import { clsx } from "clsx";
+import { RecordHistory } from "@/components/audit/AuditParts";
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -4420,6 +4421,10 @@ export default function ProductFormPage() {
                 onNavigate={setZoomedIndex}
                 onClose={() => setZoomedIndex(null)}
             />
+
+            {/* Every change to this product, who made it and when (super admins).
+                Prices and variants are their own records and appear on the Activity Log. */}
+            {isEditing && <RecordHistory type="product" id={Number(id)} />}
         </div>
     );
 }
