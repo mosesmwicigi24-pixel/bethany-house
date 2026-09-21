@@ -44,10 +44,13 @@ return [
         'retention_days' => max(90, (int) env('AUDIT_REQUEST_LOG_RETENTION_DAYS', 365)),
 
         // Housekeeping endpoints that carry no user intent.
+        // (Laravel's is() matches the full path: the websocket handshake is
+        // served under the api/ prefix.)
         'skip_paths' => [
             'api/health',
             'up',
             'broadcasting/auth',
+            'api/broadcasting/auth',
         ],
 
         // Query-string keys whose values must never be stored.
