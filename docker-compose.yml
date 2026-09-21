@@ -44,6 +44,14 @@ services:
     laravel:
         image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-laravel:${IMAGE_TAG:-latest}
         container_name: bethany_laravel
+        # Mail goes to Mailcow on this same box. The box's /etc/hosts maps
+        # mail.bethanyhouse.co.ke to 127.0.1.1 (Mailcow's hostname setup), and
+        # containers inherit that answer through DNS — so the hub dialled its
+        # own loopback and could never send mail (storefront login codes
+        # failed; found 2026-09-21). Point the name at the Docker host, where
+        # Mailcow publishes 587; the TLS certificate still matches the name.
+        extra_hosts:
+            - "mail.bethanyhouse.co.ke:host-gateway"
         restart: unless-stopped
         working_dir: /var/www
         environment:
@@ -140,6 +148,14 @@ services:
     queue:
         image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-laravel:${IMAGE_TAG:-latest}
         container_name: bethany_queue
+        # Mail goes to Mailcow on this same box. The box's /etc/hosts maps
+        # mail.bethanyhouse.co.ke to 127.0.1.1 (Mailcow's hostname setup), and
+        # containers inherit that answer through DNS — so the hub dialled its
+        # own loopback and could never send mail (storefront login codes
+        # failed; found 2026-09-21). Point the name at the Docker host, where
+        # Mailcow publishes 587; the TLS certificate still matches the name.
+        extra_hosts:
+            - "mail.bethanyhouse.co.ke:host-gateway"
         restart: unless-stopped
         working_dir: /var/www
         command: php artisan queue:work --sleep=3 --tries=3 --max-time=3600
@@ -211,6 +227,14 @@ services:
     scheduler:
         image: ghcr.io/${GITHUB_REPOSITORY:-your-org/bethany-house}/bethany-laravel:${IMAGE_TAG:-latest}
         container_name: bethany_scheduler
+        # Mail goes to Mailcow on this same box. The box's /etc/hosts maps
+        # mail.bethanyhouse.co.ke to 127.0.1.1 (Mailcow's hostname setup), and
+        # containers inherit that answer through DNS — so the hub dialled its
+        # own loopback and could never send mail (storefront login codes
+        # failed; found 2026-09-21). Point the name at the Docker host, where
+        # Mailcow publishes 587; the TLS certificate still matches the name.
+        extra_hosts:
+            - "mail.bethanyhouse.co.ke:host-gateway"
         restart: unless-stopped
         working_dir: /var/www
         command: /bin/sh -c "while true; do php artisan schedule:run --verbose --no-interaction & sleep 60; done"
