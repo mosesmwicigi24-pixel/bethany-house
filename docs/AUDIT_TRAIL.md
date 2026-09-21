@@ -66,6 +66,58 @@ php artisan audit:verify --days=7   # recent seals only
 
 A failed verification writes `audit_verification_failed` to the trail.
 
+## Downloads: approval and the owner's copy
+
+Owner decision 2026-09-21: every file taken out of the hub is approved by the
+owner (`AUDIT_OWNER_ACCOUNT_EMAIL`) or a manager he delegates to, except
+invoices, quotations and receipts. A copy of every download goes privately to
+`AUDIT_OWNER_EMAIL`; his own downloads are logged, not emailed; customer
+documents come in one morning digest.
+
+`App\Http\Middleware\DownloadGate` sees every staff API call. The route runs
+first (its permission check still decides who may see the data), then any
+successful **file** response — PDF, CSV, spreadsheet, archive, named
+attachment — is judged, from any route: an endpoint added later fails closed.
+Classification lives in `config/audit.php` → `downloads`:
+
+| Kind | Examples | Treatment |
+|---|---|---|
+| exempt | invoice, quotation, receipt PDFs; POS/expense receipts; the blank import template | through untouched; recorded + fingerprinted; in the digest |
+| views | payment proofs, chat media, shipment attachments shown in the hub | not a download |
+| never_attach | full database backups | held like any other; owner told; **never emailed** |
+| everything else | exports, reports, POs, GRNs, waybills, production orders… | held for approval (when enforcing) |
+
+When held, the console asks for a reason and the server turns its own record
+of that exact attempt into a request. Approval issues a single-use link (30
+min) bound to the person, the route and the filters; requests expire after 24h.
+Approval is **not** a Spatie permission — `Gate::before` would give it to every
+super admin. It is the owner account plus `download_approvers`, which only the
+owner can change; nobody decides their own request.
+
+Every file that leaves gets an export id (`BH-EXP-000123`) in its filename,
+an `X-Export-Id` header and the footer of hub-rendered PDFs; a server copy in
+`storage/app/download-archive` (90 days, `downloads:prune-archive`); and a
+SHA-256 fingerprint. A leaked copy names its download.
+
+Emails: the owner's copy of each download (`SendDownloadCopyToOwner`, queued,
+retried, `download_owner_copy_failed` on the trail if undeliverable), an
+approval request when someone asks, and the 06:30 digest (`audit:daily-digest`).
+
+### Switching approval on
+
+It ships **recording-only**: nothing is held, but every download is recorded
+and copied to the owner, and the digest shows which ones would have needed
+approval. To enforce, set in `/opt/bethany-house/.env`:
+
+```bash
+DOWNLOAD_GUARD_ENABLED=true
+```
+
+then recreate `bethany_laravel` (config is cached at container start) and
+confirm with a clerk account that an export answers
+`403 download_approval_required`. To switch off again, set it to `false` and
+recreate — the records stay.
+
 ## Incident — 2026-09-21: the database and the trail were both exposed
 
 **What.** `hub.bethanyhouse.co.ke/db` served Adminer — a full database login
