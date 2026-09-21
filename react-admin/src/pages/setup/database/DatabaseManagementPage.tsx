@@ -8,6 +8,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/setup/FormComponents";
 import { tokenStorage } from "@/api/client";
+import { heldFromFetch } from "@/api/downloads";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -162,6 +163,8 @@ function BackupsTab({ pgDumpAvailable }: { pgDumpAvailable: boolean }) {
             const res = await fetch(databaseApi.downloadBackupUrl(backup.id), {
                 headers: { Authorization: `Bearer ${token}` },
             });
+            // A backup is a download like any other: the owner approves it.
+            if (await heldFromFetch(res)) return;
             if (!res.ok) {
                 const err = await res.json().catch(() => ({ message: "Download failed." }));
                 toast.error(err.message ?? "Download failed.");

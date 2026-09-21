@@ -18,6 +18,7 @@ import {
     type ExportFormat,
     type SchedulePayload,
 } from "@/api/reports";
+import { heldFromFetch } from "@/api/downloads";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -989,6 +990,9 @@ export function useReportPdf() {
                         Accept: "application/pdf",
                     },
                 });
+
+                // Held for approval: the approval dialog takes over.
+                if (await heldFromFetch(res)) return;
 
                 if (!res.ok) {
                     const err = await res.json().catch(() => ({ message: "PDF generation failed." }));

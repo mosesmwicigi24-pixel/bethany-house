@@ -853,16 +853,62 @@ class PaymentController extends Controller
         ]);
     }
 
+    /**
+     * GET /admin/payment-transactions/export — the Payment Transactions list as
+     * a CSV, with the same filters as the screen.
+     *
+     * It used to return JSON that the browser turned into a CSV itself — the
+     * one file in the hub the server never saw leave. The file is built here
+     * now, so it passes the download gate (approval, export id, owner's copy)
+     * like every other export.
+     */
     public function exportTransactions(Request $request)
     {
-        $query = Payment::with(['order:id,order_number'])
+        $query = Payment::with(['order:id,order_number,customer_first_name,customer_last_name'])
             ->orderBy('created_at', 'desc')
             ->limit(5000);
 
-        if ($request->filled('start_date')) $query->whereDate('created_at', '>=', $request->start_date);
-        if ($request->filled('end_date'))   $query->whereDate('created_at', '<=', $request->end_date);
+        if ($request->filled('status'))         $query->where('status', $request->input('status'));
+        if ($request->filled('payment_method')) $query->where('payment_method', $request->input('payment_method'));
+        if ($request->filled('currency_code'))  $query->where('currency_code', $request->input('currency_code'));
+        if ($request->filled('start_date'))     $query->whereDate('payments.created_at', '>=', $request->input('start_date'));
+        if ($request->filled('end_date'))       $query->whereDate('payments.created_at', '<=', $request->input('end_date'));
+        if ($request->filled('min_amount'))     $query->where('amount', '>=', $request->input('min_amount'));
+        if ($request->filled('max_amount'))     $query->where('amount', '<=', $request->input('max_amount'));
+        if ($request->filled('search')) {
+            $term = $request->input('search');
+            $query->where(fn ($q) => $q->where('payment_number', 'ILIKE', "%{$term}%")
+                ->orWhereHas('order', fn ($o) => $o->where('order_number', 'ILIKE', "%{$term}%")));
+        }
 
-        return response()->json(['data' => $query->get()]);
+        $out = fopen('php://temp', 'r+');
+        fwrite($out, "\xEF\xBB\xBF");
+        fputcsv($out, ['#', 'Reference', 'Order', 'Customer', 'Method', 'Amount', 'Currency', 'Status', 'Date']);
+        foreach ($query->get()->values() as $i => $p) {
+            fputcsv($out, [
+                $i + 1,
+                $p->payment_number,
+                $p->order?->order_number ?? '',
+                $p->order ? trim($p->order->customer_first_name . ' ' . $p->order->customer_last_name) : '',
+                $p->payment_method,
+                $p->amount,
+                $p->currency_code,
+                $p->status,
+                optional($p->created_at)->format('Y-m-d H:i:s'),
+            ]);
+        }
+        rewind($out);
+        $csv = stream_get_contents($out);
+        fclose($out);
+
+        $from = $request->input('start_date', 'all');
+        $to   = $request->input('end_date', now()->toDateString());
+
+        return response($csv, 200, [
+            'Content-Type'        => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => "attachment; filename=\"transactions-{$from}-{$to}.csv\"",
+            'Cache-Control'       => 'no-cache, no-store, must-revalidate',
+        ]);
     }
 
     public function transactionDetails($id)

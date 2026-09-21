@@ -31,8 +31,11 @@ return [
     // unless it delegates (Phase 2). Matched case-insensitively on users.email.
     'owner_account_email' => env('AUDIT_OWNER_ACCOUNT_EMAIL', 'mwicigi@icloud.com'),
 
-    // Where silent copies of downloads and the daily digest go (Phase 3).
+    // Where silent copies of downloads and the daily digest go.
     'owner_email' => env('AUDIT_OWNER_EMAIL', 'mosesmwicigike@icloud.com'),
+
+    // Links in those emails open the console here.
+    'console_url' => env('AUDIT_CONSOLE_URL', rtrim((string) env('APP_URL', 'https://hub.bethanyhouse.co.ke'), '/') . '/admin'),
 
     'request_log' => [
         // Staff API calls. GETs repeat constantly (every screen polls), so the
@@ -139,6 +142,9 @@ return [
         \App\Models\ShippingZone::class,
         \App\Models\Channel::class,
         \App\Models\DatabaseBackup::class,
+        // Download approval: every decision and delegation, with before/after.
+        \App\Models\DownloadRequest::class,
+        \App\Models\DownloadApprover::class,
         // Spatie's own classes (config/permission.php) — App\Models\Role and
         // App\Models\Permission are unused legacy models; observing them would
         // record nothing. Grants to users/roles are pivot writes with no model
@@ -152,6 +158,7 @@ return [
     'redacted_attributes' => [
         'password', 'remember_token', 'two_factor', 'secret', 'passkey',
         'api_key', 'access_token', 'refresh_token', 'private_key', 'credentials',
+        'token_hash',
     ],
 
     // Whole columns redacted on specific models (they hold nested secrets).
@@ -161,4 +168,81 @@ return [
 
     // Attributes that change on their own and carry no intent.
     'ignored_attributes' => ['updated_at', 'last_login_at', 'last_login_ip', 'last_activity_at', 'last_seen_at'],
+
+    /*
+    |----------------------------------------------------------------------
+    | Download approval (App\Http\Middleware\DownloadGate)
+    |----------------------------------------------------------------------
+    |
+    | Owner decision 2026-09-21: every file that leaves the hub needs the
+    | owner's approval (or a manager he delegates to), except invoices,
+    | quotations and receipts. The owner's own downloads are approved by
+    | being his.
+    |
+    | Classification is by controller action. Anything NOT listed that returns
+    | a file — a PDF, a CSV, a spreadsheet, an archive — is gated too, so a
+    | download endpoint added later fails closed instead of slipping past.
+    |
+    */
+    'downloads' => [
+        // Off: the gate records what it WOULD have held (shadow) and lets it
+        // through. On: it holds. Flip in the server environment.
+        'enforce' => (bool) env('DOWNLOAD_GUARD_ENABLED', false),
+
+        'token_ttl_minutes'      => 30,     // an approved download link, once issued
+        'request_ttl_hours'      => 24,     // pending/approved requests expire after this
+        'archive_disk'           => 'local',
+        'archive_dir'            => 'download-archive',
+        'archive_retention_days' => 90,     // server copy; the owner's emailed copy is the long-term one
+        'attach_max_bytes'       => 10 * 1024 * 1024,
+
+        // Invoices, quotations, receipts — and a blank template that carries
+        // no data. Recorded, never held; reported in the owner's daily digest.
+        'exempt' => [
+            'DocumentPdfController@invoice',
+            'DocumentPdfController@quotation',
+            'DocumentPdfController@receipt',
+            'PosController@printReceipt',
+            'PosController@emailReceipt',
+            'ExpenseController@downloadReceipt',
+            'ProductController@exportTemplate',
+        ],
+
+        // Files the hub shows INSIDE its own screens — a payment proof on the
+        // approvals page, a customer's photo in a chat, a shipment attachment.
+        // Viewing them is the work; they are in the request log like any read.
+        'views' => [
+            'ChannelController@serveAttachment',
+            'PaymentApprovalController@serveProof',
+            'ShipmentController@serveShipmentAttachment',
+            'ShipmentController@serveTrackingAttachment',
+            // The owner opening a file already recorded (and logged as such) —
+            // not a new download, and not archived a second time.
+            'DownloadRequestController@archive',
+        ],
+
+        // Held like any other, and the owner is told — but the file itself is
+        // never emailed: a full database dump does not belong in a mailbox.
+        'never_attach' => [
+            'DatabaseManagementController@backupsDownload',
+        ],
+
+        // Held BEFORE the work runs (a response-time check would still catch
+        // them; this spares building a file only to discard it). Includes the
+        // JSON "exports" a browser turns into a file, which a response check
+        // cannot see.
+        'always_gated' => [
+            'AuditLogController@export',
+            'UserController@export',
+            'SupplierController@export',
+            'OrderController@exportCsv',
+            'PaymentController@exportTransactions',
+            'PurchaseOrderController@grnPDF',
+            'ReportController@exportPDF',
+            'ReportController@exportExcel',
+            'DatabaseManagementController@backupsDownload',
+            'DocumentPdfController@*',
+            'ReportPdfController@*',
+        ],
+    ],
 ];
