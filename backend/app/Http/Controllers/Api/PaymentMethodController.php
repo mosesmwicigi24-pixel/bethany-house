@@ -339,6 +339,12 @@ class PaymentMethodController extends Controller
             default => [],
         };
 
+        // Old → new onto the trail. Secrets are redacted by name; the shortcode
+        // is not a secret and is exactly what must be visible: a changed paybill
+        // or till number is how payments get diverted.
+        $written = array_filter($settingsMap, fn ($v) => $v !== null);
+        $before  = ActivityLogService::settingsSnapshot(array_keys($written));
+
         foreach ($settingsMap as $key => $value) {
             if ($value !== null) {
                 DB::table('settings')->updateOrInsert(
@@ -347,6 +353,8 @@ class PaymentMethodController extends Controller
                 );
             }
         }
+
+        ActivityLogService::settingsSaved($before, $written, 'payment credentials (' . $method->code . ')');
 
         // Bust the MpesaService config cache so the next request picks up new values
         if ($method->code === 'mpesa') {

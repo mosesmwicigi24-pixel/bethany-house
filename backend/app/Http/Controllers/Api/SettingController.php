@@ -128,6 +128,9 @@ class SettingController extends Controller
             'maintenance_mode'      => 'sometimes|boolean',
         ]);
 
+        // Snapshot before writing, so the trail can say what each value replaced.
+        $before = ActivityLogService::settingsSnapshot(array_keys($validated));
+
         DB::beginTransaction();
         try {
             foreach ($validated as $key => $value) {
@@ -155,11 +158,10 @@ class SettingController extends Controller
             TaxCalculationService::invalidateGlobalCache();
         }
 
-        // Outside transaction - failure here never rolls back the saved settings
-        ActivityLogService::log('settings_updated', null, [
-            'changed_keys' => array_keys($validated),
-            'new_values'   => array_map(fn($v) => is_bool($v) ? ($v ? 'true' : 'false') : $v, $validated),
-        ], 'Updated ' . count($validated) . ' system setting(s): ' . implode(', ', array_keys($validated)));
+        // Outside transaction - failure here never rolls back the saved settings.
+        // Old → new for each key that actually changed (it used to record only
+        // the submitted keys and their new values — not what they replaced).
+        ActivityLogService::settingsSaved($before, $validated, 'general');
 
         return response()->json([
             'message'  => 'Settings saved successfully.',
@@ -190,6 +192,7 @@ class SettingController extends Controller
             ['key' => 'app_logo_url'],
             ['value' => $url, 'updated_at' => now(), 'created_at' => DB::raw("COALESCE(created_at, NOW())")]
         );
+        ActivityLogService::settingsSaved(['app_logo_url' => $old], ['app_logo_url' => $url], 'branding');
 
         Cache::forget('app_settings');
 
@@ -292,6 +295,7 @@ class SettingController extends Controller
             'flutterwave_public_key' => 'sometimes|string',
         ]);
 
+        $before = ActivityLogService::settingsSnapshot(array_keys($validated));
         foreach ($validated as $key => $value) {
             DB::table('settings')->updateOrInsert(
                 ['key' => $key],
@@ -303,6 +307,7 @@ class SettingController extends Controller
         ActivityLogService::log('payment_providers_updated', null, [
             'changed_keys' => array_keys($validated),
         ], 'Payment provider settings updated: ' . implode(', ', array_keys($validated)));
+        ActivityLogService::settingsSaved($before, $validated, 'payment providers');
         return response()->json(['message' => 'Payment providers updated.']);
     }
 
@@ -331,6 +336,7 @@ class SettingController extends Controller
             'mail_port'         => 'sometimes|integer',
         ]);
 
+        $before = ActivityLogService::settingsSnapshot(array_keys($validated));
         foreach ($validated as $key => $value) {
             DB::table('settings')->updateOrInsert(
                 ['key' => $key],
@@ -341,6 +347,7 @@ class SettingController extends Controller
         ActivityLogService::log('email_settings_updated', null, [
             'changed_keys' => array_keys($validated),
         ], 'Email settings updated: ' . implode(', ', array_keys($validated)));
+        ActivityLogService::settingsSaved($before, $validated, 'email');
         return response()->json(['message' => 'Email settings updated.']);
     }
 
@@ -431,10 +438,12 @@ class SettingController extends Controller
     public function updateLanguages(Request $request)
     {
         $validated = $request->validate(['languages' => 'required|array']);
+        $before = ActivityLogService::settingsSnapshot(['enabled_languages']);
         DB::table('settings')->updateOrInsert(
             ['key' => 'enabled_languages'],
             ['value' => json_encode($validated['languages']), 'updated_at' => now(), 'created_at' => DB::raw("COALESCE(created_at, NOW())")]
         );
+        ActivityLogService::settingsSaved($before, ['enabled_languages' => $validated['languages']], 'languages');
         Cache::forget('app_settings');
         ActivityLogService::log('languages_updated', null, [
             'languages' => $validated['languages'],
@@ -448,10 +457,12 @@ class SettingController extends Controller
     public function updateCurrencies(Request $request)
     {
         $validated = $request->validate(['currencies' => 'required|array']);
+        $before = ActivityLogService::settingsSnapshot(['enabled_currencies']);
         DB::table('settings')->updateOrInsert(
             ['key' => 'enabled_currencies'],
             ['value' => json_encode($validated['currencies']), 'updated_at' => now(), 'created_at' => DB::raw("COALESCE(created_at, NOW())")]
         );
+        ActivityLogService::settingsSaved($before, ['enabled_currencies' => $validated['currencies']], 'currencies');
         Cache::forget('app_settings');
         return response()->json(['message' => 'Currencies updated.']);
     }
@@ -494,6 +505,8 @@ class SettingController extends Controller
             ['key' => 'maintenance_mode'],
             ['value' => $new, 'updated_at' => now(), 'created_at' => DB::raw("COALESCE(created_at, NOW())")]
         );
+        // Taking the storefront down (or up) is exactly what the trail is for.
+        ActivityLogService::settingsSaved(['maintenance_mode' => $current], ['maintenance_mode' => $new], 'maintenance');
 
         Cache::forget('app_settings');
         return response()->json(['maintenance_mode' => $new === '1', 'message' => 'Maintenance mode ' . ($new === '1' ? 'enabled' : 'disabled') . '.']);

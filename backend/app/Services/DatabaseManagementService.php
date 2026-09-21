@@ -49,18 +49,10 @@ class DatabaseManagementService
         // LEDGER GROUP — append-only log tables, safe to purge by date
         // ─────────────────────────────────────────────────────────────────────
 
-        'activity_log' => [
-            'label'       => 'Activity / Audit Log',
-            'date_column' => 'created_at',
-            'group'       => 'ledger',
-            'children'    => [],
-        ],
-        'audit_logs' => [
-            'label'       => 'Audit Logs',
-            'date_column' => 'created_at',
-            'group'       => 'ledger',
-            'children'    => [],
-        ],
+        // activity_log / audit_logs / request_logs / audit_seals are NOT here and
+        // must never be: the audit trail cannot be cleared from inside the app.
+        // The database refuses the DELETE regardless (2026_09_21 migration);
+        // listing them would only turn every "clear" into an error.
         'inventory_transactions' => [
             'label'       => 'Inventory Transactions',
             'date_column' => 'created_at',
@@ -447,18 +439,34 @@ class DatabaseManagementService
         $conn = config('database.connections.pgsql');
         $startedAt = microtime(true);
 
+        $listFile = null;
         try {
+            // Restore everything EXCEPT the audit trail. `--clean` drops and
+            // recreates each object it restores; restoring activity_log from
+            // a backup would rewind the record of everything done since — and
+            // reset its id sequence under rows that still exist. So restore
+            // from the dump's table of contents with the audit objects removed:
+            // the trail stays exactly as it is, and records this restore.
+            \exec('/usr/bin/pg_restore -l ' . escapeshellarg($localFile) . ' 2>/dev/null', $tocLines, $tocExit);
+            if ($tocExit !== 0 || $tocLines === []) {
+                // Fail closed: an unfiltered restore would rewind the audit trail.
+                throw new \RuntimeException('Could not read the backup\'s table of contents; restore refused so the audit trail is not rewound.');
+            }
+            $listFile = tempnam(sys_get_temp_dir(), 'pgrestore_list_');
+            file_put_contents($listFile, self::auditPreservingRestoreList(implode("\n", $tocLines)));
+
             // Use exec() — proc_open may be disabled on this server.
             // stderr is redirected to a temp file so we can inspect it for
             // fatal errors (pg_restore exits non-zero on harmless warnings too).
             $stderrFile = tempnam(sys_get_temp_dir(), 'pgrestore_');
             $cmd = sprintf(
-                'PGPASSWORD=%s /usr/bin/pg_restore -h %s -p %s -U %s -d %s --clean --if-exists --no-owner --no-privileges %s 2>%s',
+                'PGPASSWORD=%s /usr/bin/pg_restore -h %s -p %s -U %s -d %s --clean --if-exists --no-owner --no-privileges -L %s %s 2>%s',
                 escapeshellarg($conn['password']),
                 escapeshellarg($conn['host']),
                 escapeshellarg((string) $conn['port']),
                 escapeshellarg($conn['username']),
                 escapeshellarg($conn['database']),
+                escapeshellarg($listFile),
                 escapeshellarg($localFile),
                 escapeshellarg($stderrFile),
             );
@@ -490,10 +498,39 @@ class DatabaseManagementService
                 'warnings'         => $stderr ?: null,
             ];
         } finally {
+            if ($listFile && is_file($listFile)) {
+                @unlink($listFile);
+            }
             if (is_file($localFile) && str_starts_with($localFile, storage_path('app/tmp-backups'))) {
                 @unlink($localFile);
             }
         }
+    }
+
+    /** Tables (and everything named after them) a restore must never touch. */
+    public const AUDIT_TABLES = ['activity_log', 'audit_logs', 'request_logs', 'audit_seals'];
+
+    /**
+     * A pg_restore -L list with every audit object commented out: the tables,
+     * their data, sequences and SEQUENCE SETs, defaults, constraints, indexes,
+     * triggers, and the append-only trigger function. Pure, so it is tested
+     * without a pg_restore binary.
+     *
+     * TOC lines look like "3890; 0 16390 TABLE DATA public activity_log owner".
+     */
+    public static function auditPreservingRestoreList(string $toc): string
+    {
+        $names   = implode('|', array_map('preg_quote', self::AUDIT_TABLES));
+        $pattern = '/\spublic\s+(?:(?:' . $names . ')(?:_[a-z0-9_]+)?(?:\s|$)|audit_append_only\()/i';
+
+        $out = [];
+        foreach (preg_split('/\R/', $toc) as $line) {
+            $out[] = ($line !== '' && $line[0] !== ';' && preg_match($pattern, $line))
+                ? '; audit trail preserved — ' . $line
+                : $line;
+        }
+
+        return implode("\n", $out) . "\n";
     }
 
     /**
@@ -765,6 +802,9 @@ class DatabaseManagementService
         'payment_methods', 'outlets', 'shipping_zones', 'shipping_methods',
         'database_backups', 'backup_schedules',
         'migrations', 'failed_jobs', 'jobs', 'cache', 'cache_locks',
+        // The audit trail survives a wipe — a wipe is exactly the event it must
+        // record. The database refuses TRUNCATE on these regardless.
+        'activity_log', 'audit_logs', 'request_logs', 'audit_seals',
     ];
 
     public function wipeAllData(?User $user = null): array

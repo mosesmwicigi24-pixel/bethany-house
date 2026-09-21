@@ -435,13 +435,20 @@ Route::prefix('v1')->group(function () {
                 Route::get('/my-entries',   [TimeClockController::class, 'myEntries']);
             });
 
-            // ── Activity logs ────────────────────────────────────────────────
-            Route::middleware('permission:users.view,sanctum')->prefix('activity-logs')->group(function () {
-                Route::get('/',        [AuditLogController::class, 'index']);
-                Route::get('/export',  [AuditLogController::class, 'export']);
-                Route::post('/clear',  [AuditLogController::class, 'clear'])
-                    ->middleware('permission:activity_logs.manage,sanctum');
-                Route::get('/{id}',    [AuditLogController::class, 'show']);
+            // ── Activity logs: the audit trail — super_admin only ────────────
+            // Was permission:users.view, so anyone who could list staff could
+            // read (and export) everything everyone did. The trail now holds
+            // every change and every staff API call; it is the owner's.
+            // /clear no longer deletes: the trail is append-only (2026_09_21
+            // migration) and the endpoint answers 403 and records the attempt.
+            Route::middleware('role:super_admin')->prefix('activity-logs')->group(function () {
+                Route::get('/',                   [AuditLogController::class, 'index']);
+                Route::get('/requests',           [AuditLogController::class, 'requests']);
+                Route::get('/integrity',          [AuditLogController::class, 'integrity']);
+                Route::get('/record/{type}/{id}', [AuditLogController::class, 'record'])->whereNumber('id');
+                Route::get('/export',             [AuditLogController::class, 'export']);
+                Route::post('/clear',             [AuditLogController::class, 'clear']);
+                Route::get('/{id}',               [AuditLogController::class, 'show'])->whereNumber('id');
             });
 
             // ── Trash / Recycle Bin (super_admin only) ────────────────────────
