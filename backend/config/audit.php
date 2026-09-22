@@ -31,8 +31,10 @@ return [
     // unless it delegates (Phase 2). Matched case-insensitively on users.email.
     'owner_account_email' => env('AUDIT_OWNER_ACCOUNT_EMAIL', 'mwicigi@icloud.com'),
 
-    // Where silent copies of downloads and the daily digest go.
-    'owner_email' => env('AUDIT_OWNER_EMAIL', 'mosesmwicigike@icloud.com'),
+    // Where the owner's email goes: silent copies of downloads, download
+    // approval requests, imprest alerts and the daily digest. The owner asked
+    // (2026-09-22) for everything to go to his hub account address.
+    'owner_email' => env('AUDIT_OWNER_EMAIL', 'mwicigi@icloud.com'),
 
     // Links in those emails open the console here.
     'console_url' => env('AUDIT_CONSOLE_URL', rtrim((string) env('APP_URL', 'https://hub.bethanyhouse.co.ke'), '/') . '/admin'),
