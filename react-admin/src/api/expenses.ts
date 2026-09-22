@@ -56,6 +56,11 @@ export interface Expense {
   notes: string | null
   tags: string[] | null
   line_items_count: number
+  // Paid from the imprest: the cash left the box when it was recorded. A
+  // rejected/cancelled one waits on the super admin: returned or written off.
+  imprest_account_id?: number | null
+  imprest_resolution?: 'pending' | 'returned' | 'written_off' | null
+  imprest_resolved_at?: string | null
   created_by: number
   created_at: string
   // Expanded relations (show endpoint)
@@ -115,6 +120,7 @@ export interface ExpenseListParams {
   sort?: string
   direction?: 'asc' | 'desc'
   page?: number
+  imprest?: 'yes' | 'no' | 'unresolved'
 }
 
 export interface CreateExpensePayload {
@@ -150,8 +156,11 @@ const BASE = '/v1/admin/expenses'
 
 export const expensesApi = {
   // ── List / Show ──────────────────────────────────────────────────────────
+  // Filters go in `params`. Until 2026-09-22 these three passed the filter
+  // object as the axios config itself, which axios ignores — so search,
+  // status, dates and page never reached the server.
   list: (params: ExpenseListParams = {}) =>
-    get<{ expenses: any; stats: any }>(`${BASE}`, params as Record<string, string | number>),
+    get<{ expenses: any; stats: any }>(`${BASE}`, { params }),
 
   show: (id: number) =>
     get<{ expense: Expense }>(`${BASE}/${id}`),
@@ -212,7 +221,7 @@ export const expensesApi = {
 
   // ── Budgets ──────────────────────────────────────────────────────────────
   budgets: (params?: Partial<ExpenseBudget>) =>
-    get<{ budgets: ExpenseBudget[] }>(`${BASE}/budgets`, params as Record<string, string | number>),
+    get<{ budgets: ExpenseBudget[] }>(`${BASE}/budgets`, { params }),
 
   createBudget: (data: Partial<ExpenseBudget>) =>
     post<{ message: string; budget: ExpenseBudget }>(`${BASE}/budgets`, data),
@@ -222,7 +231,7 @@ export const expensesApi = {
 
   // ── Summary ──────────────────────────────────────────────────────────────
   summary: (params?: { start_date?: string; end_date?: string; outlet_id?: number }) =>
-    get<any>(`${BASE}/summary`, params as Record<string, string | number>),
+    get<any>(`${BASE}/summary`, { params }),
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

@@ -62,6 +62,22 @@
         @endunless
     </div>
 
+    @foreach ($imprest as $im)
+    <div class="section">
+        <h2>Imprest — {{ $im['name'] }}</h2>
+        @if ($im['low'])<div class="warn" style="margin-bottom:8px">Below its alert level — KES {{ number_format((float) $im['balance'], 2) }} of KES {{ number_format((float) $im['float'], 2) }}.</div>@endif
+        <table>
+            <tr><td style="width:180px" class="muted">Balance</td><td><b>KES {{ number_format((float) $im['balance'], 2) }}</b> of KES {{ number_format((float) $im['float'], 2) }} · held by {{ $im['custodian'] ?: '—' }}</td></tr>
+            <tr><td class="muted">Spent yesterday</td><td>KES {{ number_format((float) $im['spent'], 2) }}</td></tr>
+            @foreach ($im['received'] as $r)<tr><td class="muted">Top-up received</td><td>KES {{ number_format((float) $r->received_amount, 2) }}@if ((float) $r->received_amount !== (float) $r->sent_amount) <span style="color:#991b1b">(you sent KES {{ number_format((float) $r->sent_amount, 2) }})</span>@endif</td></tr>@endforeach
+            @foreach ($im['waiting'] as $w)<tr><td class="muted">Top-up requested</td><td>KES {{ number_format((float) $w->requested_amount, 2) }} — <a href="{{ $consoleUrl }}/expenses/imprest">decide</a></td></tr>@endforeach
+            @foreach ($im['in_transit'] as $t)<tr><td class="muted">Sent, not yet confirmed</td><td>KES {{ number_format((float) $t->sent_amount, 2) }} since {{ optional($t->sent_at)->format('j M H:i') }}</td></tr>@endforeach
+            @if ($im['unresolved'])<tr><td class="muted">Rejected spends</td><td>{{ $im['unresolved'] }} waiting: cash returned or written off?</td></tr>@endif
+            @if ($im['counts'])<tr><td class="muted">Cash counts</td><td>{{ $im['counts'] }} differ from the books — approve or reject</td></tr>@endif
+        </table>
+    </div>
+    @endforeach
+
     @if ($pending->count())
     <div class="section">
         <h2>Waiting for your decision</h2>

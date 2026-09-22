@@ -25,6 +25,7 @@ import {
 import { clsx } from "clsx";
 import dayjs from "dayjs";
 import { PdfDownloadButton } from "@/hooks/usePdfDownload";
+import { imprestApi, kes } from "@/api/imprest";
 
 // ─── Shared ───────────────────────────────────────────────────────────────────
 
@@ -636,7 +637,8 @@ export default function ExpenseDetailPage() {
     const navigate = useNavigate();
     const toast = useToastStore();
     const qc = useQueryClient();
-    const { can } = usePermissions();
+    const { can, isSuperAdmin } = usePermissions();
+    const me = useAuthStore((st) => st.user);
     const fileRef = useRef<HTMLInputElement>(null);
 
     const [editOpen, setEditOpen] = useState(false);
@@ -687,6 +689,7 @@ export default function ExpenseDetailPage() {
             toast.success(msg);
             qc.invalidateQueries({ queryKey: ["expense", id] });
             qc.invalidateQueries({ queryKey: ["expenses"] });
+            qc.invalidateQueries({ queryKey: ["imprest"] });
             refetch();
         } catch (err: any) {
             toast.error(err?.response?.data?.message ?? "Action failed.");
@@ -739,7 +742,15 @@ export default function ExpenseDetailPage() {
     const isDeletable =
         ["draft", "rejected", "cancelled"].includes(expense.status) &&
         can("expenses.delete");
+    // Owner decision 2026-09-22: nobody approves an imprest expense they
+    // recorded (the server refuses too). created_by / submitted_by arrive as
+    // ids or, with the relation loaded, as objects.
+    const idOf = (v: unknown) => (v && typeof v === "object" ? (v as { id: number }).id : (v as number | null));
+    const isImprest = !!expense.imprest_account_id;
+    const recordedByMe =
+        isImprest && !!me && (idOf(expense.created_by) === me.id || idOf(expense.submitted_by) === me.id);
     const canApprove = can("expenses.approve");
+    const canApproveThis = canApprove && !recordedByMe;
     const paymentMethod =
         PAYMENT_METHODS.find((m) => m.value === expense.payment_method)
             ?.label ?? expense.payment_method;
@@ -791,7 +802,11 @@ export default function ExpenseDetailPage() {
                         </button>
                     )}
 
-                    {expense.status === "pending_approval" && canApprove && (
+                    {expense.status === "pending_approval" && canApprove && recordedByMe && (
+                        <span className="text-xs text-surface-500">You recorded this imprest spend — someone else approves it.</span>
+                    )}
+
+                    {expense.status === "pending_approval" && canApproveThis && (
                         <>
                             <button
                                 className="btn-secondary"
@@ -1212,6 +1227,51 @@ export default function ExpenseDetailPage() {
 
                 {/* ── Right: sidebar ── */}
                 <div className="space-y-4">
+                    {isImprest && (
+                        <SectionCard title="Imprest">
+                            <div className="space-y-2 text-sm">
+                                <p className="text-surface-700">
+                                    {kes(expense.amount_kes)} came out of the imprest when this was recorded.
+                                </p>
+                                {expense.imprest_resolution === "pending" && (
+                                    <>
+                                        <p className="rounded-lg bg-danger-light/50 px-3 py-2 text-xs text-danger">
+                                            The expense was {expense.status}, but the cash had already left the box.
+                                            The super admin decides whether it came back.
+                                        </p>
+                                        {isSuperAdmin && (
+                                            <div className="flex gap-2">
+                                                <button
+                                                    className="btn-primary btn-sm flex-1 justify-center"
+                                                    disabled={busy}
+                                                    onClick={() => doAction(() => imprestApi.resolve(expense.id, "returned"), "Cash returned to the imprest.")}
+                                                >
+                                                    Cash returned
+                                                </button>
+                                                <button
+                                                    className="btn-secondary btn-sm flex-1 justify-center"
+                                                    disabled={busy}
+                                                    onClick={() => doAction(() => imprestApi.resolve(expense.id, "written_off"), "Written off.")}
+                                                >
+                                                    Write off
+                                                </button>
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                                {expense.imprest_resolution === "returned" && (
+                                    <p className="text-xs text-success">
+                                        Cash returned to the imprest{expense.imprest_resolved_at ? ` · ${dayjs(expense.imprest_resolved_at).format("DD MMM YYYY, HH:mm")}` : ""}.
+                                    </p>
+                                )}
+                                {expense.imprest_resolution === "written_off" && (
+                                    <p className="text-xs text-surface-500">
+                                        Written off — the cash did not come back{expense.imprest_resolved_at ? ` · ${dayjs(expense.imprest_resolved_at).format("DD MMM YYYY, HH:mm")}` : ""}.
+                                    </p>
+                                )}
+                            </div>
+                        </SectionCard>
+                    )}
                     {/* Receipt */}
                     <SectionCard title="Receipt">
                         {expense.receipt_path ? (

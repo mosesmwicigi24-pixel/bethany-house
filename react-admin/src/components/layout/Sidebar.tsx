@@ -312,6 +312,13 @@ const NAV: NavGroup[] = [
                 permission: "expenses.view",
             },
             {
+                // The petty-cash float: balance, top-ups, cash counts.
+                label: "Imprest",
+                href: "/expenses/imprest",
+                icon: "imprest",
+                permission: "expenses.view",
+            },
+            {
                 label: "Categories",
                 href: "/expenses/settings",
                 icon: "budget",
@@ -903,6 +910,15 @@ const Icon = ({ name }: { name: string }) => {
                 <polygon points="12 2 2 7 12 12 22 7 12 2" />
                 <polyline points="2 17 12 22 22 17" />
                 <polyline points="2 12 12 17 22 12" />
+            </>
+        ),
+        // Imprest - cash box with a coin slot
+        imprest: (
+            <>
+                <rect x="3" y="8" width="18" height="12" rx="2" />
+                <path d="M7 8V6a2 2 0 012-2h6a2 2 0 012 2v2" />
+                <line x1="10" y1="12" x2="14" y2="12" />
+                <circle cx="12" cy="16" r="1.5" />
             </>
         ),
         // Budget - calendar with coin

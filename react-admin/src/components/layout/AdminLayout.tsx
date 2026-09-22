@@ -78,6 +78,7 @@ const SEGMENT_LABELS: Record<string, string> = {
     returns: "Returns",
     approvals: "Approvals",
     expenses: "Expenses",
+    imprest: "Imprest",
     analytics: "Analytics",
     finance: "Finance",
     reports: "Reports",

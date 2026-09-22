@@ -181,6 +181,7 @@ const ExpenseCategoriesPage = lazy(
 const ExpenseSummaryPage = lazy(
     () => import("@/pages/expenses/ExpenseSummaryPage"),
 );
+const ImprestPage = lazy(() => import("@/pages/expenses/ImprestPage"));
 
 // ── Finance module ───────────────────────────────────────────────────────────
 const PaymentTransactionsPage = lazy(
@@ -951,6 +952,16 @@ export default function App() {
                                 <ProtectedRoute permission="expenses.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <ExpenseCategoriesPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/expenses/imprest"
+                            element={
+                                <ProtectedRoute permission="expenses.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <ImprestPage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }

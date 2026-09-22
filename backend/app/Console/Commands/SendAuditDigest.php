@@ -85,6 +85,19 @@ class SendAuditDigest extends Command
             'integrity'     => DB::table('activity_log')->whereIn('event', ['audit_verified', 'audit_verification_failed'])
                                   ->orderByDesc('id')->first(['event', 'created_at']),
             'seals'         => collect(array_keys(AuditSealer::TABLES))->mapWithKeys(fn ($t) => [$t => $sealer->lastSeal($t)]),
+            'imprest'       => \App\Models\ImprestAccount::with('custodian:id,first_name,last_name')->where('is_active', true)->get()
+                                  ->map(fn ($a) => [
+                                      'name' => $a->name, 'balance' => $a->balance, 'float' => $a->float_amount, 'low' => $a->isLow(),
+                                      'custodian' => trim(($a->custodian?->first_name ?? '') . ' ' . ($a->custodian?->last_name ?? '')),
+                                      'spent'     => number_format(-(float) \App\Models\ImprestTransaction::where('imprest_account_id', $a->id)
+                                                        ->where('type', 'expense')->whereBetween('created_at', [$start, $end])->sum('amount'), 2, '.', ''),
+                                      'received'  => \App\Models\ImprestTopupRequest::where('imprest_account_id', $a->id)->where('status', 'received')
+                                                        ->whereBetween('received_at', [$start, $end])->get(['received_amount', 'sent_amount']),
+                                      'waiting'   => \App\Models\ImprestTopupRequest::where('imprest_account_id', $a->id)->where('status', 'pending')->get(['requested_amount', 'created_at']),
+                                      'in_transit'=> \App\Models\ImprestTopupRequest::where('imprest_account_id', $a->id)->where('status', 'sent')->get(['sent_amount', 'sent_at']),
+                                      'unresolved'=> \App\Models\Expense::withoutViewerScope()->where('imprest_account_id', $a->id)->where('imprest_resolution', 'pending')->count(),
+                                      'counts'    => \App\Models\ImprestCashCount::where('imprest_account_id', $a->id)->where('status', 'pending')->count(),
+                                  ]),
             'enforcing'     => (bool) config('audit.downloads.enforce', false),
             'consoleUrl'    => rtrim((string) config('audit.console_url'), '/'),
         ];
