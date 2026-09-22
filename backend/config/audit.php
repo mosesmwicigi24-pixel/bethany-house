@@ -142,6 +142,11 @@ return [
         \App\Models\ShippingZone::class,
         \App\Models\Channel::class,
         \App\Models\DatabaseBackup::class,
+        // Imprest (petty-cash float): setup, top-ups, counts, every ledger row.
+        \App\Models\ImprestAccount::class,
+        \App\Models\ImprestTransaction::class,
+        \App\Models\ImprestTopupRequest::class,
+        \App\Models\ImprestCashCount::class,
         // Download approval: every decision and delegation, with before/after.
         \App\Models\DownloadRequest::class,
         \App\Models\DownloadApprover::class,

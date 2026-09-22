@@ -34,6 +34,11 @@ class ExpenseController extends Controller
     }
 
     /** Fetch an expense and authorise it in one step. */
+    private function imprest(): \App\Services\ImprestService
+    {
+        return app(\App\Services\ImprestService::class);
+    }
+
     private function findScopedExpense(int $id, User $user): Expense
     {
         $expense = Expense::findOrFail($id);
@@ -77,6 +82,7 @@ class ExpenseController extends Controller
             'per_page'    => 'nullable|integer|min:5|max:100',
             'sort'        => 'nullable|in:expense_date,amount_kes,created_at,title',
             'direction'   => 'nullable|in:asc,desc',
+            'imprest'     => 'nullable|in:yes,no,unresolved',
         ]);
 
         $query = Expense::with([
@@ -102,6 +108,13 @@ class ExpenseController extends Controller
         if (isset($validated['end_date']))    $query->where('expense_date', '<=', $validated['end_date']);
         if (isset($validated['min_amount']))  $query->where('amount_kes', '>=', $validated['min_amount']);
         if (isset($validated['max_amount']))  $query->where('amount_kes', '<=', $validated['max_amount']);
+        // Paid from the imprest or not; "unresolved" = refused after the cash left.
+        match ($validated['imprest'] ?? null) {
+            'yes'        => $query->whereNotNull('imprest_account_id'),
+            'no'         => $query->whereNull('imprest_account_id'),
+            'unresolved' => $query->where('imprest_resolution', 'pending'),
+            default      => null,
+        };
 
         if (!empty($validated['search'])) {
             $q = $validated['search'];
@@ -198,6 +211,9 @@ class ExpenseController extends Controller
             'purchase_order_id'   => 'nullable|exists:purchase_orders,id',
             'production_order_id' => 'nullable|exists:production_orders,id',
             'order_id'            => 'nullable|exists:orders,id',
+            // "Pay from imprest?" — asked on every expense once an imprest exists
+            // (owner decision 2026-09-22). No default: the answer is a choice.
+            'use_imprest'         => app(\App\Services\ImprestService::class)->anyActive() ? 'required|boolean' : 'nullable|boolean',
             // Line items (optional - for itemized expenses)
             'line_items'          => 'nullable|array',
             'line_items.*.description' => 'required_with:line_items|string',
@@ -216,6 +232,22 @@ class ExpenseController extends Controller
             );
         }
 
+        // Paid from the imprest: the cash leaves the box now, so the amount comes
+        // off now (ImprestService, same transaction as the expense) and the
+        // expense goes straight to approval — spent cash is never a quiet draft.
+        $useImprest = (bool) ($validated['use_imprest'] ?? false);
+        unset($validated['use_imprest']);
+        $imprestAccount = null;
+        if ($useImprest) {
+            $imprestAccount = $this->imprest()->activeFor($validated['outlet_id'] ?? null);
+            if (!$imprestAccount) {
+                return response()->json([
+                    'message' => 'There is no imprest for this outlet.',
+                    'errors'  => ['use_imprest' => ['There is no imprest for this outlet.']],
+                ], 422);
+            }
+        }
+
         DB::beginTransaction();
         try {
             $user         = $request->user();
@@ -231,8 +263,8 @@ class ExpenseController extends Controller
 
             // Determine initial status: needs approval if above category threshold
             $category  = ExpenseCategory::find($validated['category_id']);
-            $needsApproval = $category->requires_approval_above !== null
-                && $amountKes > $category->requires_approval_above;
+            $needsApproval = ($category->requires_approval_above !== null
+                && $amountKes > $category->requires_approval_above) || $useImprest;
 
             $expense = Expense::create([
                 ...$validated,
@@ -259,6 +291,10 @@ class ExpenseController extends Controller
                 }
             }
 
+            if ($useImprest) {
+                $this->imprest()->debitForExpense($expense, $imprestAccount, $user);
+            }
+
             // Notify finance managers if pending approval
             if ($needsApproval) {
                 $financeManagers = User::whereHas('roles.permissions', function ($q) {
@@ -283,6 +319,11 @@ class ExpenseController extends Controller
                 'expense' => $expense->fresh(['category', 'outlet', 'createdBy']),
             ], 201);
 
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            // e.g. "the imprest has only KES 1,240 left" — a 422 the form can
+            // show, not a 500. Nothing was saved: the expense rolls back too.
+            DB::rollBack();
+            throw $e;
         } catch (\Throwable $e) {
             DB::rollBack();
             return response()->json(['message' => 'Failed to create expense: ' . $e->getMessage()], 500);
@@ -316,6 +357,19 @@ class ExpenseController extends Controller
             'notes'               => 'nullable|string|max:2000',
             'tags'                => 'nullable|array',
         ]);
+
+        if ($expense->isImprest()) {
+            $newKes = null;
+            if (isset($validated['amount']) || isset($validated['currency_code']) || isset($validated['exchange_rate'])) {
+                $rate   = $validated['exchange_rate'] ?? $expense->exchange_rate;
+                $newKes = round(($validated['amount'] ?? $expense->amount) * $rate, 2);
+            }
+            if ($newKes !== null && \App\Services\ImprestService::cents($newKes) !== \App\Services\ImprestService::cents($expense->amount_kes)) {
+                return response()->json([
+                    'message' => 'An imprest expense\'s amount can\'t change after the cash has left the box. Cancel it, mark the cash returned, and record the right amount.',
+                ], 422);
+            }
+        }
 
         // Re-check on the way out too: a scoped manager must not move an
         // expense into an outlet they aren't assigned to.
@@ -364,6 +418,9 @@ class ExpenseController extends Controller
 
         if (!in_array($expense->status, ['draft', 'rejected', 'cancelled'])) {
             return response()->json(['message' => 'Only draft, rejected, or cancelled expenses can be deleted.'], 422);
+        }
+        if ($expense->isImprest() && $expense->imprest_resolution === 'pending') {
+            return response()->json(['message' => 'Mark this imprest expense\'s cash as returned or written off before deleting it.'], 422);
         }
 
         $this->activityLog->log('expense_deleted', $expense, ['expense_number' => $expense->reference_number], null, $request->user());
@@ -430,6 +487,12 @@ class ExpenseController extends Controller
 
         if ($expense->status !== 'pending_approval') {
             return response()->json(['message' => 'Only pending expenses can be approved.'], 422);
+        }
+        // Owner decision 2026-09-22: cash out of the imprest is approved by
+        // someone other than the person who recorded it.
+        if ($expense->isImprest()
+            && ((int) $expense->created_by === (int) $user->id || (int) $expense->submitted_by === (int) $user->id)) {
+            return response()->json(['message' => 'You recorded this imprest expense — someone else must approve it.'], 403);
         }
 
         $validated = $request->validate([
@@ -539,6 +602,8 @@ class ExpenseController extends Controller
             }
 
             $this->activityLog->log('expense_rejected', $expense, ['reason' => $validated['reason']], null, $user);
+            $this->imprest()->flagForResolution($expense, $user, 'rejected');
+
             DB::commit();
 
             return response()->json(['message' => 'Expense rejected.', 'expense' => $expense->fresh()]);
@@ -597,6 +662,7 @@ class ExpenseController extends Controller
         }
 
         $expense->update(['status' => 'cancelled']);
+        $this->imprest()->flagForResolution($expense, $request->user(), 'cancelled');
         $this->activityLog->log('expense_cancelled', $expense, ['status' => 'cancelled'], null, $request->user());
 
         return response()->json(['message' => 'Expense cancelled.', 'expense' => $expense->fresh()]);

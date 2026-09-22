@@ -40,6 +40,12 @@ class Expense extends Model
         'expense_date',
         'payment_method',
         'payment_reference',
+        // Paid from the petty-cash float (App\Services\ImprestService). Set by
+        // the service when the debit is written — never mass-assigned from a request.
+        'imprest_account_id',
+        'imprest_resolution',   // null | pending | returned | written_off (after reject/cancel)
+        'imprest_resolved_by',
+        'imprest_resolved_at',
         'vendor_name',
         'vendor_contact',
         'outlet_id',
@@ -78,6 +84,7 @@ class Expense extends Model
         'approved_at'        => 'datetime',
         'rejected_at'        => 'datetime',
         'paid_at'            => 'datetime',
+        'imprest_resolved_at'=> 'datetime',
         'tags'               => 'array',
     ];
 
@@ -136,6 +143,16 @@ class Expense extends Model
     public function createdBy()
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function imprestAccount()
+    {
+        return $this->belongsTo(ImprestAccount::class);
+    }
+
+    public function isImprest(): bool
+    {
+        return $this->imprest_account_id !== null;
     }
 
     public function purchaseOrder()

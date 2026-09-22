@@ -28,6 +28,7 @@ use App\Http\Controllers\Api\{
     PermissionController,
     AuditLogController,
     DownloadRequestController,
+    ImprestController,
     ShipmentController,
     ReturnController,
     ContentPageController,
@@ -1290,6 +1291,31 @@ Route::prefix('v1')->group(function () {
                 Route::get('/categories',      [ExpenseController::class, 'categories']);
                 Route::get('/budgets',         [ExpenseController::class, 'budgets']);
                 Route::get('/summary',         [ExpenseController::class, 'summary']);
+
+                // ── Imprest (petty-cash float) — before /{id} so "imprest" is not an id.
+                // Who may do what is enforced in ImprestController / ImprestService
+                // (custodian, super admin), on top of these route permissions.
+                Route::prefix('imprest')->group(function () {
+                    Route::get('/',                        [ImprestController::class, 'index']);
+                    Route::get('/unresolved',              [ImprestController::class, 'unresolved']);
+                    Route::post('/',                       [ImprestController::class, 'store']);
+                    Route::put('/{id}',                    [ImprestController::class, 'update'])->whereNumber('id');
+                    Route::get('/{id}/statement',          [ImprestController::class, 'statement'])->whereNumber('id');
+                    Route::get('/{id}/topups',             [ImprestController::class, 'topups'])->whereNumber('id');
+                    Route::get('/{id}/unreplenished',      [ImprestController::class, 'unreplenished'])->whereNumber('id');
+                    Route::get('/{id}/counts',             [ImprestController::class, 'counts'])->whereNumber('id');
+                    Route::post('/{id}/topups',            [ImprestController::class, 'requestTopup'])->whereNumber('id')
+                        ->middleware('permission:expenses.create,sanctum');
+                    Route::post('/{id}/topups/direct',     [ImprestController::class, 'sendDirect'])->whereNumber('id');
+                    Route::post('/{id}/counts',            [ImprestController::class, 'recordCount'])->whereNumber('id');
+                    Route::post('/topups/{uuid}/send',     [ImprestController::class, 'send'])->whereUuid('uuid');
+                    Route::post('/topups/{uuid}/receive',  [ImprestController::class, 'receive'])->whereUuid('uuid');
+                    Route::post('/topups/{uuid}/decline',  [ImprestController::class, 'decline'])->whereUuid('uuid');
+                    Route::post('/topups/{uuid}/cancel',   [ImprestController::class, 'cancelTopup'])->whereUuid('uuid');
+                    Route::post('/counts/{countId}/decide',[ImprestController::class, 'decideCount'])->whereNumber('countId');
+                });
+                Route::post('/{id}/imprest-resolution', [ImprestController::class, 'resolve'])->whereNumber('id');
+
                 Route::get('/',                [ExpenseController::class, 'index']);
                 Route::get('/{id}',            [ExpenseController::class, 'show']);
                 Route::get('/{id}/receipt',    [ExpenseController::class, 'downloadReceipt']);

@@ -1,7 +1,8 @@
 // src/pages/expenses/ExpensesPage.tsx
 import { useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { imprestApi, kes } from "@/api/imprest";
 import { get } from "@/api/client";
 import {
     expensesApi,
@@ -81,6 +82,18 @@ function NewExpenseModal({
     const [description, setDescription] = useState("");
     const [notes, setNotes] = useState("");
     const [submitting, setSubmitting] = useState(false);
+    // "Pay from imprest?" — no default: once an imprest exists the answer is
+    // a deliberate choice on every expense (owner decision 2026-09-22).
+    const [useImprest, setUseImprest] = useState<boolean | null>(null);
+
+    const { data: imprestData } = useQuery({
+        queryKey: ["imprest"],
+        queryFn: () => imprestApi.summary(),
+        enabled: open,
+    });
+    const imprest = imprestData?.accounts?.[0] ?? null;
+    const imprestShort =
+        !!imprest && useImprest === true && currency === "KES" && amount !== "" && Number(amount) > Number(imprest.balance);
 
     const { data: catData } = useQuery({
         queryKey: ["expense-categories"],
@@ -116,11 +129,20 @@ function NewExpenseModal({
         setRecurrenceEnd("");
         setDescription("");
         setNotes("");
+        setUseImprest(null);
     };
 
     const handleSubmit = async () => {
         if (!title || !categoryId || !amount || !expenseDate) {
             toast.error("Please fill in all required fields.");
+            return;
+        }
+        if (imprest && useImprest === null) {
+            toast.error("Choose whether this is paid from the imprest.");
+            return;
+        }
+        if (imprestShort) {
+            toast.error(`The imprest has only ${kes(imprest!.balance)} left. Ask for a top-up, or pay this another way.`);
             return;
         }
         setSubmitting(true);
@@ -142,14 +164,19 @@ function NewExpenseModal({
                     isRecurring && recurrenceEnd ? recurrenceEnd : undefined,
                 description: description || undefined,
                 notes: notes || undefined,
+                use_imprest: imprest ? useImprest : undefined,
             } as any);
-            toast.success("Expense created.");
+            toast.success(useImprest ? "Expense recorded and taken off the imprest." : "Expense created.");
+            qc.invalidateQueries({ queryKey: ["imprest"] });
             qc.invalidateQueries({ queryKey: ["expenses"] });
             reset();
             onSaved();
         } catch (err: any) {
             toast.error(
-                err?.response?.data?.message ?? "Failed to create expense.",
+                err?.errors?.use_imprest?.[0] ??
+                    err?.response?.data?.message ??
+                    err?.message ??
+                    "Failed to create expense.",
             );
         } finally {
             setSubmitting(false);
@@ -255,6 +282,50 @@ function NewExpenseModal({
                         </FieldSelect>
                     </Field>
                 </div>
+
+                {imprest && (
+                    <div className={`rounded-lg border p-4 ${imprestShort ? "border-danger/40 bg-danger-light/40" : "border-surface-200"}`}>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-sm font-medium text-surface-800">Pay from imprest? *</p>
+                            <p className={`text-xs ${imprest.is_low ? "text-warning font-semibold" : "text-surface-500"}`}>
+                                Imprest balance: {kes(imprest.balance)} of {kes(imprest.float_amount)}
+                            </p>
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 gap-2" role="radiogroup" aria-label="Pay from imprest">
+                            {[{ v: true, label: "Yes — paid from the imprest" }, { v: false, label: "No — paid another way" }].map((o) => (
+                                <button
+                                    key={String(o.v)}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={useImprest === o.v}
+                                    onClick={() => setUseImprest(o.v)}
+                                    className={`rounded-lg border px-3 py-2 text-sm text-left transition-colors ${
+                                        useImprest === o.v
+                                            ? "border-brand-500 bg-brand-50 text-brand-700 font-medium"
+                                            : "border-surface-200 text-surface-600 hover:bg-surface-50"
+                                    }`}
+                                >
+                                    {o.label}
+                                </button>
+                            ))}
+                        </div>
+                        {useImprest === true && !imprestShort && (
+                            <p className="mt-2 text-xs text-surface-500">
+                                The amount comes off the imprest as soon as you save, and the expense goes for approval
+                                {currency !== "KES" ? " (in KES at today's rate)" : ""}.
+                            </p>
+                        )}
+                        {imprestShort && (
+                            <p className="mt-2 text-xs text-danger">
+                                The imprest has only {kes(imprest.balance)} left.{" "}
+                                <Link to="/expenses/imprest" className="underline font-medium" onClick={onClose}>
+                                    Ask for a top-up
+                                </Link>{" "}
+                                or pay this another way.
+                            </p>
+                        )}
+                    </div>
+                )}
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <Field label="Payment Method *">
@@ -651,6 +722,14 @@ function ExpenseRowActions({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+function personName(p: unknown): string | null {
+    if (p && typeof p === "object" && "first_name" in (p as any)) {
+        const u = p as { first_name?: string; last_name?: string };
+        return `${u.first_name ?? ""} ${u.last_name ?? ""}`.trim() || null;
+    }
+    return null;
+}
+
 export default function ExpensesPage() {
     const { can } = usePermissions();
     const navigate = useNavigate();
@@ -660,8 +739,9 @@ export default function ExpensesPage() {
     const [statusFilter, setStatusFilter] = useState("");
     const [startDate, setStartDate] = useState("");
     const [endDate, setEndDate] = useState("");
+    const [imprestFilter, setImprestFilter] = useState<"" | "yes" | "no" | "unresolved">("");
 
-    const hasFilters = !!(statusFilter || startDate || endDate);
+    const hasFilters = !!(statusFilter || startDate || endDate || imprestFilter);
 
     const params: ExpenseListParams = {
         page: state.page,
@@ -670,6 +750,7 @@ export default function ExpensesPage() {
         status: statusFilter || undefined,
         start_date: startDate || undefined,
         end_date: endDate || undefined,
+        imprest: imprestFilter || undefined,
         sort: "expense_date",
         direction: "desc",
     };
@@ -683,6 +764,10 @@ export default function ExpensesPage() {
     const pagination = data?.expenses;
     const stats = data?.stats;
 
+    // The petty-cash float, if one is set up (balance card + low warning).
+    const { data: imprestSummary } = useQuery({ queryKey: ["imprest"], queryFn: () => imprestApi.summary() });
+    const imprestAccount = imprestSummary?.accounts?.[0] ?? null;
+
     // Group the current page of rows by expense_date. Pagination, sort, and
     // filters are untouched - this only re-partitions the rows already fetched.
     const expenseGroups = groupRowsByDate(expenses, (exp) => exp.expense_date);
@@ -691,6 +776,7 @@ export default function ExpensesPage() {
         setStatusFilter("");
         setStartDate("");
         setEndDate("");
+        setImprestFilter("");
         setPage(1);
     };
 
@@ -736,7 +822,26 @@ export default function ExpensesPage() {
 
             {/* ── Stats ── */}
             {stats && (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className={clsx("grid grid-cols-1 gap-3", imprestAccount ? "sm:grid-cols-2 lg:grid-cols-4" : "sm:grid-cols-3")}>
+                    {imprestAccount && (
+                        <Link
+                            to="/expenses/imprest"
+                            className={clsx(
+                                "card card-body flex flex-col gap-1 transition-colors hover:border-brand-300",
+                                imprestAccount.is_low && "border-warning/50 bg-warning-light/40",
+                            )}
+                        >
+                            <p className="text-xs text-surface-500">Imprest balance</p>
+                            <p className={clsx("text-xl font-bold", imprestAccount.is_low ? "text-warning" : "text-surface-900")}>
+                                {kes(imprestAccount.balance)}
+                            </p>
+                            <p className="text-2xs text-surface-400">
+                                of {kes(imprestAccount.float_amount)}
+                                {imprestAccount.is_low ? " · low — ask for a top-up" : ""}
+                                {imprestAccount.open_topup?.status === "sent" ? " · top-up on its way" : ""}
+                            </p>
+                        </Link>
+                    )}
                     {[
                         {
                             label: "Approved (Period)",
@@ -813,6 +918,23 @@ export default function ExpensesPage() {
                         </option>
                     ))}
                 </select>
+
+                {imprestAccount && (
+                    <select
+                        className="input flex-1 sm:w-44 sm:flex-none"
+                        value={imprestFilter}
+                        aria-label="Imprest"
+                        onChange={(e) => {
+                            setImprestFilter(e.target.value as typeof imprestFilter);
+                            setPage(1);
+                        }}
+                    >
+                        <option value="">Imprest or not</option>
+                        <option value="yes">Paid from imprest</option>
+                        <option value="no">Not from imprest</option>
+                        <option value="unresolved">Cash returned? (undecided)</option>
+                    </select>
+                )}
 
                 <input
                     type="date"
@@ -924,6 +1046,19 @@ export default function ExpensesPage() {
                                         <p className="font-medium text-surface-900 truncate">
                                             {exp.title}
                                         </p>
+                                        {exp.imprest_account_id && (
+                                            <span
+                                                className={clsx(
+                                                    "mt-0.5 inline-flex rounded px-1.5 py-0.5 text-2xs font-semibold",
+                                                    exp.imprest_resolution === "pending"
+                                                        ? "bg-danger-light text-danger"
+                                                        : "bg-brand-50 text-brand-600",
+                                                )}
+                                                title="Paid from the imprest"
+                                            >
+                                                Imprest{exp.imprest_resolution === "pending" ? " · cash returned?" : ""}
+                                            </span>
+                                        )}
                                         {exp.vendor_name && (
                                             <p className="text-xs text-surface-400 truncate mt-0.5">
                                                 {exp.vendor_name}
@@ -992,8 +1127,11 @@ export default function ExpensesPage() {
 
                                     {/* Submitted by */}
                                     <td className="px-4 py-3 text-sm text-surface-600 hidden md:table-cell">
-                                        {exp.submittedBy ? (
-                                            `${exp.submittedBy.first_name} ${exp.submittedBy.last_name}`
+                                        {/* Laravel sends the loaded relation as snake_case
+                                            `submitted_by` (an object), not `submittedBy` —
+                                            reading the camelCase key showed "-" on every row. */}
+                                        {personName((exp as any).submitted_by) ?? personName((exp as any).created_by) ? (
+                                            personName((exp as any).submitted_by) ?? personName((exp as any).created_by)
                                         ) : (
                                             <span className="text-surface-500">
                                                 -
