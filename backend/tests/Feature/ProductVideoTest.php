@@ -183,10 +183,24 @@ class ProductVideoTest extends TestCase
     {
         $product = $this->product();
 
-        // 20 MB is nginx's client_max_body_size; the rule must not accept more.
-        $this->upload($product, UploadedFile::fake()->create('huge.mp4', 20481, 'video/mp4'))
+        // 100 MB is what every hop in front of us allows (the host vhost and
+        // the image's nginx client_max_body_size, with PHP's post_max_size at
+        // 101M). The rule must not accept more than the edge will carry.
+        $this->upload($product, UploadedFile::fake()->create('huge.mp4', 102401, 'video/mp4'))
             ->assertStatus(422)
             ->assertJsonValidationErrors(['video']);
+    }
+
+    public function test_accepts_a_phone_clip_bigger_than_the_old_twenty_megabyte_ceiling(): void
+    {
+        // A 4K phone clip runs ~5 MB a second, so ten seconds cleared 20 MB and
+        // was refused (owner hit this 2026-09-23). Size is not what protects the
+        // site: ProductVideoService re-encodes to 720p and the first 12 seconds.
+        $product = $this->product();
+
+        $this->upload($product, UploadedFile::fake()->create('phone-4k.mp4', 48000, 'video/mp4'))
+            ->assertStatus(202)
+            ->assertJsonPath('video_status', 'processing');
     }
 
     public function test_without_ffmpeg_a_mov_upload_is_refused_with_guidance(): void
