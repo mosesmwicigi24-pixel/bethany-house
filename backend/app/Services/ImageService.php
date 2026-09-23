@@ -126,7 +126,15 @@ class ImageService
         $fullPath   = $directory . '/' . $filename;
 
         $encoded = $this->encode($resized, $useWebP, self::QUALITY_WEBP);
-        Storage::disk($disk)->put($fullPath, $encoded);
+        // put() returns false on a failed write — it does not throw. Unchecked,
+        // the caller goes on to record a product_images row for a file that was
+        // never written, and the console shows a broken thumbnail with nothing
+        // in the log (2026-09-24: the video job, running as root, had created
+        // the product's directory root-owned, so www-data could not write into
+        // it). A write that did not land is an error, and says so.
+        if (Storage::disk($disk)->put($fullPath, $encoded) === false) {
+            throw new \RuntimeException("could not write {$fullPath} to the {$disk} disk");
+        }
         $compressedSize = strlen($encoded);
         $url            = $this->toUrl($fullPath, $disk);
 
@@ -141,7 +149,10 @@ class ImageService
             $thumbFile   = Str::uuid() . '_thumb.' . $ext;
             $thumbPath   = $directory . '/' . $thumbFile;
             $thumbQuality = $useWebP ? 75 : 80;
-            Storage::disk($disk)->put($thumbPath, $this->encode($thumb, $useWebP, $thumbQuality));
+            if (Storage::disk($disk)->put($thumbPath, $this->encode($thumb, $useWebP, $thumbQuality)) === false) {
+                Storage::disk($disk)->delete($fullPath);   // don't leave a half-stored image
+                throw new \RuntimeException("could not write {$thumbPath} to the {$disk} disk");
+            }
             $thumbnailPath = $thumbPath;
             $thumbnailUrl  = $this->toUrl($thumbPath, $disk);
             $this->destroyGd($thumb, $preWatermark);

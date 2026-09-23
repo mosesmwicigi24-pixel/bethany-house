@@ -91,7 +91,7 @@ class ProductVideoService
         if ($ffmpeg === null) {
             // Already browser-native — stash() refused anything else.
             $path = "{$directory}/{$name}.{$ext}";
-            Storage::disk($disk)->put($path, Storage::disk($stashDisk)->get($stashPath));
+            $this->write($disk, $path, Storage::disk($stashDisk)->get($stashPath));
 
             return [
                 'path' => $path,
@@ -112,7 +112,7 @@ class ProductVideoService
             }
 
             $path = "{$directory}/{$name}.mp4";
-            Storage::disk($disk)->put($path, file_get_contents($tmp));
+            $this->write($disk, $path, file_get_contents($tmp));
         } finally {
             if (is_file($tmp)) {
                 @unlink($tmp);
@@ -180,7 +180,7 @@ class ProductVideoService
             }
 
             $path = "{$directory}/{$name}.mp4";
-            Storage::disk($disk)->put($path, file_get_contents($tmp));
+            $this->write($disk, $path, file_get_contents($tmp));
         } finally {
             if (is_file($tmp)) {
                 @unlink($tmp);
@@ -228,10 +228,25 @@ class ProductVideoService
      *
      * @return string[]
      */
+    /**
+     * put() returns false on a failed write — it does not throw. Unchecked, the
+     * caller records a row for a clip that was never written and the console
+     * shows a broken tile with nothing in the log. A write that did not land is
+     * an error (2026-09-24, see ImageService for the sibling case).
+     */
+    private function write(string $disk, string $path, string $bytes): void
+    {
+        if (Storage::disk($disk)->put($path, $bytes) === false) {
+            throw new \RuntimeException("could not write {$path} to the {$disk} disk");
+        }
+    }
+
     public function ffmpegCommand(string $ffmpeg, string $input, string $output): array
     {
-        $px = max(240, (int) config('video.max_px', 720));
-        $sec = max(1, (int) config('video.max_seconds', 12));
+        $px = max(240, (int) config('video.max_px', 1080));
+        $sec = max(1, (int) config('video.max_seconds', 6));
+        $crf = min(51, max(0, (int) config('video.crf', 20)));
+        $preset = (string) config('video.preset', 'slow');
 
         return [
             $ffmpeg, '-y', '-v', 'error', '-nostdin',
@@ -246,7 +261,7 @@ class ProductVideoService
             '-t', (string) $sec,
             '-vf', "scale='if(gt(iw,ih),{$px},-2)':'if(gt(iw,ih),-2,{$px})',fps=30,setsar=1,format=yuv420p",
             '-c:v', 'libx264', '-profile:v', 'main', '-level', '3.1',
-            '-preset', 'medium', '-crf', '26',
+            '-preset', $preset, '-crf', (string) $crf,
             '-movflags', '+faststart',
             '-an',
             $output,

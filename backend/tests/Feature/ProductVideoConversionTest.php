@@ -155,6 +155,24 @@ class ProductVideoConversionTest extends TestCase
     }
 
     /**
+     * What shoppers actually watch. A portrait phone clip is scaled by its LONG
+     * side, so the old 720 left it ~400px wide and soft in the gallery, and
+     * crf 26 banded on gold — most of this catalogue. Owner asked for shorter
+     * and sharper (2026-09-24): six seconds, 1080, crf 20.
+     */
+    public function test_the_clip_is_short_and_sharp(): void
+    {
+        $cmd = app(ProductVideoService::class)->ffmpegCommand('ffmpeg', '/tmp/in.mov', '/tmp/out.mp4');
+        $after = fn (string $flag) => $cmd[array_search($flag, $cmd, true) + 1] ?? null;
+
+        $this->assertSame('6', $after('-t'), 'six seconds of clip');
+        $this->assertSame('20', $after('-crf'), 'crf 20 — 26 banded on gold');
+        $this->assertSame('slow', $after('-preset'));
+        $this->assertStringContainsString('1080', $after('-vf'), 'the long side is 1080');
+        $this->assertContains('-an', $cmd, 'the card plays it silently');
+    }
+
+    /**
      * Redis hands a job to a second worker once retry_after passes. Every job
      * timeout must sit below it, or one upload becomes two encodes and two
      * updates. SendEodReportEmail (120s) was already over the old 90.

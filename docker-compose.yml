@@ -172,7 +172,13 @@ services:
             - "mail.bethanyhouse.co.ke:host-gateway"
         restart: unless-stopped
         working_dir: /var/www
+        # Runs as www-data (82), the same user php-fpm serves uploads with — see
+        # `user:` below. As root this worker created product directories
+        # root-owned, and the next image upload from the console could not write
+        # into them: Storage::put() returned false, no exception, and the row was
+        # recorded for a file that never existed (2026-09-24, product 95).
         command: php artisan queue:work --sleep=3 --tries=3 --max-time=3600
+        user: "82:82"
         environment:
             <<: *laravel-env
         volumes:
@@ -205,7 +211,10 @@ services:
             - "mail.bethanyhouse.co.ke:host-gateway"
         restart: unless-stopped
         working_dir: /var/www
+        # Same reasoning as the queue worker: scheduled commands write into the
+        # same storage volume, so they run as www-data too.
         command: /bin/sh -c "while true; do php artisan schedule:run --verbose --no-interaction & sleep 60; done"
+        user: "82:82"
         environment:
             <<: *laravel-env
         volumes:

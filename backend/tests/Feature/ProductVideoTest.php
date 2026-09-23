@@ -249,7 +249,14 @@ class ProductVideoTest extends TestCase
         $path = $this->pathOf($this->settledUrl($product));
         $this->assertStringEndsWith('.mp4', $path);
         Storage::disk('public')->assertExists($path);
-        $this->assertLessThan(filesize($src) + 1, Storage::disk('public')->size($path));
+        // "Smaller than the source" was the old bound, and it broke when quality
+        // went up (crf 20): synthetic colour bars compress far better than any
+        // real footage, so the re-encode can come out slightly larger than the
+        // thing it was made from. That says nothing about a phone clip. What the
+        // storefront actually needs is a clip small enough to autoplay on a card
+        // — two seconds at this quality is tens of KB, and a megabyte here would
+        // mean the encode never ran.
+        $this->assertLessThan(1_000_000, Storage::disk('public')->size($path));
         @unlink($src);
     }
 }

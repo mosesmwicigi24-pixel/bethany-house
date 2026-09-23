@@ -3668,7 +3668,7 @@ export default function ProductFormPage() {
                                             {isEditing ? "Click to upload a video" : "Save the product first, then upload a video"}
                                         </p>
                                         <p className="text-xs text-surface-500 mt-1">
-                                            MP4, MOV or WebM · under 100 MB · a steady 5–10 second clip framed like the main photo works best · converted for the web automatically
+                                            MP4, MOV or WebM · under 100 MB · the first 6 seconds are kept, so lead with the shot that sells it · converted to sharp 1080p automatically
                                         </p>
                                     </div>
                                 )}
