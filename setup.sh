@@ -109,12 +109,8 @@ fi
 
 # Create necessary directories
 print_info "Creating necessary directories..."
-mkdir -p docker/nginx/ssl
-mkdir -p docker/nginx/conf.d/includes
-mkdir -p docker/postgres/init
-mkdir -p docker/php/conf.d
-mkdir -p docker/php/php-fpm.d
-mkdir -p docker/supervisor
+# The service configs live in backend/docker/ and are baked into the image by
+# backend/Dockerfile — there is nothing to create here.
 mkdir -p backups
 print_success "Directories created"
 

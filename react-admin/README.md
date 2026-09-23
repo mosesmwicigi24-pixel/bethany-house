@@ -55,21 +55,19 @@ npm run dev
 
 ---
 
-## Docker - add to the stack
+## Docker - how this ships
 
-1. Place `docker-compose.override.yml` next to your root `docker-compose.yml`  
-   Docker Compose merges it automatically.
+The console is built by CI (`.github/workflows/deploy.yml`, context `./react-admin`,
+`target: production`) and published to GHCR. The box pulls that image as the
+`react-admin` service in the root `docker-compose.yml`; nothing is built there.
 
-2. Add the Nginx location block from `nginx-location-block.conf`  
-   to `docker/nginx/conf.d/default.conf`.
+Routing is the host's nginx vhost, not a file in this repo: `/admin` proxies to
+the container on `127.0.0.1:3012`. The console lives at
+`https://hub.bethanyhouse.co.ke/admin` — the `/admin-react` prefix from the
+Livewire-era migration is long gone.
 
-3. Rebuild:
-   ```bash
-   docker compose build react-admin
-   docker compose up -d react-admin nginx
-   ```
-
-4. Access at: `http://your-domain/admin-react`
+The container's own nginx (SPA deep-link fallback) is `react-admin/nginx.conf`.
+The API image's nginx and PHP settings are `backend/docker/`.
 
 ---
 
