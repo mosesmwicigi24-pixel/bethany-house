@@ -879,12 +879,16 @@ class ProductController extends Controller
     public function uploadVideo(Request $request, $id)
     {
         $request->validate([
-            // 20 MB is the edge ceiling (nginx client_max_body_size and PHP
-            // post_max_size in docker/). A larger file is rejected before
-            // Laravel runs, so promising more here would only mislead.
+            // 100 MB, matching the ceiling every hop in front of us allows
+            // (host nginx vhost, the image's nginx client_max_body_size and
+            // PHP post_max_size in docker/). A larger file is rejected before
+            // Laravel runs, so promising more here would only mislead. Size is
+            // not what protects the site: the clip is re-encoded to 720p and
+            // the first 12 seconds (config/video.php), so a 90 MB 4K phone
+            // clip still reaches shoppers as ~2 MB.
             // Format is checked by extension in the service (phone .mov
             // uploads are routinely mislabelled by finfo).
-            'video' => ['required', 'file', 'max:20480'],
+            'video' => ['required', 'file', 'max:102400'],
         ]);
 
         $product = Product::findOrFail($id);

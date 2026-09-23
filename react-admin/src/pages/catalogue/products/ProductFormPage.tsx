@@ -2866,8 +2866,8 @@ export default function ProductFormPage() {
                 toast.error("Save the product first before uploading a video.");
                 return;
             }
-            if (file.size > 20 * 1024 * 1024) {
-                toast.error("Video must be under 20 MB. Trim it to a few seconds or export at 720p.");
+            if (file.size > 100 * 1024 * 1024) {
+                toast.error("Video must be under 100 MB. Trim it to a few seconds, or export at 1080p instead of 4K.");
                 return;
             }
             setVideoBusy(true);
@@ -3668,7 +3668,7 @@ export default function ProductFormPage() {
                                             {isEditing ? "Click to upload a video" : "Save the product first, then upload a video"}
                                         </p>
                                         <p className="text-xs text-surface-500 mt-1">
-                                            MP4, MOV or WebM · under 20 MB · a steady 5–10 second clip framed like the main photo works best · converted for the web automatically
+                                            MP4, MOV or WebM · under 100 MB · a steady 5–10 second clip framed like the main photo works best · converted for the web automatically
                                         </p>
                                     </div>
                                 )}
