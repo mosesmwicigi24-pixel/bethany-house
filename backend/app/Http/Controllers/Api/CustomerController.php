@@ -149,8 +149,21 @@ class CustomerController extends Controller
 
         $customer = Customer::with(['user', 'addresses'])->findOrFail($id);
 
-        // Orders link via user_id, not customer_id - query directly
-        $ordersQuery = Order::where('user_id', $customer->user_id);
+        // A customer's orders are the ones placed AS that customer. That is
+        // customer_id — restored 2026-09-25, after mass assignment had been
+        // dropping it since the POS was written.
+        //
+        // This used to read user_id alone, which is null for 683 of 684
+        // customers (a walk-in has no login), so `user_id = NULL` matched
+        // nothing and every walk-in's history showed empty while their orders
+        // sat in the table. user_id stays as a second arm for the web accounts
+        // that do have one, and for orders placed before the link was repaired.
+        $ordersQuery = Order::where(function ($q) use ($customer) {
+            $q->where('customer_id', $customer->id);
+            if ($customer->user_id) {
+                $q->orWhere('user_id', $customer->user_id);
+            }
+        });
 
         $stats = [
             'total_orders'       => $ordersQuery->count(),
