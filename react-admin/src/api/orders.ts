@@ -276,6 +276,7 @@ export const ordersApi = {
             last_name?:  string;
             phone:       string;
             email?:      string;
+            company?:    string;
         };
     }) =>
         post<{ message: string; order: Record<string, any> }>(

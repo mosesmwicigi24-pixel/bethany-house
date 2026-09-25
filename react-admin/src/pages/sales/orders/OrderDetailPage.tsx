@@ -3271,6 +3271,9 @@ function AttachCustomerModal({ order, onClose, onDone }: {
     const [lastName,  setLastName]  = useState(order.customer_name?.split(" ").slice(1).join(" ") ?? "");
     const [phone,     setPhone]     = useState(order.customer_phone ?? "");
     const [email,     setEmail]     = useState(order.customer_email ?? "");
+    // The organisation the order is for. Kept out of the phone field, which is
+    // what customer matching keys on across the hub and Neema.
+    const [company,   setCompany]   = useState("");
 
     const { data: searchData } = useQuery({
         queryKey: ["customer-search", search],
@@ -3282,7 +3285,7 @@ function AttachCustomerModal({ order, onClose, onDone }: {
     const mutation = useMutation({
         mutationFn: () => ordersApi.attachCustomer(order.id, mode === "existing"
             ? { customer_id: selectedCustomer?.id }
-            : { new_customer: { first_name: firstName, last_name: lastName || undefined, phone, email: email || undefined } }
+            : { new_customer: { first_name: firstName, last_name: lastName || undefined, phone, email: email || undefined, company: company.trim() || undefined } }
         ),
         onSuccess: () => { toast.success("Customer attached"); onDone(); onClose(); },
         onError:   (e: ApiError) => toast.error(e.message),
@@ -3350,6 +3353,11 @@ function AttachCustomerModal({ order, onClose, onDone }: {
                         <div>
                             <label className="label">Email <span className="text-surface-400">(optional)</span></label>
                             <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="input" />
+                        </div>
+                        <div>
+                            <label className="label">Company or church <span className="text-surface-400">(optional)</span></label>
+                            <input type="text" value={company} onChange={e => setCompany(e.target.value)} className="input"
+                                placeholder="e.g. Cooperative Bank of Kenya" />
                         </div>
                     </>
                 )}

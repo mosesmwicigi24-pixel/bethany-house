@@ -75,6 +75,7 @@ interface AttachedCustomer {
         last_name: string;
         phone: string;
         email?: string;
+        company?: string;
     };
 }
 
@@ -599,6 +600,10 @@ function CustomerSearchPanel({
     const [manualMode, setManualMode] = useState(false);
     const [manualName, setManualName] = useState("");
     const [manualPhone, setManualPhone] = useState("");
+    // Who they buy for — a parish, a school, a bank. Without a field for it,
+    // staff put the organisation in the phone box (2026-09-25), and phone is
+    // what every channel matches a customer on.
+    const [manualCompany, setManualCompany] = useState("");
     const [manualEmail, setManualEmail] = useState("");
     const containerRef = useRef<HTMLDivElement>(null);
     const searchTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -676,7 +681,7 @@ aria-label="Close" title="Remove customer">
                         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v6m3-3H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                         New Customer
                     </p>
-                    <button onClick={() => { setManualMode(false); setManualName(""); setManualPhone(""); setManualEmail(""); }}
+                    <button onClick={() => { setManualMode(false); setManualName(""); setManualPhone(""); setManualEmail(""); setManualCompany(""); }}
                         className="text-2xs text-surface-400 hover:text-danger">Cancel</button>
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -695,6 +700,9 @@ aria-label="Close" title="Remove customer">
                 <input type="email" placeholder="Email address (optional)"
                     value={manualEmail} onChange={e => setManualEmail(e.target.value)}
                     className="input text-xs py-1.5 w-full" />
+                <input type="text" placeholder="Company or church (optional)"
+                    value={manualCompany} onChange={e => setManualCompany(e.target.value)}
+                    className="input text-xs py-1.5 w-full" />
                 <button
                     onClick={() => {
                         onAttach({
@@ -708,6 +716,7 @@ aria-label="Close" title="Remove customer">
                                 last_name:  lastName || "",
                                 phone: manualPhone,
                                 email: manualEmail || undefined,
+                                company: manualCompany.trim() || undefined,
                             },
                         });
                         setManualMode(false);

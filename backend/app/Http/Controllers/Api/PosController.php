@@ -603,6 +603,11 @@ class PosController extends Controller
             'new_customer.last_name'           => 'nullable|string|max:100',
             'new_customer.phone'               => 'required_with:new_customer|string|max:30',
             'new_customer.email'               => 'nullable|email|max:255',
+            // The organisation a walk-in buys for — a parish, a school, a bank.
+            // Without it, staff put "Cooperative Bank of Kenya" in the phone
+            // field (2026-09-25), which breaks the matching every channel does
+            // on phone number.
+            'new_customer.company'             => 'nullable|string|max:255',
             // Country drives currency for international POS orders
             'customer_country_code'            => 'nullable|string|size:2',
             'items'                  => 'required|array|min:1',
@@ -916,6 +921,7 @@ class PosController extends Controller
                     'last_name'  => $nc['last_name'] ?? '',   // Customer model's creating() guard also defends against null here - belt-and-suspenders
                     'phone'      => $nc['phone'],
                     'email'      => $nc['email'] ?? null,
+                    'company'    => $nc['company'] ?? null,
                     'created_by' => $user->id,
                 ]);
                 $customerId = $newCustomer->id;
@@ -3048,6 +3054,7 @@ class PosController extends Controller
             'new_customer.last_name'               => 'nullable|string|max:100',
             'new_customer.phone'                   => 'required_with:new_customer|string|max:30',
             'new_customer.email'                   => 'nullable|email|max:255',
+            'new_customer.company'                 => 'nullable|string|max:255',
             // Country drives currency for international POS orders
             'customer_country_code'                => 'nullable|string|size:2',
             'items'                                => 'nullable|array',
@@ -3326,6 +3333,7 @@ class PosController extends Controller
                     'last_name'  => $nc['last_name'] ?? '',   // Customer model's creating() guard also defends against null here - belt-and-suspenders
                     'phone'      => $nc['phone'],
                     'email'      => $nc['email'] ?? null,
+                    'company'    => $nc['company'] ?? null,
                     'created_by' => $request->user()->id,
                 ]);
                 $customerId = $newCustomer->id;
@@ -3441,6 +3449,7 @@ class PosController extends Controller
             'new_customer.last_name'               => 'nullable|string|max:100',
             'new_customer.phone'                   => 'required_with:new_customer|string|max:30',
             'new_customer.email'                   => 'nullable|email|max:255',
+            'new_customer.company'                 => 'nullable|string|max:255',
             // Country drives currency for international POS orders
             'customer_country_code'                => 'nullable|string|size:2',
             // Sales channel this order came through. Defaults to 'pos' so the POS
@@ -3790,6 +3799,7 @@ class PosController extends Controller
                     'last_name'  => $nc['last_name'] ?? '',   // Customer model's creating() guard also defends against null here - belt-and-suspenders
                     'phone'      => $nc['phone'],
                     'email'      => $nc['email'] ?? null,
+                    'company'    => $nc['company'] ?? null,
                     'created_by' => $user->id,
                 ]);
                 $customerId = $newCustomer->id;

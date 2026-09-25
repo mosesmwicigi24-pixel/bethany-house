@@ -167,6 +167,12 @@ class Order extends Model
         'total_amount',
         'deposit_amount',
         'balance_due_date',
+        // Without this, every Order::create() that passes a customer_id had it
+        // silently dropped by mass assignment — the POS creates the customer,
+        // says "persist customer FK so restore can re-link the record", and
+        // stores NULL. 811 of 817 orders carry no link to the customer who
+        // placed them (found 2026-09-25 while testing the company field).
+        'customer_id',
         'customer_email',
         'customer_phone',
         'customer_first_name',

@@ -1742,6 +1742,7 @@ class OrderController extends Controller
             'new_customer.last_name'  => 'nullable|string|max:100',
             'new_customer.phone'      => 'required_with:new_customer|string|max:30',
             'new_customer.email'      => 'nullable|email|max:255',
+            'new_customer.company'    => 'nullable|string|max:255',
         ]);
 
         $order = Order::findOrFail($id);
@@ -1792,6 +1793,7 @@ class OrderController extends Controller
                 'last_name'  => $nc['last_name'] ?? '',   // Customer model's creating() guard also defends against null here - belt-and-suspenders
                 'phone'      => $nc['phone'],
                 'email'      => $nc['email'] ?? null,
+                'company'    => $nc['company'] ?? null,
                 'created_by' => $request->user()->id,
             ]);
             $customerId = $customer->id;
