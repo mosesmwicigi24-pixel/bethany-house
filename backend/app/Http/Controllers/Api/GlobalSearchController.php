@@ -131,7 +131,7 @@ class GlobalSearchController extends Controller
                   ->orWhere('company',    'ILIKE', "%{$q}%")
                   ->orWhere(\DB::raw("CONCAT(first_name, ' ', last_name)"), 'ILIKE', "%{$q}%");
             })
-            ->select('id', 'first_name', 'last_name', 'email', 'phone', 'status')
+            ->select('id', 'first_name', 'last_name', 'email', 'phone', 'company', 'status')
             ->orderByDesc('created_at')
             ->limit(self::MAX_PER_TYPE)
             ->get();
@@ -140,7 +140,12 @@ class GlobalSearchController extends Controller
             'id'       => $c->id,
             'type'     => 'customer',
             'title'    => trim("{$c->first_name} {$c->last_name}") ?: $c->email,
-            'subtitle' => $c->email,
+            // Company leads the subtitle when there is one: this search matches
+            // on it, and "Boniface Karanja — noemail+…@placeholder.local" gives
+            // no clue why a search for "Cooperative" returned him.
+            'subtitle' => trim((string) $c->company) !== ''
+                ? trim((string) $c->company) . ($c->email ? " · {$c->email}" : '')
+                : $c->email,
             'href'     => "/sales/customers/{$c->id}",
             'meta'     => $c->phone,
         ])->values()->toArray();
