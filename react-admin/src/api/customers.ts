@@ -59,6 +59,8 @@ export interface CustomerAddress {
 
 export interface CustomerStats {
     total_orders: number;
+    /** The subset of those orders that count as income (Order::scopeRecognised). */
+    recognised_orders: number;
     total_spent: number;
     average_order_value: number;
     last_order_date: string | null;

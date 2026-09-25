@@ -165,16 +165,32 @@ class CustomerController extends Controller
             }
         });
 
+        // What a customer has SPENT is recognised income — Order::scopeRecognised,
+        // the one definition every report in this system uses: a human accepted
+        // the order or the money arrived, and the order is not dead.
+        //
+        // This used to count status = 'completed' alone. A till sale is
+        // confirmed the moment it is paid and rarely moves on, so that matched
+        // 47 of 817 orders: the page showed KES 806,915 against the reports'
+        // KES 6,087,000, and read zero for customers who had bought plenty.
+        // Voided and cancelled orders stay out, which is why a customer whose
+        // only two orders were voided still reads zero.
+        $recognised = (clone $ordersQuery)->recognised();
+
         $stats = [
-            'total_orders'       => $ordersQuery->count(),
-            'total_spent'        => (clone $ordersQuery)
-                ->where('status', 'completed')
-                ->sum('total_amount'),
-            'average_order_value'=> (clone $ordersQuery)
-                ->where('status', 'completed')
-                ->avg('total_amount') ?? 0,
-            'last_order_date'    => (clone $ordersQuery)
+            // Every order they placed — their history, pipeline included.
+            'total_orders'        => $ordersQuery->count(),
+            // The subset that is income, so the two figures can be told apart.
+            'recognised_orders'   => (clone $recognised)->count(),
+            'total_spent'         => (clone $recognised)->sum('total_amount'),
+            'average_order_value' => (clone $recognised)->avg('total_amount') ?? 0,
+            'last_order_date'     => (clone $ordersQuery)
                 ->latest()->value('created_at'),
+            // The detail page has always rendered these three cards; nothing
+            // ever sent them, so they showed blank next to the figures above.
+            'online_orders'       => (clone $ordersQuery)->where('order_type', '!=', 'pos')->count(),
+            'pos_orders'          => (clone $ordersQuery)->where('order_type', 'pos')->count(),
+            'cancelled_orders'    => (clone $ordersQuery)->whereIn('status', Order::DEAD_STATUSES)->count(),
         ];
 
         // Attach recent orders to the customer object for the frontend
