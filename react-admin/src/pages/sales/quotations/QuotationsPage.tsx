@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { get } from "@/api/client";
+import { get, post } from "@/api/client";
 import {
     quotationApi,
     type Quotation,
@@ -306,6 +306,12 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
     const [phone, setPhone] = useState(editing?.customer_phone ?? "");
     const [validUntil, setValidUntil] = useState(editing?.valid_until ?? "");
     const [currency, setCurrency] = useState(editing?.currency_code ?? "KES");
+    // Currency used to relabel a quotation without moving a figure — pick ZMW
+    // and KES 17,000 read as "ZMW 17,000", seven times the real price. Changing
+    // it now re-prices every line on the server (the catalogue's own price for
+    // that currency, else the configured rate), and says so.
+    const [repricing, setRepricing] = useState(false);
+    const [keptKeys, setKeptKeys] = useState<string[]>([]);
     const [shipping, setShipping] = useState(String(editing?.shipping_amount ?? 0));
     const [servedBy, setServedBy] = useState(editing?.served_by ?? currentUserName);
     const [notes, setNotes] = useState(editing?.notes ?? "");
@@ -388,6 +394,57 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
         setRows((r) => [...r, { key: newKey(), product_id: hit.id, product_name: hit.name, sku: hit.sku, quantity: "1", unit_price: String(hit.price || 0) }]);
         setProductQuery(""); setHits([]);
     }
+    // Changing the currency re-prices the lines. Prices are the server's: the
+    // shop's own price for that currency when it has one, otherwise converted at
+    // the configured rate. Anything it cannot price is left exactly as typed and
+    // flagged — an operator fixing one figure is recoverable, a silent guess is
+    // not. The operator can still overwrite any line afterwards.
+    async function changeCurrency(next: string) {
+        const previous = currency;
+        setCurrency(next);
+        if (next === previous || rows.length === 0) { setKeptKeys([]); return; }
+
+        setRepricing(true);
+        try {
+            const res = await post<{
+                lines: { key: string; unit_price: number; source: "catalogue" | "converted" | "kept" }[];
+                summary: { catalogue: number; converted: number; kept: number };
+                warnings: string[];
+            }>("/v1/admin/quotations/reprice", {
+                from: previous,
+                to: next,
+                lines: rows.map((r) => ({
+                    key: r.key,
+                    product_id: r.product_id,
+                    unit_price: num(r.unit_price),
+                    name: r.product_name || "This line",
+                })),
+            });
+
+            const priced = new Map(res.lines.map((l) => [l.key, l]));
+            setRows((rs) => rs.map((r) => {
+                const hit = priced.get(r.key);
+                return hit ? { ...r, unit_price: String(hit.unit_price) } : r;
+            }));
+            setKeptKeys(res.lines.filter((l) => l.source === "kept").map((l) => l.key));
+
+            const { catalogue, converted, kept } = res.summary;
+            const parts = [
+                catalogue ? `${catalogue} from the ${next} price list` : null,
+                converted ? `${converted} converted` : null,
+                kept ? `${kept} left as typed` : null,
+            ].filter(Boolean).join(", ");
+            if (kept) toast.warning(`Priced in ${next}: ${parts}. ${res.warnings[0] ?? ""}`.trim());
+            else toast.success(`Priced in ${next}: ${parts}.`);
+        } catch (e) {
+            // Never leave figures from the old currency under a new label.
+            setCurrency(previous);
+            toast.error((e as ApiError)?.message ?? `Could not price this quotation in ${next}. The currency is unchanged.`);
+        } finally {
+            setRepricing(false);
+        }
+    }
+
     function addAdHoc() {
         setRows((r) => [...r, { key: newKey(), product_id: null, product_name: "", sku: "", quantity: "1", unit_price: "0" }]);
     }
@@ -462,7 +519,7 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
                         <FieldInput type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
                     </Field>
                     <Field label="Currency" error={errors.currency_code?.[0]}>
-                        <FieldSelect value={currency} onChange={(e) => setCurrency(e.target.value)}>
+                        <FieldSelect value={currency} disabled={repricing} onChange={(e) => changeCurrency(e.target.value)}>
                             {currencies.map((c) => (
                                 <option key={c.code} value={c.code}>{c.code} — {c.name}</option>
                             ))}
@@ -548,8 +605,11 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
                                             onChange={(e) => updateRow(r.key, "quantity", e.target.value)} />
                                     </td>
                                     <td>
-                                        <input className="input text-right" type="number" min="0" step="0.01" value={r.unit_price}
-                                            onChange={(e) => updateRow(r.key, "unit_price", e.target.value)} />
+                                        <input
+                                            className={`input text-right${keptKeys.includes(r.key) ? " border-warning bg-warning-light/40" : ""}`}
+                                            type="number" min="0" step="0.01" value={r.unit_price}
+                                            title={keptKeys.includes(r.key) ? `No ${currency} price on the hub for this line — check the figure before sending.` : undefined}
+                                            onChange={(e) => { updateRow(r.key, "unit_price", e.target.value); setKeptKeys((k) => k.filter((x) => x !== r.key)); }} />
                                     </td>
                                     <td className="text-right tabular-nums">{money(num(r.quantity) * num(r.unit_price), currency)}</td>
                                     <td>

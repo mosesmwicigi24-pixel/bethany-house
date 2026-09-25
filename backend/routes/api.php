@@ -743,6 +743,10 @@ Route::prefix('v1')->group(function () {
 
                 Route::post('/',         [QuotationController::class, 'store'])
                     ->middleware('permission:quotations.create,sanctum');
+                // What the lines on screen cost in another currency — read-only,
+                // so whoever may draft a quotation may ask.
+                Route::post('/reprice',  [QuotationController::class, 'reprice'])
+                    ->middleware('permission:quotations.create,sanctum');
                 Route::put('/{id}',      [QuotationController::class, 'update'])
                     ->middleware('permission:quotations.create,sanctum');
                 Route::delete('/{id}',   [QuotationController::class, 'destroy'])
