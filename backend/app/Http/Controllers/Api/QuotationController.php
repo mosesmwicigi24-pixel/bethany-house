@@ -10,6 +10,7 @@ use App\Services\ActivityLogService;
 use App\Services\QuotationService;
 use App\Services\TaxCalculationService;
 use Illuminate\Http\JsonResponse;
+use App\Services\CurrencyPricing;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -152,6 +153,87 @@ class QuotationController extends Controller
             'message'   => 'Quotation issued.',
             'quotation' => $quotation->fresh('items'),
             'document'  => $document,
+        ]);
+    }
+
+    /**
+     * POST /quotations/reprice
+     *
+     * What these lines cost in another currency, before anything is saved.
+     *
+     * The currency field used to relabel a quotation without touching a single
+     * figure: pick ZMW and KES 17,000 became "ZMW 17,000" — about seven times
+     * the real price, and a hundred times over in USD. Owner asked for the
+     * numbers to move with the label (2026-09-24).
+     *
+     * Pricing is CurrencyPricing's, the same rules every order and POS sale
+     * already uses: the shop's own price for that currency wins verbatim (a row
+     * at 0.00 counts as never filled in), otherwise convert at the configured
+     * rate, and when neither exists say so rather than invent a number. A line
+     * we cannot price comes back untouched and flagged, because a quotation
+     * with one figure the operator must fix is recoverable and a quietly
+     * converted guess is not.
+     *
+     * Read-only: the client sends what is on screen and gets figures back. What
+     * is finally quoted is still whatever the operator saves — a negotiated
+     * price is theirs to type.
+     */
+    public function reprice(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'to'                 => 'required|string|size:3',
+            'from'               => 'required|string|size:3',
+            'lines'              => 'required|array|max:200',
+            'lines.*.key'        => 'required|string|max:64',
+            'lines.*.product_id' => 'nullable|integer|exists:products,id',
+            'lines.*.variant_id' => 'nullable|integer|exists:product_variants,id',
+            'lines.*.unit_price' => 'required|numeric|min:0|max:100000000',
+            'lines.*.name'       => 'nullable|string|max:255',
+        ]);
+
+        $to   = strtoupper($data['to']);
+        $from = strtoupper($data['from']);
+
+        $lines = [];
+        $warnings = [];
+        $counts = ['catalogue' => 0, 'converted' => 0, 'kept' => 0];
+
+        foreach ($data['lines'] as $line) {
+            $name = $line['name'] ?? 'This line';
+            $typed = (float) $line['unit_price'];
+
+            // 1. A catalogue line asks the catalogue first.
+            $priced = !empty($line['product_id']) || !empty($line['variant_id'])
+                ? CurrencyPricing::catalogue($line['product_id'] ?? null, $line['variant_id'] ?? null, $to)
+                : null;
+
+            if ($priced !== null) {
+                $source = $priced['converted_from'] === null ? 'catalogue' : 'converted';
+                $counts[$source]++;
+                $lines[] = ['key' => $line['key'], 'unit_price' => round((float) $priced['effective_price'], 2), 'source' => $source];
+                continue;
+            }
+
+            // 2. No catalogue answer (ad-hoc line, or no priced row): carry the
+            //    figure on screen across at the configured rate.
+            $converted = $typed > 0 ? CurrencyPricing::convert($typed, $from, $to) : 0.0;
+            if ($converted !== null) {
+                $counts['converted']++;
+                $lines[] = ['key' => $line['key'], 'unit_price' => round($converted, 2), 'source' => 'converted'];
+                continue;
+            }
+
+            // 3. Nothing to go on. Leave the figure alone and say why.
+            $counts['kept']++;
+            $warnings[] = CurrencyPricing::unpriceableReason((string) $name, $to);
+            $lines[] = ['key' => $line['key'], 'unit_price' => round($typed, 2), 'source' => 'kept'];
+        }
+
+        return response()->json([
+            'currency_code' => $to,
+            'lines'         => $lines,
+            'summary'       => $counts,
+            'warnings'      => array_values(array_unique($warnings)),
         ]);
     }
 
