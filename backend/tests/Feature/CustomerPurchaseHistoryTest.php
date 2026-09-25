@@ -127,15 +127,102 @@ class CustomerPurchaseHistoryTest extends TestCase
             ->assertJsonPath('stats', null);
     }
 
-    public function test_only_completed_orders_count_toward_what_they_have_spent(): void
+    /**
+     * Spend is recognised income — Order::scopeRecognised, what every report
+     * uses. It used to count status='completed' alone, which matched 47 of 817
+     * live orders because a till sale is confirmed when paid and stays there:
+     * the page read KES 806,915 against the reports' KES 6,087,000.
+     */
+    public function test_spend_is_recognised_income_not_only_completed_orders(): void
     {
         $customer = Customer::create(['first_name' => 'Half', 'last_name' => 'D', 'email' => 'd@example.test', 'phone' => '0700000004']);
-        $this->order(['customer_id' => $customer->id, 'total_amount' => 4000]);
-        $this->order(['customer_id' => $customer->id, 'total_amount' => 9000, 'status' => 'pending']);
+        $this->order(['customer_id' => $customer->id, 'total_amount' => 4000]);                            // completed
+        $this->order(['customer_id' => $customer->id, 'total_amount' => 9000, 'status' => 'confirmed']);   // a paid till sale
+        $this->order(['customer_id' => $customer->id, 'total_amount' => 500, 'status' => 'processing']);   // being made
 
         $res = $this->getJson("/api/v1/admin/customers/{$customer->id}")->assertOk();
 
-        $res->assertJsonPath('stats.total_orders', 2, 'both orders are theirs');
-        $this->assertSame(4000.0, (float) $res->json('stats.total_spent'), 'only the completed one is spend');
+        $res->assertJsonPath('stats.total_orders', 3);
+        $res->assertJsonPath('stats.recognised_orders', 3);
+        $this->assertSame(13500.0, (float) $res->json('stats.total_spent'));
+        $this->assertSame(4500.0, (float) $res->json('stats.average_order_value'));
+    }
+
+    public function test_a_voided_or_cancelled_order_is_never_spend(): void
+    {
+        // The case that prompted this: a customer whose only two orders were
+        // voided must still read zero, however they were paid.
+        $customer = Customer::create(['first_name' => 'John', 'last_name' => '', 'email' => 'john@example.test', 'phone' => '0700000006']);
+        $this->order(['customer_id' => $customer->id, 'total_amount' => 350, 'status' => 'voided', 'payment_status' => 'paid']);
+        $this->order(['customer_id' => $customer->id, 'total_amount' => 4500, 'status' => 'cancelled', 'payment_status' => 'paid']);
+
+        $res = $this->getJson("/api/v1/admin/customers/{$customer->id}")->assertOk();
+
+        $res->assertJsonPath('stats.total_orders', 2, 'the orders are still their history');
+        $res->assertJsonPath('stats.recognised_orders', 0);
+        $this->assertSame(0.0, (float) $res->json('stats.total_spent'));
+    }
+
+    public function test_an_unpaid_cart_is_history_but_not_spend(): void
+    {
+        $customer = Customer::create(['first_name' => 'Cart', 'last_name' => 'F', 'email' => 'f@example.test', 'phone' => '0700000007']);
+        $this->order(['customer_id' => $customer->id, 'total_amount' => 2000, 'status' => 'pending', 'payment_status' => 'pending']);
+
+        $res = $this->getJson("/api/v1/admin/customers/{$customer->id}")->assertOk();
+
+        $res->assertJsonPath('stats.total_orders', 1);
+        $res->assertJsonPath('stats.recognised_orders', 0);
+        $this->assertSame(0.0, (float) $res->json('stats.total_spent'));
+    }
+
+    public function test_a_pending_order_that_was_paid_is_income(): void
+    {
+        // The payment arm of the house rule: money arrived, so it is a sale
+        // whatever queue the order is sitting in.
+        $customer = Customer::create(['first_name' => 'Paid', 'last_name' => 'G', 'email' => 'g@example.test', 'phone' => '0700000008']);
+        $this->order(['customer_id' => $customer->id, 'total_amount' => 6000, 'status' => 'pending', 'payment_status' => 'paid']);
+
+        $res = $this->getJson("/api/v1/admin/customers/{$customer->id}")->assertOk();
+
+        $res->assertJsonPath('stats.recognised_orders', 1);
+        $this->assertSame(6000.0, (float) $res->json('stats.total_spent'));
+    }
+
+    public function test_the_three_cards_that_rendered_blank_now_carry_numbers(): void
+    {
+        // CustomerDetailPage has always drawn Online / POS / Cancelled cards,
+        // and the endpoint never sent those keys, so they read as nothing.
+        $customer = Customer::create(['first_name' => 'Cards', 'last_name' => 'I', 'email' => 'i@example.test', 'phone' => '0700000014']);
+        $this->order(['customer_id' => $customer->id, 'order_type' => 'pos']);
+        $this->order(['customer_id' => $customer->id, 'order_type' => 'pos']);
+        $this->order(['customer_id' => $customer->id, 'order_type' => 'online']);
+        $this->order(['customer_id' => $customer->id, 'order_type' => 'pos', 'status' => 'voided']);
+
+        $res = $this->getJson("/api/v1/admin/customers/{$customer->id}")->assertOk();
+
+        $res->assertJsonPath('stats.pos_orders', 3)
+            ->assertJsonPath('stats.online_orders', 1)
+            ->assertJsonPath('stats.cancelled_orders', 1);
+    }
+
+    public function test_the_page_agrees_with_the_house_definition(): void
+    {
+        // Whatever the page says a customer spent must equal what Order's own
+        // recognised scope says — one definition, not a second opinion.
+        $customer = Customer::create(['first_name' => 'Agree', 'last_name' => 'H', 'email' => 'h@example.test', 'phone' => '0700000009']);
+        foreach ([
+            ['completed', 'paid', 1000], ['confirmed', 'paid', 2000], ['processing', 'pending', 3000],
+            ['pending', 'pending', 4000], ['voided', 'paid', 5000], ['cancelled', 'paid', 6000],
+            ['shipped', 'paid', 7000], ['delivered', 'paid', 8000],
+        ] as [$status, $paymentStatus, $amount]) {
+            $this->order(['customer_id' => $customer->id, 'status' => $status,
+                          'payment_status' => $paymentStatus, 'total_amount' => $amount]);
+        }
+
+        $houseRule = (float) Order::where('customer_id', $customer->id)->recognised()->sum('total_amount');
+        $page      = (float) $this->getJson("/api/v1/admin/customers/{$customer->id}")->assertOk()->json('stats.total_spent');
+
+        $this->assertSame($houseRule, $page);
+        $this->assertSame(21000.0, $page, 'completed + confirmed + processing + shipped + delivered');
     }
 }
