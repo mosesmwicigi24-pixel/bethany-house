@@ -518,7 +518,9 @@ class ChannelController extends Controller
     // Media + docs staff share in chat. Whitelisted by EXTENSION (not server MIME)
     // because phone uploads — iPhone .mov/.heic, Android .3gp voice notes — are
     // frequently mislabelled by finfo, which would wrongly reject legitimate media.
-    private const ATTACHMENT_IMAGE_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp', 'svg'];
+    // SVG is deliberately absent: it is a script container wearing an image
+    // extension, and serving one inline executes it in this app's origin.
+    private const ATTACHMENT_IMAGE_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp'];
     private const ATTACHMENT_VIDEO_EXT = ['mp4', 'mov', 'm4v', 'webm', '3gp', '3gpp', 'avi', 'mkv'];
     private const ATTACHMENT_AUDIO_EXT = ['mp3', 'm4a', 'wav', 'aac', 'ogg', 'oga', 'opus', 'amr', 'flac', 'weba'];
     private const ATTACHMENT_DOC_EXT   = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt', 'csv'];
@@ -565,11 +567,35 @@ class ChannelController extends Controller
 
     // ── GET /channels/attachments/serve?path= ─────────────────────────────────────
 
+    /**
+     * The Content-Type served for each whitelisted extension. DECLARED, never
+     * sniffed: mimeType() reads file CONTENT, so an HTML payload wearing a
+     * .jpg name would sniff as text/html and — served inline — execute in
+     * this app's origin with the viewer's session. The extension decides the
+     * type; nosniff (below) forbids the browser second-guessing it.
+     */
+    private const SERVE_MIME = [
+        'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png',
+        'gif' => 'image/gif', 'webp' => 'image/webp', 'heic' => 'image/heic',
+        'heif' => 'image/heif', 'bmp' => 'image/bmp',
+        'mp4' => 'video/mp4', 'mov' => 'video/quicktime', 'm4v' => 'video/x-m4v',
+        'webm' => 'video/webm', '3gp' => 'video/3gpp', '3gpp' => 'video/3gpp',
+        'avi' => 'video/x-msvideo', 'mkv' => 'video/x-matroska',
+        'mp3' => 'audio/mpeg', 'm4a' => 'audio/mp4', 'wav' => 'audio/wav',
+        'aac' => 'audio/aac', 'ogg' => 'audio/ogg', 'oga' => 'audio/ogg',
+        'opus' => 'audio/opus', 'amr' => 'audio/amr', 'flac' => 'audio/flac',
+        'weba' => 'audio/webm',
+        'pdf' => 'application/pdf',
+    ];
+
     public function serveAttachment(Request $request)
     {
         $path = $request->get('path', '');
 
-        if (!$path || !str_starts_with($path, 'channel-attachments/')) {
+        // Confined to the attachments folder, with no upward steps: Flysystem
+        // would throw on traversal anyway, but a crafted path deserves a clean
+        // 403, not a 500.
+        if (!$path || !str_starts_with($path, 'channel-attachments/') || str_contains($path, '..')) {
             return response()->json(['message' => 'Access denied.'], 403);
         }
 
@@ -577,14 +603,36 @@ class ChannelController extends Controller
             return response()->json(['message' => 'File not found.'], 404);
         }
 
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+
+        // Media and PDF render inline; every other kind (Office docs, txt/csv,
+        // any legacy file whose extension is no longer whitelisted — old .svg
+        // uploads included) downloads as an opaque blob. A download cannot
+        // script, whatever is inside it.
+        $mimeType = self::SERVE_MIME[$ext] ?? 'application/octet-stream';
+        $inline   = array_key_exists($ext, self::SERVE_MIME);
+
         $content  = Storage::disk('local')->get($path);
-        $mimeType = Storage::disk('local')->mimeType($path) ?: 'application/octet-stream';
         $filename = basename($path);
 
-        return response($content, 200)
+        $response = response($content, 200)
             ->header('Content-Type', $mimeType)
-            ->header('Content-Disposition', 'inline; filename="' . $filename . '"')
+            ->header('Content-Disposition', ($inline ? 'inline' : 'attachment') . '; filename="' . $filename . '"')
+            // Never let the browser second-guess the declared type — sniffing
+            // an HTML payload out of a mislabelled file is the XSS vector this
+            // endpoint used to have.
+            ->header('X-Content-Type-Options', 'nosniff')
             ->header('Cache-Control', 'private, max-age=3600');
+
+        // Defence in depth for anything but PDF: even if a response were ever
+        // misinterpreted as a document, the sandbox strips scripts and
+        // same-origin access. PDFs are excluded because the sandbox also
+        // blocks the browser's PDF viewer plugin.
+        if ($ext !== 'pdf') {
+            $response->header('Content-Security-Policy', 'sandbox');
+        }
+
+        return $response;
     }
 
     // ── POST /channels/context ────────────────────────────────────────────────
