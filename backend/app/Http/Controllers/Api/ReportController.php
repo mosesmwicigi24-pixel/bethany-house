@@ -29,6 +29,8 @@ use Carbon\Carbon;
 class ReportController extends Controller
 {
     use \App\Http\Controllers\Api\Concerns\ReportsMoneyInKes;
+    use \App\Http\Controllers\Api\Concerns\ResolvesReportWindow;
+    use \App\Http\Controllers\Api\Concerns\IdentifiesBuyers;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -84,34 +86,6 @@ class ReportController extends Controller
         return $data;
     }
 
-    /**
-     * The window this report answers for — from EITHER convention (D4).
-     *
-     * Reports grew three date contracts. The executive endpoints read
-     * `from`/`to`; these legacy endpoints read `start_date`/`end_date` and
-     * quietly fall back to the last 30 days; the intelligence endpoints read
-     * `period`, ignoring `from`/`to` unless `period=custom`. A caller using
-     * the wrong pair — a link copied between two pages of the same section, a
-     * bookmark, our own frontend — got a DIFFERENT window back with no error,
-     * and nothing in the numbers to say so.
-     *
-     * Both spellings are accepted here, `start_date` winning if a caller
-     * sends both, and every payload already returns the window that actually
-     * answered in its `period` block, so it can be read rather than assumed.
-     *
-     * Unifying all three contracts belongs to the consolidation. Making the
-     * wrong pair stop lying does not have to wait for it.
-     */
-    private function dateRange(Request $request): array
-    {
-        $start = $request->get('start_date', $request->get('from', now()->subDays(29)->format('Y-m-d')));
-        $end   = $request->get('end_date',   $request->get('to',   now()->format('Y-m-d')));
-
-        // substr guards a caller who sends a full timestamp: appending the
-        // end-of-day to "2026-09-30 14:00:00" produced an invalid date and
-        // Postgres took the whole query down with it.
-        return [$start, substr($end, 0, 10) . ' 23:59:59'];
-    }
 
     /**
      * Return the equivalent prior period date range for comparison.
@@ -1311,10 +1285,6 @@ class ReportController extends Controller
      * a second arm for web accounts. Prefixed so the two id spaces cannot
      * collide.
      */
-    private function buyerKey(string $table = 'orders'): string
-    {
-        return "COALESCE('c' || {$table}.customer_id, 'u' || {$table}.user_id)";
-    }
 
     public function customerSummary(Request $request)
     {

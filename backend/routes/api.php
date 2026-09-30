@@ -1528,7 +1528,11 @@ Route::prefix('v1')->group(function () {
             // ── Report PDFs ───────────────────────────────────────────────────
             // GET /api/v1/admin/reports/pdf/{type}?start_date=&end_date=
             // Runs queries server-side and streams a formatted PDF binary.
-            Route::middleware('permission:reports.view,sanctum')
+            // report.window here too: the PRINTED report had its own copy of the
+            // date resolver and none of the section's normalisation, so a PDF
+            // exported with from/to covered the last 30 days instead of the
+            // window on the screen it came from.
+            Route::middleware(['permission:reports.view,sanctum', 'report.window'])
                 ->prefix('reports/pdf')
                 ->name('reports.pdf.')
                 ->group(function () {

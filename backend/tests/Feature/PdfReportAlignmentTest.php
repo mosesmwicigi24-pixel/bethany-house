@@ -121,4 +121,54 @@ class PdfReportAlignmentTest extends TestCase
 
         $this->assertSame(7000.0, (float) $page['revenue']);
     }
+
+    public function test_the_customer_pdf_lists_the_people_who_actually_bought(): void
+    {
+        // This page printed an EMPTY top-customers table and a lifetime value
+        // of 0, for as long as it has existed, because it required
+        // orders.user_id — and not one paid order on production has one. The
+        // comment above the query explained why: "orders have no customer_id",
+        // true when written, false ever since the column was added and
+        // backfilled.
+        $walkIn = \App\Models\Customer::create([
+            'first_name' => 'Agnes', 'last_name' => 'Wairimu',
+            'email' => 'agnes@example.test', 'phone' => '0722000101',
+        ]);
+
+        foreach ([['KES', 1000], ['USD', 10]] as [$currency, $total]) {
+            Order::factory()->create([
+                'customer_id'         => $walkIn->id,
+                'customer_first_name' => 'Agnes',
+                'customer_last_name'  => 'Wairimu',
+                'customer_email'      => 'agnes@example.test',
+                'status' => 'completed', 'payment_status' => 'paid',
+                'currency_code' => $currency, 'total_amount' => $total,
+            ]);
+        }
+
+        $d = $this->pdfData('customersData');
+
+        $this->assertCount(1, $d['top_customers'], 'the table was blank');
+        $row = $d['top_customers']->first();
+        $this->assertSame('Agnes Wairimu', trim($row->customer_name));
+        $this->assertSame(2, (int) $row->order_count);
+        // 1,000 + 10 x 128 = 2,280: the printed page and the screen agree.
+        $this->assertSame(2280.0, round((float) $row->total_spent, 2));
+        $this->assertSame(2280.0, round($d['avg_ltv'], 2), 'lifetime value read 0');
+        $this->assertSame(2280.0, round($d['max_ltv'], 2));
+    }
+
+    public function test_the_customer_pdf_leaves_out_an_order_attached_to_nobody(): void
+    {
+        // 219 orders on production carry no customer at all. They are sales,
+        // but they are not a buyer anyone can name, and a top-customers table
+        // must not invent one.
+        Order::factory()->create([
+            'status' => 'completed', 'payment_status' => 'paid',
+            'currency_code' => 'KES', 'total_amount' => 9_999,
+            'customer_id' => null, 'user_id' => null,
+        ]);
+
+        $this->assertCount(0, $this->pdfData('customersData')['top_customers']);
+    }
 }
