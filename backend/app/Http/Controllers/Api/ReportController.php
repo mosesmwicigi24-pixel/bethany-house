@@ -1283,9 +1283,12 @@ class ReportController extends Controller
         $totalCustomers = Customer::count();
         $newCustomers   = Customer::whereBetween('created_at', [$start, $end])->count();
 
-        $uniqueBuyers = (int) DB::table('orders')
+        // A buyer is someone whose order was RECOGNISED, not only someone who
+        // has finished paying (owner's decision, 2026-09-30). Paid-only made a
+        // deposit customer invisible until their last instalment: measured on
+        // Q3, 442 buyers against 485, and 33 repeat buyers against 37.
+        $uniqueBuyers = (int) $this->recognisedOrders(DB::table('orders'))
             ->whereBetween('created_at', [$start, $end])
-            ->where('payment_status', 'paid')
             ->whereRaw('(orders.customer_id IS NOT NULL OR orders.user_id IS NOT NULL)')
             ->distinct()
             ->count(DB::raw($buyer));
@@ -1293,10 +1296,9 @@ class ReportController extends Controller
         // Repeat purchase rate: customers who placed >= 2 orders in the period
         // Use DB::table with explicit selectRaw so PostgreSQL GROUP BY is satisfied
         $repeatBuyers = DB::table(
-            DB::table('orders')
+            $this->recognisedOrders(DB::table('orders'))
                 ->selectRaw("{$buyer} AS buyer, COUNT(*) AS order_count")
                 ->whereBetween('created_at', [$start, $end])
-                ->where('payment_status', 'paid')
                 ->whereRaw('(orders.customer_id IS NOT NULL OR orders.user_id IS NOT NULL)')
                 ->groupBy(DB::raw($buyer)),
             'buyer_counts'
@@ -1307,14 +1309,15 @@ class ReportController extends Controller
         $repeatRate = $uniqueBuyers > 0 ? round(($repeatBuyers / $uniqueBuyers) * 100, 1) : 0;
 
         // New vs returning in period
-        $returningBuyers = (int) DB::table('orders as o1')
+        // Both sides of the comparison move together, or "returning" would
+        // mean a recognised order this period against a fully-paid one before
+        // it — two different questions in one ratio.
+        $returningBuyers = (int) $this->recognisedOrders(DB::table('orders as o1'), 'o1')
             ->whereBetween('o1.created_at', [$start, $end])
-            ->where('o1.payment_status', 'paid')
             ->whereRaw('(o1.customer_id IS NOT NULL OR o1.user_id IS NOT NULL)')
             ->whereExists(function ($q) use ($start) {
-                $q->from('orders as o2')
+                $this->recognisedOrders($q->from('orders as o2'), 'o2')
                   ->whereRaw($this->buyerKey('o2') . ' = ' . $this->buyerKey('o1'))
-                  ->where('o2.payment_status', 'paid')
                   ->where('o2.created_at', '<', $start);
             })
             ->distinct()
@@ -1354,9 +1357,8 @@ class ReportController extends Controller
             // Counted distinct logins, of which paid orders have none: this
             // read 0 while hundreds of people were buying. Same buyer key as
             // the customer summary (cycle 1) and salesByCustomer.
-            'active_customers' => DB::table('orders')
+            'active_customers' => $this->recognisedOrders(DB::table('orders'))
                 ->where('created_at', '>=', now()->subDays($period))
-                ->where('payment_status', 'paid')
                 ->whereRaw($this->buyerKey('orders') . ' IS NOT NULL')
                 ->distinct()
                 ->count(DB::raw($this->buyerKey('orders'))),
@@ -1369,7 +1371,12 @@ class ReportController extends Controller
             ->leftJoin('orders', function ($join) {
                 $join->on(fn ($j) => $j->on('orders.customer_id', '=', 'customers.id')
                                        ->orOn('orders.user_id', '=', 'customers.user_id'))
-                     ->where('orders.payment_status', 'paid');
+                     // Recognised, like every other count of who bought: a
+                     // customer with two deposit orders is a Repeat customer,
+                     // not a New one waiting on their last instalment.
+                     ->whereNotIn('orders.status', \App\Models\Order::DEAD_STATUSES)
+                     ->where(fn ($q) => $q->whereIn('orders.status', \App\Models\Order::RECOGNISED_STATUSES)
+                                          ->orWhereIn('orders.payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES));
             })
             ->groupBy('customers.id')
             ->selectRaw("
@@ -1394,8 +1401,7 @@ class ReportController extends Controller
         $ltv   = $amtKesB('total_amount');
         $buyer = $this->buyerKey('orders');
 
-        $spendBrackets = DB::table('orders')
-            ->where('payment_status', 'paid')
+        $spendBrackets = $this->recognisedOrders(DB::table('orders'))
             ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKesB, $currencyB, 'currency_code'))
             ->whereRaw("{$buyer} IS NOT NULL")
             ->groupByRaw($buyer)
@@ -1507,26 +1513,47 @@ class ReportController extends Controller
         $retention = $cohorts->map(function ($cohort) {
             $cohortMonth = $cohort->cohort_month;
 
-            // Customers acquired in this cohort month
-            $cohortUserIds = DB::table('customers')
+            // Customers acquired in this cohort month, as BUYER KEYS.
+            //
+            // This was `whereNotNull('user_id')->pluck('user_id')`, and of 718
+            // customers exactly ONE has a login. Every cohort was therefore
+            // empty and the report returned cohort sizes with zero retention
+            // for all of them — telling a reader that not one of the 692
+            // customers acquired in Q3 2026 ever came back, while 37 people
+            // bought repeatedly in Q3 alone. It did not under-report; it
+            // reported the opposite. The worst figure found in this programme.
+            //
+            // A customer's key is 'c<id>', plus 'u<user_id>' when they also
+            // have a login, so an order placed either way counts for them.
+            $cohortMembers = DB::table('customers')
                 ->whereRaw("TO_CHAR(created_at, 'YYYY-MM') = ?", [$cohortMonth])
-                ->whereNotNull('user_id')
-                ->pluck('user_id');
+                ->get(['id', 'user_id']);
 
-            if ($cohortUserIds->isEmpty()) {
+            $cohortKeys = $cohortMembers
+                ->flatMap(fn ($c) => array_filter([
+                    'c' . $c->id,
+                    $c->user_id ? 'u' . $c->user_id : null,
+                ]))
+                ->all();
+
+            if ($cohortKeys === []) {
                 return ['cohort' => $cohortMonth, 'size' => $cohort->cohort_size, 'months' => []];
             }
 
-            // Purchases per month by cohort members (up to 6 months forward)
-            $purchaseMonths = DB::table('orders')
-                ->whereIn('user_id', $cohortUserIds)
-                ->where('payment_status', 'paid')
-                ->whereRaw("TO_CHAR(created_at, 'YYYY-MM') >= ?", [$cohortMonth])
+            $buyerKey    = $this->buyerKey('orders');
+            $placeholders = implode(',', array_fill(0, count($cohortKeys), '?'));
+
+            // Purchases per month by cohort members (up to 6 months forward),
+            // on the recognised basis and keyed the same way as every other
+            // count of who bought.
+            $purchaseMonths = $this->recognisedOrders(DB::table('orders'))
+                ->whereRaw("{$buyerKey} IN ({$placeholders})", $cohortKeys)
+                ->whereRaw("TO_CHAR(orders.created_at, 'YYYY-MM') >= ?", [$cohortMonth])
                 ->selectRaw("
-                    TO_CHAR(created_at, 'YYYY-MM') AS month,
-                    COUNT(DISTINCT COALESCE(user_id::text, normalize_phone(customer_phone), NULLIF(lower(btrim(customer_email)), ''))) AS retained
+                    TO_CHAR(orders.created_at, 'YYYY-MM') AS month,
+                    COUNT(DISTINCT {$buyerKey}) AS retained
                 ")
-                ->groupBy(DB::raw("TO_CHAR(created_at, 'YYYY-MM')"))
+                ->groupBy(DB::raw("TO_CHAR(orders.created_at, 'YYYY-MM')"))
                 ->orderBy('month')
                 ->limit(7)
                 ->get()
