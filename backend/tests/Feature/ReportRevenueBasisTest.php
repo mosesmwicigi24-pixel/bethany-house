@@ -222,4 +222,23 @@ class ReportRevenueBasisTest extends TestCase
         // Pinned so a later sweep does not "fix" it into nonsense.
         $this->assertSame(4_000.0, round((float) $rows->sum('total'), 2));
     }
+
+    public function test_the_dashboard_agrees_with_the_sales_page(): void
+    {
+        // The dashboard was the last paid-only revenue basis in the module, on
+        // the first screen a manager opens. Measured live: 176 orders and KES
+        // 1,655,650 where the sales page said 207 and 2,118,350 for the same
+        // thirty days. Two pages, one month, a 28% gap.
+        $this->seedTheAwkwardCases();
+
+        $dash    = $this->getJson('/api/v1/admin/reports/dashboard/kpis?days=30')->assertOk()->json('kpis.sales');
+        $summary = $this->report('/api/v1/admin/reports/sales/summary')['summary'];
+
+        $this->assertSame(
+            round((float) $summary['total_revenue'], 2),
+            round((float) $dash['total'], 2),
+            'the dashboard and the sales page describe the same sales',
+        );
+        $this->assertSame((int) $summary['total_orders'], (int) $dash['count']);
+    }
 }
