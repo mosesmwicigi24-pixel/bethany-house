@@ -38,6 +38,9 @@ class OutreachLogTest extends TestCase
         $user = User::factory()->create(['first_name' => 'Amani', 'last_name' => 'Clerk']);
         $user->assignRole(Role::findOrCreate('admin', 'sanctum'));
         $user->givePermissionTo(Permission::findOrCreate('reports.view', 'sanctum'));
+        // Taking a FILE needs reports.export as well as reports.view — the
+        // ?export= door used to bypass it (#384).
+        $user->givePermissionTo(Permission::findOrCreate('reports.export', 'sanctum'));
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 

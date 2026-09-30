@@ -115,6 +115,61 @@ class MetricEngine
         return new self($requestedOutletId ? [$requestedOutletId] : null);
     }
 
+    /**
+     * Metrics that read zero because the WORK BEHIND THEM has never happened,
+     * as distinct from a quiet month.
+     *
+     * A manager looking at "0 completed · on-time —" cannot tell whether the
+     * floor had a slow week or whether no production order has ever been closed
+     * out. On production, 2026-09-30, it is the latter: 0 of 145 production
+     * orders have ever been marked complete, and all 25 expenses sit in
+     * pending_approval, so throughput, on-time rate and every operating-expense
+     * figure are structurally unpopulatable. The same shape as the end-of-day
+     * reports nobody submits.
+     *
+     * Reporting the zero without the reason invites the wrong conclusion —
+     * that the business made nothing and spent nothing. This says which it is,
+     * and a reader who sees no gaps listed knows the zeros are real.
+     */
+    public function structuralGaps(): array
+    {
+        $gaps = [];
+
+        $production = DB::table('production_orders')
+            ->selectRaw("COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'completed') AS completed")
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+            ->first();
+
+        if (($production->total ?? 0) > 0 && (int) ($production->completed ?? 0) === 0) {
+            $gaps[] = [
+                'key'     => 'production_never_completed',
+                'metrics' => ['production.completed', 'production.on_time_pct'],
+                'title'   => 'No production order has ever been marked complete',
+                'detail'  => (int) $production->total . ' production orders exist and none has been closed out, '
+                           . 'so throughput and on-time rate cannot populate. The figures are not zero because '
+                           . 'nothing was made — they are zero because nothing is being signed off.',
+            ];
+        }
+
+        $expenses = DB::table('expenses')
+            ->selectRaw("COUNT(*) AS total, COUNT(*) FILTER (WHERE status IN ('approved','paid')) AS spend")
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+            ->first();
+
+        if (($expenses->total ?? 0) > 0 && (int) ($expenses->spend ?? 0) === 0) {
+            $gaps[] = [
+                'key'     => 'expenses_never_approved',
+                'metrics' => ['financial.expenses', 'financial.net_collected', 'profit_loss.operating_expenses'],
+                'title'   => 'No expense has ever been approved',
+                'detail'  => 'All ' . (int) $expenses->total . ' recorded expenses are awaiting approval, so every '
+                           . 'operating-expense figure reads zero and each margin beside it is gross of costs '
+                           . 'the business has already incurred.',
+            ];
+        }
+
+        return $gaps;
+    }
+
     /** Business-wide engine for scheduled jobs (no request user to scope by). */
     public static function unscoped(): self
     {
