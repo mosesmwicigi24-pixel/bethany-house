@@ -1,26 +1,69 @@
 @import "tailwindcss";
 
+/* ─────────────────────────────────────────────────────────────
+   Bethany House storefront theme
+   Warm slate base + amber accent — matches the admin design system
+   ───────────────────────────────────────────────────────────── */
+@theme {
+  /* Brand — warm amber */
+  --color-brand-50:  #fdf8f0;
+  --color-brand-100: #faefd9;
+  --color-brand-200: #f4dcb0;
+  --color-brand-300: #ecc47d;
+  --color-brand-400: #e3a44a;
+  --color-brand-500: #d98a2a;
+  --color-brand-600: #c07020;
+  --color-brand-700: #9f561c;
+  --color-brand-800: #82451d;
+  --color-brand-900: #6b3a1a;
+  --color-brand-950: #3c1c0a;
+
+  /* Surface — cool slate neutrals */
+  --color-surface-0:   #ffffff;
+  --color-surface-50:  #f8f9fb;
+  --color-surface-100: #f0f2f5;
+  --color-surface-200: #e4e7ec;
+  --color-surface-300: #cdd2da;
+  --color-surface-400: #9aa3b0;
+  --color-surface-500: #697586;
+  --color-surface-600: #4b5565;
+  --color-surface-700: #364152;
+  --color-surface-800: #202939;
+  --color-surface-900: #121926;
+  --color-surface-950: #0d1117;
+
+  --font-sans: var(--font-dm-sans), system-ui, sans-serif;
+  --font-display: var(--font-sora), system-ui, sans-serif;
+
+  --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06);
+  --shadow-card-lg: 0 10px 15px -3px rgb(0 0 0 / 0.07), 0 4px 6px -4px rgb(0 0 0 / 0.05);
+}
+
 :root {
   --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --foreground: #202939;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-300);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-surface-400);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
 }
