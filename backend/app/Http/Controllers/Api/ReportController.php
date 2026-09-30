@@ -2435,8 +2435,15 @@ class ReportController extends Controller
         // published the result as the average order value. One base now, one
         // unit, and the average is the total's own average.
         [$amtKes, $inKes, $currency] = $this->reportingMoney($request, 'currency_code');
-        $kpiSales = fn () => DB::table('orders')
-            ->where('payment_status', 'paid')
+        // Recognised income, like every other sales figure (D3, approved
+        // 2026-09-30). This was the last paid-only revenue basis left in the
+        // module and it sat on the FIRST screen a manager opens: measured on
+        // the live database 2026-10-01, the dashboard showed 176 orders and
+        // KES 1,655,650 for the last 30 days where the sales page showed 207
+        // and 2,118,350 — a 462,700 gap, 28%, between two pages describing the
+        // same month. Found by a live verification that contradicted my own
+        // claim that only sales-by-payment-method remained on this basis.
+        $kpiSales = fn () => $this->recognisedOrders(DB::table('orders'))
             ->where('created_at', '>=', $since)
             ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency, 'currency_code'));
 
