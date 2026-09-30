@@ -408,4 +408,63 @@ class ReportCurrencyAndBuyerTest extends TestCase
         $this->assertStringContainsString('Downloadable', $csv, 'the file listed nobody before');
         $this->assertStringContainsString('6400', str_replace(['"', ','], '', $csv));
     }
+
+    // ── The segment join, without its OR ─────────────────────────────────────
+
+    /** A customer who ALSO has a web login — 1 of 718 on production. */
+    private function customerWithLogin(string $name): array
+    {
+        $user = User::factory()->create();
+        $customer = Customer::create([
+            'customer_number' => 'CUST-LOGIN-' . bin2hex(random_bytes(3)),
+            'first_name' => $name, 'last_name' => 'L', 'user_id' => $user->id,
+            'email' => strtolower($name) . '.login@example.test',
+            'phone' => '07' . random_int(10000000, 99999999),
+        ]);
+
+        return [$customer, $user];
+    }
+
+    private function recognisedOrder(?int $customerId, ?int $userId): void
+    {
+        Order::create([
+            'order_number' => 'SG-' . bin2hex(random_bytes(4)),
+            'customer_id' => $customerId, 'user_id' => $userId,
+            'status' => 'completed', 'payment_status' => 'paid',
+            'currency_code' => 'KES', 'subtotal' => 100, 'total_amount' => 100,
+        ]);
+    }
+
+    public function test_an_order_matching_a_customer_by_both_keys_counts_once(): void
+    {
+        // The segment join used `customer_id = c.id OR user_id = c.user_id`,
+        // which is quadratic at volume (cycle 7). Its replacement is a UNION of
+        // two equality joins — and UNION, unlike UNION ALL, de-duplicates. This
+        // pins that: four orders that match by BOTH keys are four orders, which
+        // is "Repeat". Counted twice they would be eight, which is "Regular".
+        [$customer, $user] = $this->customerWithLogin('Both');
+        for ($i = 0; $i < 4; $i++) {
+            $this->recognisedOrder($customer->id, $user->id);
+        }
+
+        $segments = $this->getJson('/api/v1/admin/reports/customers/analytics')->assertOk()->json('segments');
+
+        $this->assertSame(1, (int) ($segments['Repeat'] ?? 0), 'four orders, counted once each');
+        $this->assertArrayNotHasKey('Regular', $segments, 'double-counting would read eight');
+    }
+
+    public function test_an_order_placed_only_through_the_login_still_counts(): void
+    {
+        // The second arm of the UNION: an order carrying the login but no
+        // customer record. Without that arm this customer has one order ("New");
+        // with it, two ("Repeat").
+        [$customer, $user] = $this->customerWithLogin('LoginOnly');
+        $this->recognisedOrder($customer->id, null);   // by customer record
+        $this->recognisedOrder(null, $user->id);       // by login only
+
+        $segments = $this->getJson('/api/v1/admin/reports/customers/analytics')->assertOk()->json('segments');
+
+        $this->assertSame(1, (int) ($segments['Repeat'] ?? 0), 'both routes to the same person count');
+        $this->assertArrayNotHasKey('New', $segments);
+    }
 }
