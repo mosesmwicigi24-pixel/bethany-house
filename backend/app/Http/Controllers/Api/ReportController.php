@@ -485,10 +485,13 @@ class ReportController extends Controller
         [$start, $end] = $this->dateRange($request);
         $outletId  = $request->get('outlet_id');
         $currency  = strtoupper($request->get('currency_code', 'KES'));
-        // The four staff queues (Order::SALES_BUCKETS). 'Online' used to conflate
-        // self-service web orders with staff-converted quotations; the split
-        // restates that one channel's history — POS and WhatsApp are unchanged.
-        $channels  = ['till', 'web', 'chat', 'quoted'];
+        // The reporting channels (Order::REPORTING_CHANNELS). 'Online' used to
+        // conflate self-service web orders with staff-converted quotations, and
+        // 'chat' conflated the two apps the business actually sells on. The
+        // sales summary was split in #381; this page kept one "Chat Orders"
+        // line, so two pages of the same section disagreed about what a channel
+        // is. One list now, from the model.
+        $channels  = \App\Models\Order::REPORTING_CHANNELS;
 
         // Cash per order: settled payments net of refunds. Computed once as a
         // sub-select so every aggregate below reuses it instead of re-joining.
@@ -527,7 +530,7 @@ class ReportController extends Controller
             ->groupBy('order_id');
 
         $scoped = fn (?string $channel) => Order::query()
-            ->salesChannel($channel)
+            ->reportingChannel($channel)
             ->whereBetween('orders.created_at', [$start, $end])
             // Recognised income only: an order a human has confirmed. Before
             // this the filter was NOT IN (voided, cancelled), which counted
@@ -566,7 +569,7 @@ class ReportController extends Controller
             $r = $scoped($c)->selectRaw($agg)->first();
             $byChannel[] = [
                 'channel' => $c,
-                'label'   => ['till' => 'Till Sales', 'web' => 'Web Orders', 'chat' => 'Chat Orders', 'quoted' => 'Quoted Sales'][$c],
+                'label'   => \App\Models\Order::REPORTING_CHANNEL_LABELS[$c],
                 'orders'  => (int)   ($r->orders  ?? 0),
                 'sales'   => (float) ($r->sales   ?? 0),
                 'paid'    => (float) ($r->paid    ?? 0),
@@ -660,7 +663,7 @@ class ReportController extends Controller
             }
             $byStage[] = [
                 'channel' => $c,
-                'label'   => ['till' => 'Till Sales', 'web' => 'Web Orders', 'chat' => 'Chat Orders', 'quoted' => 'Quoted Sales'][$c],
+                'label'   => \App\Models\Order::REPORTING_CHANNEL_LABELS[$c],
                 'stages'  => $stages,
             ];
         }
@@ -670,7 +673,7 @@ class ReportController extends Controller
         // to wonder where the missing money went: sales + pipeline + dead is
         // the whole order book.
         $pipelineScoped = fn (?string $channel) => Order::query()
-            ->salesChannel($channel)
+            ->reportingChannel($channel)
             ->whereBetween('orders.created_at', [$start, $end])
             ->pipeline()
             ->when($reportInKes,

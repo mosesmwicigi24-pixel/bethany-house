@@ -542,7 +542,8 @@ export interface LedgerFigures {
 export interface LedgerBucket {
     period: string;
     total: LedgerFigures;
-    by_channel: Record<"till" | "web" | "chat" | "quoted", LedgerFigures>;
+    /** Keyed by Order::REPORTING_CHANNELS — chat splits into the two apps. */
+    by_channel: Record<"till" | "web" | "whatsapp" | "messenger" | "chat" | "quoted", LedgerFigures>;
 }
 // ── Second-purchase engine ────────────────────────────────────────────────────
 
@@ -637,7 +638,7 @@ export interface SalesLedger {
     /** Unconfirmed carts. Reportable, never income. */
     pipeline: {
         total: { orders: number; sales: number };
-        by_channel: Record<"till" | "web" | "chat" | "quoted", { orders: number; sales: number }>;
+        by_channel: Record<"till" | "web" | "whatsapp" | "messenger" | "chat" | "quoted", { orders: number; sales: number }>;
     };
     /** recognised + pipeline = gross. Bridges this report to older printouts. */
     reconciliation: {

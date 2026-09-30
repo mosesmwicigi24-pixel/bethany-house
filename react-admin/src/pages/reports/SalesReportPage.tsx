@@ -973,8 +973,16 @@ function SalesByOutletTable({ params }: { params: Record<string, any> }) {
 // landed in (see ReportController::salesLedger). Read "balance" as "still owed
 // on what we sold then", not "money that has not arrived yet".
 
-const CHANNEL_KEYS = ["till", "web", "chat", "quoted"] as const;
-const CHANNEL_LABEL: Record<string, string> = { till: "Till Sales", web: "Web Orders", chat: "Chat Orders", quoted: "Quoted Sales" };
+/** Mirrors Order::REPORTING_CHANNELS. Chat is two apps the business sells on
+ *  and judges separately; the ledger showed one "Chat Orders" column while the
+ *  summary above it had split them since #381, so one page said two things.
+ *  "Other chat" exists only for an order that names neither app — it is kept in
+ *  the list so the columns still add up to the row total. */
+const CHANNEL_KEYS = ["till", "web", "whatsapp", "messenger", "chat", "quoted"] as const;
+const CHANNEL_LABEL: Record<string, string> = {
+    till: "Till Sales", web: "Web Orders", whatsapp: "WhatsApp", messenger: "Messenger",
+    chat: "Other Chat", quoted: "Quoted Sales",
+};
 
 /** Balance is the number a manager is chasing, so it earns colour; zero does not. */
 function Owed({ value }: { value: number }) {
