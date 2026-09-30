@@ -494,13 +494,32 @@ class MetricEngine
     private function openBalances()
     {
         return $this->salesBase()
-            ->whereIn('payment_status', ['pending', 'partial', 'deposit'])
             ->leftJoinSub(
                 DB::table('payments')->where('status', 'paid')
                     ->selectRaw('order_id, SUM((amount - COALESCE(refund_amount,0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))) AS paid')
                     ->groupBy('order_id'),
                 'pp', 'pp.order_id', '=', 'orders.id',
-            );
+            )
+            // Open = not settled, and money still owed.
+            //
+            // It was `whereIn('payment_status', ['pending','partial','deposit'])`
+            // — an enumeration, and a fifth value existed: one recognised order
+            // sits in `pending_approval` owing KES 15,500, which the receivables
+            // page could not see while the sales figures counted it. Found by
+            // reconciling sold − collected (434,242) against outstanding
+            // (482,092): the gap is exactly that 15,500, less 63,350 of
+            // overpayment which this correctly clamps away per order.
+            //
+            // The two conditions are deliberate and do different jobs.
+            // `payment_status <> 'paid'` respects a human's judgement that an
+            // order is settled: a partially REFUNDED order leaves paid-net
+            // below its total, and whether that is a receivable or a total that
+            // should have been reduced is a business question, not arithmetic.
+            // The `owed > 0` half then catches every other status, including
+            // ones nobody has invented yet — enumerating them is how money goes
+            // missing quietly.
+            ->where('payment_status', '<>', 'paid')
+            ->whereRaw(self::owed() . ' > 0');
     }
 
     /** Sales minus money truth per open order: what customers still owe. */
