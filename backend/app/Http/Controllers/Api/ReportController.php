@@ -1197,29 +1197,45 @@ class ReportController extends Controller
     /**
      * GET /admin/reports/customers/summary
      */
+    /**
+     * Who placed an order, for counting distinct buyers.
+     *
+     * This counted `user_id` alone, and 683 of 684 customers have no login —
+     * a walk-in never gets one — so unique buyers, repeat buyers, the repeat
+     * rate and returning buyers all read ZERO while 566 people bought in the
+     * quarter (measured 2026-09-29). customer_id is the link; user_id stays as
+     * a second arm for web accounts. Prefixed so the two id spaces cannot
+     * collide.
+     */
+    private function buyerKey(string $table = 'orders'): string
+    {
+        return "COALESCE('c' || {$table}.customer_id, 'u' || {$table}.user_id)";
+    }
+
     public function customerSummary(Request $request)
     {
         [$start, $end] = $this->dateRange($request);
+        $buyer = $this->buyerKey();
 
         $totalCustomers = Customer::count();
         $newCustomers   = Customer::whereBetween('created_at', [$start, $end])->count();
 
-        $uniqueBuyers = DB::table('orders')
+        $uniqueBuyers = (int) DB::table('orders')
             ->whereBetween('created_at', [$start, $end])
             ->where('payment_status', 'paid')
-            ->whereNotNull('user_id')
-            ->distinct('user_id')
-            ->count('user_id');
+            ->whereRaw('(orders.customer_id IS NOT NULL OR orders.user_id IS NOT NULL)')
+            ->distinct()
+            ->count(DB::raw($buyer));
 
         // Repeat purchase rate: customers who placed >= 2 orders in the period
         // Use DB::table with explicit selectRaw so PostgreSQL GROUP BY is satisfied
         $repeatBuyers = DB::table(
             DB::table('orders')
-                ->selectRaw('user_id, COUNT(*) AS order_count')
+                ->selectRaw("{$buyer} AS buyer, COUNT(*) AS order_count")
                 ->whereBetween('created_at', [$start, $end])
                 ->where('payment_status', 'paid')
-                ->whereNotNull('user_id')
-                ->groupBy('user_id'),
+                ->whereRaw('(orders.customer_id IS NOT NULL OR orders.user_id IS NOT NULL)')
+                ->groupBy(DB::raw($buyer)),
             'buyer_counts'
         )
             ->where('order_count', '>=', 2)
@@ -1228,18 +1244,18 @@ class ReportController extends Controller
         $repeatRate = $uniqueBuyers > 0 ? round(($repeatBuyers / $uniqueBuyers) * 100, 1) : 0;
 
         // New vs returning in period
-        $returningBuyers = DB::table('orders as o1')
+        $returningBuyers = (int) DB::table('orders as o1')
             ->whereBetween('o1.created_at', [$start, $end])
             ->where('o1.payment_status', 'paid')
-            ->whereNotNull('o1.user_id')
+            ->whereRaw('(o1.customer_id IS NOT NULL OR o1.user_id IS NOT NULL)')
             ->whereExists(function ($q) use ($start) {
                 $q->from('orders as o2')
-                  ->whereRaw('o2.user_id = o1.user_id')
+                  ->whereRaw($this->buyerKey('o2') . ' = ' . $this->buyerKey('o1'))
                   ->where('o2.payment_status', 'paid')
                   ->where('o2.created_at', '<', $start);
             })
-            ->distinct('o1.user_id')
-            ->count('o1.user_id');
+            ->distinct()
+            ->count(DB::raw($this->buyerKey('o1')));
 
         // New customer acquisition by month
         $acquisitionTrend = DB::table('customers')

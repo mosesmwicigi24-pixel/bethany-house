@@ -43,25 +43,53 @@ class EnhancedReportController extends Controller
      */
     public function inventoryValuation(Request $request)
     {
-        $rows = DB::table('inventory_items')
-            ->join('product_variants', 'inventory_items.product_variant_id', '=', 'product_variants.id')
-            ->join('products', 'product_variants.product_id', '=', 'products.id')
-            ->leftJoin('categories', 'products.category_id', '=', 'categories.id')
-            ->leftJoin('outlets', 'inventory_items.outlet_id', '=', 'outlets.id')
-            ->leftJoin('product_prices', function($join) {
-                $join->on('product_prices.product_variant_id', '=', 'product_variants.id')
-                     ->where('product_prices.currency_code', '=', 'KES');
-            })
-            ->whereRaw('(inventory_items.quantity_on_hand - inventory_items.quantity_reserved) > 0')
+        // Stock hangs off inventory_items.product_id, which is never null; the
+        // variant is optional. Joining product_variants INNER therefore valued
+        // only the catalogue's variant stock and silently dropped every simple
+        // product: 91 of 164 SKUs and 47,264 of 50,967 available units on
+        // 2026-09-29, reporting KES 26.6m against the engine's 86.7m. Join the
+        // product, and let the variant be optional as the data has it.
+        //
+        // Price follows the house rule (CurrencyPricing): the variant's own KES
+        // row when the line is a variant, otherwise the product-level KES row.
+        $rows = DB::table('inventory_items as ii')
+            ->join('products as p', 'p.id', '=', 'ii.product_id')
+            ->leftJoin('categories', 'categories.id', '=', 'p.category_id')
+            ->leftJoin('outlets', 'outlets.id', '=', 'ii.outlet_id')
+            // One price row per key, guaranteed. `unique_product_price` covers
+            // (product_id, product_variant_id, currency_code), but Postgres
+            // treats NULLs as distinct, so it does NOT stop a second
+            // product-level row — the same NULL hole the inventory_items unique
+            // index was rebuilt to close. None exists today (checked
+            // 2026-09-30); joining raw would silently multiply the units of any
+            // product that grew one.
+            ->leftJoin(DB::raw("(SELECT product_variant_id, MAX(regular_price) AS regular_price
+                                   FROM product_prices
+                                  WHERE currency_code = 'KES' AND product_variant_id IS NOT NULL
+                               GROUP BY product_variant_id) AS vprice"),
+                'vprice.product_variant_id', '=', 'ii.product_variant_id')
+            ->leftJoin(DB::raw("(SELECT product_id, MAX(regular_price) AS regular_price
+                                   FROM product_prices
+                                  WHERE currency_code = 'KES' AND product_variant_id IS NULL
+                               GROUP BY product_id) AS pprice"),
+                'pprice.product_id', '=', 'ii.product_id')
+            ->whereRaw('(ii.quantity_on_hand - ii.quantity_reserved) > 0')
             ->selectRaw("
                 COALESCE(categories.name_en, 'Uncategorised') AS category_name,
                 COALESCE(outlets.name, 'Warehouse') AS outlet_name,
                 COUNT(*) AS sku_count,
-                SUM(inventory_items.quantity_on_hand - inventory_items.quantity_reserved) AS total_units,
+                SUM(ii.quantity_on_hand - ii.quantity_reserved) AS total_units,
                 SUM(
-                    (inventory_items.quantity_on_hand - inventory_items.quantity_reserved)
-                    * COALESCE(product_prices.regular_price, 0)
-                ) AS total_retail_value
+                    (ii.quantity_on_hand - ii.quantity_reserved)
+                    * COALESCE(vprice.regular_price, pprice.regular_price, 0)
+                ) AS total_retail_value,
+                -- On-hand beside available, because the engine's inventory
+                -- health values on-hand and the two could not be reconciled
+                -- without it. The headline stays available: that is what the
+                -- report has always meant and changing it is the owner's call.
+                SUM(ii.quantity_on_hand) AS total_units_on_hand,
+                SUM(ii.quantity_on_hand * COALESCE(vprice.regular_price, pprice.regular_price, 0))
+                    AS total_retail_value_on_hand
             ")
             ->groupBy('categories.name_en', 'outlets.name')
             ->orderBy('categories.name_en')
@@ -71,11 +99,15 @@ class EnhancedReportController extends Controller
             'total_retail_value' => $rows->sum('total_retail_value'),
             'total_sku_count'    => $rows->sum('sku_count'),
             'total_units'        => $rows->sum('total_units'),
+            'basis'              => 'available (on hand less reserved)',
+            'total_units_on_hand'        => $rows->sum('total_units_on_hand'),
+            'total_retail_value_on_hand' => $rows->sum('total_retail_value_on_hand'),
         ];
 
         if ($request->get('export') === 'csv') {
             return $this->csvResponse('inventory_valuation', $rows->toArray(),
-                ['category_name', 'outlet_name', 'sku_count', 'total_units', 'total_retail_value']);
+                ['category_name', 'outlet_name', 'sku_count', 'total_units', 'total_retail_value',
+                 'total_units_on_hand', 'total_retail_value_on_hand']);
         }
 
         return response()->json(['breakdown' => $rows, 'grand_totals' => $grand]);
