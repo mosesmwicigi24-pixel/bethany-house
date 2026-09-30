@@ -43,7 +43,16 @@ class ReportDateContractTest extends TestCase
         Sanctum::actingAs($staff);
 
         $this->order(1_000_000, now()->subMonths(8));   // only a wide window sees this
-        $this->order(7, now()->subDay());               // every default window sees this
+
+        // NOW, not yesterday. This was `now()->subDay()`, which is in THIS
+        // month for all but a few hours a month — and CI ran at 21:08 UTC on
+        // 30 September, which is 00:08 on 1 October in Africa/Nairobi, so
+        // "yesterday" fell in the previous month and `period=this_month`
+        // correctly found nothing. The test was wrong, not the report.
+        //
+        // `now()` is inside this month, inside the last 30 days and inside
+        // every wide window by construction, on every day of every month.
+        $this->order(7, now());                        // every default window sees this
     }
 
     private function order(float $total, \DateTimeInterface $at): void
