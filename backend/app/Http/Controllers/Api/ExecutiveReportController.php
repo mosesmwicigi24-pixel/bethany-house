@@ -84,7 +84,11 @@ class ExecutiveReportController extends Controller
                     'low_stock' => $engine->lowStock(),
                 ],
             ],
-            'attention' => $engine->attention(),
+            // Which of the zeros above are zero because the work never
+            // happened, as opposed to a quiet month. An empty list means the
+            // zeros are real — which is itself worth being able to tell.
+            'structural_gaps' => $engine->structuralGaps(),
+            'attention'       => $engine->attention(),
         ];
 
         // CFO block: reports.financial holders only (rule 5 of the spec).
