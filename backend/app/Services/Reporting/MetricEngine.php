@@ -389,6 +389,12 @@ class MetricEngine
      * is denominated in the order's own currency, so reading it raw mixes
      * units — see owed() below for what that cost.
      */
+    /** Any money column, in shillings, by the currency column beside it. */
+    private static function kesOf(string $amountColumn, string $currencyColumn): string
+    {
+        return \App\Support\ReportingCurrency::kes($amountColumn, $currencyColumn);
+    }
+
     private static function totalKes(string $table = 'orders'): string
     {
         return \App\Support\ReportingCurrency::kes("{$table}.total_amount", "{$table}.currency_code");
@@ -861,8 +867,9 @@ class MetricEngine
             ->when($this->outletIds, fn ($q) => $q->whereIn('o.outlet_id', $this->outletIds))
             ->groupBy('oi.product_id')
             ->selectRaw('oi.product_id, MAX(oi.product_name) AS product,
-                COALESCE(SUM(oi.total_price), 0) AS revenue, COALESCE(SUM(oi.quantity), 0) AS units')
-            ->orderByDesc(DB::raw('SUM(oi.total_price)'))
+                COALESCE(SUM(' . self::kesOf('oi.total_price', 'o.currency_code') . '), 0) AS revenue,
+                COALESCE(SUM(oi.quantity), 0) AS units')
+            ->orderByDesc(DB::raw('SUM(' . self::kesOf('oi.total_price', 'o.currency_code') . ')'))
             ->get();
     }
 
@@ -1024,6 +1031,9 @@ class MetricEngine
      */
     public function supplierPerformance(Carbon $s, Carbon $e)
     {
+        // Purchase orders are all KES today, so this was right by luck.
+        $poSpend = self::kesOf('po.total_amount', 'po.currency_code');
+
         return DB::table('purchase_orders as po')
             ->join('suppliers as sup', 'sup.id', '=', 'po.supplier_id')
             ->leftJoin(DB::raw('(
@@ -1043,13 +1053,13 @@ class MetricEngine
             ->groupBy('sup.id', 'sup.name', 'sup.rating')
             ->selectRaw("sup.name AS supplier, sup.rating,
                 COUNT(*) AS orders,
-                COALESCE(SUM(po.total_amount), 0) AS spend,
+                COALESCE(SUM({$poSpend}), 0) AS spend,
                 ROUND(AVG(g.received_date - po.order_date) FILTER (WHERE g.received_date IS NOT NULL)::numeric, 1) AS avg_delivery_days,
                 COUNT(*) FILTER (WHERE g.received_date IS NOT NULL) AS delivered,
                 COUNT(*) FILTER (WHERE g.received_date > po.expected_delivery_date) AS late,
                 COALESCE(SUM(gq.qty_received), 0) AS qty_received,
                 COALESCE(SUM(gq.qty_rejected), 0) AS qty_rejected")
-            ->orderByDesc(DB::raw('COALESCE(SUM(po.total_amount), 0)'))
+            ->orderByDesc(DB::raw('COALESCE(SUM(' . self::kesOf('po.total_amount', 'po.currency_code') . '), 0)'))
             ->limit(10)
             ->get();
     }
@@ -1569,7 +1579,8 @@ class MetricEngine
             FROM win_back_outreach w
             LEFT JOIN users u ON u.id = w.contacted_by
             LEFT JOIN LATERAL (
-                SELECT o.id AS order_id, o.order_number, o.total_amount AS recovered_amount,
+                SELECT o.id AS order_id, o.order_number,
+                       (o.total_amount) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) AS recovered_amount,
                        o.created_at AS ordered_at
                 FROM orders o
                 WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
@@ -1710,7 +1721,7 @@ class MetricEngine
                 -- value is that day's total line spend on the product.
                 SELECT {$key} AS ckey, oi.product_id,
                        DATE(o.created_at) AS buy_date,
-                       SUM(oi.total_price) AS event_value,
+                       SUM((oi.total_price) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))) AS event_value,
                        MAX(TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,'')))) AS name,
                        MAX(o.customer_phone) AS phone
                 FROM orders o
@@ -1954,7 +1965,7 @@ class MetricEngine
             ->groupBy('p.payment_method')
             ->selectRaw("p.payment_method AS method, COUNT(*) AS payments,
                 COALESCE(SUM(p.amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code))), 0) AS gross,
-                COALESCE(SUM(COALESCE(p.refund_amount, 0)), 0) AS refunds,
+                COALESCE(SUM(COALESCE(p.refund_amount, 0) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code))), 0) AS refunds,
                 COALESCE(SUM((p.amount - COALESCE(p.refund_amount, 0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code))), 0) AS net")
             ->orderByDesc(DB::raw('COALESCE(SUM((p.amount - COALESCE(p.refund_amount, 0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code))), 0)'))
             ->get();
@@ -2014,9 +2025,12 @@ class MetricEngine
             $end   = $now->subMonthsNoOverflow($i)->endOfMonth();
             $months[] = [
                 'month'   => $start->format('M Y'),
+                // Converted, because the tile above this chart is. Read raw,
+                // the trend showed July at 2,312,285 while the tile said
+                // 2,617,974 — one page disagreeing with itself by 305,689.
                 'revenue' => round((float) $this->salesBase()
                     ->whereBetween('orders.created_at', [$start->toMutable(), $end->toMutable()])
-                    ->sum('total_amount'), 2),
+                    ->selectRaw('COALESCE(SUM(' . self::totalKes() . '),0) AS v')->value('v'), 2),
             ];
         }
 
@@ -2351,7 +2365,7 @@ class MetricEngine
         $linesCte = "
             lines AS (
                 SELECT o.id AS order_id, oi.product_id,
-                       SUM(oi.total_price) AS line_value
+                       SUM((oi.total_price) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))) AS line_value
                 FROM orders o
                 JOIN order_items oi ON oi.order_id = o.id
                 WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
@@ -2540,7 +2554,7 @@ class MetricEngine
         $sales = collect(DB::select("
             SELECT oi.product_id,
                    SUM(oi.quantity)    AS units,
-                   SUM(oi.total_price) AS revenue,
+                   SUM((oi.total_price) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))) AS revenue,
                    COALESCE(MAX(pt.name), MAX(p.slug), MAX(p.sku)) AS name
             FROM order_items oi
             JOIN orders o   ON o.id = oi.order_id
@@ -2870,7 +2884,7 @@ class MetricEngine
         $hub60 = collect(DB::select("
             SELECT oi.product_id,
                    SUM(oi.quantity)    AS units,
-                   SUM(oi.total_price) AS revenue
+                   SUM((oi.total_price) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))) AS revenue
             FROM order_items oi
             JOIN orders o ON o.id = oi.order_id
             WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
@@ -3606,7 +3620,9 @@ class MetricEngine
         // DISTINCT pairs is exactly the buyer-turnover signal.
         $instCte = "
             WITH keyed AS (
-                SELECT {$key} AS ckey, o.id AS order_id, o.customer_id, o.total_amount, o.created_at,
+                SELECT {$key} AS ckey, o.id AS order_id, o.customer_id,
+                       (o.total_amount) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) AS total_amount,
+                       o.created_at,
                        TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,''))) AS name,
                        o.customer_phone AS phone,
                        NULLIF(CONCAT(

@@ -184,7 +184,7 @@ class SalesLedgerTest extends TestCase
 
         foreach (['weekly', 'monthly'] as $grain) {
             foreach ($this->ledger()[$grain] as $row) {
-                $this->assertSame(['till', 'web', 'chat', 'quoted'],
+                $this->assertSame(\App\Models\Order::REPORTING_CHANNELS,
                     array_keys($row['by_channel']), "{$grain} row is missing a channel");
             }
         }

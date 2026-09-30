@@ -29,6 +29,8 @@ use Carbon\Carbon;
 class ReportController extends Controller
 {
     use \App\Http\Controllers\Api\Concerns\ReportsMoneyInKes;
+    use \App\Http\Controllers\Api\Concerns\ResolvesReportWindow;
+    use \App\Http\Controllers\Api\Concerns\IdentifiesBuyers;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -84,34 +86,6 @@ class ReportController extends Controller
         return $data;
     }
 
-    /**
-     * The window this report answers for — from EITHER convention (D4).
-     *
-     * Reports grew three date contracts. The executive endpoints read
-     * `from`/`to`; these legacy endpoints read `start_date`/`end_date` and
-     * quietly fall back to the last 30 days; the intelligence endpoints read
-     * `period`, ignoring `from`/`to` unless `period=custom`. A caller using
-     * the wrong pair — a link copied between two pages of the same section, a
-     * bookmark, our own frontend — got a DIFFERENT window back with no error,
-     * and nothing in the numbers to say so.
-     *
-     * Both spellings are accepted here, `start_date` winning if a caller
-     * sends both, and every payload already returns the window that actually
-     * answered in its `period` block, so it can be read rather than assumed.
-     *
-     * Unifying all three contracts belongs to the consolidation. Making the
-     * wrong pair stop lying does not have to wait for it.
-     */
-    private function dateRange(Request $request): array
-    {
-        $start = $request->get('start_date', $request->get('from', now()->subDays(29)->format('Y-m-d')));
-        $end   = $request->get('end_date',   $request->get('to',   now()->format('Y-m-d')));
-
-        // substr guards a caller who sends a full timestamp: appending the
-        // end-of-day to "2026-09-30 14:00:00" produced an invalid date and
-        // Postgres took the whole query down with it.
-        return [$start, substr($end, 0, 10) . ' 23:59:59'];
-    }
 
     /**
      * Return the equivalent prior period date range for comparison.
@@ -511,10 +485,13 @@ class ReportController extends Controller
         [$start, $end] = $this->dateRange($request);
         $outletId  = $request->get('outlet_id');
         $currency  = strtoupper($request->get('currency_code', 'KES'));
-        // The four staff queues (Order::SALES_BUCKETS). 'Online' used to conflate
-        // self-service web orders with staff-converted quotations; the split
-        // restates that one channel's history — POS and WhatsApp are unchanged.
-        $channels  = ['till', 'web', 'chat', 'quoted'];
+        // The reporting channels (Order::REPORTING_CHANNELS). 'Online' used to
+        // conflate self-service web orders with staff-converted quotations, and
+        // 'chat' conflated the two apps the business actually sells on. The
+        // sales summary was split in #381; this page kept one "Chat Orders"
+        // line, so two pages of the same section disagreed about what a channel
+        // is. One list now, from the model.
+        $channels  = \App\Models\Order::REPORTING_CHANNELS;
 
         // Cash per order: settled payments net of refunds. Computed once as a
         // sub-select so every aggregate below reuses it instead of re-joining.
@@ -553,7 +530,7 @@ class ReportController extends Controller
             ->groupBy('order_id');
 
         $scoped = fn (?string $channel) => Order::query()
-            ->salesChannel($channel)
+            ->reportingChannel($channel)
             ->whereBetween('orders.created_at', [$start, $end])
             // Recognised income only: an order a human has confirmed. Before
             // this the filter was NOT IN (voided, cancelled), which counted
@@ -592,7 +569,7 @@ class ReportController extends Controller
             $r = $scoped($c)->selectRaw($agg)->first();
             $byChannel[] = [
                 'channel' => $c,
-                'label'   => ['till' => 'Till Sales', 'web' => 'Web Orders', 'chat' => 'Chat Orders', 'quoted' => 'Quoted Sales'][$c],
+                'label'   => \App\Models\Order::REPORTING_CHANNEL_LABELS[$c],
                 'orders'  => (int)   ($r->orders  ?? 0),
                 'sales'   => (float) ($r->sales   ?? 0),
                 'paid'    => (float) ($r->paid    ?? 0),
@@ -686,7 +663,7 @@ class ReportController extends Controller
             }
             $byStage[] = [
                 'channel' => $c,
-                'label'   => ['till' => 'Till Sales', 'web' => 'Web Orders', 'chat' => 'Chat Orders', 'quoted' => 'Quoted Sales'][$c],
+                'label'   => \App\Models\Order::REPORTING_CHANNEL_LABELS[$c],
                 'stages'  => $stages,
             ];
         }
@@ -696,7 +673,7 @@ class ReportController extends Controller
         // to wonder where the missing money went: sales + pipeline + dead is
         // the whole order book.
         $pipelineScoped = fn (?string $channel) => Order::query()
-            ->salesChannel($channel)
+            ->reportingChannel($channel)
             ->whereBetween('orders.created_at', [$start, $end])
             ->pipeline()
             ->when($reportInKes,
@@ -1311,10 +1288,6 @@ class ReportController extends Controller
      * a second arm for web accounts. Prefixed so the two id spaces cannot
      * collide.
      */
-    private function buyerKey(string $table = 'orders'): string
-    {
-        return "COALESCE('c' || {$table}.customer_id, 'u' || {$table}.user_id)";
-    }
 
     public function customerSummary(Request $request)
     {
