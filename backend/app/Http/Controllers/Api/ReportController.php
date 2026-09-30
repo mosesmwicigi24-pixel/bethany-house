@@ -497,13 +497,29 @@ class ReportController extends Controller
         // the order it settles: measured 2026-09-30, 0 of 834 payments differ
         // and no order has payments in two currencies. If that ever changes,
         // convert HERE, per payment, using payments.currency_code.
+        // A LATERAL lookup per order, not an aggregate over every payment.
+        //
+        // This was `SELECT order_id, SUM(...) FROM payments GROUP BY order_id`
+        // joined with leftJoinSub. Measured at scale (cycle 7), Postgres put
+        // that aggregate on the inner side of a nested loop and RE-COMPUTED it
+        // for every order — 2,195 loops over 2,501 payments — so the ledger
+        // grew with the SQUARE of the data: 301 ms at 850 orders, 7.7 s at
+        // 5,000, 116 s at 20,000. The index payments_order_id_index already
+        // existed; the old shape simply could not use it, because the join
+        // happened after the aggregation. A lateral subquery correlated on
+        // orders.id hits that index once per order instead.
+        //
+        // Results are unchanged — proven by diffing a deterministic 5,000-order
+        // snapshot of every ledger figure before and after. Without payments
+        // the aggregate returns one row of 0 rather than a NULL row; the
+        // COALESCE(pay.paid, 0) downstream makes those identical.
         $paidPerOrder = DB::table('payments')
-            ->selectRaw('order_id, (COALESCE(SUM(amount - COALESCE(refund_amount, 0)), 0))::float8 AS paid')
-            ->where('status', 'paid')
-            ->where(fn ($q) => $q->where('requires_approval', false)
-                                 ->orWhereNull('requires_approval')
-                                 ->orWhere('approval_status', 'approved'))
-            ->groupBy('order_id');
+            ->selectRaw('(COALESCE(SUM(payments.amount - COALESCE(payments.refund_amount, 0)), 0))::float8 AS paid')
+            ->whereColumn('payments.order_id', 'orders.id')
+            ->where('payments.status', 'paid')
+            ->where(fn ($q) => $q->where('payments.requires_approval', false)
+                                 ->orWhereNull('payments.requires_approval')
+                                 ->orWhere('payments.approval_status', 'approved'));
 
         $scoped = fn (?string $channel) => Order::query()
             ->reportingChannel($channel)
@@ -518,7 +534,7 @@ class ReportController extends Controller
                 fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code')),
                 fn ($q) => $q->whereRaw('UPPER(orders.currency_code) = ?', [$currency]))
             ->when($outletId, fn ($q) => $q->where('orders.outlet_id', $outletId))
-            ->leftJoinSub($paidPerOrder, 'pay', fn ($j) => $j->on('pay.order_id', '=', 'orders.id'));
+            ->leftJoinLateral($paidPerOrder, 'pay');
 
         // Clamp PER ORDER, not on the bucket sum. paid is capped at each order's
         // own total and balance is that order's shortfall — the rule
@@ -656,7 +672,7 @@ class ReportController extends Controller
                 fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code')),
                 fn ($q) => $q->whereRaw('UPPER(orders.currency_code) = ?', [$currency]))
             ->when($outletId, fn ($q) => $q->where('orders.outlet_id', $outletId))
-            ->leftJoinSub($paidPerOrder, 'pay', fn ($j) => $j->on('pay.order_id', '=', 'orders.id'));
+            ->leftJoinLateral($paidPerOrder, 'pay');
 
         $pipeline = ['total' => ['orders' => 0, 'sales' => 0.0], 'by_channel' => []];
         foreach ($channels as $c) {
@@ -1367,24 +1383,42 @@ class ReportController extends Controller
         // Segment by lifetime order count. The join hung on the login too, so
         // every walk-in customer matched no orders at all and the whole book
         // was reported as "New" — a segmentation that described nothing.
+        // Each customer's recognised orders, matched by EITHER key.
+        //
+        // This was one LEFT JOIN on `orders.customer_id = customers.id OR
+        // orders.user_id = customers.user_id`. The OR was added in cycle 3 to
+        // stop every walk-in being classed "New" — and it fixed that while
+        // making the query quadratic: an OR in a join condition rules out a
+        // hash or merge join, so Postgres nested-looped every customer over
+        // every order (measured at 20,000 orders, with real statistics:
+        // 2,000 customers x 13,334 orders, 866 ms of a 941 ms request; at
+        // 50,000 it was the first report in the module past one second).
+        //
+        // Two equality joins, UNIONed. UNION — not UNION ALL — de-duplicates
+        // the (customer, order) pairs, so an order that matches a customer by
+        // BOTH keys still counts once, exactly as the OR did. Each arm can
+        // hash-join. Proven equivalent by snapshot at volume and by a test for
+        // the both-keys case, which the snapshot's walk-in data cannot reach.
+        $byCustomerRecord = $this->recognisedOrders(DB::table('orders as o'), 'o')
+            ->whereNotNull('o.customer_id')
+            ->selectRaw('o.customer_id AS cid, o.id AS oid');
+
+        $byLogin = $this->recognisedOrders(
+                DB::table('orders as o')->join('customers as lc', 'lc.user_id', '=', 'o.user_id'),
+                'o',
+            )
+            ->whereNotNull('o.user_id')
+            ->selectRaw('lc.id AS cid, o.id AS oid');
+
         $segments = DB::table('customers')
-            ->leftJoin('orders', function ($join) {
-                $join->on(fn ($j) => $j->on('orders.customer_id', '=', 'customers.id')
-                                       ->orOn('orders.user_id', '=', 'customers.user_id'))
-                     // Recognised, like every other count of who bought: a
-                     // customer with two deposit orders is a Repeat customer,
-                     // not a New one waiting on their last instalment.
-                     ->whereNotIn('orders.status', \App\Models\Order::DEAD_STATUSES)
-                     ->where(fn ($q) => $q->whereIn('orders.status', \App\Models\Order::RECOGNISED_STATUSES)
-                                          ->orWhereIn('orders.payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES));
-            })
+            ->leftJoinSub($byCustomerRecord->union($byLogin), 'm', 'm.cid', '=', 'customers.id')
             ->groupBy('customers.id')
             ->selectRaw("
-                COUNT(orders.id) AS order_count,
+                COUNT(m.oid) AS order_count,
                 CASE
-                    WHEN COUNT(orders.id) >= 10 THEN 'VIP'
-                    WHEN COUNT(orders.id) >= 5  THEN 'Regular'
-                    WHEN COUNT(orders.id) >= 2  THEN 'Repeat'
+                    WHEN COUNT(m.oid) >= 10 THEN 'VIP'
+                    WHEN COUNT(m.oid) >= 5  THEN 'Regular'
+                    WHEN COUNT(m.oid) >= 2  THEN 'Repeat'
                     ELSE 'New'
                 END AS segment
             ")

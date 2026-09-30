@@ -12,6 +12,18 @@
             <directory>tests/Feature</directory>
         </testsuite>
     </testsuites>
+    <!-- The scale group is a measuring instrument, not a regression test: it
+         seeds up to 50,000 orders and times every report. Excluded here so CI
+         does not pay for it on every build; select the group explicitly on the
+         command line to run it. (Its docblock claimed this exclusion before it
+         existed. Note: XML forbids a double hyphen inside a comment, which is
+         why the command is described rather than quoted here; quoting it once
+         stopped the whole suite from starting.) -->
+    <groups>
+        <exclude>
+            <group>scale</group>
+        </exclude>
+    </groups>
     <source>
         <include>
             <directory>app</directory>
