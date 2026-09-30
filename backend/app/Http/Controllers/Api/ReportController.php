@@ -190,17 +190,32 @@ class ReportController extends Controller
             WHEN orders.order_type = 'online' THEN 'quoted'
             ELSE 'till' END)";
 
+        // The reporting axis: the bucket above, except chat splits into the two
+        // apps the owner sells on and judges separately (Order::CHAT_SOURCES).
+        // chat_revenue stays, as WhatsApp + Messenger + any unlabelled chat, so
+        // nothing that already reads this payload changes meaning.
+        $channelExpr = Order::reportingChannelSql($bucketExpr);
+
         $payKes = $reportInKes
             ? \App\Support\ReportingCurrency::kes('p.amount - COALESCE(p.refund_amount, 0)', 'p.currency_code')
             : 'p.amount - COALESCE(p.refund_amount, 0)';
 
-        $base = fn () => Order::whereBetween('orders.created_at', [$start, $end])
+        // ONE definition of "the orders this report counts", parameterised by
+        // window so the prior period is the SAME question asked of an earlier
+        // month. It used to be written out a second time further down with
+        // `whereNotIn(['voided','cancelled'])` and a single-currency filter,
+        // which quietly counted pending carts and refunded orders as prior
+        // revenue and compared them against a recognised, multi-currency
+        // present — so revenue_change_pct measured two different things.
+        $baseFor = fn ($from, $to) => Order::whereBetween('orders.created_at', [$from, $to])
             ->recognised()
             ->when($reportInKes,
                 fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code')),
                 fn ($q) => $q->whereRaw('UPPER(orders.currency_code) = ?', [$currency]))
             ->when($outletId,  fn ($q) => $q->where('orders.outlet_id',  $outletId))
             ->when($orderType, fn ($q) => $q->where('orders.order_type', $orderType));
+
+        $base = fn () => $baseFor($start, $end);
 
         // Money truth beside it: what actually settled in the same window.
         $collected = (float) DB::table('payments as p')
@@ -251,6 +266,15 @@ class ReportController extends Controller
             COUNT(CASE WHEN {$bucketExpr} = 'web'    THEN 1 END)              AS web_count,
             COUNT(CASE WHEN {$bucketExpr} = 'chat'   THEN 1 END)              AS chat_count,
             COUNT(CASE WHEN {$bucketExpr} = 'quoted' THEN 1 END)              AS quoted_count,
+            -- Chat, split into the two apps. These three sum to chat_revenue
+            -- above, so the tile a reader already knows keeps its meaning while
+            -- WhatsApp and Messenger become separately answerable.
+            (COALESCE(SUM(CASE WHEN {$channelExpr} = 'whatsapp'  THEN {$amtKes('orders.total_amount')} ELSE 0 END), 0))::float8 AS whatsapp_revenue,
+            (COALESCE(SUM(CASE WHEN {$channelExpr} = 'messenger' THEN {$amtKes('orders.total_amount')} ELSE 0 END), 0))::float8 AS messenger_revenue,
+            (COALESCE(SUM(CASE WHEN {$channelExpr} = 'chat'      THEN {$amtKes('orders.total_amount')} ELSE 0 END), 0))::float8 AS other_chat_revenue,
+            COUNT(CASE WHEN {$channelExpr} = 'whatsapp'  THEN 1 END)          AS whatsapp_count,
+            COUNT(CASE WHEN {$channelExpr} = 'messenger' THEN 1 END)          AS messenger_count,
+            COUNT(CASE WHEN {$channelExpr} = 'chat'      THEN 1 END)          AS other_chat_count,
             COUNT(DISTINCT COALESCE(user_id::text, normalize_phone(customer_phone), NULLIF(lower(btrim(customer_email)), '')))                                            AS unique_customers,
             (COALESCE(SUM({$amtKes('orders.discount_amount')}) / NULLIF(SUM({$amtKes('orders.total_amount')}) + SUM({$amtKes('orders.discount_amount')}), 0) * 100, 0))::float8 AS discount_rate_percent
         ")->first();
@@ -258,7 +282,7 @@ class ReportController extends Controller
         $daily = $base()->selectRaw("
             DATE(created_at)               AS date,
             COUNT(*)                       AS orders,
-            (COALESCE(SUM(total_amount), 0))::float8 AS revenue,
+            (COALESCE(SUM({$amtKes('orders.total_amount')}), 0))::float8 AS revenue,
             COUNT(DISTINCT COALESCE(user_id::text, normalize_phone(customer_phone), NULLIF(lower(btrim(customer_email)), '')))        AS unique_customers
         ")
             ->groupBy(DB::raw('DATE(created_at)'))
@@ -269,7 +293,7 @@ class ReportController extends Controller
         $weekly = $base()->selectRaw("
             DATE_TRUNC('week', created_at)::date AS week_start,
             COUNT(*)                             AS orders,
-            (COALESCE(SUM(total_amount), 0))::float8       AS revenue
+            (COALESCE(SUM({$amtKes('orders.total_amount')}), 0))::float8       AS revenue
         ")
             ->groupBy(DB::raw("DATE_TRUNC('week', created_at)"))
             ->orderBy('week_start')
@@ -333,7 +357,7 @@ class ReportController extends Controller
         $byHour = $base()->selectRaw("
             EXTRACT(HOUR FROM created_at)::int AS hour,
             COUNT(*)                           AS orders,
-            (COALESCE(SUM(total_amount), 0))::float8     AS revenue
+            (COALESCE(SUM({$amtKes('orders.total_amount')}), 0))::float8     AS revenue
         ")
             ->groupBy(DB::raw("EXTRACT(HOUR FROM created_at)"))
             ->orderBy('hour')
@@ -344,7 +368,7 @@ class ReportController extends Controller
             EXTRACT(DOW FROM created_at)::int AS dow,
             TO_CHAR(created_at, 'Day')        AS day_name,
             COUNT(*)                          AS orders,
-            (COALESCE(SUM(total_amount), 0))::float8    AS revenue
+            (COALESCE(SUM({$amtKes('orders.total_amount')}), 0))::float8    AS revenue
         ")
             ->groupBy(DB::raw("EXTRACT(DOW FROM created_at)"), DB::raw("TO_CHAR(created_at, 'Day')"))
             ->orderBy('dow')
@@ -354,15 +378,11 @@ class ReportController extends Controller
         $comparison = null;
         if ($request->boolean('compare')) {
             [$ps, $pe] = $this->priorPeriod($start, $end);
-            $prior = Order::whereBetween('created_at', [$ps, $pe])
-                ->whereNotIn('status', ['voided', 'cancelled'])
-                ->whereRaw('UPPER(currency_code) = ?', [$currency])
-                ->when($outletId,  fn ($q) => $q->where('outlet_id',  $outletId))
-                ->when($orderType, fn ($q) => $q->where('order_type', $orderType))
+            $prior = $baseFor($ps, $pe)
                 ->selectRaw("
                     COUNT(*) AS total_orders,
-                    (COALESCE(SUM(total_amount), 0))::float8 AS total_revenue,
-                    (COALESCE(AVG(total_amount), 0))::float8 AS average_order_value
+                    (COALESCE(SUM({$amtKes('orders.total_amount')}), 0))::float8 AS total_revenue,
+                    (COALESCE(AVG({$amtKes('orders.total_amount')}), 0))::float8 AS average_order_value
                 ")->first();
 
             $comparison = [

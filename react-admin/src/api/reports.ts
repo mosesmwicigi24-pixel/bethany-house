@@ -615,7 +615,9 @@ export interface OrderPipelineReport {
         currency: string;
     };
     aging: { key: "fresh" | "recent" | "stale" | "dormant"; label: string; orders: number; value: number }[];
-    by_channel: { channel: "till" | "web" | "chat" | "quoted"; label: string; orders: number; value: number }[];
+    /** Chat splits into the two apps the business sells on; "chat" itself
+     *  appears only when an order names neither (Order::REPORTING_CHANNELS). */
+    by_channel: { channel: "till" | "web" | "whatsapp" | "messenger" | "chat" | "quoted"; label: string; orders: number; value: number }[];
     orders: PipelineOrder[];
 }
 

@@ -212,8 +212,19 @@ export default function SalesReportPage() {
                          sub={`${s.till_count ?? 0} orders`} />
                 <KpiCard label="Web Orders" value={fmtKes(s.web_revenue ?? 0)}
                          sub={`${s.web_count ?? 0} orders`} />
-                <KpiCard label="Chat Orders" value={fmtKes(s.chat_revenue ?? 0)}
-                         sub={`${s.chat_count ?? 0} orders`} />
+                {/* Chat is two channels the business runs and judges apart —
+                    WhatsApp through Neema, and Messenger. One "Chat Orders"
+                    tile hid that the smaller count carried the larger money.
+                    The two (plus any chat order that names no app) still sum
+                    to what that tile showed. */}
+                <KpiCard label="WhatsApp Orders" value={fmtKes(s.whatsapp_revenue ?? 0)}
+                         sub={`${s.whatsapp_count ?? 0} orders`} />
+                <KpiCard label="Messenger Orders" value={fmtKes(s.messenger_revenue ?? 0)}
+                         sub={`${s.messenger_count ?? 0} orders`} />
+                {(s.other_chat_count ?? 0) > 0 && (
+                    <KpiCard label="Other Chat Orders" value={fmtKes(s.other_chat_revenue ?? 0)}
+                             sub={`${s.other_chat_count} orders`} />
+                )}
                 <KpiCard label="Quoted Sales" value={fmtKes(s.quoted_revenue ?? 0)}
                          sub={`${s.quoted_count ?? 0} orders`} />
                 {/* Accrued on this period's sales, by order date — not cash
