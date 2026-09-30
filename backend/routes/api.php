@@ -1353,7 +1353,10 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Reports ───────────────────────────────────────────────────────
-            Route::middleware('permission:reports.view,sanctum')->prefix('reports')->group(function () {
+            // report.window: one date contract for the whole section — a
+            // caller using the other page's spelling got a different window
+            // back, silently (D4). See NormalisesReportWindow.
+            Route::middleware(['permission:reports.view,sanctum', 'report.window'])->prefix('reports')->group(function () {
                 Route::get('/executive',       [\App\Http\Controllers\Api\ExecutiveReportController::class, 'executive']);
                 Route::get('/drill/{metric}',  [\App\Http\Controllers\Api\ExecutiveReportController::class, 'drill']);
                 Route::get('/production-intelligence', [\App\Http\Controllers\Api\ExecutiveReportController::class, 'productionIntelligence']);

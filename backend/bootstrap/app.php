@@ -61,6 +61,9 @@ return Application::configure(basePath: dirname(__DIR__))
             // included — reached every admin route lacking a per-route
             // permission gate.
             'ensure.staff' => EnsureStaff::class,
+            // One date contract for Reports, whichever spelling the caller
+            // knows — see the class docblock (D4).
+            'report.window' => \App\Http\Middleware\NormalisesReportWindow::class,
         ]);
 
         // Every staff API call → request_logs (who looked at what). Staff-only
