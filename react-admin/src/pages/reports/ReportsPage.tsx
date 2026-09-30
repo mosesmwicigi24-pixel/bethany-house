@@ -429,8 +429,20 @@ function DrillModal({ metric, label, money, bucket, period, reportPath, onClose 
                                             </p>
                                         </div>
                                         {r.amount != null && (
-                                            <span className="text-xs font-bold tabular-nums text-surface-800 shrink-0">
-                                                {money ? `KES ${Number(r.amount).toLocaleString()}` : Number(r.amount).toLocaleString()}
+                                            <span className="text-right shrink-0">
+                                                <span className="block text-xs font-bold tabular-nums text-surface-800">
+                                                    {money ? `KES ${Number(r.amount).toLocaleString()}` : Number(r.amount).toLocaleString()}
+                                                </span>
+                                                {/* What the customer was actually charged, when that
+                                                    was not shillings. The row's own figure is always
+                                                    KES so the list adds up to the tile it opened
+                                                    from; without this line a USD 200 order and a KES
+                                                    200 order looked like the same sale. */}
+                                                {money && r.currency && r.currency !== "KES" && r.amount_original != null && (
+                                                    <span className="block text-2xs text-surface-400 tabular-nums">
+                                                        {r.currency} {Number(r.amount_original).toLocaleString()}
+                                                    </span>
+                                                )}
                                             </span>
                                         )}
                                     </button>

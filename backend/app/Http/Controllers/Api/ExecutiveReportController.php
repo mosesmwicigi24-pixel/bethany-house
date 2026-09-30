@@ -210,7 +210,7 @@ class ExecutiveReportController extends Controller
      * 10-minute cache or is a summary-sized query, so this stays cheap; each
      * one is computed independently so a single engine failing degrades to a
      * null (the SPA renders a "—" card) instead of taking the Overview down.
-     * reports.view via the route group; outlet scoping via MetricEngine::for.
+     * reports.view via the route group; an optional outlet_id filter via MetricEngine::for.
      */
     public function engineRoom(Request $request)
     {
@@ -244,7 +244,7 @@ class ExecutiveReportController extends Controller
      * Replenishment Radar — per-customer product reorder cycles. "As of now"
      * by design: the radar has no period parameter because due/overdue only
      * makes sense against today. reports.view via the route group; outlet
-     * scoping via MetricEngine::for like every other report.
+     * an optional outlet_id filter, like every other report.
      */
     public function replenishment(Request $request)
     {
@@ -274,7 +274,7 @@ class ExecutiveReportController extends Controller
      * Collections funnel — quote/deposit/balance: every shilling promised but
      * not collected, staged with per-row follow-up lists. "As of now" like the
      * replenishment radar (owed only means anything against today).
-     * reports.view via the route group; outlet scoping via MetricEngine::for.
+     * reports.view via the route group; an optional outlet_id filter via MetricEngine::for.
      */
     public function collections(Request $request)
     {
@@ -314,7 +314,7 @@ class ExecutiveReportController extends Controller
      * (default 180 days): which products sell together, how strongly (attach
      * rate + lift), and the ESTIMATED revenue missed on anchor sales where
      * the usual companion never made it into the basket. reports.view via the
-     * route group; outlet scoping via MetricEngine::for; result cached 10
+     * route group; an optional outlet_id filter via MetricEngine::for; result cached 10
      * minutes inside the engine (keyed by scope + days).
      */
     public function attachRates(Request $request)
@@ -351,7 +351,7 @@ class ExecutiveReportController extends Controller
      * velocity computed over in-stock days only, and the estimated KES lost
      * while shelves sat empty — plus the live "bleeding now" rate for
      * products out right now. reports.view via the route group; outlet
-     * scoping via MetricEngine::for; cached 10 minutes inside the engine
+     * an optional outlet_id filter via MetricEngine::for; cached 10 minutes inside the engine
      * (keyed by scope + days).
      */
     public function stockoutLoss(Request $request)
@@ -386,7 +386,7 @@ class ExecutiveReportController extends Controller
      * per-season product lift, projected units, stock gap and the ORDER-BY
      * date each purchase must leave by given supplier lead times. "As of
      * now" like the radar — the horizon is always the next 120 days.
-     * reports.view via the route group; outlet scoping via MetricEngine::for;
+     * reports.view via the route group; an optional outlet_id filter via MetricEngine::for;
      * cached 10 minutes inside the engine.
      */
     public function seasonalDemand(Request $request)
@@ -423,7 +423,7 @@ class ExecutiveReportController extends Controller
      * per-currency rollups, per-country grouping, corridor top products and
      * a 6-month trend. KES equivalents appear only where the currencies
      * table carries a real configured rate — never invented conversions.
-     * reports.view via the route group; outlet scoping via MetricEngine::for;
+     * reports.view via the route group; an optional outlet_id filter via MetricEngine::for;
      * cached 10 minutes inside the engine (keyed by scope + days).
      */
     public function international(Request $request)
@@ -464,7 +464,7 @@ class ExecutiveReportController extends Controller
      * purchase rhythm, with the KES at risk, outreach history and 30-day
      * recovery attribution. "As of now" like the radar (dormancy only means
      * anything against today). reports.view via the route group; outlet
-     * scoping via MetricEngine::for.
+     * an optional outlet_id filter via MetricEngine::for.
      */
     /**
      * The unconfirmed order queue — GET /reports/order-pipeline
@@ -579,7 +579,7 @@ class ExecutiveReportController extends Controller
      * (customer_type='business' or an institution keyword in the name — see
      * MetricEngine::INSTITUTION_NAME_REGEX). "As of now" like the radar (a
      * quiet church only means anything against today). reports.view via the
-     * route group; outlet scoping via MetricEngine::for; cached 10 minutes
+     * route group; an optional outlet_id filter via MetricEngine::for; cached 10 minutes
      * inside the engine (keyed by scope).
      */
     public function institutions(Request $request)
