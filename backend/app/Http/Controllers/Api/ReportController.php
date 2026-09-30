@@ -29,6 +29,7 @@ use Carbon\Carbon;
 class ReportController extends Controller
 {
     use \App\Http\Controllers\Api\Concerns\ExportsCsv;
+    use \App\Http\Controllers\Api\Concerns\RecognisesIncome;
     use \App\Http\Controllers\Api\Concerns\ReportsMoneyInKes;
     use \App\Http\Controllers\Api\Concerns\ResolvesReportWindow;
     use \App\Http\Controllers\Api\Concerns\IdentifiesBuyers;
@@ -922,15 +923,15 @@ class ReportController extends Controller
         $revenue   = $amtKes('order_items.total_price');
         $unitPrice = $amtKes('order_items.unit_price');
 
-        $products = DB::table('order_items')
-            ->join('orders', 'order_items.order_id', '=', 'orders.id')
+        $products = $this->recognisedOrders(
+                DB::table('order_items')->join('orders', 'order_items.order_id', '=', 'orders.id'),
+            )
             ->whereBetween('orders.created_at', [$start, $end])
-            // NOTE (D3): this counts only fully-paid orders, where the sales
-            // summary counts recognised income. Product revenue therefore does
-            // not add up to total revenue, and never has. That is a definition
-            // to settle in the consolidation, not a currency bug, so it is
-            // left standing here rather than moved in the same breath.
-            ->where('orders.payment_status', 'paid')
+            // Recognised income, the same scope as the sales summary, so the
+            // product rows now ADD UP to total revenue. They never did: this
+            // counted only fully-paid orders, which dropped every part-paid and
+            // deposit order from the product breakdown while the headline above
+            // it included them (owner's decision, 2026-09-30 — D3).
             ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency))
             ->whereNotNull('order_items.product_name')
             ->groupBy('order_items.product_id', 'order_items.product_name', 'order_items.sku')
@@ -974,19 +975,19 @@ class ReportController extends Controller
     {
         [$start, $end] = $this->dateRange($request);
 
-        // Same rule as salesByProduct: an item is worth what its order is
-        // denominated in, and the foreign business must be in the figure
-        // rather than filtered out of it. The paid-only scope (D3) is left
-        // as it stands; see the note there.
+        // Same rules as salesByProduct: an item is worth what its order is
+        // denominated in, and the scope is recognised income so the categories
+        // sum to the same total the headline states.
         [$amtKes, $inKes, $currency] = $this->reportingMoney($request);
         $revenue = $amtKes('order_items.total_price');
 
-        $categories = DB::table('order_items')
-            ->join('orders',     'order_items.order_id',  '=', 'orders.id')
-            ->join('products',   'order_items.product_id','=', 'products.id')
-            ->join('categories', 'products.category_id',  '=', 'categories.id')
+        $categories = $this->recognisedOrders(
+                DB::table('order_items')
+                    ->join('orders',     'order_items.order_id',  '=', 'orders.id')
+                    ->join('products',   'order_items.product_id','=', 'products.id')
+                    ->join('categories', 'products.category_id',  '=', 'categories.id'),
+            )
             ->whereBetween('orders.created_at', [$start, $end])
-            ->where('orders.payment_status', 'paid')
             ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency))
             ->groupBy('categories.id', 'categories.name_en')
             ->selectRaw("
@@ -1037,9 +1038,15 @@ class ReportController extends Controller
         $buyer   = $this->buyerKey('orders');
         $spent   = $amtKes('orders.total_amount');
 
-        $customers = DB::table('orders')
+        // Recognised income, because #378 already settled that "what a customer
+        // spent" means recognised income on the customer's own page — and this
+        // report was still answering paid-only. The same question, two answers:
+        // measured 2026-09-30, 450 buyers / 5,820,409 here against the page's
+        // 494 / 6,972,439, a gap of 44 people and KES 1,152,030. Conformance to
+        // an approved definition, not a new one.
+        $customers = Order::query()
             ->whereBetween('orders.created_at', [$start, $end])
-            ->where('orders.payment_status', 'paid')
+            ->recognised()
             ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency))
             ->whereRaw("{$buyer} IS NOT NULL")
             ->groupByRaw($buyer)
@@ -1140,6 +1147,10 @@ class ReportController extends Controller
         [$amtKes, $inKes, $currency] = $this->reportingMoney($request, 'currency_code');
         $total = $amtKes('total_amount');
 
+        // DELIBERATELY paid-only, unlike the other sales reports: an order that
+        // has not been paid cannot be attributed to a payment method, so the
+        // recognised basis would mean inventing a rail for money that never
+        // moved. This is the one sales figure where paid-only is the question.
         $rows = DB::table('orders')
             ->whereBetween('created_at', [$start, $end])
             ->where('payment_status', 'paid')
@@ -1272,9 +1283,12 @@ class ReportController extends Controller
         $totalCustomers = Customer::count();
         $newCustomers   = Customer::whereBetween('created_at', [$start, $end])->count();
 
-        $uniqueBuyers = (int) DB::table('orders')
+        // A buyer is someone whose order was RECOGNISED, not only someone who
+        // has finished paying (owner's decision, 2026-09-30). Paid-only made a
+        // deposit customer invisible until their last instalment: measured on
+        // Q3, 442 buyers against 485, and 33 repeat buyers against 37.
+        $uniqueBuyers = (int) $this->recognisedOrders(DB::table('orders'))
             ->whereBetween('created_at', [$start, $end])
-            ->where('payment_status', 'paid')
             ->whereRaw('(orders.customer_id IS NOT NULL OR orders.user_id IS NOT NULL)')
             ->distinct()
             ->count(DB::raw($buyer));
@@ -1282,10 +1296,9 @@ class ReportController extends Controller
         // Repeat purchase rate: customers who placed >= 2 orders in the period
         // Use DB::table with explicit selectRaw so PostgreSQL GROUP BY is satisfied
         $repeatBuyers = DB::table(
-            DB::table('orders')
+            $this->recognisedOrders(DB::table('orders'))
                 ->selectRaw("{$buyer} AS buyer, COUNT(*) AS order_count")
                 ->whereBetween('created_at', [$start, $end])
-                ->where('payment_status', 'paid')
                 ->whereRaw('(orders.customer_id IS NOT NULL OR orders.user_id IS NOT NULL)')
                 ->groupBy(DB::raw($buyer)),
             'buyer_counts'
@@ -1296,14 +1309,15 @@ class ReportController extends Controller
         $repeatRate = $uniqueBuyers > 0 ? round(($repeatBuyers / $uniqueBuyers) * 100, 1) : 0;
 
         // New vs returning in period
-        $returningBuyers = (int) DB::table('orders as o1')
+        // Both sides of the comparison move together, or "returning" would
+        // mean a recognised order this period against a fully-paid one before
+        // it — two different questions in one ratio.
+        $returningBuyers = (int) $this->recognisedOrders(DB::table('orders as o1'), 'o1')
             ->whereBetween('o1.created_at', [$start, $end])
-            ->where('o1.payment_status', 'paid')
             ->whereRaw('(o1.customer_id IS NOT NULL OR o1.user_id IS NOT NULL)')
             ->whereExists(function ($q) use ($start) {
-                $q->from('orders as o2')
+                $this->recognisedOrders($q->from('orders as o2'), 'o2')
                   ->whereRaw($this->buyerKey('o2') . ' = ' . $this->buyerKey('o1'))
-                  ->where('o2.payment_status', 'paid')
                   ->where('o2.created_at', '<', $start);
             })
             ->distinct()
@@ -1343,9 +1357,8 @@ class ReportController extends Controller
             // Counted distinct logins, of which paid orders have none: this
             // read 0 while hundreds of people were buying. Same buyer key as
             // the customer summary (cycle 1) and salesByCustomer.
-            'active_customers' => DB::table('orders')
+            'active_customers' => $this->recognisedOrders(DB::table('orders'))
                 ->where('created_at', '>=', now()->subDays($period))
-                ->where('payment_status', 'paid')
                 ->whereRaw($this->buyerKey('orders') . ' IS NOT NULL')
                 ->distinct()
                 ->count(DB::raw($this->buyerKey('orders'))),
@@ -1358,7 +1371,12 @@ class ReportController extends Controller
             ->leftJoin('orders', function ($join) {
                 $join->on(fn ($j) => $j->on('orders.customer_id', '=', 'customers.id')
                                        ->orOn('orders.user_id', '=', 'customers.user_id'))
-                     ->where('orders.payment_status', 'paid');
+                     // Recognised, like every other count of who bought: a
+                     // customer with two deposit orders is a Repeat customer,
+                     // not a New one waiting on their last instalment.
+                     ->whereNotIn('orders.status', \App\Models\Order::DEAD_STATUSES)
+                     ->where(fn ($q) => $q->whereIn('orders.status', \App\Models\Order::RECOGNISED_STATUSES)
+                                          ->orWhereIn('orders.payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES));
             })
             ->groupBy('customers.id')
             ->selectRaw("
@@ -1383,8 +1401,7 @@ class ReportController extends Controller
         $ltv   = $amtKesB('total_amount');
         $buyer = $this->buyerKey('orders');
 
-        $spendBrackets = DB::table('orders')
-            ->where('payment_status', 'paid')
+        $spendBrackets = $this->recognisedOrders(DB::table('orders'))
             ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKesB, $currencyB, 'currency_code'))
             ->whereRaw("{$buyer} IS NOT NULL")
             ->groupByRaw($buyer)
@@ -1427,8 +1444,10 @@ class ReportController extends Controller
         $buyer = $this->buyerKey('orders');
         $spent = $amtKes('orders.total_amount');
 
-        $customers = DB::table('orders')
-            ->where('orders.payment_status', 'paid')
+        // Same definition as the customer's own page and as Sales by Customer:
+        // lifetime value is recognised income, not just the fully-settled part.
+        $customers = Order::query()
+            ->recognised()
             ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency))
             ->whereRaw("{$buyer} IS NOT NULL")
             ->groupByRaw($buyer)
@@ -1494,26 +1513,47 @@ class ReportController extends Controller
         $retention = $cohorts->map(function ($cohort) {
             $cohortMonth = $cohort->cohort_month;
 
-            // Customers acquired in this cohort month
-            $cohortUserIds = DB::table('customers')
+            // Customers acquired in this cohort month, as BUYER KEYS.
+            //
+            // This was `whereNotNull('user_id')->pluck('user_id')`, and of 718
+            // customers exactly ONE has a login. Every cohort was therefore
+            // empty and the report returned cohort sizes with zero retention
+            // for all of them — telling a reader that not one of the 692
+            // customers acquired in Q3 2026 ever came back, while 37 people
+            // bought repeatedly in Q3 alone. It did not under-report; it
+            // reported the opposite. The worst figure found in this programme.
+            //
+            // A customer's key is 'c<id>', plus 'u<user_id>' when they also
+            // have a login, so an order placed either way counts for them.
+            $cohortMembers = DB::table('customers')
                 ->whereRaw("TO_CHAR(created_at, 'YYYY-MM') = ?", [$cohortMonth])
-                ->whereNotNull('user_id')
-                ->pluck('user_id');
+                ->get(['id', 'user_id']);
 
-            if ($cohortUserIds->isEmpty()) {
+            $cohortKeys = $cohortMembers
+                ->flatMap(fn ($c) => array_filter([
+                    'c' . $c->id,
+                    $c->user_id ? 'u' . $c->user_id : null,
+                ]))
+                ->all();
+
+            if ($cohortKeys === []) {
                 return ['cohort' => $cohortMonth, 'size' => $cohort->cohort_size, 'months' => []];
             }
 
-            // Purchases per month by cohort members (up to 6 months forward)
-            $purchaseMonths = DB::table('orders')
-                ->whereIn('user_id', $cohortUserIds)
-                ->where('payment_status', 'paid')
-                ->whereRaw("TO_CHAR(created_at, 'YYYY-MM') >= ?", [$cohortMonth])
+            $buyerKey    = $this->buyerKey('orders');
+            $placeholders = implode(',', array_fill(0, count($cohortKeys), '?'));
+
+            // Purchases per month by cohort members (up to 6 months forward),
+            // on the recognised basis and keyed the same way as every other
+            // count of who bought.
+            $purchaseMonths = $this->recognisedOrders(DB::table('orders'))
+                ->whereRaw("{$buyerKey} IN ({$placeholders})", $cohortKeys)
+                ->whereRaw("TO_CHAR(orders.created_at, 'YYYY-MM') >= ?", [$cohortMonth])
                 ->selectRaw("
-                    TO_CHAR(created_at, 'YYYY-MM') AS month,
-                    COUNT(DISTINCT COALESCE(user_id::text, normalize_phone(customer_phone), NULLIF(lower(btrim(customer_email)), ''))) AS retained
+                    TO_CHAR(orders.created_at, 'YYYY-MM') AS month,
+                    COUNT(DISTINCT {$buyerKey}) AS retained
                 ")
-                ->groupBy(DB::raw("TO_CHAR(created_at, 'YYYY-MM')"))
+                ->groupBy(DB::raw("TO_CHAR(orders.created_at, 'YYYY-MM')"))
                 ->orderBy('month')
                 ->limit(7)
                 ->get()
@@ -1817,12 +1857,13 @@ class ReportController extends Controller
         // shillings-only, so one statement carried a whole-business top line
         // with KES-only deductions. Same basis now.
         //
-        // (They also use payment_status='paid' where revenue uses recognised
-        // income — a D3 definition for the consolidation to settle, not a
-        // currency bug, so it is named here rather than moved in passing.)
-        $plMoney = fn (string $column) => (float) DB::table('orders')
-            ->whereBetween('created_at', [$start, $end])
-            ->where('payment_status', 'paid')
+        // And on the SAME basis as that revenue line: recognised income. They
+        // were paid-only, so a statement deducted tax and discounts from a
+        // wider set of sales than it charged them against (D3, settled
+        // 2026-09-30).
+        $plMoney = fn (string $column) => (float) Order::query()
+            ->whereBetween('orders.created_at', [$start, $end])
+            ->recognised()
             ->when($plInKes,
                 fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('currency_code')),
                 fn ($q) => $q->whereRaw('UPPER(currency_code) = ?', [strtoupper($currency)]))
@@ -1918,26 +1959,88 @@ class ReportController extends Controller
     {
         [$start, $end] = $this->dateRange($request);
 
-        // One of the three figures that call themselves "revenue" (D3): this
-        // one is cash-basis, paid orders only. That naming is the
-        // consolidation's problem; being KES-only was this report's, and it
-        // showed 5,288,590 of a true 5,745,409.
+        // TWO bases, both named, and the word "revenue" no longer standing
+        // alone (the brief's invariant 3, and the owner's decision of
+        // 2026-09-30).
+        //
+        // This endpoint used to report one figure: orders whose
+        // payment_status was 'paid'. That is neither of the two honest
+        // answers. It excluded every part-paid and deposit order, so it
+        // understated what was SOLD; and it counted the full value of each
+        // paid order regardless of when the cash arrived, so it was not
+        // COLLECTED either. Measured on Q3 2026: sold 6,811,239 across 678
+        // orders, collected 6,451,047 across 684, and the old hybrid
+        // 5,721,209 across 611 — a number that answered no question anyone
+        // would ask, on a page titled Revenue.
+        //
+        // The 360,192 by which sold exceeds collected is not an error. It is
+        // the quarter's movement in what customers owe, and showing both
+        // bases is the only way a reader can see it.
         [$amtKes, $inKes, $currency] = $this->reportingMoney($request, 'currency_code');
-        $total = $amtKes('total_amount');
+        $soldKes = $amtKes('total_amount');
 
-        $monthly = DB::table('orders')
-            ->whereBetween('created_at', [$start, $end])
-            ->where('payment_status', 'paid')
-            ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency, 'currency_code'))
-            ->selectRaw("TO_CHAR(created_at, 'YYYY-MM') AS month, (COALESCE(SUM({$total}), 0))::float8 AS total, COUNT(*) AS orders")
-            ->groupBy(DB::raw("TO_CHAR(created_at, 'YYYY-MM')"))
+        // SOLD — recognised income, the same scope every other sales figure
+        // uses, so this foots with the sales summary to the cent.
+        $soldMonthly = Order::query()
+            ->whereBetween('orders.created_at', [$start, $end])
+            ->recognised()
+            ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency))
+            ->selectRaw("TO_CHAR(orders.created_at, 'YYYY-MM') AS month,
+                (COALESCE(SUM({$amtKes('orders.total_amount')}), 0))::float8 AS total,
+                COUNT(*) AS orders")
+            ->groupBy(DB::raw("TO_CHAR(orders.created_at, 'YYYY-MM')"))
             ->orderBy('month')
             ->get();
 
+        // COLLECTED — money that actually arrived, by the date it arrived,
+        // net of refunds. Payments carry their own currency.
+        [$payKes] = $this->reportingMoney($request, 'p.currency_code');
+        $collectedMonthly = DB::table('payments as p')
+            ->join('orders as o', 'o.id', '=', 'p.order_id')
+            ->where('p.status', 'paid')
+            ->where(fn ($q) => $q->where('p.requires_approval', false)
+                                 ->orWhereNull('p.requires_approval')
+                                 ->orWhere('p.approval_status', 'approved'))
+            ->whereBetween(DB::raw('COALESCE(p.paid_at, p.created_at)'), [$start, $end])
+            ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency, 'p.currency_code'))
+            ->selectRaw("TO_CHAR(COALESCE(p.paid_at, p.created_at), 'YYYY-MM') AS month,
+                (COALESCE(SUM({$payKes('p.amount - COALESCE(p.refund_amount, 0)')}), 0))::float8 AS total,
+                COUNT(DISTINCT o.id) AS orders")
+            ->groupBy(DB::raw("TO_CHAR(COALESCE(p.paid_at, p.created_at), 'YYYY-MM')"))
+            ->orderBy('month')
+            ->get();
+
+        $sold      = (float) $soldMonthly->sum('total');
+        $collected = (float) $collectedMonthly->sum('total');
+
         return response()->json([
-            'period'  => ['start' => $start, 'end' => $end],
-            'monthly' => $monthly,
-            'total'   => $monthly->sum('total'),
+            'period' => ['start' => $start, 'end' => $end, 'currency' => $currency],
+            'sold' => [
+                'label'   => 'Sold in the period',
+                'basis'   => 'recognised income, by order date',
+                'total'   => round($sold, 2),
+                'monthly' => $soldMonthly,
+            ],
+            'collected' => [
+                'label'   => 'Collected in the period',
+                'basis'   => 'settled payments net of refunds, by the date the money arrived',
+                'total'   => round($collected, 2),
+                'monthly' => $collectedMonthly,
+            ],
+            // What the difference IS, so nobody has to guess whether it is a bug.
+            'receivable_movement' => [
+                'amount' => round($sold - $collected, 2),
+                'note'   => 'Sold minus collected: the change in what customers owe over this '
+                          . 'period. A positive figure means the business sold faster than it '
+                          . 'was paid; it is not a discrepancy.',
+            ],
+            // The old key, kept for one release so nothing breaks silently, and
+            // pointed at the basis a reader almost certainly meant.
+            'monthly' => $soldMonthly,
+            'total'   => round($sold, 2),
+            'note'    => 'This page used to publish a single figure filtered on payment_status=paid, '
+                       . 'which was neither sold nor collected. `total` now means SOLD; `collected` '
+                       . 'is stated beside it.',
         ]);
     }
 

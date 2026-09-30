@@ -217,4 +217,44 @@ class ReportMoneyCurrencyTest extends TestCase
         $this->assertNull($row['amount_original']);
         $this->assertNull($row['currency']);
     }
+
+    public function test_an_unenumerated_payment_status_is_still_a_receivable(): void
+    {
+        // Outstanding used to list the payment statuses it considered open:
+        // pending, partial, deposit. A fifth value existed in production —
+        // one recognised order in `pending_approval` owing KES 15,500 — and the
+        // receivables page could not see it while the sales figures counted it.
+        // Found by reconciling sold − collected against outstanding; the gap was
+        // exactly that order, less overpayments.
+        $order = Order::create([
+            'order_number'   => 'PA-' . bin2hex(random_bytes(4)),
+            'status'         => 'confirmed',
+            'payment_status' => 'pending_approval',
+            'currency_code'  => 'USD',
+            'subtotal'       => 100,
+            'total_amount'   => 100,
+        ]);
+        $this->assertSame('pending_approval', $order->payment_status);
+
+        $this->assertSame(12_800.0, round((float) $this->executive()['money']['outstanding']['amount'], 2),
+            'a status nobody enumerated still owes money');
+    }
+
+    public function test_an_order_a_human_marked_settled_is_not_a_receivable(): void
+    {
+        // The other half of the rule. A partially refunded order leaves its
+        // paid-net below its total, but `payment_status = 'paid'` records a
+        // human's judgement that it is done — and whether that refund is a
+        // receivable or a total that should have been reduced is a business
+        // question, not arithmetic. Deciding it silently is what this guards.
+        $order = $this->order('KES', 5_000, 'paid');
+        Payment::create([
+            'order_id' => $order->id, 'amount' => 5_000, 'refund_amount' => 2_000,
+            'currency_code' => 'KES', 'status' => 'paid',
+            'payment_method' => 'cash', 'paid_at' => now(),
+        ]);
+
+        $this->assertSame(0.0, round((float) $this->executive()['money']['outstanding']['amount'], 2),
+            'settled means settled');
+    }
 }
