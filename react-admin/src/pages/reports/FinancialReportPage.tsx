@@ -134,7 +134,10 @@ export default function FinancialReportPage() {
     );
 
     const plRows = [
-        { label: "Revenue", value: revenue, indent: 0, bold: false },
+        // "Revenue" alone meant three different figures across this section
+        // until 2026-09-30. This line is what was SOLD; what was COLLECTED is
+        // stated under the chart below, with the difference named.
+        { label: "Revenue (sold in the period)", value: revenue, indent: 0, bold: false },
         {
             label: "(–) Cost of Goods Sold",
             value: cogs,
@@ -621,6 +624,27 @@ export default function FinancialReportPage() {
                     {chartData.length > 0 && (
                         <div className="card p-5">
                             <SectionHeader title="Revenue vs Expenses (Monthly)" />
+                            {/* Sold and collected are different questions and
+                                this is where a reader can see both, plus what
+                                the gap is: the movement in what customers owe. */}
+                            {revQuery.data?.sold && revQuery.data?.collected && (
+                                <div className="px-4 pt-2 flex flex-wrap gap-x-6 gap-y-1 text-2xs text-surface-500">
+                                    <span>
+                                        Sold <span className="font-semibold text-surface-800 tabular-nums">{fmtKes(Number(revQuery.data.sold.total))}</span>
+                                        <span className="text-surface-400"> · {revQuery.data.sold.basis}</span>
+                                    </span>
+                                    <span>
+                                        Collected <span className="font-semibold text-surface-800 tabular-nums">{fmtKes(Number(revQuery.data.collected.total))}</span>
+                                        <span className="text-surface-400"> · {revQuery.data.collected.basis}</span>
+                                    </span>
+                                    {revQuery.data.receivable_movement && (
+                                        <span title={revQuery.data.receivable_movement.note}>
+                                            Change in what customers owe{" "}
+                                            <span className="font-semibold text-surface-800 tabular-nums">{fmtKes(Number(revQuery.data.receivable_movement.amount))}</span>
+                                        </span>
+                                    )}
+                                </div>
+                            )}
                             <ResponsiveContainer width="100%" height={280}>
                                 <BarChart data={chartData}>
                                     <CartesianGrid
