@@ -361,4 +361,51 @@ class ReportCurrencyAndBuyerTest extends TestCase
         $this->assertNotNull($row, 'the completed job must appear');
         $this->assertSame(12_800.0, round((float) $row['revenue'], 2), 'USD 100 is KES 12,800');
     }
+
+    // ── The file, not just the screen ────────────────────────────────────────
+
+    /** The CSV body for a report, as a staff member with permission to take it. */
+    private function csv(string $path): string
+    {
+        $exporter = User::factory()->create();
+        foreach (['reports.view', 'reports.financial', 'reports.export'] as $p) {
+            $exporter->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
+        }
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        Sanctum::actingAs($exporter);
+
+        $join = str_contains($path, '?') ? '&' : '?';
+
+        // csvResponse builds the file in memory rather than streaming it, on
+        // purpose — its docblock explains why — so read the content directly.
+        return $this->get($path . $join . 'export=csv&start_date=2020-01-01&end_date=2030-12-31')
+            ->assertOk()->getContent();
+    }
+
+    public function test_the_downloaded_file_carries_the_corrected_product_revenue(): void
+    {
+        // The CSV branch of these methods was never exercised by a test, so a
+        // figure fixed on the screen might not have followed into the file
+        // people actually circulate.
+        $product  = Product::factory()->create(['status' => Product::STATUS_ACTIVE]);
+        $this->itemOn($this->paidOrder($this->walkIn('Csv1'), 'KES', 1_000), $product, 1_000);
+        $this->itemOn($this->paidOrder($this->walkIn('Csv2'), 'USD', 100), $product, 100);
+
+        $csv = $this->csv('/api/v1/admin/reports/sales/by-product');
+
+        $this->assertStringContainsString('13800', str_replace(['"', ','], '', $csv),
+            'the file states KES 13,800, as the page does');
+        $this->assertStringNotContainsString('Total Revenue,1100', $csv, 'not face value');
+    }
+
+    public function test_the_downloaded_customer_file_is_not_empty_either(): void
+    {
+        $customer = $this->walkIn('Downloadable');
+        $this->paidOrder($customer, 'USD', 50);      // 6,400
+
+        $csv = $this->csv('/api/v1/admin/reports/sales/by-customer');
+
+        $this->assertStringContainsString('Downloadable', $csv, 'the file listed nobody before');
+        $this->assertStringContainsString('6400', str_replace(['"', ','], '', $csv));
+    }
 }
