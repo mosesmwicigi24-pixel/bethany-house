@@ -152,6 +152,13 @@ export const reportsApi = {
             ...(params.outlet_id ? { outlet_id: params.outlet_id } : {}),
         } }),
 
+    // Audit & Data Quality: where the records behind the figures are incomplete.
+    dataQuality: (params: { start_date: string; end_date: string; outlet_id?: number }) =>
+        get<DataQualityReport>(`${BASE}/data-quality`, { params: {
+            period: "custom", from: params.start_date, to: params.end_date,
+            ...(params.outlet_id ? { outlet_id: params.outlet_id } : {}),
+        } }),
+
     // Outlets a report can be filtered by (reports.view; no POS access needed).
     outlets: () => get<{ data: { id: number; name: string }[] }>(`${BASE}/outlets`),
 
@@ -1194,6 +1201,42 @@ export interface PerformanceRow {
     unconfirmed_carts: number;
     unconfirmed_value: number;
 }
+// ─── Audit & Data Quality ─────────────────────────────────────────────────────
+export type DataQualityLinks = Partial<Record<"order" | "customer" | "payment" | "production" | "expense" | "product", string>>;
+export interface DataQualityRow {
+    kind: "order" | "customer" | "payment" | "expense" | "product" | "currency";
+    id: number | null;
+    ref?: string | null;
+    customer?: string | null;
+    detail?: string | null;
+    date?: string | null;
+    amount?: number | null;
+    records?: number;
+    lines?: number;
+    phone_field?: string | null;
+    links: DataQualityLinks;
+}
+export interface DataQualityCheck {
+    key: string;
+    group: "sales" | "money" | "customers";
+    scope: "period" | "current";
+    outlet: boolean;
+    severity: "high" | "medium" | "low";
+    title: string;
+    affects: string;
+    fix: { label: string; to: string | null };
+    count: number;
+    value: number | null;
+    rows: DataQualityRow[];
+}
+export interface DataQualityReport {
+    period: { key: string; start: string; end: string };
+    checks: DataQualityCheck[];
+    gaps: { key: string; title: string; detail: string; metrics: string[] }[];
+    coverage: { orders: number; buyer_identified: number | null; lines: number; lines_costed: number | null };
+    row_limit: number;
+}
+
 export interface PerformanceReport {
     period: { start: string; end: string; previous_start: string; previous_end: string };
     outlets: PerformanceRow[];

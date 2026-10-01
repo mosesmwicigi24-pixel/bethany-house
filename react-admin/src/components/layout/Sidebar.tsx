@@ -431,6 +431,7 @@ const NAV: NavGroup[] = [
             { label: "Procurement & Suppliers", href: "/reports/procurement", icon: "purchase-orders", permission: "reports.view" },
             { label: "Staff, Outlets & Performance", href: "/reports/performance", icon: "outlets", permission: "reports.view" },
             { label: "Signals",                 href: "/reports/signals",     icon: "intelligence",    permission: "reports.view" },
+            { label: "Audit & Data Quality",    href: "/reports/data-quality", icon: "qc",             permission: "reports.view" },
         ],
     },
 

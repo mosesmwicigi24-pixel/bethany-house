@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { purchaseOrderApi, supplierApi } from "@/api/procurement";
 import type { PurchaseOrder, POStatus } from "@/api/procurement";
 import { useToastStore } from "@/store/toast.store";
@@ -1003,7 +1003,11 @@ export default function PurchaseOrdersPage() {
     const [supplierFilter, setSupplierFilter] = useState("");
     const navigate = useNavigate();
 
-    const [createOpen, setCreateOpen] = useState(false);
+    // ?new=1 opens the create form directly — where "Create PO" on the Signals
+    // page leads (it pointed at /purchase-orders/new, which is the detail
+    // route with the id "new").
+    const [poParams] = useSearchParams();
+    const [createOpen, setCreateOpen] = useState(poParams.get("new") === "1");
     const [detailPO, setDetailPO] = useState<PurchaseOrder | null>(null);
     const [statusPO, setStatusPO] = useState<PurchaseOrder | null>(null);
 
