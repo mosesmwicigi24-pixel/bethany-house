@@ -26,7 +26,8 @@ namespace App\Http\Controllers\Api\Concerns;
  * every sale is a walk-in served at the counter. Any report keyed on the login
  * is therefore not "mostly right" — it is empty.
  *
- * A buyer is the CUSTOMER record, with the web login as a second arm. The two
+ * (Superseded 2026-10-01 — see App\Support\BuyerIdentity: phone first.)
+ * A buyer was the CUSTOMER record, with the web login as a second arm. The two
  * id spaces are prefixed so customer 1 and user 1 can never collapse into one
  * person, and the expression is NULL only for an order attached to nobody at
  * all (219 such orders exist; they are sales, but they are not a buyer anyone
@@ -36,6 +37,8 @@ trait IdentifiesBuyers
 {
     private function buyerKey(string $table = 'orders'): string
     {
-        return "COALESCE('c' || {$table}.customer_id, 'u' || {$table}.user_id)";
+        // Instance eight was four DIFFERENT definitions across the module
+        // (cycle 10): one rule now, in App\Support\BuyerIdentity — phone first.
+        return \App\Support\BuyerIdentity::sql($table);
     }
 }

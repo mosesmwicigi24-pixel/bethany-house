@@ -280,7 +280,7 @@ HTML;
                 COALESCE(AVG({$amt('total_amount', 'currency_code')}), 0) AS avg_order_value,
                 COALESCE(SUM({$amt('tax_amount', 'currency_code')}), 0)   AS total_tax,
                 COALESCE(SUM({$amt('discount_amount', 'currency_code')}), 0) AS total_discounts,
-                COUNT(DISTINCT COALESCE(user_id::text, normalize_phone(customer_phone), NULLIF(lower(btrim(customer_email)), ''))) AS unique_customers
+                COUNT(DISTINCT " . \App\Support\BuyerIdentity::sql('orders') . ") AS unique_customers
             ")->first();
 
         // By product (top 20)

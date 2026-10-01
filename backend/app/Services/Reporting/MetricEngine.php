@@ -1226,7 +1226,9 @@ class MetricEngine
     // with neither are walk-ins and are reported as such, not guessed.
 
     /** Per-order customer key expression (id wins, else full phone). */
-    private const CUSTOMER_KEY = "COALESCE(o.customer_id::text, NULLIF(o.customer_phone, ''))";
+    // CUSTOMER_KEY was "customer_id, else the RAW phone" — so '0711…' and
+    // '+254711…' were two people, and it disagreed with three other buyer
+    // definitions in the module (cycle 10). One rule now: BuyerIdentity.
 
     /** Sales-truth orders aliased o, with the customer key attached. */
     private function customerOrders()
@@ -1250,7 +1252,7 @@ class MetricEngine
             ->groupBy(DB::raw("COALESCE(cid.customer_type, cp.customer_type, 'walk_in')"))
             ->selectRaw("COALESCE(cid.customer_type, cp.customer_type, 'walk_in') AS segment,
                 COUNT(*) AS orders, COALESCE(SUM(o.total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))), 0) AS revenue,
-                COUNT(DISTINCT " . self::CUSTOMER_KEY . ") AS customers")
+                COUNT(DISTINCT " . \App\Support\BuyerIdentity::sql('o') . ") AS customers")
             ->orderByDesc(DB::raw('COALESCE(SUM(o.total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))), 0)'))
             ->get();
     }
@@ -1262,7 +1264,7 @@ class MetricEngine
      */
     public function newVsReturning(Carbon $s, Carbon $e): array
     {
-        $key = self::CUSTOMER_KEY;
+        $key = \App\Support\BuyerIdentity::sql('o');
         $rows = DB::select("
             WITH keyed AS (
                 SELECT o.id, o.total_amount, o.currency_code, o.created_at, {$key} AS ckey,
@@ -1294,7 +1296,7 @@ class MetricEngine
     /** Window's top customers with their all-time value beside the period. */
     public function topCustomers(Carbon $s, Carbon $e)
     {
-        $key = self::CUSTOMER_KEY;
+        $key = \App\Support\BuyerIdentity::sql('o');
         return collect(DB::select("
             WITH keyed AS (
                 SELECT {$key} AS ckey, o.total_amount, o.currency_code, o.created_at,
@@ -1325,7 +1327,7 @@ class MetricEngine
      */
     public function dormantTopCustomers(int $quietDays = 60, int $topN = 20)
     {
-        $key = self::CUSTOMER_KEY;
+        $key = \App\Support\BuyerIdentity::sql('o');
         $now = CarbonImmutable::now(self::TZ);
         return collect(DB::select("
             WITH keyed AS (
@@ -1377,7 +1379,7 @@ class MetricEngine
      */
     public function rfmSegments(): array
     {
-        $key = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
+        $key = \App\Support\BuyerIdentity::sql('o');
         $now = CarbonImmutable::now(self::TZ);
         $since = $now->subDays(365);
         $outletSql = $this->outletIds
@@ -1593,7 +1595,7 @@ class MetricEngine
      */
     public function winBackEconomics(int $limit = 50): array
     {
-        $key = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
+        $key = \App\Support\BuyerIdentity::sql('o');
         $now   = CarbonImmutable::now(self::TZ);
         $today = $now->format('Y-m-d');
         $since = $now->subDays(365);
@@ -1781,7 +1783,7 @@ class MetricEngine
      */
     public function replenishmentRadar(int $limit = 50): array
     {
-        $key = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
+        $key = \App\Support\BuyerIdentity::sql('o');
         $now   = CarbonImmutable::now(self::TZ);
         $today = $now->format('Y-m-d');
         $since = $now->subDays(540);
@@ -3387,6 +3389,45 @@ class MetricEngine
             ];
         }
 
+        // 3c. Sales in a currency with no REPORTING rate (cycle 10). Every
+        //     report leaves them out rather than guess what they are worth —
+        //     correct, and silent. GBP was created on 2026-10-01 with a pricing
+        //     rate and no reporting rate (the hub had no field for it), so the
+        //     first pound sale would have vanished from every page. Named here
+        //     the day it happens, with the currency, so it is fixed in Setup
+        //     rather than discovered at month end.
+        $unrated = DB::select("
+            SELECT UPPER(o.currency_code) AS currency, COUNT(*) AS orders, SUM(o.total_amount) AS total
+            FROM orders o
+            LEFT JOIN currencies rc ON UPPER(rc.code) = UPPER(o.currency_code)
+            WHERE rc.reporting_rate_to_kes IS NULL
+              AND o.status NOT IN ('cancelled', 'voided', 'refunded')
+              AND (o.status IN ('confirmed', 'processing', 'shipped', 'delivered', 'completed')
+                   OR o.payment_status IN ('paid', 'partial', 'deposit'))
+              " . $this->outletScopeSql('o.outlet_id') . "
+            GROUP BY UPPER(o.currency_code)
+            ORDER BY COUNT(*) DESC
+        ");
+        if ($unrated) {
+            $n     = array_sum(array_map(fn ($r) => (int) $r->orders, $unrated));
+            $codes = implode(', ', array_map(fn ($r) => $r->currency, $unrated));
+            $items[] = [
+                'key' => 'unrated_currency_sales', 'severity' => 'high',
+                'title' => "{$n} sale" . ($n > 1 ? 's' : '') . " in {$codes} left out of every report",
+                'detail' => 'These currencies have no reporting rate, so no report can say what the sales are worth. '
+                    . 'Set one in Settings → Currencies (KES per 1 unit) and they count from then on.',
+                'count' => $n, 'link' => '/settings/currencies',
+                'entities' => array_map(fn ($r) => [
+                    'currency' => $r->currency,
+                    'orders'   => (int) $r->orders,
+                    'total'    => round((float) $r->total, 2),
+                ], $unrated),
+                'actions' => [
+                    ['type' => 'navigate', 'label' => 'Open currencies', 'to' => '/settings/currencies'],
+                ],
+            ];
+        }
+
         // 4. Capacity: next week's due load exceeds the floor's actual pace.
         $cap = $this->capacityOutlook();
         if ($cap['shortfall'] > 0 && $cap['due_pieces'] > 0) {
@@ -3743,6 +3784,9 @@ class MetricEngine
     /** The uncached rollup pass behind institutionalAccounts(). */
     private function computeInstitutionalAccounts(): array
     {
+        // ACCOUNT, not person: an institution is a customer record whose buying
+        // staff change, so it groups by the record first — the one deliberate
+        // exception to BuyerIdentity (cycle 10, owner's phone-first rule).
         $key   = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
         $now   = CarbonImmutable::now(self::TZ);
         $today = $now->format('Y-m-d');
@@ -3937,7 +3981,7 @@ class MetricEngine
     /** The uncached rollup pass behind internationalCorridor(). */
     private function computeInternationalCorridor(int $days): array
     {
-        $key   = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
+        $key   = \App\Support\BuyerIdentity::sql('o');
         $since = CarbonImmutable::now(self::TZ)->subDays($days)->startOfDay();
         $outletSql = $this->outletIds
             ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')'
@@ -4184,7 +4228,7 @@ class MetricEngine
      *    contact details needed to act.
      *
      * Identity, recognition, scoping and money follow the engine's conventions:
-     * CUSTOMER_KEY identity, recognised orders only (an abandoned cart is not a
+     * BuyerIdentity, recognised orders only (an abandoned cart is not a
      * first purchase), outlet scoping, and money stated in KES at the REPORTING
      * rate. A currency with no reporting rate stays in the counts — a customer
      * is a customer — but out of every money figure.
@@ -4205,7 +4249,7 @@ class MetricEngine
     // second purchase exists, THIS list is the only place they appear.
     public function secondPurchase(int $recentDays = 90, int $worklistLimit = 250): array
     {
-        $key = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
+        $key = \App\Support\BuyerIdentity::sql('o');
         $rate = "(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))";
         $outletSql = $this->outletIds
             ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')'

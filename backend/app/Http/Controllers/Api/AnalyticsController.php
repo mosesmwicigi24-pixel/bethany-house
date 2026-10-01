@@ -70,14 +70,27 @@ class AnalyticsController extends Controller
         // Online buyers by country. Country codes are captured on few orders, so
         // fall back to the phone dialing-prefix (shared CountryInference resolver
         // — same one the Intelligence audience view uses) before giving up.
+        //
+        // RECOGNISED orders, in SHILLINGS (cycle 10). This panel sits behind
+        // reports.view but outside the Reports route group, so it kept both
+        // defects the sales pages lost in cycles 2–5: it summed every online
+        // order including unconfirmed carts, and added each in its own
+        // currency as though it were KES. Measured live over 30 days: 168,130
+        // of "revenue" — 162,000 of it eight abandoned carts, a USD order read
+        // as 130 instead of 16,640 — against 6,000 actually sold.
         $onlineOrders = DB::table('orders as o')
+            ->join('currencies as rc', fn ($j) => $j->on(DB::raw('UPPER(rc.code)'), '=', DB::raw('UPPER(o.currency_code)'))
+                ->whereNotNull('rc.reporting_rate_to_kes'))
             ->leftJoin('customers as c1', 'c1.id', '=', 'o.customer_id')
             ->leftJoin('customers as c2', 'c2.user_id', '=', 'o.user_id')
             ->where('o.created_at', '>=', $since)
             ->where('o.order_type', 'online')
+            ->whereNotIn('o.status', \App\Models\Order::DEAD_STATUSES)
+            ->where(fn ($q) => $q->whereIn('o.status', \App\Models\Order::RECOGNISED_STATUSES)
+                                 ->orWhereIn('o.payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES))
             ->selectRaw("o.customer_country_code, o.shipping_country_code, o.billing_country_code,
                          COALESCE(NULLIF(o.customer_phone,''), c1.phone, c2.phone) as phone,
-                         o.total_amount")
+                         o.total_amount * rc.reporting_rate_to_kes AS total_kes")
             ->get();
         $buyerTally = [];
         foreach ($onlineOrders as $o) {
@@ -88,7 +101,7 @@ class AnalyticsController extends Controller
             if ($code === null) { continue; }
             $buyerTally[$code] ??= ['country_code' => $code, 'orders' => 0, 'revenue' => 0.0];
             $buyerTally[$code]['orders']++;
-            $buyerTally[$code]['revenue'] += (float) $o->total_amount;
+            $buyerTally[$code]['revenue'] += (float) $o->total_kes;
         }
         $buyersByCountry = collect(array_values($buyerTally))
             ->sortByDesc('orders')->take(50)->values();
