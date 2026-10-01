@@ -80,7 +80,7 @@ function MetricCard({ label, value, sub, metric, to, money = false, downIsGood =
             </div>
             <p className="text-lg sm:text-xl font-bold text-surface-900 tabular-nums mt-1 truncate">{display}</p>
             <div className="flex items-end justify-between gap-2 mt-1 min-h-[24px]">
-                <p className="text-2xs text-surface-400 truncate">
+                <p className="text-2xs text-surface-400 line-clamp-3">
                     {sub ?? (metric?.previous
                         ? `prev ${money ? "KES " : ""}${Number(metric.previous).toLocaleString()}`
                         : "")}
@@ -233,8 +233,8 @@ function daysUntil(date: string): number {
     );
 }
 
-function EngineCard({ icon, label, value, sub, to, zero = false }: {
-    icon: string; label: string; value: string; sub: string; to: string; zero?: boolean;
+function EngineCard({ label, value, sub, to, zero = false }: {
+    label: string; value: string; sub: string; to: string; zero?: boolean;
 }) {
     const navigate = useNavigate();
     return (
@@ -242,17 +242,16 @@ function EngineCard({ icon, label, value, sub, to, zero = false }: {
             onClick={() => navigate(to)}
             className="card card-body text-left transition-shadow hover:shadow-md cursor-pointer"
         >
-            <div className="flex items-center gap-1.5">
-                <span className="text-base leading-none" aria-hidden="true">{icon}</span>
-                <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest truncate">{label}</p>
-            </div>
+            {/* Labels say what the money is in plain words and are never cut
+                off — a truncated "MONEY ON TH…" told a manager nothing. */}
+            <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest leading-snug">{label}</p>
             <p className={clsx(
                 "text-lg font-bold tabular-nums mt-1 truncate",
                 zero || value === "—" ? "text-surface-400" : "text-surface-900",
             )}>
                 {value}
             </p>
-            <p className="text-2xs text-surface-400 truncate mt-0.5">{sub}</p>
+            <p className="text-2xs text-surface-400 mt-0.5 line-clamp-2">{sub}</p>
         </button>
     );
 }
@@ -274,8 +273,8 @@ function EngineRoomStrip() {
     return (
         <div>
             <div className="flex items-center gap-2 mb-2">
-                <span aria-hidden="true">⚙️</span>
-                <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest">Revenue engines</p>
+                <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest">Opportunities</p>
+                <p className="text-2xs text-surface-400">— money waiting to be won, each one a click from the list behind it</p>
             </div>
             {isLoading || !data ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
@@ -290,8 +289,7 @@ function EngineRoomStrip() {
             ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
                     <EngineCard
-                        icon="💰"
-                        label="Money on the Table"
+                        label="Open quotes & balances"
                         value={collections ? kesCompact(collections.money_on_table) : "—"}
                         sub={collections
                             ? `${collections.open_quotes.count} quotes · ${collections.unpaid_balances.count} unpaid balances`
@@ -300,8 +298,7 @@ function EngineRoomStrip() {
                         to="/reports/sales?tab=collections"
                     />
                     <EngineCard
-                        icon="📉"
-                        label="Bleeding Now"
+                        label="Lost to empty shelves"
                         value={stockout ? `${kesCompact(stockout.est_daily_loss_now)}/day` : "—"}
                         sub={stockout
                             ? `${stockout.products_currently_out} product${stockout.products_currently_out === 1 ? "" : "s"} out now`
@@ -310,8 +307,7 @@ function EngineRoomStrip() {
                         to="/reports/inventory?tab=intelligence"
                     />
                     <EngineCard
-                        icon="🔄"
-                        label="Value at Risk"
+                        label="Regulars gone quiet"
                         value={winback ? kesCompact(winback.annual_value_at_risk) : "—"}
                         sub={winback
                             ? `${winback.customers_at_risk} customers · ${kesCompact(winback.recovered_revenue_90d)} recovered 90d`
@@ -320,8 +316,7 @@ function EngineRoomStrip() {
                         to="/reports/customers?tab=winback"
                     />
                     <EngineCard
-                        icon="🛒"
-                        label="Missed Attach"
+                        label="Add-ons not sold"
                         value={attach ? kesCompact(attach.missed_revenue_estimate_total) : "—"}
                         sub={attach?.top_pair
                             ? `best pair: ${attach.top_pair.anchor} → ${attach.top_pair.companion} ${attach.top_pair.attach_rate}%`
@@ -330,8 +325,7 @@ function EngineRoomStrip() {
                         to="/reports/sales?tab=basket"
                     />
                     <EngineCard
-                        icon="🎯"
-                        label="Radar"
+                        label="Due to buy again"
                         value={radar ? kesCompact(radar.expected_revenue) : "—"}
                         sub={radar
                             ? `${radar.due_pairs} due · pings 30d: ${radar.pings_30d}`
@@ -340,8 +334,7 @@ function EngineRoomStrip() {
                         to="/reports/customers?tab=replenishment"
                     />
                     <EngineCard
-                        icon="⛪"
-                        label="Seasonal"
+                        label="Season ahead"
                         value={seasonal
                             ? seasonal.history_depth_days === 0
                                 ? "—"
@@ -482,7 +475,7 @@ function ExecutiveOverview() {
                                 )}
                             </>
                         )}
-                        <div className={clsx(k.financial ? "col-span-2 md:col-span-4 2xl:col-span-2" : "col-span-2 md:col-span-3 2xl:col-span-5")}>
+                        <div className={clsx(k.financial ? "col-span-2 md:col-span-2 2xl:col-span-2" : "col-span-2 md:col-span-3 2xl:col-span-5")}>
                             <AgingCard aging={k.money.aging}
                                 onBucket={(bucket, label) => setDrill({ metric: "outstanding", bucket, label, money: true, reportPath: "/pos/outstanding-balances" })} />
                         </div>
@@ -576,7 +569,16 @@ interface ReportCategory {
     icon: React.ReactNode;
     path: string;
     color: string;
+    /** What the page offers — the tags must be true for each page. */
+    csv?: boolean;
+    schedulable?: boolean;
 }
+
+const tileIcon = (d: string) => (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+        <path strokeLinecap="round" strokeLinejoin="round" d={d} />
+    </svg>
+);
 
 const CATEGORIES: ReportCategory[] = [
     {
@@ -714,6 +716,42 @@ const CATEGORIES: ReportCategory[] = [
             </svg>
         ),
     },
+    {
+        id: "performance",
+        label: "Staff, Outlets & Performance",
+        description: "Each outlet and salesperson against the previous period",
+        path: "/reports/performance",
+        color: "text-brand-600 bg-brand-50",
+        csv: true, schedulable: false,
+        icon: tileIcon("M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"),
+    },
+    {
+        id: "signals",
+        label: "Business Intelligence & Signals",
+        description: "Reorder suggestions, channel engagement, customer geography",
+        path: "/reports/signals",
+        color: "text-info-600 bg-info-50",
+        csv: false, schedulable: false,
+        icon: tileIcon("M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"),
+    },
+    {
+        id: "explorer",
+        label: "Business Explorer",
+        description: "Any figure by month, channel, outlet, product or person — and the orders behind it",
+        path: "/reports/explorer",
+        color: "text-accent-600 bg-accent-50",
+        csv: true, schedulable: false,
+        icon: tileIcon("M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"),
+    },
+    {
+        id: "data-quality",
+        label: "Audit & Data Quality",
+        description: "Can these numbers be trusted — and where the records are incomplete",
+        path: "/reports/data-quality",
+        color: "text-success-600 bg-success-50",
+        csv: true, schedulable: false,
+        icon: tileIcon("M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"),
+    },
 ];
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
@@ -747,7 +785,7 @@ export default function ReportsPage() {
 
             <div>
                 <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-3">
-                    Report Categories
+                    All reports
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {visibleCategories.map((cat) => (
@@ -772,7 +810,7 @@ export default function ReportsPage() {
                                     {cat.description}
                                 </p>
                                 <div className="flex items-center gap-3 mt-2 text-xs text-surface-400">
-                                    <span className="flex items-center gap-0.5">
+                                    {cat.csv !== false && <span className="flex items-center gap-0.5">
                                         <svg
                                             className="w-3 h-3"
                                             fill="none"
@@ -787,8 +825,8 @@ export default function ReportsPage() {
                                             />
                                         </svg>
                                         CSV export
-                                    </span>
-                                    <span className="flex items-center gap-0.5">
+                                    </span>}
+                                    {cat.schedulable !== false && <span className="flex items-center gap-0.5">
                                         <svg
                                             className="w-3 h-3"
                                             fill="none"
@@ -803,7 +841,7 @@ export default function ReportsPage() {
                                             />
                                         </svg>
                                         Schedulable
-                                    </span>
+                                    </span>}
                                 </div>
                             </div>
                             <svg

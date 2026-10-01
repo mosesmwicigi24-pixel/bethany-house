@@ -129,6 +129,9 @@ export function KpiCard({
     const open = drill
         ? () => setSp(prev => { const p = new URLSearchParams(prev); p.set("drill", drill); return p; })
         : undefined;
+    // A zero never wears an alarm (or a success) colour: "QC Failed 0" in red
+    // drew the eye to nothing. Colour is for figures that say something.
+    const isZero = /^(KES\s*)?0(\.0+)?%?$/.test(String(value).trim());
     return (
         <div
             className={clsx("card card-body flex flex-col gap-1", open && "cursor-pointer hover:ring-1 hover:ring-brand-300 transition")}
@@ -143,7 +146,7 @@ export function KpiCard({
                 <p
                     className={clsx(
                         "text-xl font-bold tabular-nums",
-                        color || "text-surface-900",
+                        isZero ? "text-surface-400" : (color || "text-surface-900"),
                     )}
                 >
                     {value}
@@ -153,6 +156,24 @@ export function KpiCard({
             {sub && <p className="text-xs text-surface-400 mt-0.5">{sub}</p>}
         </div>
     );
+}
+
+/**
+ * What an empty section says instead of nothing: what is missing, and what to
+ * try. A blank card under a tab read as a broken page.
+ */
+export function EmptyNote({ title, hint }: { title: string; hint?: string }) {
+    return (
+        <div className="card card-body text-center py-10">
+            <p className="text-sm font-medium text-surface-700">{title}</p>
+            {hint && <p className="text-xs text-surface-500 mt-1">{hint}</p>}
+        </div>
+    );
+}
+
+/** A rate is only a rate when there is something to measure: "—" and why, never a red 0%. */
+export function rateOrDash(numerator: number, denominator: number, digits = 0): string {
+    return denominator > 0 ? `${(Math.round((numerator / denominator) * 100 * 10 ** digits) / 10 ** digits).toFixed(digits)}%` : "—";
 }
 
 export function TableWrapper({ children }: { children: React.ReactNode }) {
@@ -663,6 +684,12 @@ export function ReportPageHeader({
 }) {
     const [showSchedule, setShowSchedule] = useState(false);
     const [showSchedules, setShowSchedules] = useState(false);
+    // On a phone the filters fold into one line ("1 Sep – 30 Sep 2026 · All
+    // outlets · Change"): seven controls stacked above the figures pushed every
+    // number below the first screen. From sm up they are always shown.
+    const [filtersOpen, setFiltersOpen] = useState(false);
+    const { data: outletList } = useQuery({ queryKey: ["report-outlets"], queryFn: () => reportsApi.outlets(), staleTime: 300_000, enabled: !!onOutletChange });
+    const outletName = outlet ? outletList?.data?.find((o) => String(o.id) === String(outlet))?.name : null;
     const { can } = usePermissions();
     const canExport = can("reports.export");
 
@@ -691,13 +718,24 @@ export function ReportPageHeader({
                     <p className="text-sm text-surface-400 mt-0.5">{subtitle}</p>
                 </div>
 
+                {/* Phone: the filters as one line, opened on tap */}
+                <button type="button" onClick={() => setFiltersOpen((o) => !o)} aria-expanded={filtersOpen}
+                    className="sm:hidden flex items-center justify-between gap-2 w-full rounded-lg border border-line px-3 py-2 text-left text-sm">
+                    <span className="min-w-0 truncate text-surface-700 tabular-nums">
+                        {dayjs(start).format("D MMM")} – {dayjs(end).format("D MMM YYYY")}
+                        {onOutletChange && <span className="text-surface-500"> · {outletName ?? "All outlets"}</span>}
+                    </span>
+                    <span className="shrink-0 text-xs font-medium text-brand-600">{filtersOpen ? "Done" : "Change"}</span>
+                </button>
+
                 {/* Right: date picker + compare + extras */}
-                <div className="flex flex-col items-start gap-2 xl:items-end xl:shrink-0">
+                <div className={clsx("flex-col items-start gap-2 xl:items-end xl:shrink-0", filtersOpen ? "flex" : "hidden sm:flex")}>
                     {/* Date picker row */}
                     <div className="flex items-center gap-2 flex-wrap">
                         {onOutletChange && <OutletSelect value={outlet ?? ""} onChange={onOutletChange} />}
                         <select
-                            className="input input-sm w-36 text-sm"
+                            className="input input-sm w-40 text-sm"
+                            aria-label="Period"
                             value={preset}
                             onChange={e => onPresetChange(e.target.value as DatePreset)}
                         >
@@ -768,7 +806,7 @@ export function ReportPageHeader({
                 {canExport && reportType && (
                 <button
                     onClick={() => setShowSchedule(true)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-surface-600 hover:bg-surface-100 hover:text-surface-900 transition-colors"
+                    className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-surface-600 hover:bg-surface-100 hover:text-surface-900 transition-colors"
                 >
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -780,7 +818,7 @@ export function ReportPageHeader({
                 {reportType && (
                 <button
                     onClick={() => setShowSchedules(s => !s)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-surface-600 hover:bg-surface-100 hover:text-surface-900 transition-colors"
+                    className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-surface-600 hover:bg-surface-100 hover:text-surface-900 transition-colors"
                 >
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />

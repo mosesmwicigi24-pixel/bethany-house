@@ -28,6 +28,7 @@ import {
 import {
     KPI_GRID,
     KpiCard,
+    EmptyNote,
     ReportPdfButton,
     SectionHeader,
     TableWrapper,
@@ -148,8 +149,9 @@ export default function ProcurementReportPage() {
                     value={fmtKes(summary.avg_po_value)}
                 />
                 <KpiCard
-                    label="Fulfillment Rate"
-                    value={`${fulfillmentRate}%`}
+                    label="Fulfilment Rate"
+                    value={summary.total_orders > 0 ? `${fulfillmentRate}%` : "—"}
+                    sub={summary.total_orders > 0 ? undefined : "no purchase orders in this period"}
                     color={
                         fulfillmentRate >= 80 ? "text-success" : "text-warning"
                     }
@@ -200,6 +202,10 @@ export default function ProcurementReportPage() {
             {/* ── OVERVIEW ── */}
             {activeTab === "overview" && (
                 <div className="space-y-6">
+                    {data && !(Number(summary.total_orders) > 0) && monthlyTrend.length === 0 && (
+                        <EmptyNote title="No purchase orders in this period."
+                            hint="Try a longer range, or open Suppliers for the full supplier list." />
+                    )}
                     {/* Monthly spend trend */}
                     {monthlyTrend.length > 0 && (
                         <div className="card p-5">

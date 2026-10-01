@@ -205,9 +205,12 @@ class MetricEngine
                 $now->subDays(29)->startOfDay(), $now->endOfDay(),
                 $now->subDays(59)->startOfDay(), $now->subDays(30)->endOfDay(),
             ],
+            // A period still in progress is compared LIKE FOR LIKE — the same
+            // stretch of the previous one (1–2 Oct against 1–2 Sep), never the
+            // whole of it: two days against thirty read as a 77% collapse.
             'this_month' => [
                 $now->startOfMonth(), $now->endOfDay(),
-                $now->subMonthNoOverflow()->startOfMonth(), $now->subMonthNoOverflow()->endOfMonth(),
+                $now->subMonthNoOverflow()->startOfMonth(), $now->subMonthNoOverflow()->endOfDay(),
             ],
             'last_month' => [
                 $now->subMonthNoOverflow()->startOfMonth(), $now->subMonthNoOverflow()->endOfMonth(),
@@ -215,11 +218,11 @@ class MetricEngine
             ],
             'this_quarter' => [
                 $now->startOfQuarter(), $now->endOfDay(),
-                $now->subQuarter()->startOfQuarter(), $now->subQuarter()->endOfQuarter(),
+                $now->subMonthsNoOverflow(3)->startOfQuarter(), $now->subMonthsNoOverflow(3)->endOfDay(),
             ],
             'this_year' => [
                 $now->startOfYear(), $now->endOfDay(),
-                $now->subYear()->startOfYear(), $now->subYear()->endOfYear(),
+                $now->subYearNoOverflow()->startOfYear(), $now->subYearNoOverflow()->endOfDay(),
             ],
             'custom' => (function () use ($from, $to, $now) {
                 $s = CarbonImmutable::parse($from ?: $now->format('Y-m-d'), self::TZ)->startOfDay();

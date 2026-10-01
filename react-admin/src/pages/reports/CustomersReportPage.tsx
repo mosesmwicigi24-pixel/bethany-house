@@ -33,6 +33,7 @@ import dayjs from "dayjs";
 import {
     KPI_GRID,
     KpiCard,
+    EmptyNote,
     ReportPdfButton,
     SectionHeader,
     TableWrapper,
@@ -112,12 +113,13 @@ export default function CustomersReportPage() {
     const summary = summaryQuery.data ?? {};
     const analytics = analyticsQuery.data ?? {};
 
+    // Zero-sized slices drew an empty pie; only segments with customers in them.
     const segmentData = Object.entries(analytics.segments ?? {}).map(
         ([name, value]) => ({
             name,
             value: Number(value),
         }),
-    );
+    ).filter((d) => d.value > 0);
     const spendBrackets = Object.entries(analytics.spend_brackets ?? {}).map(
         ([bracket, count]) => ({
             bracket,
@@ -282,6 +284,9 @@ export default function CustomersReportPage() {
                 <div className="space-y-6">
                     {/* Segments + spend brackets */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {segmentData.length === 0 && (
+                            <EmptyNote title="No customer segments for this period." hint="Segments fill in as customers buy." />
+                        )}
                         {segmentData.length > 0 && (
                             <div className="card p-5">
                                 <SectionHeader title="Customer Segments" />

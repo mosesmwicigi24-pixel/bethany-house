@@ -467,6 +467,8 @@ export function datePresetRange(preset: DatePreset): {
 } {
     const fmt = (d: dayjs.Dayjs) => d.format("YYYY-MM-DD");
     const now = dayjs();
+    // "This week/month/quarter/year" run to TODAY: ending on the 31st showed days
+    // that have not happened and made every comparison look like a collapse.
 
     switch (preset) {
         case "today":
@@ -482,7 +484,7 @@ export function datePresetRange(preset: DatePreset): {
         case "this_week":
             return {
                 start: fmt(now.startOf("week")),
-                end: fmt(now.endOf("week")),
+                end: fmt(now.endOf("day")),
             };
         case "last_week":
             return {
@@ -512,7 +514,7 @@ export function datePresetRange(preset: DatePreset): {
         case "this_month":
             return {
                 start: fmt(now.startOf("month")),
-                end: fmt(now.endOf("month")),
+                end: fmt(now.endOf("day")),
             };
         case "last_month":
             return {
@@ -522,7 +524,7 @@ export function datePresetRange(preset: DatePreset): {
         case "this_quarter":
             return {
                 start: fmt(now.startOf("quarter")),
-                end: fmt(now.endOf("quarter")),
+                end: fmt(now.endOf("day")),
             };
         case "last_quarter":
             return {
@@ -532,7 +534,7 @@ export function datePresetRange(preset: DatePreset): {
         case "this_year":
             return {
                 start: fmt(now.startOf("year")),
-                end: fmt(now.endOf("year")),
+                end: fmt(now.endOf("day")),
             };
         case "last_year":
             return {
