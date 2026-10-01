@@ -910,6 +910,24 @@ export function useDateRange(defaultPreset: DatePreset = "this_month") {
     };
 }
 
+/**
+ * The active tab, held in the URL (`?tab=`) — read on every render and written
+ * on every change, so a refresh, the back button or a shared link lands on the
+ * same tab. An unknown or forbidden tab falls back to `fallback`.
+ */
+export function useReportTab<T extends string>(tabs: readonly T[], fallback: T): [T, (t: T) => void] {
+    const [sp, setSp] = useSearchParams();
+    const t = sp.get("tab") as T | null;
+    const active = t && tabs.includes(t) ? t : fallback;
+    const set = (next: T) => setSp((prev) => {
+        const p = new URLSearchParams(prev);
+        if (next === fallback) p.delete("tab"); else p.set("tab", next);
+        p.delete("drill");   // a drill belongs to the tab it was opened from
+        return p;
+    }, { replace: true });
+    return [active, set];
+}
+
 /** The page's outlet filter, from the URL — for sections that call the engine directly. */
 export function useReportOutlet(): number | undefined {
     const [sp] = useSearchParams();

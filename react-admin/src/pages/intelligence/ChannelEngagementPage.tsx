@@ -19,7 +19,8 @@ const CHANNEL_META: Record<string, { label: string; emoji: string }> = {
     web:       { label: "Webpage",   emoji: "🌐" },
 };
 
-export default function ChannelEngagementPage() {
+/** `embedded`: shown as the Channels tab of Customers & Neema — no page title of its own. */
+export default function ChannelEngagementPage({ embedded = false }: { embedded?: boolean } = {}) {
     const navigate = useNavigate();
     const { data, isLoading } = useQuery({
         queryKey: ["intelligence", "channels"],
@@ -34,10 +35,14 @@ export default function ChannelEngagementPage() {
 
     return (
         <div className="space-y-5 animate-fade-in">
-            <div className="page-header">
-                <h1 className="page-title">Channel Engagement</h1>
-                <p className="page-subtitle">How often customers reach you across WhatsApp, Messenger, Instagram, Facebook and the website.</p>
-            </div>
+            {embedded ? (
+                <p className="text-sm text-surface-500">How often customers reach you across WhatsApp, Messenger, Instagram, Facebook and the website.</p>
+            ) : (
+                <div className="page-header">
+                    <h1 className="page-title">Channel Engagement</h1>
+                    <p className="page-subtitle">How often customers reach you across WhatsApp, Messenger, Instagram, Facebook and the website.</p>
+                </div>
+            )}
 
             {isLoading ? <div className="py-16 flex justify-center"><Spinner /></div> : (
                 <>

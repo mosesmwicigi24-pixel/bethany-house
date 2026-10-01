@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 
@@ -191,7 +191,6 @@ const PaymentTransactionsPage = lazy(
 // ── Reports module ───────────────────────────────────────────────────────────
 const ReportsPage        = lazy(() => import("@/pages/reports/ReportsPage"));
 const SalesReportPage       = lazy(() => import("@/pages/reports/SalesReportPage"));
-const OrderPipelinePage     = lazy(() => import("@/pages/reports/OrderPipelinePage"));
 const CustomersReportPage   = lazy(() => import("@/pages/reports/CustomersReportPage"));
 const InventoryReportPage   = lazy(() => import("@/pages/reports/InventoryReportPage"));
 const ProductionReportPage  = lazy(() => import("@/pages/reports/ProductionReportPage"));
@@ -199,8 +198,6 @@ const ProcurementReportPage = lazy(() => import("@/pages/reports/ProcurementRepo
 const FinancialReportPage   = lazy(() => import("@/pages/reports/FinancialReportPage"));
 const ProductCostingReportPage = lazy(() => import("@/pages/reports/ProductCostingReportPage"));
 const IntelligenceDashboard = lazy(() => import("@/pages/intelligence/IntelligenceDashboard"));
-const CustomerGeographyPage = lazy(() => import("@/pages/intelligence/CustomerGeographyPage"));
-const ChannelEngagementPage = lazy(() => import("@/pages/intelligence/ChannelEngagementPage"));
 
 const ModulePlaceholder = lazy(
     (): Promise<{ default: React.ComponentType }> =>
@@ -280,6 +277,20 @@ function PageLoader() {
             <Spinner size="lg" />
         </div>
     );
+}
+
+/**
+ * A report that moved keeps working at its old address (reports consolidation,
+ * 2026-10-01): `to` may carry its own query (e.g. ?tab=unconfirmed); any other
+ * parameters on the old link — dates, outlet — come along.
+ */
+function MovedReport({ to }: { to: string }) {
+    const loc = useLocation();
+    const [path, q = ""] = to.split("?");
+    const sp = new URLSearchParams(loc.search);
+    new URLSearchParams(q).forEach((v, k) => sp.set(k, v));
+    const qs = sp.toString();
+    return <Navigate to={qs ? `${path}?${qs}` : path} replace />;
 }
 
 export default function App() {
@@ -998,16 +1009,8 @@ export default function App() {
                                 </ProtectedRoute>
                             }
                         />
-                        <Route
-                            path="/reports/order-pipeline"
-                            element={
-                                <ProtectedRoute permission="reports.view">
-                                <Suspense fallback={<PageLoader />}>
-                                    <OrderPipelinePage />
-                                </Suspense>
-                                </ProtectedRoute>
-                            }
-                        />
+                        {/* Unconfirmed orders are a tab of Sales & Orders now */}
+                        <Route path="/reports/order-pipeline" element={<MovedReport to="/reports/sales?tab=unconfirmed" />} />
                         <Route
                             path="/reports/sales"
                             element={
@@ -1058,16 +1061,19 @@ export default function App() {
                                 </ProtectedRoute>
                             }
                         />
+                        {/* Finance & Cash: reports.financial, as its data has long required
+                            (the old route admitted reports.view, who then met 403s). */}
                         <Route
-                            path="/reports/financial"
+                            path="/reports/finance"
                             element={
-                                <ProtectedRoute permission="reports.view">
+                                <ProtectedRoute permission="reports.financial">
                                 <Suspense fallback={<PageLoader />}>
                                     <FinancialReportPage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }
                         />
+                        <Route path="/reports/financial" element={<MovedReport to="/reports/finance" />} />
                         <Route
                             path="/reports/production/costing/:id"
                             element={
@@ -1078,33 +1084,16 @@ export default function App() {
                                 </ProtectedRoute>
                             }
                         />
-                        {/* ── Intelligence ──────────────────────────────────── */}
+                        {/* ── Business Intelligence & Signals (was /intelligence) ── */}
+                        <Route path="/intelligence" element={<MovedReport to="/reports/signals" />} />
+                        <Route path="/intelligence/geography" element={<MovedReport to="/reports/customers?tab=geography" />} />
+                        <Route path="/intelligence/channels" element={<MovedReport to="/reports/customers?tab=channels" />} />
                         <Route
-                            path="/intelligence"
+                            path="/reports/signals"
                             element={
                                 <ProtectedRoute anyOf={["inventory.view", "production.view", "customers.view", "expenses.view"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <IntelligenceDashboard />
-                                </Suspense>
-                                </ProtectedRoute>
-                            }
-                        />
-                        <Route
-                            path="/intelligence/geography"
-                            element={
-                                <ProtectedRoute anyOf={["customers.view"]}>
-                                <Suspense fallback={<PageLoader />}>
-                                    <CustomerGeographyPage />
-                                </Suspense>
-                                </ProtectedRoute>
-                            }
-                        />
-                        <Route
-                            path="/intelligence/channels"
-                            element={
-                                <ProtectedRoute anyOf={["customers.view"]}>
-                                <Suspense fallback={<PageLoader />}>
-                                    <ChannelEngagementPage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }

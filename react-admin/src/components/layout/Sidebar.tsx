@@ -406,94 +406,30 @@ const NAV: NavGroup[] = [
                 // record a takings. The ledger has its own permission.
                 permission: "payments.transactions",
             },
-            {
-                label: "Financial Report",
-                href: "/reports/financial",
-                icon: "expenses",
-                // The backend has required reports.financial for a while; the
-                // menu still offered it to anyone with reports.view, who then
-                // got a 403 on arrival.
-                permission: "reports.financial",
-            },
+            // The Financial Report moved into Reports as "Finance & Cash"
+            // (reports consolidation, 2026-10-01).
         ],
     },
 
     // ── Reports ───────────────────────────────────────────────────────────────
-    // Sub-report order mirrors the operational section order above:
-    //   Sales → Customers → Production → Inventory → Procurement
-    // (The Financial Report moved to the Finance section above.)
+    // The consolidated Reports module (owner brief, 2026-10-01): a few deep
+    // pages, each answering one management question, instead of many shallow
+    // ones. Unconfirmed Orders is a tab of Sales & Orders; Neema, Channels and
+    // Geography are tabs of Customers & Neema; the Intelligence group's Signals
+    // is a Reports page. Staff & Outlets, the Business Explorer and Data
+    // Quality join this list when they are built — never as empty pages.
     {
         label: "Reports",
         items: [
-            {
-                label: "Overview",
-                href: "/reports",
-                icon: "reports",
-                permission: "reports.view",
-            },
-            {
-                label: "Sales",
-                href: "/reports/sales",
-                icon: "orders",
-                permission: "reports.view",
-            },
-            {
-                label: "Unconfirmed Orders",
-                href: "/reports/order-pipeline",
-                icon: "orders",
-                permission: "reports.view",
-            },
-            {
-                label: "Customers",
-                href: "/reports/customers",
-                icon: "customers",
-                permission: "reports.view",
-            },
-            {
-                label: "Production",
-                href: "/reports/production",
-                icon: "production",
-                permission: "reports.view",
-            },
-            {
-                label: "Inventory",
-                href: "/reports/inventory",
-                icon: "stock",
-                permission: "reports.view",
-            },
-            {
-                label: "Procurement",
-                href: "/reports/procurement",
-                icon: "purchase-orders",
-                permission: "reports.view",
-            },
-        ],
-    },
-
-    // ── Intelligence ──────────────────────────────────────────────────────────
-    {
-        label: "Intelligence",
-        items: [
-            {
-                label: "Signals",
-                href: "/intelligence",
-                icon: "intelligence",
-                permission: "reports.view",
-            },
-            {
-                label: "Customer Geography",
-                href: "/intelligence/geography",
-                icon: "customers",
-                                // Not customers.view — serving a customer is not the
-                // same as reading where the customer base lives.
-                permission: "intelligence.view",
-            },
-            {
-                label: "Channel Engagement",
-                href: "/intelligence/channels",
-                icon: "customers",
-                permission: "intelligence.view",
-            },
+            { label: "Executive Overview",      href: "/reports",             icon: "reports",         permission: "reports.view" },
+            { label: "Sales & Orders",          href: "/reports/sales",       icon: "orders",          permission: "reports.view" },
+            { label: "Customers & Neema",       href: "/reports/customers",   icon: "customers",       permission: "reports.view" },
+            // reports.financial: what its data has always required.
+            { label: "Finance & Cash",          href: "/reports/finance",     icon: "expenses",        permission: "reports.financial" },
+            { label: "Production & Fulfilment", href: "/reports/production",  icon: "production",      permission: "reports.view" },
+            { label: "Inventory",               href: "/reports/inventory",   icon: "stock",           permission: "reports.view" },
+            { label: "Procurement & Suppliers", href: "/reports/procurement", icon: "purchase-orders", permission: "reports.view" },
+            { label: "Signals",                 href: "/reports/signals",     icon: "intelligence",    permission: "reports.view" },
         ],
     },
 

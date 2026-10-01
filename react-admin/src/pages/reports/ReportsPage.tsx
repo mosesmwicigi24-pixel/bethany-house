@@ -467,7 +467,7 @@ function ExecutiveOverview() {
                             <>
                                 <MetricCard label="Expenses" metric={k.financial.expenses} money downIsGood
                                     onOpen={() => setDrill({ metric: "expenses", label: "Expenses in period", money: true, reportPath: "/expenses" })} />
-                                <MetricCard label="Net (Coll. − Exp.)" metric={k.financial.net_collected} money to="/reports/financial" />
+                                <MetricCard label="Net (Coll. − Exp.)" metric={k.financial.net_collected} money to="/reports/finance" />
                             </>
                         )}
                         <div className={clsx(k.financial ? "col-span-2 2xl:col-span-3" : "col-span-2 md:col-span-3 2xl:col-span-5")}>
@@ -490,7 +490,7 @@ function ExecutiveOverview() {
 
 // Collected drills to financial for those who may enter; sales otherwise.
 function can_financial_path(k: any): string {
-    return k?.financial ? "/reports/financial" : "/reports/sales";
+    return k?.financial ? "/reports/finance" : "/reports/sales";
 }
 
 // ─── Scheduled reports summary ─────────────────────────────────────────────────
@@ -569,7 +569,7 @@ interface ReportCategory {
 const CATEGORIES: ReportCategory[] = [
     {
         id: "sales",
-        label: "Sales",
+        label: "Sales & Orders",
         description: "Revenue, orders, products, channels, patterns & returns",
         path: "/reports/sales",
         color: "text-info-600 bg-info-50",
@@ -591,7 +591,7 @@ const CATEGORIES: ReportCategory[] = [
     },
     {
         id: "customers",
-        label: "Customers",
+        label: "Customers & Neema",
         description: "Growth, segments, lifetime value, retention cohorts",
         path: "/reports/customers",
         color: "text-accent-600 bg-accent-50",
@@ -636,7 +636,7 @@ const CATEGORIES: ReportCategory[] = [
     },
     {
         id: "production",
-        label: "Production",
+        label: "Production & Fulfilment",
         description:
             "Completion, on-time rate, tailor performance, QC failures",
         path: "/reports/production",
@@ -659,7 +659,7 @@ const CATEGORIES: ReportCategory[] = [
     },
     {
         id: "procurement",
-        label: "Procurement",
+        label: "Procurement & Suppliers",
         description:
             "Purchase orders, supplier spend, top items, fulfilment status",
         path: "/reports/procurement",
@@ -682,9 +682,9 @@ const CATEGORIES: ReportCategory[] = [
     },
     {
         id: "financial",
-        label: "Financial",
+        label: "Finance & Cash",
         description: "P&L statement, revenue vs expenses, tax, discounts",
-        path: "/reports/financial",
+        path: "/reports/finance",
         color: "text-info-600 bg-info-50",
         icon: (
             <svg
@@ -710,7 +710,7 @@ export default function ReportsPage() {
     const navigate = useNavigate();
     const { can } = usePermissions();
     // Every /reports/* sub-page requires reports.view, already implied by
-    // reaching this page - except /reports/financial, which requires the
+    // reaching this page - except /reports/finance, which requires the
     // more restricted reports.financial (see routes/api.php and
     // SyncPermissions.php: outlet_manager and procurement_officer/manager
     // deliberately get reports.view but not reports.financial). Filtering
@@ -722,10 +722,11 @@ export default function ReportsPage() {
     return (
         <div className="space-y-8 animate-fade-in">
             <div>
-                <h1 className="page-title">Reports & Analytics</h1>
+                <h1 className="page-title">Executive Overview</h1>
                 <p className="page-subtitle">
-                    Business intelligence overview. Select a category to drill
-                    down with custom date ranges, CSV export, and scheduling.
+                    How the business is doing: what changed, where the pressure
+                    is, and where to look next. Tap a figure for the records
+                    behind it.
                 </p>
             </div>
 
