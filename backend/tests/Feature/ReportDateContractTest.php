@@ -91,12 +91,22 @@ class ReportDateContractTest extends TestCase
         $this->assertSame(1_000_007.0, $this->summaryRevenue($wide));
     }
 
-    public function test_when_a_caller_sends_both_the_explicit_legacy_pair_wins(): void
+    /**
+     * CHANGED in cycle 10 (owner-approved 2026-10-01). This asserted that the
+     * legacy pair wins — predictable on THIS page, but the executive pages read
+     * `from`, so one URL answered for two windows on two pages. Contradictory
+     * spellings are now refused; the same day under both names is fine.
+     */
+    public function test_when_a_caller_sends_both_spellings_they_must_agree(): void
     {
         $mixed = 'start_date=' . now()->subYear()->toDateString() . '&end_date=' . now()->toDateString()
                . '&from=' . now()->subDay()->toDateString() . '&to=' . now()->toDateString();
 
-        $this->assertSame(1_000_007.0, $this->summaryRevenue($mixed), 'one of them must win, predictably');
+        $this->getJson("/api/v1/admin/reports/sales/summary?{$mixed}")->assertStatus(422);
+
+        $agreeing = 'start_date=' . now()->subYear()->toDateString() . '&from=' . now()->subYear()->toDateString()
+                  . '&end_date=' . now()->toDateString();
+        $this->assertSame(1_000_007.0, $this->summaryRevenue($agreeing), 'the same day under both names is one window');
     }
 
     public function test_the_default_window_is_unchanged_when_no_dates_are_given(): void

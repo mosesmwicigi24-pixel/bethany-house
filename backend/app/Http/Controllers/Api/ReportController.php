@@ -249,7 +249,7 @@ class ReportController extends Controller
             COUNT(CASE WHEN {$channelExpr} = 'whatsapp'  THEN 1 END)          AS whatsapp_count,
             COUNT(CASE WHEN {$channelExpr} = 'messenger' THEN 1 END)          AS messenger_count,
             COUNT(CASE WHEN {$channelExpr} = 'chat'      THEN 1 END)          AS other_chat_count,
-            COUNT(DISTINCT COALESCE(user_id::text, normalize_phone(customer_phone), NULLIF(lower(btrim(customer_email)), '')))                                            AS unique_customers,
+            COUNT(DISTINCT " . \App\Support\BuyerIdentity::sql('orders') . ")                                            AS unique_customers,
             (COALESCE(SUM({$amtKes('orders.discount_amount')}) / NULLIF(SUM({$amtKes('orders.total_amount')}) + SUM({$amtKes('orders.discount_amount')}), 0) * 100, 0))::float8 AS discount_rate_percent
         ")->first();
 
@@ -257,7 +257,7 @@ class ReportController extends Controller
             DATE(created_at)               AS date,
             COUNT(*)                       AS orders,
             (COALESCE(SUM({$amtKes('orders.total_amount')}), 0))::float8 AS revenue,
-            COUNT(DISTINCT COALESCE(user_id::text, normalize_phone(customer_phone), NULLIF(lower(btrim(customer_email)), '')))        AS unique_customers
+            COUNT(DISTINCT " . \App\Support\BuyerIdentity::sql('orders') . ")        AS unique_customers
         ")
             ->groupBy(DB::raw('DATE(created_at)'))
             ->orderBy('date')
@@ -928,7 +928,7 @@ class ReportController extends Controller
                 COALESCE(MAX({$unitPrice}), 0)                                     AS max_price,
                 (COALESCE(SUM({$amtKes('order_items.discount_amount')}), 0))::float8 AS total_discounts,
                 COUNT(DISTINCT orders.id)                                          AS order_count,
-                COUNT(DISTINCT orders.user_id)                                     AS unique_customers,
+                COUNT(DISTINCT " . \App\Support\BuyerIdentity::sql('orders') . ") AS unique_customers,
                 (COALESCE(SUM({$revenue}) / NULLIF(SUM(order_items.quantity), 0), 0))::float8 AS revenue_per_unit
             ")
             ->orderByRaw("(COALESCE(SUM({$revenue}), 0))::float8 DESC")
@@ -1339,7 +1339,7 @@ class ReportController extends Controller
         // it — two different questions in one ratio.
         $returningBuyers = (int) $this->recognisedOrders(DB::table('orders as o1'), 'o1')
             ->whereBetween('o1.created_at', [$start, $end])
-            ->whereRaw('(o1.customer_id IS NOT NULL OR o1.user_id IS NOT NULL)')
+            ->whereRaw($this->buyerKey('o1') . ' IS NOT NULL')
             ->whereExists(function ($q) use ($start) {
                 $this->recognisedOrders($q->from('orders as o2'), 'o2')
                   ->whereRaw($this->buyerKey('o2') . ' = ' . $this->buyerKey('o1'))
@@ -1552,62 +1552,58 @@ class ReportController extends Controller
             ->orderBy('cohort_month')
             ->get();
 
-        // For each cohort, count how many made a purchase in subsequent months
-        $retention = $cohorts->map(function ($cohort) {
-            $cohortMonth = $cohort->cohort_month;
+        // Who in each cohort bought again, month by month — ONE query, with the
+        // same buyer rule as every other count (App\Support\BuyerIdentity).
+        //
+        // History: this was `whereNotNull('user_id')`, and with one login among
+        // 718 customers every cohort read ZERO retention — "not one of the 692
+        // customers acquired in Q3 came back" while 37 bought repeatedly. The
+        // worst figure in this programme. Cycle 6 keyed members as 'c<id>' /
+        // 'u<login>'; when buyers became phone-first (cycle 10) those keys
+        // stopped matching any customer who has a phone — the same zero, by a
+        // different road. It also ran a query per cohort, each recomputing every
+        // order's identity: 70 ms at 5,000 orders, 632 ms at 20,000.
+        //
+        // A member's identity is built by the SAME rule an order's is: their
+        // phone (normalised), else their record — plus their login if they have
+        // one. Counting distinct MEMBERS, so a person who bought both ways in a
+        // month is one returning customer, not two.
+        $dead       = "'" . implode("','", Order::DEAD_STATUSES) . "'";
+        $recognised = "'" . implode("','", Order::RECOGNISED_STATUSES) . "'";
+        $settled    = "'" . implode("','", Order::SETTLED_PAYMENT_STATUSES) . "'";
+        $buyer      = \App\Support\BuyerIdentity::sql('o');
 
-            // Customers acquired in this cohort month, as BUYER KEYS.
-            //
-            // This was `whereNotNull('user_id')->pluck('user_id')`, and of 718
-            // customers exactly ONE has a login. Every cohort was therefore
-            // empty and the report returned cohort sizes with zero retention
-            // for all of them — telling a reader that not one of the 692
-            // customers acquired in Q3 2026 ever came back, while 37 people
-            // bought repeatedly in Q3 alone. It did not under-report; it
-            // reported the opposite. The worst figure found in this programme.
-            //
-            // A customer's key is 'c<id>', plus 'u<user_id>' when they also
-            // have a login, so an order placed either way counts for them.
-            $cohortMembers = DB::table('customers')
-                ->whereRaw("TO_CHAR(created_at, 'YYYY-MM') = ?", [$cohortMonth])
-                ->get(['id', 'user_id']);
+        $rows = collect(DB::select("
+            WITH mem AS (
+                SELECT c.id AS cid, TO_CHAR(c.created_at, 'YYYY-MM') AS cohort, k.bk
+                FROM customers c
+                CROSS JOIN LATERAL (VALUES
+                    (COALESCE(normalize_phone(c.phone), 'c' || c.id)),
+                    ('u' || c.user_id)
+                ) AS k(bk)
+                WHERE c.created_at BETWEEN ? AND ? AND k.bk IS NOT NULL
+            ),
+            ord AS (
+                SELECT {$buyer} AS bk, TO_CHAR(o.created_at, 'YYYY-MM') AS month
+                FROM orders o
+                WHERE o.status NOT IN ({$dead})
+                  AND (o.status IN ({$recognised}) OR o.payment_status IN ({$settled}))
+            )
+            SELECT mem.cohort, ord.month, COUNT(DISTINCT mem.cid) AS retained
+            FROM mem
+            JOIN ord ON ord.bk = mem.bk AND ord.month >= mem.cohort
+            GROUP BY mem.cohort, ord.month
+            ORDER BY mem.cohort, ord.month
+        ", [$start, $end]))->groupBy('cohort');
 
-            $cohortKeys = $cohortMembers
-                ->flatMap(fn ($c) => array_filter([
-                    'c' . $c->id,
-                    $c->user_id ? 'u' . $c->user_id : null,
-                ]))
-                ->all();
-
-            if ($cohortKeys === []) {
-                return ['cohort' => $cohortMonth, 'size' => $cohort->cohort_size, 'months' => []];
-            }
-
-            $buyerKey    = $this->buyerKey('orders');
-            $placeholders = implode(',', array_fill(0, count($cohortKeys), '?'));
-
-            // Purchases per month by cohort members (up to 6 months forward),
-            // on the recognised basis and keyed the same way as every other
-            // count of who bought.
-            $purchaseMonths = $this->recognisedOrders(DB::table('orders'))
-                ->whereRaw("{$buyerKey} IN ({$placeholders})", $cohortKeys)
-                ->whereRaw("TO_CHAR(orders.created_at, 'YYYY-MM') >= ?", [$cohortMonth])
-                ->selectRaw("
-                    TO_CHAR(orders.created_at, 'YYYY-MM') AS month,
-                    COUNT(DISTINCT {$buyerKey}) AS retained
-                ")
-                ->groupBy(DB::raw("TO_CHAR(orders.created_at, 'YYYY-MM')"))
-                ->orderBy('month')
-                ->limit(7)
-                ->get()
-                ->mapWithKeys(fn ($r) => [$r->month => $r->retained]);
-
-            return [
-                'cohort' => $cohortMonth,
-                'size'   => $cohort->cohort_size,
-                'months' => $purchaseMonths,
-            ];
-        });
+        $retention = $cohorts->map(fn ($cohort) => [
+            'cohort' => $cohort->cohort_month,
+            'size'   => $cohort->cohort_size,
+            // Up to seven months from acquisition, as before.
+            'months' => collect($rows->get($cohort->cohort_month, []))
+                ->take(7)
+                ->mapWithKeys(fn ($r) => [$r->month => (int) $r->retained]),
+        ]);
 
         return response()->json([
             'period'    => ['start' => $start, 'end' => $end],

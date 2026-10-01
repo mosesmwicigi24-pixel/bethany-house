@@ -37,10 +37,21 @@ class NormalisesReportWindow
         // Refuse malformed input at the door, before anything is mirrored or
         // queried (cycle 8): a bad date or outlet used to reach Postgres and
         // come back as a 500 on twelve legacy endpoints. See ReportInput.
+        $day = [];
         foreach (['start_date', 'end_date', 'from', 'to'] as $field) {
-            ReportInput::date($field, $request->query($field));
+            $day[$field] = ReportInput::date($field, $request->query($field));
         }
         ReportInput::outletId($request->query('outlet_id'));
+
+        // Both spellings, different days: the legacy pages read start_date, the
+        // executive ones read from, so one URL answered for two windows on two
+        // pages (cycle 10). Mirroring below fills a MISSING spelling; a
+        // contradiction is the caller's to resolve, not ours to pick.
+        foreach ([['start_date', 'from'], ['end_date', 'to']] as [$a, $b]) {
+            if ($day[$a] !== null && $day[$b] !== null && $day[$a] !== $day[$b]) {
+                abort(422, "{$a} and {$b} name different days. Send one of them.");
+            }
+        }
 
         $mirror = function (string $a, string $b) use ($request) {
             if ($request->filled($a) && ! $request->filled($b)) {

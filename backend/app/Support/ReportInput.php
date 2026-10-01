@@ -38,6 +38,12 @@ final class ReportInput
             return null;
         }
 
+        // `start_date[]=…` arrives as an array, and `(string)` on an array is
+        // a PHP error — the cycle 8 fix itself answered 500 to it (cycle 10).
+        if (! is_scalar($value)) {
+            self::refuse($field);
+        }
+
         $value = (string) $value;
         // A time, fractional seconds and a zone are tolerated (a JavaScript
         // toISOString() is a reasonable thing to send) and ignored: reports
