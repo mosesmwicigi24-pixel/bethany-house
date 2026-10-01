@@ -2223,6 +2223,7 @@ function OutcomesCard({ start, end, outlet }: { start: string; end: string; outl
 // ─── Sold, by channel ─────────────────────────────────────────────────────────
 function ChannelSplit({ total, rows }: { total: number; rows: readonly (readonly [string, number | undefined, number | undefined])[] }) {
     const max = Math.max(1, ...rows.map(([, v]) => Number(v ?? 0)));
+    const idle = rows.filter(([, v]) => !(Number(v ?? 0) > 0)).map(([label]) => label);
     return (
         <div className="card card-body">
             <div className="flex items-baseline justify-between gap-2 mb-3">
@@ -2233,7 +2234,9 @@ function ChannelSplit({ total, rows }: { total: number; rows: readonly (readonly
                 {rows.map(([label, value, count]) => {
                     const v = Number(value ?? 0);
                     return (
-                        <div key={label} className="grid grid-cols-[6.5rem_1fr_auto] items-center gap-3 text-sm">
+                        // A phone shows the channels that sold; the empty ones fold
+                        // into one line below instead of a column of KES 0 rows.
+                        <div key={label} className={clsx("grid-cols-[6.5rem_1fr_auto] items-center gap-3 text-sm", v > 0 ? "grid" : "hidden sm:grid")}>
                             <span className={v > 0 ? "text-surface-700" : "text-surface-400"}>{label}</span>
                             <div className="h-1.5 rounded-full bg-surface-100">
                                 {v > 0 && <div className="h-1.5 rounded-full bg-brand-400" style={{ width: `${(v / max) * 100}%` }} />}
@@ -2245,6 +2248,9 @@ function ChannelSplit({ total, rows }: { total: number; rows: readonly (readonly
                     );
                 })}
             </div>
+            {idle.length > 0 && (
+                <p className="sm:hidden mt-2 text-2xs text-surface-400">Nothing sold via {idle.join(", ")}.</p>
+            )}
         </div>
     );
 }

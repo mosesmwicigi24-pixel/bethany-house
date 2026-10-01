@@ -90,7 +90,7 @@ function ReorderSuggestions() {
 
     return (
         <SectionCard
-            title="Reorder Suggestions"
+            title="Reorder suggestions"
             icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"/></svg>}
             badge={suggestions.length || undefined}
             badgeColor={suggestions.length > 0 ? "bg-danger-light text-danger" : undefined}
@@ -155,7 +155,7 @@ function TailorWorkloadCard() {
 
     return (
         <SectionCard
-            title="Tailor Workload"
+            title="Tailor workload"
             icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>}
         >
             {isLoading ? <div className="py-6 flex justify-center"><Spinner /></div> :
@@ -221,7 +221,7 @@ function ChurnRiskCard() {
 
     return (
         <SectionCard
-            title="Customer Churn Risk"
+            title="Customer churn risk"
             icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>}
             badge={highRisk > 0 ? `${highRisk} high risk` : customers.length > 0 ? customers.length : undefined}
             badgeColor={highRisk > 0 ? "bg-danger-light text-danger" : "bg-warning-light text-warning-dark"}
@@ -278,7 +278,7 @@ function MaterialShortagesCard() {
 
     return (
         <SectionCard
-            title="Material Shortage Pre-flight"
+            title="Material shortage pre-flight"
             icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>}
             badge={shortages.length > 0 ? (outOfStock > 0 ? `${outOfStock} out of stock` : `${shortages.length} short`) : undefined}
             badgeColor={outOfStock > 0 ? "bg-danger-light text-danger" : "bg-warning-light text-warning-dark"}
@@ -343,7 +343,7 @@ function BudgetWarningsCard() {
 
     return (
         <SectionCard
-            title="Expense Budget Warnings"
+            title="Expense budget warnings"
             icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>}
             badge={warnings.length > 0 ? (exceeded > 0 ? `${exceeded} exceeded` : `${warnings.length} warning`) : undefined}
             badgeColor={exceeded > 0 ? "bg-danger-light text-danger" : "bg-warning-light text-warning-dark"}
@@ -419,7 +419,7 @@ function CustomerGeographyCard() {
 
     return (
         <SectionCard
-            title="Customer Geography"
+            title="Customer geography"
             icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9 9 0 100-18 9 9 0 000 18zM3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 010 18M12 3a15 15 0 000 18"/></svg>}
             badge={summary?.top_country_name ? `Top: ${summary.top_country_name}` : undefined}
             badgeColor="bg-brand-50 text-brand-700"
@@ -485,7 +485,7 @@ function ChannelEngagementCard() {
 
     return (
         <SectionCard
-            title="Channel Engagement"
+            title="Channel engagement"
             icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4-.8L3 20l.8-3.6A7.9 7.9 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>}
             badge={`${connected}/5 connected`}
             badgeColor="bg-brand-50 text-brand-700"
@@ -551,7 +551,7 @@ export default function IntelligenceDashboard() {
             {/* The shared report header, without a period: every signal here is
                 the business as it stands now, not a window of time. */}
             <ReportPageHeader
-                title="Business Intelligence & Signals"
+                title="Signals"
                 subtitle="What needs acting on now — stock, production, customers and budgets, as they stand today."
             />
 
