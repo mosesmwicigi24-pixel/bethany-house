@@ -260,5 +260,7 @@ export function fmtKes(amount: number | null | undefined): string {
   // there are any, still show both digits.
   const n = Number(amount ?? 0)
   const cents = Math.round(n * 100) % 100 !== 0
-  return 'KES ' + n.toLocaleString('en-KE', { minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: 2 })
+  // A non-breaking space: "KES" never wraps away from its amount (a phone card
+  // showed "KES" alone on one line and the number on the next).
+  return 'KES\u00A0' + n.toLocaleString('en-KE', { minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: 2 })
 }

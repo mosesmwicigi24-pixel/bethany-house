@@ -5,7 +5,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { DrillPanel, ReportPageHeader, useDateRange, periodParams } from "./reportShared";
+import { DrillPanel, ReportPageHeader, useDateRange, periodParams, LoadFailed, ReportPending } from "./reportShared";
 import { reportsApi, type EngineRoomSummaries } from "@/api/reports";
 import { purchaseOrderApi } from "@/api/procurement";
 import { fmtKes } from "@/api/expenses";
@@ -85,7 +85,7 @@ function MetricCard({ label, value, sub, metric, to, money = false, downIsGood =
                 <p className="text-xs text-surface-500">{label}</p>
                 {metric && <DeltaChip current={metric.current} previous={metric.previous} downIsGood={downIsGood} money={money} />}
             </div>
-            <p className="text-xl font-bold text-surface-900 tabular-nums mt-1">{display}</p>
+            <p className="text-[clamp(1.05rem,4.4vw,1.25rem)] leading-tight font-bold text-surface-900 tabular-nums mt-1 break-words">{display}</p>
             <div className="flex items-end justify-between gap-2 mt-1 min-h-[24px]">
                 <p className="text-2xs text-surface-400 line-clamp-3">
                     {sub ?? (metric?.previous
@@ -411,10 +411,11 @@ function ExecutiveOverview() {
     const dr = useDateRange("this_month");
     const query = periodParams(dr.preset, dr.start, dr.end, dr.outlet);
     const [drill, setDrill] = useState<{ metric: string; label: string; money?: boolean; bucket?: string; reportPath?: string } | null>(null);
-    const { data, isLoading } = useQuery({
+    const { data, isError, refetch, isPlaceholderData, fetchStatus } = useQuery({
         queryKey: ["executive-dashboard", query],
         queryFn: () => reportsApi.executive(query),
         staleTime: 60_000,
+        placeholderData: (prev) => prev,   // keep the figures while a new period loads
     });
 
     const k = data?.kpis;
@@ -434,8 +435,10 @@ function ExecutiveOverview() {
                 onOutletChange={dr.setOutlet}
             />
 
-            {isLoading || !k ? (
-                <div className="flex justify-center py-12"><Spinner /></div>
+            {isError && (!k || isPlaceholderData) ? (
+                <LoadFailed what="The Executive Overview" onRetry={() => refetch()} />
+            ) : !k ? (
+                <ReportPending paused={fetchStatus === "paused"} />
             ) : (
                 <>
                     <Headline k={k} start={dr.start} end={dr.end} attention={(data.attention ?? []).length} />

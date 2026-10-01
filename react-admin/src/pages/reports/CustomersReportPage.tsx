@@ -30,6 +30,8 @@ import dayjs from "dayjs";
 import {
     KPI_GRID,
     KpiCard,
+    LoadFailed,
+    ReportPending,
     EmptyNote,
     ReportPdfButton,
     SectionHeader,
@@ -80,6 +82,7 @@ export default function CustomersReportPage() {
 
     const summaryQuery = useQuery({
         queryKey: ["report-customers-summary", dr.start, dr.end, dr.outlet],
+        placeholderData: (prev) => prev,   // keep the figures while a new period loads — no blank page
         queryFn: () => reportsApi.customerSummary(dr.params),
         enabled: !!dr.start && !!dr.end,
     });
@@ -100,12 +103,12 @@ export default function CustomersReportPage() {
         enabled: !!dr.start && !!dr.end && activeTab === "retention",
     });
 
-    if (summaryQuery.isLoading)
-        return (
-            <div className="flex justify-center py-20">
-                <Spinner />
-            </div>
-        );
+    // Kept figures are the PREVIOUS period's: on failure they must not stand
+    // under this period's heading.
+    if (summaryQuery.isError && (!summaryQuery.data || summaryQuery.isPlaceholderData))
+        return <LoadFailed what="Customers & Neema" onRetry={() => summaryQuery.refetch()} />;
+    if (!summaryQuery.data)
+        return <ReportPending paused={summaryQuery.fetchStatus === "paused"} />;
 
     const summary = summaryQuery.data ?? {};
     const analytics = analyticsQuery.data ?? {};

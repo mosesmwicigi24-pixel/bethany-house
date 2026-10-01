@@ -244,9 +244,11 @@ const queryClient = new QueryClient({
             gcTime: 5 * 60_000, // 5 min cache
             refetchOnWindowFocus: true,
             retry: (failureCount, error) => {
-                // Don't retry on 401/403/422
-                const status = (error as { response?: { status: number } })
-                    ?.response?.status;
+                // Don't retry on 401/403/422. The client reshapes errors into
+                // {message, errors, status}; reading error.response.status
+                // found nothing, so these were retried every time.
+                const status = (error as { status?: number }).status
+                    ?? (error as { response?: { status: number } })?.response?.status;
                 if (status && [401, 403, 422].includes(status)) return false;
                 return failureCount < 2;
             },

@@ -86,6 +86,8 @@ export interface Outlet {
 
 export interface ApiError {
   message: string
+  /** The HTTP status, when there was a response — the retry rule needs it. */
+  status?: number
   errors?: Record<string, string[]>
   /**
    * Machine-readable refusal code from the API, when it sends one. Several
