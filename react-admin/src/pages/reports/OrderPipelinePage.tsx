@@ -138,7 +138,7 @@ export default function OrderPipelinePage({ embedded = false }: { embedded?: boo
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 {d?.by_channel.map(c => (
                     <div key={c.channel} className="card p-4">
-                        <p className="text-xs font-semibold text-surface-500 uppercase tracking-wide">{c.label}</p>
+                        <p className="text-xs text-surface-500">{c.label}</p>
                         <p className="text-xl font-bold text-surface-900 mt-1 tabular-nums">{fmtKes(c.value)}</p>
                         <p className="text-xs text-surface-500 mt-0.5">{c.orders} unconfirmed</p>
                     </div>

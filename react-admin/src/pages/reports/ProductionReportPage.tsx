@@ -200,7 +200,7 @@ export default function ProductionReportPage() {
                         { id: "products", label: "Products" },
                         { id: "tailors",  label: "Tailors" },
                         { id: "costing",  label: "Costing & Profitability" },
-                        { id: "intelligence", label: "🧠 Intelligence" },
+                        { id: "intelligence", label: "Intelligence" },
                     ] as const).filter((tab) => tab.id !== "costing" || canSeeCosting).map((tab) => (
                         <button
                             key={tab.id}
