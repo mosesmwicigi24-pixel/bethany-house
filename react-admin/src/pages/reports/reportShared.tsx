@@ -788,6 +788,18 @@ export function ReportPageHeader({
                     Schedules {showSchedules ? "▲" : "▼"}
                 </button>
                 )}
+
+                {/* Currency: the slot the shell reserves for it. Every figure
+                    is stated in KES at the owner's REPORTING rates (never a
+                    customer's pricing rate), so there is one basis to choose;
+                    a currency's own business is a slice, in the Explorer. */}
+                <Link
+                    to="/reports/explorer?by=currency"
+                    className="ml-auto inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs text-surface-500 hover:bg-surface-100 hover:text-surface-800 transition-colors"
+                    title="USD, GBP and ZMW are converted at the reporting rates set in Settings → Currencies"
+                >
+                    KES · reporting rates <span className="text-brand-600 font-medium">By currency →</span>
+                </Link>
             </div>
 
             {/* Schedules list (inline) */}

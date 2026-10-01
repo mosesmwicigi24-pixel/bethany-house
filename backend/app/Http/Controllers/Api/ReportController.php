@@ -190,14 +190,11 @@ class ReportController extends Controller
         // Money truth beside it: what actually settled in the same window.
         $collected = (float) DB::table('payments as p')
             ->join('orders as o', 'o.id', '=', 'p.order_id')
-            ->where('p.status', 'paid')
+            ->tap(fn ($q) => \App\Support\SettledPayment::where($q, 'p'))
             // Same rule as the ledger: a payment recorded from a customer's
             // word (Mukuru, Western Union, M-Pesa send-money) is not collected
             // until someone verifies it. The tile lacked this guard while the
             // methods panel had it — one of two reasons they could not foot.
-            ->where(fn ($q) => $q->where('p.requires_approval', false)
-                                 ->orWhereNull('p.requires_approval')
-                                 ->orWhere('p.approval_status', 'approved'))
             ->when($reportInKes,
                 fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('p.currency_code')),
                 fn ($q) => $q->whereRaw('UPPER(p.currency_code) = ?', [$currency]))
@@ -478,10 +475,7 @@ class ReportController extends Controller
         $paidPerOrder = DB::table('payments')
             ->selectRaw('(COALESCE(SUM(payments.amount - COALESCE(payments.refund_amount, 0)), 0))::float8 AS paid')
             ->whereColumn('payments.order_id', 'orders.id')
-            ->where('payments.status', 'paid')
-            ->where(fn ($q) => $q->where('payments.requires_approval', false)
-                                 ->orWhereNull('payments.requires_approval')
-                                 ->orWhere('payments.approval_status', 'approved'));
+            ->tap(fn ($q) => \App\Support\SettledPayment::where($q, 'payments'));
 
         $scoped = fn (?string $channel) => Order::query()
             ->reportingChannel($channel)
@@ -767,10 +761,7 @@ class ReportController extends Controller
 
         $paidPerOrder = DB::table('payments')
             ->selectRaw('order_id, (COALESCE(SUM(' . $payKes('amount - COALESCE(refund_amount, 0)') . '), 0))::float8 AS paid')
-            ->where('status', 'paid')
-            ->where(fn ($q) => $q->where('requires_approval', false)
-                                 ->orWhereNull('requires_approval')
-                                 ->orWhere('approval_status', 'approved'))
+            ->tap(fn ($q) => \App\Support\SettledPayment::where($q))
             ->groupBy('order_id');
 
         // Payments are converted where they are summed, so the clamp below
@@ -1177,10 +1168,7 @@ class ReportController extends Controller
                 fn ($q) => $q->whereRaw('UPPER(p.currency_code) = ?', [$currency]))
             ->when($outletId,  fn ($q) => $q->where('o.outlet_id',  $outletId))
             ->when($orderType, fn ($q) => $q->where('o.order_type', $orderType))
-            ->where('p.status', 'paid')
-            ->where(fn ($q) => $q->where('p.requires_approval', false)
-                                 ->orWhereNull('p.requires_approval')
-                                 ->orWhere('p.approval_status', 'approved'))
+            ->tap(fn ($q) => \App\Support\SettledPayment::where($q, 'p'))
             ->selectRaw("
                 p.payment_method,
                 COALESCE(pm.name, p.payment_method) AS method_name,
@@ -1851,18 +1839,7 @@ class ReportController extends Controller
                 COUNT(*) FILTER (WHERE COALESCE(oi.cost_price, pr.cost_price) IS NULL)         AS unpriced_lines
             FROM order_items oi
             JOIN orders o ON o.id = oi.order_id
-            LEFT JOIN LATERAL (
-                SELECT pp.cost_price
-                FROM product_prices pp
-                WHERE UPPER(pp.currency_code) = 'KES'
-                  AND pp.cost_price IS NOT NULL
-                  AND (
-                        (oi.product_variant_id IS NOT NULL AND pp.product_variant_id = oi.product_variant_id)
-                     OR (pp.product_id = oi.product_id AND pp.product_variant_id IS NULL)
-                  )
-                ORDER BY pp.product_variant_id IS NULL
-                LIMIT 1
-            ) pr ON TRUE
+            LEFT JOIN LATERAL (SELECT " . \App\Support\CostBasis::bookCostSql('oi') . " AS cost_price) pr ON TRUE
             WHERE o.created_at BETWEEN ? AND ?
               AND o.status NOT IN ('cancelled','voided','refunded')
               AND (o.status IN ('confirmed','processing','shipped','delivered','completed')
@@ -2066,10 +2043,7 @@ class ReportController extends Controller
         $collectedMonthly = DB::table('payments as p')
             ->join('orders as o', 'o.id', '=', 'p.order_id')
             ->tap(fn ($q) => $this->inOutlet($q, 'o.outlet_id'))
-            ->where('p.status', 'paid')
-            ->where(fn ($q) => $q->where('p.requires_approval', false)
-                                 ->orWhereNull('p.requires_approval')
-                                 ->orWhere('p.approval_status', 'approved'))
+            ->tap(fn ($q) => \App\Support\SettledPayment::where($q, 'p'))
             ->whereBetween(DB::raw('COALESCE(p.paid_at, p.created_at)'), [$start, $end])
             ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency, 'p.currency_code'))
             ->selectRaw("TO_CHAR(COALESCE(p.paid_at, p.created_at), 'YYYY-MM') AS month,

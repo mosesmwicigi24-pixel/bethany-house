@@ -321,7 +321,7 @@ class MetricEngine
     {
         return DB::table('payments as p')
             ->join('orders as o', 'o.id', '=', 'p.order_id')
-            ->where('p.status', 'paid')
+            ->tap(fn ($q) => \App\Support\SettledPayment::where($q, 'p'))
             ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code)) IS NOT NULL")
             ->when($this->outletIds, fn ($q) => $q->whereIn('o.outlet_id', $this->outletIds));
     }
@@ -502,7 +502,7 @@ class MetricEngine
     {
         return $this->salesBase()
             ->leftJoinSub(
-                DB::table('payments')->where('status', 'paid')
+                \App\Support\SettledPayment::where(DB::table('payments'))
                     ->selectRaw('order_id, SUM((amount - COALESCE(refund_amount,0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))) AS paid')
                     ->groupBy('order_id'),
                 'pp', 'pp.order_id', '=', 'orders.id',
@@ -798,8 +798,7 @@ class MetricEngine
                        SUM((p.amount - COALESCE(p.refund_amount, 0)) * prc.reporting_rate_to_kes) AS paid
                 FROM payments p
                 JOIN currencies prc ON UPPER(prc.code) = UPPER(p.currency_code) AND prc.reporting_rate_to_kes IS NOT NULL
-                WHERE p.status = 'paid'
-                  AND (p.requires_approval IS NOT TRUE OR p.approval_status = 'approved')
+                WHERE " . \App\Support\SettledPayment::sql('p') . "
                 GROUP BY p.order_id
             ) pp ON pp.order_id = o.id
             WHERE o.status NOT IN ('cancelled', 'voided', 'refunded')
@@ -1161,15 +1160,10 @@ class MetricEngine
         // 4. Lines with no cost — neither the cost snapshotted at sale nor a
         //    KES cost in the price book. The P&L's cost of goods counts them
         //    as zero, so its margin is overstated by whatever they cost. The
-        //    lookup and the population (rated currencies) are the classic
-        //    P&L's (ReportController::profitLoss), so this count IS its
-        //    `unpriced_lines` — the reader can check one against the other.
-        $bookCost = "(SELECT pp.cost_price FROM product_prices pp
-                WHERE UPPER(pp.currency_code) = 'KES' AND pp.cost_price IS NOT NULL
-                  AND ((oi.product_variant_id IS NOT NULL AND pp.product_variant_id = oi.product_variant_id)
-                       OR (pp.product_id = oi.product_id AND pp.product_variant_id IS NULL))
-                ORDER BY pp.product_variant_id IS NULL
-                LIMIT 1)";
+        //    lookup (CostBasis) and the population (rated currencies) are the
+        //    P&L's, so this count IS its `unpriced_lines` — the reader can
+        //    check one against the other.
+        $bookCost = \App\Support\CostBasis::bookCostSql('oi');
         $soldLines = fn () => $sold()->join('order_items as oi', 'oi.order_id', '=', 'o.id')
             ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('o.currency_code'));
         $uncosted = $soldLines()->whereRaw("COALESCE(oi.cost_price, {$bookCost}) IS NULL");
@@ -2592,7 +2586,7 @@ class MetricEngine
             WITH paid AS (
                 SELECT order_id, SUM((amount - COALESCE(refund_amount,0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))) AS net,
                        MAX(COALESCE(paid_at, created_at)) AS settled_at
-                FROM payments WHERE status = 'paid' GROUP BY order_id
+                FROM payments WHERE " . \App\Support\SettledPayment::sql() . " GROUP BY order_id
             )
             SELECT COUNT(*) AS orders, COALESCE(SUM(o.total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))), 0) AS revenue
             FROM orders o JOIN paid p ON p.order_id = o.id
@@ -2611,7 +2605,7 @@ class MetricEngine
             WITH paid AS (
                 SELECT order_id, SUM((amount - COALESCE(refund_amount,0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))) AS net,
                        MAX(COALESCE(paid_at, created_at)) AS settled_at
-                FROM payments WHERE status = 'paid' GROUP BY order_id
+                FROM payments WHERE " . \App\Support\SettledPayment::sql() . " GROUP BY order_id
             )
             -- Prefer the cost snapshotted on the line at sale time; fall back to
             -- the current product cost for historical lines that predate it.
@@ -2620,13 +2614,7 @@ class MetricEngine
             FROM orders o
             JOIN paid p ON p.order_id = o.id
             JOIN order_items oi ON oi.order_id = o.id
-            LEFT JOIN LATERAL (
-                SELECT pp.cost_price FROM product_prices pp
-                WHERE pp.product_id = oi.product_id AND UPPER(pp.currency_code) = 'KES'
-                  AND (pp.product_variant_id = oi.product_variant_id OR pp.product_variant_id IS NULL)
-                ORDER BY (pp.product_variant_id IS NOT NULL AND pp.product_variant_id = oi.product_variant_id) DESC
-                LIMIT 1
-            ) pr ON TRUE
+            LEFT JOIN LATERAL (SELECT " . \App\Support\CostBasis::bookCostSql('oi') . " AS cost_price) pr ON TRUE
             WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
               AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL {$scope}
               AND p.net >= o.total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) - 0.01
@@ -2848,7 +2836,7 @@ class MetricEngine
     private function openBalancesWithLastPayment()
     {
         return $this->openBalances()->leftJoinSub(
-            DB::table('payments')->where('status', 'paid')
+            \App\Support\SettledPayment::where(DB::table('payments'))
                 ->selectRaw('order_id, MAX(COALESCE(paid_at, created_at)) AS last_paid_at')
                 ->groupBy('order_id'),
             'lp', 'lp.order_id', '=', 'orders.id',
@@ -3004,7 +2992,7 @@ class MetricEngine
             ->where('payment_status', 'paid')
             ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
             ->joinSub(
-                DB::table('payments')->where('status', 'paid')
+                \App\Support\SettledPayment::where(DB::table('payments'))
                     ->selectRaw('order_id, COUNT(*) AS n,
                         MIN(COALESCE(paid_at, created_at)) AS first_pay,
                         MAX(COALESCE(paid_at, created_at)) AS last_pay')
@@ -4635,7 +4623,7 @@ class MetricEngine
                    SUM(p.amount - p.refund_amount) AS paid
             FROM payments p
             JOIN orders o ON o.id = p.order_id
-            WHERE p.status = 'paid'
+            WHERE " . \App\Support\SettledPayment::sql('p') . "
               AND UPPER(p.currency_code) = UPPER(o.currency_code)
               AND o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
               AND {$corridor}
