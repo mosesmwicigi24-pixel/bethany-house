@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use App\Support\ServerError;
 
 class ProductController extends Controller
 {
@@ -472,7 +473,7 @@ class ProductController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to create product.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to create product.');
         }
     }
 
@@ -661,7 +662,7 @@ class ProductController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to update product.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to update product.');
         }
     }
 
@@ -706,7 +707,7 @@ class ProductController extends Controller
             return response()->json(['message' => 'Product deleted.']);
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to delete product.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to delete product.');
         }
     }
 
@@ -1055,7 +1056,7 @@ class ProductController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to create variant.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to create variant.');
         }
     }
 
@@ -1125,7 +1126,7 @@ class ProductController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to update variant.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to update variant.');
         }
     }
 
@@ -1236,7 +1237,7 @@ class ProductController extends Controller
 
                     $imported++;
                 } catch (\Exception $e) {
-                    $errors[] = "Row {$row}: " . $e->getMessage();
+                    $errors[] = "Row {$row}: " . ServerError::message($e, 'could not be saved.', ['row' => $row]);
                 }
             }
 
@@ -1246,7 +1247,7 @@ class ProductController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             fclose($handle);
-            return response()->json(['message' => 'Import failed: ' . $e->getMessage()], 500);
+            return ServerError::respond($e, 'Import failed.');
         }
 
         try {

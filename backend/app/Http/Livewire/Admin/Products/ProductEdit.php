@@ -15,6 +15,7 @@ use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 use Livewire\WithFileUploads;
+use App\Support\ServerError;
 
 class ProductEdit extends Component
 {
@@ -534,7 +535,7 @@ class ProductEdit extends Component
         } catch (\Exception $e) {
             DB::rollBack();
             $this->saving       = false;
-            $this->flashMessage = 'Failed to update product: ' . $e->getMessage();
+            $this->flashMessage = ServerError::message($e, 'Failed to update product.');
             $this->flashType    = 'error';
         }
     }

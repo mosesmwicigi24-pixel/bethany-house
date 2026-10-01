@@ -10,6 +10,7 @@ use App\Models\Product;
 use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Support\ServerError;
 
 class BomController extends Controller
 {
@@ -110,7 +111,7 @@ class BomController extends Controller
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to save BOM.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to save BOM.');
         }
     }
 
@@ -180,7 +181,7 @@ class BomController extends Controller
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to update BOM.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to update BOM.');
         }
     }
 

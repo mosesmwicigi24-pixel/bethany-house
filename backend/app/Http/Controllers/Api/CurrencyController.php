@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Support\ServerError;
 
 class CurrencyController extends Controller
 {
@@ -306,10 +307,7 @@ class CurrencyController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to set default currency.',
-                'error'   => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to set default currency.');
         }
     }
 

@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Services\IntelligenceService;
 use App\Support\SortResolver;
+use App\Support\ServerError;
 
 class StockLevelsController extends Controller
 {
@@ -214,7 +215,7 @@ class StockLevelsController extends Controller
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to save stock.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to save stock.');
         }
     }
 

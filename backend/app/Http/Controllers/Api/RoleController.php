@@ -10,6 +10,7 @@ use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
 use App\Services\ActivityLogService;
 use App\Services\PermissionDependencyService;
+use App\Support\ServerError;
 
 class RoleController extends Controller
 {
@@ -119,7 +120,7 @@ class RoleController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to create role.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to create role.');
         }
     }
 
@@ -187,7 +188,7 @@ class RoleController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to delete role.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to delete role.');
         }
     }
 
@@ -258,7 +259,7 @@ class RoleController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to update permissions.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to update permissions.');
         }
     }
 
@@ -304,7 +305,7 @@ class RoleController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to duplicate role.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to duplicate role.');
         }
     }
 

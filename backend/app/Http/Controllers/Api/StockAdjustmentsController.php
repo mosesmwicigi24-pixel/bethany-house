@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
+use App\Support\ServerError;
 
 class StockAdjustmentsController extends Controller
 {
@@ -256,7 +257,7 @@ class StockAdjustmentsController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to save adjustment.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to save adjustment.');
         }
     }
 
@@ -324,7 +325,7 @@ class StockAdjustmentsController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Approval failed.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Approval failed.');
         }
     }
 
@@ -503,7 +504,7 @@ class StockAdjustmentsController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Reversal failed.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Reversal failed.');
         }
     }
 

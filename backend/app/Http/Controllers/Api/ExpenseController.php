@@ -12,6 +12,7 @@ use App\Services\Reporting\MetricEngine;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\{DB, Storage};
 use Carbon\Carbon;
+use App\Support\ServerError;
 
 class ExpenseController extends Controller
 {
@@ -326,7 +327,7 @@ class ExpenseController extends Controller
             throw $e;
         } catch (\Throwable $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to create expense: ' . $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to create expense.');
         }
     }
 
@@ -405,7 +406,7 @@ class ExpenseController extends Controller
 
         } catch (\Throwable $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Update failed: ' . $e->getMessage()], 500);
+            return ServerError::respond($e, 'Update failed.');
         }
     }
 
@@ -469,7 +470,7 @@ class ExpenseController extends Controller
             return response()->json(['message' => 'Expense submitted for approval.', 'expense' => $expense->fresh()]);
         } catch (\Throwable $e) {
             DB::rollBack();
-            return response()->json(['message' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'The expense could not be submitted.');
         }
     }
 
@@ -553,7 +554,7 @@ class ExpenseController extends Controller
             return response()->json(['message' => 'Expense approved.', 'expense' => $expense->fresh()]);
         } catch (\Throwable $e) {
             DB::rollBack();
-            return response()->json(['message' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'The expense could not be approved.');
         }
     }
 
@@ -609,7 +610,7 @@ class ExpenseController extends Controller
             return response()->json(['message' => 'Expense rejected.', 'expense' => $expense->fresh()]);
         } catch (\Throwable $e) {
             DB::rollBack();
-            return response()->json(['message' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'The expense could not be rejected.');
         }
     }
 

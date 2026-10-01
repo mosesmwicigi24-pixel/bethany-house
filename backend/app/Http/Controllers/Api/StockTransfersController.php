@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
+use App\Support\ServerError;
 
 class StockTransfersController extends Controller
 {
@@ -183,11 +184,7 @@ class StockTransfersController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             // Return full error detail to help debug column/table issues
-            return response()->json([
-                'message' => 'Failed to create transfer.',
-                'error'   => $e->getMessage(),
-                'hint'    => 'Check column names in inventory_transfers and inventory_transfer_items tables.',
-            ], 500);
+            return ServerError::respond($e, 'Failed to create transfer.');
         }
     }
 
@@ -273,7 +270,7 @@ class StockTransfersController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Dispatch failed.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Dispatch failed.');
         }
     }
 
@@ -342,7 +339,7 @@ class StockTransfersController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Receive failed.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Receive failed.');
         }
     }
 

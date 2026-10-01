@@ -7,6 +7,7 @@ use App\Services\ActivityLogService;
 use App\Services\TaxCalculationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Support\ServerError;
 
 class TaxRateController extends Controller
 {
@@ -118,7 +119,7 @@ class TaxRateController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to create tax rate', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to create tax rate');
         }
     }
 
@@ -180,7 +181,7 @@ class TaxRateController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to update tax rate', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to update tax rate');
         }
     }
 
@@ -289,7 +290,7 @@ class TaxRateController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to update product tax rates', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to update product tax rates');
         }
     }
 

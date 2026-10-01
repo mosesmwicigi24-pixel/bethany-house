@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\{DB, Hash};
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Str;
+use App\Support\ServerError;
 
 class UserController extends Controller
 {
@@ -180,7 +181,7 @@ class UserController extends Controller
                 'must_setup_2fa' => $validated['must_setup_2fa'] ?? false,
             ]);
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Failed to create user', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to create user');
         }
 
         // Assign roles — if this fails, clean up and report
@@ -189,7 +190,7 @@ class UserController extends Controller
                 $this->syncUserRoles($user->id, $validated['role_ids']);
             } catch (\Exception $e) {
                 $user->forceDelete();
-                return response()->json(['message' => 'Failed to assign roles', 'error' => $e->getMessage()], 500);
+                return ServerError::respond($e, 'Failed to assign roles');
             }
         }
 
@@ -318,7 +319,7 @@ class UserController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to update user', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to update user');
         }
 
         // ── Role sync - runs OUTSIDE the transaction ──────────────────────────
@@ -518,11 +519,7 @@ class UserController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to delete user',
-                'error'   => $e->getMessage(),
-                'step'    => $e->getFile() . ':' . $e->getLine(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to delete user');
         }
     }
 
@@ -717,10 +714,7 @@ class UserController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to promote user.',
-                'error'   => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to promote user.');
         }
 
         // 5. Sync roles outside transaction (matches pattern in update())
