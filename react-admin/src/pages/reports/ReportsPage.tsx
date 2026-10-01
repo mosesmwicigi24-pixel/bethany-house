@@ -92,19 +92,22 @@ function MetricCard({ label, value, sub, metric, to, money = false, downIsGood =
         <button onClick={() => (onOpen ? onOpen() : to && navigate(to))} disabled={!to && !onOpen}
             className={clsx("card card-body text-left transition-shadow", (to || onOpen) && "hover:shadow-md cursor-pointer")}>
             <div className="flex items-start justify-between gap-2">
-                <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest">{label}</p>
+                <p className="text-xs text-surface-500">{label}</p>
                 {metric && <DeltaChip current={metric.current} previous={metric.previous} downIsGood={downIsGood} money={money} />}
             </div>
-            {/* Same visible cue as every report's figures: this one opens its records. */}
-            {onOpen && <span className="block text-2xs font-medium text-brand-600 mt-0.5" aria-hidden="true">records ›</span>}
-            <p className="text-lg sm:text-xl font-bold text-surface-900 tabular-nums mt-1 truncate">{display}</p>
+            <p className="text-xl font-bold text-surface-900 tabular-nums mt-1">{display}</p>
             <div className="flex items-end justify-between gap-2 mt-1 min-h-[24px]">
                 <p className="text-2xs text-surface-400 line-clamp-3">
                     {sub ?? (metric?.previous
                         ? `prev ${money ? fmtKes(metric.previous) : Number(metric.previous).toLocaleString()}`
                         : "")}
                 </p>
-                <Sparkline series={metric?.series} />
+                {/* The figure leads; the cue that it opens its records sits with
+                    the small print, as on every other report's cards. */}
+                <span className="flex shrink-0 items-end gap-2">
+                    {onOpen && <span className="text-2xs font-medium text-brand-600" aria-hidden="true">records ›</span>}
+                    <Sparkline series={metric?.series} />
+                </span>
             </div>
         </button>
     );
@@ -217,7 +220,7 @@ function AttentionPanel({ items }: { items: any[] }) {
         <div>
             <div className="flex items-center gap-2 mb-2">
                 <span aria-hidden="true">⚠️</span>
-                <p className="text-2xs font-bold text-amber-800 uppercase tracking-widest">Needs your attention</p>
+                <h2 className="text-sm font-semibold text-amber-800">Needs your attention</h2>
                 <span className="text-2xs font-bold text-amber-700 bg-amber-100 rounded-full px-1.5 py-0.5">{items.length}</span>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
@@ -263,7 +266,7 @@ function EngineCard({ label, value, sub, to, zero = false }: {
         >
             {/* Labels say what the money is in plain words and are never cut
                 off — a truncated "MONEY ON TH…" told a manager nothing. */}
-            <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest leading-snug">{label}</p>
+            <p className="text-xs text-surface-500 leading-snug">{label}</p>
             <p className={clsx(
                 "text-lg font-bold tabular-nums mt-1 truncate",
                 zero || value === "—" ? "text-surface-400" : "text-surface-900",
@@ -292,7 +295,7 @@ function EngineRoomStrip() {
     return (
         <div>
             <div className="flex items-center gap-2 mb-2">
-                <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest">Opportunities</p>
+                <h2 className="text-sm font-semibold text-surface-900">Opportunities</h2>
                 <p className="text-2xs text-surface-400">— money waiting to be won, each one a click from the list behind it</p>
             </div>
             {isLoading || !data ? (
@@ -381,7 +384,7 @@ function AgingCard({ aging, onBucket }: { aging: any; onBucket: (bucket: string,
     const max = Math.max(...buckets.map((b: any) => Number(b.amount)), 1);
     return (
         <div className="card card-body h-full">
-            <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest">Balance Aging</p>
+            <h3 className="text-sm font-semibold text-surface-900">Balance aging</h3>
             <div className="space-y-1.5 mt-2">
                 {buckets.map((b: any) => (
                     <button key={b.key} onClick={() => Number(b.amount) > 0 && onBucket(b.key, `Owed ${b.label}`)}
@@ -803,9 +806,9 @@ export default function ReportsPage() {
             <SchedulesSummary />
 
             <div>
-                <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-3">
+                <h2 className="text-sm font-semibold text-surface-900 mb-3">
                     All reports
-                </p>
+                </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {visibleCategories.map((cat) => (
                         <button
