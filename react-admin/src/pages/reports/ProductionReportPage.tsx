@@ -186,8 +186,8 @@ export default function ProductionReportPage() {
                 ) : (
                     <KpiCard
                         label="Avg Completion"
-                        value={fmtHours(s.avg_completion_hours)}
-                        sub="per order"
+                        value={Number(s.avg_completion_hours) > 0 ? fmtHours(s.avg_completion_hours) : "—"}
+                        sub={Number(s.avg_completion_hours) > 0 ? "per order" : "nothing completed in this period"}
                     />
                 )}
             </div>

@@ -229,15 +229,16 @@ export default function FinancialReportPage() {
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <KpiCard
-                    label="Opex"
+                    label="Operating expenses"
                     drill="expenses"
                     value={fmtKes(opex)}
                     color="text-danger"
                     comparison={cmp?.opex_change_pct}
                 />
                 <KpiCard
-                    label="Tax Collected"
+                    label="Tax on sales"
                     value={fmtKes(pl.tax_collected)}
+                    sub="charged on this period's sales"
                 />
                 <KpiCard
                     label="Discounts Given"

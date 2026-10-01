@@ -47,16 +47,33 @@ function Sparkline({ series }: { series?: Record<string, number> }) {
     );
 }
 
-function DeltaChip({ current, previous, downIsGood = false }: {
-    current: number; previous: number; downIsGood?: boolean;
+/**
+ * The change against the previous period, in the form that is true for it. A
+ * percentage only means something against a positive base: "▲724%" off a
+ * negative net read as a boom, and "prev n/a" called a previous zero missing.
+ */
+function DeltaChip({ current, previous, downIsGood = false, money = false }: {
+    current: number; previous: number; downIsGood?: boolean; money?: boolean;
 }) {
-    if (!previous) return <span className="text-2xs text-surface-500">— prev n/a</span>;
-    const pct = ((current - previous) / Math.abs(previous)) * 100;
-    if (Math.abs(pct) < 0.05) return <span className="text-2xs text-surface-400">± 0%</span>;
-    const up = pct > 0;
+    const diff = current - previous;
+    if (Math.abs(diff) < 0.005) return <span className="text-2xs text-surface-400">± 0</span>;
+    const up = diff > 0;
     const good = downIsGood ? !up : up;
+    const tone = good ? "text-success-600" : "text-danger-600";
+    if (previous === 0) {
+        return <span className={clsx("text-2xs font-bold", tone)} title="Nothing in the previous period">{up ? "new" : "▼ from 0"}</span>;
+    }
+    if (previous < 0) {
+        const abs = Math.abs(diff);
+        return (
+            <span className={clsx("text-2xs font-bold tabular-nums", tone)} title="Change in amount — a percentage of a negative figure means nothing">
+                {up ? "▲" : "▼"} {money ? fmtKes(abs) : abs.toLocaleString()}
+            </span>
+        );
+    }
+    const pct = (diff / previous) * 100;
     return (
-        <span className={clsx("text-2xs font-bold tabular-nums", good ? "text-success-600" : "text-danger-600")}>
+        <span className={clsx("text-2xs font-bold tabular-nums", tone)}>
             {up ? "▲" : "▼"} {Math.abs(pct).toFixed(1)}%
         </span>
     );
@@ -69,20 +86,22 @@ function MetricCard({ label, value, sub, metric, to, money = false, downIsGood =
 }) {
     const navigate = useNavigate();
     const display = value ?? (money
-        ? `KES ${Number(metric?.current ?? 0).toLocaleString()}`
+        ? fmtKes(metric?.current ?? 0)
         : Number(metric?.current ?? 0).toLocaleString());
     return (
         <button onClick={() => (onOpen ? onOpen() : to && navigate(to))} disabled={!to && !onOpen}
             className={clsx("card card-body text-left transition-shadow", (to || onOpen) && "hover:shadow-md cursor-pointer")}>
             <div className="flex items-start justify-between gap-2">
                 <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest">{label}</p>
-                {metric && <DeltaChip current={metric.current} previous={metric.previous} downIsGood={downIsGood} />}
+                {metric && <DeltaChip current={metric.current} previous={metric.previous} downIsGood={downIsGood} money={money} />}
             </div>
+            {/* Same visible cue as every report's figures: this one opens its records. */}
+            {onOpen && <span className="block text-2xs font-medium text-brand-600 mt-0.5" aria-hidden="true">records ›</span>}
             <p className="text-lg sm:text-xl font-bold text-surface-900 tabular-nums mt-1 truncate">{display}</p>
             <div className="flex items-end justify-between gap-2 mt-1 min-h-[24px]">
                 <p className="text-2xs text-surface-400 line-clamp-3">
                     {sub ?? (metric?.previous
-                        ? `prev ${money ? "KES " : ""}${Number(metric.previous).toLocaleString()}`
+                        ? `prev ${money ? fmtKes(metric.previous) : Number(metric.previous).toLocaleString()}`
                         : "")}
                 </p>
                 <Sparkline series={metric?.series} />
@@ -214,7 +233,7 @@ function AttentionPanel({ items }: { items: any[] }) {
 // it. Data comes from GET /reports/engine-room — six summaries in one call;
 // an engine that failed server-side arrives as null and renders a "—" card.
 
-/** "KES 1.2M" instead of fmtKes's full "KES 1,234,567.00" — strip cards are small. */
+/** "KES 1.2M" instead of fmtKes's full "KES 1,234,567" — strip cards are small. */
 function kesCompact(amount: number | null | undefined): string {
     if (amount == null) return "—";
     return (
@@ -421,16 +440,16 @@ function ExecutiveOverview() {
                     {/* One continuous grid: the whole screen is the dashboard.
                         2-up on phones, 4-up on laptops, 8-up on big displays. */}
                     <div className="grid grid-cols-2 md:grid-cols-4 2xl:grid-cols-8 gap-3">
-                        <MetricCard label="Revenue" metric={k.sales.revenue} money
+                        <MetricCard label="Sold" metric={k.sales.revenue} money
                             onOpen={() => setDrill({ metric: "revenue", label: "Revenue — source orders", money: true, reportPath: "/reports/sales" })} />
                         <MetricCard label="Collected" metric={k.money.collected} money
                             onOpen={() => setDrill({ metric: "collected", label: "Collected — settled payments", money: true, reportPath: can_financial_path(k) })} />
                         <MetricCard label="Outstanding"
-                            value={`KES ${Number(k.money.outstanding.amount).toLocaleString()}`}
+                            value={fmtKes(k.money.outstanding.amount)}
                             sub={`${k.money.outstanding.orders} open orders`}
                             onOpen={() => setDrill({ metric: "outstanding", label: "Outstanding balances", money: true, reportPath: "/pos/outstanding-balances" })} />
                         <MetricCard label="Deposits Held"
-                            value={`KES ${Number(k.money.aging?.deposits_held?.amount ?? 0).toLocaleString()}`}
+                            value={fmtKes(k.money.aging?.deposits_held?.amount ?? 0)}
                             sub={`${k.money.aging?.deposits_held?.orders ?? 0} undelivered — not income`}
                             onOpen={() => setDrill({ metric: "outstanding", bucket: "deposits", label: "Deposits held (undelivered)", money: true })} />
                         <MetricCard label="Orders" metric={k.sales.orders}
@@ -465,7 +484,7 @@ function ExecutiveOverview() {
                                     with what it leaves out stated, never a bare margin. */}
                                 {k.financial.earned && (
                                     <MetricCard label="Earned profit"
-                                        value={`KES ${Number(k.financial.earned.net_profit).toLocaleString()}`}
+                                        value={fmtKes(k.financial.earned.net_profit)}
                                         sub={k.financial.earned.limits?.length
                                             ? `Limited: ${k.financial.earned.limits.join("; ")}`
                                             : k.financial.earned.gross_margin_pct != null

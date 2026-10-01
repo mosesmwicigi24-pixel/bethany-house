@@ -141,7 +141,12 @@ export function KpiCard({
             onKeyDown={open ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } } : undefined}
             title={open ? "Show the records behind this number" : undefined}
         >
-            <p className="text-xs text-surface-500">{label}</p>
+            <div className="flex items-start justify-between gap-2">
+                <p className="text-xs text-surface-500">{label}</p>
+                {/* Visible, not hover-only: on a phone there is no hover, and a
+                    figure nobody knows they can open is a dead end. */}
+                {open && <span className="shrink-0 text-2xs font-medium text-brand-600" aria-hidden="true">records ›</span>}
+            </div>
             <div className="flex items-baseline gap-2 flex-wrap">
                 <p
                     className={clsx(

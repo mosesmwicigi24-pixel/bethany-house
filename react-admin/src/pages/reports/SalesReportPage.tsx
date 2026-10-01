@@ -175,60 +175,16 @@ export default function SalesReportPage() {
                 onCompareChange={setCompare}
             />
 
-            {/* KPIs row 1 */}
+            {/* Headline: what was sold and what arrived — read together, so side
+                by side — then who bought and the typical order. */}
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Total Revenue"
+                    label="Sold"
                     drill="revenue"
                     value={fmtKes(s.total_revenue)}
-                    sub={`${s.total_orders ?? 0} orders (sales truth)`}
+                    sub={`${s.total_orders ?? 0} orders · confirmed or paid`}
                     comparison={cmp?.revenue_change_pct}
                 />
-                <KpiCard
-                    label="Avg Order Value"
-                    value={fmtKes(s.average_order_value)}
-                    comparison={cmp?.aov_change_pct}
-                />
-                <KpiCard
-                    label="Unique Customers"
-                    value={s.unique_customers ?? 0}
-                    sub="Placed ≥ 1 order"
-                />
-                <KpiCard
-                    label="Discount Rate"
-                    value={`${Number(s.discount_rate_percent ?? 0).toFixed(1)}%`}
-                    sub={`${fmtKes(s.total_discounts)} given`}
-                />
-            </div>
-
-            {/* KPIs row 2 */}
-            <div className={KPI_GRID}>
-                {/* The four queues, and they SUM to Total Revenue — the old
-                    Online/POS pair covered only two of them, so the page
-                    showed 245 orders against a 248 total and nobody could
-                    say where the rest went. */}
-                <KpiCard label="Till Sales" value={fmtKes(s.till_revenue ?? 0)}
-                         sub={`${s.till_count ?? 0} orders`} />
-                <KpiCard label="Web Orders" value={fmtKes(s.web_revenue ?? 0)}
-                         sub={`${s.web_count ?? 0} orders`} />
-                {/* Chat is two channels the business runs and judges apart —
-                    WhatsApp through Neema, and Messenger. One "Chat Orders"
-                    tile hid that the smaller count carried the larger money.
-                    The two (plus any chat order that names no app) still sum
-                    to what that tile showed. */}
-                <KpiCard label="WhatsApp Orders" value={fmtKes(s.whatsapp_revenue ?? 0)}
-                         sub={`${s.whatsapp_count ?? 0} orders`} />
-                <KpiCard label="Messenger Orders" value={fmtKes(s.messenger_revenue ?? 0)}
-                         sub={`${s.messenger_count ?? 0} orders`} />
-                {(s.other_chat_count ?? 0) > 0 && (
-                    <KpiCard label="Other Chat Orders" value={fmtKes(s.other_chat_revenue ?? 0)}
-                             sub={`${s.other_chat_count} orders`} />
-                )}
-                <KpiCard label="Quoted Sales" value={fmtKes(s.quoted_revenue ?? 0)}
-                         sub={`${s.quoted_count ?? 0} orders`} />
-                {/* Accrued on this period's sales, by order date — not cash
-                    received. The old label said "Collected" and it never was. */}
-                <KpiCard label="Tax on sales" value={fmtKes(s.total_tax)} />
                 {/* "Collected" and the ledger's "Paid" are DIFFERENT questions and
                     are not meant to match: this is money that ARRIVED in the
                     period whatever period its order belongs to (treasury), while
@@ -240,6 +196,43 @@ export default function SalesReportPage() {
                     value={fmtKes(s.total_collected)}
                     sub="money received in this period, by payment date"
                 />
+                <KpiCard
+                    label="Buyers"
+                    value={s.unique_customers ?? 0}
+                    sub="people who ordered"
+                />
+                <KpiCard
+                    label="Avg order"
+                    value={fmtKes(s.average_order_value)}
+                    comparison={cmp?.aov_change_pct}
+                />
+            </div>
+
+            {/* The channels, as ONE breakdown that adds up to Sold. Five separate
+                cards (three usually KES 0) read as five headlines. Chat is two
+                channels the business judges apart — WhatsApp through Neema, and
+                Messenger; any chat order naming no app still sums in. */}
+            <ChannelSplit
+                total={Number(s.total_revenue ?? 0)}
+                rows={[
+                    ["Till", s.till_revenue, s.till_count],
+                    ["Web", s.web_revenue, s.web_count],
+                    ["WhatsApp", s.whatsapp_revenue, s.whatsapp_count],
+                    ["Messenger", s.messenger_revenue, s.messenger_count],
+                    ...((s.other_chat_count ?? 0) > 0 ? [["Other chat", s.other_chat_revenue, s.other_chat_count] as const] : []),
+                    ["Quoted", s.quoted_revenue, s.quoted_count],
+                ]}
+            />
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <KpiCard
+                    label="Discounts"
+                    value={`${Number(s.discount_rate_percent ?? 0).toFixed(1)}%`}
+                    sub={`${fmtKes(s.total_discounts)} given`}
+                />
+                {/* Accrued on this period's sales, by order date — not cash
+                    received. The old label said "Collected" and it never was. */}
+                <KpiCard label="Tax on sales" value={fmtKes(s.total_tax)} sub="charged on this period's sales" />
             </div>
 
             {/* Tabs */}
@@ -2258,6 +2251,35 @@ function OutcomesCard({ start, end, outlet }: { start: string; end: string; outl
                 </div>
             )}
             {openLost && <DrillPanel metric="lost" title="Lost sales" query={query} onClose={() => setOpenLost(false)} />}
+        </div>
+    );
+}
+
+// ─── Sold, by channel ─────────────────────────────────────────────────────────
+function ChannelSplit({ total, rows }: { total: number; rows: readonly (readonly [string, number | undefined, number | undefined])[] }) {
+    const max = Math.max(1, ...rows.map(([, v]) => Number(v ?? 0)));
+    return (
+        <div className="card card-body">
+            <div className="flex items-baseline justify-between gap-2 mb-3">
+                <p className="text-xs text-surface-500">Sold, by channel</p>
+                <p className="text-2xs text-surface-400">adds up to Sold · {fmtKes(total)}</p>
+            </div>
+            <div className="grid gap-x-8 gap-y-2 sm:grid-cols-2">
+                {rows.map(([label, value, count]) => {
+                    const v = Number(value ?? 0);
+                    return (
+                        <div key={label} className="grid grid-cols-[6.5rem_1fr_auto] items-center gap-3 text-sm">
+                            <span className={v > 0 ? "text-surface-700" : "text-surface-400"}>{label}</span>
+                            <div className="h-1.5 rounded-full bg-surface-100">
+                                {v > 0 && <div className="h-1.5 rounded-full bg-brand-400" style={{ width: `${(v / max) * 100}%` }} />}
+                            </div>
+                            <span className={clsx("tabular-nums text-right whitespace-nowrap", v > 0 ? "text-surface-800" : "text-surface-400")}>
+                                {fmtKes(v)} <span className="text-2xs text-surface-400">· {Number(count ?? 0)}</span>
+                            </span>
+                        </div>
+                    );
+                })}
+            </div>
         </div>
     );
 }
