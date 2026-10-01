@@ -71,6 +71,7 @@ function createApiClient(): AxiosInstance {
                 // Redirect to login without hard reload to preserve SPA history
                 window.dispatchEvent(new CustomEvent("auth:expired"));
                 return Promise.reject({
+                    status,
                     message: "Your session has expired. Please log in again.",
                     errors: {},
                 } satisfies ApiError);
@@ -85,6 +86,7 @@ function createApiClient(): AxiosInstance {
                     if (body?.code === "download_approval_required") {
                         window.dispatchEvent(new CustomEvent("download:held", { detail: body }));
                         return Promise.reject({
+                    status,
                             message: "This download needs approval. Add a reason to send the request.",
                             errors: {},
                             reason: "download_approval_required",
@@ -92,12 +94,14 @@ function createApiClient(): AxiosInstance {
                     }
                     if (body?.code === "download_token_invalid") {
                         return Promise.reject({
+                    status,
                             message: body.message ?? "This download link cannot be used.",
                             errors: {},
                             reason: "download_token_invalid",
                         } satisfies ApiError);
                     }
                     return Promise.reject({
+                    status,
                         message: body?.message && body.message !== "This action is unauthorized."
                             ? body.message
                             : "You do not have permission to perform this action.",
@@ -108,6 +112,7 @@ function createApiClient(): AxiosInstance {
 
             if (status === 422 && data.errors) {
                 return Promise.reject({
+                    status,
                     message: data.message ?? "Validation failed.",
                     errors: data.errors,
                     reason: data.reason,
@@ -116,6 +121,7 @@ function createApiClient(): AxiosInstance {
 
             if (status === 429) {
                 return Promise.reject({
+                    status,
                     message:
                         "Too many requests. Please wait a moment and try again.",
                     errors: {},
@@ -126,6 +132,7 @@ function createApiClient(): AxiosInstance {
             // with {message, reason} and no `errors` bag; without this the
             // caller only ever saw the prose and had to guess what happened.
             return Promise.reject({
+                    status,
                 message: data?.message ?? "An unexpected error occurred.",
                 errors: data?.errors ?? {},
                 reason: data?.reason,

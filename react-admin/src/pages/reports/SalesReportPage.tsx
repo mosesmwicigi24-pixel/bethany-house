@@ -36,6 +36,8 @@ import dayjs from "dayjs";
 import {
     KPI_GRID,
     KpiCard,
+    LoadFailed,
+    ReportPending,
     ShareBars,
     ReportPdfButton,
     SectionHeader,
@@ -87,6 +89,7 @@ export default function SalesReportPage() {
 
     const summaryQuery = useQuery({
         queryKey: ["report-sales-summary", dr.start, dr.end, dr.outlet, compare],
+        placeholderData: (prev) => prev,   // keep the figures while a new period loads — no blank page
         queryFn: () =>
             reportsApi.salesSummary({
                 ...dr.params,
@@ -139,12 +142,12 @@ export default function SalesReportPage() {
     const hourly = summaryQuery.data?.by_hour ?? [];
     const byDow = summaryQuery.data?.by_day_of_week ?? [];
 
-    if (summaryQuery.isLoading)
-        return (
-            <div className="flex justify-center py-20">
-                <Spinner />
-            </div>
-        );
+    // Kept figures are the PREVIOUS period's: on failure they must not stand
+    // under this period's heading.
+    if (summaryQuery.isError && (!summaryQuery.data || summaryQuery.isPlaceholderData))
+        return <LoadFailed what="Sales & Orders" onRetry={() => summaryQuery.refetch()} />;
+    if (!summaryQuery.data)
+        return <ReportPending paused={summaryQuery.fetchStatus === "paused"} />;
 
     const maxRevProduct = Math.max(
         ...(byProductQuery.data?.products ?? []).map((p: any) =>

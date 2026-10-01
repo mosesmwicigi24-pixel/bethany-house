@@ -7,6 +7,7 @@ import { tokenStorage } from "@/api/client";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { clsx } from "clsx";
+import { Spinner } from "@/components/ui/Spinner";
 import { fmtKes } from "@/api/expenses";
 import dayjs from "dayjs";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -151,7 +152,7 @@ export function KpiCard({
             <div className="flex items-baseline gap-2 flex-wrap">
                 <p
                     className={clsx(
-                        "text-xl font-bold tabular-nums",
+                        "text-[clamp(1.05rem,4.4vw,1.25rem)] leading-tight font-bold tabular-nums break-words",
                         isZero ? "text-surface-400" : (color || "text-surface-900"),
                     )}
                 >
@@ -173,6 +174,44 @@ export function EmptyNote({ title, hint }: { title: string; hint?: string }) {
         <div className="card card-body text-center py-10">
             <p className="text-sm font-medium text-surface-700">{title}</p>
             {hint && <p className="text-xs text-surface-500 mt-1">{hint}</p>}
+        </div>
+    );
+}
+
+/**
+ * No figures for this period yet. Gate on THAT, never on isLoading: when the
+ * browser drops offline React Query pauses — pending but not fetching — so
+ * isLoading is false and every page fell through to "KES 0" cards. Offline says
+ * so; otherwise a spinner.
+ */
+export function ReportPending({ paused }: { paused: boolean }) {
+    // React Query also pauses retries while the tab is in the background —
+    // that is not "offline"; only say offline when the browser says so.
+    const offline = paused && typeof navigator !== "undefined" && !navigator.onLine;
+    return offline ? (
+        <div className="card card-body text-center py-12 space-y-1" role="status">
+            <p className="text-sm font-medium text-surface-800">You're offline.</p>
+            <p className="text-xs text-surface-500">The figures will load as soon as the connection is back — nothing below is shown as zero meanwhile.</p>
+        </div>
+    ) : (
+        <div className="flex justify-center py-20"><Spinner /></div>
+    );
+}
+
+/**
+ * A report whose figures failed to load says so, and hides them — a failed
+ * request used to fall through to "KES 0" cards a manager would believe (or,
+ * on Executive, a spinner that never ended).
+ */
+export function LoadFailed({ what, onRetry }: { what: string; onRetry: () => void }) {
+    return (
+        <div className="card card-body text-center py-12 space-y-3" role="alert">
+            <p className="text-sm font-medium text-surface-800">{what} could not be loaded.</p>
+            <p className="text-xs text-surface-500">The figures are hidden rather than shown as zero. Check your connection and try again.</p>
+            <div className="flex justify-center gap-3">
+                <button onClick={onRetry} className="btn-primary btn-sm">Try again</button>
+                <Link to="/reports" className="btn-secondary btn-sm">All reports</Link>
+            </div>
         </div>
     );
 }
@@ -1003,9 +1042,19 @@ export function useDateRange(defaultPreset: DatePreset = "this_month") {
     const urlPreset = sp.get("preset") ?? memo.preset ?? null;
     const preset: DatePreset = known(urlPreset) ? urlPreset : (sp.get("from") ?? memo.from) ? "custom" : defaultPreset;
     const fallback = datePresetRange(preset === "custom" ? defaultPreset : preset);
-    const start = preset === "custom" ? (sp.get("from") ?? memo.from ?? fallback.start) : fallback.start;
-    const end   = preset === "custom" ? (sp.get("to") ?? memo.to ?? fallback.end) : fallback.end;
-    const outlet = sp.get("outlet") ?? (sp.has("outlet") ? "" : rememberedFilters().outlet ?? "");
+    const rawStart = preset === "custom" ? (sp.get("from") ?? memo.from ?? fallback.start) : fallback.start;
+    const rawEnd   = preset === "custom" ? (sp.get("to") ?? memo.to ?? fallback.end) : fallback.end;
+    // A range typed backwards (end before start) is read the right way round:
+    // sent as typed, the older reports answered with an empty window — every
+    // figure zero, nothing saying why.
+    const [start, end] = rawStart <= rawEnd ? [rawStart, rawEnd] : [rawEnd, rawStart];
+    const wantedOutlet = sp.get("outlet") ?? (sp.has("outlet") ? "" : rememberedFilters().outlet ?? "");
+    // Only an outlet that exists: a remembered (or linked) outlet that was
+    // closed — or mistyped — was applied to every report, which then queried a
+    // shop that is not there (zeros on some pages, a refusal on others) while
+    // the header said "All outlets".
+    const { data: outletList } = useQuery({ queryKey: ["report-outlets"], queryFn: () => reportsApi.outlets(), staleTime: 300_000 });
+    const outlet = wantedOutlet && outletList?.data && !outletList.data.some((o) => String(o.id) === wantedOutlet) ? "" : wantedOutlet;
 
     try {
         sessionStorage.setItem(REPORT_FILTERS_KEY, JSON.stringify({

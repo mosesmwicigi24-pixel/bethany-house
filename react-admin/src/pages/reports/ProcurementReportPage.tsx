@@ -25,6 +25,8 @@ import {
 import {
     KPI_GRID,
     KpiCard,
+    LoadFailed,
+    ReportPending,
     ShareBars,
     EmptyNote,
     ReportPdfButton,
@@ -66,18 +68,19 @@ export default function ProcurementReportPage() {
     // CustomersReportPage; after that the tab buttons own the state.
     const [activeTab, setActiveTab] = useReportTab(PROCUREMENT_TABS, "overview");
 
-    const { data, isLoading } = useQuery({
+    const { data, isError, refetch, isPlaceholderData, fetchStatus } = useQuery({
         queryKey: ["report-procurement", dr.start, dr.end, dr.outlet],
+        placeholderData: (prev) => prev,   // keep the figures while a new period loads — no blank page
         queryFn: () => reportsApi.purchaseOrders(dr.params),
         enabled: !!dr.start && !!dr.end,
     });
 
-    if (isLoading)
-        return (
-            <div className="flex justify-center py-20">
-                <Spinner />
-            </div>
-        );
+    // Kept figures are the PREVIOUS period's: on failure they must not stand
+    // under this period's heading.
+    if (isError && (!data || isPlaceholderData))
+        return <LoadFailed what="Procurement & Suppliers" onRetry={() => refetch()} />;
+    if (!data)
+        return <ReportPending paused={fetchStatus === "paused"} />;
 
     const summary = data?.summary ?? {};
     const bySupplier = data?.by_supplier ?? [];

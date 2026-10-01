@@ -23,6 +23,8 @@ import {
 import {
     KPI_GRID,
     KpiCard,
+    LoadFailed,
+    ReportPending,
     ShareBars,
     ReportPdfButton,
     SectionHeader,
@@ -55,6 +57,7 @@ export default function FinancialReportPage() {
 
     const plQuery = useQuery({
         queryKey: ["report-pl", dr.start, dr.end, dr.outlet, compare],
+        placeholderData: (prev) => prev,   // keep the figures while a new period loads — no blank page
         queryFn: () =>
             reportsApi.profitLoss({
                 ...dr.params,
@@ -87,12 +90,12 @@ export default function FinancialReportPage() {
         enabled: !!dr.start && !!dr.end && activeTab === "cashflow",
     });
 
-    if (plQuery.isLoading)
-        return (
-            <div className="flex justify-center py-20">
-                <Spinner />
-            </div>
-        );
+    // Kept figures are the PREVIOUS period's: on failure they must not stand
+    // under this period's heading.
+    if (plQuery.isError && (!plQuery.data || plQuery.isPlaceholderData))
+        return <LoadFailed what="Finance & Cash" onRetry={() => plQuery.refetch()} />;
+    if (!plQuery.data)
+        return <ReportPending paused={plQuery.fetchStatus === "paused"} />;
 
     const pl = plQuery.data ?? {};
     const cmp = pl.comparison;
