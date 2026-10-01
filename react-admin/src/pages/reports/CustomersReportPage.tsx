@@ -408,7 +408,7 @@ export default function CustomersReportPage() {
                             />
                         </SectionHeader>
                     </div>
-                    <TableWrapper>
+                    <TableWrapper ranked>
                         <table className="w-full">
                             <thead>
                                 <tr className="border-y border-line bg-surface-50/50">

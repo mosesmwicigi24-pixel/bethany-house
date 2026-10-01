@@ -15,9 +15,6 @@ import {
     Bar,
     LineChart,
     Line,
-    PieChart,
-    Pie,
-    Cell,
     XAxis,
     YAxis,
     CartesianGrid,
@@ -28,6 +25,7 @@ import {
 import {
     KPI_GRID,
     KpiCard,
+    ShareBars,
     EmptyNote,
     ReportPdfButton,
     SectionHeader,
@@ -248,39 +246,7 @@ export default function ProcurementReportPage() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="card p-5">
                                 <SectionHeader title="PO Status Distribution" />
-                                <ResponsiveContainer width="100%" height={200}>
-                                    <PieChart>
-                                        <Pie
-                                            data={byStatus}
-                                            dataKey="count"
-                                            nameKey="status"
-                                            cx="50%"
-                                            cy="50%"
-                                            outerRadius={75}
-                                            label={({ status, percent }: any) =>
-                                                `${status?.replace(/_/g, " ")} ${(percent * 100).toFixed(0)}%`
-                                            }
-                                            labelLine={false}
-                                        >
-                                            {byStatus.map(
-                                                (_: any, i: number) => (
-                                                    <Cell
-                                                        key={i}
-                                                        fill={
-                                                            CHART_COLORS[
-                                                                i %
-                                                                    CHART_COLORS.length
-                                                            ]
-                                                        }
-                                                    />
-                                                ),
-                                            )}
-                                        </Pie>
-                                        <Tooltip
-                                            formatter={(v, name) => [v, name]}
-                                        />
-                                    </PieChart>
-                                </ResponsiveContainer>
+                                <ShareBars rows={(byStatus ?? []).map((d: any) => ({ label: String(d.status ?? "—"), value: Number(d.count ?? 0) }))} />
                             </div>
                             <div className="card p-5">
                                 <SectionHeader title="By Status" />
@@ -431,7 +397,7 @@ export default function ProcurementReportPage() {
                     <div className="px-5 pt-5 pb-4">
                         <SectionHeader title="Top Purchased Items" />
                     </div>
-                    <TableWrapper>
+                    <TableWrapper ranked>
                         <table className="w-full">
                             <thead>
                                 <tr className="border-y border-line bg-surface-50/50">

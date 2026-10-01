@@ -7,6 +7,7 @@ import { tokenStorage } from "@/api/client";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { clsx } from "clsx";
+import { fmtKes } from "@/api/expenses";
 import dayjs from "dayjs";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -181,8 +182,53 @@ export function rateOrDash(numerator: number, denominator: number, digits = 0): 
     return denominator > 0 ? `${(Math.round((numerator / denominator) * 100 * 10 ** digits) / 10 ** digits).toFixed(digits)}%` : "—";
 }
 
-export function TableWrapper({ children }: { children: React.ReactNode }) {
-    return <div className="overflow-x-auto">{children}</div>;
+/**
+ * Shares as ranked bars, not a pie: a single slice drew a 100% arc the browser
+ * renders as nothing (Customer Segments, Expenses by Category), and lengths
+ * compare faster than angles. Largest first, each with its value and share.
+ */
+export function ShareBars({ rows, money = false }: { rows: { label: string; value: number }[]; money?: boolean }) {
+    const shown = rows.filter((r) => r.value > 0).sort((a, b) => b.value - a.value);
+    const total = shown.reduce((a, r) => a + r.value, 0);
+    if (shown.length === 0) return <p className="text-xs text-surface-400 py-6 text-center">Nothing to show for this period.</p>;
+    return (
+        <div className="space-y-2.5">
+            {shown.map((r) => (
+                <div key={r.label} className="grid grid-cols-[minmax(6rem,9rem)_1fr_auto] items-center gap-3 text-sm">
+                    <span className="text-surface-700 capitalize truncate" title={r.label}>{r.label.replace(/_/g, " ")}</span>
+                    <div className="h-2 rounded-full bg-surface-100">
+                        <div className="h-2 rounded-full bg-brand-400" style={{ width: `${(r.value / Math.max(total, 1)) * 100}%` }} />
+                    </div>
+                    <span className="tabular-nums text-surface-700 whitespace-nowrap">
+                        {money ? fmtKes(r.value) : r.value.toLocaleString()}
+                        <span className="text-2xs text-surface-400"> · {Math.round((r.value / Math.max(total, 1)) * 100)}%</span>
+                    </span>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+/**
+ * Every report table scrolls sideways when it must, and its first column — the
+ * row's name (customer, product, week) — stays put while the numbers scroll:
+ * on a phone, an 11-column table lost which customer a row belonged to. The
+ * frozen cell keeps the row's hover, so a row still lights up as one.
+ */
+export function TableWrapper({ children, ranked = false }: {
+    children: React.ReactNode;
+    /** The first column is a "#" rank: pin it to a fixed width and freeze the
+     *  name beside it too — freezing a rank alone kept "1" and lost the name. */
+    ranked?: boolean;
+}) {
+    return (
+        <div className={clsx(
+            "overflow-x-auto [&_tr>*:first-child]:sticky [&_tr>*:first-child]:left-0 [&_tr>*:first-child]:z-[1] [&_tr>*:first-child]:bg-white [&_tbody_tr:hover>*:first-child]:bg-surface-50",
+            ranked && "[&_tr>*:first-child:not([colspan])]:w-10 [&_tr>*:first-child:not([colspan])]:min-w-10 [&_tr>*:first-child:not([colspan])]:max-w-10 [&_tr>*:first-child:not([colspan])]:px-2 [&_tr>*:nth-child(2)]:sticky [&_tr>*:nth-child(2)]:left-10 [&_tr>*:nth-child(2)]:z-[1] [&_tr>*:nth-child(2)]:bg-white [&_tbody_tr:hover>*:nth-child(2)]:bg-surface-50",
+        )}>
+            {children}
+        </div>
+    );
 }
 
 export function EmptyRow({

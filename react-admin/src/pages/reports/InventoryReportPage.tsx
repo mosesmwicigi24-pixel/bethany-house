@@ -10,9 +10,6 @@ import dayjs from "dayjs";
 import {
     BarChart,
     Bar,
-    PieChart,
-    Pie,
-    Cell,
     LineChart,
     Line,
     XAxis,
@@ -25,6 +22,7 @@ import {
 import {
     KPI_GRID,
     KpiCard,
+    ShareBars,
     EmptyNote,
     ReportPdfButton,
     SectionHeader,
@@ -273,27 +271,7 @@ export default function InventoryReportPage() {
                         {statusPie.length > 0 && (
                             <div className="card p-5">
                                 <SectionHeader title="Stock Health" />
-                                <ResponsiveContainer width="100%" height={200}>
-                                    <PieChart>
-                                        <Pie
-                                            data={statusPie}
-                                            dataKey="value"
-                                            nameKey="name"
-                                            cx="50%"
-                                            cy="50%"
-                                            outerRadius={75}
-                                            label={({ name, percent }: any) =>
-                                                `${name} ${(percent * 100).toFixed(0)}%`
-                                            }
-                                            labelLine={false}
-                                        >
-                                            {statusPie.map((d, i) => (
-                                                <Cell key={i} fill={d.color} />
-                                            ))}
-                                        </Pie>
-                                        <Tooltip />
-                                    </PieChart>
-                                </ResponsiveContainer>
+                                <ShareBars rows={(statusPie ?? []).map((d: any) => ({ label: String(d.name ?? "—"), value: Number(d.value ?? 0) }))} />
                                 <div className="grid grid-cols-1 gap-3 mt-4 sm:grid-cols-3">
                                     {[
                                         {
