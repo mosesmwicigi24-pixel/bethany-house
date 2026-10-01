@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Support\ReportInput;
 use Closure;
 use Illuminate\Http\Request;
 
@@ -33,6 +34,14 @@ class NormalisesReportWindow
 {
     public function handle(Request $request, Closure $next)
     {
+        // Refuse malformed input at the door, before anything is mirrored or
+        // queried (cycle 8): a bad date or outlet used to reach Postgres and
+        // come back as a 500 on twelve legacy endpoints. See ReportInput.
+        foreach (['start_date', 'end_date', 'from', 'to'] as $field) {
+            ReportInput::date($field, $request->query($field));
+        }
+        ReportInput::outletId($request->query('outlet_id'));
+
         $mirror = function (string $a, string $b) use ($request) {
             if ($request->filled($a) && ! $request->filled($b)) {
                 $request->merge([$b => $request->get($a)]);

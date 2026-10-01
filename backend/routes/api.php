@@ -1356,7 +1356,7 @@ Route::prefix('v1')->group(function () {
             // report.window: one date contract for the whole section — a
             // caller using the other page's spelling got a different window
             // back, silently (D4). See NormalisesReportWindow.
-            Route::middleware(['permission:reports.view,sanctum', 'report.window'])->prefix('reports')->group(function () {
+            Route::middleware(['permission:reports.view,sanctum', 'report.window', 'report.snapshot'])->prefix('reports')->group(function () {
                 Route::get('/executive',       [\App\Http\Controllers\Api\ExecutiveReportController::class, 'executive']);
                 Route::get('/drill/{metric}',  [\App\Http\Controllers\Api\ExecutiveReportController::class, 'drill']);
                 Route::get('/production-intelligence', [\App\Http\Controllers\Api\ExecutiveReportController::class, 'productionIntelligence']);
@@ -1532,7 +1532,7 @@ Route::prefix('v1')->group(function () {
             // date resolver and none of the section's normalisation, so a PDF
             // exported with from/to covered the last 30 days instead of the
             // window on the screen it came from.
-            Route::middleware(['permission:reports.view,sanctum', 'report.window'])
+            Route::middleware(['permission:reports.view,sanctum', 'report.window', 'report.snapshot'])
                 ->prefix('reports/pdf')
                 ->name('reports.pdf.')
                 ->group(function () {
