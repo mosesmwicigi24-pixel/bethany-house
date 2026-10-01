@@ -1004,6 +1004,88 @@ class ExecutiveReportController extends Controller
     }
 
     /**
+     * Business Explorer — any measure by any dimension, narrowed by filters,
+     * on the same definitions as every other page. CSV exports the table.
+     */
+    public function explorer(Request $request)
+    {
+        [$s, $e, $engine, $filters] = $this->explorerInput($request);
+        $dim = $request->validate([
+            'by' => 'required|string|in:' . implode(',', array_keys(MetricEngine::EXPLORER_DIMENSIONS)),
+        ])['by'];
+
+        $result = $engine->explorer($s, $e, $dim, $filters);
+
+        if ($this->wantsExport($request)) {
+            $label = fn (string $m) => match ($m) {
+                'sold' => 'Sold KES', 'orders' => 'Orders', 'buyers' => 'Buyers', 'aov' => 'Avg order KES',
+                'collected' => 'Collected KES', 'line_value' => 'Line value KES', 'units' => 'Units',
+            };
+
+            return $this->csvResponse(
+                array_merge([MetricEngine::EXPLORER_DIMENSIONS[$dim]['label']], array_map($label, $result['measures'])),
+                array_merge(
+                    array_map(fn ($r) => array_merge([$r['label']], array_map(fn ($m) => $r[$m], $result['measures'])), $result['rows']),
+                    [array_merge(['Total'], array_map(fn ($m) => $result['totals'][$m] ?? '', $result['measures']))],
+                ),
+                'business_explorer_' . $dim);
+        }
+
+        return response()->json($result + [
+            'dimensions' => MetricEngine::EXPLORER_DIMENSIONS,
+            'filters'    => $filters,
+            'row_limit'  => MetricEngine::EXPLORER_ROW_LIMIT,
+        ]);
+    }
+
+    /** The orders (or, by payment method, the payments) behind one Explorer row. */
+    public function explorerOrders(Request $request)
+    {
+        [$s, $e, $engine, $filters] = $this->explorerInput($request);
+        $v = $request->validate([
+            'by'   => 'nullable|string|in:' . implode(',', array_keys(MetricEngine::EXPLORER_DIMENSIONS)),
+            'key'  => 'nullable|string|max:100|required_with:by',
+            'page' => 'nullable|integer|min:1',
+        ]);
+        if (($v['by'] ?? null) === 'method') {
+            $filters['method'] = $v['key'];
+            $v['by'] = $v['key'] = null;
+        }
+
+        $result = $engine->explorerOrders($s, $e, $v['by'] ?? null, $v['key'] ?? null, $filters, (int) ($v['page'] ?? 1));
+        $user = $request->user();
+        $result['rows'] = array_map(fn ($r) => $this->withLinks($r, $user), $result['rows']);
+
+        return response()->json($result);
+    }
+
+    /** Period, outlet and the Explorer's filters (f_<dimension>=<key>), validated once. */
+    private function explorerInput(Request $request): array
+    {
+        $rules = [
+            'period'    => 'nullable|string|in:today,yesterday,last_7,last_30,this_month,last_month,this_quarter,this_year,custom',
+            'from'      => 'nullable|date|required_if:period,custom',
+            'to'        => 'nullable|date|required_if:period,custom',
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+        ];
+        foreach (MetricEngine::EXPLORER_FILTERS as $f) {
+            $rules["f_{$f}"] = 'nullable|string|max:100';
+        }
+        $v = $request->validate($rules);
+
+        [$s, $e] = MetricEngine::resolvePeriod($v['period'] ?? 'this_month', $v['from'] ?? null, $v['to'] ?? null);
+        $engine  = MetricEngine::for($request->user(), isset($v['outlet_id']) ? (int) $v['outlet_id'] : null);
+        $filters = [];
+        foreach (MetricEngine::EXPLORER_FILTERS as $f) {
+            if (($v["f_{$f}"] ?? '') !== '') {
+                $filters[$f] = $v["f_{$f}"];
+            }
+        }
+
+        return [$s, $e, $engine, $filters];
+    }
+
+    /**
      * Staff, Outlets & Performance — how each outlet and salesperson is doing,
      * this window against the previous one. Sales figures only.
      */

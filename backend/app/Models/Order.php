@@ -476,6 +476,20 @@ class Order extends Model
     }
 
     /**
+     * The sales bucket as SQL — the stored bucket, or for a NULL bucket
+     * (fixtures, a forgetful future writer) the legacy derivation, so an order
+     * degrades into a bucket instead of falling out of every channel figure.
+     */
+    public static function salesBucketSql(string $table = 'orders'): string
+    {
+        return "COALESCE({$table}.sales_bucket, CASE
+            WHEN {$table}.order_type = 'whatsapp' THEN 'chat'
+            WHEN {$table}.order_type = 'online' AND {$table}.created_by IS NULL THEN 'web'
+            WHEN {$table}.order_type = 'online' THEN 'quoted'
+            ELSE 'till' END)";
+    }
+
+    /**
      * The reporting channel as ONE SQL expression, for the aggregate queries
      * that bucket in a single pass instead of one query per channel.
      *

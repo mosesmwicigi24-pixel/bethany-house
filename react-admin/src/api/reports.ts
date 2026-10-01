@@ -152,6 +152,11 @@ export const reportsApi = {
             ...(params.outlet_id ? { outlet_id: params.outlet_id } : {}),
         } }),
 
+    // Business Explorer: any measure by any dimension, narrowed by f_<dimension> filters.
+    explorer: (params: Record<string, any>) => get<ExplorerReport>(`${BASE}/explorer`, { params }),
+    // The orders (or payments, by method) behind one Explorer row.
+    explorerOrders: (params: Record<string, any>) => get<any>(`${BASE}/explorer/orders`, { params }),
+
     // Audit & Data Quality: where the records behind the figures are incomplete.
     dataQuality: (params: { start_date: string; end_date: string; outlet_id?: number }) =>
         get<DataQualityReport>(`${BASE}/data-quality`, { params: {
@@ -1201,6 +1206,24 @@ export interface PerformanceRow {
     unconfirmed_carts: number;
     unconfirmed_value: number;
 }
+// ─── Business Explorer ────────────────────────────────────────────────────────
+export type ExplorerMeasure = "sold" | "orders" | "buyers" | "aov" | "collected" | "line_value" | "units";
+export interface ExplorerRow extends Partial<Record<ExplorerMeasure, number | null>> {
+    key: string;
+    label: string;
+}
+export interface ExplorerReport {
+    dimension: string;
+    level: "order" | "item" | "payment";
+    measures: ExplorerMeasure[];
+    rows: ExplorerRow[];
+    row_count: number;
+    totals: Partial<Record<ExplorerMeasure, number | null>>;
+    dimensions: Record<string, { label: string; level: string }>;
+    filters: Record<string, string>;
+    row_limit: number;
+}
+
 // ─── Audit & Data Quality ─────────────────────────────────────────────────────
 export type DataQualityLinks = Partial<Record<"order" | "customer" | "payment" | "production" | "expense" | "product", string>>;
 export interface DataQualityRow {

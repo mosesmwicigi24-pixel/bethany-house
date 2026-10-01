@@ -158,11 +158,7 @@ class ReportController extends Controller
         // Same bucket-or-derive rule as Order::scopeSalesChannel, as SQL — a
         // NULL bucket (fixtures, a forgetful future writer) degrades to the
         // legacy derivation instead of falling out of every tile.
-        $bucketExpr = "COALESCE(orders.sales_bucket, CASE
-            WHEN orders.order_type = 'whatsapp' THEN 'chat'
-            WHEN orders.order_type = 'online' AND orders.created_by IS NULL THEN 'web'
-            WHEN orders.order_type = 'online' THEN 'quoted'
-            ELSE 'till' END)";
+        $bucketExpr = Order::salesBucketSql();
 
         // The reporting axis: the bucket above, except chat splits into the two
         // apps the owner sells on and judges separately (Order::CHAT_SOURCES).

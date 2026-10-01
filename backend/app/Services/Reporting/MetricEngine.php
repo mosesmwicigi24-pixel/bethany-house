@@ -301,12 +301,19 @@ class MetricEngine
                 ->orWhereIn("{$alias}.payment_status", \App\Models\Order::SETTLED_PAYMENT_STATUSES));
     }
 
-    /** Sales-truth base: recognised orders, KES, scoped. */
-    private function salesBase()
+    /**
+     * Sales-truth base: recognised orders, KES, scoped.
+     *
+     * @param string $alias table alias, for callers that join (the Explorer
+     *                      joins lines, products and payments onto it)
+     */
+    private function salesBase(string $alias = 'orders')
     {
-        return $this->recognise(DB::table('orders'))
-            ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code)) IS NOT NULL")
-            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds));
+        $from = $alias === 'orders' ? 'orders' : "orders as {$alias}";
+
+        return $this->recognise(DB::table($from), $alias)
+            ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER({$alias}.currency_code)) IS NOT NULL")
+            ->when($this->outletIds, fn ($q) => $q->whereIn("{$alias}.outlet_id", $this->outletIds));
     }
 
     /** Money-truth base: settled payments net of refunds, KES, scoped via order. */
@@ -817,6 +824,253 @@ class MetricEngine
             GROUP BY UPPER(o.currency_code)
             ORDER BY COUNT(*) DESC
         ");
+    }
+
+    // ── Business Explorer ────────────────────────────────────────────────────
+
+    /** Rows the Explorer returns for one dimension; totals always cover all of them. */
+    public const EXPLORER_ROW_LIMIT = 200;
+
+    /**
+     * The Explorer's dimensions. `level` decides which measures can be read
+     * by it, because each measure lives on one grain:
+     *   order   — Sold, Orders, Buyers, Avg order, and Collected (by payment)
+     *   item    — Units and Line value (what Sales by Product sums), Orders, Buyers
+     *   payment — Collected only (a method belongs to a payment, not an order)
+     * Time dimensions read the ORDER date for sales and the PAYMENT date for
+     * Collected — the same dates as the Sold and Collected tiles.
+     */
+    public const EXPLORER_DIMENSIONS = [
+        'month'       => ['label' => 'Month',          'level' => 'order'],
+        'week'        => ['label' => 'Week',           'level' => 'order'],
+        'day'         => ['label' => 'Day',            'level' => 'order'],
+        'outlet'      => ['label' => 'Outlet',         'level' => 'order'],
+        'channel'     => ['label' => 'Channel',        'level' => 'order'],
+        'salesperson' => ['label' => 'Salesperson',    'level' => 'order'],
+        'currency'    => ['label' => 'Currency',       'level' => 'order'],
+        'category'    => ['label' => 'Category',       'level' => 'item'],
+        'product'     => ['label' => 'Product',        'level' => 'item'],
+        'method'      => ['label' => 'Payment method', 'level' => 'payment'],
+    ];
+
+    /** Filters the Explorer accepts — every non-time dimension except method. */
+    public const EXPLORER_FILTERS = ['channel', 'salesperson', 'currency', 'category', 'product'];
+
+    /**
+     * [key expression, label expression] for a dimension, on aliases o
+     * (orders), oi (order_items), pr (products), p (payments). $ts is the
+     * timestamp the time dimensions bucket.
+     */
+    private function explorerKey(string $dim, string $ts): array
+    {
+        $tz = "({$ts})";
+
+        return match ($dim) {
+            'month'       => ["to_char(date_trunc('month', {$tz}), 'YYYY-MM')", null],
+            'week'        => ["to_char(date_trunc('week', {$tz}), 'YYYY-MM-DD')", null],
+            'day'         => ["to_char({$tz}, 'YYYY-MM-DD')", null],
+            'outlet'      => ['o.outlet_id::text', '(SELECT ol.name FROM outlets ol WHERE ol.id = o.outlet_id)'],
+            'channel'     => [\App\Models\Order::reportingChannelSql(\App\Models\Order::salesBucketSql('o'), 'o'), null],
+            'salesperson' => ['o.created_by::text', "(SELECT TRIM(CONCAT(u.first_name, ' ', u.last_name)) FROM users u WHERE u.id = o.created_by)"],
+            'currency'    => ['UPPER(o.currency_code)', null],
+            'category'    => ['pr.category_id::text', '(SELECT c.name_en FROM categories c WHERE c.id = pr.category_id)'],
+            'product'     => ['oi.product_id::text', 'MIN(oi.product_name)'],
+            'method'      => ['p.payment_method', null],
+        };
+    }
+
+    /** Narrow a query by the Explorer's filters; item filters need oi/pr joined. */
+    private function explorerFilter($q, array $filters)
+    {
+        foreach ($filters as $dim => $value) {
+            if ($value === null || $value === '') {
+                continue;
+            }
+            [$key] = $this->explorerKey($dim, 'o.created_at');
+            // A "none" value (web checkout, no outlet, uncategorised) is the
+            // NULL key, so it can be explored like any other row.
+            $value === '__none__' ? $q->whereRaw("({$key}) IS NULL") : $q->whereRaw("({$key}) = ?", [(string) $value]);
+        }
+
+        return $q;
+    }
+
+    /**
+     * Business Explorer — any measure by any dimension, narrowed by filters,
+     * on the definitions every other page uses. The totals are computed over
+     * the whole slice, not by adding rows: they are the headline figures for
+     * the slice (Sold = the Sold tile, Collected = the Collected tile), and
+     * Buyers are distinct people, which no sum of rows can give.
+     *
+     * @param array<string,string> $filters dimension => key (EXPLORER_FILTERS only)
+     */
+    public function explorer(Carbon $s, Carbon $e, string $dim, array $filters): array
+    {
+        $meta  = self::EXPLORER_DIMENSIONS[$dim];
+        $level = $meta['level'];
+        $itemFiltered = (bool) array_intersect(array_keys(array_filter($filters, fn ($v) => $v !== null && $v !== '')), ['category', 'product']);
+        // A category or product filter turns the question into "lines of
+        // that kind": order totals would carry the rest of each basket.
+        if ($itemFiltered && $level === 'order') {
+            $level = 'item';
+        }
+        abort_if($itemFiltered && $level === 'payment', 422,
+            'A payment pays a whole order, not a line — clear the category or product filter to read by payment method.');
+
+        $buyer   = \App\Support\BuyerIdentity::sql('o');
+        $soldKes = self::totalKes('o');
+        $lineKes = \App\Support\ReportingCurrency::kes('oi.total_price', 'o.currency_code');
+        $payKes  = '(p.amount - COALESCE(p.refund_amount,0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code))';
+
+        $sales = fn () => $this->explorerFilter(
+            $this->salesBase('o')->whereBetween('o.created_at', [$s, $e])
+                ->when($level === 'item' || $itemFiltered, fn ($q) => $q
+                    ->join('order_items as oi', 'oi.order_id', '=', 'o.id')
+                    ->leftJoin('products as pr', 'pr.id', '=', 'oi.product_id')),
+            $filters);
+        // Collected never takes an item filter: a payment pays an order, not a line.
+        $money = fn () => $this->explorerFilter(
+            $this->moneyBase()->whereBetween(DB::raw(self::PAID_AT), [$s, $e]), $filters);
+
+        $rows = [];
+        $measures = match ($level) {
+            'order'   => ['sold', 'orders', 'buyers', 'aov', 'collected'],
+            'item'    => ['line_value', 'units', 'orders', 'buyers'],
+            'payment' => ['collected'],
+        };
+
+        $merge = function (iterable $got, array $fields) use (&$rows) {
+            foreach ($got as $r) {
+                $k = $r->k === null ? '__none__' : (string) $r->k;
+                $rows[$k] ??= ['key' => $k, 'label' => $r->label ?? null];
+                $rows[$k]['label'] ??= $r->label ?? null;
+                foreach ($fields as $f) {
+                    $rows[$k][$f] = round((float) $r->{$f}, 2);
+                }
+            }
+        };
+
+        if ($level === 'order' || $level === 'item') {
+            [$key, $label] = $this->explorerKey($dim, 'o.created_at');
+            $select = $level === 'order'
+                ? "COALESCE(SUM({$soldKes}),0) AS sold, COUNT(*) AS orders, COUNT(DISTINCT {$buyer}) AS buyers"
+                : "COALESCE(SUM({$lineKes}),0) AS line_value, COALESCE(SUM(oi.quantity),0) AS units, COUNT(DISTINCT o.id) AS orders, COUNT(DISTINCT {$buyer}) AS buyers";
+            $merge($sales()->groupBy(DB::raw($key))
+                ->selectRaw("({$key}) AS k, " . ($label && $dim !== 'product' ? "MIN({$label})" : ($label ?? 'NULL')) . " AS label, {$select}")
+                ->get(), $level === 'order' ? ['sold', 'orders', 'buyers'] : ['line_value', 'units', 'orders', 'buyers']);
+        }
+        if (in_array('collected', $measures, true)) {
+            [$key, $label] = $this->explorerKey($dim, self::PAID_AT);
+            $merge($money()->groupBy(DB::raw($key))
+                ->selectRaw("({$key}) AS k, " . ($label ? "MIN({$label})" : 'NULL') . " AS label, COALESCE(SUM({$payKes}),0) AS collected")
+                ->get(), ['collected']);
+        }
+
+        $none = match ($dim) {
+            'outlet' => 'No outlet', 'salesperson' => 'No salesperson (web checkout)',
+            'category' => 'Uncategorised', 'product' => 'No product', default => 'None',
+        };
+        $rows = array_map(function ($r) use ($measures, $none) {
+            foreach ($measures as $m) {
+                $r[$m] ??= 0.0;
+            }
+            if (in_array('aov', $measures, true)) {
+                $r['aov'] = $r['orders'] > 0 ? round($r['sold'] / $r['orders'], 2) : null;
+            }
+            $r['orders'] = isset($r['orders']) ? (int) $r['orders'] : null;
+            $r['label'] ??= $r['key'] === '__none__' ? $none : $r['key'];
+
+            return $r;
+        }, array_values($rows));
+        if ($dim === 'channel') {
+            foreach ($rows as &$r) {
+                $r['label'] = \App\Models\Order::REPORTING_CHANNEL_LABELS[$r['key']] ?? $r['label'];
+            }
+            unset($r);
+        }
+
+        // Time reads in order; everything else biggest first.
+        $lead = $measures[0];
+        usort($rows, in_array($dim, ['month', 'week', 'day'], true)
+            ? fn ($a, $b) => strcmp($a['key'], $b['key'])
+            : fn ($a, $b) => $b[$lead] <=> $a[$lead]);
+
+        // Totals over the whole slice — never a sum of rows.
+        $totals = [];
+        if ($level === 'order' || $level === 'item') {
+            $t = $sales()->selectRaw($level === 'order'
+                ? "COALESCE(SUM({$soldKes}),0) AS sold, COUNT(*) AS orders, COUNT(DISTINCT {$buyer}) AS buyers"
+                : "COALESCE(SUM({$lineKes}),0) AS line_value, COALESCE(SUM(oi.quantity),0) AS units, COUNT(DISTINCT o.id) AS orders, COUNT(DISTINCT {$buyer}) AS buyers")->first();
+            foreach ((array) $t as $k => $v) {
+                $totals[$k] = $k === 'orders' || $k === 'buyers' ? (int) $v : round((float) $v, 2);
+            }
+            if ($level === 'order') {
+                $totals['aov'] = $totals['orders'] > 0 ? round($totals['sold'] / $totals['orders'], 2) : null;
+            }
+        }
+        if (in_array('collected', $measures, true)) {
+            $totals['collected'] = round((float) $money()->selectRaw("COALESCE(SUM({$payKes}),0) AS v")->value('v'), 2);
+        }
+
+        return [
+            'dimension' => $dim,
+            'level'     => $level,
+            'measures'  => $measures,
+            'rows'      => array_slice($rows, 0, self::EXPLORER_ROW_LIMIT),
+            'row_count' => count($rows),
+            'totals'    => $totals,
+        ];
+    }
+
+    /**
+     * The orders behind one Explorer slice — the rows a cell is made of, with
+     * the amount the cell counted for each (the order total, or for an item
+     * slice the matching lines' value). Collected-only slices list payments.
+     */
+    public function explorerOrders(Carbon $s, Carbon $e, ?string $dim, ?string $key, array $filters, int $page = 1): array
+    {
+        if ($dim !== null && $key !== null) {
+            $filters[$dim] = $key;
+        }
+        $perPage = 50;
+        $method  = $filters['method'] ?? null;
+        unset($filters['method']);
+        $itemFiltered = (bool) array_intersect(array_keys(array_filter($filters, fn ($v) => $v !== null && $v !== '')), ['category', 'product']);
+        $time = in_array($dim, ['month', 'week', 'day'], true) ? $dim : null;
+
+        if ($method !== null) {
+            abort_if($itemFiltered, 422, 'A payment pays a whole order, not a line — clear the category or product filter.');
+            $q = $this->explorerFilter($this->moneyBase()->whereBetween(DB::raw(self::PAID_AT), [$s, $e]), array_diff_key($filters, ['month' => 1, 'week' => 1, 'day' => 1]))
+                ->where('p.payment_method', $method);
+            if ($time) {
+                [$k] = $this->explorerKey($time, self::PAID_AT);
+                $q->whereRaw("({$k}) = ?", [$key]);
+            }
+            $total = (clone $q)->count();
+            $rows = $q->selectRaw("'payment' AS kind, p.id, p.payment_number AS ref, p.payment_number, p.order_id, o.customer_id,
+                    " . self::PAID_AT . " AS date, (p.amount - COALESCE(p.refund_amount,0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code)) AS amount")
+                ->orderByDesc(DB::raw(self::PAID_AT))->forPage($page, $perPage)->get();
+
+            return ['rows' => $rows->map(fn ($r) => (array) $r)->all(), 'total' => $total, 'page' => $page, 'per_page' => $perPage];
+        }
+
+        $timeFilter = $time ? [$time => $filters[$time]] : [];
+        $filters = array_diff_key($filters, ['month' => 1, 'week' => 1, 'day' => 1]);
+        $q = $this->salesBase('o')->whereBetween('o.created_at', [$s, $e]);
+        if ($itemFiltered) {
+            $q->join('order_items as oi', 'oi.order_id', '=', 'o.id')->leftJoin('products as pr', 'pr.id', '=', 'oi.product_id');
+        }
+        $q = $this->explorerFilter($q, $filters + $timeFilter);
+        $amount = $itemFiltered
+            ? 'SUM(' . \App\Support\ReportingCurrency::kes('oi.total_price', 'o.currency_code') . ')'
+            : 'MIN(' . self::totalKes('o') . ')';
+        $q->groupBy('o.id');
+        $total = DB::query()->fromSub((clone $q)->selectRaw('o.id'), 'x')->count();
+        $rows = $q->selectRaw("'order' AS kind, o.id, MIN(o.order_number) AS ref, MIN(o.customer_id) AS customer_id, MIN(o.created_at) AS date,
+                MIN(TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,'')))) AS customer, {$amount} AS amount")
+            ->orderByDesc(DB::raw('MIN(o.created_at)'))->forPage($page, $perPage)->get();
+
+        return ['rows' => $rows->map(fn ($r) => (array) $r)->all(), 'total' => $total, 'page' => $page, 'per_page' => $perPage];
     }
 
     /** Rows a Data Quality check lists; `count` always says how many there are in all. */
