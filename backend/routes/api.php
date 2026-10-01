@@ -1360,6 +1360,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/executive',       [\App\Http\Controllers\Api\ExecutiveReportController::class, 'executive']);
                 Route::get('/drill/{metric}',  [\App\Http\Controllers\Api\ExecutiveReportController::class, 'drill']);
                 Route::get('/outlets',         [\App\Http\Controllers\Api\ExecutiveReportController::class, 'outlets']);
+                Route::get('/performance',     [\App\Http\Controllers\Api\ExecutiveReportController::class, 'performance']);
                 Route::get('/production-intelligence', [\App\Http\Controllers\Api\ExecutiveReportController::class, 'productionIntelligence']);
                 Route::get('/inventory-intelligence',   [\App\Http\Controllers\Api\ExecutiveReportController::class, 'inventoryIntelligence']);
                 Route::get('/procurement-intelligence', [\App\Http\Controllers\Api\ExecutiveReportController::class, 'procurementIntelligence']);

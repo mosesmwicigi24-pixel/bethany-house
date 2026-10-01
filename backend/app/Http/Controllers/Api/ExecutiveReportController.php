@@ -887,6 +887,7 @@ class ExecutiveReportController extends Controller
             'outlet_id' => 'nullable|integer|exists:outlets,id',
             'page'   => 'nullable|integer|min:1',
             'bucket' => 'nullable|string|in:0_30,31_60,61_90,90_plus,deposits',
+            'salesperson' => 'nullable|integer|min:1',
         ]);
 
         if ($metric === 'expenses') {
@@ -900,6 +901,7 @@ class ExecutiveReportController extends Controller
             $metric, $s, $e,
             (int) ($validated['page'] ?? 1),
             $validated['bucket'] ?? null,
+            isset($validated['salesperson']) ? (int) $validated['salesperson'] : null,
         );
 
         // Where each row leads — decided HERE, from what the row is and what
@@ -928,6 +930,45 @@ class ExecutiveReportController extends Controller
         })->all();
 
         return response()->json($result);
+    }
+
+    /**
+     * Staff, Outlets & Performance — how each outlet and salesperson is doing,
+     * this window against the previous one. Sales figures only.
+     */
+    public function performance(Request $request)
+    {
+        $validated = $request->validate([
+            'period'    => 'nullable|string|in:today,yesterday,last_7,last_30,this_month,last_month,this_quarter,this_year,custom',
+            'from'      => 'nullable|date|required_if:period,custom',
+            'to'        => 'nullable|date|required_if:period,custom',
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+        ]);
+
+        $periodKey = $validated['period'] ?? 'this_month';
+        [$s, $e, $ps, $pe] = MetricEngine::resolvePeriod($periodKey, $validated['from'] ?? null, $validated['to'] ?? null);
+        $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+
+        $perf = $engine->performance($s, $e, $ps, $pe);
+
+        if ($this->wantsExport($request)) {
+            $rows = [];
+            foreach (['outlets' => 'Outlet', 'salespeople' => 'Salesperson'] as $key => $label) {
+                foreach ($perf[$key] as $r) {
+                    $rows[] = [$label, $r['name'], $r['sold'], $r['sold_previous'], $r['orders'], $r['aov'],
+                        $r['buyers'], $r['collected'], $r['unconfirmed_value']];
+                }
+            }
+
+            return $this->csvResponse(
+                ['Breakdown', 'Name', 'Sold KES', 'Sold previous period KES', 'Orders', 'Avg order KES', 'Buyers', 'Collected KES', 'Unconfirmed KES'],
+                $rows, 'staff_outlets_performance');
+        }
+
+        return response()->json(['period' => [
+            'key' => $periodKey, 'start' => $s->toIso8601String(), 'end' => $e->toIso8601String(),
+            'previous_start' => $ps->toIso8601String(), 'previous_end' => $pe->toIso8601String(),
+        ]] + $perf);
     }
 
     /**

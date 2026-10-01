@@ -145,6 +145,13 @@ export const reportsApi = {
     drillWith: (metric: string, params: Record<string, any>) =>
         get<any>(`${BASE}/drill/${metric}`, { params }),
 
+    // Staff, Outlets & Performance: outlets and salespeople, this window vs the previous.
+    performance: (params: { start_date: string; end_date: string; outlet_id?: number }) =>
+        get<PerformanceReport>(`${BASE}/performance`, { params: {
+            period: "custom", from: params.start_date, to: params.end_date,
+            ...(params.outlet_id ? { outlet_id: params.outlet_id } : {}),
+        } }),
+
     // Outlets a report can be filtered by (reports.view; no POS access needed).
     outlets: () => get<{ data: { id: number; name: string }[] }>(`${BASE}/outlets`),
 
@@ -1171,4 +1178,25 @@ export interface NeemaSalesReport {
         /** Date daily snapshots began collecting; period figures before this are structurally zero. */
         daily_since: string | null;
     };
+}
+
+// ─── Staff, Outlets & Performance ────────────────────────────────────────────
+export interface PerformanceRow {
+    id: number | null;
+    name: string;
+    sold: number;
+    sold_previous: number;
+    orders: number;
+    orders_previous: number;
+    aov: number | null;
+    buyers: number;
+    collected: number;
+    unconfirmed_carts: number;
+    unconfirmed_value: number;
+}
+export interface PerformanceReport {
+    period: { start: string; end: string; previous_start: string; previous_end: string };
+    outlets: PerformanceRow[];
+    salespeople: PerformanceRow[];
+    totals: { sold: number; orders: number; collected: number };
 }
