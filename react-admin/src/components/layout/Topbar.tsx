@@ -601,12 +601,14 @@ export function Topbar({
             {breadcrumbs && breadcrumbs.length > 0 && (
                 <nav
                     aria-label="Breadcrumb"
-                    className="flex items-center gap-1.5 text-sm"
+                    className="flex items-center gap-1.5 text-sm min-w-0"
                 >
+                    {/* On a phone only the page you are on, on one line: the
+                        full trail wrapped "Sales / & / Orders" onto three. */}
                     {breadcrumbs.map((crumb, i) => (
-                        <span key={i} className="flex items-center gap-1.5">
+                        <span key={i} className={clsx("items-center gap-1.5 min-w-0", i < breadcrumbs.length - 1 ? "hidden sm:flex" : "flex")}>
                             {i > 0 && (
-                                <span className="text-surface-500">/</span>
+                                <span className="text-surface-500 hidden sm:inline">/</span>
                             )}
                             {crumb.href && i < breadcrumbs.length - 1 ? (
                                 <Link
@@ -618,6 +620,7 @@ export function Topbar({
                             ) : (
                                 <span
                                     className={clsx(
+                                        "truncate whitespace-nowrap",
                                         i === breadcrumbs.length - 1
                                             ? "text-surface-900 font-medium"
                                             : "text-surface-500",

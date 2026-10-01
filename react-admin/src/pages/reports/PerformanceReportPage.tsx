@@ -86,7 +86,7 @@ export default function PerformanceReportPage() {
                             sub="not sales until someone confirms them" />
                     </div>
 
-                    <div className="border-b border-line">
+                    <div className="border-b border-line overflow-x-auto no-scrollbar">
                         <nav className="flex gap-1 -mb-px">
                             {TABS.map((t) => (
                                 <button key={t} onClick={() => setTab(t)}

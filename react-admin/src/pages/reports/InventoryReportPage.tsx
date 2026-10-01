@@ -25,6 +25,7 @@ import {
 import {
     KPI_GRID,
     KpiCard,
+    EmptyNote,
     ReportPdfButton,
     SectionHeader,
     TableWrapper,
@@ -263,6 +264,10 @@ export default function InventoryReportPage() {
 
             {activeTab === "overview" && (
                 <div className="space-y-6">
+                    {stockQuery.data && !(Number(t.total_items) > 0) && (
+                        <EmptyNote title={dr.outlet ? "No stock recorded at this outlet." : "No stock recorded yet."}
+                            hint="Stock appears here once items are received or counted in." />
+                    )}
                     {/* Health pie + category distribution */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {statusPie.length > 0 && (

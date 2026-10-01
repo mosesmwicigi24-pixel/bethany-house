@@ -25,6 +25,7 @@ import {
 import {
     KPI_GRID,
     KpiCard,
+    EmptyNote,
     SectionHeader,
     TableWrapper,
     EmptyRow,
@@ -120,6 +121,11 @@ export default function ProductionReportPage() {
                 onOutletChange={dr.setOutlet}
             />
 
+            {data && !(Number(s.total_orders) > 0) && (
+                <EmptyNote title="No production orders in this period."
+                    hint="Try a longer range — or check Production orders for jobs not yet scheduled." />
+            )}
+
             {/* KPIs row 1 */}
             <div className={KPI_GRID}>
                 <KpiCard label="Total Orders" value={s.total_orders ?? 0} />
@@ -152,8 +158,10 @@ export default function ProductionReportPage() {
                 />
                 <KpiCard
                     label="Completion Rate"
-                    value={`${completionRate}%`}
-                    sub={`${s.total_units_produced ?? 0} / ${s.total_units_planned ?? 0} units`}
+                    value={s.total_units_planned > 0 ? `${completionRate}%` : "—"}
+                    sub={s.total_units_planned > 0
+                        ? `${s.total_units_produced ?? 0} / ${s.total_units_planned ?? 0} units`
+                        : "no units planned in this period"}
                     color={
                         completionRate >= 80
                             ? "text-success"
@@ -185,7 +193,7 @@ export default function ProductionReportPage() {
             </div>
 
             {/* Tabs */}
-            <div className="border-b border-line">
+            <div className="border-b border-line overflow-x-auto no-scrollbar">
                 <nav className="flex gap-1 -mb-px">
                     {([
                         { id: "overview", label: "Overview" },

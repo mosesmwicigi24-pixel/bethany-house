@@ -255,6 +255,10 @@ export const PAYMENT_METHODS = [
 ]
 
 export function fmtKes(amount: number | null | undefined): string {
-  if (amount == null) return 'KES 0.00'
-  return 'KES ' + Number(amount).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  // Whole shillings without ".00" — on a report every figure carried two zeros
+  // that said nothing and pushed large numbers onto two lines. Cents, when
+  // there are any, still show both digits.
+  const n = Number(amount ?? 0)
+  const cents = Math.round(n * 100) % 100 !== 0
+  return 'KES ' + n.toLocaleString('en-KE', { minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: 2 })
 }
