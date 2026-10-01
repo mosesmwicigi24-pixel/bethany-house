@@ -40,6 +40,7 @@ import {
     TH,
     TH_R,
     useReportOutlet,
+    useReportTab,
 } from "./reportShared";
 
 // Movement type classification
@@ -58,16 +59,9 @@ type InventoryTab = (typeof INVENTORY_TABS)[number];
 export default function InventoryReportPage() {
     const dr = useDateRange("this_month");
     const [lowOnly, setLowOnly] = useState(false);
-    // Honour deep-links like /reports/inventory?tab=intelligence (the
-    // attention feed sends users here) — read once on mount, same pattern as
-    // CustomersReportPage; after that the tab buttons own the state.
-    const [searchParams] = useSearchParams();
-    const [activeTab, setActiveTab] = useState<InventoryTab>(() => {
-        const t = searchParams.get("tab");
-        return INVENTORY_TABS.includes(t as InventoryTab)
-            ? (t as InventoryTab)
-            : "overview";
-    });
+    // The tab lives in the URL (?tab=), so deep links from the attention feed,
+    // refreshes and shared links all land on it.
+    const [activeTab, setActiveTab] = useReportTab<InventoryTab>(INVENTORY_TABS, "overview");
     const [movTypeFilter, setMovTypeFilter] = useState("");
 
     const outletId = useReportOutlet();
@@ -203,7 +197,7 @@ export default function InventoryReportPage() {
     return (
         <div className="space-y-6 animate-fade-in">
             <ReportPageHeader
-                title="Inventory Report"
+                title="Inventory"
                 subtitle="Stock health, outlet distribution, low-stock alerts, and movement history."
                 reportType="inventory"
                 exportPath="inventory/stock-on-hand"

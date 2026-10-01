@@ -40,6 +40,7 @@ import {
     fmtHours,
     useReportOutlet,
     ReportPageHeader,
+    useReportTab,
 } from "./reportShared";
 
 export default function ProductionReportPage() {
@@ -48,9 +49,10 @@ export default function ProductionReportPage() {
     // behind reports.financial (cycle 9), so the tab is offered only then.
     const { can } = usePermissions();
     const canSeeCosting = can("reports.financial");
-    const [activeTab, setActiveTab] = useState<
-        "overview" | "products" | "tailors" | "costing" | "intelligence"
-    >("overview");
+    // ?tab= in the URL; the costing tab exists only for reports.financial.
+    const productionTabs = (["overview", "products", "tailors", "costing", "intelligence"] as const)
+        .filter((t) => t !== "costing" || canSeeCosting);
+    const [activeTab, setActiveTab] = useReportTab<"overview" | "products" | "tailors" | "costing" | "intelligence">(productionTabs, "overview");
 
     const { data, isLoading } = useQuery({
         queryKey: ["report-production", dr.start, dr.end, dr.outlet],

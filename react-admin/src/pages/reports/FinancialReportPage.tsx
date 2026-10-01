@@ -43,14 +43,15 @@ import {
     TH_R,
     ChangeBadge,
     useReportOutlet,
+    useReportTab,
 } from "./reportShared";
 
 export default function FinancialReportPage() {
     const { can } = usePermissions();
     const dr = useDateRange("last_30_days");
     const [compare, setCompare] = useState(false);
-    const [activeTab, setActiveTab] = useState<"pl" | "expenses" | "trends" | "tax" | "cashflow" | "intelligence">(
-        "pl",
+    const [activeTab, setActiveTab] = useReportTab<"pl" | "expenses" | "trends" | "tax" | "cashflow" | "intelligence">(
+        ["pl", "expenses", "trends", "tax", "cashflow", "intelligence"], "pl",
     );
     const [expStatus, setExpStatus] = useState("");
 
@@ -173,7 +174,7 @@ export default function FinancialReportPage() {
     return (
         <div className="space-y-6 animate-fade-in">
             <ReportPageHeader
-                title="Financial Report"
+                title="Finance & Cash"
                 subtitle="Analytical P&L view — profit & loss, expenses, tax, and cash flow."
                 reportType="financial"
                 exportPath="financial/profit-loss"

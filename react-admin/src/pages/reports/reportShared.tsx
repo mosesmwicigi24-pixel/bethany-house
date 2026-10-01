@@ -668,7 +668,10 @@ export function ReportPageHeader({
     return (
         <div className="card overflow-hidden">
             {/* ── Top row: title + controls ── */}
-            <div className="px-5 pt-4 pb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            {/* Title above the controls until the screen is wide: beside them at
+                medium widths the outlet + date controls squeezed the title into
+                one word per line (seen in the preview, 2026-10-01). */}
+            <div className="px-5 pt-4 pb-3 flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                 {/* Left: breadcrumb + title */}
                 <div className="min-w-0">
                     <div className="flex items-center gap-1.5 mb-1.5">
@@ -688,7 +691,7 @@ export function ReportPageHeader({
                 </div>
 
                 {/* Right: date picker + compare + extras */}
-                <div className="flex flex-col items-start gap-2 sm:items-end shrink-0">
+                <div className="flex flex-col items-start gap-2 xl:items-end xl:shrink-0">
                     {/* Date picker row */}
                     <div className="flex items-center gap-2 flex-wrap">
                         {onOutletChange && <OutletSelect value={outlet ?? ""} onChange={onOutletChange} />}
@@ -908,6 +911,24 @@ export function useDateRange(defaultPreset: DatePreset = "this_month") {
             ...(outlet ? { outlet_id: Number(outlet) } : {}),
         } as { start_date: string; end_date: string; outlet_id?: number },
     };
+}
+
+/**
+ * The active tab, held in the URL (`?tab=`) — read on every render and written
+ * on every change, so a refresh, the back button or a shared link lands on the
+ * same tab. An unknown or forbidden tab falls back to `fallback`.
+ */
+export function useReportTab<T extends string>(tabs: readonly T[], fallback: T): [T, (t: T) => void] {
+    const [sp, setSp] = useSearchParams();
+    const t = sp.get("tab") as T | null;
+    const active = t && tabs.includes(t) ? t : fallback;
+    const set = (next: T) => setSp((prev) => {
+        const p = new URLSearchParams(prev);
+        if (next === fallback) p.delete("tab"); else p.set("tab", next);
+        p.delete("drill");   // a drill belongs to the tab it was opened from
+        return p;
+    }, { replace: true });
+    return [active, set];
 }
 
 /** The page's outlet filter, from the URL — for sections that call the engine directly. */

@@ -52,7 +52,8 @@ const CHANNEL_LABEL: Record<string, string> = {
     whatsapp: "WhatsApp", online: "Online", pos: "POS",
 };
 
-export default function OrderPipelinePage() {
+/** `embedded`: shown as the Unconfirmed tab of Sales & Orders — no page title of its own. */
+export default function OrderPipelinePage({ embedded = false }: { embedded?: boolean } = {}) {
     const [sort, setSort] = useState<"value" | "age">("value");
     const [busyId, setBusyId] = useState<number | null>(null);
     const navigate = useNavigate();
@@ -99,9 +100,9 @@ export default function OrderPipelinePage() {
     }
 
     return (
-        <div className="space-y-6 p-5">
+        <div className={embedded ? "space-y-6" : "space-y-6 p-5"}>
             <div>
-                <h1 className="text-2xl font-bold text-surface-900">Unconfirmed orders</h1>
+                {!embedded && <h1 className="text-2xl font-bold text-surface-900">Unconfirmed orders</h1>}
                 <p className="text-sm text-surface-500 mt-1 max-w-3xl">
                     Carts customers started on the storefront or over WhatsApp and never had
                     confirmed. They are <strong>not</strong> counted as sales. Confirm the real

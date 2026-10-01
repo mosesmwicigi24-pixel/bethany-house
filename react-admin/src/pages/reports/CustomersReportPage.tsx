@@ -47,20 +47,32 @@ import {
     TH,
     TH_R,
     useReportOutlet,
+    useReportTab,
 } from "./reportShared";
+import { NeemaTab } from "./NeemaReport";
+import ChannelEngagementPage from "@/pages/intelligence/ChannelEngagementPage";
+import CustomerGeographyPage from "@/pages/intelligence/CustomerGeographyPage";
 
-type CustomersTab = "overview" | "secondpurchase" | "ltv" | "retention" | "intelligence" | "replenishment" | "winback" | "institutions" | "outreachlog";
-const CUSTOMERS_TABS: readonly CustomersTab[] = ["overview", "secondpurchase", "ltv", "retention", "intelligence", "replenishment", "winback", "institutions", "outreachlog"];
+// Neema, Channels and Geography joined from Sales and the Intelligence menu
+// (reports consolidation, 2026-10-01). Channels and Geography keep the
+// intelligence.view permission their old pages had.
+type CustomersTab = "overview" | "secondpurchase" | "ltv" | "retention" | "intelligence" | "replenishment" | "winback" | "institutions" | "outreachlog" | "neema" | "channels" | "geography";
+const CUSTOMERS_TABS: readonly CustomersTab[] = ["overview", "secondpurchase", "ltv", "retention", "intelligence", "replenishment", "winback", "institutions", "outreachlog", "neema", "channels", "geography"];
 
 export default function CustomersReportPage() {
     const dr = useDateRange("this_month");
     // Honour deep-links like /reports/customers?tab=replenishment (the
     // attention feed sends users here) — read once on mount, same pattern as
     // ProductionPage's ?status=; after that the tab buttons own the state.
-    const [searchParams] = useSearchParams();
-    const [activeTab, setActiveTab] = useState<CustomersTab>(() => {
-        const t = searchParams.get("tab");
-        return CUSTOMERS_TABS.includes(t as CustomersTab) ? (t as CustomersTab) : "overview";
+    const { can } = usePermissions();
+    const visibleTabs = CUSTOMERS_TABS.filter((t) => (t !== "channels" && t !== "geography") || can("intelligence.view"));
+    const [activeTab, setActiveTab] = useReportTab(visibleTabs, "overview");
+
+    // Neema (AI agent) — loaded only on its tab.
+    const neemaQuery = useQuery({
+        queryKey: ["report-neema", dr.start, dr.end, dr.outlet],
+        queryFn: () => reportsApi.salesNeema(dr.params),
+        enabled: !!dr.start && !!dr.end && activeTab === "neema",
     });
 
     const periodDays = Math.max(
@@ -124,7 +136,7 @@ export default function CustomersReportPage() {
     return (
         <div className="space-y-6 animate-fade-in">
             <ReportPageHeader
-                title="Customers Report"
+                title="Customers & Neema"
                 subtitle="Customer growth, segments, lifetime value, and retention."
                 reportType="customers"
                 exportPath="customers/lifetime-value"
@@ -195,7 +207,7 @@ export default function CustomersReportPage() {
             {/* Tabs */}
             <div className="border-b border-line overflow-x-auto no-scrollbar">
                 <nav className="flex gap-1 -mb-px">
-                    {CUSTOMERS_TABS.map((tab) => (
+                    {visibleTabs.map((tab) => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
@@ -206,7 +218,13 @@ export default function CustomersReportPage() {
                                     : "border-transparent text-surface-500 hover:text-surface-700",
                             )}
                         >
-                            {tab === "secondpurchase"
+                            {tab === "neema"
+                                ? "Neema"
+                                : tab === "channels"
+                                ? "Channels"
+                                : tab === "geography"
+                                ? "Geography"
+                                : tab === "secondpurchase"
                                 ? "Second Purchase"
                                 : tab === "ltv"
                                 ? "Lifetime Value"
@@ -256,6 +274,9 @@ export default function CustomersReportPage() {
                    proactive contact: automated radar pings + manual win-back
                    outreach, newest first, with outcome attribution. ── */}
             {activeTab === "outreachlog" && <OutreachLogTab />}
+            {activeTab === "neema" && <NeemaTab query={neemaQuery} />}
+            {activeTab === "channels" && <ChannelEngagementPage embedded />}
+            {activeTab === "geography" && <CustomerGeographyPage embedded />}
 
             {activeTab === "overview" && (
                 <div className="space-y-6">

@@ -161,7 +161,7 @@ export default function PaymentTransactionsPage() {
                     <p className="page-subtitle">All payment records across every channel and gateway.</p>
                     {can("reports.financial") && (
                         <Link
-                            to="/reports/financial"
+                            to="/reports/finance"
                             className="mt-1 inline-block text-xs text-surface-400 hover:text-brand-500 transition-colors"
                         >
                             View financial report →

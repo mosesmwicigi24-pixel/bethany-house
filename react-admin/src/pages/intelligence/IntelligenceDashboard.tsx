@@ -548,7 +548,7 @@ export default function IntelligenceDashboard() {
     return (
         <div className="space-y-5 animate-fade-in">
             <div className="page-header">
-                <h1 className="page-title">Intelligence</h1>
+                <h1 className="page-title">Business Intelligence &amp; Signals</h1>
                 <p className="page-subtitle">
                     Proactive signals across stock, production, customers, and finance
                 </p>

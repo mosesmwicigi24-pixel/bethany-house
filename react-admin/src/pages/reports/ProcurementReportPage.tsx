@@ -43,6 +43,7 @@ import {
     TH,
     TH_R,
     useReportOutlet,
+    useReportTab,
 } from "./reportShared";
 
 type ProcurementTab =
@@ -64,13 +65,7 @@ export default function ProcurementReportPage() {
     // Honour deep-links like /reports/procurement?tab=seasonal (the attention
     // feed sends users here) — read once on mount, same pattern as
     // CustomersReportPage; after that the tab buttons own the state.
-    const [searchParams] = useSearchParams();
-    const [activeTab, setActiveTab] = useState<ProcurementTab>(() => {
-        const t = searchParams.get("tab");
-        return PROCUREMENT_TABS.includes(t as ProcurementTab)
-            ? (t as ProcurementTab)
-            : "overview";
-    });
+    const [activeTab, setActiveTab] = useReportTab(PROCUREMENT_TABS, "overview");
 
     const { data, isLoading } = useQuery({
         queryKey: ["report-procurement", dr.start, dr.end, dr.outlet],
@@ -114,7 +109,7 @@ export default function ProcurementReportPage() {
     return (
         <div className="space-y-6 animate-fade-in">
             <ReportPageHeader
-                title="Procurement Report"
+                title="Procurement & Suppliers"
                 subtitle="Purchase orders, supplier spend, and fulfilment."
                 reportType="procurement"
                 exportPath="purchase-orders"
