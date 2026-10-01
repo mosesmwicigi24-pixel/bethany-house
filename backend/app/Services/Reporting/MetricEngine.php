@@ -773,6 +773,299 @@ class MetricEngine
         ];
     }
 
+    /**
+     * Orders paid MORE than they are worth, in shillings (cycle 9) — one
+     * definition for the attention feed and the Data Quality page. Same
+     * payments as Collected: paid, approved where approval applies; live
+     * orders only; the report's outlet.
+     */
+    private function overpaidOrders(): array
+    {
+        return DB::select("
+            SELECT o.id, o.order_number, o.customer_id,
+                   (pp.paid - o.total_amount * rc.reporting_rate_to_kes) AS excess
+            FROM orders o
+            JOIN currencies rc ON UPPER(rc.code) = UPPER(o.currency_code) AND rc.reporting_rate_to_kes IS NOT NULL
+            JOIN (
+                SELECT p.order_id,
+                       SUM((p.amount - COALESCE(p.refund_amount, 0)) * prc.reporting_rate_to_kes) AS paid
+                FROM payments p
+                JOIN currencies prc ON UPPER(prc.code) = UPPER(p.currency_code) AND prc.reporting_rate_to_kes IS NOT NULL
+                WHERE p.status = 'paid'
+                  AND (p.requires_approval IS NOT TRUE OR p.approval_status = 'approved')
+                GROUP BY p.order_id
+            ) pp ON pp.order_id = o.id
+            WHERE o.status NOT IN ('cancelled', 'voided', 'refunded')
+              " . $this->outletScopeSql('o.outlet_id') . "
+              AND pp.paid > o.total_amount * rc.reporting_rate_to_kes + 0.5
+            ORDER BY excess DESC
+        ");
+    }
+
+    /** Recognised sales in a currency with no reporting rate (cycle 10) — feed and Data Quality. */
+    private function unratedCurrencySales(): array
+    {
+        return DB::select("
+            SELECT UPPER(o.currency_code) AS currency, COUNT(*) AS orders, SUM(o.total_amount) AS total
+            FROM orders o
+            LEFT JOIN currencies rc ON UPPER(rc.code) = UPPER(o.currency_code)
+            WHERE rc.reporting_rate_to_kes IS NULL
+              AND o.status NOT IN ('cancelled', 'voided', 'refunded')
+              AND (o.status IN ('confirmed', 'processing', 'shipped', 'delivered', 'completed')
+                   OR o.payment_status IN ('paid', 'partial', 'deposit'))
+              " . $this->outletScopeSql('o.outlet_id') . "
+            GROUP BY UPPER(o.currency_code)
+            ORDER BY COUNT(*) DESC
+        ");
+    }
+
+    /** Rows a Data Quality check lists; `count` always says how many there are in all. */
+    public const DATA_QUALITY_ROW_LIMIT = 50;
+
+    /**
+     * Audit & Data Quality — "can I trust these numbers, and where is the data
+     * incomplete?" Each check names a gap in the records that a figure on
+     * another page silently depends on, says which figures it bends, and lists
+     * the rows to fix. Nothing here is a new definition: every check reuses
+     * the rule the figure itself uses (recognised orders, BuyerIdentity,
+     * normalize_phone, the P&L's cost lookup, the pipeline scope), so a check
+     * that reads clean means the figure is whole on that count.
+     *
+     * Scope is stated per check, because the two kinds answer different
+     * questions: 'period' checks say whether THIS window's figures are whole;
+     * 'current' checks are the standing state of the records, whatever the
+     * window. `outlet` says whether the outlet filter narrows a check —
+     * customers belong to the whole business, and orders with no outlet are
+     * by definition outside every outlet's view.
+     *
+     * Measured on production, 2026-10-01: 51 order phone fields hold notes
+     * ("cash", "refer to iand m", "ATC Measurements"), 57 recognised sales
+     * carry no buyer at all, 39 numbers sit on 87 customer records, and all 25
+     * expenses await approval.
+     *
+     * @param bool $withFinancial include checks whose rows are expense money (reports.financial)
+     */
+    public function dataQuality(Carbon $s, Carbon $e, bool $withFinancial): array
+    {
+        $limit = self::DATA_QUALITY_ROW_LIMIT;
+        $kes   = self::totalKes('o');
+        $sold  = fn () => $this->recognise(DB::table('orders as o'), 'o')
+            ->whereBetween('o.created_at', [$s, $e])
+            ->when($this->outletIds, fn ($q) => $q->whereIn('o.outlet_id', $this->outletIds));
+        $orderRow = "'order' AS kind, o.id, o.order_number AS ref, o.customer_id, o.created_at AS date,
+            TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,''))) AS customer,
+            {$kes} AS amount";
+
+        $checks = [];
+        $add = function (string $key, array $meta, int $count, ?float $value, array $rows) use (&$checks) {
+            $checks[] = $meta + [
+                'key'   => $key,
+                'count' => $count,
+                'value' => $value === null ? null : round($value, 2),
+                'rows'  => array_map(fn ($r) => (array) $r, $rows),
+            ];
+        };
+
+        // ── This window's sales ──────────────────────────────────────────────
+
+        // 1. Sales with no buyer: no phone that reads as a number, no customer
+        //    record, no email, no login. Revenue counts them; buyers cannot.
+        $anon = $sold()->whereRaw(\App\Support\BuyerIdentity::sql('o') . ' IS NULL');
+        $agg  = (clone $anon)->selectRaw("COUNT(*) AS n, COALESCE(SUM({$kes}),0) AS v")->first();
+        $add('anonymous_sales', [
+            'group' => 'sales', 'scope' => 'period', 'outlet' => true, 'severity' => 'medium',
+            'title'   => 'Sales with no buyer recorded',
+            'affects' => 'Buyers, repeat-purchase and customer figures. Revenue includes these sales; no buyer count can.',
+            'fix'     => ['label' => 'Add the customer to the order', 'to' => null, 'permission' => null],
+        ], (int) $agg->n, (float) $agg->v,
+            (clone $anon)->selectRaw($orderRow)->orderByDesc(DB::raw($kes))->limit($limit)->get()->all());
+
+        // 2. Phone fields that hold a note, not a number. normalize_phone
+        //    rejects them, so the buyer falls back to the record or is lost.
+        $notes = $sold()->whereRaw("NULLIF(btrim(o.customer_phone), '') IS NOT NULL AND normalize_phone(o.customer_phone) IS NULL");
+        $add('unreadable_order_phones', [
+            'group' => 'sales', 'scope' => 'period', 'outlet' => true, 'severity' => 'medium',
+            'title'   => 'Order phone fields holding a note, not a number',
+            'affects' => 'Buyer identity: these orders cannot be matched to the person by phone, so one customer can count as two, or as nobody.',
+            'fix'     => ['label' => 'Move the note to the order notes and enter the phone', 'to' => null, 'permission' => null],
+        ], (clone $notes)->count(), null,
+            (clone $notes)->selectRaw($orderRow . ', o.customer_phone AS phone_field')->orderByDesc('o.created_at')->limit($limit)->get()->all());
+
+        // 3. Lines sold at no price — a product given away, or a price never set.
+        $free = $sold()->join('order_items as oi', 'oi.order_id', '=', 'o.id')
+            ->where(fn ($q) => $q->whereNull('oi.unit_price')->orWhere('oi.unit_price', '<=', 0));
+        $add('unpriced_lines', [
+            'group' => 'sales', 'scope' => 'period', 'outlet' => true, 'severity' => 'medium',
+            'title'   => 'Lines sold at no price',
+            'affects' => 'Sales by product and average price: the quantity counts, the revenue is zero.',
+            'fix'     => ['label' => 'Correct the line price, or record it as a discount', 'to' => null, 'permission' => null],
+        ], (clone $free)->count(), null,
+            (clone $free)->selectRaw("'order' AS kind, o.id, o.order_number AS ref, o.customer_id, o.created_at AS date,
+                oi.product_id, CONCAT(oi.product_name, ' × ', oi.quantity) AS detail")
+                ->orderByDesc('o.created_at')->limit($limit)->get()->all());
+
+        // 4. Lines with no cost — neither the cost snapshotted at sale nor a
+        //    KES cost in the price book. The P&L's cost of goods counts them
+        //    as zero, so its margin is overstated by whatever they cost. The
+        //    lookup and the population (rated currencies) are the classic
+        //    P&L's (ReportController::profitLoss), so this count IS its
+        //    `unpriced_lines` — the reader can check one against the other.
+        $bookCost = "(SELECT pp.cost_price FROM product_prices pp
+                WHERE UPPER(pp.currency_code) = 'KES' AND pp.cost_price IS NOT NULL
+                  AND ((oi.product_variant_id IS NOT NULL AND pp.product_variant_id = oi.product_variant_id)
+                       OR (pp.product_id = oi.product_id AND pp.product_variant_id IS NULL))
+                ORDER BY pp.product_variant_id IS NULL
+                LIMIT 1)";
+        $soldLines = fn () => $sold()->join('order_items as oi', 'oi.order_id', '=', 'o.id')
+            ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('o.currency_code'));
+        $uncosted = $soldLines()->whereRaw("COALESCE(oi.cost_price, {$bookCost}) IS NULL");
+        $lineKes = \App\Support\ReportingCurrency::kes('oi.total_price', 'o.currency_code');
+        $agg = (clone $uncosted)->selectRaw("COUNT(*) AS n, COALESCE(SUM({$lineKes}),0) AS v")->first();
+        $costedTotal = $soldLines()->count();
+        $add('uncosted_lines', [
+            'group' => 'sales', 'scope' => 'period', 'outlet' => true, 'severity' => 'high',
+            'title'   => 'Lines sold with no cost',
+            'affects' => 'Cost of goods and every margin: the P&L leaves these lines out of cost, so profit reads higher than it is. The value shown is their revenue.',
+            'fix'     => ['label' => 'Set a KES cost price on the product', 'to' => null, 'permission' => null],
+        ], (int) $agg->n, (float) $agg->v,
+            (clone $uncosted)->groupBy('oi.product_id', 'oi.product_name')
+                ->selectRaw("'product' AS kind, oi.product_id AS id, oi.product_name AS ref, COUNT(*) AS lines, SUM({$lineKes}) AS amount")
+                ->orderByDesc(DB::raw("SUM({$lineKes})"))->limit($limit)->get()->all());
+
+        // 5. Orders with no outlet — in the business total, in no outlet's.
+        //    Not narrowed by the outlet filter: they are exactly what it hides.
+        $orphans = $this->recognise(DB::table('orders as o'), 'o')
+            ->whereBetween('o.created_at', [$s, $e])->whereNull('o.outlet_id');
+        $agg = (clone $orphans)->selectRaw("COUNT(*) AS n, COALESCE(SUM({$kes}),0) AS v")->first();
+        $add('orders_without_outlet', [
+            'group' => 'sales', 'scope' => 'period', 'outlet' => false, 'severity' => 'low',
+            'title'   => 'Sales with no outlet',
+            'affects' => 'Outlet figures: the business total includes these; no single outlet does, so outlets sum to less than the whole.',
+            'fix'     => ['label' => 'Set the outlet on the order', 'to' => null, 'permission' => null],
+        ], (int) $agg->n, (float) $agg->v,
+            (clone $orphans)->selectRaw($orderRow)->orderByDesc(DB::raw($kes))->limit($limit)->get()->all());
+
+        // ── Standing state of the records ────────────────────────────────────
+
+        // 6. Paid more than the order is worth (the attention feed's rule).
+        $over = $this->overpaidOrders();
+        $add('overpaid_orders', [
+            'group' => 'money', 'scope' => 'current', 'outlet' => true, 'severity' => 'high',
+            'title'   => 'Orders paid more than their total',
+            'affects' => 'Collected includes this money; Sold and the order balances do not. Collected minus Sold is not "owed".',
+            'fix'     => ['label' => 'Refund it, hold it as credit, or correct the order', 'to' => null, 'permission' => null],
+        ], count($over), array_sum(array_map(fn ($r) => (float) $r->excess, $over)),
+            array_map(fn ($r) => ['kind' => 'order', 'id' => $r->id, 'ref' => $r->order_number,
+                'customer_id' => $r->customer_id, 'amount' => round((float) $r->excess, 2)], array_slice($over, 0, $limit)));
+
+        // 7. Sales in a currency no report can value.
+        $unrated = $this->unratedCurrencySales();
+        $add('unrated_currency_sales', [
+            'group' => 'money', 'scope' => 'current', 'outlet' => true, 'severity' => 'high',
+            'title'   => 'Sales in a currency with no reporting rate',
+            'affects' => 'Every sales and money figure: these sales are left out rather than guessed at.',
+            'fix'     => ['label' => 'Set a reporting rate in Settings → Currencies', 'to' => '/settings/currencies', 'permission' => 'role:super_admin'],
+        ], array_sum(array_map(fn ($r) => (int) $r->orders, $unrated)), null,
+            array_map(fn ($r) => ['kind' => 'currency', 'id' => null, 'ref' => $r->currency,
+                'detail' => (int) $r->orders . ' orders · ' . $r->currency . ' ' . number_format((float) $r->total, 2)], $unrated));
+
+        // 8. Payments claimed but not approved: not in Collected until they are.
+        $pending = DB::table('payments as p')->join('orders as o', 'o.id', '=', 'p.order_id')
+            ->where('p.requires_approval', true)->where('p.approval_status', 'pending_review')
+            ->when($this->outletIds, fn ($q) => $q->whereIn('o.outlet_id', $this->outletIds));
+        $payKes = \App\Support\ReportingCurrency::kes('p.amount', 'p.currency_code');
+        $agg = (clone $pending)->selectRaw("COUNT(*) AS n, COALESCE(SUM({$payKes}),0) AS v")->first();
+        $add('payments_awaiting_approval', [
+            'group' => 'money', 'scope' => 'current', 'outlet' => true, 'severity' => 'medium',
+            'title'   => 'Payments awaiting approval',
+            'affects' => 'Collected leaves these out until someone approves them; the order still shows a balance.',
+            'fix'     => ['label' => 'Review in Approvals', 'to' => '/approvals', 'permission' => 'any:procurement.approve,inventory.approve'],
+        ], (int) $agg->n, (float) $agg->v,
+            (clone $pending)->selectRaw("'payment' AS kind, p.id, p.payment_number AS ref, p.payment_number, p.order_id,
+                o.customer_id, p.created_at AS date, {$payKes} AS amount")
+                ->orderBy('p.created_at')->limit($limit)->get()->all());
+
+        // 9. Expenses awaiting approval: not spend, so not in any expense
+        //    figure or margin. Expense money stays behind reports.financial.
+        if ($withFinancial) {
+            $waiting = DB::table('expenses')->where('status', 'pending_approval')->whereNull('deleted_at')
+                ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds));
+            $agg = (clone $waiting)->selectRaw('COUNT(*) AS n, COALESCE(SUM(amount_kes),0) AS v')->first();
+            $add('expenses_awaiting_approval', [
+                'group' => 'money', 'scope' => 'current', 'outlet' => true, 'severity' => 'high',
+                'title'   => 'Expenses awaiting approval',
+                'affects' => 'Every expense figure and net margin: only approved and paid expenses count as spend.',
+                'fix'     => ['label' => 'Approve or reject in Expenses', 'to' => '/expenses', 'permission' => 'expenses.view'],
+            ], (int) $agg->n, (float) $agg->v,
+                (clone $waiting)->selectRaw("'expense' AS kind, id, reference_number AS ref, title AS detail,
+                    expense_date AS date, amount_kes AS amount")
+                    ->orderBy('expense_date')->limit($limit)->get()->all());
+        }
+
+        // 10. Carts left unconfirmed over 30 days: not sales, still in the order book.
+        $stale = DB::table('orders as o')->whereIn('o.status', \App\Models\Order::PIPELINE_STATUSES)
+            ->whereNotIn('o.payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES)
+            ->where('o.created_at', '<', CarbonImmutable::now(self::TZ)->subDays(30)->toMutable())
+            ->when($this->outletIds, fn ($q) => $q->whereIn('o.outlet_id', $this->outletIds));
+        $agg = (clone $stale)->selectRaw("COUNT(*) AS n, COALESCE(SUM({$kes}),0) AS v")->first();
+        $add('stale_unconfirmed_carts', [
+            'group' => 'sales', 'scope' => 'current', 'outlet' => true, 'severity' => 'low',
+            'title'   => 'Carts unconfirmed for over 30 days',
+            'affects' => 'The unconfirmed pipeline: these are counted as live leads. They are not sales on any page.',
+            'fix'     => ['label' => 'Confirm or cancel in Sales → Unconfirmed', 'to' => '/reports/sales?tab=unconfirmed', 'permission' => 'reports.view'],
+        ], (int) $agg->n, (float) $agg->v,
+            (clone $stale)->selectRaw($orderRow)->orderByDesc(DB::raw($kes))->limit($limit)->get()->all());
+
+        // 11. One number on several customer records — one person, registered
+        //     twice. Buyer counts already join them by phone; the records,
+        //     their histories and their contact details are still split.
+        $dupes = DB::table('customers')->whereNull('deleted_at')
+            ->whereRaw('normalize_phone(phone) IS NOT NULL')
+            ->groupBy(DB::raw('normalize_phone(phone)'))->havingRaw('COUNT(*) > 1');
+        $add('duplicate_customer_records', [
+            'group' => 'customers', 'scope' => 'current', 'outlet' => false, 'severity' => 'low',
+            'title'   => 'Customer records sharing one phone number',
+            'affects' => 'Customer history and lifetime value: one person\'s orders are split across records. Buyer counts already join them by phone.',
+            'fix'     => ['label' => 'Merge the records', 'to' => null, 'permission' => null],
+        ], DB::query()->fromSub((clone $dupes)->selectRaw('1'), 'd')->count(), null,
+            (clone $dupes)->selectRaw("'customer' AS kind, MIN(id) AS id, COUNT(*) AS records,
+                STRING_AGG(TRIM(CONCAT(first_name, ' ', last_name)), ' · ' ORDER BY id) AS customer,
+                MIN(phone) AS phone_field")
+                ->orderByDesc(DB::raw('COUNT(*)'))->limit($limit)->get()->all());
+
+        // 12. Customer records whose phone is a note.
+        $badRec = DB::table('customers')->whereNull('deleted_at')
+            ->whereRaw("NULLIF(btrim(phone), '') IS NOT NULL AND normalize_phone(phone) IS NULL");
+        $add('unreadable_customer_phones', [
+            'group' => 'customers', 'scope' => 'current', 'outlet' => false, 'severity' => 'low',
+            'title'   => 'Customer records with an unreadable phone',
+            'affects' => 'These customers cannot be matched to their till orders by phone, or contacted from the record.',
+            'fix'     => ['label' => 'Correct the phone on the customer', 'to' => null, 'permission' => null],
+        ], (clone $badRec)->count(), null,
+            (clone $badRec)->selectRaw("'customer' AS kind, id, TRIM(CONCAT(first_name, ' ', last_name)) AS customer,
+                phone AS phone_field, created_at AS date")
+                ->orderByDesc('created_at')->limit($limit)->get()->all());
+
+        $soldOrders = (clone $sold())->count();
+        $identified = $soldOrders - (int) collect($checks)->firstWhere('key', 'anonymous_sales')['count'];
+
+        return [
+            'checks'   => $checks,
+            // Zeros that are structural, not quiet (production never signed
+            // off, expenses never approved) — the same notes the overview shows.
+            'gaps'     => $this->structuralGaps(),
+            'coverage' => [
+                'orders'            => $soldOrders,
+                'buyer_identified'  => $soldOrders > 0 ? round($identified / $soldOrders * 100, 1) : null,
+                'lines'             => $costedTotal,
+                'lines_costed'      => $costedTotal > 0
+                    ? round(($costedTotal - (int) collect($checks)->firstWhere('key', 'uncosted_lines')['count']) / $costedTotal * 100, 1)
+                    : null,
+            ],
+            'row_limit' => $limit,
+        ];
+    }
+
     /** One sentence per drillable metric: exactly what its rows add up to. */
     public const DRILL_DEFINITIONS = [
         'revenue'              => 'Recognised orders in the period (confirmed or paid), in KES at the reporting rate. Pending carts and cancelled orders are not included.',
@@ -3454,25 +3747,7 @@ class MetricEngine
         //     order), so the feed names it rather than netting it away.
         //     Same payments as the Collected tile: paid, and approved where
         //     approval applies; live orders only.
-        $over = DB::select("
-            SELECT o.order_number,
-                   (pp.paid - o.total_amount * rc.reporting_rate_to_kes) AS excess
-            FROM orders o
-            JOIN currencies rc ON UPPER(rc.code) = UPPER(o.currency_code) AND rc.reporting_rate_to_kes IS NOT NULL
-            JOIN (
-                SELECT p.order_id,
-                       SUM((p.amount - COALESCE(p.refund_amount, 0)) * prc.reporting_rate_to_kes) AS paid
-                FROM payments p
-                JOIN currencies prc ON UPPER(prc.code) = UPPER(p.currency_code) AND prc.reporting_rate_to_kes IS NOT NULL
-                WHERE p.status = 'paid'
-                  AND (p.requires_approval IS NOT TRUE OR p.approval_status = 'approved')
-                GROUP BY p.order_id
-            ) pp ON pp.order_id = o.id
-            WHERE o.status NOT IN ('cancelled', 'voided', 'refunded')
-              " . $this->outletScopeSql('o.outlet_id') . "
-              AND pp.paid > o.total_amount * rc.reporting_rate_to_kes + 0.5
-            ORDER BY excess DESC
-        ");
+        $over = $this->overpaidOrders();
         if ($over) {
             $n      = count($over);
             $excess = array_sum(array_map(fn ($r) => (float) $r->excess, $over));
@@ -3483,13 +3758,13 @@ class MetricEngine
                 'detail' => 'Collected includes this money; the orders do not account for it. Refund it, hold it as '
                     . 'credit, or correct the order — largest: ' . $over[0]->order_number
                     . ' (KES ' . number_format((float) $over[0]->excess) . ' over).',
-                'count' => $n, 'link' => '/orders',
+                'count' => $n, 'link' => '/sales/orders',
                 'entities' => array_map(fn ($r) => [
                     'number' => $r->order_number,
                     'excess' => round((float) $r->excess, 2),
                 ], array_slice($over, 0, 5)),
                 'actions' => [
-                    ['type' => 'navigate', 'label' => 'Open orders', 'to' => '/orders'],
+                    ['type' => 'navigate', 'label' => 'Open orders', 'to' => '/sales/orders'],
                 ],
             ];
         }
@@ -3501,18 +3776,7 @@ class MetricEngine
         //     first pound sale would have vanished from every page. Named here
         //     the day it happens, with the currency, so it is fixed in Setup
         //     rather than discovered at month end.
-        $unrated = DB::select("
-            SELECT UPPER(o.currency_code) AS currency, COUNT(*) AS orders, SUM(o.total_amount) AS total
-            FROM orders o
-            LEFT JOIN currencies rc ON UPPER(rc.code) = UPPER(o.currency_code)
-            WHERE rc.reporting_rate_to_kes IS NULL
-              AND o.status NOT IN ('cancelled', 'voided', 'refunded')
-              AND (o.status IN ('confirmed', 'processing', 'shipped', 'delivered', 'completed')
-                   OR o.payment_status IN ('paid', 'partial', 'deposit'))
-              " . $this->outletScopeSql('o.outlet_id') . "
-            GROUP BY UPPER(o.currency_code)
-            ORDER BY COUNT(*) DESC
-        ");
+        $unrated = $this->unratedCurrencySales();
         if ($unrated) {
             $n     = array_sum(array_map(fn ($r) => (int) $r->orders, $unrated));
             $codes = implode(', ', array_map(fn ($r) => $r->currency, $unrated));

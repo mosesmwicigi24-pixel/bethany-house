@@ -904,32 +904,103 @@ class ExecutiveReportController extends Controller
             isset($validated['salesperson']) ? (int) $validated['salesperson'] : null,
         );
 
-        // Where each row leads — decided HERE, from what the row is and what
-        // this viewer may open, never guessed by the page. A link is offered
-        // only when its destination's own permission allows it: a drill must
-        // not become a way round the screen it points to.
         $user = $request->user();
-        $can  = fn (string $p) => $user->can($p);
-        $result['rows'] = collect($result['rows'])->map(function ($r) use ($can) {
-            $r = (array) $r;
-            $orderId = $r['kind'] === 'order' ? $r['id'] : ($r['order_id'] ?? null);
-            $r['links'] = array_filter([
-                'order'      => $orderId && $can('orders.view') ? "/sales/orders/{$orderId}" : null,
-                'customer'   => match (true) {
-                    $r['kind'] === 'customer' && $can('customers.view')   => "/sales/customers/{$r['id']}",
-                    ! empty($r['customer_id']) && $can('customers.view') => "/sales/customers/{$r['customer_id']}",
-                    default                                              => null,
-                },
-                'payment'    => $r['kind'] === 'payment' && ! empty($r['payment_number']) && $can('payments.transactions')
-                    ? '/finance/transactions?search=' . rawurlencode($r['payment_number']) : null,
-                'production' => $r['kind'] === 'production' && $can('production.view') ? "/production/orders/{$r['id']}" : null,
-                'expense'    => $r['kind'] === 'expense' && $can('expenses.view') ? "/expenses/{$r['id']}" : null,
-            ]);
-
-            return $r;
-        })->all();
+        $result['rows'] = collect($result['rows'])->map(fn ($r) => $this->withLinks((array) $r, $user))->all();
 
         return response()->json($result);
+    }
+
+    /**
+     * Where a report row leads — decided HERE, from what the row is and what
+     * this viewer may open, never guessed by the page. A link is offered only
+     * when its destination's own permission allows it: a drill must not become
+     * a way round the screen it points to. One composer for every report that
+     * lists rows (drill-downs, Data Quality), so the rule cannot drift.
+     */
+    private function withLinks(array $r, \App\Models\User $user): array
+    {
+        $can     = fn (string $p) => $user->can($p);
+        $kind    = $r['kind'] ?? null;
+        $orderId = $kind === 'order' ? ($r['id'] ?? null) : ($r['order_id'] ?? null);
+
+        $r['links'] = array_filter([
+            'order'      => $orderId && $can('orders.view') ? "/sales/orders/{$orderId}" : null,
+            'customer'   => match (true) {
+                $kind === 'customer' && ! empty($r['id']) && $can('customers.view') => "/sales/customers/{$r['id']}",
+                ! empty($r['customer_id']) && $can('customers.view')                => "/sales/customers/{$r['customer_id']}",
+                default                                                             => null,
+            },
+            'payment'    => $kind === 'payment' && ! empty($r['payment_number']) && $can('payments.transactions')
+                ? '/finance/transactions?search=' . rawurlencode($r['payment_number']) : null,
+            'production' => $kind === 'production' && $can('production.view') ? "/production/orders/{$r['id']}" : null,
+            'expense'    => $kind === 'expense' && $can('expenses.view') ? "/expenses/{$r['id']}" : null,
+            'product'    => match (true) {
+                $kind === 'product' && ! empty($r['id']) && $can('products.view')         => "/catalogue/products/{$r['id']}",
+                ! empty($r['product_id']) && $can('products.view')                        => "/catalogue/products/{$r['product_id']}",
+                default                                                                   => null,
+            },
+        ]);
+
+        return $r;
+    }
+
+    /**
+     * Audit & Data Quality — where the records behind the other pages are
+     * incomplete, and which figures that bends. Rows carry the same
+     * permission-checked links as a drill; a check's "where to fix it" link is
+     * offered only to someone who may open that screen. Expense money stays
+     * behind reports.financial, exactly as on Finance & Cash.
+     */
+    public function dataQuality(Request $request)
+    {
+        $validated = $request->validate([
+            'period'    => 'nullable|string|in:today,yesterday,last_7,last_30,this_month,last_month,this_quarter,this_year,custom',
+            'from'      => 'nullable|date|required_if:period,custom',
+            'to'        => 'nullable|date|required_if:period,custom',
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+        ]);
+
+        $user      = $request->user();
+        $periodKey = $validated['period'] ?? 'this_month';
+        [$s, $e]   = MetricEngine::resolvePeriod($periodKey, $validated['from'] ?? null, $validated['to'] ?? null);
+        $engine    = MetricEngine::for($user, isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+
+        $dq = $engine->dataQuality($s, $e, $user->can('reports.financial'));
+
+        $mayOpen = fn (?string $rule) => match (true) {
+            $rule === null                => false,
+            str_starts_with($rule, 'role:') => $user->hasRole(substr($rule, 5)),
+            str_starts_with($rule, 'any:')  => collect(explode(',', substr($rule, 4)))->contains(fn ($p) => $user->can($p)),
+            default                         => $user->can($rule),
+        };
+
+        $dq['checks'] = array_map(function (array $c) use ($user, $mayOpen) {
+            $c['rows'] = array_map(fn ($r) => $this->withLinks($r, $user), $c['rows']);
+            $c['fix']  = ['label' => $c['fix']['label'], 'to' => $mayOpen($c['fix']['permission']) ? $c['fix']['to'] : null];
+
+            return $c;
+        }, $dq['checks']);
+
+        // One line per listed record, under its check — the work list, for
+        // whoever fixes it. Contacts go through report.contacts like any CSV.
+        if ($this->wantsExport($request)) {
+            $rows = [];
+            foreach ($dq['checks'] as $c) {
+                foreach ($c['rows'] as $r) {
+                    $rows[] = [$c['title'], $c['scope'] === 'period' ? 'This period' : 'All records', $c['count'],
+                        $r['ref'] ?? ($r['id'] ?? ''), $r['customer'] ?? '', $r['detail'] ?? '', $r['phone_field'] ?? '',
+                        $r['date'] ?? '', $r['amount'] ?? ''];
+                }
+            }
+
+            return $this->csvResponse(
+                ['Check', 'Scope', 'Records in all', 'Reference', 'Customer', 'Detail', 'Phone field', 'Date', 'KES'],
+                $rows, 'data_quality');
+        }
+
+        return response()->json(['period' => [
+            'key' => $periodKey, 'start' => $s->toIso8601String(), 'end' => $e->toIso8601String(),
+        ]] + $dq);
     }
 
     /**

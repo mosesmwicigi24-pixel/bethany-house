@@ -282,7 +282,7 @@ function MaterialShortagesCard() {
             badge={shortages.length > 0 ? (outOfStock > 0 ? `${outOfStock} out of stock` : `${shortages.length} short`) : undefined}
             badgeColor={outOfStock > 0 ? "bg-danger-light text-danger" : "bg-warning-light text-warning-dark"}
             action={shortages.length > 0 && canCreatePO ? (
-                <button onClick={() => navigate("/procurement/purchase-orders/new")}
+                <button onClick={() => navigate("/procurement/purchase-orders?new=1")}
                     className="btn-primary btn-sm text-xs">
                     Create PO
                 </button>

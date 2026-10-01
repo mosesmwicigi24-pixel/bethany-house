@@ -196,6 +196,7 @@ const InventoryReportPage   = lazy(() => import("@/pages/reports/InventoryReport
 const ProductionReportPage  = lazy(() => import("@/pages/reports/ProductionReportPage"));
 const ProcurementReportPage = lazy(() => import("@/pages/reports/ProcurementReportPage"));
 const PerformanceReportPage = lazy(() => import("@/pages/reports/PerformanceReportPage"));
+const DataQualityReportPage = lazy(() => import("@/pages/reports/DataQualityReportPage"));
 const FinancialReportPage   = lazy(() => import("@/pages/reports/FinancialReportPage"));
 const ProductCostingReportPage = lazy(() => import("@/pages/reports/ProductCostingReportPage"));
 const IntelligenceDashboard = lazy(() => import("@/pages/intelligence/IntelligenceDashboard"));
@@ -1081,6 +1082,16 @@ export default function App() {
                                 <ProtectedRoute permission="reports.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <PerformanceReportPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/reports/data-quality"
+                            element={
+                                <ProtectedRoute permission="reports.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <DataQualityReportPage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }

@@ -112,6 +112,7 @@ const REPORT_PAGE_LABELS: Record<string, string> = {
     procurement: 'Procurement & Suppliers',
     signals: 'Signals',
     performance: 'Staff, Outlets & Performance',
+    'data-quality': 'Audit & Data Quality',
 }
 
 function buildBreadcrumbs(pathname: string) {
