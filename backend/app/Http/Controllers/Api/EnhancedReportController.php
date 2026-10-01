@@ -132,18 +132,32 @@ class EnhancedReportController extends Controller
      *
      * Tax rates are assigned per-product via product_tax_rates pivot.
      * There is no tax_rate_id on order_items - we join through product_tax_rates.
+     *
+     * BASIS (owner delegated the decision, 2026-10-02): the SOLD basis —
+     * recognised orders, the same scope as every sales figure — not only the
+     * orders money has reached. VAT falls due on the supply or the invoice,
+     * whichever is first; a confirmed sale awaiting payment is still taxable.
+     * The paid-only basis left out KES 33,500 of September's confirmed sales.
+     *
+     * ONE RATE PER LINE: a product carrying two rates (product 108 is tagged
+     * both VAT 16% and No Tax) was counted once under EACH, so its line was in
+     * the taxable total twice. It now counts once, under its higher rate — the
+     * cautious reading for a VAT return — and is named in
+     * `conflicting_rate_products` so the product's tax setup is corrected.
+     * Rated currencies only, like every KES figure.
      */
     public function taxReport(Request $request)
     {
         $p = $this->params($request);
-
-        $rows = DB::table('orders')
-            ->join('order_items', 'orders.id', '=', 'order_items.order_id')
-            ->leftJoin('product_tax_rates', 'order_items.product_id', '=', 'product_tax_rates.product_id')
-            ->leftJoin('tax_rates', 'product_tax_rates.tax_rate_id', '=', 'tax_rates.id')
+        $lineRate = '(SELECT ptr.tax_rate_id FROM product_tax_rates ptr JOIN tax_rates trx ON trx.id = ptr.tax_rate_id
+                      WHERE ptr.product_id = order_items.product_id ORDER BY trx.rate DESC, ptr.tax_rate_id LIMIT 1)';
+        $base = fn () => $this->recognisedOrders(DB::table('orders')
+                ->join('order_items', 'orders.id', '=', 'order_items.order_id'))
             ->whereBetween('orders.created_at', [$p['start'], $p['end']])
-            ->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
-            ->whereIn('orders.payment_status', ['paid', 'partial', 'deposit'])->whereNotIn('orders.status', ['cancelled', 'refunded', 'voided'])
+            ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code'));
+
+        $rows = $base()
+            ->leftJoin('tax_rates', DB::raw('tax_rates.id'), '=', DB::raw($lineRate))
             ->selectRaw("
                 COALESCE(tax_rates.name, 'No Tax / Default') AS tax_name,
                 COALESCE(tax_rates.rate, 0) AS tax_rate,
@@ -154,6 +168,12 @@ class EnhancedReportController extends Controller
             ->groupBy('tax_rates.id', 'tax_rates.name', 'tax_rates.rate')
             ->orderByDesc('tax_collected')
             ->get();
+
+        $conflicting = $base()
+            ->whereIn('order_items.product_id', DB::table('product_tax_rates')->select('product_id')
+                ->groupBy('product_id')->havingRaw('COUNT(*) > 1'))
+            ->distinct()->orderBy('order_items.product_id')
+            ->pluck('order_items.product_id')->map(fn ($id) => (int) $id)->all();
 
         $totals = [
             'total_taxable'  => $rows->sum('taxable_amount'),
@@ -168,7 +188,8 @@ class EnhancedReportController extends Controller
                 ['tax_name', 'tax_rate', 'order_count', 'taxable_amount', 'tax_collected']);
         }
 
-        return response()->json(['period' => $p, 'by_tax_rate' => $rows, 'totals' => $totals]);
+        return response()->json(['period' => $p, 'by_tax_rate' => $rows, 'totals' => $totals,
+            'basis' => 'sold', 'conflicting_rate_products' => $conflicting]);
     }
 
     /**
@@ -182,18 +203,21 @@ class EnhancedReportController extends Controller
     {
         $p = $this->params($request);
 
-        // Inflows: completed payments grouped by month
-        // Every rail converts at the REPORTING rate before summing — a USD
-        // payment added at face value understates silently, the exact defect
-        // the 2026-08 audit found on the Collected tile. Rate-less currencies
-        // stay out of the sum rather than entering at a guess.
-        $inflows = DB::table('payments')
+        // Inflows ARE Collected (owner delegated the decision, 2026-10-02):
+        // settled payments, approved where approval applies, by PAYMENT date,
+        // net of refunds, in KES at the reporting rate — so a month's inflow
+        // is that month's Collected tile. It read the record's creation date
+        // and the gross amount, so a refund never left the cash flow and a
+        // payment recorded in one month and settled in the next sat in the
+        // wrong one (July 2026: 500 apart). Rate-less currencies stay out of
+        // the sum rather than entering at a guess.
+        $paidAt  = 'COALESCE(payments.paid_at, payments.created_at)';
+        $inflows = \App\Support\SettledPayment::where(DB::table('payments'))
             ->when($this->reportOutletId(), fn ($q, $outlet) => $q->whereIn('order_id',
                 DB::table('orders')->where('outlet_id', $outlet)->select('id')))
-            ->whereBetween('created_at', [$p['start'], $p['end']])
-            ->where('status', 'paid')
-            ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('currency_code'))
-            ->selectRaw("TO_CHAR(created_at, 'YYYY-MM') AS month, SUM(" . \App\Support\ReportingCurrency::kes('amount', 'currency_code') . ") AS inflow, payment_method")
+            ->whereBetween(DB::raw($paidAt), [$p['start'], $p['end']])
+            ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('payments.currency_code'))
+            ->selectRaw("TO_CHAR({$paidAt}, 'YYYY-MM') AS month, SUM(" . \App\Support\ReportingCurrency::kes('payments.amount - COALESCE(payments.refund_amount, 0)', 'payments.currency_code') . ") AS inflow, payment_method")
             ->groupBy('month', 'payment_method')
             ->orderBy('month')
             ->get();
