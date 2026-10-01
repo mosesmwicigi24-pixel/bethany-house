@@ -87,7 +87,7 @@ export default function SalesReportPage() {
     });
 
     const summaryQuery = useQuery({
-        queryKey: ["report-sales-summary", dr.start, dr.end, compare],
+        queryKey: ["report-sales-summary", dr.start, dr.end, dr.outlet, compare],
         queryFn: () =>
             reportsApi.salesSummary({
                 ...dr.params,
@@ -96,17 +96,17 @@ export default function SalesReportPage() {
         enabled: !!dr.start && !!dr.end,
     });
     const byProductQuery = useQuery({
-        queryKey: ["report-sales-products", dr.start, dr.end],
+        queryKey: ["report-sales-products", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.salesByProduct({ ...dr.params, limit: 30 }),
         enabled: !!dr.start && !!dr.end,
     });
     const byCatQuery = useQuery({
-        queryKey: ["report-sales-category", dr.start, dr.end],
+        queryKey: ["report-sales-category", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.salesByCategory(dr.params),
         enabled: !!dr.start && !!dr.end,
     });
     const byCustomerQuery = useQuery({
-        queryKey: ["report-sales-customers", dr.start, dr.end],
+        queryKey: ["report-sales-customers", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.salesByCustomer({ ...dr.params, limit: 25 }),
         enabled: !!dr.start && !!dr.end && activeTab === "customers",
     });
@@ -114,20 +114,20 @@ export default function SalesReportPage() {
     // only on the Channels tab — it is three grouped aggregations and there is
     // no reason to pay for them while the user is reading Overview.
     const ledgerQuery = useQuery({
-        queryKey: ["report-sales-ledger", dr.start, dr.end],
+        queryKey: ["report-sales-ledger", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.salesLedger(dr.params),
         enabled: !!dr.start && !!dr.end && activeTab === "channels",
     });
 
     const returnsQuery = useQuery({
-        queryKey: ["report-sales-returns", dr.start, dr.end],
+        queryKey: ["report-sales-returns", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.salesReturns(dr.params),
         enabled: !!dr.start && !!dr.end,
     });
 
     // Neema (AI agent) performance — loaded only on its tab.
     const neemaQuery = useQuery({
-        queryKey: ["report-sales-neema", dr.start, dr.end],
+        queryKey: ["report-sales-neema", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.salesNeema(dr.params),
         enabled: !!dr.start && !!dr.end && activeTab === "neema",
     });
@@ -910,7 +910,7 @@ export default function SalesReportPage() {
 
 function SalesByOutletTable({ params }: { params: Record<string, any> }) {
     const { data, isLoading } = useQuery({
-        queryKey: ["report-sales-outlet", params.start_date, params.end_date],
+        queryKey: ["report-sales-outlet", params.start_date, params.end_date, params.outlet_id],
         queryFn: () => reportsApi.salesByOutlet(params),
         enabled: !!params.start_date && !!params.end_date,
     });

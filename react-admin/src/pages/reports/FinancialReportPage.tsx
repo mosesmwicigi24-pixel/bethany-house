@@ -55,7 +55,7 @@ export default function FinancialReportPage() {
     const [expStatus, setExpStatus] = useState("");
 
     const plQuery = useQuery({
-        queryKey: ["report-pl", dr.start, dr.end, compare],
+        queryKey: ["report-pl", dr.start, dr.end, dr.outlet, compare],
         queryFn: () =>
             reportsApi.profitLoss({
                 ...dr.params,
@@ -64,7 +64,7 @@ export default function FinancialReportPage() {
         enabled: !!dr.start && !!dr.end,
     });
     const expQuery = useQuery({
-        queryKey: ["report-expenses", dr.start, dr.end, expStatus],
+        queryKey: ["report-expenses", dr.start, dr.end, dr.outlet, expStatus],
         queryFn: () =>
             reportsApi.expenses({
                 ...dr.params,
@@ -73,17 +73,17 @@ export default function FinancialReportPage() {
         enabled: !!dr.start && !!dr.end,
     });
     const revQuery = useQuery({
-        queryKey: ["report-revenue", dr.start, dr.end],
+        queryKey: ["report-revenue", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.revenue(dr.params),
         enabled: !!dr.start && !!dr.end,
     });
     const taxQuery = useQuery({
-        queryKey: ["report-tax", dr.start, dr.end],
+        queryKey: ["report-tax", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.taxReport(dr.params),
         enabled: !!dr.start && !!dr.end && activeTab === "tax",
     });
     const cashFlowQuery = useQuery({
-        queryKey: ["report-cashflow", dr.start, dr.end],
+        queryKey: ["report-cashflow", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.cashFlow(dr.params),
         enabled: !!dr.start && !!dr.end && activeTab === "cashflow",
     });

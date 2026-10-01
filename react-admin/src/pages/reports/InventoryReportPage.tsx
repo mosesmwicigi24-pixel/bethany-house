@@ -80,7 +80,7 @@ export default function InventoryReportPage() {
         queryFn: () => reportsApi.inventoryValuationBreakdown(outletId),
     });
     const movementQuery = useQuery({
-        queryKey: ["report-movement", dr.start, dr.end],
+        queryKey: ["report-movement", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.inventoryMovement(dr.params),
         enabled: !!dr.start && !!dr.end,
     });

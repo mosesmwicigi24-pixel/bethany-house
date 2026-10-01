@@ -53,13 +53,13 @@ export default function ProductionReportPage() {
     >("overview");
 
     const { data, isLoading } = useQuery({
-        queryKey: ["report-production", dr.start, dr.end],
+        queryKey: ["report-production", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.productionSummary(dr.params),
         enabled: !!dr.start && !!dr.end,
     });
 
     const { data: costingData, isLoading: costingLoading } = useQuery({
-        queryKey: ["report-production-costing", dr.start, dr.end],
+        queryKey: ["report-production-costing", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.productionCostingSummary(dr.params),
         enabled: !!dr.start && !!dr.end && activeTab === "costing" && canSeeCosting,
     });

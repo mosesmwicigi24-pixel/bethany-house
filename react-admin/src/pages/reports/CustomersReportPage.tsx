@@ -69,23 +69,23 @@ export default function CustomersReportPage() {
     );
 
     const summaryQuery = useQuery({
-        queryKey: ["report-customers-summary", dr.start, dr.end],
+        queryKey: ["report-customers-summary", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.customerSummary(dr.params),
         enabled: !!dr.start && !!dr.end,
     });
     const ltvQuery = useQuery({
-        queryKey: ["report-customers-ltv", dr.start, dr.end],
+        queryKey: ["report-customers-ltv", dr.start, dr.end, dr.outlet],
         queryFn: () =>
             reportsApi.customerLifetimeValue({ ...dr.params, limit: 30 }),
         enabled: !!dr.start && !!dr.end,
     });
     const analyticsQuery = useQuery({
-        queryKey: ["report-customers-analytics", periodDays],
+        queryKey: ["report-customers-analytics", periodDays, dr.outlet],
         queryFn: () =>
-            reportsApi.customerAnalytics({ period: periodDays } as any),
+            reportsApi.customerAnalytics({ period: periodDays, ...(dr.outlet ? { outlet_id: Number(dr.outlet) } : {}) } as any),
     });
     const retentionQuery = useQuery({
-        queryKey: ["report-customers-retention", dr.start, dr.end],
+        queryKey: ["report-customers-retention", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.customerRetention(dr.params),
         enabled: !!dr.start && !!dr.end && activeTab === "retention",
     });

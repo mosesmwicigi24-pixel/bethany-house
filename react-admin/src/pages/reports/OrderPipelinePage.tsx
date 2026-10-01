@@ -9,7 +9,7 @@ import { openWhatsApp } from "@/lib/whatsapp";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToastStore } from "@/store/toast.store";
 import { Spinner } from "@/components/ui/Spinner";
-import { KPI_GRID, KpiCard, TableWrapper, EmptyRow } from "./reportShared";
+import { KPI_GRID, KpiCard, TableWrapper, EmptyRow, useReportOutlet } from "./reportShared";
 import { clsx } from "clsx";
 import dayjs from "dayjs";
 import type { ApiError } from "@/types";
@@ -62,9 +62,11 @@ export default function OrderPipelinePage() {
 
     const canWork = can("orders.edit");
 
+    // The report's outlet filter (as a tab of Sales & Orders it must follow it).
+    const outletId = useReportOutlet();
     const query = useQuery({
-        queryKey: ["order-pipeline", sort],
-        queryFn: () => reportsApi.orderPipeline({ sort }),
+        queryKey: ["order-pipeline", sort, outletId],
+        queryFn: () => reportsApi.orderPipeline({ sort, ...(outletId ? { outlet_id: outletId } : {}) }),
     });
 
     const refresh = () => {

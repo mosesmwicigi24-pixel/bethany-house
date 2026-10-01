@@ -73,7 +73,7 @@ export default function ProcurementReportPage() {
     });
 
     const { data, isLoading } = useQuery({
-        queryKey: ["report-procurement", dr.start, dr.end],
+        queryKey: ["report-procurement", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.purchaseOrders(dr.params),
         enabled: !!dr.start && !!dr.end,
     });
