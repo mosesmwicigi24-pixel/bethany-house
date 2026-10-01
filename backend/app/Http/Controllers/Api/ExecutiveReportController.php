@@ -101,6 +101,22 @@ class ExecutiveReportController extends Controller
                     'previous' => round($collected['previous'] - $expenses['previous'], 2),
                     'series'   => collect(),
                 ],
+                // Profit, not cash: the earned P&L (fully-paid orders, their
+                // cost, approved expenses) — the figure Finance & Cash shows,
+                // with the reasons it is incomplete stated beside it, so the
+                // overview never presents a margin as if every cost were in.
+                'earned' => (function () use ($engine, $s, $e) {
+                    $pnl = $engine->earnedPnl($s, $e);
+                    $limits = [];
+                    if ($pnl['unpriced_lines'] > 0) {
+                        $limits[] = $pnl['unpriced_lines'] . ' line' . ($pnl['unpriced_lines'] === 1 ? '' : 's') . ' sold with no cost — counted at zero, so profit reads high';
+                    }
+                    if ($pnl['expenses_pending_approval']['count'] > 0) {
+                        $limits[] = 'KES ' . number_format($pnl['expenses_pending_approval']['amount']) . ' of expenses awaiting approval — not yet deducted';
+                    }
+
+                    return $pnl + ['limits' => $limits];
+                })(),
             ];
         }
 
@@ -1001,6 +1017,24 @@ class ExecutiveReportController extends Controller
         return response()->json(['period' => [
             'key' => $periodKey, 'start' => $s->toIso8601String(), 'end' => $e->toIso8601String(),
         ]] + $dq);
+    }
+
+    /**
+     * Where the period's orders went — sold, unconfirmed, lost, refunded —
+     * and who lost them. Every order raised in the window, in one bucket.
+     */
+    public function outcomes(Request $request)
+    {
+        $v = $request->validate([
+            'period'    => 'nullable|string|in:today,yesterday,last_7,last_30,this_month,last_month,this_quarter,this_year,custom',
+            'from'      => 'nullable|date|required_if:period,custom',
+            'to'        => 'nullable|date|required_if:period,custom',
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+        ]);
+        [$s, $e, $ps, $pe] = MetricEngine::resolvePeriod($v['period'] ?? 'this_month', $v['from'] ?? null, $v['to'] ?? null);
+        $engine = MetricEngine::for($request->user(), isset($v['outlet_id']) ? (int) $v['outlet_id'] : null);
+
+        return response()->json($engine->orderOutcomes($s, $e, $ps, $pe));
     }
 
     /**

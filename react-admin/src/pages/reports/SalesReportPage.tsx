@@ -57,6 +57,7 @@ import {
     ChangeBadge,
     useReportOutlet,
     useReportTab,
+    DrillPanel,
 } from "./reportShared";
 import OrderPipelinePage from "./OrderPipelinePage";
 
@@ -276,6 +277,8 @@ export default function SalesReportPage() {
             {/* ── OVERVIEW TAB ── */}
             {activeTab === "overview" && (
                 <div className="space-y-6">
+                    <OutcomesCard start={dr.start} end={dr.end} outlet={dr.outlet} />
+
                     {/* Daily revenue chart */}
                     {daily.length > 0 && (
                         <div className="card p-5">
@@ -2181,6 +2184,80 @@ function InternationalTab() {
                     </ComposedChart>
                 </ResponsiveContainer>
             </div>
+        </div>
+    );
+}
+
+// ─── Where the orders went ────────────────────────────────────────────────────
+// Every order raised in the window, in exactly one bucket (MetricEngine::
+// orderOutcomes): Sold is the Sold tile; lost = cancelled or voided — value
+// the business quoted and did not keep, shown against the previous period and
+// by who raised it, with the orders one click away.
+const OUTCOME_ROWS: { key: "sold" | "unconfirmed" | "lost" | "refunded" | "other"; label: string; tone: string }[] = [
+    { key: "sold", label: "Sold", tone: "bg-success" },
+    { key: "unconfirmed", label: "Unconfirmed carts", tone: "bg-warning" },
+    { key: "lost", label: "Lost — cancelled or voided", tone: "bg-danger" },
+    { key: "refunded", label: "Refunded", tone: "bg-surface-400" },
+    { key: "other", label: "Other", tone: "bg-surface-300" },
+];
+
+function OutcomesCard({ start, end, outlet }: { start: string; end: string; outlet?: string }) {
+    const [openLost, setOpenLost] = useState(false);
+    const query = { period: "custom", from: start, to: end, ...(outlet ? { outlet_id: Number(outlet) } : {}) };
+    const { data } = useQuery({
+        queryKey: ["report-outcomes", start, end, outlet],
+        queryFn: () => reportsApi.outcomes(query),
+    });
+    if (!data) return null;
+
+    const total = OUTCOME_ROWS.reduce((a, r) => a + data[r.key].value, 0);
+    const lost = data.lost;
+    const lostChange = lost.previous_value > 0 ? Math.round(((lost.value - lost.previous_value) / lost.previous_value) * 1000) / 10 : null;
+
+    return (
+        <div className="card p-5 space-y-4">
+            <SectionHeader title="Where the orders went" />
+            <p className="text-xs text-surface-500 -mt-2">
+                Every order raised in this period, in one place each — so the sold figure, the carts nobody confirmed and the sales lost add up to the whole order book.
+            </p>
+            <div className="flex h-2.5 overflow-hidden rounded-full bg-surface-100">
+                {OUTCOME_ROWS.map((r) => data[r.key].value > 0 && (
+                    <div key={r.key} className={r.tone} style={{ width: `${(data[r.key].value / Math.max(total, 1)) * 100}%` }} title={r.label} />
+                ))}
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {OUTCOME_ROWS.filter((r) => r.key !== "other" || data.other.orders > 0).map((r) => (
+                    <div key={r.key} className="space-y-0.5">
+                        <div className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wide text-surface-500">
+                            <span className={clsx("h-2 w-2 rounded-full", r.tone)} />{r.label}
+                        </div>
+                        <div className="text-sm font-semibold tabular-nums text-surface-800">{fmtKes(data[r.key].value)}</div>
+                        <div className="text-2xs text-surface-400">{data[r.key].orders} order{data[r.key].orders === 1 ? "" : "s"}</div>
+                    </div>
+                ))}
+            </div>
+            {lost.orders > 0 && (
+                <div className="rounded-xl border border-line p-4 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm text-surface-700">
+                            <span className="font-semibold">{fmtKes(lost.value)}</span> lost on {lost.orders} order{lost.orders === 1 ? "" : "s"}
+                            {lost.share_pct != null && <span className="text-surface-500"> · {lost.share_pct}% of everything raised</span>}
+                            {lostChange != null && <span className="text-surface-500"> · {lostChange > 0 ? "up" : "down"} {Math.abs(lostChange)}% on the previous period</span>}
+                        </p>
+                        <button onClick={() => setOpenLost(true)} className="text-xs font-medium text-brand-600 hover:underline">Orders →</button>
+                    </div>
+                    {lost.by_salesperson.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                            {lost.by_salesperson.map((p) => (
+                                <span key={p.id ?? "none"} className="rounded-full bg-surface-100 px-2.5 py-0.5 text-2xs text-surface-600">
+                                    {p.name}: {fmtKes(p.value)} · {p.orders}
+                                </span>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+            {openLost && <DrillPanel metric="lost" title="Lost sales" query={query} onClose={() => setOpenLost(false)} />}
         </div>
     );
 }

@@ -441,18 +441,7 @@ HTML;
                 COUNT(*) FILTER (WHERE COALESCE(oi.cost_price, pr.cost_price) IS NULL)         AS unpriced_lines
             FROM order_items oi
             JOIN orders o ON o.id = oi.order_id
-            LEFT JOIN LATERAL (
-                SELECT pp.cost_price
-                FROM product_prices pp
-                WHERE UPPER(pp.currency_code) = 'KES'
-                  AND pp.cost_price IS NOT NULL
-                  AND (
-                        (oi.product_variant_id IS NOT NULL AND pp.product_variant_id = oi.product_variant_id)
-                     OR (pp.product_id = oi.product_id AND pp.product_variant_id IS NULL)
-                  )
-                ORDER BY pp.product_variant_id IS NULL
-                LIMIT 1
-            ) pr ON TRUE
+            LEFT JOIN LATERAL (SELECT " . \App\Support\CostBasis::bookCostSql('oi') . " AS cost_price) pr ON TRUE
             WHERE o.created_at BETWEEN ? AND ?
               AND o.status NOT IN ('cancelled','voided','refunded')
               AND (o.status IN ('confirmed','processing','shipped','delivered','completed')

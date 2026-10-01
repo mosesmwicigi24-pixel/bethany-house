@@ -152,6 +152,11 @@ export const reportsApi = {
             ...(params.outlet_id ? { outlet_id: params.outlet_id } : {}),
         } }),
 
+    // Where the period's orders went: sold / unconfirmed / lost / refunded, and who lost them.
+    outcomes: (params: Record<string, any>) => get<OrderOutcomes>(`${BASE}/outcomes`, { params }),
+    // Stock by time since it last moved, at cost (cost needs reports.financial).
+    stockAging: (params: Record<string, any>) => get<StockAging>(`${BASE}/inventory/aging`, { params }),
+
     // Business Explorer: any measure by any dimension, narrowed by f_<dimension> filters.
     explorer: (params: Record<string, any>) => get<ExplorerReport>(`${BASE}/explorer`, { params }),
     // The orders (or payments, by method) behind one Explorer row.
@@ -1206,6 +1211,25 @@ export interface PerformanceRow {
     unconfirmed_carts: number;
     unconfirmed_value: number;
 }
+// ─── Order outcomes & stock aging ─────────────────────────────────────────────
+export interface OutcomeBucket { orders: number; value: number }
+export interface OrderOutcomes {
+    sold: OutcomeBucket;
+    unconfirmed: OutcomeBucket;
+    lost: OutcomeBucket & {
+        previous_value: number; previous_orders: number; share_pct: number | null;
+        by_salesperson: { id: number | null; name: string; orders: number; value: number }[];
+    };
+    refunded: OutcomeBucket;
+    other: OutcomeBucket;
+}
+export interface StockAging {
+    buckets: { key: string; label: string; lines: number; units: number; cost_value: number | null }[];
+    slow_items: { id: number; ref: string; detail: string; units: number; amount: number | null; days_since_moved: number | null; bucket: string; links: Record<string, string> }[];
+    totals: { lines: number; units: number; cost_value: number | null; uncosted_lines: number };
+    turnover: { sold_90_days: number; on_hand: number; ratio: number | null; note: string };
+}
+
 // ─── Business Explorer ────────────────────────────────────────────────────────
 export type ExplorerMeasure = "sold" | "orders" | "buyers" | "aov" | "collected" | "line_value" | "units";
 export interface ExplorerRow extends Partial<Record<ExplorerMeasure, number | null>> {
