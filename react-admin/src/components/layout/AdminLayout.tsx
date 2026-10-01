@@ -103,6 +103,16 @@ const SEGMENT_LABELS: Record<string, string> = {
     new: "New",
 }
 
+const REPORT_PAGE_LABELS: Record<string, string> = {
+    sales: 'Sales & Orders',
+    customers: 'Customers & Neema',
+    finance: 'Finance & Cash',
+    production: 'Production & Fulfilment',
+    inventory: 'Inventory',
+    procurement: 'Procurement & Suppliers',
+    signals: 'Signals',
+}
+
 function buildBreadcrumbs(pathname: string) {
     const segments = pathname.replace(/^\//, '').split('/')
     const crumbs: { label: string; href?: string }[] = []
@@ -114,7 +124,13 @@ function buildBreadcrumbs(pathname: string) {
             crumbs.push({ label: '#' + seg })
             continue
         }
+        // Report pages are named for the question they answer (reports
+        // consolidation, 2026-10-01) — "Sales & Orders", not the module word.
+        const reportLabel = path.startsWith('/reports/') && path.split('/').length === 3
+            ? REPORT_PAGE_LABELS[seg.toLowerCase()]
+            : undefined
         const label =
+            reportLabel ??
             SEGMENT_LABELS[seg.toLowerCase()] ??
             seg
                 .split('-')

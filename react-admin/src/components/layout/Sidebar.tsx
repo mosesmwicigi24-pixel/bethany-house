@@ -555,6 +555,20 @@ const NAV: NavGroup[] = [
     },
 ];
 
+/**
+ * Which menu item a path belongs to: an exact match, or the MOST SPECIFIC
+ * prefix. A plain prefix test lit "Executive Overview" (/reports) on every
+ * report page (/reports/sales…) beside the page's own entry — two items
+ * highlighted at once (reports consolidation, 2026-10-01).
+ */
+const ALL_HREFS = NAV.flatMap((g) => g.items.map((i) => i.href));
+function isActiveHref(pathname: string, href: string): boolean {
+    if (pathname === href) return true;
+    if (!pathname.startsWith(href + "/")) return false;
+    return !ALL_HREFS.some((h) => h !== href && h.length > href.length
+        && (pathname === h || pathname.startsWith(h + "/")));
+}
+
 // ─── Icon map ─────────────────────────────────────────────────────────────────
 const Icon = ({ name }: { name: string }) => {
     const paths: Record<string, React.ReactNode> = {
@@ -1077,10 +1091,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
 
     useEffect(() => {
         const activeGroup = NAV.find((g) =>
-            g.items.some((item) =>
-                location.pathname === item.href ||
-                location.pathname.startsWith(item.href + "/")
-            )
+            g.items.some((item) => isActiveHref(location.pathname, item.href))
         );
         if (activeGroup) {
             setExpandedGroups((prev) => ({ ...prev, [activeGroup.label]: true }));
@@ -1170,9 +1181,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
                             {(collapsed || isExpanded) && (
                                 <ul className="mt-0.5">
                                     {visibleItems.map((item) => {
-                                        const isActive =
-                                            location.pathname === item.href ||
-                                            location.pathname.startsWith(item.href + "/");
+                                        const isActive = isActiveHref(location.pathname, item.href);
 
                                         return (
                                             <li key={item.href}>

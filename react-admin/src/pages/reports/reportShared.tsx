@@ -668,7 +668,10 @@ export function ReportPageHeader({
     return (
         <div className="card overflow-hidden">
             {/* ── Top row: title + controls ── */}
-            <div className="px-5 pt-4 pb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            {/* Title above the controls until the screen is wide: beside them at
+                medium widths the outlet + date controls squeezed the title into
+                one word per line (seen in the preview, 2026-10-01). */}
+            <div className="px-5 pt-4 pb-3 flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                 {/* Left: breadcrumb + title */}
                 <div className="min-w-0">
                     <div className="flex items-center gap-1.5 mb-1.5">
@@ -688,7 +691,7 @@ export function ReportPageHeader({
                 </div>
 
                 {/* Right: date picker + compare + extras */}
-                <div className="flex flex-col items-start gap-2 sm:items-end shrink-0">
+                <div className="flex flex-col items-start gap-2 xl:items-end xl:shrink-0">
                     {/* Date picker row */}
                     <div className="flex items-center gap-2 flex-wrap">
                         {onOutletChange && <OutletSelect value={outlet ?? ""} onChange={onOutletChange} />}
