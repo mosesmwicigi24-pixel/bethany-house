@@ -19,9 +19,6 @@ import {
     Bar,
     LineChart,
     Line,
-    PieChart,
-    Pie,
-    Cell,
     XAxis,
     YAxis,
     CartesianGrid,
@@ -171,26 +168,28 @@ export default function CustomersReportPage() {
                     sub="Registered in range"
                 />
                 <KpiCard
-                    label="Unique Buyers"
+                    label="Buyers"
                     value={summary.unique_buyers ?? 0}
-                    sub="Placed ≥ 1 order"
+                    sub={`people who ordered · ${summary.new_buyers ?? 0} first-time, ${summary.returning_buyers ?? 0} returning`}
                 />
                 <KpiCard
-                    label="Repeat Purchase Rate"
+                    label="Bought twice or more"
                     value={`${summary.repeat_purchase_rate ?? 0}%`}
-                    sub={`${summary.repeat_buyers ?? 0} repeat buyers`}
+                    sub={`${summary.repeat_buyers ?? 0} of this period's buyers ordered again within it`}
                     color="text-brand-600"
                 />
             </div>
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="New Buyers"
+                    label="First-time buyers"
                     value={summary.new_buyers ?? 0}
+                    sub="first order ever, this period"
                     color="text-success"
                 />
                 <KpiCard
-                    label="Returning Buyers"
+                    label="Returning buyers"
                     value={summary.returning_buyers ?? 0}
+                    sub="had bought before this period"
                     color="text-info"
                 />
                 <KpiCard
@@ -290,38 +289,9 @@ export default function CustomersReportPage() {
                         {segmentData.length > 0 && (
                             <div className="card p-5">
                                 <SectionHeader title="Customer Segments" />
-                                <ResponsiveContainer width="100%" height={200}>
-                                    <PieChart>
-                                        <Pie
-                                            data={segmentData}
-                                            dataKey="value"
-                                            nameKey="name"
-                                            cx="50%"
-                                            cy="50%"
-                                            outerRadius={75}
-                                            label={({ name, percent }: any) =>
-                                                `${name} ${(percent * 100).toFixed(0)}%`
-                                            }
-                                            labelLine={false}
-                                        >
-                                            {segmentData.map(
-                                                (_: any, i: number) => (
-                                                    <Cell
-                                                        key={i}
-                                                        fill={
-                                                            CHART_COLORS[
-                                                                i %
-                                                                    CHART_COLORS.length
-                                                            ]
-                                                        }
-                                                    />
-                                                ),
-                                            )}
-                                        </Pie>
-                                        <Tooltip />
-                                    </PieChart>
-                                </ResponsiveContainer>
-                                <div className="space-y-2 mt-3">
+                                {/* No pie: a single segment drew a 100% arc the browser renders as
+                                    nothing, and the list below already gives every share. */}
+                                <div className="space-y-2 mt-1">
                                     {segmentData.map((seg, i) => {
                                         const total = segmentData.reduce(
                                             (s, x) => s + x.value,
