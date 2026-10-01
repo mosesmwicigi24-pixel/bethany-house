@@ -19,6 +19,7 @@ import {
     TH,
     TH_R,
     KpiCard,
+    tablistKeys,
     ChangeBadge,
     SectionHeader,
     TableWrapper,
@@ -88,9 +89,9 @@ export default function PerformanceReportPage() {
                     </div>
 
                     <div className="border-b border-line overflow-x-auto no-scrollbar">
-                        <nav className="flex gap-1 -mb-px">
+                        <nav className="flex gap-1 -mb-px" role="tablist" aria-label="Report sections" onKeyDown={tablistKeys}>
                             {TABS.map((t) => (
-                                <button key={t} onClick={() => setTab(t)}
+                                <button key={t} onClick={() => setTab(t)} role="tab" aria-selected={tab === t}
                                     className={clsx(
                                         "px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors",
                                         tab === t ? "border-brand-500 text-brand-600" : "border-transparent text-surface-500 hover:text-surface-700",

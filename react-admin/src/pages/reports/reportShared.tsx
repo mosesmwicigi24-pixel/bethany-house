@@ -1,7 +1,7 @@
 // src/pages/reports/reportShared.tsx
 // Shared components, constants, types, and hooks used across all report tab pages.
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { tokenStorage } from "@/api/client";
 import { useToastStore } from "@/store/toast.store";
@@ -29,7 +29,9 @@ import { heldFromFetch } from "@/api/downloads";
 // phones, 4-up on laptops; on big displays auto-fit packs as many ~210px
 // cards as fit (8+ across) and stretches a short row to fill the width —
 // no ghost columns either way.
-export const KPI_GRID = "grid grid-cols-2 md:grid-cols-4 2xl:grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-3";
+// Two-up until the content area is wide enough for four: at 768 px the sidebar
+// leaves ~500 px, and four cards of ~115 px overflowed "KES 20,395.31".
+export const KPI_GRID = "grid grid-cols-2 lg:grid-cols-4 2xl:grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-3";
 
 export const CHART_COLORS = [
     // Derived from the design tokens, so a palette change happens in
@@ -176,6 +178,23 @@ export function EmptyNote({ title, hint }: { title: string; hint?: string }) {
             {hint && <p className="text-xs text-surface-500 mt-1">{hint}</p>}
         </div>
     );
+}
+
+/**
+ * Arrow keys move between a tab list's tabs (Home/End to the ends) — the
+ * keyboard pattern screen-reader users expect of role="tablist".
+ */
+export function tablistKeys(e: React.KeyboardEvent<HTMLElement>) {
+    const tabs = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')];
+    const i = tabs.indexOf(document.activeElement as HTMLElement);
+    if (i < 0) return;
+    const next = e.key === "ArrowRight" ? (i + 1) % tabs.length
+        : e.key === "ArrowLeft" ? (i - 1 + tabs.length) % tabs.length
+        : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : -1;
+    if (next < 0) return;
+    e.preventDefault();
+    tabs[next].focus();
+    tabs[next].click();
 }
 
 /**
@@ -1167,6 +1186,17 @@ export function DrillPanel({ metric, query, onClose, title, load }: {
 }) {
     const navigate = useNavigate();
     const [page, setPage] = useState(1);
+    // Keyboard: Escape closes; focus moves into the panel on open and goes back
+    // to the figure that opened it on close — a keyboard user was left behind
+    // on the page underneath with no way to dismiss it.
+    const closeRef = useRef<HTMLButtonElement>(null);
+    useEffect(() => {
+        const opener = document.activeElement as HTMLElement | null;
+        closeRef.current?.focus();
+        const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+        window.addEventListener("keydown", onKey);
+        return () => { window.removeEventListener("keydown", onKey); opener?.focus?.(); };
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
     const { data, isLoading, isError } = useQuery({
         queryKey: ["drill", metric, query, page],
         queryFn: () => (load ?? ((q: Record<string, any>) => reportsApi.drillWith(metric, q)))({ ...query, page }),
@@ -1193,7 +1223,7 @@ export function DrillPanel({ metric, query, onClose, title, load }: {
     return (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-6" onClick={onClose}>
             <div className="bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[85vh] flex flex-col"
-                onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Records behind this number">
+                onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title ? `Records behind ${title}` : "Records behind this number"}>
                 <div className="px-4 py-3 border-b border-line flex items-start gap-3">
                     <div className="min-w-0">
                         <p className="text-sm font-bold text-surface-900">
@@ -1203,8 +1233,8 @@ export function DrillPanel({ metric, query, onClose, title, load }: {
                         {context && <p className="text-2xs font-medium text-surface-600 mt-0.5">{context}</p>}
                         {data?.definition && <p className="text-2xs text-surface-500 mt-0.5">{data.definition}</p>}
                     </div>
-                    <button onClick={onClose} aria-label="Close"
-                        className="ml-auto w-7 h-7 rounded-lg flex items-center justify-center text-surface-400 hover:bg-surface-100">✕</button>
+                    <button ref={closeRef} onClick={onClose} aria-label="Close (Esc)"
+                        className="ml-auto w-9 h-9 rounded-lg flex items-center justify-center text-surface-400 hover:bg-surface-100">✕</button>
                 </div>
                 <div className="flex-1 overflow-y-auto">
                     {isLoading ? (

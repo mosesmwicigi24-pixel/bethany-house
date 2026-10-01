@@ -36,6 +36,7 @@ import dayjs from "dayjs";
 import {
     KPI_GRID,
     KpiCard,
+    tablistKeys,
     LoadFailed,
     ReportPending,
     ShareBars,
@@ -225,7 +226,7 @@ export default function SalesReportPage() {
                 ]}
             />
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <KpiCard
                     label="Discounts"
                     value={`${Number(s.discount_rate_percent ?? 0).toFixed(1)}%`}
@@ -238,7 +239,7 @@ export default function SalesReportPage() {
 
             {/* Tabs */}
             <div className="border-b border-line overflow-x-auto no-scrollbar">
-                <nav className="flex gap-1 -mb-px">
+                <nav className="flex gap-1 -mb-px" role="tablist" aria-label="Report sections" onKeyDown={tablistKeys}>
                     {(
                         [
                             ["overview", "Overview"],
@@ -254,7 +255,7 @@ export default function SalesReportPage() {
                     ).map(([tab, label]) => (
                         <button
                             key={tab}
-                            onClick={() => setActiveTab(tab)}
+                            onClick={() => setActiveTab(tab)} role="tab" aria-selected={activeTab === tab}
                             className={clsx(
                                 "px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap shrink-0 transition-colors",
                                 activeTab === tab

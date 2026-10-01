@@ -22,6 +22,7 @@ import {
 import {
     KPI_GRID,
     KpiCard,
+    tablistKeys,
     LoadFailed,
     ReportPending,
     ShareBars,
@@ -195,7 +196,7 @@ export default function ProductionReportPage() {
 
             {/* Tabs */}
             <div className="border-b border-line overflow-x-auto no-scrollbar">
-                <nav className="flex gap-1 -mb-px">
+                <nav className="flex gap-1 -mb-px" role="tablist" aria-label="Report sections" onKeyDown={tablistKeys}>
                     {([
                         { id: "overview", label: "Overview" },
                         { id: "products", label: "Products" },
@@ -205,7 +206,7 @@ export default function ProductionReportPage() {
                     ] as const).filter((tab) => tab.id !== "costing" || canSeeCosting).map((tab) => (
                         <button
                             key={tab.id}
-                            onClick={() => setActiveTab(tab.id)}
+                            onClick={() => setActiveTab(tab.id)} role="tab" aria-selected={activeTab === tab.id}
                             className={clsx(
                                 "px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
                                 activeTab === tab.id
