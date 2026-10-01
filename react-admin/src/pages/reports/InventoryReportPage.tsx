@@ -39,6 +39,7 @@ import {
     CHART_COLORS,
     TH,
     TH_R,
+    useReportOutlet,
 } from "./reportShared";
 
 // Movement type classification
@@ -69,13 +70,14 @@ export default function InventoryReportPage() {
     });
     const [movTypeFilter, setMovTypeFilter] = useState("");
 
+    const outletId = useReportOutlet();
     const stockQuery = useQuery({
-        queryKey: ["report-stock", lowOnly],
-        queryFn: () => reportsApi.stockOnHand({ low_stock_only: lowOnly }),
+        queryKey: ["outlet", outletId, "report-stock", lowOnly],
+        queryFn: () => reportsApi.stockOnHand({ low_stock_only: lowOnly, ...(outletId ? { outlet_id: outletId } : {}) }),
     });
     const valuationQuery = useQuery({
-        queryKey: ["report-valuation"],
-        queryFn: () => reportsApi.inventoryValuationBreakdown(),
+        queryKey: ["outlet", outletId, "report-valuation"],
+        queryFn: () => reportsApi.inventoryValuationBreakdown(outletId),
     });
     const movementQuery = useQuery({
         queryKey: ["report-movement", dr.start, dr.end],
@@ -212,6 +214,8 @@ export default function InventoryReportPage() {
                 onPresetChange={dr.handlePreset}
                 onStartChange={dr.setStart}
                 onEndChange={dr.setEnd}
+                outlet={dr.outlet}
+                onOutletChange={dr.setOutlet}
             />
 
             {/* KPIs */}
@@ -1028,9 +1032,10 @@ export default function InventoryReportPage() {
 // ABC classes with days-of-cover, stockout risks, dead stock, material health.
 
 function InventoryIntelligence({ start, end }: { start: string; end: string }) {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["inventory-intelligence", start, end],
-        queryFn: () => reportsApi.inventoryIntelligence(start, end),
+        queryKey: ["outlet", outletId, "inventory-intelligence", start, end],
+        queryFn: () => reportsApi.inventoryIntelligence(start, end, outletId),
         enabled: !!start && !!end,
         staleTime: 60_000,
     });
@@ -1187,9 +1192,10 @@ function InventoryIntelligence({ start, end }: { start: string; end: string }) {
 // right now. Trailing-window metric — independent of the page date range.
 
 function StockoutLosses() {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["stockout-loss"],
-        queryFn: () => reportsApi.stockoutLoss(),
+        queryKey: ["outlet", outletId, "stockout-loss"],
+        queryFn: () => reportsApi.stockoutLoss(outletId),
         staleTime: 60_000,
     });
     if (isLoading || !data) return null;

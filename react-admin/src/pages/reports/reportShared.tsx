@@ -2,6 +2,7 @@
 // Shared components, constants, types, and hooks used across all report tab pages.
 
 import { useState, useCallback, useRef } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { tokenStorage } from "@/api/client";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -112,15 +113,31 @@ export function KpiCard({
     sub,
     color = "",
     comparison,
+    drill,
 }: {
     label: string;
     value: string | number;
     sub?: string;
     color?: string;
     comparison?: number | null;
+    /** A metric the backend can drill (MetricEngine::drill). Only pass one whose
+     *  definition is the SAME as this card's figure — a drill that lists other
+     *  rows than the number sums is worse than none. */
+    drill?: string;
 }) {
+    const [, setSp] = useSearchParams();
+    const open = drill
+        ? () => setSp(prev => { const p = new URLSearchParams(prev); p.set("drill", drill); return p; })
+        : undefined;
     return (
-        <div className="card card-body flex flex-col gap-1">
+        <div
+            className={clsx("card card-body flex flex-col gap-1", open && "cursor-pointer hover:ring-1 hover:ring-brand-300 transition")}
+            onClick={open}
+            role={open ? "button" : undefined}
+            tabIndex={open ? 0 : undefined}
+            onKeyDown={open ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } } : undefined}
+            title={open ? "Show the records behind this number" : undefined}
+        >
             <p className="text-xs text-surface-500">{label}</p>
             <div className="flex items-baseline gap-2 flex-wrap">
                 <p
@@ -622,6 +639,9 @@ export function ReportPageHeader({
     onCompareChange,
     // Optional extra right-side controls
     extra,
+    // Outlet filter (from useDateRange) — omit on a page whose endpoints are not outlet-scoped
+    outlet,
+    onOutletChange,
 }: {
     title: string;
     subtitle: string;
@@ -637,6 +657,8 @@ export function ReportPageHeader({
     compare?: boolean;
     onCompareChange?: (v: boolean) => void;
     extra?: React.ReactNode;
+    outlet?: string;
+    onOutletChange?: (id: string) => void;
 }) {
     const [showSchedule, setShowSchedule] = useState(false);
     const [showSchedules, setShowSchedules] = useState(false);
@@ -669,6 +691,7 @@ export function ReportPageHeader({
                 <div className="flex flex-col items-start gap-2 sm:items-end shrink-0">
                     {/* Date picker row */}
                     <div className="flex items-center gap-2 flex-wrap">
+                        {onOutletChange && <OutletSelect value={outlet ?? ""} onChange={onOutletChange} />}
                         <select
                             className="input input-sm w-36 text-sm"
                             value={preset}
@@ -769,6 +792,9 @@ export function ReportPageHeader({
                 </div>
             )}
 
+            {/* The drill panel for every clickable number on this page */}
+            <DrillHost start={start} end={end} outlet={outlet} />
+
             {/* Schedule create modal */}
             {showSchedule && (
                 <ScheduleModal
@@ -838,32 +864,189 @@ export function DateRangePicker({
 }
 
 /**
- * Self-contained date filter hook - each report section owns its own date range.
+ * The report's filters, held in the URL (reports build, 2026-10-01):
+ * `?preset=` or `?preset=custom&from=&to=`, and `?outlet=`. A refresh or a
+ * shared link reproduces the investigation; every section of a page reads the
+ * same keys, so a headline and the table under it cannot answer for different
+ * windows or shops. `params` carries exactly what the report endpoints accept.
  */
 export function useDateRange(defaultPreset: DatePreset = "this_month") {
-    const initial = datePresetRange(defaultPreset);
-    const [preset, setPreset] = useState<DatePreset>(defaultPreset);
-    const [start, setStart] = useState(initial.start);
-    const [end, setEnd] = useState(initial.end);
+    const [sp, setSp] = useSearchParams();
+    const known = (p: string | null): p is DatePreset => !!p && DATE_PRESETS.some((d) => d.value === p);
+
+    const urlPreset = sp.get("preset");
+    const preset: DatePreset = known(urlPreset) ? urlPreset : sp.get("from") ? "custom" : defaultPreset;
+    const fallback = datePresetRange(preset === "custom" ? defaultPreset : preset);
+    const start = preset === "custom" ? (sp.get("from") ?? fallback.start) : fallback.start;
+    const end   = preset === "custom" ? (sp.get("to") ?? fallback.end) : fallback.end;
+    const outlet = sp.get("outlet") ?? "";
+
+    const patch = (next: Record<string, string | null>) =>
+        setSp((prev) => {
+            const p = new URLSearchParams(prev);
+            Object.entries(next).forEach(([k, v]) => (v ? p.set(k, v) : p.delete(k)));
+            return p;
+        }, { replace: true });
 
     function handlePreset(p: DatePreset) {
-        setPreset(p);
-        if (p !== "custom") {
-            const r = datePresetRange(p);
-            setStart(r.start);
-            setEnd(r.end);
-        }
+        if (p === "custom") patch({ preset: "custom", from: start, to: end });
+        else patch({ preset: p, from: null, to: null });
     }
 
     return {
         preset,
         start,
         end,
-        setStart,
-        setEnd,
+        outlet,
+        setStart: (d: string) => patch({ preset: "custom", from: d, to: end }),
+        setEnd: (d: string) => patch({ preset: "custom", from: start, to: d }),
+        setOutlet: (id: string) => patch({ outlet: id || null }),
         handlePreset,
-        params: { start_date: start, end_date: end },
+        params: {
+            start_date: start,
+            end_date: end,
+            ...(outlet ? { outlet_id: Number(outlet) } : {}),
+        } as { start_date: string; end_date: string; outlet_id?: number },
     };
+}
+
+/** The page's outlet filter, from the URL — for sections that call the engine directly. */
+export function useReportOutlet(): number | undefined {
+    const [sp] = useSearchParams();
+    const v = sp.get("outlet");
+    return v ? Number(v) : undefined;
+}
+
+// ─── Outlet filter ────────────────────────────────────────────────────────────
+// Reports are business-wide (owner, 2026-09-30); an outlet narrows every query
+// on the page at the database, never by hiding rows here.
+
+export function OutletSelect({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+    const { data } = useQuery({ queryKey: ["report-outlets"], queryFn: () => reportsApi.outlets(), staleTime: 300_000 });
+    const outlets = data?.data ?? [];
+    if (outlets.length < 2 && !value) return null; // one shop: a filter with one choice is noise
+    return (
+        <select className="input input-sm w-44 text-sm" value={value} onChange={(e) => onChange(e.target.value)}
+            aria-label="Outlet">
+            <option value="">All outlets</option>
+            {outlets.map((o) => <option key={o.id} value={String(o.id)}>{o.name}</option>)}
+        </select>
+    );
+}
+
+// ─── Drill-down ───────────────────────────────────────────────────────────────
+// The rows behind a number. The backend says what the number IS (`definition`)
+// and where each row may lead (`links`, already filtered by the viewer's
+// permissions); this panel only renders them. Opened by `?drill=<metric>` so a
+// refresh keeps it open and the rows always use the page's own filters.
+
+const LINK_LABEL: Record<string, string> = {
+    order: "Order", customer: "Customer", payment: "Payment", production: "Job", expense: "Expense",
+};
+
+export function DrillPanel({ metric, query, onClose, title }: {
+    metric: string; query: Record<string, any>; onClose: () => void; title?: string;
+}) {
+    const navigate = useNavigate();
+    const [page, setPage] = useState(1);
+    const { data, isLoading, isError } = useQuery({
+        queryKey: ["drill", metric, query, page],
+        queryFn: () => reportsApi.drillWith(metric, { ...query, page }),
+        staleTime: 60_000,
+    });
+    const rows: any[] = data?.rows ?? [];
+    const pages = data ? Math.max(1, Math.ceil(data.total / data.per_page)) : 1;
+    const money = rows.some((r) => r.currency);
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-6" onClick={onClose}>
+            <div className="bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[85vh] flex flex-col"
+                onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Records behind this number">
+                <div className="px-4 py-3 border-b border-line flex items-start gap-3">
+                    <div className="min-w-0">
+                        <p className="text-sm font-bold text-surface-900">
+                            {title ? `${title} · ` : ""}
+                            {data ? `${data.total.toLocaleString()} record${data.total === 1 ? "" : "s"}` : "Loading…"}
+                        </p>
+                        {data?.definition && <p className="text-2xs text-surface-500 mt-0.5">{data.definition}</p>}
+                    </div>
+                    <button onClick={onClose} aria-label="Close"
+                        className="ml-auto w-7 h-7 rounded-lg flex items-center justify-center text-surface-400 hover:bg-surface-100">✕</button>
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                    {isLoading ? (
+                        <p className="text-center text-xs text-surface-400 py-12">Loading…</p>
+                    ) : isError ? (
+                        <p className="text-center text-xs text-danger py-12">These records could not be loaded.</p>
+                    ) : rows.length === 0 ? (
+                        <p className="text-center text-xs text-surface-400 py-12">No records for these filters.</p>
+                    ) : (
+                        <div className="divide-y divide-line">
+                            {rows.map((r) => (
+                                <div key={`${r.kind}-${r.id}`} className="flex items-center gap-3 px-4 py-2.5">
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-semibold text-surface-800 font-mono truncate">{r.ref}</p>
+                                        <p className="text-2xs text-surface-400 truncate">
+                                            {dayjs(r.at).format("D MMM YYYY")}
+                                            {r.who ? ` · ${r.who}` : ""}{r.detail ? ` · ${r.detail}` : ""}
+                                        </p>
+                                        {r.links && Object.keys(r.links).length > 0 && (
+                                            <div className="flex gap-2 mt-1">
+                                                {Object.entries(r.links as Record<string, string>).map(([k, to]) => (
+                                                    <button key={k} onClick={() => navigate(to)}
+                                                        className="text-2xs font-medium text-brand-600 hover:underline">
+                                                        {LINK_LABEL[k] ?? k} →
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                    {r.amount != null && (
+                                        <span className="text-right shrink-0">
+                                            <span className="block text-xs font-bold tabular-nums text-surface-800">
+                                                {money ? `KES ${Number(r.amount).toLocaleString()}` : Number(r.amount).toLocaleString()}
+                                            </span>
+                                            {r.currency && r.currency !== "KES" && r.amount_original != null && (
+                                                <span className="block text-2xs text-surface-400 tabular-nums">
+                                                    {r.currency} {Number(r.amount_original).toLocaleString()}
+                                                </span>
+                                            )}
+                                        </span>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+                {pages > 1 && (
+                    <div className="px-4 py-2.5 border-t border-line flex items-center gap-2">
+                        <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}
+                            className="btn-secondary text-2xs px-2.5 py-1 disabled:opacity-40">← Prev</button>
+                        <span className="text-2xs text-surface-400 tabular-nums">{page} / {pages}</span>
+                        <button disabled={page >= pages} onClick={() => setPage((p) => p + 1)}
+                            className="btn-secondary text-2xs px-2.5 py-1 disabled:opacity-40">Next →</button>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+/**
+ * Opens the drill named in `?drill=` with THIS page's own window and outlet —
+ * passed in, never recomputed, so a page defaulting to the last 30 days cannot
+ * drill over this month. One per page (ReportPageHeader renders it).
+ */
+export function DrillHost({ start, end, outlet }: { start: string; end: string; outlet?: string }) {
+    const [sp, setSp] = useSearchParams();
+    const metric = sp.get("drill");
+    if (!metric) return null;
+    const close = () => setSp((prev) => { const p = new URLSearchParams(prev); p.delete("drill"); return p; }, { replace: true });
+    return (
+        <DrillPanel metric={metric}
+            query={{ period: "custom", from: start, to: end, ...(outlet ? { outlet_id: Number(outlet) } : {}) }}
+            onClose={close} />
+    );
 }
 
 // ─── Status Pills ─────────────────────────────────────────────────────────────

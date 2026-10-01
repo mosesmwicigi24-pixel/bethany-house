@@ -611,7 +611,7 @@ class MetricEngine
                 ->selectRaw("orders.id, order_number AS ref, orders.created_at AS at, {$who} AS who,
                     payment_status AS detail, {$totalKes} AS amount,
                     orders.total_amount AS amount_original, UPPER(orders.currency_code) AS currency,
-                    'order' AS kind"),
+                    'order' AS kind, orders.customer_id"),
 
             'collected' => $this->moneyBase()
                 ->whereBetween(DB::raw(self::PAID_AT), [$s, $e])
@@ -621,7 +621,7 @@ class MetricEngine
                     p.payment_method AS detail, {$paidKes} AS amount,
                     (p.amount - COALESCE(p.refund_amount,0)) AS amount_original,
                     UPPER(p.currency_code) AS currency,
-                    'payment' AS kind, o.id AS order_id"),
+                    'payment' AS kind, o.id AS order_id, o.customer_id, p.payment_number"),
 
             'outstanding' => $this->openBalances()
                 ->when($bucket, fn ($q) => $this->applyAgingBucket($q, $bucket))
@@ -629,7 +629,7 @@ class MetricEngine
                 ->selectRaw("orders.id, order_number AS ref, orders.created_at AS at, {$who} AS who,
                     payment_status AS detail, " . self::owed() . " AS amount,
                     orders.total_amount AS amount_original, UPPER(orders.currency_code) AS currency,
-                    'order' AS kind"),
+                    'order' AS kind, orders.customer_id"),
 
             'new_customers' => DB::table('customers')
                 ->whereBetween('created_at', [$s, $e])
@@ -672,13 +672,29 @@ class MetricEngine
         $rows  = $q->forPage(max(1, $page), $perPage)->get();
 
         return [
-            'metric'   => $metric,
-            'rows'     => $rows,
-            'total'    => $total,
-            'page'     => max(1, $page),
-            'per_page' => $perPage,
+            'metric'     => $metric,
+            // What the number IS, in the words a reader needs — stated by the
+            // definition layer, so a drill panel never has to guess (reports
+            // build, 2026-10-01).
+            'definition' => self::DRILL_DEFINITIONS[$metric] ?? null,
+            'rows'       => $rows,
+            'total'      => $total,
+            'page'       => max(1, $page),
+            'per_page'   => $perPage,
         ];
     }
+
+    /** One sentence per drillable metric: exactly what its rows add up to. */
+    public const DRILL_DEFINITIONS = [
+        'revenue'              => 'Recognised orders in the period (confirmed or paid), in KES at the reporting rate. Pending carts and cancelled orders are not included.',
+        'orders'               => 'The same recognised orders, counted.',
+        'collected'            => 'Payments settled in the period, by payment date, net of refunds, in KES. Payments awaiting approval are not included.',
+        'outstanding'          => 'What customers still owe on open recognised orders, per order, in KES. An overpayment never reduces another order\'s balance.',
+        'new_customers'        => 'Customer records created in the period. Customers belong to the whole business, so the outlet filter does not apply.',
+        'production_completed' => 'Production orders completed in the period; the figure is pieces.',
+        'production_overdue'   => 'Open production orders past their due date today.',
+        'expenses'             => 'Approved and paid expenses dated in the period, in KES. Expenses awaiting approval are not included.',
+    ];
 
     /** Narrow an outstanding drill to one aging bucket (or deposits). */
     private function applyAgingBucket($q, string $bucket)

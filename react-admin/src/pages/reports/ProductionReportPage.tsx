@@ -38,6 +38,8 @@ import {
     TH,
     TH_R,
     fmtHours,
+    useReportOutlet,
+    ReportPageHeader,
 } from "./reportShared";
 
 export default function ProductionReportPage() {
@@ -100,29 +102,20 @@ export default function ProductionReportPage() {
 
     return (
         <div className="space-y-6 animate-fade-in">
-            {/* Header */}
-            <div className="flex items-start justify-between gap-4 flex-wrap">
-                <div>
-                    <h1 className="page-title">Production Report</h1>
-                    <p className="page-subtitle">
-                        Order completion, on-time delivery, and tailor
-                        performance.
-                    </p>
-                </div>
-                <DateRangePicker
-                    preset={dr.preset}
-                    start={dr.start}
-                    end={dr.end}
-                    onPresetChange={dr.handlePreset}
-                    onStartChange={dr.setStart}
-                    onEndChange={dr.setEnd}
-                />
-            </div>
-
-            <ReportActionBar
+            <ReportPageHeader
+                title="Production & Fulfilment"
+                subtitle="Order completion, on-time delivery, and tailor performance."
                 reportType="production"
                 exportPath="production/summary"
                 params={dr.params}
+                preset={dr.preset}
+                start={dr.start}
+                end={dr.end}
+                onPresetChange={dr.handlePreset}
+                onStartChange={dr.setStart}
+                onEndChange={dr.setEnd}
+                outlet={dr.outlet}
+                onOutletChange={dr.setOutlet}
             />
 
             {/* KPIs row 1 */}
@@ -650,7 +643,7 @@ function marginColor(m: number | null | undefined): string {
 function CostingTab({ data, isLoading, params }: {
     data: any;
     isLoading: boolean;
-    params: Record<string, string | undefined>;
+    params: Record<string, string | number | undefined>;
 }) {
     const navigate = useNavigate();
 
@@ -909,9 +902,10 @@ function CostingTab({ data, isLoading, params }: {
 // the floor's actual pace, QC truth, benches, and live material demand.
 
 function IntelligenceTab({ start, end }: { start: string; end: string }) {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["production-intelligence", start, end],
-        queryFn: () => reportsApi.productionIntelligence(start, end),
+        queryKey: ["outlet", outletId, "production-intelligence", start, end],
+        queryFn: () => reportsApi.productionIntelligence(start, end, outletId),
         enabled: !!start && !!end,
         staleTime: 60_000,
     });

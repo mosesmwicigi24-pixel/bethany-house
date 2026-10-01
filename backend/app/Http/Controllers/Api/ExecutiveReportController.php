@@ -896,10 +896,49 @@ class ExecutiveReportController extends Controller
         [$s, $e] = MetricEngine::resolvePeriod($validated['period'] ?? 'this_month', $validated['from'] ?? null, $validated['to'] ?? null);
         $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
 
-        return response()->json($engine->drill(
+        $result = $engine->drill(
             $metric, $s, $e,
             (int) ($validated['page'] ?? 1),
             $validated['bucket'] ?? null,
-        ));
+        );
+
+        // Where each row leads — decided HERE, from what the row is and what
+        // this viewer may open, never guessed by the page. A link is offered
+        // only when its destination's own permission allows it: a drill must
+        // not become a way round the screen it points to.
+        $user = $request->user();
+        $can  = fn (string $p) => $user->can($p);
+        $result['rows'] = collect($result['rows'])->map(function ($r) use ($can) {
+            $r = (array) $r;
+            $orderId = $r['kind'] === 'order' ? $r['id'] : ($r['order_id'] ?? null);
+            $r['links'] = array_filter([
+                'order'      => $orderId && $can('orders.view') ? "/sales/orders/{$orderId}" : null,
+                'customer'   => match (true) {
+                    $r['kind'] === 'customer' && $can('customers.view')   => "/sales/customers/{$r['id']}",
+                    ! empty($r['customer_id']) && $can('customers.view') => "/sales/customers/{$r['customer_id']}",
+                    default                                              => null,
+                },
+                'payment'    => $r['kind'] === 'payment' && ! empty($r['payment_number']) && $can('payments.transactions')
+                    ? '/finance/transactions?search=' . rawurlencode($r['payment_number']) : null,
+                'production' => $r['kind'] === 'production' && $can('production.view') ? "/production/orders/{$r['id']}" : null,
+                'expense'    => $r['kind'] === 'expense' && $can('expenses.view') ? "/expenses/{$r['id']}" : null,
+            ]);
+
+            return $r;
+        })->all();
+
+        return response()->json($result);
+    }
+
+    /**
+     * The outlets a report can be filtered by. The only other list sits behind
+     * pos.access, which a report reader need not hold; names and ids only.
+     */
+    public function outlets()
+    {
+        return response()->json([
+            'data' => \Illuminate\Support\Facades\DB::table('outlets')
+                ->where('is_active', true)->orderBy('name')->get(['id', 'name']),
+        ]);
     }
 }

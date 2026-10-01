@@ -35,6 +35,8 @@ class EnhancedReportController extends Controller
     // own `export === 'csv'` branch and handed a file to anyone with
     // reports.view, never asking for reports.export.
     use ExportsCsv;
+    // The report's outlet filter at the query layer (reports build, 2026-10-01).
+    use \App\Http\Controllers\Api\Concerns\RecognisesIncome;
 
     // =========================================================================
     // INVENTORY
@@ -140,6 +142,7 @@ class EnhancedReportController extends Controller
             ->leftJoin('product_tax_rates', 'order_items.product_id', '=', 'product_tax_rates.product_id')
             ->leftJoin('tax_rates', 'product_tax_rates.tax_rate_id', '=', 'tax_rates.id')
             ->whereBetween('orders.created_at', [$p['start'], $p['end']])
+            ->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
             ->whereIn('orders.payment_status', ['paid', 'partial', 'deposit'])->whereNotIn('orders.status', ['cancelled', 'refunded', 'voided'])
             ->selectRaw("
                 COALESCE(tax_rates.name, 'No Tax / Default') AS tax_name,
@@ -185,6 +188,8 @@ class EnhancedReportController extends Controller
         // the 2026-08 audit found on the Collected tile. Rate-less currencies
         // stay out of the sum rather than entering at a guess.
         $inflows = DB::table('payments')
+            ->when($this->reportOutletId(), fn ($q, $outlet) => $q->whereIn('order_id',
+                DB::table('orders')->where('outlet_id', $outlet)->select('id')))
             ->whereBetween('created_at', [$p['start'], $p['end']])
             ->where('status', 'paid')
             ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('currency_code'))
@@ -195,6 +200,7 @@ class EnhancedReportController extends Controller
 
         // Outflows: approved/paid expenses grouped by month
         $outflows = DB::table('expenses')
+            ->tap(fn ($q) => $this->inOutlet($q, 'expenses.outlet_id'))
             ->whereBetween('expense_date', [$p['start'], $p['end']])
             ->whereIn('status', ['approved', 'paid'])
             ->selectRaw("TO_CHAR(expense_date, 'YYYY-MM') AS month, SUM(amount_kes) AS outflow")

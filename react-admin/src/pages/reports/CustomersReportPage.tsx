@@ -46,6 +46,7 @@ import {
     CHART_COLORS,
     TH,
     TH_R,
+    useReportOutlet,
 } from "./reportShared";
 
 type CustomersTab = "overview" | "secondpurchase" | "ltv" | "retention" | "intelligence" | "replenishment" | "winback" | "institutions" | "outreachlog";
@@ -134,6 +135,8 @@ export default function CustomersReportPage() {
                 onPresetChange={dr.handlePreset}
                 onStartChange={dr.setStart}
                 onEndChange={dr.setEnd}
+                outlet={dr.outlet}
+                onOutletChange={dr.setOutlet}
             />
 
             {/* KPIs */}
@@ -148,6 +151,7 @@ export default function CustomersReportPage() {
                 />
                 <KpiCard
                     label="New (Period)"
+                    drill="new_customers"
                     value={summary.new_customers ?? 0}
                     color="text-success"
                     sub="Registered in range"
@@ -651,9 +655,10 @@ function CustomerIntelligence({
     end: string;
     onOpenWinBack: () => void;
 }) {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["customer-intelligence", start, end],
-        queryFn: () => reportsApi.customerIntelligence(start, end),
+        queryKey: ["outlet", outletId, "customer-intelligence", start, end],
+        queryFn: () => reportsApi.customerIntelligence(start, end, outletId),
         enabled: !!start && !!end,
         staleTime: 60_000,
     });
@@ -788,9 +793,10 @@ function CustomerIntelligence({
 // WhatsApp ping so the shop reaches out BEFORE the customer remembers.
 
 function ReplenishmentRadarTab() {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["replenishment-radar"],
-        queryFn: () => reportsApi.replenishmentRadar(),
+        queryKey: ["outlet", outletId, "replenishment-radar"],
+        queryFn: () => reportsApi.replenishmentRadar(outletId),
         staleTime: 60_000,
     });
 
@@ -1000,9 +1006,10 @@ function ReplenishmentRadarTab() {
 // the summary can attribute orders placed within 30 days of an outreach.
 
 function SecondPurchaseTab() {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["second-purchase"],
-        queryFn: () => reportsApi.secondPurchase(),
+        queryKey: ["outlet", outletId, "second-purchase"],
+        queryFn: () => reportsApi.secondPurchase(outletId ? { outlet_id: outletId } : undefined),
         staleTime: 60_000,
     });
 
@@ -1167,9 +1174,10 @@ function WinBackTab() {
     const { can } = usePermissions();
     const canLogOutreach = can("customers.insights");
 
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["win-back-economics"],
-        queryFn: () => reportsApi.winBack(),
+        queryKey: ["outlet", outletId, "win-back-economics"],
+        queryFn: () => reportsApi.winBack(outletId),
         staleTime: 60_000,
     });
 
@@ -1444,9 +1452,10 @@ function WinBackTab() {
 function InstitutionsTab() {
     const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["institutional-accounts"],
-        queryFn: () => reportsApi.institutionalAccounts(),
+        queryKey: ["outlet", outletId, "institutional-accounts"],
+        queryFn: () => reportsApi.institutionalAccounts(outletId),
         staleTime: 60_000,
     });
 

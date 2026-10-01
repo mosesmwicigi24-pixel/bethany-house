@@ -42,6 +42,7 @@ import {
     TH,
     TH_R,
     ChangeBadge,
+    useReportOutlet,
 } from "./reportShared";
 
 export default function FinancialReportPage() {
@@ -183,6 +184,8 @@ export default function FinancialReportPage() {
                 onPresetChange={dr.handlePreset}
                 onStartChange={dr.setStart}
                 onEndChange={dr.setEnd}
+                outlet={dr.outlet}
+                onOutletChange={dr.setOutlet}
                 compare={compare}
                 onCompareChange={setCompare}
                 extra={
@@ -199,10 +202,14 @@ export default function FinancialReportPage() {
 
             {/* KPIs */}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {/* Recognised sales, not "paid": this figure is confirmed-or-paid
+                    orders, the same basis as the sales page (it said "Gross paid
+                    sales", which it has not been since cycle 5). */}
                 <KpiCard
-                    label="Revenue"
+                    label="Sold (recognised)"
+                    drill="revenue"
                     value={fmtKes(revenue)}
-                    sub="Gross paid sales"
+                    sub="Confirmed or paid orders"
                     comparison={cmp?.revenue_change_pct}
                 />
                 <KpiCard
@@ -222,6 +229,7 @@ export default function FinancialReportPage() {
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <KpiCard
                     label="Opex"
+                    drill="expenses"
                     value={fmtKes(opex)}
                     color="text-danger"
                     comparison={cmp?.opex_change_pct}
@@ -904,9 +912,10 @@ export default function FinancialReportPage() {
 // and per-rail reconciliation net of refunds.
 
 function FinancialIntelligence({ start, end }: { start: string; end: string }) {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["financial-intelligence", start, end],
-        queryFn: () => reportsApi.financialIntelligence(start, end),
+        queryKey: ["outlet", outletId, "financial-intelligence", start, end],
+        queryFn: () => reportsApi.financialIntelligence(start, end, outletId),
         enabled: !!start && !!end,
         staleTime: 60_000,
     });

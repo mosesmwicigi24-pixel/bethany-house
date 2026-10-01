@@ -42,6 +42,7 @@ import {
     CHART_COLORS,
     TH,
     TH_R,
+    useReportOutlet,
 } from "./reportShared";
 
 type ProcurementTab =
@@ -124,6 +125,8 @@ export default function ProcurementReportPage() {
                 onPresetChange={dr.handlePreset}
                 onStartChange={dr.setStart}
                 onEndChange={dr.setEnd}
+                outlet={dr.outlet}
+                onOutletChange={dr.setOutlet}
             />
 
             {/* KPIs */}
@@ -492,9 +495,10 @@ export default function ProcurementReportPage() {
 // times. Pre-import (no history) it invites the legacy import instead.
 
 function SeasonalDemandTab() {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["seasonal-demand"],
-        queryFn: () => reportsApi.seasonalDemand(),
+        queryKey: ["outlet", outletId, "seasonal-demand"],
+        queryFn: () => reportsApi.seasonalDemand(outletId),
         staleTime: 60_000,
     });
     if (isLoading || !data)
@@ -730,9 +734,10 @@ function SeasonalDemandTab() {
 }
 
 function ProcurementIntelligence({ start, end }: { start: string; end: string }) {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["procurement-intelligence", start, end],
-        queryFn: () => reportsApi.procurementIntelligence(start, end),
+        queryKey: ["outlet", outletId, "procurement-intelligence", start, end],
+        queryFn: () => reportsApi.procurementIntelligence(start, end, outletId),
         enabled: !!start && !!end,
         staleTime: 60_000,
     });
