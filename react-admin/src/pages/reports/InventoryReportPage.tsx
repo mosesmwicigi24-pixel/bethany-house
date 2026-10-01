@@ -1,6 +1,6 @@
 // src/pages/reports/InventoryReportPage.tsx
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { reportsApi } from "@/api/reports";
 import { fmtKes } from "@/api/expenses";
@@ -53,7 +53,7 @@ const OUT_TYPES = new Set([
     "return_to_supplier",
 ]);
 
-const INVENTORY_TABS = ["overview", "stock", "movements", "intelligence"] as const;
+const INVENTORY_TABS = ["overview", "stock", "aging", "movements", "intelligence"] as const;
 type InventoryTab = (typeof INVENTORY_TABS)[number];
 
 export default function InventoryReportPage() {
@@ -235,7 +235,7 @@ export default function InventoryReportPage() {
             {/* Tabs */}
             <div className="border-b border-line overflow-x-auto no-scrollbar">
                 <nav className="flex gap-1 -mb-px">
-                    {(["overview", "stock", "movements", "intelligence"] as const).map(
+                    {INVENTORY_TABS.map(
                         (tab) => (
                             <button
                                 key={tab}
@@ -253,6 +253,8 @@ export default function InventoryReportPage() {
                     )}
                 </nav>
             </div>
+
+            {activeTab === "aging" && <StockAgingTab outlet={dr.outlet} />}
 
             {/* ── OVERVIEW TAB ── */}
             {activeTab === "intelligence" && (
@@ -1293,6 +1295,96 @@ function StockoutLosses() {
                     </tbody>
                 </table>
             </TableWrapper>
+        </div>
+    );
+}
+
+// ─── Stock aging ──────────────────────────────────────────────────────────────
+// How long since each stock line last MOVED — a sale, a count, an adjustment,
+// a receipt (MetricEngine::stockAging). Dead stock on Intelligence asks "unsold
+// for 90 days"; this asks "untouched". Cost is a financial figure: without
+// reports.financial the backend sends none, and the page says so.
+function StockAgingTab({ outlet }: { outlet?: string }) {
+    const navigate = useNavigate();
+    const { data, isLoading, isError } = useQuery({
+        queryKey: ["report-stock-aging", outlet],
+        queryFn: () => reportsApi.stockAging(outlet ? { outlet_id: Number(outlet) } : {}),
+    });
+    if (isLoading) return <div className="flex justify-center py-16"><Spinner /></div>;
+    if (isError || !data) return <div className="card card-body text-sm text-danger">Stock aging could not be loaded.</div>;
+
+    const showCost = data.totals.cost_value != null;
+    const maxUnits = Math.max(1, ...data.buckets.map((b) => b.units));
+
+    return (
+        <div className="space-y-6">
+            <div className={KPI_GRID}>
+                <KpiCard label="Stock lines on hand" value={data.totals.lines.toLocaleString()} sub={`${data.totals.units.toLocaleString()} units`} />
+                <KpiCard label="Stock at cost" value={showCost ? fmtKes(data.totals.cost_value!) : "—"}
+                    sub={showCost ? (data.totals.uncosted_lines ? `${data.totals.uncosted_lines} lines have no cost — counted at zero` : "every line costed") : "needs financial access"} />
+                <KpiCard label="Untouched 60+ days" value={data.buckets.filter((b) => ["61_90", "90_plus", "never"].includes(b.key)).reduce((a, b) => a + b.lines, 0).toLocaleString()}
+                    sub="lines no sale, count or adjustment has moved" />
+                <KpiCard label="Turnover (90 days)" value={data.turnover.ratio != null ? `${data.turnover.ratio}×` : "—"}
+                    sub={`${data.turnover.sold_90_days.toLocaleString()} sold ÷ ${data.turnover.on_hand.toLocaleString()} on hand`} />
+            </div>
+
+            <div className="card p-5">
+                <SectionHeader title="Time since stock last moved" />
+                <p className="text-xs text-surface-500 -mt-2 mb-4">{data.turnover.note}</p>
+                <div className="space-y-3">
+                    {data.buckets.map((b) => (
+                        <div key={b.key} className="grid grid-cols-[8rem_1fr_auto] items-center gap-3 text-sm">
+                            <span className="text-surface-600">{b.label}</span>
+                            <div className="h-2 rounded-full bg-surface-100">
+                                <div className={clsx("h-2 rounded-full", b.key === "0_30" ? "bg-success" : b.key === "31_60" ? "bg-warning" : "bg-danger")}
+                                    style={{ width: `${(b.units / maxUnits) * 100}%` }} />
+                            </div>
+                            <span className="tabular-nums text-right text-surface-700 whitespace-nowrap">
+                                {b.lines} lines · {b.units.toLocaleString()} units{showCost && b.cost_value != null ? ` · ${fmtKes(b.cost_value)}` : ""}
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            <div className="card overflow-hidden">
+                <div className="px-5 pt-5 pb-3">
+                    <SectionHeader title="Stock not moved in 30 days" />
+                    <p className="text-xs text-surface-500 -mt-2">{showCost ? "Largest value first." : "Values need financial access."}</p>
+                </div>
+                <TableWrapper>
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr>
+                                <th className={TH}>Product</th>
+                                <th className={TH}>Outlet</th>
+                                <th className={TH_R}>Units</th>
+                                <th className={TH_R}>Last moved</th>
+                                {showCost && <th className={TH_R}>At cost</th>}
+                                <th className={TH_R}></th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-line">
+                            {data.slow_items.length === 0 ? (
+                                <tr><td colSpan={6} className="px-5 py-10 text-center text-xs text-surface-400">Everything on hand moved in the last 30 days.</td></tr>
+                            ) : data.slow_items.map((r) => (
+                                <tr key={`${r.id}-${r.detail}`} className="hover:bg-surface-50">
+                                    <td className="px-5 py-2.5 font-medium text-surface-800">{r.ref}</td>
+                                    <td className="px-5 py-2.5 text-surface-600">{r.detail}</td>
+                                    <td className="px-5 py-2.5 text-right tabular-nums">{r.units}</td>
+                                    <td className="px-5 py-2.5 text-right text-surface-600">{r.days_since_moved != null ? `${r.days_since_moved} days ago` : "never"}</td>
+                                    {showCost && <td className="px-5 py-2.5 text-right tabular-nums">{r.amount != null ? fmtKes(r.amount) : "—"}</td>}
+                                    <td className="px-5 py-2.5 text-right">
+                                        {r.links.product && (
+                                            <button onClick={() => navigate(r.links.product)} className="text-xs font-medium text-brand-600 hover:underline">Product →</button>
+                                        )}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </TableWrapper>
+            </div>
         </div>
     );
 }

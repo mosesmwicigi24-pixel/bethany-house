@@ -1725,11 +1725,31 @@ class ReportController extends Controller
     // trap; the split-brain that produced it is audit item Q-4.
 
     /**
-     * GET /admin/reports/inventory/aging  - stub
+     * GET /reports/inventory/aging — stock by time since it last moved, at
+     * cost (MetricEngine::stockAging). Was a stub that said "not yet
+     * implemented" while routed; the buckets now add up to the overview's
+     * stock value.
      */
     public function inventoryAging(Request $request)
     {
-        return response()->json(['message' => 'Inventory aging not yet implemented.', 'aging' => []]);
+        $result = \App\Services\Reporting\MetricEngine::for($request->user(), $this->reportOutletId())->stockAging();
+        $user = $request->user();
+
+        // Stock at COST is what the business paid — behind reports.financial,
+        // exactly as on the inventory overview (cycle 9). Ages, units and
+        // turnover stay: they are what running the shop needs.
+        if (! $user->can('reports.financial')) {
+            $result['totals']['cost_value'] = null;
+            $result['buckets'] = array_map(fn ($b) => ['cost_value' => null] + $b, $result['buckets']);
+            $result['slow_items'] = array_map(fn ($r) => ['amount' => null] + $r, $result['slow_items']);
+        }
+        $result['slow_items'] = array_map(function ($r) use ($user) {
+            $r['links'] = $user->can('products.view') ? ['product' => "/catalogue/products/{$r['id']}"] : [];
+
+            return $r;
+        }, $result['slow_items']);
+
+        return response()->json($result);
     }
 
     /**

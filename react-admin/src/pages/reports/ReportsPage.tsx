@@ -468,9 +468,21 @@ function ExecutiveOverview() {
                                 <MetricCard label="Expenses" metric={k.financial.expenses} money downIsGood
                                     onOpen={() => setDrill({ metric: "expenses", label: "Expenses in period", money: true, reportPath: "/expenses" })} />
                                 <MetricCard label="Net (Coll. − Exp.)" metric={k.financial.net_collected} money to="/reports/finance" />
+                                {/* Profit, not cash — the earned P&L from Finance & Cash,
+                                    with what it leaves out stated, never a bare margin. */}
+                                {k.financial.earned && (
+                                    <MetricCard label="Earned profit"
+                                        value={`KES ${Number(k.financial.earned.net_profit).toLocaleString()}`}
+                                        sub={k.financial.earned.limits?.length
+                                            ? `Limited: ${k.financial.earned.limits.join("; ")}`
+                                            : k.financial.earned.gross_margin_pct != null
+                                                ? `${k.financial.earned.gross_margin_pct}% gross margin · every cost in`
+                                                : "no fully-paid orders yet"}
+                                        to="/reports/finance?tab=intelligence" />
+                                )}
                             </>
                         )}
-                        <div className={clsx(k.financial ? "col-span-2 2xl:col-span-3" : "col-span-2 md:col-span-3 2xl:col-span-5")}>
+                        <div className={clsx(k.financial ? "col-span-2 md:col-span-4 2xl:col-span-2" : "col-span-2 md:col-span-3 2xl:col-span-5")}>
                             <AgingCard aging={k.money.aging}
                                 onBucket={(bucket, label) => setDrill({ metric: "outstanding", bucket, label, money: true, reportPath: "/pos/outstanding-balances" })} />
                         </div>

@@ -32,7 +32,7 @@ class ReportRouteSmokeTest extends TestCase
         return [
             'GET customers/aging'              => ['GET', 'customers/aging', [], 'aging'],
             'GET financial/tax'                => ['GET', 'financial/tax', [], 'by_tax_rate'],
-            'GET inventory/aging'              => ['GET', 'inventory/aging', [], 'aging'],
+            'GET inventory/aging'              => ['GET', 'inventory/aging', [], 'buckets'],
             'GET inventory/low-stock'          => ['GET', 'inventory/low-stock', [], 'low_stock_items'],
             'GET inventory/movement'           => ['GET', 'inventory/movement', [], 'transactions'],
             'GET production/costing/{id}'      => ['GET', 'production/costing/{po}', [], 'report.header'],

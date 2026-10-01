@@ -621,6 +621,15 @@ class MetricEngine
                     orders.total_amount AS amount_original, UPPER(orders.currency_code) AS currency,
                     'order' AS kind, orders.customer_id"),
 
+            'lost' => $this->lostBase()
+                ->whereBetween('orders.created_at', [$s, $e])
+                ->when($salespersonId, fn ($q) => $q->where('orders.created_by', $salespersonId))
+                ->orderByDesc('orders.created_at')
+                ->selectRaw("orders.id, order_number AS ref, orders.created_at AS at, {$who} AS who,
+                    orders.status AS detail, {$totalKes} AS amount,
+                    orders.total_amount AS amount_original, UPPER(orders.currency_code) AS currency,
+                    'order' AS kind, orders.customer_id"),
+
             'collected' => $this->moneyBase()
                 ->whereBetween(DB::raw(self::PAID_AT), [$s, $e])
                 ->when($salespersonId, fn ($q) => $q->where('o.created_by', $salespersonId))
@@ -1324,7 +1333,79 @@ class MetricEngine
         'production_completed' => 'Production orders completed in the period; the figure is pieces.',
         'production_overdue'   => 'Open production orders past their due date today.',
         'expenses'             => 'Approved and paid expenses dated in the period, in KES. Expenses awaiting approval are not included.',
+        'lost'                 => 'Orders raised in the period and then cancelled or voided, in KES at the reporting rate. Refunded orders are returns, reported with Returns.',
     ];
+
+    /** Lost = raised, then cancelled or voided. Refunded is a return, not a lost sale. */
+    public const LOST_STATUSES = ['cancelled', 'voided'];
+
+    /** Lost-sales base: dead orders that never became income, KES-rated, scoped. */
+    private function lostBase()
+    {
+        return DB::table('orders')
+            ->whereIn('orders.status', self::LOST_STATUSES)
+            ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(orders.currency_code)) IS NOT NULL")
+            ->when($this->outletIds, fn ($q) => $q->whereIn('orders.outlet_id', $this->outletIds));
+    }
+
+    /**
+     * Where the period's orders went — every order raised in the window, in
+     * exactly one bucket, so the buckets add up to the order book:
+     *   sold        recognised (the Sold tile, to the shilling)
+     *   unconfirmed carts nobody confirmed (the pipeline)
+     *   lost        cancelled or voided — value the business quoted and lost
+     *   refunded    returned after sale (Returns reports the money)
+     *   other       anything else (a status no rule claims), so nothing hides
+     * Rated currencies only, like every KES figure. Lost carries the previous
+     * period too, because "are we losing more?" is the question it answers.
+     */
+    public function orderOutcomes(Carbon $s, Carbon $e, Carbon $ps, Carbon $pe): array
+    {
+        $kes  = self::totalKes();
+        $rec  = \App\Models\Order::RECOGNISED_STATUSES;
+        $settled = \App\Models\Order::SETTLED_PAYMENT_STATUSES;
+        $list = fn (array $v) => implode(',', array_map(fn ($x) => "'{$x}'", $v));
+        [$dead, $lost, $recognised, $paid, $pipeline] = [
+            $list(\App\Models\Order::DEAD_STATUSES), $list(self::LOST_STATUSES), $list($rec),
+            $list($settled), $list(\App\Models\Order::PIPELINE_STATUSES),
+        ];
+        $bucket = "CASE
+            WHEN orders.status IN ({$dead}) THEN CASE WHEN orders.status IN ({$lost}) THEN 'lost' ELSE 'refunded' END
+            WHEN orders.status IN ({$recognised}) OR orders.payment_status IN ({$paid}) THEN 'sold'
+            WHEN orders.status IN ({$pipeline}) THEN 'unconfirmed'
+            ELSE 'other' END";
+
+        $read = fn (Carbon $a, Carbon $b) => DB::table('orders')
+            ->whereBetween('orders.created_at', [$a, $b])
+            ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(orders.currency_code)) IS NOT NULL")
+            ->when($this->outletIds, fn ($q) => $q->whereIn('orders.outlet_id', $this->outletIds))
+            ->groupBy(DB::raw($bucket))
+            ->selectRaw("{$bucket} AS b, COUNT(*) AS n, COALESCE(SUM({$kes}),0) AS v")
+            ->get()->keyBy('b');
+
+        $now = $read($s, $e);
+        $before = $read($ps, $pe);
+        $out = [];
+        foreach (['sold', 'unconfirmed', 'lost', 'refunded', 'other'] as $b) {
+            $out[$b] = ['orders' => (int) ($now[$b]->n ?? 0), 'value' => round((float) ($now[$b]->v ?? 0), 2)];
+        }
+        $out['lost']['previous_value']  = round((float) ($before['lost']->v ?? 0), 2);
+        $out['lost']['previous_orders'] = (int) ($before['lost']->n ?? 0);
+        $raised = array_sum(array_map(fn ($k) => $out[$k]['value'], ['sold', 'unconfirmed', 'lost', 'refunded', 'other']));
+        $out['lost']['share_pct'] = $raised > 0 ? round($out['lost']['value'] / $raised * 100, 1) : null;
+
+        // Lost by who raised it: is losing a person's pattern or the shop's?
+        $out['lost']['by_salesperson'] = $this->lostBase()->whereBetween('orders.created_at', [$s, $e])
+            ->groupBy('orders.created_by')
+            ->selectRaw("orders.created_by AS id,
+                COALESCE((SELECT TRIM(CONCAT(u.first_name, ' ', u.last_name)) FROM users u WHERE u.id = orders.created_by), 'No salesperson (web checkout)') AS name,
+                COUNT(*) AS orders, COALESCE(SUM({$kes}),0) AS value")
+            ->orderByDesc(DB::raw("SUM({$kes})"))->get()
+            ->map(fn ($r) => ['id' => $r->id, 'name' => $r->name, 'orders' => (int) $r->orders, 'value' => round((float) $r->value, 2)])
+            ->all();
+
+        return $out;
+    }
 
     /** Narrow an outstanding drill to one aging bucket (or deposits). */
     private function applyAgingBucket($q, string $bucket)
@@ -1547,8 +1628,8 @@ class MetricEngine
                    COUNT(*) FILTER (WHERE (ii.quantity_on_hand - ii.quantity_reserved) <= 0) AS out_of_stock,
                    COUNT(*) FILTER (WHERE ii.reorder_point > 0
                        AND (ii.quantity_on_hand - ii.quantity_reserved) <= ii.reorder_point) AS low_stock,
-                   COUNT(*) FILTER (WHERE pr.cost_price IS NULL)       AS unpriced,
-                   COALESCE(SUM(GREATEST(ii.quantity_on_hand, 0) * COALESCE(pr.cost_price, 0)), 0)    AS cost_value,
+                   COUNT(*) FILTER (WHERE cb.cost IS NULL)             AS unpriced,
+                   COALESCE(SUM(GREATEST(ii.quantity_on_hand, 0) * COALESCE(cb.cost, 0)), 0)          AS cost_value,
                    COALESCE(SUM(GREATEST(ii.quantity_on_hand, 0) * COALESCE(pr.regular_price, 0)), 0) AS retail_value
             FROM inventory_items ii
             LEFT JOIN LATERAL (
@@ -1560,6 +1641,9 @@ class MetricEngine
                 ORDER BY (pp.product_variant_id IS NOT NULL AND pp.product_variant_id = ii.product_variant_id) DESC
                 LIMIT 1
             ) pr ON TRUE
+            -- Cost through the one lookup (CostBasis): a variant row with no
+            -- cost no longer hides the product's own (2026-10-02 decision).
+            LEFT JOIN LATERAL (SELECT " . \App\Support\CostBasis::bookCostSql('ii') . " AS cost) cb ON TRUE
             WHERE TRUE {$scope}
         ");
 
@@ -1572,6 +1656,74 @@ class MetricEngine
             'unpriced'     => (int) $row->unpriced,
             'cost_value'   => round((float) $row->cost_value, 2),
             'retail_value' => round((float) $row->retail_value, 2),
+        ];
+    }
+
+    /**
+     * Stock aging — how long since each stock line last MOVED (any
+     * inventory transaction: a sale, a count, an adjustment, a receipt), in
+     * buckets, valued at cost through CostBasis so the buckets add up to the
+     * overview's stock value. Dead stock elsewhere means "unsold for 90 days";
+     * this is the wider question — stock nobody has touched at all.
+     *
+     * Turnover is stated plainly as an approximation: units sold in the last
+     * 90 days against the units on hand TODAY (the ledger starts 2026-06-23,
+     * too short for a true average-stock figure).
+     */
+    public function stockAging(): array
+    {
+        $scope = $this->outletScopeSql('ii.outlet_id');
+        $now   = CarbonImmutable::now(self::TZ)->toMutable();
+        $rows = DB::select("
+            SELECT ii.id, ii.product_id, GREATEST(ii.quantity_on_hand, 0) AS units,
+                   COALESCE(
+                       (SELECT pt.name FROM product_translations pt WHERE pt.product_id = ii.product_id AND pt.language_code = 'en' LIMIT 1),
+                       (SELECT p.sku FROM products p WHERE p.id = ii.product_id)) AS name,
+                   (SELECT o.name FROM outlets o WHERE o.id = ii.outlet_id) AS outlet,
+                   GREATEST(ii.quantity_on_hand, 0) * COALESCE(" . \App\Support\CostBasis::bookCostSql('ii') . ", 0) AS cost_value,
+                   " . \App\Support\CostBasis::bookCostSql('ii') . " IS NULL AS uncosted,
+                   (SELECT MAX(t.created_at) FROM inventory_transactions t WHERE t.inventory_item_id = ii.id) AS last_moved,
+                   (SELECT COALESCE(-SUM(t.quantity_change), 0) FROM inventory_transactions t
+                     WHERE t.inventory_item_id = ii.id AND t.transaction_type = 'sale' AND t.created_at >= ?) AS sold_90
+            FROM inventory_items ii
+            WHERE ii.quantity_on_hand > 0 {$scope}
+        ", [$now->copy()->subDays(90)]);
+
+        $buckets = [];
+        foreach (['0_30' => '0–30 days', '31_60' => '31–60 days', '61_90' => '61–90 days', '90_plus' => 'Over 90 days', 'never' => 'Never moved'] as $k => $label) {
+            $buckets[$k] = ['key' => $k, 'label' => $label, 'lines' => 0, 'units' => 0, 'cost_value' => 0.0];
+        }
+        $items = [];
+        $units = 0; $sold = 0; $value = 0.0; $uncosted = 0;
+        foreach ($rows as $r) {
+            $days = $r->last_moved ? (int) Carbon::parse($r->last_moved)->diffInDays($now) : null;
+            $k = match (true) {
+                $days === null => 'never', $days <= 30 => '0_30', $days <= 60 => '31_60', $days <= 90 => '61_90', default => '90_plus',
+            };
+            $buckets[$k]['lines']++;
+            $buckets[$k]['units'] += (int) $r->units;
+            $buckets[$k]['cost_value'] += (float) $r->cost_value;
+            $units += (int) $r->units; $sold += (int) $r->sold_90; $value += (float) $r->cost_value;
+            $uncosted += $r->uncosted ? 1 : 0;
+            if ($k !== '0_30') {
+                $items[] = ['kind' => 'product', 'id' => (int) $r->product_id, 'ref' => $r->name, 'detail' => $r->outlet,
+                    'units' => (int) $r->units, 'amount' => round((float) $r->cost_value, 2),
+                    'days_since_moved' => $days, 'bucket' => $k];
+            }
+        }
+        foreach ($buckets as &$b) { $b['cost_value'] = round($b['cost_value'], 2); } unset($b);
+        usort($items, fn ($a, $b) => $b['amount'] <=> $a['amount']);
+
+        return [
+            'buckets'      => array_values($buckets),
+            'slow_items'   => array_slice($items, 0, 100),
+            'totals'       => ['lines' => count($rows), 'units' => $units, 'cost_value' => round($value, 2), 'uncosted_lines' => $uncosted],
+            'turnover'     => [
+                'sold_90_days' => $sold,
+                'on_hand'      => $units,
+                'ratio'        => $units > 0 ? round($sold / $units, 2) : null,
+                'note'         => 'Units sold in the last 90 days ÷ units on hand today — an approximation; the stock ledger starts 23 June 2026.',
+            ],
         ];
     }
 
