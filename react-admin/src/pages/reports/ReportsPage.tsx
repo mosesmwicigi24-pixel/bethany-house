@@ -455,8 +455,8 @@ function ExecutiveOverview() {
                             onOpen={() => setDrill({ metric: "revenue", label: "Sold — the orders", money: true, reportPath: "/reports/sales" })} />
                         <MetricCard label="Orders" metric={k.sales.orders}
                             onOpen={() => setDrill({ metric: "orders", label: "Orders in period", reportPath: "/reports/sales" })} />
-                        <MetricCard label="Avg Order Value" metric={k.sales.aov} money to="/reports/sales" />
-                        <MetricCard label="New Customers" metric={k.sales.new_customers}
+                        <MetricCard label="Avg order value" metric={k.sales.aov} money to="/reports/sales" />
+                        <MetricCard label="New customers" metric={k.sales.new_customers}
                             onOpen={() => setDrill({ metric: "new_customers", label: "New customers", reportPath: "/reports/customers" })} />
                     </MetricGroup>
 
@@ -467,7 +467,7 @@ function ExecutiveOverview() {
                             value={fmtKes(k.money.outstanding.amount)}
                             sub={`${k.money.outstanding.orders} open orders`}
                             onOpen={() => setDrill({ metric: "outstanding", label: "Outstanding balances", money: true, reportPath: "/pos/outstanding-balances" })} />
-                        <MetricCard label="Deposits Held"
+                        <MetricCard label="Deposits held"
                             value={fmtKes(k.money.aging?.deposits_held?.amount ?? 0)}
                             sub={`${k.money.aging?.deposits_held?.orders ?? 0} undelivered — not income`}
                             onOpen={() => setDrill({ metric: "outstanding", bucket: "deposits", label: "Deposits held (undelivered)", money: true })} />
@@ -478,17 +478,17 @@ function ExecutiveOverview() {
                     </MetricGroup>
 
                     <MetricGroup title="Operations">
-                        <MetricCard label="Low Stock"
+                        <MetricCard label="Low stock"
                             value={String(k.inventory.low_stock)}
                             sub={k.inventory.low_stock > 0 ? "items at reorder point" : "all healthy"}
                             to="/reports/inventory" />
-                        <MetricCard label="Production Done" metric={k.production.completed}
+                        <MetricCard label="Production done" metric={k.production.completed}
                             onOpen={() => setDrill({ metric: "production_completed", label: "Completed production orders", reportPath: "/reports/production" })} />
                         <MetricCard label="On-time %"
                             value={k.production.on_time_pct.current != null ? `${k.production.on_time_pct.current}%` : "—"}
                             sub={k.production.on_time_pct.previous != null ? `prev ${k.production.on_time_pct.previous}%` : "no prior data"}
                             to="/reports/production" />
-                        <MetricCard label="WIP / Overdue"
+                        <MetricCard label="WIP / overdue"
                             value={`${k.production.wip}${k.production.overdue > 0 ? ` · ${k.production.overdue} late` : ""}`}
                             sub={k.production.overdue > 0 ? "overdue on the floor" : "nothing overdue"}
                             onOpen={k.production.overdue > 0
@@ -501,7 +501,7 @@ function ExecutiveOverview() {
                         <MetricGroup title="Finance">
                             <MetricCard label="Expenses" metric={k.financial.expenses} money downIsGood
                                 onOpen={() => setDrill({ metric: "expenses", label: "Expenses in period", money: true, reportPath: "/expenses" })} />
-                            <MetricCard label="Net (Coll. − Exp.)" metric={k.financial.net_collected} money to="/reports/finance" />
+                            <MetricCard label="Net (collected − expenses)" metric={k.financial.net_collected} money to="/reports/finance" />
                             {/* Profit, not cash — the earned P&L from Finance & Cash,
                                 with what it leaves out stated, never a bare margin. */}
                             {k.financial.earned && (

@@ -130,7 +130,7 @@ export default function ProductionReportPage() {
 
             {/* KPIs row 1 */}
             <div className={KPI_GRID}>
-                <KpiCard label="Total Orders" value={s.total_orders ?? 0} />
+                <KpiCard label="Total orders" value={s.total_orders ?? 0} />
                 <KpiCard
                     label="Completed"
                     value={s.completed_count ?? 0}
@@ -142,7 +142,7 @@ export default function ProductionReportPage() {
                     color="text-info"
                 />
                 <KpiCard
-                    label="QC Failed"
+                    label="QC failed"
                     value={s.failed_count ?? 0}
                     color="text-danger"
                 />
@@ -151,15 +151,15 @@ export default function ProductionReportPage() {
             {/* KPIs row 2 */}
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Units Planned"
+                    label="Units planned"
                     value={s.total_units_planned ?? 0}
                 />
                 <KpiCard
-                    label="Units Produced"
+                    label="Units produced"
                     value={s.total_units_produced ?? 0}
                 />
                 <KpiCard
-                    label="Completion Rate"
+                    label="Completion rate"
                     value={s.total_units_planned > 0 ? `${completionRate}%` : "—"}
                     sub={s.total_units_planned > 0
                         ? `${s.total_units_produced ?? 0} / ${s.total_units_planned ?? 0} units`
@@ -174,7 +174,7 @@ export default function ProductionReportPage() {
                 />
                 {s.on_time_rate !== null && s.on_time_rate !== undefined ? (
                     <KpiCard
-                        label="On-Time Rate"
+                        label="On-time rate"
                         value={`${s.on_time_rate}%`}
                         sub={`${s.on_time_count ?? 0} / ${s.completed_with_due ?? 0} with due date`}
                         color={
@@ -187,7 +187,7 @@ export default function ProductionReportPage() {
                     />
                 ) : (
                     <KpiCard
-                        label="Avg Completion"
+                        label="Avg completion"
                         value={Number(s.avg_completion_hours) > 0 ? fmtHours(s.avg_completion_hours) : "—"}
                         sub={Number(s.avg_completion_hours) > 0 ? "per order" : "nothing completed in this period"}
                     />
@@ -201,7 +201,7 @@ export default function ProductionReportPage() {
                         { id: "overview", label: "Overview" },
                         { id: "products", label: "Products" },
                         { id: "tailors",  label: "Tailors" },
-                        { id: "costing",  label: "Costing & Profitability" },
+                        { id: "costing",  label: "Costing & profitability" },
                         { id: "intelligence", label: "Intelligence" },
                     ] as const).filter((tab) => tab.id !== "costing" || canSeeCosting).map((tab) => (
                         <button
@@ -227,11 +227,11 @@ export default function ProductionReportPage() {
                     {byStatus.length > 0 && (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="card p-5">
-                                <SectionHeader title="Status Distribution" />
+                                <SectionHeader title="Status distribution" />
                                 <ShareBars rows={(byStatus ?? []).map((d: any) => ({ label: String(d.status ?? "—"), value: Number(d.count ?? 0) }))} />
                             </div>
                             <div className="card p-5">
-                                <SectionHeader title="Status Breakdown" />
+                                <SectionHeader title="Status breakdown" />
                                 <div className="space-y-3 mt-2">
                                     {byStatus.map((s: any, i: number) => (
                                         <div
@@ -269,7 +269,7 @@ export default function ProductionReportPage() {
                     {/* Daily trend */}
                     {dailyTrend.length > 0 && (
                         <div className="card p-5">
-                            <SectionHeader title="Daily Production Activity" />
+                            <SectionHeader title="Daily production activity" />
                             <ResponsiveContainer width="100%" height={220}>
                                 <BarChart data={dailyTrend}>
                                     <CartesianGrid
@@ -305,7 +305,7 @@ export default function ProductionReportPage() {
 
                     {/* Avg time metrics */}
                     <div className="card p-5">
-                        <SectionHeader title="Performance Metrics" />
+                        <SectionHeader title="Performance metrics" />
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                             <div>
                                 <p className="text-xs text-surface-500">
@@ -362,7 +362,7 @@ export default function ProductionReportPage() {
                 <div className="space-y-6">
                     {chartData.length > 0 && (
                         <div className="card p-5">
-                            <SectionHeader title="Planned vs Produced — Top Products" />
+                            <SectionHeader title="Planned vs produced — top products" />
                             <ResponsiveContainer width="100%" height={280}>
                                 <BarChart data={chartData}>
                                     <CartesianGrid
@@ -394,7 +394,7 @@ export default function ProductionReportPage() {
                     )}
                     <div className="card overflow-hidden">
                         <div className="px-5 pt-5 pb-4">
-                            <SectionHeader title="Production by Product">
+                            <SectionHeader title="Production by product">
                                 <ExportCsvButton
                                     path="production/summary"
                                     params={dr.params}
@@ -516,7 +516,7 @@ export default function ProductionReportPage() {
             {activeTab === "tailors" && (
                 <div className="card overflow-hidden">
                     <div className="px-5 pt-5 pb-4">
-                        <SectionHeader title="Tailor Performance">
+                        <SectionHeader title="Tailor performance">
                             <ExportCsvButton
                                 path="production/tailor-productivity"
                                 params={dr.params}
@@ -651,25 +651,25 @@ function CostingTab({ data, isLoading, params }: {
             {/* ── Summary KPIs ── */}
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Total Revenue"
+                    label="Total revenue"
                     value={fmtKes(totals.total_revenue)}
                     color="text-brand-600"
                     sub={`${totals.order_count ?? 0} batches`}
                 />
                 <KpiCard
-                    label="Total Material Cost"
+                    label="Total material cost"
                     value={fmtKes(totals.total_material_cost)}
                     color="text-warning"
                     sub={`${totals.total_qty_produced ?? 0} units produced`}
                 />
                 <KpiCard
-                    label="Total Gross Profit"
+                    label="Total gross profit"
                     value={fmtKes(totals.total_gross_profit)}
                     color={totals.total_gross_profit >= 0 ? "text-success" : "text-danger"}
                     sub={`${totals.profitable_count ?? 0} profitable batches`}
                 />
                 <KpiCard
-                    label="Avg Gross Margin"
+                    label="Avg gross margin"
                     value={fmtPctLocal(totals.avg_gross_margin)}
                     color={marginColor(totals.avg_gross_margin)}
                     sub={`${totals.loss_count ?? 0} loss-making batches`}
@@ -679,7 +679,7 @@ function CostingTab({ data, isLoading, params }: {
             {/* ── By Product ── */}
             <div className="card overflow-hidden">
                 <div className="px-5 pt-5 pb-4">
-                    <SectionHeader title="Profitability by Product">
+                    <SectionHeader title="Profitability by product">
                         <ExportCsvButton path="production/costing-summary" params={params} />
                     </SectionHeader>
                 </div>
@@ -775,7 +775,7 @@ function CostingTab({ data, isLoading, params }: {
             {/* ── Per-batch orders ── */}
             <div className="card overflow-hidden">
                 <div className="px-5 pt-5 pb-4">
-                    <SectionHeader title="All Batches" />
+                    <SectionHeader title="All batches" />
                 </div>
                 <TableWrapper>
                     <table className="w-full">
@@ -905,9 +905,9 @@ function IntelligenceTab({ start, end }: { start: string; end: string }) {
             <div className={clsx("card card-body border", short ? "border-danger-200 bg-danger-50/40" : "border-success-200 bg-success-50/30")}>
                 <SectionHeader title="Capacity — next 7 days" />
                 <div className={clsx(KPI_GRID, "mt-1")}>
-                    <KpiCard label="Pieces Due" value={capacity.due_pieces} sub={`${capacity.due_orders} orders`} />
-                    <KpiCard label="Floor Pace" value={`${capacity.daily_throughput}/day`} sub="last 14 days, actual" />
-                    <KpiCard label="Week Capacity" value={capacity.week_capacity} sub="at current pace" />
+                    <KpiCard label="Pieces due" value={capacity.due_pieces} sub={`${capacity.due_orders} orders`} />
+                    <KpiCard label="Floor pace" value={`${capacity.daily_throughput}/day`} sub="last 14 days, actual" />
+                    <KpiCard label="Week capacity" value={capacity.week_capacity} sub="at current pace" />
                     <KpiCard label={short ? "Shortfall" : "Headroom"}
                         value={short ? capacity.shortfall : Math.round((capacity.week_capacity - capacity.due_pieces) * 10) / 10}
                         color={short ? "text-danger" : "text-success"}
@@ -987,10 +987,10 @@ function IntelligenceTab({ start, end }: { start: string; end: string }) {
                         <p className="text-xs text-surface-400 py-4">No QC checks recorded in this period.</p>
                     ) : (
                         <div className="grid grid-cols-2 gap-3 mt-1">
-                            <KpiCard label="Pass Rate" value={`${qc.pass_rate}%`}
+                            <KpiCard label="Pass rate" value={`${qc.pass_rate}%`}
                                 color={Number(qc.pass_rate) >= 90 ? "text-success" : Number(qc.pass_rate) >= 70 ? "text-warning" : "text-danger"}
                                 sub={`${qc.checks} checks`} />
-                            <KpiCard label="Rework Pieces" value={qc.pieces_failed}
+                            <KpiCard label="Rework pieces" value={qc.pieces_failed}
                                 color={qc.pieces_failed > 0 ? "text-danger" : "text-success"}
                                 sub={`${qc.pieces_passed} passed`} />
                         </div>
