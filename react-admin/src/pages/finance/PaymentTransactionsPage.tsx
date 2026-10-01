@@ -1,6 +1,6 @@
 // src/pages/finance/PaymentTransactionsPage.tsx
 import { useState, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import dayjs from "dayjs";
@@ -64,7 +64,9 @@ export default function PaymentTransactionsPage() {
 
     const [status,        setStatus]        = useState("");
     const [paymentMethod, setPaymentMethod] = useState("");
-    const [search,        setSearch]        = useState("");
+    // ?search= opens the ledger at one payment — where a report drill leads.
+    const [urlParams] = useSearchParams();
+    const [search,        setSearch]        = useState(urlParams.get("search") ?? "");
     const [minAmount,     setMinAmount]     = useState("");
     const [maxAmount,     setMaxAmount]     = useState("");
     const [showFilters,   setShowFilters]   = useState(false);

@@ -5,6 +5,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { DrillPanel } from "./reportShared";
 import { reportsApi, type EngineRoomSummaries } from "@/api/reports";
 import { purchaseOrderApi } from "@/api/procurement";
 import { fmtKes } from "@/api/expenses";
@@ -362,116 +363,6 @@ function EngineRoomStrip() {
     );
 }
 
-// ─── Drill-down modal: the rows behind the number ─────────────────────────────
-// Spec rule 3: a figure with no drill-down is a rumour. The modal lists the
-// exact source rows the KPI summed, paginated; tapping a row opens the record.
-
-const KIND_PATH: Record<string, (r: any) => string | null> = {
-    order:      r => `/sales/orders/${r.id}`,
-    payment:    r => (r.order_id ? `/sales/orders/${r.order_id}` : null),
-    production: r => `/production/orders/${r.id}`,
-    customer:   () => "/sales/customers",
-    expense:    () => "/expenses",
-};
-
-function DrillModal({ metric, label, money, bucket, period, reportPath, onClose }: {
-    metric: string; label: string; money?: boolean; bucket?: string; period: string;
-    reportPath?: string; onClose: () => void;
-}) {
-    const navigate = useNavigate();
-    const [page, setPage] = useState(1);
-    const { data, isLoading } = useQuery({
-        queryKey: ["drill", metric, bucket, period, page],
-        queryFn: () => reportsApi.drill(metric, period, { page, bucket }),
-        staleTime: 60_000,
-    });
-    const rows = data?.rows ?? [];
-    const pages = data ? Math.max(1, Math.ceil(data.total / data.per_page)) : 1;
-
-    return (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-6"
-            onClick={onClose}>
-            <div className="bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[85vh] flex flex-col"
-                onClick={e => e.stopPropagation()}>
-                <div className="px-4 py-3 border-b border-line flex items-center gap-3">
-                    <div className="min-w-0">
-                        <p className="text-sm font-bold text-surface-900">{label}</p>
-                        <p className="text-2xs text-surface-400">
-                            {data ? `${data.total.toLocaleString()} source record${data.total === 1 ? "" : "s"}` : "Loading…"}
-                            {" · every row is part of the number you tapped"}
-                        </p>
-                    </div>
-                    <button onClick={onClose} aria-label="Close"
-                        className="ml-auto w-7 h-7 rounded-lg flex items-center justify-center text-surface-400 hover:bg-surface-100">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
-                </div>
-                <div className="flex-1 overflow-y-auto">
-                    {isLoading ? (
-                        <div className="flex justify-center py-12"><Spinner /></div>
-                    ) : rows.length === 0 ? (
-                        <p className="text-center text-xs text-surface-400 py-12">No records in this period.</p>
-                    ) : (
-                        <div className="divide-y divide-line">
-                            {rows.map((r: any) => {
-                                const path = KIND_PATH[r.kind]?.(r) ?? null;
-                                return (
-                                    <button key={`${r.kind}-${r.id}`} disabled={!path}
-                                        onClick={() => path && navigate(path)}
-                                        className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-50 transition-colors disabled:cursor-default">
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-xs font-semibold text-surface-800 font-mono truncate">{r.ref}</p>
-                                            <p className="text-2xs text-surface-400 truncate">
-                                                {new Date(r.at).toLocaleDateString("en-KE", { day: "2-digit", month: "short" })}
-                                                {r.who ? ` · ${r.who}` : ""}{r.detail ? ` · ${r.detail}` : ""}
-                                            </p>
-                                        </div>
-                                        {r.amount != null && (
-                                            <span className="text-right shrink-0">
-                                                <span className="block text-xs font-bold tabular-nums text-surface-800">
-                                                    {money ? `KES ${Number(r.amount).toLocaleString()}` : Number(r.amount).toLocaleString()}
-                                                </span>
-                                                {/* What the customer was actually charged, when that
-                                                    was not shillings. The row's own figure is always
-                                                    KES so the list adds up to the tile it opened
-                                                    from; without this line a USD 200 order and a KES
-                                                    200 order looked like the same sale. */}
-                                                {money && r.currency && r.currency !== "KES" && r.amount_original != null && (
-                                                    <span className="block text-2xs text-surface-400 tabular-nums">
-                                                        {r.currency} {Number(r.amount_original).toLocaleString()}
-                                                    </span>
-                                                )}
-                                            </span>
-                                        )}
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    )}
-                </div>
-                <div className="px-4 py-2.5 border-t border-line flex items-center gap-2">
-                    {pages > 1 && (
-                        <>
-                            <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}
-                                className="btn-secondary text-2xs px-2.5 py-1 disabled:opacity-40">← Prev</button>
-                            <span className="text-2xs text-surface-400 tabular-nums">{page} / {pages}</span>
-                            <button disabled={page >= pages} onClick={() => setPage(p => p + 1)}
-                                className="btn-secondary text-2xs px-2.5 py-1 disabled:opacity-40">Next →</button>
-                        </>
-                    )}
-                    {reportPath && (
-                        <button onClick={() => navigate(reportPath)}
-                            className="ml-auto text-2xs font-semibold text-brand-600 hover:text-brand-700">
-                            Open full report →
-                        </button>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
-}
 
 function AgingCard({ aging, onBucket }: { aging: any; onBucket: (bucket: string, label: string) => void }) {
     const buckets = aging?.buckets ?? [];
@@ -586,7 +477,13 @@ function ExecutiveOverview() {
                     </div>
                 </>
             )}
-            {drill && <DrillModal {...drill} period={period} onClose={() => setDrill(null)} />}
+            {/* The shared drill panel: the backend says what each number is and
+                where each row may lead (permission-checked); nothing is guessed here. */}
+            {drill && (
+                <DrillPanel metric={drill.metric} title={drill.label}
+                    query={{ period, ...(drill.bucket ? { bucket: drill.bucket } : {}) }}
+                    onClose={() => setDrill(null)} />
+            )}
         </div>
     );
 }

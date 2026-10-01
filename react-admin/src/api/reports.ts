@@ -25,20 +25,20 @@ export const reportsApi = {
         get<any>(`${BASE}/executive`, { params: { period, ...(outletId ? { outlet_id: outletId } : {}) } }),
 
     // Production intelligence: cycle times, bottlenecks, tailors, QC, capacity, materials.
-    productionIntelligence: (from: string, to: string) =>
-        get<any>(`${BASE}/production-intelligence`, { params: { period: "custom", from, to } }),
+    productionIntelligence: (from: string, to: string, outletId?: number) =>
+        get<any>(`${BASE}/production-intelligence`, { params: { period: "custom", from, to, ...(outletId ? { outlet_id: outletId } : {}) } }),
 
     // Inventory intelligence: valuation, ABC + cover days, dead stock, materials.
-    inventoryIntelligence: (from: string, to: string) =>
-        get<any>(`${BASE}/inventory-intelligence`, { params: { period: "custom", from, to } }),
+    inventoryIntelligence: (from: string, to: string, outletId?: number) =>
+        get<any>(`${BASE}/inventory-intelligence`, { params: { period: "custom", from, to, ...(outletId ? { outlet_id: outletId } : {}) } }),
 
     // Procurement intelligence: supplier scorecard, purchase suggestions, open POs.
-    procurementIntelligence: (from: string, to: string) =>
-        get<any>(`${BASE}/procurement-intelligence`, { params: { period: "custom", from, to } }),
+    procurementIntelligence: (from: string, to: string, outletId?: number) =>
+        get<any>(`${BASE}/procurement-intelligence`, { params: { period: "custom", from, to, ...(outletId ? { outlet_id: outletId } : {}) } }),
 
     // Customer intelligence: segments, new vs returning, top + dormant customers.
-    customerIntelligence: (from: string, to: string) =>
-        get<any>(`${BASE}/customer-intelligence`, { params: { period: "custom", from, to } }),
+    customerIntelligence: (from: string, to: string, outletId?: number) =>
+        get<any>(`${BASE}/customer-intelligence`, { params: { period: "custom", from, to, ...(outletId ? { outlet_id: outletId } : {}) } }),
 
     // Replenishment radar — per-customer product reorder cycles, "as of now"
     // (no date range: due/overdue only means anything against today).
@@ -135,8 +135,18 @@ export const reportsApi = {
         }),
 
     // Financial intelligence (reports.financial): earned P&L, budgets, cash flow, rails.
-    financialIntelligence: (from: string, to: string) =>
-        get<any>(`${BASE}/financial-intelligence`, { params: { period: "custom", from, to } }),
+    financialIntelligence: (from: string, to: string, outletId?: number) =>
+        get<any>(`${BASE}/financial-intelligence`, { params: { period: "custom", from, to, ...(outletId ? { outlet_id: outletId } : {}) } }),
+
+    // Row-level drill with the PAGE's own filters (dates as start_date/end_date
+    // or a period, outlet_id) — so the rows answer for exactly the scope of the
+    // headline that opened them. The backend states what the number is
+    // (`definition`) and where each row may lead (`links`); nothing is guessed here.
+    drillWith: (metric: string, params: Record<string, any>) =>
+        get<any>(`${BASE}/drill/${metric}`, { params }),
+
+    // Outlets a report can be filtered by (reports.view; no POS access needed).
+    outlets: () => get<{ data: { id: number; name: string }[] }>(`${BASE}/outlets`),
 
     // Row-level drill-down: the same query as the KPI, aggregation removed.
     drill: (metric: string, period: string, opts?: { page?: number; bucket?: string; outletId?: number }) =>
@@ -212,7 +222,8 @@ export const reportsApi = {
         get<any>(`${BASE}/customers/retention`, { params }),
 
     // Inventory
-    inventoryValuationBreakdown: () => get<any>(`${BASE}/inventory/valuation`),
+    inventoryValuationBreakdown: (outletId?: number) =>
+        get<any>(`${BASE}/inventory/valuation`, { params: { ...(outletId ? { outlet_id: outletId } : {}) } }),
 
     stockOnHand: (
         params: DateRangeParams & {

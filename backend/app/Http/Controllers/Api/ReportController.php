@@ -182,7 +182,7 @@ class ReportController extends Controller
         // revenue and compared them against a recognised, multi-currency
         // present — so revenue_change_pct measured two different things.
         $baseFor = fn ($from, $to) => Order::whereBetween('orders.created_at', [$from, $to])
-            ->recognised()
+            ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
             ->when($reportInKes,
                 fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code')),
                 fn ($q) => $q->whereRaw('UPPER(orders.currency_code) = ?', [$currency]))
@@ -356,7 +356,7 @@ class ReportController extends Controller
         //     totals at that rate. Saying "excluded" about these (the old
         //     behaviour) contradicted the very tiles above them.
         $foreign = Order::whereBetween('orders.created_at', [$start, $end])
-            ->recognised()
+            ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
             ->whereRaw('UPPER(orders.currency_code) <> ?', [$currency])
             // DELIBERATELY NOT CONVERTED: this lists what was left out, by
             // currency, so each row is its own unit — 61 orders, USD 4,307.
@@ -495,7 +495,7 @@ class ReportController extends Controller
             // abandoned storefront/WhatsApp carts as sales — 33% of the last
             // 30 days' reported revenue. The unconfirmed money is not lost,
             // it is reported separately as pipeline (see $pipeline below).
-            ->recognised()
+            ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
             ->when($reportInKes,
                 fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code')),
                 fn ($q) => $q->whereRaw('UPPER(orders.currency_code) = ?', [$currency]))
@@ -753,6 +753,7 @@ class ReportController extends Controller
         // Revenue over DISTINCT matched orders — a join-then-SUM would count an
         // order once per lead it matches, and one person can send two leads.
         $convOrders = DB::table('orders as o')
+            ->tap(fn ($q) => $this->inOutlet($q, 'o.outlet_id'))
             ->whereNotIn('o.status', \App\Models\Order::DEAD_STATUSES)
             ->where(fn ($q) => $q->whereIn('o.status', \App\Models\Order::RECOGNISED_STATUSES)
                                  ->orWhereIn('o.payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES))
@@ -784,7 +785,7 @@ class ReportController extends Controller
         $wa = Order::query()
             ->salesChannel('whatsapp')
             ->whereBetween('orders.created_at', [$start, $end])
-            ->recognised()
+            ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
             ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency))
             ->leftJoinSub($paidPerOrder, 'pay', fn ($j) => $j->on('pay.order_id', '=', 'orders.id'))
             // Per-order clamp, same rule as the sales ledger above: cap paid at
@@ -1028,7 +1029,7 @@ class ReportController extends Controller
         // an approved definition, not a new one.
         $customers = Order::query()
             ->whereBetween('orders.created_at', [$start, $end])
-            ->recognised()
+            ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
             ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency))
             ->whereRaw("{$buyer} IS NOT NULL")
             ->groupByRaw($buyer)
@@ -1216,6 +1217,7 @@ class ReportController extends Controller
         $returns = DB::table('order_returns')
             ->join('orders', 'order_returns.order_id', '=', 'orders.id')
             ->whereBetween('order_returns.created_at', [$start, $end])
+            ->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
             ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency))
             ->selectRaw("
                 COUNT(*)                                        AS total_returns,
@@ -1231,6 +1233,7 @@ class ReportController extends Controller
         $byReason = DB::table('order_returns')
             ->join('orders', 'order_returns.order_id', '=', 'orders.id')
             ->whereBetween('order_returns.created_at', [$start, $end])
+            ->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
             ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency))
             ->whereNotNull('order_returns.return_reason')
             ->selectRaw("
@@ -1245,6 +1248,8 @@ class ReportController extends Controller
         // Also aggregate per-item reasons from return_items for a finer breakdown
         $byItemReason = DB::table('return_items')
             ->join('order_returns', 'return_items.return_id', '=', 'order_returns.id')
+            ->join('orders', 'order_returns.order_id', '=', 'orders.id')
+            ->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
             ->whereBetween('order_returns.created_at', [$start, $end])
             ->whereNotNull('return_items.reason')
             ->selectRaw("
@@ -1314,7 +1319,7 @@ class ReportController extends Controller
         // Q3, 442 buyers against 485, and 33 repeat buyers against 37.
         $uniqueBuyers = (int) $this->recognisedOrders(DB::table('orders'))
             ->whereBetween('created_at', [$start, $end])
-            ->whereRaw('(orders.customer_id IS NOT NULL OR orders.user_id IS NOT NULL)')
+            ->whereRaw("{$buyer} IS NOT NULL")   // any identity under BuyerIdentity — not "record or login", which left out every phone-only walk-in (a cycle 10 sibling, found building the outlet filter)
             ->distinct()
             ->count(DB::raw($buyer));
 
@@ -1324,7 +1329,7 @@ class ReportController extends Controller
             $this->recognisedOrders(DB::table('orders'))
                 ->selectRaw("{$buyer} AS buyer, COUNT(*) AS order_count")
                 ->whereBetween('created_at', [$start, $end])
-                ->whereRaw('(orders.customer_id IS NOT NULL OR orders.user_id IS NOT NULL)')
+                ->whereRaw("{$buyer} IS NOT NULL")   // any identity under BuyerIdentity — not "record or login", which left out every phone-only walk-in (a cycle 10 sibling, found building the outlet filter)
                 ->groupBy(DB::raw($buyer)),
             'buyer_counts'
         )
@@ -1490,7 +1495,7 @@ class ReportController extends Controller
         // Same definition as the customer's own page and as Sales by Customer:
         // lifetime value is recognised income, not just the fully-settled part.
         $customers = Order::query()
-            ->recognised()
+            ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
             ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency))
             ->whereRaw("{$buyer} IS NOT NULL")
             ->groupByRaw($buyer)
@@ -1588,6 +1593,7 @@ class ReportController extends Controller
                 FROM orders o
                 WHERE o.status NOT IN ({$dead})
                   AND (o.status IN ({$recognised}) OR o.payment_status IN ({$settled}))
+                  " . ($this->reportOutletId() ? 'AND o.outlet_id = ' . (int) $this->reportOutletId() : '') . "
             )
             SELECT mem.cohort, ord.month, COUNT(DISTINCT mem.cid) AS retained
             FROM mem
@@ -1751,6 +1757,7 @@ class ReportController extends Controller
 
         $query = DB::table('inventory_transactions')
             ->join('inventory_items', 'inventory_transactions.inventory_item_id', '=', 'inventory_items.id')
+            ->tap(fn ($q) => $this->inOutlet($q, 'inventory_items.outlet_id'))
             ->leftJoin('product_variants', 'inventory_items.product_variant_id', '=', 'product_variants.id')
             ->leftJoin('products',         'inventory_items.product_id',          '=', 'products.id')
             ->leftJoin('product_translations', function ($join) {
@@ -1777,7 +1784,9 @@ class ReportController extends Controller
 
         // Movement summary by type
         $byType = DB::table('inventory_transactions')
-            ->whereBetween('created_at', [$start, $end])
+            ->join('inventory_items', 'inventory_transactions.inventory_item_id', '=', 'inventory_items.id')
+            ->tap(fn ($q) => $this->inOutlet($q, 'inventory_items.outlet_id'))
+            ->whereBetween('inventory_transactions.created_at', [$start, $end])
             ->selectRaw("
                 transaction_type AS type,
                 COUNT(*) AS count,
@@ -1824,7 +1833,7 @@ class ReportController extends Controller
         $plInKes = strtoupper($currency) === 'KES';
         $revenue = (float) Order::query()
             ->whereBetween('orders.created_at', [$start, $end])
-            ->recognised()
+            ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
             ->when($plInKes,
                 fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code')),
                 fn ($q) => $q->whereRaw('UPPER(orders.currency_code) = ?', [strtoupper($currency)]))
@@ -1862,6 +1871,7 @@ class ReportController extends Controller
               AND o.status NOT IN ('cancelled','voided','refunded')
               AND (o.status IN ('confirmed','processing','shipped','delivered','completed')
                    OR o.payment_status IN ('paid','partial','deposit'))
+              " . ($this->reportOutletId() ? 'AND o.outlet_id = ' . (int) $this->reportOutletId() : '') . "
               AND " . ($plInKes
                   ? "(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL"
                   : "UPPER(o.currency_code) = " . DB::getPdo()->quote(strtoupper($currency))) . "
@@ -1873,6 +1883,7 @@ class ReportController extends Controller
         $grossMargin = $revenue > 0 ? round(($grossProfit / $revenue) * 100, 2) : 0;
 
         $opex = DB::table('expenses')
+            ->tap(fn ($q) => $this->inOutlet($q, 'expenses.outlet_id'))
             ->whereBetween('expense_date', [substr($start, 0, 10), substr($end, 0, 10)])
             ->whereIn('status', ['approved', 'paid'])
             ->sum('amount_kes');
@@ -1882,6 +1893,7 @@ class ReportController extends Controller
         // will take home (cycle 9: September showed net = gross while 20
         // expenses, KES 11,240, waited for approval). Stated, not netted.
         $pendingOpex = DB::table('expenses')
+            ->tap(fn ($q) => $this->inOutlet($q, 'expenses.outlet_id'))
             ->whereBetween('expense_date', [substr($start, 0, 10), substr($end, 0, 10)])
             ->where('status', 'pending_approval')
             ->selectRaw('COUNT(*) AS n, (COALESCE(SUM(amount_kes), 0))::float8 AS kes')
@@ -1890,6 +1902,7 @@ class ReportController extends Controller
         // Expenses by category for breakdown
         $expensesByCategory = DB::table('expenses')
             ->leftJoin('expense_categories', 'expenses.category_id', '=', 'expense_categories.id')
+            ->tap(fn ($q) => $this->inOutlet($q, 'expenses.outlet_id'))
             ->whereBetween('expenses.expense_date', [substr($start, 0, 10), substr($end, 0, 10)])
             ->whereIn('expenses.status', ['approved', 'paid'])
             ->groupBy('expense_categories.id', 'expense_categories.name')
@@ -1912,7 +1925,7 @@ class ReportController extends Controller
         // 2026-09-30).
         $plMoney = fn (string $column) => (float) Order::query()
             ->whereBetween('orders.created_at', [$start, $end])
-            ->recognised()
+            ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
             ->when($plInKes,
                 fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('currency_code')),
                 fn ($q) => $q->whereRaw('UPPER(currency_code) = ?', [strtoupper($currency)]))
@@ -1935,7 +1948,7 @@ class ReportController extends Controller
             // apples to oranges.
             $priorRevenue = (float) Order::query()
                 ->whereBetween('orders.created_at', [$ps, $pe])
-                ->recognised()
+                ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
                 ->when($plInKes,
                     fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code')),
                     fn ($q) => $q->whereRaw('UPPER(orders.currency_code) = ?', [strtoupper($currency)]))
@@ -1944,6 +1957,7 @@ class ReportController extends Controller
                     : 'orders.total_amount') . '), 0) AS v')
                 ->value('v');
             $priorOpex = DB::table('expenses')
+                ->tap(fn ($q) => $this->inOutlet($q, 'expenses.outlet_id'))
                 ->whereBetween('expense_date', [substr($ps, 0, 10), substr($pe, 0, 10)])
                 ->whereIn('status', ['approved', 'paid'])
                 ->sum('amount_kes');
@@ -2041,7 +2055,7 @@ class ReportController extends Controller
         // uses, so this foots with the sales summary to the cent.
         $soldMonthly = Order::query()
             ->whereBetween('orders.created_at', [$start, $end])
-            ->recognised()
+            ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
             ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency))
             ->selectRaw("TO_CHAR(orders.created_at, 'YYYY-MM') AS month,
                 (COALESCE(SUM({$amtKes('orders.total_amount')}), 0))::float8 AS total,
@@ -2055,6 +2069,7 @@ class ReportController extends Controller
         [$payKes] = $this->reportingMoney($request, 'p.currency_code');
         $collectedMonthly = DB::table('payments as p')
             ->join('orders as o', 'o.id', '=', 'p.order_id')
+            ->tap(fn ($q) => $this->inOutlet($q, 'o.outlet_id'))
             ->where('p.status', 'paid')
             ->where(fn ($q) => $q->where('p.requires_approval', false)
                                  ->orWhereNull('p.requires_approval')
@@ -2189,6 +2204,7 @@ class ReportController extends Controller
         [$start, $end] = $this->dateRange($request);
 
         $summary = DB::table('production_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
             ->whereBetween('created_at', [$start, $end])
             ->selectRaw("
                 COUNT(*)                                                                           AS total_orders,
@@ -2207,6 +2223,7 @@ class ReportController extends Controller
 
         // On-time delivery rate
         $onTime = DB::table('production_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
             ->whereBetween('created_at', [$start, $end])
             ->where('status', 'completed')
             ->whereNotNull('due_date')
@@ -2215,6 +2232,7 @@ class ReportController extends Controller
             ->count();
 
         $completedWithDue = DB::table('production_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
             ->whereBetween('created_at', [$start, $end])
             ->where('status', 'completed')
             ->whereNotNull('due_date')
@@ -2224,6 +2242,7 @@ class ReportController extends Controller
 
         // By product
         $byProduct = DB::table('production_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
             ->join('products', 'production_orders.product_id', '=', 'products.id')
             ->leftJoin('product_translations', function ($join) {
                 $join->on('product_translations.product_id', '=', 'products.id')
@@ -2248,6 +2267,7 @@ class ReportController extends Controller
         $byTailor = DB::table('production_order_assignees')
             ->join('production_orders', 'production_order_assignees.production_order_id', '=', 'production_orders.id')
             ->join('users', 'production_order_assignees.user_id', '=', 'users.id')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
             ->whereBetween('production_orders.created_at', [$start, $end])
             ->where('production_orders.status', 'completed')
             ->groupBy('users.id', 'users.first_name', 'users.last_name')
@@ -2263,6 +2283,7 @@ class ReportController extends Controller
 
         // Daily production trend
         $dailyTrend = DB::table('production_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
             ->whereBetween('created_at', [$start, $end])
             ->selectRaw("
                 DATE(created_at) AS date,
@@ -2275,6 +2296,7 @@ class ReportController extends Controller
 
         // Status distribution
         $byStatus = DB::table('production_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
             ->whereBetween('created_at', [$start, $end])
             ->selectRaw("status, COUNT(*) AS count, (COALESCE(SUM(quantity), 0))::float8 AS units")
             ->groupBy('status')
@@ -2310,6 +2332,7 @@ class ReportController extends Controller
         [$start, $end] = $this->dateRange($request);
 
         $efficiency = DB::table('production_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
             ->whereBetween('created_at', [$start, $end])
             ->selectRaw("
                 COUNT(*) AS total,
@@ -2337,6 +2360,7 @@ class ReportController extends Controller
         $tailors = DB::table('production_order_assignees')
             ->join('production_orders', 'production_order_assignees.production_order_id', '=', 'production_orders.id')
             ->join('users', 'production_order_assignees.user_id', '=', 'users.id')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
             ->whereBetween('production_orders.created_at', [$start, $end])
             ->where('production_orders.status', 'completed')
             ->groupBy('users.id', 'users.first_name', 'users.last_name')
@@ -2385,6 +2409,7 @@ class ReportController extends Controller
         $poItemSpend = $amtKes('purchase_order_items.total_price');
 
         $summary = DB::table('purchase_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'purchase_orders.outlet_id'))
             ->whereBetween('created_at', [$start, $end])
             ->selectRaw("
                 COUNT(*)                                                                           AS total_orders,
@@ -2401,6 +2426,7 @@ class ReportController extends Controller
             ->first();
 
         $bySupplier = DB::table('purchase_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'purchase_orders.outlet_id'))
             ->join('suppliers', 'purchase_orders.supplier_id', '=', 'suppliers.id')
             ->whereBetween('purchase_orders.created_at', [$start, $end])
             ->groupBy('suppliers.id', 'suppliers.name', 'suppliers.email')
@@ -2419,6 +2445,7 @@ class ReportController extends Controller
 
         // Monthly spend trend
         $monthlyTrend = DB::table('purchase_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'purchase_orders.outlet_id'))
             ->whereBetween('created_at', [$start, $end])
             ->selectRaw("
                 TO_CHAR(created_at, 'YYYY-MM') AS month,
@@ -2431,6 +2458,7 @@ class ReportController extends Controller
 
         // Status breakdown
         $byStatus = DB::table('purchase_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'purchase_orders.outlet_id'))
             ->whereBetween('created_at', [$start, $end])
             ->selectRaw("status, COUNT(*) AS count, (COALESCE(SUM({$poTotal}), 0))::float8 AS total")
             ->groupBy('status')
@@ -2439,6 +2467,7 @@ class ReportController extends Controller
         // Top purchased items
         $topItems = DB::table('purchase_order_items')
             ->join('purchase_orders', 'purchase_order_items.purchase_order_id', '=', 'purchase_orders.id')
+            ->tap(fn ($q) => $this->inOutlet($q, 'purchase_orders.outlet_id'))
             ->leftJoin('products', 'purchase_order_items.product_id', '=', 'products.id')
             ->leftJoin('product_translations', function ($join) {
                 $join->on('product_translations.product_id', '=', 'products.id')
@@ -2521,9 +2550,11 @@ class ReportController extends Controller
             ],
             'production' => [
                 'active' => DB::table('production_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
                     ->whereIn('status', ['pending', 'assigned', 'in_progress'])
                     ->count(),
                 'completed_this_period' => DB::table('production_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
                     ->where('status', 'completed')
                     ->where('completed_at', '>=', $since)
                     ->count(),

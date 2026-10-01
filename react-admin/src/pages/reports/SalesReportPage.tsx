@@ -55,6 +55,7 @@ import {
     TH_R,
     fmtPct,
     ChangeBadge,
+    useReportOutlet,
 } from "./reportShared";
 
 const DOW_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -86,7 +87,7 @@ export default function SalesReportPage() {
     });
 
     const summaryQuery = useQuery({
-        queryKey: ["report-sales-summary", dr.start, dr.end, compare],
+        queryKey: ["report-sales-summary", dr.start, dr.end, dr.outlet, compare],
         queryFn: () =>
             reportsApi.salesSummary({
                 ...dr.params,
@@ -95,17 +96,17 @@ export default function SalesReportPage() {
         enabled: !!dr.start && !!dr.end,
     });
     const byProductQuery = useQuery({
-        queryKey: ["report-sales-products", dr.start, dr.end],
+        queryKey: ["report-sales-products", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.salesByProduct({ ...dr.params, limit: 30 }),
         enabled: !!dr.start && !!dr.end,
     });
     const byCatQuery = useQuery({
-        queryKey: ["report-sales-category", dr.start, dr.end],
+        queryKey: ["report-sales-category", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.salesByCategory(dr.params),
         enabled: !!dr.start && !!dr.end,
     });
     const byCustomerQuery = useQuery({
-        queryKey: ["report-sales-customers", dr.start, dr.end],
+        queryKey: ["report-sales-customers", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.salesByCustomer({ ...dr.params, limit: 25 }),
         enabled: !!dr.start && !!dr.end && activeTab === "customers",
     });
@@ -113,20 +114,20 @@ export default function SalesReportPage() {
     // only on the Channels tab — it is three grouped aggregations and there is
     // no reason to pay for them while the user is reading Overview.
     const ledgerQuery = useQuery({
-        queryKey: ["report-sales-ledger", dr.start, dr.end],
+        queryKey: ["report-sales-ledger", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.salesLedger(dr.params),
         enabled: !!dr.start && !!dr.end && activeTab === "channels",
     });
 
     const returnsQuery = useQuery({
-        queryKey: ["report-sales-returns", dr.start, dr.end],
+        queryKey: ["report-sales-returns", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.salesReturns(dr.params),
         enabled: !!dr.start && !!dr.end,
     });
 
     // Neema (AI agent) performance — loaded only on its tab.
     const neemaQuery = useQuery({
-        queryKey: ["report-sales-neema", dr.start, dr.end],
+        queryKey: ["report-sales-neema", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.salesNeema(dr.params),
         enabled: !!dr.start && !!dr.end && activeTab === "neema",
     });
@@ -173,6 +174,8 @@ export default function SalesReportPage() {
                 onPresetChange={dr.handlePreset}
                 onStartChange={dr.setStart}
                 onEndChange={dr.setEnd}
+                outlet={dr.outlet}
+                onOutletChange={dr.setOutlet}
                 compare={compare}
                 onCompareChange={setCompare}
             />
@@ -181,6 +184,7 @@ export default function SalesReportPage() {
             <div className={KPI_GRID}>
                 <KpiCard
                     label="Total Revenue"
+                    drill="revenue"
                     value={fmtKes(s.total_revenue)}
                     sub={`${s.total_orders ?? 0} orders (sales truth)`}
                     comparison={cmp?.revenue_change_pct}
@@ -906,7 +910,7 @@ export default function SalesReportPage() {
 
 function SalesByOutletTable({ params }: { params: Record<string, any> }) {
     const { data, isLoading } = useQuery({
-        queryKey: ["report-sales-outlet", params.start_date, params.end_date],
+        queryKey: ["report-sales-outlet", params.start_date, params.end_date, params.outlet_id],
         queryFn: () => reportsApi.salesByOutlet(params),
         enabled: !!params.start_date && !!params.end_date,
     });
@@ -1551,9 +1555,10 @@ function NeemaTab({
 
 function CollectionsTab() {
     const toast = useToastStore();
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["collections-funnel"],
-        queryFn: () => reportsApi.collectionsFunnel(),
+        queryKey: ["outlet", outletId, "collections-funnel"],
+        queryFn: () => reportsApi.collectionsFunnel(outletId),
         staleTime: 60_000,
     });
     // Which order row is currently fetching its payment link ("stalled-12").
@@ -2001,9 +2006,10 @@ function CollectionsTab() {
 // expected-value estimates, labelled as such — not booked money.
 
 function BasketIntelTab() {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["attach-rates"],
-        queryFn: () => reportsApi.attachRates(),
+        queryKey: ["outlet", outletId, "attach-rates"],
+        queryFn: () => reportsApi.attachRates(outletId),
         staleTime: 60_000,
     });
     // Which anchor rows are expanded to show their companion breakdown.
@@ -2182,9 +2188,10 @@ function fmtNative(currency: string, amount: number) {
 }
 
 function InternationalTab() {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["international-corridor"],
-        queryFn: () => reportsApi.internationalCorridor(),
+        queryKey: ["outlet", outletId, "international-corridor"],
+        queryFn: () => reportsApi.internationalCorridor(outletId),
         staleTime: 60_000,
     });
 

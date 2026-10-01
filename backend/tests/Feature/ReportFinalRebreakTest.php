@@ -231,6 +231,10 @@ class ReportFinalRebreakTest extends TestCase
         $this->assertSame(2, $summary, 'sales summary');
         $this->assertSame(2, $byCust, 'sales by customer');
         $this->assertSame(2, $product1, 'sales by product — counted logins only before');
+        // Missed in cycle 10, found building the outlet filter: the customer
+        // summary still pre-filtered to "record or login".
+        $this->assertSame(2, (int) $this->getJson("/api/v1/admin/reports/customers/summary?{$q}")->json('unique_buyers'),
+            'customers summary');
     }
 
     /**

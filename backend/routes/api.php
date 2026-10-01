@@ -1359,6 +1359,7 @@ Route::prefix('v1')->group(function () {
             Route::middleware(['permission:reports.view,sanctum', 'report.window', 'report.snapshot', 'report.contacts'])->prefix('reports')->group(function () {
                 Route::get('/executive',       [\App\Http\Controllers\Api\ExecutiveReportController::class, 'executive']);
                 Route::get('/drill/{metric}',  [\App\Http\Controllers\Api\ExecutiveReportController::class, 'drill']);
+                Route::get('/outlets',         [\App\Http\Controllers\Api\ExecutiveReportController::class, 'outlets']);
                 Route::get('/production-intelligence', [\App\Http\Controllers\Api\ExecutiveReportController::class, 'productionIntelligence']);
                 Route::get('/inventory-intelligence',   [\App\Http\Controllers\Api\ExecutiveReportController::class, 'inventoryIntelligence']);
                 Route::get('/procurement-intelligence', [\App\Http\Controllers\Api\ExecutiveReportController::class, 'procurementIntelligence']);

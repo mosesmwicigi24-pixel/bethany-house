@@ -4085,8 +4085,12 @@ export default function OrderDetailPage() {
                                                     )}
                                                 </div>
                                             )}
-                                            {order.user_id && (
-                                                <button onClick={() => navigate(`/sales/customers/${order.user_id}`)}
+                                            {/* customer_id, not user_id: user_id is a web login (no order in
+                                                production has one), so this link never appeared on the 632
+                                                orders linked to a customer — and /sales/customers/:id reads
+                                                customers.id. Reports build, 2026-10-01. */}
+                                            {order.customer_id && (
+                                                <button onClick={() => navigate(`/sales/customers/${order.customer_id}`)}
                                                     className="text-2xs text-brand-500 hover:underline mt-1 block">View profile →</button>
                                             )}
                                         </div>
