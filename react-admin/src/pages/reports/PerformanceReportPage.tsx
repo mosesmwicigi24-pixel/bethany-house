@@ -26,6 +26,7 @@ import {
     DrillPanel,
     useDateRange,
     useReportTab,
+    periodParams,
 } from "./reportShared";
 
 const TABS = ["outlets", "salespeople"] as const;
@@ -41,8 +42,8 @@ export default function PerformanceReportPage() {
     const [drillFor, setDrillFor] = useState<PerformanceRow | null>(null);
 
     const { data, isLoading, isError } = useQuery({
-        queryKey: ["report-performance", dr.start, dr.end, dr.outlet],
-        queryFn: () => reportsApi.performance(dr.params),
+        queryKey: ["report-performance", dr.preset, dr.start, dr.end, dr.outlet],
+        queryFn: () => reportsApi.performance(periodParams(dr.preset, dr.start, dr.end, dr.outlet)),
     });
 
     const rows = (tab === "outlets" ? data?.outlets : data?.salespeople) ?? [];

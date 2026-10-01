@@ -673,14 +673,16 @@ export function ReportPageHeader({
     subtitle: string;
     /** Omit for a page with no printed (PDF) version — no button that cannot work. */
     reportType?: ReportType;
-    exportPath: string;
-    params: Record<string, any>;
-    preset: DatePreset;
-    start: string;
-    end: string;
-    onPresetChange: (p: DatePreset) => void;
-    onStartChange: (d: string) => void;
-    onEndChange: (d: string) => void;
+    /** Omit for a page with nothing to export. */
+    exportPath?: string;
+    params?: Record<string, any>;
+    /** Omit the four date props for a page that describes the present, not a period (Signals). */
+    preset?: DatePreset;
+    start?: string;
+    end?: string;
+    onPresetChange?: (p: DatePreset) => void;
+    onStartChange?: (d: string) => void;
+    onEndChange?: (d: string) => void;
     compare?: boolean;
     onCompareChange?: (v: boolean) => void;
     extra?: React.ReactNode;
@@ -697,6 +699,8 @@ export function ReportPageHeader({
     const outletName = outlet ? outletList?.data?.find((o) => String(o.id) === String(outlet))?.name : null;
     const { can } = usePermissions();
     const canExport = can("reports.export");
+    const dated = !!(preset && start && end && onPresetChange && onStartChange && onEndChange);
+    const hasFilters = dated || !!onOutletChange;
 
     return (
         <div className="card overflow-hidden">
@@ -724,25 +728,26 @@ export function ReportPageHeader({
                 </div>
 
                 {/* Phone: the filters as one line, opened on tap */}
-                <button type="button" onClick={() => setFiltersOpen((o) => !o)} aria-expanded={filtersOpen}
+                {hasFilters && <button type="button" onClick={() => setFiltersOpen((o) => !o)} aria-expanded={filtersOpen}
                     className="sm:hidden flex items-center justify-between gap-2 w-full rounded-lg border border-line px-3 py-2 text-left text-sm">
                     <span className="min-w-0 truncate text-surface-700 tabular-nums">
-                        {dayjs(start).format("D MMM")} – {dayjs(end).format("D MMM YYYY")}
-                        {onOutletChange && <span className="text-surface-500"> · {outletName ?? "All outlets"}</span>}
+                        {dated ? `${dayjs(start).format("D MMM")} – ${dayjs(end).format("D MMM YYYY")}` : ""}
+                        {onOutletChange && <span className="text-surface-500">{dated ? " · " : ""}{outletName ?? "All outlets"}</span>}
                     </span>
                     <span className="shrink-0 text-xs font-medium text-brand-600">{filtersOpen ? "Done" : "Change"}</span>
-                </button>
+                </button>}
 
                 {/* Right: date picker + compare + extras */}
                 <div className={clsx("flex-col items-start gap-2 xl:items-end xl:shrink-0", filtersOpen ? "flex" : "hidden sm:flex")}>
                     {/* Date picker row */}
                     <div className="flex items-center gap-2 flex-wrap">
                         {onOutletChange && <OutletSelect value={outlet ?? ""} onChange={onOutletChange} />}
+                        {dated && <>
                         <select
                             className="input input-sm w-40 text-sm"
                             aria-label="Period"
                             value={preset}
-                            onChange={e => onPresetChange(e.target.value as DatePreset)}
+                            onChange={e => onPresetChange!(e.target.value as DatePreset)}
                         >
                             {DATE_PRESETS.map(p => (
                                 <option key={p.value} value={p.value}>{p.label}</option>
@@ -750,15 +755,16 @@ export function ReportPageHeader({
                         </select>
                         {preset === "custom" ? (
                             <>
-                                <input type="date" className="input input-sm w-36 text-sm" value={start} onChange={e => onStartChange(e.target.value)} />
+                                <input type="date" className="input input-sm w-36 text-sm" aria-label="From" value={start} onChange={e => onStartChange!(e.target.value)} />
                                 <span className="text-surface-400 text-sm">to</span>
-                                <input type="date" className="input input-sm w-36 text-sm" value={end} onChange={e => onEndChange(e.target.value)} />
+                                <input type="date" className="input input-sm w-36 text-sm" aria-label="To" value={end} onChange={e => onEndChange!(e.target.value)} />
                             </>
                         ) : (
                             <span className="text-sm text-surface-500 whitespace-nowrap tabular-nums">
                                 {dayjs(start).format("D MMM YYYY")} – {dayjs(end).format("D MMM YYYY")}
                             </span>
                         )}
+                        </>}
                     </div>
 
                     {/* Compare toggle + extras on same row */}
@@ -784,14 +790,14 @@ export function ReportPageHeader({
             {/* ── Divider + action toolbar ── */}
             <div className="border-t border-line px-4 py-2 flex items-center gap-0.5 flex-wrap">
                 {/* Export CSV */}
-                <ExportCsvButton
+                {exportPath && <ExportCsvButton
                     path={exportPath}
-                    params={params}
+                    params={params ?? {}}
                     label="Export CSV"
-                />
+                />}
 
                 {/* Download PDF */}
-                {reportType && <ReportPdfButton type={reportType as any} params={params} compact />}
+                {reportType && <ReportPdfButton type={reportType as any} params={params ?? {}} compact />}
 
                 {/* Print */}
                 <button
@@ -854,13 +860,13 @@ export function ReportPageHeader({
             )}
 
             {/* The drill panel for every clickable number on this page */}
-            <DrillHost start={start} end={end} outlet={outlet} />
+            {dated && <DrillHost start={start!} end={end!} outlet={outlet} />}
 
             {/* Schedule create modal */}
             {showSchedule && reportType && (
                 <ScheduleModal
                     reportType={reportType}
-                    params={params}
+                    params={params ?? {}}
                     onClose={() => setShowSchedule(false)}
                 />
             )}
@@ -931,16 +937,35 @@ export function DateRangePicker({
  * same keys, so a headline and the table under it cannot answer for different
  * windows or shops. `params` carries exactly what the report endpoints accept.
  */
+/** The period and outlet a reader last chose, for this browser session. */
+const REPORT_FILTERS_KEY = "bh-report-filters";
+type RememberedFilters = { preset?: string; from?: string; to?: string; outlet?: string };
+function rememberedFilters(): RememberedFilters {
+    try { return JSON.parse(sessionStorage.getItem(REPORT_FILTERS_KEY) ?? "{}") ?? {}; } catch { return {}; }
+}
+
 export function useDateRange(defaultPreset: DatePreset = "this_month") {
     const [sp, setSp] = useSearchParams();
-    const known = (p: string | null): p is DatePreset => !!p && DATE_PRESETS.some((d) => d.value === p);
+    const known = (p: string | null | undefined): p is DatePreset => !!p && DATE_PRESETS.some((d) => d.value === p);
 
-    const urlPreset = sp.get("preset");
-    const preset: DatePreset = known(urlPreset) ? urlPreset : sp.get("from") ? "custom" : defaultPreset;
+    // The period follows the reader from page to page: a report opened from the
+    // menu (no dates in its link) uses the period and outlet last chosen in this
+    // session, not each page's own default — September on Sales stayed
+    // September on Customers. A link that carries its own dates still wins.
+    const urlHasPeriod = sp.has("preset") || sp.has("from");
+    const memo = urlHasPeriod ? {} : rememberedFilters();
+    const urlPreset = sp.get("preset") ?? memo.preset ?? null;
+    const preset: DatePreset = known(urlPreset) ? urlPreset : (sp.get("from") ?? memo.from) ? "custom" : defaultPreset;
     const fallback = datePresetRange(preset === "custom" ? defaultPreset : preset);
-    const start = preset === "custom" ? (sp.get("from") ?? fallback.start) : fallback.start;
-    const end   = preset === "custom" ? (sp.get("to") ?? fallback.end) : fallback.end;
-    const outlet = sp.get("outlet") ?? "";
+    const start = preset === "custom" ? (sp.get("from") ?? memo.from ?? fallback.start) : fallback.start;
+    const end   = preset === "custom" ? (sp.get("to") ?? memo.to ?? fallback.end) : fallback.end;
+    const outlet = sp.get("outlet") ?? (sp.has("outlet") ? "" : rememberedFilters().outlet ?? "");
+
+    try {
+        sessionStorage.setItem(REPORT_FILTERS_KEY, JSON.stringify({
+            preset, ...(preset === "custom" ? { from: start, to: end } : {}), outlet,
+        }));
+    } catch { /* private mode: the period simply doesn't follow */ }
 
     const patch = (next: Record<string, string | null>) =>
         setSp((prev) => {
@@ -1000,6 +1025,23 @@ export function useReportOutlet(): number | undefined {
 // Reports are business-wide (owner, 2026-09-30); an outlet narrows every query
 // on the page at the database, never by hiding rows here.
 
+/**
+ * The window as the backend should hear it. A preset the backend knows is sent
+ * by NAME, so an in-progress period is compared like for like (this month so
+ * far against the same days last month); anything else as dates.
+ */
+const BACKEND_PERIODS: Partial<Record<DatePreset, string>> = {
+    today: "today", yesterday: "yesterday", last_7_days: "last_7", last_30_days: "last_30",
+    this_month: "this_month", last_month: "last_month", this_quarter: "this_quarter", this_year: "this_year",
+};
+export function periodParams(preset: DatePreset, start: string, end: string, outlet?: string): Record<string, string | number> {
+    const key = BACKEND_PERIODS[preset];
+    return {
+        ...(key ? { period: key } : { period: "custom", from: start, to: end }),
+        ...(outlet ? { outlet_id: Number(outlet) } : {}),
+    };
+}
+
 export function OutletSelect({ value, onChange }: { value: string; onChange: (id: string) => void }) {
     const { data } = useQuery({ queryKey: ["report-outlets"], queryFn: () => reportsApi.outlets(), staleTime: 300_000 });
     const outlets = data?.data ?? [];
@@ -1037,6 +1079,20 @@ export function DrillPanel({ metric, query, onClose, title, load }: {
     });
     const rows: any[] = data?.rows ?? [];
     const pages = data ? Math.max(1, Math.ceil(data.total / data.per_page)) : 1;
+    // The records keep their context: which period and outlet they belong to,
+    // so a list opened from a figure never floats free of the figure.
+    const { data: outletList } = useQuery({ queryKey: ["report-outlets"], queryFn: () => reportsApi.outlets(), staleTime: 300_000, enabled: !!query.outlet_id });
+    const PERIOD_WORDS: Record<string, string> = {
+        today: "Today", yesterday: "Yesterday", last_7: "Last 7 days", last_30: "Last 30 days", this_month: "This month",
+        last_month: "Last month", this_quarter: "This quarter", this_year: "This year",
+    };
+    const when = query.from && query.to
+        ? `${dayjs(query.from).format("D MMM")} – ${dayjs(query.to).format("D MMM YYYY")}`
+        : PERIOD_WORDS[query.period] ?? null;
+    const where = query.outlet_id
+        ? outletList?.data?.find((o) => String(o.id) === String(query.outlet_id))?.name ?? "One outlet"
+        : null;
+    const context = [when, where].filter(Boolean).join(" · ");
     const money = rows.some((r) => r.currency);
 
     return (
@@ -1049,6 +1105,7 @@ export function DrillPanel({ metric, query, onClose, title, load }: {
                             {title ? `${title} · ` : ""}
                             {data ? `${data.total.toLocaleString()} record${data.total === 1 ? "" : "s"}` : "Loading…"}
                         </p>
+                        {context && <p className="text-2xs font-medium text-surface-600 mt-0.5">{context}</p>}
                         {data?.definition && <p className="text-2xs text-surface-500 mt-0.5">{data.definition}</p>}
                     </div>
                     <button onClick={onClose} aria-label="Close"
@@ -1118,13 +1175,20 @@ export function DrillPanel({ metric, query, onClose, title, load }: {
  * passed in, never recomputed, so a page defaulting to the last 30 days cannot
  * drill over this month. One per page (ReportPageHeader renders it).
  */
+/** What each drillable figure is called, so its records panel says whose records they are. */
+const DRILL_TITLES: Record<string, string> = {
+    revenue: "Sold", orders: "Orders", collected: "Collected", outstanding: "Outstanding",
+    new_customers: "New customers", production_completed: "Production completed",
+    production_overdue: "Overdue production", expenses: "Expenses", lost: "Lost sales",
+};
+
 export function DrillHost({ start, end, outlet }: { start: string; end: string; outlet?: string }) {
     const [sp, setSp] = useSearchParams();
     const metric = sp.get("drill");
     if (!metric) return null;
     const close = () => setSp((prev) => { const p = new URLSearchParams(prev); p.delete("drill"); return p; }, { replace: true });
     return (
-        <DrillPanel metric={metric}
+        <DrillPanel metric={metric} title={DRILL_TITLES[metric]}
             query={{ period: "custom", from: start, to: end, ...(outlet ? { outlet_id: Number(outlet) } : {}) }}
             onClose={close} />
     );

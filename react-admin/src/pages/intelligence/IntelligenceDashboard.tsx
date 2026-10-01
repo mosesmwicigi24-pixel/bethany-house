@@ -18,6 +18,7 @@ import { intelligenceApi, type ReorderSuggestion, type TailorWorkload,
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
+import { ReportPageHeader } from "@/pages/reports/reportShared";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -547,12 +548,12 @@ function ChannelEngagementCard() {
 export default function IntelligenceDashboard() {
     return (
         <div className="space-y-5 animate-fade-in">
-            <div className="page-header">
-                <h1 className="page-title">Business Intelligence &amp; Signals</h1>
-                <p className="page-subtitle">
-                    Proactive signals across stock, production, customers, and finance
-                </p>
-            </div>
+            {/* The shared report header, without a period: every signal here is
+                the business as it stands now, not a window of time. */}
+            <ReportPageHeader
+                title="Business Intelligence & Signals"
+                subtitle="What needs acting on now — stock, production, customers and budgets, as they stand today."
+            />
 
             <div className="grid grid-cols-1 gap-5">
                 <CustomerGeographyCard />
