@@ -5,7 +5,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { DrillPanel } from "./reportShared";
+import { DrillPanel, ReportPageHeader, useDateRange, periodParams } from "./reportShared";
 import { reportsApi, type EngineRoomSummaries } from "@/api/reports";
 import { purchaseOrderApi } from "@/api/procurement";
 import { fmtKes } from "@/api/expenses";
@@ -21,16 +21,6 @@ import { useState } from "react";
 // {current, previous, series}: value, delta vs the equivalent prior period,
 // sparkline of the current window, and a click-through to the report that
 // explains it. The attention feed answers "what needs me today?"
-
-const PERIODS = [
-    { key: "today",        label: "Today" },
-    { key: "last_7",       label: "7 Days" },
-    { key: "last_30",      label: "30 Days" },
-    { key: "this_month",   label: "This Month" },
-    { key: "last_month",   label: "Last Month" },
-    { key: "this_quarter", label: "Quarter" },
-    { key: "this_year",    label: "Year" },
-];
 
 function Sparkline({ series }: { series?: Record<string, number> }) {
     const values = Object.values(series ?? {}).map(Number);
@@ -407,11 +397,14 @@ function AgingCard({ aging, onBucket }: { aging: any; onBucket: (bucket: string,
 }
 
 function ExecutiveOverview() {
-    const [period, setPeriod] = useState("this_month");
+    // The same header, period and outlet as every report — the period follows
+    // the reader in from (and out to) the other pages.
+    const dr = useDateRange("this_month");
+    const query = periodParams(dr.preset, dr.start, dr.end, dr.outlet);
     const [drill, setDrill] = useState<{ metric: string; label: string; money?: boolean; bucket?: string; reportPath?: string } | null>(null);
     const { data, isLoading } = useQuery({
-        queryKey: ["executive-dashboard", period],
-        queryFn: () => reportsApi.executive(period),
+        queryKey: ["executive-dashboard", query],
+        queryFn: () => reportsApi.executive(query),
         staleTime: 60_000,
     });
 
@@ -419,18 +412,18 @@ function ExecutiveOverview() {
 
     return (
         <div className="space-y-4">
-            {/* Period selector */}
-            <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1">
-                {PERIODS.map(pd => (
-                    <button key={pd.key} onClick={() => setPeriod(pd.key)}
-                        className={clsx("shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors",
-                            period === pd.key
-                                ? "bg-surface-900 text-white"
-                                : "bg-white border border-surface-200 text-surface-500 hover:border-brand-300 hover:text-brand-600")}>
-                        {pd.label}
-                    </button>
-                ))}
-            </div>
+            <ReportPageHeader
+                title="Executive Overview"
+                subtitle="How the business is doing: what changed, where the pressure is, and where to look next. Tap a figure for the records behind it."
+                preset={dr.preset}
+                start={dr.start}
+                end={dr.end}
+                onPresetChange={dr.handlePreset}
+                onStartChange={dr.setStart}
+                onEndChange={dr.setEnd}
+                outlet={dr.outlet}
+                onOutletChange={dr.setOutlet}
+            />
 
             {isLoading || !k ? (
                 <div className="flex justify-center py-12"><Spinner /></div>
@@ -444,7 +437,7 @@ function ExecutiveOverview() {
                         2-up on phones, 4-up on laptops, 8-up on big displays. */}
                     <div className="grid grid-cols-2 md:grid-cols-4 2xl:grid-cols-8 gap-3">
                         <MetricCard label="Sold" metric={k.sales.revenue} money
-                            onOpen={() => setDrill({ metric: "revenue", label: "Revenue — source orders", money: true, reportPath: "/reports/sales" })} />
+                            onOpen={() => setDrill({ metric: "revenue", label: "Sold — the orders", money: true, reportPath: "/reports/sales" })} />
                         <MetricCard label="Collected" metric={k.money.collected} money
                             onOpen={() => setDrill({ metric: "collected", label: "Collected — settled payments", money: true, reportPath: can_financial_path(k) })} />
                         <MetricCard label="Outstanding"
@@ -508,7 +501,7 @@ function ExecutiveOverview() {
                 where each row may lead (permission-checked); nothing is guessed here. */}
             {drill && (
                 <DrillPanel metric={drill.metric} title={drill.label}
-                    query={{ period, ...(drill.bucket ? { bucket: drill.bucket } : {}) }}
+                    query={{ ...query, ...(drill.bucket ? { bucket: drill.bucket } : {}) }}
                     onClose={() => setDrill(null)} />
             )}
         </div>
@@ -793,15 +786,6 @@ export default function ReportsPage() {
 
     return (
         <div className="space-y-8 animate-fade-in">
-            <div>
-                <h1 className="page-title">Executive Overview</h1>
-                <p className="page-subtitle">
-                    How the business is doing: what changed, where the pressure
-                    is, and where to look next. Tap a figure for the records
-                    behind it.
-                </p>
-            </div>
-
             <ExecutiveOverview />
             <SchedulesSummary />
 

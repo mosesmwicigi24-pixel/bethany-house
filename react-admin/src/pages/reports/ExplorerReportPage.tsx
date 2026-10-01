@@ -25,6 +25,7 @@ import {
     ReportPageHeader,
     DrillPanel,
     useDateRange,
+    periodParams,
 } from "./reportShared";
 
 const DIMENSIONS: { key: string; label: string }[] = [
@@ -69,10 +70,7 @@ export default function ExplorerReportPage() {
     const [openRow, setOpenRow] = useState<ExplorerRow | null>(null);
 
     const query = {
-        period: "custom",
-        from: dr.start,
-        to: dr.end,
-        ...(dr.outlet ? { outlet_id: Number(dr.outlet) } : {}),
+        ...periodParams(dr.preset, dr.start, dr.end, dr.outlet),
         ...Object.fromEntries(Object.entries(filters).map(([k, v]) => [`f_${k}`, v])),
     };
 

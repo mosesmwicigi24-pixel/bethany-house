@@ -21,8 +21,10 @@ export const reportsApi = {
         get<any>(`${BASE}/dashboard/kpis`, { params: { days } }),
 
     // Executive dashboard — the MetricEngine-backed command centre.
-    executive: (period: string, outletId?: number) =>
-        get<any>(`${BASE}/executive`, { params: { period, ...(outletId ? { outlet_id: outletId } : {}) } }),
+    // The Executive figures for a window (periodParams: a known preset by name,
+    // so an in-progress period compares like for like; anything else as dates).
+    executive: (params: Record<string, string | number>) =>
+        get<any>(`${BASE}/executive`, { params }),
 
     // Production intelligence: cycle times, bottlenecks, tailors, QC, capacity, materials.
     productionIntelligence: (from: string, to: string, outletId?: number) =>
@@ -146,11 +148,9 @@ export const reportsApi = {
         get<any>(`${BASE}/drill/${metric}`, { params }),
 
     // Staff, Outlets & Performance: outlets and salespeople, this window vs the previous.
-    performance: (params: { start_date: string; end_date: string; outlet_id?: number }) =>
-        get<PerformanceReport>(`${BASE}/performance`, { params: {
-            period: "custom", from: params.start_date, to: params.end_date,
-            ...(params.outlet_id ? { outlet_id: params.outlet_id } : {}),
-        } }),
+    // params from periodParams(): a known preset by name (like-for-like previous period), else dates.
+    performance: (params: Record<string, string | number>) =>
+        get<PerformanceReport>(`${BASE}/performance`, { params }),
 
     // Where the period's orders went: sold / unconfirmed / lost / refunded, and who lost them.
     outcomes: (params: Record<string, any>) => get<OrderOutcomes>(`${BASE}/outcomes`, { params }),
@@ -163,11 +163,8 @@ export const reportsApi = {
     explorerOrders: (params: Record<string, any>) => get<any>(`${BASE}/explorer/orders`, { params }),
 
     // Audit & Data Quality: where the records behind the figures are incomplete.
-    dataQuality: (params: { start_date: string; end_date: string; outlet_id?: number }) =>
-        get<DataQualityReport>(`${BASE}/data-quality`, { params: {
-            period: "custom", from: params.start_date, to: params.end_date,
-            ...(params.outlet_id ? { outlet_id: params.outlet_id } : {}),
-        } }),
+    dataQuality: (params: Record<string, string | number>) =>
+        get<DataQualityReport>(`${BASE}/data-quality`, { params }),
 
     // Outlets a report can be filtered by (reports.view; no POS access needed).
     outlets: () => get<{ data: { id: number; name: string }[] }>(`${BASE}/outlets`),

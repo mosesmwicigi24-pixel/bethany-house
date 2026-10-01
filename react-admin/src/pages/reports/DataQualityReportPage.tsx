@@ -24,6 +24,7 @@ import {
     ReportPageHeader,
     useDateRange,
     useReportTab,
+    periodParams,
 } from "./reportShared";
 
 const TABS = ["sales", "money", "customers"] as const;
@@ -57,8 +58,8 @@ export default function DataQualityReportPage() {
     const [tab, setTab] = useReportTab<DqTab>(TABS, "sales");
 
     const { data, isLoading, isError } = useQuery({
-        queryKey: ["report-data-quality", dr.start, dr.end, dr.outlet],
-        queryFn: () => reportsApi.dataQuality(dr.params),
+        queryKey: ["report-data-quality", dr.preset, dr.start, dr.end, dr.outlet],
+        queryFn: () => reportsApi.dataQuality(periodParams(dr.preset, dr.start, dr.end, dr.outlet)),
     });
 
     const checks = data?.checks ?? [];
