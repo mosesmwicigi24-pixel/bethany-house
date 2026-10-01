@@ -291,41 +291,7 @@ class ReportController extends Controller
         // that paid part of it. This now answers "how much money arrived through
         // each method", which is the question a paybill statement can answer
         // back. `count` stays a count of ORDERS so the column keeps its meaning.
-        $byPaymentMethod = DB::table('payments as p')
-            ->join('orders as o', 'o.id', '=', 'p.order_id')
-            ->leftJoin('payment_methods as pm', 'pm.code', '=', 'p.payment_method')
-            // The panel answers "HOW did the collected money arrive", so it
-            // shares the Collected tile's basis exactly: payment date, not
-            // order date. Windowing on o.created_at made it a receivables
-            // view wearing a treasury caption — on live data the two sides
-            // diverged by KES 315,780 of old orders' balances paid this
-            // period, and the divergence was invisible on same-day fixtures.
-            ->whereBetween(DB::raw('COALESCE(p.paid_at, p.created_at)'), [$start, $end])
-            ->whereNotIn('o.status', \App\Models\Order::DEAD_STATUSES)
-            // Reporting in KES converts every convertible rail at the reporting
-            // rate — the same rule as the Collected tile, so the method rows
-            // FOOT to it. The old hard KES filter left foreign payments off
-            // this panel entirely while Collected counted them, an
-            // irreconcilable gap nobody could explain from the screen.
-            ->when($reportInKes,
-                fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('p.currency_code')),
-                fn ($q) => $q->whereRaw('UPPER(p.currency_code) = ?', [$currency]))
-            ->when($outletId,  fn ($q) => $q->where('o.outlet_id',  $outletId))
-            ->when($orderType, fn ($q) => $q->where('o.order_type', $orderType))
-            ->where('p.status', 'paid')
-            ->where(fn ($q) => $q->where('p.requires_approval', false)
-                                 ->orWhereNull('p.requires_approval')
-                                 ->orWhere('p.approval_status', 'approved'))
-            ->selectRaw("
-                p.payment_method,
-                COALESCE(pm.name, p.payment_method) AS method_name,
-                pm.description                      AS method_description,
-                COUNT(DISTINCT o.id)                AS count,
-                (COALESCE(SUM({$payKes}), 0))::float8 AS total
-            ")
-            ->groupBy('p.payment_method', 'pm.name', 'pm.description')
-            ->orderByRaw("(COALESCE(SUM({$payKes}), 0))::float8 DESC")
-            ->get();
+        $byPaymentMethod = $this->paymentMethodBreakdown($start, $end, $reportInKes, $currency, $outletId, $orderType);
 
         // Hourly distribution - useful for staffing decisions
         $byHour = $base()->selectRaw("
@@ -1160,31 +1126,74 @@ class ReportController extends Controller
     public function salesByPaymentMethod(Request $request)
     {
         [$start, $end] = $this->dateRange($request);
-        [$amtKes, $inKes, $currency] = $this->reportingMoney($request, 'currency_code');
-        $total = $amtKes('total_amount');
+        [, $inKes, $currency] = $this->reportingMoney($request, 'p.currency_code');
+        $outletId  = $request->filled('outlet_id')  ? (int) $request->outlet_id : null;
+        $orderType = $request->filled('order_type') ? (string) $request->order_type : null;
 
-        // DELIBERATELY paid-only, unlike the other sales reports: an order that
-        // has not been paid cannot be attributed to a payment method, so the
-        // recognised basis would mean inventing a rail for money that never
-        // moved. This is the one sales figure where paid-only is the question.
-        $rows = DB::table('orders')
-            ->whereBetween('created_at', [$start, $end])
-            ->where('payment_status', 'paid')
-            ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency, 'currency_code'))
-            ->whereNotNull('payment_method')
-            ->selectRaw("
-                payment_method,
-                COUNT(*) AS count,
-                (COALESCE(SUM({$total}), 0))::float8 AS total
-            ")
-            ->groupBy('payment_method')
-            ->orderByRaw("(COALESCE(SUM({$total}), 0))::float8 DESC")
-            ->get();
+        // The SAME breakdown the sales summary's panel shows, from the same
+        // query (paymentMethodBreakdown). This endpoint used to run its own:
+        // fully paid ORDERS grouped by the order's single payment_method,
+        // summing order totals. On production for September (cycle 9) it said
+        // 1,523,450 across 157 orders while the panel — and Collected — said
+        // 1,942,320. No screen calls it today; anything that does now gets the
+        // panel's answer, not a second one.
+        $rows = $this->paymentMethodBreakdown($start, $end, $inKes, $currency, $outletId, $orderType);
 
         return response()->json([
             'period'          => ['start' => $start, 'end' => $end],
+            'basis'           => 'Money received in this period, by payment date, net of refunds. '
+                               . 'Adds up to Collected. A split payment counts under each method it used.',
+            'total'           => round((float) $rows->sum('total'), 2),
             'payment_methods' => $rows,
         ]);
+    }
+
+    /**
+     * How the collected money arrived, by payment method: the panel on the
+     * sales summary and the /sales/by-payment-method endpoint both read this,
+     * so the two cannot disagree again (cycle 9).
+     */
+    private function paymentMethodBreakdown(string $start, string $end, bool $reportInKes, string $currency, ?int $outletId, ?string $orderType)
+    {
+        $payKes = $reportInKes
+            ? \App\Support\ReportingCurrency::kes('p.amount - COALESCE(p.refund_amount, 0)', 'p.currency_code')
+            : 'p.amount - COALESCE(p.refund_amount, 0)';
+
+        return DB::table('payments as p')
+            ->join('orders as o', 'o.id', '=', 'p.order_id')
+            ->leftJoin('payment_methods as pm', 'pm.code', '=', 'p.payment_method')
+            // The panel answers "HOW did the collected money arrive", so it
+            // shares the Collected tile's basis exactly: payment date, not
+            // order date. Windowing on o.created_at made it a receivables
+            // view wearing a treasury caption — on live data the two sides
+            // diverged by KES 315,780 of old orders' balances paid this
+            // period, and the divergence was invisible on same-day fixtures.
+            ->whereBetween(DB::raw('COALESCE(p.paid_at, p.created_at)'), [$start, $end])
+            ->whereNotIn('o.status', \App\Models\Order::DEAD_STATUSES)
+            // Reporting in KES converts every convertible rail at the reporting
+            // rate — the same rule as the Collected tile, so the method rows
+            // FOOT to it. The old hard KES filter left foreign payments off
+            // this panel entirely while Collected counted them, an
+            // irreconcilable gap nobody could explain from the screen.
+            ->when($reportInKes,
+                fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('p.currency_code')),
+                fn ($q) => $q->whereRaw('UPPER(p.currency_code) = ?', [$currency]))
+            ->when($outletId,  fn ($q) => $q->where('o.outlet_id',  $outletId))
+            ->when($orderType, fn ($q) => $q->where('o.order_type', $orderType))
+            ->where('p.status', 'paid')
+            ->where(fn ($q) => $q->where('p.requires_approval', false)
+                                 ->orWhereNull('p.requires_approval')
+                                 ->orWhere('p.approval_status', 'approved'))
+            ->selectRaw("
+                p.payment_method,
+                COALESCE(pm.name, p.payment_method) AS method_name,
+                pm.description                      AS method_description,
+                COUNT(DISTINCT o.id)                AS count,
+                (COALESCE(SUM({$payKes}), 0))::float8 AS total
+            ")
+            ->groupBy('p.payment_method', 'pm.name', 'pm.description')
+            ->orderByRaw("(COALESCE(SUM({$payKes}), 0))::float8 DESC")
+            ->get();
     }
 
     /**
@@ -1872,6 +1881,16 @@ class ReportController extends Controller
             ->whereIn('status', ['approved', 'paid'])
             ->sum('amount_kes');
 
+        // Spending nobody has approved yet is rightly left out of net profit —
+        // but a "net profit" that is silent about it overstates what a reader
+        // will take home (cycle 9: September showed net = gross while 20
+        // expenses, KES 11,240, waited for approval). Stated, not netted.
+        $pendingOpex = DB::table('expenses')
+            ->whereBetween('expense_date', [substr($start, 0, 10), substr($end, 0, 10)])
+            ->where('status', 'pending_approval')
+            ->selectRaw('COUNT(*) AS n, (COALESCE(SUM(amount_kes), 0))::float8 AS kes')
+            ->first();
+
         // Expenses by category for breakdown
         $expensesByCategory = DB::table('expenses')
             ->leftJoin('expense_categories', 'expenses.category_id', '=', 'expense_categories.id')
@@ -1968,6 +1987,7 @@ class ReportController extends Controller
             'gross_profit'               => round($grossProfit, 2),
             'gross_profit_margin_percent'=> $grossMargin,
             'operating_expenses'         => round($opex, 2),
+            'expenses_pending_approval'  => ['count' => (int) $pendingOpex->n, 'amount' => round((float) $pendingOpex->kes, 2)],
             'net_profit'                 => round($netProfit, 2),
             'net_margin'                 => $netMargin,
             'tax_collected'              => round($taxCollected, 2),
@@ -1976,13 +1996,21 @@ class ReportController extends Controller
             'comparison'                 => $comparison,
         ]);
 
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+            // A deliberate refusal (403 without reports.export, 422 on a bad
+            // window) is an answer, not a failure. This catch used to swallow
+            // it and turn it into a 500 (cycle 9).
+            throw $e;
         } catch (\Throwable $e) {
+            // The detail goes to the log, never to the caller: this response
+            // used to carry the exception's message, file and line — server
+            // paths, and SQL text whenever the database was the one failing.
             \Illuminate\Support\Facades\Log::error('profitLoss failed', [
                 'error' => $e->getMessage(),
                 'file'  => $e->getFile(),
                 'line'  => $e->getLine(),
             ]);
-            return response()->json(['message' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()], 500);
+            return response()->json(['message' => 'The profit and loss report could not be produced.'], 500);
         }
     }
 
@@ -2548,6 +2576,15 @@ class ReportController extends Controller
             'is_active'    => 'boolean',
         ]);
 
+        // A schedule mails the report to whoever is listed, so it may carry no
+        // more than its author can read: the financial report needs
+        // reports.financial, exactly as /reports/pdf/financial does (cycle 9).
+        abort_if(
+            $validated['report_type'] === 'financial' && ! $request->user()?->can('reports.financial'),
+            403,
+            'Scheduling the financial report requires the reports.financial permission.',
+        );
+
         $id  = $validated['report_type'] . '_' . \Illuminate\Support\Str::slug($validated['name']);
         $key = 'report_schedule_' . $id;
 
@@ -2579,14 +2616,20 @@ class ReportController extends Controller
     // LEGACY EXPORT STUBS (now replaced by ?export=csv on each endpoint)
     // =========================================================================
 
+    /**
+     * Neither endpoint produces a file, and nothing calls them. exportPDF used
+     * to answer 501 claiming no PDF library was installed — false since the
+     * dompdf reports at /reports/pdf/* exist. 410 says what is true: this door
+     * is closed, and names the ones that work (cycle 9).
+     */
     public function exportPDF(Request $request)
     {
-        return response()->json(['message' => 'Use ?export=csv on any report endpoint for data export. PDF export requires a server-side PDF library (e.g. barryvdh/laravel-dompdf).'], 501);
+        return response()->json(['message' => 'This endpoint does not produce files. PDFs: GET /api/v1/admin/reports/pdf/{sales|customers|inventory|procurement|production|financial}.'], 410);
     }
 
     public function exportExcel(Request $request)
     {
-        return response()->json(['message' => 'Use ?export=csv on any report endpoint. The CSV uses UTF-8 BOM so it opens correctly in Excel.'], 200);
+        return response()->json(['message' => 'This endpoint does not produce files. Add ?export=csv to any report endpoint; the CSV opens in Excel.'], 410);
     }
     // =========================================================================
     // PRODUCT COSTING & PROFITABILITY

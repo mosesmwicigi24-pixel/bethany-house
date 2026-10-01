@@ -215,12 +215,20 @@ class ReportRevenueBasisTest extends TestCase
     {
         $this->seedTheAwkwardCases();
 
-        $rows = collect($this->report('/api/v1/admin/reports/sales/by-payment-method')['payment_methods']);
+        $rows      = collect($this->report('/api/v1/admin/reports/sales/by-payment-method')['payment_methods']);
+        $collected = (float) $this->report('/api/v1/admin/reports/sales/summary')['summary']['total_collected'];
 
         // An order nobody has paid cannot be attributed to a payment rail, so
-        // this ONE sales figure is paid-only on purpose: 4,000, not 18,800.
-        // Pinned so a later sweep does not "fix" it into nonsense.
-        $this->assertSame(4_000.0, round((float) $rows->sum('total'), 2));
+        // this ONE sales figure is never the recognised 18,800. Pinned so a
+        // later sweep does not "fix" it into revenue.
+        //
+        // It used to be 4,000: the totals of FULLY PAID orders only — a proxy
+        // for "money that moved" that dropped every part payment. Since cycle 9
+        // it is the money itself: payments received, the same query the
+        // summary's panel uses, so it equals Collected. The principle this
+        // test guards is unchanged; only the proxy is gone.
+        $this->assertNotSame(18_800.0, round((float) $rows->sum('total'), 2), 'never the revenue figure');
+        $this->assertSame(round($collected, 2), round((float) $rows->sum('total'), 2), 'the money received, by rail');
     }
 
     public function test_the_dashboard_agrees_with_the_sales_page(): void

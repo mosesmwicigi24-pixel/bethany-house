@@ -75,6 +75,22 @@ class ReportCurrencyAndBuyerTest extends TestCase
         ]);
     }
 
+    /**
+     * The money that settled a paid order, in its own currency. The payment-
+     * method breakdown reads PAYMENTS (money received, cycle 9) — an order
+     * marked paid with no payment row, which production never holds, has no
+     * rail to be attributed to.
+     */
+    private function settled(Order $order): Order
+    {
+        \App\Models\Payment::create([
+            'order_id' => $order->id, 'amount' => $order->total_amount, 'currency_code' => $order->currency_code,
+            'payment_method' => 'cash', 'status' => 'paid', 'paid_at' => now(),
+        ]);
+
+        return $order;
+    }
+
     private function paidOrder(Customer $customer, string $currency, float $total): Order
     {
         return Order::create([
@@ -152,8 +168,8 @@ class ReportCurrencyAndBuyerTest extends TestCase
 
     public function test_sales_by_payment_method_converts(): void
     {
-        $this->paidOrder($this->walkIn('P1'), 'KES', 3_000);
-        $this->paidOrder($this->walkIn('P2'), 'USD', 50);       // 6,400
+        $this->settled($this->paidOrder($this->walkIn('P1'), 'KES', 3_000));
+        $this->settled($this->paidOrder($this->walkIn('P2'), 'USD', 50));       // 6,400
 
         $row = collect($this->report('/api/v1/admin/reports/sales/by-payment-method')['payment_methods'])->first();
 
@@ -169,8 +185,8 @@ class ReportCurrencyAndBuyerTest extends TestCase
         ]);
         \App\Support\ReportingCurrency::forget();
 
-        $this->paidOrder($this->walkIn('Known'), 'KES', 1_000);
-        $this->paidOrder($this->walkIn('Unrated'), 'GBP', 9_999);
+        $this->settled($this->paidOrder($this->walkIn('Known'), 'KES', 1_000));
+        $this->settled($this->paidOrder($this->walkIn('Unrated'), 'GBP', 9_999));
 
         $rows = collect($this->report('/api/v1/admin/reports/sales/by-payment-method')['payment_methods']);
         $row  = $rows->first();
@@ -183,8 +199,8 @@ class ReportCurrencyAndBuyerTest extends TestCase
 
     public function test_asking_for_a_foreign_currency_reports_it_natively(): void
     {
-        $this->paidOrder($this->walkIn('N1'), 'USD', 100);
-        $this->paidOrder($this->walkIn('N2'), 'KES', 5_000);
+        $this->settled($this->paidOrder($this->walkIn('N1'), 'USD', 100));
+        $this->settled($this->paidOrder($this->walkIn('N2'), 'KES', 5_000));
 
         $row = collect($this->report('/api/v1/admin/reports/sales/by-payment-method?currency_code=USD')['payment_methods'])->first();
 

@@ -66,6 +66,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'report.window' => \App\Http\Middleware\NormalisesReportWindow::class,
             // Every figure on a report from the same instant (cycle 8).
             'report.snapshot' => \App\Http\Middleware\ReadsOneSnapshot::class,
+            // Customer phones and emails need customers.view (owner, cycle 9).
+            'report.contacts' => \App\Http\Middleware\RedactsCustomerContacts::class,
         ]);
 
         // Every staff API call → request_logs (who looked at what). Staff-only
@@ -128,5 +130,18 @@ return Application::configure(basePath: dirname(__DIR__))
             ->withoutOverlapping();
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // SQLSTATE 57014 = a query cancelled by statement_timeout — the ceiling
+        // ReadsOneSnapshot puts on a report (cycle 9). It is not a server fault
+        // to be hidden behind "Server Error": it is an answer the reader can
+        // act on. 503, because the same request on a narrower window will work.
+        $exceptions->render(function (\Illuminate\Database\QueryException $e, \Illuminate\Http\Request $request) {
+            if ((string) ($e->errorInfo[0] ?? $e->getCode()) !== '57014') {
+                return null;
+            }
+
+            return response()->json([
+                'message' => 'This report took too long to produce. Narrow the date range and try again.',
+                'reason'  => 'report_timeout',
+            ], 503);
+        });
     })->create();

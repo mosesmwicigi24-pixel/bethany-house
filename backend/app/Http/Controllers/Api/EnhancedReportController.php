@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Api\Concerns\ExportsCsv;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * The three reports that are served from this class rather than ReportController.
@@ -31,6 +31,11 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class EnhancedReportController extends Controller
 {
+    // The section's one export door (cycle 9): these two endpoints had their
+    // own `export === 'csv'` branch and handed a file to anyone with
+    // reports.view, never asking for reports.export.
+    use ExportsCsv;
+
     // =========================================================================
     // INVENTORY
     // =========================================================================
@@ -104,8 +109,8 @@ class EnhancedReportController extends Controller
             'total_retail_value_on_hand' => $rows->sum('total_retail_value_on_hand'),
         ];
 
-        if ($request->get('export') === 'csv') {
-            return $this->csvResponse('inventory_valuation', $rows->toArray(),
+        if ($this->wantsExport($request)) {
+            return $this->csvTable('inventory_valuation', $rows->toArray(),
                 ['category_name', 'outlet_name', 'sku_count', 'total_units', 'total_retail_value',
                  'total_units_on_hand', 'total_retail_value_on_hand']);
         }
@@ -155,8 +160,8 @@ class EnhancedReportController extends Controller
                 : 0,
         ];
 
-        if ($request->get('export') === 'csv') {
-            return $this->csvResponse('tax_report', $rows->toArray(),
+        if ($this->wantsExport($request)) {
+            return $this->csvTable('tax_report', $rows->toArray(),
                 ['tax_name', 'tax_rate', 'order_count', 'taxable_amount', 'tax_collected']);
         }
 
@@ -232,27 +237,19 @@ class EnhancedReportController extends Controller
     }
 
     /**
-     * Stream a CSV response for the given data and columns.
+     * Pick the named columns, title the headers, and hand them to the shared
+     * ExportsCsv::csvResponse — the same in-memory file every other report
+     * produces (BOM, no-store), instead of a stream of its own.
      */
-    private function csvResponse(string $filename, array $data, array $columns): StreamedResponse
+    private function csvTable(string $filename, array $data, array $columns): \Illuminate\Http\Response
     {
-        $headers = [
-            'Content-Type'        => 'text/csv',
-            'Content-Disposition' => "attachment; filename=\"{$filename}_" . date('Y-m-d') . ".csv\"",
-            'Cache-Control'       => 'no-cache, no-store, must-revalidate',
-        ];
+        $headers = array_map(fn ($c) => str_replace('_', ' ', ucwords($c, '_')), $columns);
+        $rows    = array_map(function ($row) use ($columns) {
+            $row = (array) $row;
 
-        return response()->stream(function () use ($data, $columns) {
-            $handle = fopen('php://output', 'w');
+            return array_map(fn ($c) => $row[$c] ?? '', $columns);
+        }, $data);
 
-            fputcsv($handle, array_map(fn($c) => str_replace('_', ' ', ucwords($c, '_')), $columns));
-
-            foreach ($data as $row) {
-                $row = (array) $row;
-                fputcsv($handle, array_map(fn($c) => $row[$c] ?? '', $columns));
-            }
-
-            fclose($handle);
-        }, 200, $headers);
+        return $this->csvResponse($headers, $rows, $filename);
     }
 }

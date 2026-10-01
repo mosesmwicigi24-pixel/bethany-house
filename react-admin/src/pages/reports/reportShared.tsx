@@ -178,6 +178,7 @@ export function ExportCsvButton({
 }) {
     const [loading, setLoading] = useState(false);
     const toast = useToastStore();
+    const { can } = usePermissions();
 
     const download = useCallback(async () => {
         setLoading(true);
@@ -190,6 +191,10 @@ export function ExportCsvButton({
             setLoading(false);
         }
     }, [path, params, toast]);
+
+    // The server refuses a file without reports.export; a button that can
+    // only fail ("CSV export failed") is worse than no button.
+    if (!can("reports.export")) return null;
 
     return (
         <button
@@ -1043,6 +1048,11 @@ export function ReportPdfButton({
     compact?: boolean;
 }) {
     const { download, loading } = useReportPdf();
+    const { can } = usePermissions();
+
+    // A PDF is a file out of the building, like a CSV: reports.export
+    // (owner, 2026-10-01). The server refuses it without; so does the button.
+    if (!can("reports.export")) return null;
 
     return (
         <button

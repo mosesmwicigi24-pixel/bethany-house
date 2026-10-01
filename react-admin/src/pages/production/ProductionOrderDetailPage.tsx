@@ -2399,12 +2399,16 @@ export default function ProductionOrderDetailPage() {
                         alongside the height. */}
                     <PdfDownloadButton type="production-orders" id={order.id} label="PDF"
                         className="!rounded-lg !px-2.5 !h-[30px] !min-h-[30px] sm:!h-9 sm:!min-h-[36px] !text-[11px] sm:!text-xs" />
+                    {/* Costing shows profit and margins: reports.financial, as
+                        the server now requires (cycle 9). */}
+                    {can("reports.financial") && (
                     <button
                         onClick={() => navigate(`/reports/production/costing/${order.id}`)}
                         className={clsx(ACT_BTN, "hover:!border-success-300 hover:!text-success-700")}
                     >
                         <span className="hidden sm:inline">📊 </span>Costing<span className="hidden sm:inline">&nbsp;Report</span>
                     </button>
+                    )}
 
                     {/* WIP Board / Edit / Cancel / Delete live behind ⋯ at the end
                         of the row. They are occasional, one is navigation and two

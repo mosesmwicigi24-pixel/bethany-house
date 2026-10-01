@@ -26,6 +26,10 @@ class OrderPipelineQueueTest extends TestCase
         $user = User::factory()->create();
         $user->assignRole(Role::findOrCreate('admin', 'sanctum'));
         $user->givePermissionTo(Permission::findOrCreate('reports.view', 'sanctum'));
+        // Cycle 9: customer contacts need customers.view, recording outreach
+        // needs customers.insights, stock at cost needs reports.financial.
+        // This user works the feature under test, so holds what it needs.
+        $user->givePermissionTo(Permission::findOrCreate('customers.view', 'sanctum'));
 
         return $user;
     }

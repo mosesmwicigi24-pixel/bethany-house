@@ -1356,7 +1356,7 @@ Route::prefix('v1')->group(function () {
             // report.window: one date contract for the whole section — a
             // caller using the other page's spelling got a different window
             // back, silently (D4). See NormalisesReportWindow.
-            Route::middleware(['permission:reports.view,sanctum', 'report.window', 'report.snapshot'])->prefix('reports')->group(function () {
+            Route::middleware(['permission:reports.view,sanctum', 'report.window', 'report.snapshot', 'report.contacts'])->prefix('reports')->group(function () {
                 Route::get('/executive',       [\App\Http\Controllers\Api\ExecutiveReportController::class, 'executive']);
                 Route::get('/drill/{metric}',  [\App\Http\Controllers\Api\ExecutiveReportController::class, 'drill']);
                 Route::get('/production-intelligence', [\App\Http\Controllers\Api\ExecutiveReportController::class, 'productionIntelligence']);
@@ -1374,7 +1374,11 @@ Route::prefix('v1')->group(function () {
                 Route::get('/win-back',                 [\App\Http\Controllers\Api\ExecutiveReportController::class, 'winBack']);
                 Route::get('/order-pipeline',           [\App\Http\Controllers\Api\ExecutiveReportController::class, 'orderPipeline']);
                 Route::get('/second-purchase',          [\App\Http\Controllers\Api\ExecutiveReportController::class, 'secondPurchase']);
-                Route::post('/win-back/outreach',       [\App\Http\Controllers\Api\ExecutiveReportController::class, 'winBackOutreach']);
+                // A WRITE, and a phone-to-revenue lookup for any number given:
+                // it belongs to whoever works the customer book, not to every
+                // report reader (cycle 9).
+                Route::post('/win-back/outreach',       [\App\Http\Controllers\Api\ExecutiveReportController::class, 'winBackOutreach'])
+                    ->middleware('permission:customers.insights,sanctum');
                 Route::get('/outreach-log',             [\App\Http\Controllers\Api\ExecutiveReportController::class, 'outreachLog']);
                 Route::get('/financial-intelligence',   [\App\Http\Controllers\Api\ExecutiveReportController::class, 'financialIntelligence']);
                 Route::get('/dashboard/kpis',  [ReportController::class, 'dashboardKPIs']);
@@ -1436,8 +1440,13 @@ Route::prefix('v1')->group(function () {
                     Route::get('/summary',             [ReportController::class, 'productionSummary']);
                     Route::get('/efficiency',          [ReportController::class, 'productionEfficiency']);
                     Route::get('/tailor-productivity', [ReportController::class, 'tailorProductivity']);
-                    Route::get('/costing-summary',     [ReportController::class, 'productionCostingSummary']);
-                    Route::get('/costing/{id}',        [ReportController::class, 'productCostingReport']);
+                    // Gross profit, net profit and margins per product: the
+                    // financial figures every other page keeps behind
+                    // reports.financial (cycle 9).
+                    Route::get('/costing-summary',     [ReportController::class, 'productionCostingSummary'])
+                        ->middleware('permission:reports.financial,sanctum');
+                    Route::get('/costing/{id}',        [ReportController::class, 'productCostingReport'])
+                        ->middleware('permission:reports.financial,sanctum');
                 });
             });
 
@@ -1532,7 +1541,9 @@ Route::prefix('v1')->group(function () {
             // date resolver and none of the section's normalisation, so a PDF
             // exported with from/to covered the last 30 days instead of the
             // window on the screen it came from.
-            Route::middleware(['permission:reports.view,sanctum', 'report.window', 'report.snapshot'])
+            // reports.export: a PDF leaves the building exactly as a CSV does
+            // (owner, 2026-10-01) — one rule for every file a report produces.
+            Route::middleware(['permission:reports.view,sanctum', 'permission:reports.export,sanctum', 'report.window', 'report.snapshot'])
                 ->prefix('reports/pdf')
                 ->name('reports.pdf.')
                 ->group(function () {

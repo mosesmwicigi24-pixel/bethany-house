@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { reportsApi } from "@/api/reports";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
 import { clsx } from "clsx";
 import dayjs from "dayjs";
@@ -41,6 +42,10 @@ import {
 
 export default function ProductionReportPage() {
     const dr = useDateRange("this_month");
+    // Costing shows gross profit, net profit and margins — the server holds it
+    // behind reports.financial (cycle 9), so the tab is offered only then.
+    const { can } = usePermissions();
+    const canSeeCosting = can("reports.financial");
     const [activeTab, setActiveTab] = useState<
         "overview" | "products" | "tailors" | "costing" | "intelligence"
     >("overview");
@@ -54,7 +59,7 @@ export default function ProductionReportPage() {
     const { data: costingData, isLoading: costingLoading } = useQuery({
         queryKey: ["report-production-costing", dr.start, dr.end],
         queryFn: () => reportsApi.productionCostingSummary(dr.params),
-        enabled: !!dr.start && !!dr.end && activeTab === "costing",
+        enabled: !!dr.start && !!dr.end && activeTab === "costing" && canSeeCosting,
     });
 
     if (isLoading)
@@ -193,7 +198,7 @@ export default function ProductionReportPage() {
                         { id: "tailors",  label: "Tailors" },
                         { id: "costing",  label: "Costing & Profitability" },
                         { id: "intelligence", label: "🧠 Intelligence" },
-                    ] as const).map((tab) => (
+                    ] as const).filter((tab) => tab.id !== "costing" || canSeeCosting).map((tab) => (
                         <button
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id)}
