@@ -24,9 +24,6 @@ import {
     BarChart,
     Bar,
     ComposedChart,
-    PieChart,
-    Pie,
-    Cell,
     XAxis,
     YAxis,
     CartesianGrid,
@@ -39,6 +36,7 @@ import dayjs from "dayjs";
 import {
     KPI_GRID,
     KpiCard,
+    ShareBars,
     ReportPdfButton,
     SectionHeader,
     TableWrapper,
@@ -346,44 +344,7 @@ export default function SalesReportPage() {
                         {(byCatQuery.data?.categories ?? []).length > 0 && (
                             <div className="card p-5">
                                 <SectionHeader title="Revenue by Category" />
-                                <ResponsiveContainer width="100%" height={220}>
-                                    <PieChart>
-                                        <Pie
-                                            data={byCatQuery.data.categories}
-                                            dataKey="total_revenue"
-                                            nameKey="category_name"
-                                            cx="50%"
-                                            cy="50%"
-                                            outerRadius={80}
-                                            label={({
-                                                category_name,
-                                                percent,
-                                            }: any) =>
-                                                `${category_name} ${(percent * 100).toFixed(0)}%`
-                                            }
-                                            labelLine={false}
-                                        >
-                                            {byCatQuery.data.categories.map(
-                                                (_: any, i: number) => (
-                                                    <Cell
-                                                        key={i}
-                                                        fill={
-                                                            CHART_COLORS[
-                                                                i %
-                                                                    CHART_COLORS.length
-                                                            ]
-                                                        }
-                                                    />
-                                                ),
-                                            )}
-                                        </Pie>
-                                        <Tooltip
-                                            formatter={(v) =>
-                                                fmtKes(v as number)
-                                            }
-                                        />
-                                    </PieChart>
-                                </ResponsiveContainer>
+                                <ShareBars rows={(byCatQuery.data.categories ?? []).map((d: any) => ({ label: String(d.category_name ?? "—"), value: Number(d.total_revenue ?? 0) }))} money />
                             </div>
                         )}
 
@@ -544,7 +505,7 @@ export default function SalesReportPage() {
                                 />
                             </SectionHeader>
                         </div>
-                        <TableWrapper>
+                        <TableWrapper ranked>
                             <table className="w-full">
                                 <thead>
                                     <tr className="border-y border-line bg-surface-50/50">
@@ -704,7 +665,7 @@ export default function SalesReportPage() {
                                 />
                             </SectionHeader>
                         </div>
-                        <TableWrapper>
+                        <TableWrapper ranked>
                             <table className="w-full">
                                 <thead>
                                     <tr className="border-y border-line bg-surface-50/50">

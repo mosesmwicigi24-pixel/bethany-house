@@ -13,9 +13,6 @@ import {
     Bar,
     LineChart,
     Line,
-    PieChart,
-    Pie,
-    Cell,
     XAxis,
     YAxis,
     CartesianGrid,
@@ -26,6 +23,7 @@ import {
 import {
     KPI_GRID,
     KpiCard,
+    ShareBars,
     ReportPdfButton,
     SectionHeader,
     TableWrapper,
@@ -408,44 +406,7 @@ export default function FinancialReportPage() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="card p-5">
                                 <SectionHeader title="Expenses by Category" />
-                                <ResponsiveContainer width="100%" height={220}>
-                                    <PieChart>
-                                        <Pie
-                                            data={expCats}
-                                            dataKey="total"
-                                            nameKey="category"
-                                            cx="50%"
-                                            cy="50%"
-                                            outerRadius={80}
-                                            label={({
-                                                category,
-                                                percent,
-                                            }: any) =>
-                                                `${category} ${(percent * 100).toFixed(0)}%`
-                                            }
-                                            labelLine={false}
-                                        >
-                                            {expCats.map(
-                                                (_: any, i: number) => (
-                                                    <Cell
-                                                        key={i}
-                                                        fill={
-                                                            CHART_COLORS[
-                                                                i %
-                                                                    CHART_COLORS.length
-                                                            ]
-                                                        }
-                                                    />
-                                                ),
-                                            )}
-                                        </Pie>
-                                        <Tooltip
-                                            formatter={(v) =>
-                                                fmtKes(v as number)
-                                            }
-                                        />
-                                    </PieChart>
-                                </ResponsiveContainer>
+                                <ShareBars rows={(expCats ?? []).map((d: any) => ({ label: String(d.category ?? "—"), value: Number(d.total ?? 0) }))} money />
                             </div>
                             <div className="card p-5">
                                 <SectionHeader title="Category Breakdown" />
