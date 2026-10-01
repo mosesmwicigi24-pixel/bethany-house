@@ -20,6 +20,7 @@ import {
     TH,
     TH_R,
     KpiCard,
+    tablistKeys,
     TableWrapper,
     ReportPageHeader,
     useDateRange,
@@ -118,11 +119,11 @@ export default function DataQualityReportPage() {
                     )}
 
                     <div className="border-b border-line">
-                        <nav className="flex gap-1 -mb-px overflow-x-auto">
+                        <nav className="flex gap-1 -mb-px overflow-x-auto" role="tablist" aria-label="Report sections" onKeyDown={tablistKeys}>
                             {TABS.map((t) => {
                                 const n = checks.filter((c) => c.group === t && c.count > 0).length;
                                 return (
-                                    <button key={t} onClick={() => setTab(t)}
+                                    <button key={t} onClick={() => setTab(t)} role="tab" aria-selected={tab === t}
                                         className={clsx(
                                             "px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors",
                                             tab === t ? "border-brand-500 text-brand-600" : "border-transparent text-surface-500 hover:text-surface-700",

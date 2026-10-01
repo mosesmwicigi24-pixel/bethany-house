@@ -471,7 +471,7 @@ function ExecutiveOverview() {
                             value={fmtKes(k.money.aging?.deposits_held?.amount ?? 0)}
                             sub={`${k.money.aging?.deposits_held?.orders ?? 0} undelivered — not income`}
                             onOpen={() => setDrill({ metric: "outstanding", bucket: "deposits", label: "Deposits held (undelivered)", money: true })} />
-                        <div className="col-span-2 md:col-span-1">
+                        <div className="col-span-2 lg:col-span-1">
                             <AgingCard aging={k.money.aging}
                                 onBucket={(bucket, label) => setDrill({ metric: "outstanding", bucket, label, money: true, reportPath: "/pos/outstanding-balances" })} />
                         </div>
@@ -534,7 +534,7 @@ function MetricGroup({ title, children }: { title: string; children: React.React
     return (
         <section aria-label={title}>
             <h2 className="text-sm font-semibold text-surface-900 mb-2">{title}</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{children}</div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{children}</div>
         </section>
     );
 }
