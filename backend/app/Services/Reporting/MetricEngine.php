@@ -597,7 +597,7 @@ class MetricEngine
      * Non-money arms (production quantities, new customers) have no original
      * and say so with NULL rather than repeating a number in another unit.
      */
-    public function drill(string $metric, Carbon $s, Carbon $e, int $page = 1, ?string $bucket = null): array
+    public function drill(string $metric, Carbon $s, Carbon $e, int $page = 1, ?string $bucket = null, ?int $salespersonId = null): array
     {
         $perPage  = 25;
         $who      = "TRIM(CONCAT(COALESCE(customer_first_name,''),' ',COALESCE(customer_last_name,'')))";
@@ -607,6 +607,7 @@ class MetricEngine
         $q = match ($metric) {
             'revenue', 'orders' => $this->salesBase()
                 ->whereBetween(DB::raw('orders.created_at'), [$s, $e])
+                ->when($salespersonId, fn ($q) => $q->where('orders.created_by', $salespersonId))
                 ->orderByDesc('orders.created_at')
                 ->selectRaw("orders.id, order_number AS ref, orders.created_at AS at, {$who} AS who,
                     payment_status AS detail, {$totalKes} AS amount,
@@ -615,6 +616,7 @@ class MetricEngine
 
             'collected' => $this->moneyBase()
                 ->whereBetween(DB::raw(self::PAID_AT), [$s, $e])
+                ->when($salespersonId, fn ($q) => $q->where('o.created_by', $salespersonId))
                 ->orderByDesc(DB::raw(self::PAID_AT))
                 ->selectRaw("p.id, o.order_number AS ref, " . self::PAID_AT . " AS at,
                     TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,''))) AS who,
@@ -681,6 +683,93 @@ class MetricEngine
             'total'      => $total,
             'page'       => max(1, $page),
             'per_page'   => $perPage,
+        ];
+    }
+
+    /**
+     * Outlets and salespeople, on the SAME definitions as every other page
+     * (reports build, 2026-10-01): sold = salesBase (recognised, rated
+     * currencies, the report's outlet), collected = moneyBase by payment date,
+     * buyers = BuyerIdentity, unconfirmed = pipeline carts. Each with the
+     * previous equivalent window. A salesperson is the staff member who raised
+     * the order (orders.created_by); an order with none — a web checkout — is
+     * reported under its own line, never dropped. Operational sales figures
+     * only: nothing here tracks a person's logins or activity.
+     */
+    public function performance(Carbon $s, Carbon $e, Carbon $ps, Carbon $pe): array
+    {
+        $buyer = \App\Support\BuyerIdentity::sql('orders');
+
+        $sold = fn (string $dim, Carbon $a, Carbon $b) => $this->salesBase()
+            ->whereBetween('orders.created_at', [$a, $b])
+            ->groupBy("orders.{$dim}")
+            ->selectRaw("orders.{$dim} AS k, COUNT(*) AS orders,
+                COALESCE(SUM(" . self::totalKes() . "), 0) AS sold,
+                COUNT(DISTINCT {$buyer}) AS buyers")
+            ->get()->keyBy(fn ($r) => (string) $r->k);
+
+        $collected = fn (string $dim) => $this->moneyBase()
+            ->whereBetween(DB::raw(self::PAID_AT), [$s, $e])
+            ->groupBy("o.{$dim}")
+            ->selectRaw("o.{$dim} AS k, COALESCE(SUM((p.amount - COALESCE(p.refund_amount,0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code))), 0) AS collected")
+            ->get()->keyBy(fn ($r) => (string) $r->k);
+
+        $unconfirmed = fn (string $dim) => DB::table('orders')
+            ->whereIn('orders.status', \App\Models\Order::PIPELINE_STATUSES)
+            ->whereBetween('orders.created_at', [$s, $e])
+            ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(orders.currency_code)) IS NOT NULL")
+            ->when($this->outletIds, fn ($q) => $q->whereIn('orders.outlet_id', $this->outletIds))
+            ->groupBy("orders.{$dim}")
+            ->selectRaw("orders.{$dim} AS k, COUNT(*) AS carts, COALESCE(SUM(" . self::totalKes() . "), 0) AS value")
+            ->get()->keyBy(fn ($r) => (string) $r->k);
+
+        $build = function (string $dim, \Closure $name) use ($sold, $collected, $unconfirmed, $s, $e, $ps, $pe) {
+            $now  = $sold($dim, $s, $e);
+            $prev = $sold($dim, $ps, $pe);
+            $col  = $collected($dim);
+            $unc  = $unconfirmed($dim);
+            $keys = collect([$now, $prev, $col, $unc])->flatMap(fn ($c) => $c->keys())->unique();
+
+            return $keys->map(function ($k) use ($now, $prev, $col, $unc, $name) {
+                $n = $now->get($k);
+                $orders = (int) ($n->orders ?? 0);
+                $soldV  = round((float) ($n->sold ?? 0), 2);
+
+                return [
+                    'id'                => $k === '' ? null : (int) $k,
+                    'name'              => $name($k === '' ? null : (int) $k),
+                    'sold'              => $soldV,
+                    'sold_previous'     => round((float) ($prev->get($k)->sold ?? 0), 2),
+                    'orders'            => $orders,
+                    'orders_previous'   => (int) ($prev->get($k)->orders ?? 0),
+                    'aov'               => $orders > 0 ? round($soldV / $orders, 2) : null,
+                    'buyers'            => (int) ($n->buyers ?? 0),
+                    'collected'         => round((float) ($col->get($k)->collected ?? 0), 2),
+                    'unconfirmed_carts' => (int) ($unc->get($k)->carts ?? 0),
+                    'unconfirmed_value' => round((float) ($unc->get($k)->value ?? 0), 2),
+                ];
+            })->sortByDesc('sold')->values()->all();
+        };
+
+        $outletNames = DB::table('outlets')->pluck('name', 'id');
+        $userNames   = DB::table('users')->selectRaw("id, TRIM(CONCAT(COALESCE(first_name,''),' ',COALESCE(last_name,''))) AS n")
+            ->pluck('n', 'id');
+
+        $outlets     = $build('outlet_id', fn ($id) => $id === null ? 'No outlet' : ($outletNames[$id] ?? "Outlet #{$id}"));
+        $salespeople = $build('created_by', fn ($id) => $id === null ? 'No salesperson (web checkout)' : (($userNames[$id] ?? '') ?: "Staff #{$id}"));
+
+        $sum = fn (array $rows, string $k) => round(array_sum(array_column($rows, $k)), 2);
+
+        return [
+            'outlets'     => $outlets,
+            'salespeople' => $salespeople,
+            // Both breakdowns partition the same orders, so each sums to the
+            // whole business for the window — the reconciliation a reader needs.
+            'totals'      => [
+                'sold'      => $sum($outlets, 'sold'),
+                'orders'    => (int) $sum($outlets, 'orders'),
+                'collected' => $sum($outlets, 'collected'),
+            ],
         ];
     }
 

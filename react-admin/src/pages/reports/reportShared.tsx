@@ -645,7 +645,8 @@ export function ReportPageHeader({
 }: {
     title: string;
     subtitle: string;
-    reportType: ReportType;
+    /** Omit for a page with no printed (PDF) version — no button that cannot work. */
+    reportType?: ReportType;
     exportPath: string;
     params: Record<string, any>;
     preset: DatePreset;
@@ -747,7 +748,7 @@ export function ReportPageHeader({
                 />
 
                 {/* Download PDF */}
-                <ReportPdfButton type={reportType as any} params={params} compact />
+                {reportType && <ReportPdfButton type={reportType as any} params={params} compact />}
 
                 {/* Print */}
                 <button
@@ -763,8 +764,8 @@ export function ReportPageHeader({
                 {/* Divider */}
                 <span className="w-px h-4 bg-surface-200 mx-1" aria-hidden />
 
-                {/* Schedule */}
-                {canExport && (
+                {/* Schedule — only for a report the scheduler can produce */}
+                {canExport && reportType && (
                 <button
                     onClick={() => setShowSchedule(true)}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-surface-600 hover:bg-surface-100 hover:text-surface-900 transition-colors"
@@ -776,6 +777,7 @@ export function ReportPageHeader({
                 </button>
                 )}
 
+                {reportType && (
                 <button
                     onClick={() => setShowSchedules(s => !s)}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-surface-600 hover:bg-surface-100 hover:text-surface-900 transition-colors"
@@ -785,13 +787,14 @@ export function ReportPageHeader({
                     </svg>
                     Schedules {showSchedules ? "▲" : "▼"}
                 </button>
+                )}
             </div>
 
             {/* Schedules list (inline) */}
             {showSchedules && (
                 <div className="border-t border-line px-5 py-4 bg-surface-50/60">
                     <p className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-3">Active Schedules</p>
-                    <SchedulesList reportType={reportType} />
+                    {reportType && <SchedulesList reportType={reportType} />}
                 </div>
             )}
 
@@ -799,7 +802,7 @@ export function ReportPageHeader({
             <DrillHost start={start} end={end} outlet={outlet} />
 
             {/* Schedule create modal */}
-            {showSchedule && (
+            {showSchedule && reportType && (
                 <ScheduleModal
                     reportType={reportType}
                     params={params}

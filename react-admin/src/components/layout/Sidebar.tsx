@@ -416,8 +416,8 @@ const NAV: NavGroup[] = [
     // pages, each answering one management question, instead of many shallow
     // ones. Unconfirmed Orders is a tab of Sales & Orders; Neema, Channels and
     // Geography are tabs of Customers & Neema; the Intelligence group's Signals
-    // is a Reports page. Staff & Outlets, the Business Explorer and Data
-    // Quality join this list when they are built — never as empty pages.
+    // is a Reports page. The Business Explorer and Data Quality join this list
+    // when they are built — never as empty pages.
     {
         label: "Reports",
         items: [
@@ -429,6 +429,7 @@ const NAV: NavGroup[] = [
             { label: "Production & Fulfilment", href: "/reports/production",  icon: "production",      permission: "reports.view" },
             { label: "Inventory",               href: "/reports/inventory",   icon: "stock",           permission: "reports.view" },
             { label: "Procurement & Suppliers", href: "/reports/procurement", icon: "purchase-orders", permission: "reports.view" },
+            { label: "Staff, Outlets & Performance", href: "/reports/performance", icon: "outlets", permission: "reports.view" },
             { label: "Signals",                 href: "/reports/signals",     icon: "intelligence",    permission: "reports.view" },
         ],
     },

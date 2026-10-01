@@ -111,6 +111,7 @@ const REPORT_PAGE_LABELS: Record<string, string> = {
     inventory: 'Inventory',
     procurement: 'Procurement & Suppliers',
     signals: 'Signals',
+    performance: 'Staff, Outlets & Performance',
 }
 
 function buildBreadcrumbs(pathname: string) {
