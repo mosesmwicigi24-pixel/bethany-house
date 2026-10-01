@@ -95,6 +95,8 @@ return Application::configure(basePath: dirname(__DIR__))
         \App\Console\Commands\PurgeOldActivityLogs::class,
         \App\Console\Commands\RunScheduledBackups::class,
         \App\Console\Commands\SealAuditTrail::class,
+        \App\Console\Commands\MergeDuplicateCustomers::class,
+        \App\Console\Commands\UnmergeCustomers::class,
         \App\Console\Commands\VerifyAuditTrail::class,
         \App\Console\Commands\SendAuditDigest::class,
         \App\Console\Commands\PruneDownloadArchive::class,
