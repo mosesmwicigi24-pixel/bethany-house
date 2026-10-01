@@ -220,7 +220,7 @@ class CustomerController extends Controller
             'last_name'          => 'required|string|max:255',
             // Email optional - unique across users only when present
             'email'              => 'nullable|email|unique:users,email|max:255',
-            'phone'              => 'nullable|string|max:32',
+            'phone'              => ['nullable', 'string', 'max:32', new \App\Rules\CustomerPhone()],
             'type'               => 'sometimes|in:individual,business',
             'company_name'       => 'required_if:type,business|nullable|string|max:255',
             'tax_number'         => 'nullable|string|max:50',
@@ -320,7 +320,7 @@ class CustomerController extends Controller
             'first_name'         => 'sometimes|string|max:255',
             'last_name'          => 'sometimes|string|max:255',
             'email'              => ['sometimes', 'email', Rule::unique('users')->ignore($customer->user_id)],
-            'phone'              => 'nullable|string|max:32',
+            'phone'              => ['nullable', 'string', 'max:32', new \App\Rules\CustomerPhone($customer->phone)],
             'type'               => 'sometimes|in:individual,business',
             'company_name'       => 'nullable|string|max:255',
             'tax_number'         => 'nullable|string|max:50',
@@ -719,7 +719,7 @@ class CustomerController extends Controller
             'first_name' => 'required|string|max:255',
             'last_name'  => 'required|string|max:255',
             'email'      => 'nullable|email|unique:users,email|max:255',
-            'phone'      => 'nullable|string|max:32',
+            'phone'      => ['nullable', 'string', 'max:32', new \App\Rules\CustomerPhone()],
             'company'    => 'nullable|string|max:255',
         ]);
 

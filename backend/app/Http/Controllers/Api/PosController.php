@@ -585,6 +585,22 @@ class PosController extends Controller
         return Order::withoutViewerScope()->where('client_request_id', $clientRequestId)->first();
     }
 
+    /**
+     * The phone rule for a sale: a newly typed phone must be a real number
+     * (App\Rules\CustomerPhone); the attached customer's own phone and, on an
+     * edit, the order's current phone may be resent as they are — so a sale to
+     * a customer whose record holds a legacy note is never blocked.
+     */
+    private function customerPhoneRule(Request $request, ?string $orderPhone = null): \App\Rules\CustomerPhone
+    {
+        $customerId = (int) $request->input('customer_id');
+
+        return new \App\Rules\CustomerPhone(array_filter([
+            $customerId > 0 ? \App\Models\Customer::whereKey($customerId)->value('phone') : null,
+            $orderPhone,
+        ]));
+    }
+
     public function createSale(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -595,13 +611,13 @@ class PosController extends Controller
             'customer_id'            => 'nullable|exists:customers,id',
             'customer_first_name'    => 'nullable|string|max:255',
             'customer_last_name'     => 'nullable|string|max:255',
-            'customer_phone'         => 'nullable|string|max:30',
+            'customer_phone'         => ['nullable', 'string', 'max:30', $this->customerPhoneRule($request)],
             'customer_email'         => 'nullable|email|max:255',
             // New customer creation (id === -1 on frontend)
             'new_customer'                     => 'nullable|array',
             'new_customer.first_name'          => 'required_with:new_customer|string|max:100',
             'new_customer.last_name'           => 'nullable|string|max:100',
-            'new_customer.phone'               => 'required_with:new_customer|string|max:30',
+            'new_customer.phone'               => ['required_with:new_customer', 'string', 'max:30', new \App\Rules\CustomerPhone()],
             'new_customer.email'               => 'nullable|email|max:255',
             // The organisation a walk-in buys for — a parish, a school, a bank.
             // Without it, staff put "Cooperative Bank of Kenya" in the phone
@@ -3047,12 +3063,12 @@ class PosController extends Controller
             'customer_id'                          => 'nullable|exists:customers,id',
             'customer_first_name'                  => 'nullable|string|max:255',
             'customer_last_name'                   => 'nullable|string|max:255',
-            'customer_phone'                       => 'nullable|string|max:30',
+            'customer_phone'                       => ['nullable', 'string', 'max:30', $this->customerPhoneRule($request, $order->customer_phone)],
             'customer_email'                       => 'nullable|email|max:255',
             'new_customer'                         => 'nullable|array',
             'new_customer.first_name'              => 'required_with:new_customer|string|max:100',
             'new_customer.last_name'               => 'nullable|string|max:100',
-            'new_customer.phone'                   => 'required_with:new_customer|string|max:30',
+            'new_customer.phone'                   => ['required_with:new_customer', 'string', 'max:30', new \App\Rules\CustomerPhone()],
             'new_customer.email'                   => 'nullable|email|max:255',
             'new_customer.company'                 => 'nullable|string|max:255',
             // Country drives currency for international POS orders
@@ -3442,12 +3458,12 @@ class PosController extends Controller
             'customer_id'                          => 'nullable|exists:customers,id',
             'customer_first_name'                  => 'nullable|string|max:255',
             'customer_last_name'                   => 'nullable|string|max:255',
-            'customer_phone'                       => 'nullable|string|max:30',
+            'customer_phone'                       => ['nullable', 'string', 'max:30', $this->customerPhoneRule($request)],
             'customer_email'                       => 'nullable|email|max:255',
             'new_customer'                         => 'nullable|array',
             'new_customer.first_name'              => 'required_with:new_customer|string|max:100',
             'new_customer.last_name'               => 'nullable|string|max:100',
-            'new_customer.phone'                   => 'required_with:new_customer|string|max:30',
+            'new_customer.phone'                   => ['required_with:new_customer', 'string', 'max:30', new \App\Rules\CustomerPhone()],
             'new_customer.email'                   => 'nullable|email|max:255',
             'new_customer.company'                 => 'nullable|string|max:255',
             // Country drives currency for international POS orders

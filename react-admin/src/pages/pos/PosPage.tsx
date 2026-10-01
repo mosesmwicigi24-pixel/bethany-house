@@ -248,6 +248,8 @@ interface CartDraft {
     cartDiscVal:          number;
     attachedCustomer:     AttachedCustomer | null;
     customerCountryCode:  string;
+    orderNote?:           string;
+    pendingOrderNote?:    string;
     shippingAmount:       number;
     selectedShippingId:   number | null;
     shippingAddress:      string;
@@ -673,7 +675,11 @@ aria-label="Close" title="Remove customer">
         const nameParts = manualName.trim().split(" ");
         const firstName = nameParts[0] ?? "";
         const lastName  = nameParts.slice(1).join(" ");
-        const canSave   = firstName.trim().length > 0 && manualPhone.trim().length > 0;
+        // Letters mean a note, not a number — say so here, before checkout. The
+        // server (App\Rules\CustomerPhone) is the authority on everything else.
+        const phoneIsNote = /[A-Za-z]/.test(manualPhone);
+        const phoneDigits = manualPhone.replace(/\D/g, "").length;
+        const canSave   = firstName.trim().length > 0 && manualPhone.trim().length > 0 && !phoneIsNote;
         return (
             <div className="space-y-2 px-3 py-2.5 border border-brand-200 rounded-xl bg-brand-50/60">
                 <div className="flex items-center justify-between">
@@ -694,9 +700,15 @@ aria-label="Close" title="Remove customer">
                         onChange={e => setManualName(`${firstName} ${e.target.value}`.trim())}
                         className="input text-xs py-1.5" />
                 </div>
-                <input type="tel" placeholder="Phone number *"
+                <input type="tel" placeholder="Phone number * (0722 123 456 or +256 …)"
                     value={manualPhone} onChange={e => setManualPhone(e.target.value)}
-                    className="input text-xs py-1.5 w-full" />
+                    aria-invalid={phoneIsNote}
+                    className={clsx("input text-xs py-1.5 w-full", phoneIsNote && "border-danger focus:ring-danger/20")} />
+                {phoneIsNote ? (
+                    <p className="text-2xs text-danger">That looks like a note, not a phone number. Put it in the order note, and enter the customer&apos;s phone here.</p>
+                ) : manualPhone.trim() !== "" && phoneDigits < 9 ? (
+                    <p className="text-2xs text-surface-500">Enter the full number — with + and the country code if it isn&apos;t Kenyan.</p>
+                ) : null}
                 <input type="email" placeholder="Email address (optional)"
                     value={manualEmail} onChange={e => setManualEmail(e.target.value)}
                     className="input text-xs py-1.5 w-full" />
@@ -1868,6 +1880,14 @@ export default function PosPage() {
     // Customer country code - drives currency for international POS orders.
     // Declared here (before earlyCountryObj) to avoid temporal dead zone.
     const [customerCountryCode, setCustomerCountryCode] = useState<string>(_draft?.customerCountryCode ?? "");
+    // The order's own note — the place for "referred by I&M", measurements, how
+    // they paid. Without it the phone box was the only free-text field on a sale.
+    const [orderNote, setOrderNote] = useState<string>(_draft?.orderNote ?? "");
+    // The note the pending order was last saved with. A note edited after the
+    // order exists updates that order IN PLACE — the item signature stays
+    // items-only, so a note never voids an order or mints a new number.
+    const [pendingOrderNote, setPendingOrderNote] = useState<string>(_draft?.pendingOrderNote ?? "");
+    const noteChanged = orderNote.trim() !== pendingOrderNote;
 
     // ── Early currency derivation for product queries ─────────────────────────
     // Needed before selectedOutlet is declared so it can go into React Query keys.
@@ -2062,6 +2082,7 @@ export default function PosPage() {
         setPendingOrderId(incomingId);
         setPendingOrderData(openPendingData);
         setPendingOrderCartSig(cartSignature(cart));
+        setPendingOrderNote(((openPendingData as any).notes ?? "").trim());
         toast.info(`Resuming order ${openPendingData.order_number} — press Charge to continue.`);
     }, [openPendingData]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2304,6 +2325,8 @@ export default function PosPage() {
             cartDiscVal,
             attachedCustomer,
             customerCountryCode,
+            orderNote,
+            pendingOrderNote,
             shippingAmount,
             selectedShippingId,
             shippingAddress,
@@ -2313,7 +2336,7 @@ export default function PosPage() {
             isResumedOrder,
         });
     }, [ // eslint-disable-line react-hooks/exhaustive-deps
-        cart, cartDiscType, cartDiscVal, attachedCustomer, customerCountryCode,
+        cart, cartDiscType, cartDiscVal, attachedCustomer, customerCountryCode, orderNote, pendingOrderNote,
         shippingAmount, selectedShippingId, shippingAddress,
         pendingOrderId, pendingOrderData, pendingOrderCartSig, isResumedOrder,
         selectedOutletId,
@@ -2345,6 +2368,8 @@ export default function PosPage() {
         setShowShippingPanel(false);
         setAttachedCustomer(null);
         setCustomerCountryCode("");
+        setOrderNote("");
+        setPendingOrderNote("");
         setMobilePanel("products");
         setRaisedProdOrders([]);
         setPendingOrderId(null);
@@ -2571,6 +2596,7 @@ export default function PosPage() {
             ...(attachedCustomer?.id === -1 && attachedCustomer.new_customer_data ? { new_customer: attachedCustomer.new_customer_data } : {}),
             // Country drives currency resolution on the backend
             ...(customerCountryCode ? { customer_country_code: customerCountryCode } : {}),
+            ...(orderNote.trim() ? { notes: orderNote.trim() } : {}),
             // MTO items must NOT appear in items[] — the backend stock check
             // would reject them immediately (they have zero stock by definition).
             // They are represented solely via production_items[]; the backend
@@ -2589,7 +2615,7 @@ export default function PosPage() {
             ...(selectedShippingId ? { shipping_method_id: selectedShippingId } : {}),
             ...(productionItems.length > 0 ? { production_items: productionItems } : {}),
         };
-    }, [cart, selectedOutletId, attachedCustomer, customerCountryCode, cartDiscType, cartDiscVal, shippingAmount, shippingFeeFromMethod, selectedShippingId]);
+    }, [cart, selectedOutletId, attachedCustomer, customerCountryCode, orderNote, cartDiscType, cartDiscVal, shippingAmount, shippingFeeFromMethod, selectedShippingId]);
 
     // Step 1 mutation - create pending order
     const pendingOrderMutation = useMutation({
@@ -2597,6 +2623,7 @@ export default function PosPage() {
         onSuccess: (res) => {
             setPendingOrderId(res.order_id);
             setPendingOrderData(res);
+            setPendingOrderNote(orderNote.trim());
             setIsResumedOrder(false);
             // Snapshot the cart fingerprint at order-creation time.
             // The mismatch warning compares against this - not against server totals -
@@ -2622,6 +2649,7 @@ export default function PosPage() {
         onSuccess: (res) => {
             setPendingOrderData(res);
             setPendingOrderCartSig(cartSignature(cart));
+            setPendingOrderNote(orderNote.trim());
             // Keep isResumedOrder true - still a resumed order
         },
         onError: (err: { message: string }) => {
@@ -2648,7 +2676,7 @@ export default function PosPage() {
         // If there's already a pending order with no cart changes, just clear
         // locally — no need to create a duplicate.
         if (pendingOrderId && pendingOrderCartSig !== "" &&
-            cartSignature(cart) === pendingOrderCartSig) {
+            cartSignature(cart) === pendingOrderCartSig && !noteChanged) {
             const orderNum = pendingOrderData?.order_number ?? pendingOrderData?.order?.order_number ?? "";
             toast.success(`Order ${orderNum} is already saved — find it in Sales History.`);
             // Dismiss so auto-resume never re-attaches this order on return
@@ -2656,9 +2684,11 @@ export default function PosPage() {
             clearCart();
             return;
         }
-        // If this is a resumed order (restored from history), UPDATE it in place
-        // rather than creating a duplicate pending order.
-        if (isResumedOrder && pendingOrderId) {
+        // If this is a resumed order (restored from history) — or only its note
+        // changed — UPDATE it in place rather than creating a duplicate.
+        const onlyNoteChanged = !!pendingOrderId && pendingOrderCartSig !== ""
+            && cartSignature(cart) === pendingOrderCartSig && noteChanged;
+        if ((isResumedOrder || onlyNoteChanged) && pendingOrderId) {
             const idToSave = pendingOrderId;
             updateOrderMutation.mutate(
                 { id: idToSave, payload: buildCartPayload() },
@@ -2693,7 +2723,7 @@ export default function PosPage() {
             },
         });
     }, [selectedOutletId, cart, pendingOrderId, pendingOrderCartSig, pendingOrderData,
-        isResumedOrder, buildCartPayload, saveOrderMutation, updateOrderMutation, clearCart, qc, toast]);
+        isResumedOrder, noteChanged, buildCartPayload, saveOrderMutation, updateOrderMutation, clearCart, qc, toast]);
 
     // Step 2 mutation - record payment against existing order
     const payMutation = useMutation({
@@ -2833,7 +2863,15 @@ export default function PosPage() {
         const cartChanged = sigChanged || totalsMismatch;
 
         // Case B — the attached order already matches the cart: pay it as-is.
+        // If only the note changed, save it onto the same order first.
         if (pendingOrderId && !cartChanged) {
+            if (noteChanged) {
+                updateOrderMutation.mutate(
+                    { id: pendingOrderId, payload: buildCartPayload() },
+                    { onSuccess: () => setShowPaymentModal(true) },
+                );
+                return;
+            }
             setShowPaymentModal(true);
             return;
         }
@@ -2866,7 +2904,7 @@ export default function PosPage() {
             onSuccess: () => setShowPaymentModal(true),
         });
     }, [selectedOutletId, cart, pendingOrderId, pendingOrderData, pendingOrderCartSig,
-        isResumedOrder, totals.total, buildCartPayload, pendingOrderMutation, updateOrderMutation]);
+        isResumedOrder, noteChanged, totals.total, buildCartPayload, pendingOrderMutation, updateOrderMutation]);
 
     const selectedOutlet = outlets.find((o) => o.id === selectedOutletId);
     // ── Effective currency / international flag ────────────────────────────────
@@ -3316,6 +3354,18 @@ export default function PosPage() {
                                 attached={attachedCustomer}
                                 onAttach={setAttachedCustomer}
                                 onClear={() => setAttachedCustomer(null)}
+                            />
+                        </div>
+                        {/* Order note — notes belong here, never in the phone */}
+                        <div className="px-3 pb-2">
+                            <textarea
+                                value={orderNote}
+                                onChange={e => setOrderNote(e.target.value)}
+                                rows={orderNote ? 2 : 1}
+                                maxLength={1000}
+                                placeholder="Order note — referred by, measurements, how they're paying…"
+                                aria-label="Order note"
+                                className="input text-xs py-1.5 w-full resize-none"
                             />
                         </div>
                         {/* Country picker - for international POS orders */}
@@ -3802,6 +3852,10 @@ export default function PosPage() {
                         } else {
                             setAttachedCustomer(null);
                         }
+
+                        // ── 4b. Restore the order's note, so saving again keeps it ─────
+                        setOrderNote(sale.notes ?? "");
+                        setPendingOrderNote((sale.notes ?? "").trim());
 
                         // ── 5. Mark as resumed and reattach the order ─────────────────
                         setIsResumedOrder(true);

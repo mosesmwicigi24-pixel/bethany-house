@@ -40,4 +40,39 @@ class Phone
 
         return $digits;
     }
+
+    /**
+     * The number as the REPORTS read it: a line-for-line mirror of the SQL
+     * function normalize_phone() (migration 2026_08_22_120000), returning
+     * '+' E.164 or NULL for anything that is not a plausible phone. The SQL is
+     * the definition — every buyer count, retention and match uses it — so a
+     * write-time check must accept exactly what it accepts, or the till would
+     * pass a value the reports then cannot read. PhoneParityTest runs both on
+     * the same inputs. canonical() above is a separate, older key (Neema joins).
+     */
+    public static function e164(?string $raw): ?string
+    {
+        if ($raw === null || preg_match('/[A-Za-z]/', $raw)) {
+            return null;                                   // a note, not a phone
+        }
+        $hadPlus = str_starts_with(trim($raw), '+');
+        $digits  = preg_replace('/[^0-9]/', '', $raw);
+        if (strlen($digits) < 9) {
+            return null;
+        }
+        if ($hadPlus || str_starts_with($digits, '254')) {
+            return '+' . $digits;
+        }
+        if (str_starts_with($digits, '00')) {
+            return '+' . substr($digits, 2);               // 00 = international prefix
+        }
+        if ($digits[0] === '0' && strlen($digits) === 10) {
+            return '+254' . substr($digits, 1);            // 0722… national form
+        }
+        if (strlen($digits) === 9) {
+            return '+254' . $digits;                       // bare subscriber number
+        }
+
+        return '+' . $digits;                              // carries its own country code
+    }
 }

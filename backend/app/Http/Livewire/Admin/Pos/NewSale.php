@@ -241,6 +241,10 @@ class NewSale extends Component
     {
         if (empty($this->cart)) return;
 
+        // A typed phone must be a real number — notes do not go in it
+        // (App\Rules\CustomerPhone, the same rule as the main till).
+        $this->validate(['customerPhone' => ['nullable', 'string', 'max:30', new \App\Rules\CustomerPhone()]]);
+
         // Validate cash received covers total
         if ($this->payMethod === 'cash' && (float) $this->cashReceived < $this->total) {
             $this->addError('cashReceived', 'Cash received is less than the total amount.');
