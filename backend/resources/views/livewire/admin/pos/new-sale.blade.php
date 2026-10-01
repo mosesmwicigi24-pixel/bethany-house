@@ -232,6 +232,7 @@
                                class="w-full rounded-lg border border-primary-100 px-3 py-1.5 text-xs text-primary-500 placeholder:text-primary-200 focus:outline-none focus:ring-1 focus:ring-primary-400 transition" />
                         <input wire:model="customerPhone" type="tel" placeholder="Phone"
                                class="w-full rounded-lg border border-primary-100 px-3 py-1.5 text-xs text-primary-500 placeholder:text-primary-200 focus:outline-none focus:ring-1 focus:ring-primary-400 transition" />
+                        @error('customerPhone') <p class="text-xs text-danger-500 mt-1">{{ $message }}</p> @enderror
                     </div>
                 </div>
 

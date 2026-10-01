@@ -95,7 +95,7 @@ class QuotationController extends Controller
             return response()->json(['message' => 'Only a draft quotation can be edited.'], 422);
         }
 
-        $validated = $this->validatePayload($request);
+        $validated = $this->validatePayload($request, $quotation->customer_phone);
 
         DB::transaction(function () use ($quotation, $validated) {
             $quotation->update([
@@ -280,7 +280,8 @@ class QuotationController extends Controller
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
-    private function validatePayload(Request $request): array
+    /** @param string|null $phoneOnFile the draft's current phone, which an edit may resend as it is */
+    private function validatePayload(Request $request, ?string $phoneOnFile = null): array
     {
         return $request->validate([
             'user_id'             => 'nullable|integer|exists:users,id',
@@ -290,7 +291,7 @@ class QuotationController extends Controller
             'shipping_amount'     => 'nullable|numeric|min:0',
             'served_by'           => 'nullable|string|max:150',
             'customer_email'      => 'nullable|email|max:255',
-            'customer_phone'      => 'nullable|string|max:20',
+            'customer_phone'      => ['nullable', 'string', 'max:20', new \App\Rules\CustomerPhone($phoneOnFile)],
             'customer_first_name' => 'nullable|string|max:100',
             'customer_last_name'  => 'nullable|string|max:100',
             'valid_until'         => 'nullable|date',

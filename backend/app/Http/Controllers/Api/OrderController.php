@@ -1731,16 +1731,25 @@ class OrderController extends Controller
 
     public function attachCustomer(Request $request, $id)
     {
+        // A newly typed phone must be a real number; the chosen customer's own
+        // phone and the order's current one may be resent as they are
+        // (App\Rules\CustomerPhone).
+        $customerId = (int) $request->input('customer_id');
+        $onFile = array_filter([
+            $customerId > 0 ? \App\Models\Customer::whereKey($customerId)->value('phone') : null,
+            Order::whereKey($id)->value('customer_phone'),
+        ]);
+
         $validated = $request->validate([
             'customer_id'         => 'nullable|exists:customers,id',
             'customer_first_name' => 'nullable|string|max:100',
             'customer_last_name'  => 'nullable|string|max:100',
             'customer_email'      => 'nullable|email|max:255',
-            'customer_phone'      => 'nullable|string|max:30',
+            'customer_phone'      => ['nullable', 'string', 'max:30', new \App\Rules\CustomerPhone($onFile)],
             'new_customer'        => 'nullable|array',
             'new_customer.first_name' => 'required_with:new_customer|string|max:100',
             'new_customer.last_name'  => 'nullable|string|max:100',
-            'new_customer.phone'      => 'required_with:new_customer|string|max:30',
+            'new_customer.phone'      => ['required_with:new_customer', 'string', 'max:30', new \App\Rules\CustomerPhone()],
             'new_customer.email'      => 'nullable|email|max:255',
             'new_customer.company'    => 'nullable|string|max:255',
         ]);
