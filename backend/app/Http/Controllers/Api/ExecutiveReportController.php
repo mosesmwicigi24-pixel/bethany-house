@@ -151,14 +151,25 @@ class ExecutiveReportController extends Controller
         [$s, $e] = MetricEngine::resolvePeriod($periodKey, $validated['from'] ?? null, $validated['to'] ?? null);
         $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
 
+        $health    = $engine->inventoryHealth();
+        $materials = $engine->materialStockHealth();
+
+        // Stock at COST is what the business paid — a financial figure, held
+        // behind reports.financial like every other (cycle 9). Retail value,
+        // units and counts stay: they are what running the shop needs.
+        if (! $request->user()->can('reports.financial')) {
+            $health['cost_value']    = null;
+            $materials['cost_value'] = null;
+        }
+
         return response()->json([
             'period'         => ['key' => $periodKey, 'start' => $s->toIso8601String(), 'end' => $e->toIso8601String()],
-            'health'         => $engine->inventoryHealth(),
+            'health'         => $health,
             'abc'            => $engine->abcClassification($s, $e),
             'stockout_risks' => $engine->stockoutRisks(),
             'dead_stock'     => $engine->deadStock(),
             'shrinkage'      => $engine->shrinkage($s, $e),
-            'materials'      => $engine->materialStockHealth(),
+            'materials'      => $materials,
         ]);
     }
 

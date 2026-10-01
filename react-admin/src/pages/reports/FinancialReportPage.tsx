@@ -372,6 +372,22 @@ export default function FinancialReportPage() {
                                             </p>
                                         </div>
                                     )}
+                                {/* Spending awaiting approval is not in net
+                                    profit (it is not spend yet) — but a net
+                                    figure silent about it reads as more than
+                                    the business will keep (cycle 9). */}
+                                {row.label === "(–) Operating Expenses" &&
+                                    Number(pl.expenses_pending_approval?.count ?? 0) > 0 && (
+                                        <div className="flex items-start gap-2 mb-3 ml-6 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+                                            <span aria-hidden="true">⏳</span>
+                                            <p className="text-xs text-amber-800">
+                                                {Number(pl.expenses_pending_approval.count).toLocaleString()}{" "}
+                                                expense{Number(pl.expenses_pending_approval.count) === 1 ? "" : "s"}{" "}
+                                                ({fmtKes(pl.expenses_pending_approval.amount)}) awaiting approval{" "}
+                                                {Number(pl.expenses_pending_approval.count) === 1 ? "is" : "are"} not counted here.
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -910,7 +926,9 @@ function FinancialIntelligence({ start, end }: { start: string; end: string }) {
                     sub={pnl.gross_margin_pct != null ? `${pnl.gross_margin_pct}% margin` : ""}
                     color={pnl.gross_profit >= 0 ? "text-success" : "text-danger"} />
                 <KpiCard label="Net After Expenses" value={fmtKes(pnl.net_profit)}
-                    sub={`${fmtKes(pnl.expenses)} expenses`}
+                    sub={(pnl.expenses_pending_approval?.count ?? 0) > 0
+                        ? `${fmtKes(pnl.expenses)} expenses · ${fmtKes(pnl.expenses_pending_approval.amount)} awaiting approval, not counted`
+                        : `${fmtKes(pnl.expenses)} expenses`}
                     color={pnl.net_profit >= 0 ? "text-success" : "text-danger"} />
             </div>
             <p className="text-2xs text-surface-400 -mt-3">

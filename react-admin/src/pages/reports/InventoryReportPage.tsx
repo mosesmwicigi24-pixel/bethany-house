@@ -1041,10 +1041,14 @@ function InventoryIntelligence({ start, end }: { start: string; end: string }) {
     return (
         <div className="space-y-6">
             <div className={KPI_GRID}>
-                <KpiCard label="Stock at Cost" value={fmtKes(health.cost_value)} sub={`${health.units} units · ${health.skus} SKUs`} />
+                {/* cost_value is null without reports.financial (cycle 9): say so,
+                    rather than printing KES 0 as though the stock were free. */}
+                <KpiCard label="Stock at Cost" value={health.cost_value == null ? "—" : fmtKes(health.cost_value)}
+                         sub={health.cost_value == null ? "needs financial access" : `${health.units} units · ${health.skus} SKUs`} />
                 <KpiCard label="Stock at Retail" value={fmtKes(health.retail_value)} sub="if everything sold at list" />
                 <KpiCard label="Low / Out" value={`${health.low_stock} / ${health.out_of_stock}`} color={health.out_of_stock > 0 ? "text-danger" : "text-warning"} sub="low stock / out of stock" />
-                <KpiCard label="Material Stock" value={fmtKes(materials.cost_value)} sub={`${materials.materials} materials at unit cost`} />
+                <KpiCard label="Material Stock" value={materials.cost_value == null ? "—" : fmtKes(materials.cost_value)}
+                         sub={materials.cost_value == null ? "needs financial access" : `${materials.materials} materials at unit cost`} />
             </div>
 
             <StockoutLosses />

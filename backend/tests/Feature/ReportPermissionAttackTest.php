@@ -26,8 +26,10 @@ use Tests\TestCase;
  *   - financial figures (expenses, P&L, net, cost, margin, profit) need
  *     reports.financial;
  *   - a file out of the building (CSV/spreadsheet) needs reports.export;
- *   - customer-level PII (names/phones/emails) should need customer
- *     permissions (customers.view / customers.insights);
+ *   - customer CONTACTS (phones/emails) need customers.view; names stay
+ *     visible to report viewers (owner, 2026-10-01);
+ *   - a PDF is a file out of the building: it needs reports.export too
+ *     (owner, 2026-10-01);
  *   - a non-staff user (self-registered customer) is refused everywhere.
  *
  * One request per test case (data provider), so a single broken query cannot
@@ -50,7 +52,23 @@ class ReportPermissionAttackTest extends TestCase
         '744000444', 'petra.pii@example.test', 'Petra',
     ];
 
-    public const SUPPLIER_MARKERS = ['supplier.pii@example.test'];
+    /**
+     * What a reports.view-only user must not see: contact details. Names are
+     * allowed (owner, 2026-10-01) — a report about who bought is unreadable
+     * without them; a phone number is what turns it into a call list.
+     */
+    public const CONTACT_MARKERS = [
+        '711000111', '722000222', '733000333', '744000444',
+        'zelda.pii@example.test', 'zelda.order@example.test', 'oscar.pii@example.test',
+        'wanda.pii@example.test', 'petra.pii@example.test',
+    ];
+
+    /**
+     * Cost-shaped keys a reports.view-only user may still see, with the reason.
+     * procurement-intelligence's est_cost is the price of a suggested purchase
+     * order — the figure a buyer needs to raise it, not a margin.
+     */
+    public const COST_KEYS_ALLOWED = ['procurement-intelligence' => ['suggestions.*.est_cost']];
 
     /** Every GET report route (from `php artisan route:list --json`). */
     public static function getRoutes(): array
@@ -333,18 +351,9 @@ class ReportPermissionAttackTest extends TestCase
         $this->assertSame(403, $res->getStatusCode(), "{$method} {$route}: " . self::excerpt($res));
     }
 
-    /**
-     * A staff account set to `inactive` keeps its Sanctum tokens (only
-     * `suspended` revokes them — UserController) and EnsureStaff checks
-     * user_type, not status. Does a deactivated report viewer still read?
-     */
-    public function test_an_inactive_staff_account_cannot_read_reports(): void
-    {
-        self::seedReportFixture();
-        $this->actAs(['reports.view'], 'staff', 'inactive');
-        $res = $this->getJson('/api/v1/admin/reports/sales/by-customer');
-        $this->assertSame(403, $res->getStatusCode(), 'inactive staff: ' . self::excerpt($res));
-    }
+    // An `inactive` staff account still reading reports is real (EnsureStaff
+    // checks user_type, not status) but it is the whole admin API, not
+    // Reports — it has its own task and its own test there.
 
     // ── 2. reports.view only ────────────────────────────────────────────────
 
@@ -386,13 +395,14 @@ class ReportPermissionAttackTest extends TestCase
             return;
         }
 
-        $this->assertNoMarkers($res, self::PII_MARKERS, "{$route} (customer PII without customers.*)");
-        $this->assertNoMarkers($res, self::SUPPLIER_MARKERS, "{$route} (supplier contact)");
+        $this->assertNoMarkers($res, self::CONTACT_MARKERS, "{$route} (customer contacts without customers.view)");
+        // Supplier contacts are not customer data; the owner's rule covers
+        // customers, so a buyer's own supplier list stays readable.
         $this->assertNoMarkers($res, ['4321'], "{$route} (unit cost without reports.financial)");
 
         $json = str_contains((string) $res->headers->get('Content-Type'), 'json') ? $res->json() : null;
         if (is_array($json)) {
-            $keys = self::financialKeys($json);
+            $keys = array_values(array_diff(self::financialKeys($json), self::COST_KEYS_ALLOWED[$route] ?? []));
             $this->assertSame([], $keys, "{$route}: cost/profit/margin fields without reports.financial: "
                 . implode(', ', array_slice($keys, 0, 12)));
         }
@@ -472,13 +482,16 @@ class ReportPermissionAttackTest extends TestCase
     }
 
     /**
-     * The customers PDF, opened by a reports.view-only user (no customers.*).
-     * dompdf compresses page streams, so inflate them before searching.
+     * The customers PDF, downloaded by someone who may take files out
+     * (reports.export) but may not see customers' contacts (no customers.*) —
+     * the procurement_manager / finance_manager shape in the role map. A PDF
+     * cannot be redacted after rendering, so this proves the controller strips
+     * the rows first. dompdf compresses page streams, so inflate them.
      */
-    public function test_reports_view_only_customers_pdf_carries_no_customer_pii(): void
+    public function test_an_exporter_without_customer_access_gets_a_customers_pdf_without_contacts(): void
     {
         $ids = self::seedReportFixture();
-        $this->actAs(['reports.view']);
+        $this->actAs(['reports.view', 'reports.export']);
         $res = $this->get(self::uri('pdf/customers', $ids));
         $this->assertSame(200, $res->getStatusCode());
 
@@ -486,8 +499,90 @@ class ReportPermissionAttackTest extends TestCase
         $text = implode('', array_map(fn ($s) => (string) @gzuncompress($s), $m[1]));
         $this->assertNotSame('', $text, 'could not inflate the PDF — the probe is blind');
 
-        $found = array_values(array_filter(self::PII_MARKERS, fn ($mk) => str_contains($text, $mk)));
-        $this->assertSame([], $found, 'pdf/customers carries customer PII for a reports.view-only user: ' . implode(', ', $found));
+        $found = array_values(array_filter(self::CONTACT_MARKERS, fn ($mk) => str_contains($text, $mk)));
+        $this->assertSame([], $found, 'pdf/customers carries customer contacts for a reports.view-only user: ' . implode(', ', $found));
+    }
+
+    /**
+     * The same exporter asks for the customer CSVs — the file most likely to
+     * become a call list. Both export paths: ReportController's
+     * (sales/by-customer) and the MetricEngine endpoints' (second-purchase,
+     * order-pipeline). Contacts must be gone; names must still be there, or
+     * the redaction is over-broad and the file is useless.
+     */
+    public static function customerCsvRoutes(): array
+    {
+        return ['sales/by-customer' => ['sales/by-customer', 'Zelda'],
+                'second-purchase'   => ['second-purchase', 'Oscar'],
+                'order-pipeline'    => ['order-pipeline', 'Petra']];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('customerCsvRoutes')]
+    public function test_an_exporter_without_customer_access_gets_csvs_without_contacts(string $route, string $name): void
+    {
+        $ids = self::seedReportFixture();
+        $this->actAs(['reports.view', 'reports.export']);
+        $res = $this->get(self::uri($route, $ids, 'export=csv'));
+
+        $this->assertSame(200, $res->getStatusCode(), self::excerpt($res));
+        $this->assertStringContainsString('text/csv', (string) $res->headers->get('Content-Type'));
+        $this->assertNoMarkers($res, self::CONTACT_MARKERS, "{$route} CSV");
+        $this->assertStringContainsString($name, self::body($res), "{$route} CSV: names must survive the redaction");
+    }
+
+    /** The control: WITH customers.view the same CSVs carry contacts — so the test above is not passing on files that never had any. */
+    #[\PHPUnit\Framework\Attributes\DataProvider('customerCsvRoutes')]
+    public function test_positive_control_customer_csvs_carry_contacts_for_customer_staff(string $route, string $name): void
+    {
+        $ids = self::seedReportFixture();
+        $this->actAs(['reports.view', 'reports.export', 'customers.view', 'customers.insights']);
+        $body = self::body($this->get(self::uri($route, $ids, 'export=csv')));
+
+        $found = array_filter(self::CONTACT_MARKERS, fn ($m) => str_contains($body, $m));
+        $this->assertNotEmpty($found, "{$route} CSV has no contacts even for customer staff — the redaction test above would be vacuous");
+    }
+
+    /** Supplier contacts are not customer data: a buyer without customers.view still sees the supplier list. */
+    public function test_supplier_contacts_stay_visible_to_report_viewers(): void
+    {
+        $ids = self::seedReportFixture();
+        $this->actAs(['reports.view']);
+        $res = $this->getJson(self::uri('purchase-orders', $ids))->assertOk();
+
+        $this->assertStringContainsString('supplier.pii@example.test', self::body($res));
+    }
+
+    /**
+     * Walk-in buyers have no customer record, so the engine keys them by their
+     * raw phone (MetricEngine::CUSTOMER_KEY) — and win-back hands that key to
+     * the page as each row's identity (WinBackCustomerRow.ckey). Hidden from a
+     * viewer without customers.view, each must stay a DIFFERENT hidden buyer,
+     * or every walk-in collapses into one row. Tested on the rule itself with
+     * win-back-shaped rows: seeding a qualifying buying rhythm is fragile, and
+     * this is the code that does the masking.
+     */
+    public function test_hidden_walk_in_buyers_stay_distinct_and_unreadable(): void
+    {
+        $rows = \App\Support\CustomerContacts::redact(['customers' => [
+            ['ckey' => '0755000555',    'name' => 'Walk In', 'phone' => '0755000555'],
+            ['ckey' => '+254766000666', 'name' => 'Walk In', 'phone' => '+254766000666'],
+            ['ckey' => '42',            'name' => 'Zelda',   'phone' => '0711000111'],
+            // Production holds international numbers typed without a plus
+            // (116 of 1,494 at cycle 9): Nigeria, South Africa.
+            ['ckey' => '2348012345678', 'name' => 'Ada',     'phone' => '2348012345678'],
+            ['ckey' => '27761234567',   'name' => 'Thabo',   'phone' => '27761234567'],
+        ]])['customers'];
+
+        $keys = array_column($rows, 'ckey');
+        $this->assertCount(5, array_unique($keys), 'five buyers stay five buyers');
+        $this->assertSame('42', $keys[2], 'a customer-record key is not a contact and is left alone');
+        foreach (['755000555', '766000666', '8012345678', '761234567'] as $digits) {
+            $this->assertStringNotContainsString($digits, json_encode($rows), 'the number itself is gone');
+        }
+        $this->assertNull($rows[0]['phone'], 'a field named phone is emptied outright');
+        $this->assertSame('Walk In', $rows[0]['name'], 'names stay');
+        $this->assertSame(\App\Support\CustomerContacts::redact(['k' => '0755000555'])['k'], $keys[0],
+            'the same buyer gets the same hidden key on every request');
     }
 
     /** The financial drill gate is an exact string compare — try to step round it. */

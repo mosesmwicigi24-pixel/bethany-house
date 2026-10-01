@@ -33,6 +33,9 @@ use Illuminate\Support\Facades\DB;
  */
 class ReadsOneSnapshot
 {
+    /** Below nginx's 120s proxy_read_timeout on hub.bethanyhouse.co.ke (verified live 2026-10-01). */
+    public const QUERY_CEILING = '90s';
+
     public function handle(Request $request, Closure $next)
     {
         if (! $request->isMethodSafe() || DB::transactionLevel() > 0) {
@@ -41,6 +44,15 @@ class ReadsOneSnapshot
 
         return DB::transaction(function () use ($request, $next) {
             DB::statement('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+
+            // A ceiling on any one report query (cycle 9). Nothing bounded them:
+            // Postgres statement_timeout is 0, PHP-FPM has no terminate timeout,
+            // and only nginx gives up — at 120s on the hub, leaving the worker
+            // and the query running for a browser that has gone. A user who
+            // refreshes a slow report starts another. 90s ends it first, so the
+            // reader gets "narrow the range" instead of a gateway timeout.
+            // SET LOCAL dies with this transaction: nothing else inherits it.
+            DB::statement("SET LOCAL statement_timeout = '" . self::QUERY_CEILING . "'");
 
             return $this->withCacheOutsideTheSnapshot(fn () => $next($request));
         });

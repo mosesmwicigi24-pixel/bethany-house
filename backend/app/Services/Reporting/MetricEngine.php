@@ -1944,7 +1944,12 @@ class MetricEngine
             FROM orders o JOIN paid p ON p.order_id = o.id
             WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
               AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL {$scope}
-              AND p.net >= o.total_amount - 0.01
+              -- Fully paid, compared in ONE unit. p.net is already in shillings;
+              -- o.total_amount is in the order's own currency. Comparing them
+              -- raw (cycle 9) let 21,120 KES 'cover' a USD 450 order — 450 is a
+              -- smaller number than 21,120 — so a part-paid dollar order was
+              -- reported as earned. The same defect owed() had (cycle 2).
+              AND p.net >= o.total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) - 0.01
               AND p.settled_at BETWEEN ? AND ?
         ", [$s, $e]);
 
@@ -1970,13 +1975,22 @@ class MetricEngine
             ) pr ON TRUE
             WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
               AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL {$scope}
-              AND p.net >= o.total_amount - 0.01
+              AND p.net >= o.total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) - 0.01
               AND p.settled_at BETWEEN ? AND ?
         ", [$s, $e]);
 
         $expensesTotal = (float) $this->expenseSpendBase()
             ->whereBetween('expense_date', [$s->format('Y-m-d'), $e->format('Y-m-d')])
             ->sum('amount_kes');
+
+        // Awaiting approval: not spend yet, so not in net_profit — but stated
+        // beside it, exactly as the classic P&L does (cycle 9).
+        $pending = DB::table('expenses')
+            ->where('status', 'pending_approval')
+            ->whereBetween('expense_date', [$s->format('Y-m-d'), $e->format('Y-m-d')])
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+            ->selectRaw('COUNT(*) AS n, (COALESCE(SUM(amount_kes), 0))::float8 AS kes')
+            ->first();
 
         $revenue = round((float) $earned->revenue, 2);
         $cogsVal = round((float) $cogs->cogs, 2);
@@ -1988,6 +2002,7 @@ class MetricEngine
             'gross_profit'   => round($revenue - $cogsVal, 2),
             'expenses'       => round($expensesTotal, 2),
             'net_profit'     => round($revenue - $cogsVal - $expensesTotal, 2),
+            'expenses_pending_approval' => ['count' => (int) $pending->n, 'amount' => round((float) $pending->kes, 2)],
             'gross_margin_pct' => $revenue > 0 ? round(($revenue - $cogsVal) / $revenue * 100, 1) : null,
         ];
     }
@@ -3318,6 +3333,56 @@ class MetricEngine
                 'count' => (int) $pendingPay->n, 'link' => '/approvals',
                 'actions' => [
                     ['type' => 'navigate', 'label' => 'Review approvals', 'to' => '/approvals'],
+                ],
+            ];
+        }
+
+        // 3b. Paid MORE than the order is worth (cycle 9). Collected counts
+        //     every settled payment; the ledger caps each order at its total;
+        //     the difference was real money no page mentioned — KES 63,350 on
+        //     11 orders at discovery, traced to a duplicated Western Union
+        //     entry, an item removed after payment, a currency changed after
+        //     payment and early-July till entries. Whether the payment or the
+        //     total is wrong is a person's call (refund, credit, or correct the
+        //     order), so the feed names it rather than netting it away.
+        //     Same payments as the Collected tile: paid, and approved where
+        //     approval applies; live orders only.
+        $over = DB::select("
+            SELECT o.order_number,
+                   (pp.paid - o.total_amount * rc.reporting_rate_to_kes) AS excess
+            FROM orders o
+            JOIN currencies rc ON UPPER(rc.code) = UPPER(o.currency_code) AND rc.reporting_rate_to_kes IS NOT NULL
+            JOIN (
+                SELECT p.order_id,
+                       SUM((p.amount - COALESCE(p.refund_amount, 0)) * prc.reporting_rate_to_kes) AS paid
+                FROM payments p
+                JOIN currencies prc ON UPPER(prc.code) = UPPER(p.currency_code) AND prc.reporting_rate_to_kes IS NOT NULL
+                WHERE p.status = 'paid'
+                  AND (p.requires_approval IS NOT TRUE OR p.approval_status = 'approved')
+                GROUP BY p.order_id
+            ) pp ON pp.order_id = o.id
+            WHERE o.status NOT IN ('cancelled', 'voided', 'refunded')
+              " . $this->outletScopeSql('o.outlet_id') . "
+              AND pp.paid > o.total_amount * rc.reporting_rate_to_kes + 0.5
+            ORDER BY excess DESC
+        ");
+        if ($over) {
+            $n      = count($over);
+            $excess = array_sum(array_map(fn ($r) => (float) $r->excess, $over));
+            $items[] = [
+                'key' => 'overpaid_orders', 'severity' => 'medium',
+                'title' => "{$n} order" . ($n > 1 ? 's were' : ' was') . ' paid more than ' . ($n > 1 ? 'their totals' : 'its total')
+                    . ' (KES ' . number_format($excess) . ')',
+                'detail' => 'Collected includes this money; the orders do not account for it. Refund it, hold it as '
+                    . 'credit, or correct the order — largest: ' . $over[0]->order_number
+                    . ' (KES ' . number_format((float) $over[0]->excess) . ' over).',
+                'count' => $n, 'link' => '/orders',
+                'entities' => array_map(fn ($r) => [
+                    'number' => $r->order_number,
+                    'excess' => round((float) $r->excess, 2),
+                ], array_slice($over, 0, 5)),
+                'actions' => [
+                    ['type' => 'navigate', 'label' => 'Open orders', 'to' => '/orders'],
                 ],
             ];
         }

@@ -980,6 +980,14 @@ HTML;
     {
         $d = $this->customersData($request);
 
+        // Contacts need customers.view (owner, cycle 9). A rendered PDF cannot
+        // be redacted afterwards the way RedactsCustomerContacts redacts JSON
+        // and CSV, so the rows are stripped before they reach the page.
+        if (! $request->user()?->can('customers.view')) {
+            $d['top_customers'] = collect($d['top_customers'])
+                ->map(fn ($c) => \App\Support\CustomerContacts::redactRow($c));
+        }
+
         [$start, $end, $summary, $topCustomers, $acquisition] =
             [$d['start'], $d['end'], $d['summary'], $d['top_customers'], $d['acquisition']];
         $avgLtv = $d['avg_ltv'];
@@ -995,7 +1003,7 @@ HTML;
 
         $topTable = $this->table(
             [['label'=>'Customer'],['label'=>'Email'],['label'=>'Orders','right'=>true],['label'=>'Total Spent','right'=>true],['label'=>'Avg Order','right'=>true],['label'=>'Last Order']],
-            $topCustomers->map(fn($c) => [$c->customer_name, $c->email, number_format($c->order_count), $this->fmt((float)$c->total_spent, $cur), $this->fmt((float)$c->avg_order, $cur), $c->last_order_date ?? '—'])->toArray()
+            $topCustomers->map(fn($c) => [$c->customer_name, $c->email ?? '—', number_format($c->order_count), $this->fmt((float)$c->total_spent, $cur), $this->fmt((float)$c->avg_order, $cur), $c->last_order_date ?? '—'])->toArray()
         );
 
         $acqTable = $this->table(

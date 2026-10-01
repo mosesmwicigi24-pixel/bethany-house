@@ -182,6 +182,50 @@ class ReportSnapshotConsistencyTest extends TestCase
         }
     }
 
+    /** Cycle 9: no report query may run unbounded — the ceiling is set inside every snapshot. */
+    public function test_every_report_request_carries_a_query_ceiling(): void
+    {
+        $seen = [];
+        DB::listen(function (QueryExecuted $q) use (&$seen) {
+            if (stripos($q->sql, 'statement_timeout') !== false) {
+                $seen[] = $q->sql;
+            }
+        });
+
+        $this->ledger();
+
+        $this->assertCount(1, $seen, 'set once, for this request');
+        $this->assertStringContainsString(\App\Http\Middleware\ReadsOneSnapshot::QUERY_CEILING, $seen[0]);
+        $this->assertStringContainsString('SET LOCAL', $seen[0], 'LOCAL: it dies with the transaction');
+    }
+
+    /**
+     * A query past the ceiling is an answer the reader can act on, not a
+     * "Server Error": 503 and "narrow the range". Forced deterministically —
+     * on the first report query the ceiling is lowered to 100ms and a 500ms
+     * sleep runs inside the same snapshot.
+     */
+    public function test_a_report_that_runs_past_the_ceiling_says_so_and_cleans_up(): void
+    {
+        $fired = false;
+        DB::listen(function (QueryExecuted $q) use (&$fired) {
+            if ($fired || ! preg_match('/from\s+"?orders"?\s/i', $q->sql)) {
+                return;
+            }
+            $fired = true;
+            DB::statement("SET LOCAL statement_timeout = '100ms'");
+            DB::select('SELECT pg_sleep(0.5)');
+        });
+
+        $today = now()->format('Y-m-d');
+        $res   = $this->getJson("/api/v1/admin/reports/sales/ledger?start_date={$today}&end_date={$today}");
+
+        $this->assertTrue($fired, 'the slow query ran');
+        $res->assertStatus(503)->assertJsonPath('reason', 'report_timeout');
+        $this->assertStringNotContainsString('SQLSTATE', $res->getContent());
+        $this->assertSame(0, DB::transactionLevel(), 'the snapshot was rolled back, not left open');
+    }
+
     public function test_without_the_snapshot_the_same_race_makes_the_page_contradict_itself(): void
     {
         $this->withoutMiddleware(ReadsOneSnapshot::class);

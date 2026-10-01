@@ -12,6 +12,7 @@ import {
 } from "@/api/reports";
 import { fmtKes } from "@/api/expenses";
 import { openWhatsApp } from "@/lib/whatsapp";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
 import {
     BarChart,
@@ -1163,6 +1164,8 @@ function SecondPurchaseTab() {
 function WinBackTab() {
     const queryClient = useQueryClient();
     const [loggingKey, setLoggingKey] = useState<string | null>(null);
+    const { can } = usePermissions();
+    const canLogOutreach = can("customers.insights");
 
     const { data, isLoading } = useQuery({
         queryKey: ["win-back-economics"],
@@ -1191,6 +1194,9 @@ function WinBackTab() {
         row: WinBackCustomerRow,
         channel: "whatsapp" | "call",
     ) => {
+        // Recording a contact needs customers.insights (cycle 9); without it
+        // the WhatsApp link still opens, it just is not logged.
+        if (!canLogOutreach) return;
         setLoggingKey(row.ckey);
         try {
             await reportsApi.logWinBackOutreach({
@@ -1399,6 +1405,7 @@ function WinBackTab() {
                                                         WhatsApp
                                                     </button>
                                                 )}
+                                                {canLogOutreach && (
                                                 <button
                                                     onClick={() =>
                                                         void logOutreach(
@@ -1414,6 +1421,7 @@ function WinBackTab() {
                                                 >
                                                     Log call
                                                 </button>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>
