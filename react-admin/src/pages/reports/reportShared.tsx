@@ -749,7 +749,7 @@ export function ReportActionBar({
 //   divider
 //   bottom   — action buttons (export, pdf, print, schedule)
 
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
 export function ReportPageHeader({
     title,
@@ -799,6 +799,7 @@ export function ReportPageHeader({
     // outlets · Change"): seven controls stacked above the figures pushed every
     // number below the first screen. From sm up they are always shown.
     const [filtersOpen, setFiltersOpen] = useState(false);
+    const atOverview = useLocation().pathname.replace(/\/+$/, "") === "/reports";
     const { data: outletList } = useQuery({ queryKey: ["report-outlets"], queryFn: () => reportsApi.outlets(), staleTime: 300_000, enabled: !!onOutletChange });
     const outletName = outlet ? outletList?.data?.find((o) => String(o.id) === String(outlet))?.name : null;
     const { can } = usePermissions();
@@ -815,18 +816,18 @@ export function ReportPageHeader({
             <div className="px-5 pt-4 pb-3 flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                 {/* Left: breadcrumb + title */}
                 <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 mb-1.5">
-                        <Link
-                            to="/reports"
-                            className="text-xs text-surface-400 hover:text-brand-500 transition-colors"
-                        >
-                            Reports
+                    {/* The way back to the overview. It used to repeat the title,
+                        which the top bar and the heading already say — three
+                        times on a phone. The overview itself needs no link. */}
+                    {!atOverview && (
+                        <Link to="/reports"
+                            className="inline-flex items-center gap-1 mb-1.5 text-xs text-surface-400 hover:text-brand-500 transition-colors">
+                            <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                            </svg>
+                            Executive overview
                         </Link>
-                        <svg className="w-3 h-3 text-surface-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                        </svg>
-                        <span className="text-xs text-surface-600 font-medium">{title}</span>
-                    </div>
+                    )}
                     <h1 className="text-lg font-semibold text-surface-900 leading-tight">{title}</h1>
                     <p className="text-sm text-surface-400 mt-0.5">{subtitle}</p>
                 </div>
