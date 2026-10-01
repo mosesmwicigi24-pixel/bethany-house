@@ -1633,7 +1633,8 @@ class MetricEngine
                    COALESCE(SUM(GREATEST(ii.quantity_on_hand, 0) * COALESCE(pr.regular_price, 0)), 0) AS retail_value
             FROM inventory_items ii
             LEFT JOIN LATERAL (
-                SELECT pp.cost_price, pp.regular_price
+                -- Retail price only; cost comes from CostBasis (cb) below.
+                SELECT pp.regular_price
                 FROM product_prices pp
                 WHERE pp.product_id = ii.product_id
                   AND UPPER(pp.currency_code) = 'KES'
