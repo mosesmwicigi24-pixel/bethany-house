@@ -268,10 +268,14 @@ function EngineCard({ label, value, sub, to, zero = false }: {
     );
 }
 
-function EngineRoomStrip() {
+function EngineRoomStrip({ outlet }: { outlet?: string }) {
+    const navigate = useNavigate();
+    // The page's outlet, like everything else on it: the attention items
+    // followed the outlet filter while these stayed business-wide — one page,
+    // two scopes, nothing saying so.
     const { data, isLoading } = useQuery<EngineRoomSummaries>({
-        queryKey: ["engine-room"],
-        queryFn: () => reportsApi.engineRoom(),
+        queryKey: ["engine-room", outlet ?? ""],
+        queryFn: () => reportsApi.engineRoom(outlet ? Number(outlet) : undefined),
         staleTime: 5 * 60_000,
     });
 
@@ -299,70 +303,75 @@ function EngineRoomStrip() {
                     ))}
                 </div>
             ) : (
-                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-                    <EngineCard
-                        label="Open quotes & balances"
-                        value={collections ? kesCompact(collections.money_on_table) : "—"}
-                        sub={collections
+                (() => {
+                    // Only engines with money waiting get a card; the rest are
+                    // named on one quiet line — four KES 0 cards read as four
+                    // headlines saying nothing.
+                    const engines = [
+                        { label: "Open quotes & balances", to: "/reports/sales?tab=collections",
+                          value: collections ? kesCompact(collections.money_on_table) : "—",
+                          sub: collections
                             ? `${collections.open_quotes.count} quotes · ${collections.unpaid_balances.count} unpaid balances`
-                            : "unavailable right now"}
-                        zero={!collections || collections.money_on_table <= 0}
-                        to="/reports/sales?tab=collections"
-                    />
-                    <EngineCard
-                        label="Lost to empty shelves"
-                        value={stockout ? `${kesCompact(stockout.est_daily_loss_now)}/day` : "—"}
-                        sub={stockout
+                            : "unavailable right now",
+                          zero: !collections || collections.money_on_table <= 0 },
+                        { label: "Lost to empty shelves", to: "/reports/inventory?tab=intelligence",
+                          value: stockout ? `${kesCompact(stockout.est_daily_loss_now)}/day` : "—",
+                          sub: stockout
                             ? `${stockout.products_currently_out} product${stockout.products_currently_out === 1 ? "" : "s"} out now`
-                            : "unavailable right now"}
-                        zero={!stockout || stockout.est_daily_loss_now <= 0}
-                        to="/reports/inventory?tab=intelligence"
-                    />
-                    <EngineCard
-                        label="Regulars gone quiet"
-                        value={winback ? kesCompact(winback.annual_value_at_risk) : "—"}
-                        sub={winback
+                            : "unavailable right now",
+                          zero: !stockout || stockout.est_daily_loss_now <= 0 },
+                        { label: "Regulars gone quiet", to: "/reports/customers?tab=winback",
+                          value: winback ? kesCompact(winback.annual_value_at_risk) : "—",
+                          sub: winback
                             ? `${winback.customers_at_risk} customers · ${kesCompact(winback.recovered_revenue_90d)} recovered 90d`
-                            : "unavailable right now"}
-                        zero={!winback || winback.annual_value_at_risk <= 0}
-                        to="/reports/customers?tab=winback"
-                    />
-                    <EngineCard
-                        label="Add-ons not sold"
-                        value={attach ? kesCompact(attach.missed_revenue_estimate_total) : "—"}
-                        sub={attach?.top_pair
+                            : "unavailable right now",
+                          zero: !winback || winback.annual_value_at_risk <= 0 },
+                        { label: "Add-ons not sold", to: "/reports/sales?tab=basket",
+                          value: attach ? kesCompact(attach.missed_revenue_estimate_total) : "—",
+                          sub: attach?.top_pair
                             ? `best pair: ${attach.top_pair.anchor} → ${attach.top_pair.companion} ${attach.top_pair.attach_rate}%`
-                            : attach ? "not enough basket history yet" : "unavailable right now"}
-                        zero={!attach || attach.missed_revenue_estimate_total <= 0}
-                        to="/reports/sales?tab=basket"
-                    />
-                    <EngineCard
-                        label="Due to buy again"
-                        value={radar ? kesCompact(radar.expected_revenue) : "—"}
-                        sub={radar
+                            : attach ? "not enough basket history yet" : "unavailable right now",
+                          zero: !attach || attach.missed_revenue_estimate_total <= 0 },
+                        { label: "Due to buy again", to: "/reports/customers?tab=replenishment",
+                          value: radar ? kesCompact(radar.expected_revenue) : "—",
+                          sub: radar
                             ? `${radar.due_pairs} due · pings 30d: ${radar.pings_30d}`
-                            : "unavailable right now"}
-                        zero={!radar || radar.expected_revenue <= 0}
-                        to="/reports/customers?tab=replenishment"
-                    />
-                    <EngineCard
-                        label="Season ahead"
-                        value={seasonal
+                            : "unavailable right now",
+                          zero: !radar || radar.expected_revenue <= 0 },
+                        { label: "Season ahead", to: "/reports/procurement?tab=seasonal",
+                          value: seasonal
                             ? seasonal.history_depth_days === 0
                                 ? "—"
                                 : kesCompact(seasonal.total_gap_value)
-                            : "—"}
-                        sub={seasonal
+                            : "—",
+                          sub: seasonal
                             ? seasonal.history_depth_days === 0
                                 ? "import legacy history to unlock"
                                 : seasonal.next_season
                                   ? `${seasonal.next_season.label} in ${daysUntil(seasonal.next_season.start)}d · stock gap`
                                   : "no season in the next 120 days"
-                            : "unavailable right now"}
-                        zero={!seasonal || seasonal.history_depth_days === 0 || seasonal.total_gap_value <= 0}
-                        to="/reports/procurement?tab=seasonal"
-                    />
-                </div>
+                            : "unavailable right now",
+                          zero: !seasonal || seasonal.history_depth_days === 0 || seasonal.total_gap_value <= 0 },
+                    ];
+                    const live = engines.filter((e) => !e.zero);
+                    const quiet = engines.filter((e) => e.zero);
+                    return (
+                        <>
+                            {live.length > 0 && (
+                                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+                                    {live.map((e) => <EngineCard key={e.label} label={e.label} value={e.value} sub={e.sub} to={e.to} />)}
+                                </div>
+                            )}
+                            {quiet.length > 0 && (
+                                <p className="mt-2 text-2xs text-surface-400">
+                                    Nothing waiting: {quiet.map((e, i) => (
+                                        <span key={e.label}>{i > 0 && " · "}<button onClick={() => navigate(e.to)} className="hover:text-brand-600 hover:underline">{e.label}</button></span>
+                                    ))}
+                                </p>
+                            )}
+                        </>
+                    );
+                })()
             )}
         </div>
     );
@@ -429,15 +438,26 @@ function ExecutiveOverview() {
                 <div className="flex justify-center py-12"><Spinner /></div>
             ) : (
                 <>
+                    <Headline k={k} start={dr.start} end={dr.end} attention={(data.attention ?? []).length} />
+
                     <AttentionPanel items={data.attention ?? []} />
 
-                    <EngineRoomStrip />
+                    <EngineRoomStrip outlet={dr.outlet} />
 
-                    {/* One continuous grid: the whole screen is the dashboard.
-                        2-up on phones, 4-up on laptops, 8-up on big displays. */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 2xl:grid-cols-8 gap-3">
+                    {/* Grouped by the question a manager asks — sales, money,
+                        operations, finance — instead of fourteen equal cards.
+                        Every figure and every drill is kept. */}
+                    <MetricGroup title="Sales">
                         <MetricCard label="Sold" metric={k.sales.revenue} money
                             onOpen={() => setDrill({ metric: "revenue", label: "Sold — the orders", money: true, reportPath: "/reports/sales" })} />
+                        <MetricCard label="Orders" metric={k.sales.orders}
+                            onOpen={() => setDrill({ metric: "orders", label: "Orders in period", reportPath: "/reports/sales" })} />
+                        <MetricCard label="Avg Order Value" metric={k.sales.aov} money to="/reports/sales" />
+                        <MetricCard label="New Customers" metric={k.sales.new_customers}
+                            onOpen={() => setDrill({ metric: "new_customers", label: "New customers", reportPath: "/reports/customers" })} />
+                    </MetricGroup>
+
+                    <MetricGroup title="Money">
                         <MetricCard label="Collected" metric={k.money.collected} money
                             onOpen={() => setDrill({ metric: "collected", label: "Collected — settled payments", money: true, reportPath: can_financial_path(k) })} />
                         <MetricCard label="Outstanding"
@@ -448,16 +468,17 @@ function ExecutiveOverview() {
                             value={fmtKes(k.money.aging?.deposits_held?.amount ?? 0)}
                             sub={`${k.money.aging?.deposits_held?.orders ?? 0} undelivered — not income`}
                             onOpen={() => setDrill({ metric: "outstanding", bucket: "deposits", label: "Deposits held (undelivered)", money: true })} />
-                        <MetricCard label="Orders" metric={k.sales.orders}
-                            onOpen={() => setDrill({ metric: "orders", label: "Orders in period", reportPath: "/reports/sales" })} />
-                        <MetricCard label="Avg Order Value" metric={k.sales.aov} money to="/reports/sales" />
-                        <MetricCard label="New Customers" metric={k.sales.new_customers}
-                            onOpen={() => setDrill({ metric: "new_customers", label: "New customers", reportPath: "/reports/customers" })} />
+                        <div className="col-span-2 md:col-span-1">
+                            <AgingCard aging={k.money.aging}
+                                onBucket={(bucket, label) => setDrill({ metric: "outstanding", bucket, label, money: true, reportPath: "/pos/outstanding-balances" })} />
+                        </div>
+                    </MetricGroup>
+
+                    <MetricGroup title="Operations">
                         <MetricCard label="Low Stock"
                             value={String(k.inventory.low_stock)}
                             sub={k.inventory.low_stock > 0 ? "items at reorder point" : "all healthy"}
                             to="/reports/inventory" />
-
                         <MetricCard label="Production Done" metric={k.production.completed}
                             onOpen={() => setDrill({ metric: "production_completed", label: "Completed production orders", reportPath: "/reports/production" })} />
                         <MetricCard label="On-time %"
@@ -471,30 +492,27 @@ function ExecutiveOverview() {
                                 ? () => setDrill({ metric: "production_overdue", label: "Overdue production orders", reportPath: "/production/wip" })
                                 : undefined}
                             to="/production/wip" />
-                        {k.financial && (
-                            <>
-                                <MetricCard label="Expenses" metric={k.financial.expenses} money downIsGood
-                                    onOpen={() => setDrill({ metric: "expenses", label: "Expenses in period", money: true, reportPath: "/expenses" })} />
-                                <MetricCard label="Net (Coll. − Exp.)" metric={k.financial.net_collected} money to="/reports/finance" />
-                                {/* Profit, not cash — the earned P&L from Finance & Cash,
-                                    with what it leaves out stated, never a bare margin. */}
-                                {k.financial.earned && (
-                                    <MetricCard label="Earned profit"
-                                        value={fmtKes(k.financial.earned.net_profit)}
-                                        sub={k.financial.earned.limits?.length
-                                            ? `Limited: ${k.financial.earned.limits.join("; ")}`
-                                            : k.financial.earned.gross_margin_pct != null
-                                                ? `${k.financial.earned.gross_margin_pct}% gross margin · every cost in`
-                                                : "no fully-paid orders yet"}
-                                        to="/reports/finance?tab=intelligence" />
-                                )}
-                            </>
-                        )}
-                        <div className={clsx(k.financial ? "col-span-2 md:col-span-2 2xl:col-span-2" : "col-span-2 md:col-span-3 2xl:col-span-5")}>
-                            <AgingCard aging={k.money.aging}
-                                onBucket={(bucket, label) => setDrill({ metric: "outstanding", bucket, label, money: true, reportPath: "/pos/outstanding-balances" })} />
-                        </div>
-                    </div>
+                    </MetricGroup>
+
+                    {k.financial && (
+                        <MetricGroup title="Finance">
+                            <MetricCard label="Expenses" metric={k.financial.expenses} money downIsGood
+                                onOpen={() => setDrill({ metric: "expenses", label: "Expenses in period", money: true, reportPath: "/expenses" })} />
+                            <MetricCard label="Net (Coll. − Exp.)" metric={k.financial.net_collected} money to="/reports/finance" />
+                            {/* Profit, not cash — the earned P&L from Finance & Cash,
+                                with what it leaves out stated, never a bare margin. */}
+                            {k.financial.earned && (
+                                <MetricCard label="Earned profit"
+                                    value={fmtKes(k.financial.earned.net_profit)}
+                                    sub={k.financial.earned.limits?.length
+                                        ? `Limited: ${k.financial.earned.limits.join("; ")}`
+                                        : k.financial.earned.gross_margin_pct != null
+                                            ? `${k.financial.earned.gross_margin_pct}% gross margin · every cost in`
+                                            : "no fully-paid orders yet"}
+                                    to="/reports/finance?tab=intelligence" />
+                            )}
+                        </MetricGroup>
+                    )}
                 </>
             )}
             {/* The shared drill panel: the backend says what each number is and
@@ -504,6 +522,40 @@ function ExecutiveOverview() {
                     query={{ ...query, ...(drill.bucket ? { bucket: drill.bucket } : {}) }}
                     onClose={() => setDrill(null)} />
             )}
+        </div>
+    );
+}
+
+/** A titled group of figures — 2-up on phones, 4-up from tablets. */
+function MetricGroup({ title, children }: { title: string; children: React.ReactNode }) {
+    return (
+        <section aria-label={title}>
+            <h2 className="text-sm font-semibold text-surface-900 mb-2">{title}</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{children}</div>
+        </section>
+    );
+}
+
+/**
+ * The period in one sentence, from the figures below it — what was sold
+ * against the previous period, what came in, what is still owed. It states;
+ * it does not advise.
+ */
+function Headline({ k, start, end, attention }: { k: any; start: string; end: string; attention: number }) {
+    const sold = Number(k.sales.revenue.current ?? 0), prev = Number(k.sales.revenue.previous ?? 0);
+    const change = prev > 0 ? Math.round(((sold - prev) / prev) * 1000) / 10 : null;
+    const span = `${new Date(start).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} – ${new Date(end).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
+    return (
+        <div className="card card-body">
+            <p className="text-sm leading-relaxed text-surface-700">
+                <span className="font-semibold text-surface-900">{span}:</span>{" "}
+                sold <span className="font-semibold text-surface-900">{fmtKes(sold)}</span> on {Number(k.sales.orders.current ?? 0).toLocaleString()} orders
+                {change != null && <> ({change >= 0 ? "up" : "down"} {Math.abs(change)}% on the previous period)</>}
+                {prev === 0 && sold > 0 && <> (nothing in the previous period)</>}
+                ; collected <span className="font-semibold text-surface-900">{fmtKes(k.money.collected.current)}</span>
+                ; <span className="font-semibold text-surface-900">{fmtKes(k.money.outstanding.amount)}</span> still owed on {Number(k.money.outstanding.orders ?? 0).toLocaleString()} open orders.
+                {attention > 0 && <> {attention} {attention === 1 ? "thing needs" : "things need"} attention below.</>}
+            </p>
         </div>
     );
 }
