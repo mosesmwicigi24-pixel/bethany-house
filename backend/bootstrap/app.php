@@ -64,6 +64,8 @@ return Application::configure(basePath: dirname(__DIR__))
             // One date contract for Reports, whichever spelling the caller
             // knows — see the class docblock (D4).
             'report.window' => \App\Http\Middleware\NormalisesReportWindow::class,
+            // Every figure on a report from the same instant (cycle 8).
+            'report.snapshot' => \App\Http\Middleware\ReadsOneSnapshot::class,
         ]);
 
         // Every staff API call → request_logs (who looked at what). Staff-only

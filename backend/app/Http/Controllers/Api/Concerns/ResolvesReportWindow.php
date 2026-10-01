@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\Concerns;
 
+use App\Support\ReportInput;
 use Illuminate\Http\Request;
 
 /**
@@ -27,12 +28,16 @@ trait ResolvesReportWindow
      */
     private function dateRange(Request $request): array
     {
-        $start = $request->get('start_date', $request->get('from', now()->subDays(29)->format('Y-m-d')));
-        $end   = $request->get('end_date',   $request->get('to',   now()->format('Y-m-d')));
+        // ReportInput::date returns the calendar day alone, so a caller who
+        // sends a full timestamp no longer produces "2026-09-30 14:00:00
+        // 23:59:59", and a malformed one is a 422 instead of a 500 from
+        // Postgres (cycle 8). The middleware has already refused it; this is
+        // the second line for a controller reached without it.
+        $start = ReportInput::date('start_date', $request->get('start_date', $request->get('from')))
+            ?? now()->subDays(29)->format('Y-m-d');
+        $end   = ReportInput::date('end_date', $request->get('end_date', $request->get('to')))
+            ?? now()->format('Y-m-d');
 
-        // A caller who sends a full timestamp used to produce
-        // "2026-09-30 14:00:00 23:59:59" — an invalid date that took the whole
-        // query down with a 500 rather than reporting anything.
-        return [$start, substr($end, 0, 10) . ' 23:59:59'];
+        return [$start, $end . ' 23:59:59'];
     }
 }
