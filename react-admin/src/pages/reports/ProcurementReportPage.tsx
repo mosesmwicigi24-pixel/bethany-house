@@ -131,11 +131,11 @@ export default function ProcurementReportPage() {
             <div className={KPI_GRID}>
                 <KpiCard label="Total POs" value={summary.total_orders ?? 0} />
                 <KpiCard
-                    label="Total Spend"
+                    label="Total spend"
                     value={fmtKes(summary.total_value)}
                 />
                 <KpiCard
-                    label="Received Value"
+                    label="Received value"
                     value={fmtKes(summary.received_value)}
                     color="text-success"
                 />
@@ -147,11 +147,11 @@ export default function ProcurementReportPage() {
             </div>
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Avg PO Value"
+                    label="Avg PO value"
                     value={fmtKes(summary.avg_po_value)}
                 />
                 <KpiCard
-                    label="Fulfilment Rate"
+                    label="Fulfilment rate"
                     value={summary.total_orders > 0 ? `${fulfillmentRate}%` : "—"}
                     sub={summary.total_orders > 0 ? undefined : "no purchase orders in this period"}
                     color={
@@ -159,7 +159,7 @@ export default function ProcurementReportPage() {
                     }
                 />
                 <KpiCard
-                    label="Avg Lead Time"
+                    label="Avg lead time"
                     value={
                         summary.avg_lead_days
                             ? `${Math.round(summary.avg_lead_days)} days`
@@ -167,7 +167,7 @@ export default function ProcurementReportPage() {
                     }
                 />
                 <KpiCard
-                    label="Partial Received"
+                    label="Partial received"
                     value={fmtKes(summary.partial_value)}
                     color="text-info"
                 />
@@ -211,7 +211,7 @@ export default function ProcurementReportPage() {
                     {/* Monthly spend trend */}
                     {monthlyTrend.length > 0 && (
                         <div className="card p-5">
-                            <SectionHeader title="Monthly Spend Trend" />
+                            <SectionHeader title="Monthly spend trend" />
                             <ResponsiveContainer width="100%" height={240}>
                                 <LineChart data={monthlyTrend}>
                                     <CartesianGrid
@@ -249,11 +249,11 @@ export default function ProcurementReportPage() {
                     {byStatus.length > 0 && (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="card p-5">
-                                <SectionHeader title="PO Status Distribution" />
+                                <SectionHeader title="PO status distribution" />
                                 <ShareBars rows={(byStatus ?? []).map((d: any) => ({ label: String(d.status ?? "—"), value: Number(d.count ?? 0) }))} />
                             </div>
                             <div className="card p-5">
-                                <SectionHeader title="By Status" />
+                                <SectionHeader title="By status" />
                                 <div className="space-y-3 mt-2">
                                     {byStatus.map((s: any, i: number) => (
                                         <div
@@ -283,7 +283,7 @@ export default function ProcurementReportPage() {
                 <div className="space-y-6">
                     {chartData.length > 0 && (
                         <div className="card p-5">
-                            <SectionHeader title="Spend by Supplier" />
+                            <SectionHeader title="Spend by supplier" />
                             <ResponsiveContainer width="100%" height={280}>
                                 <BarChart data={chartData} layout="vertical">
                                     <CartesianGrid
@@ -320,7 +320,7 @@ export default function ProcurementReportPage() {
 
                     <div className="card overflow-hidden">
                         <div className="px-5 pt-5 pb-4">
-                            <SectionHeader title="Supplier Summary">
+                            <SectionHeader title="Supplier summary">
                                 <ExportCsvButton
                                     path="purchase-orders"
                                     params={dr.params}
@@ -399,7 +399,7 @@ export default function ProcurementReportPage() {
             {activeTab === "items" && (
                 <div className="card overflow-hidden">
                     <div className="px-5 pt-5 pb-4">
-                        <SectionHeader title="Top Purchased Items" />
+                        <SectionHeader title="Top purchased items" />
                     </div>
                     <TableWrapper ranked>
                         <table className="w-full">
@@ -569,7 +569,7 @@ function SeasonalDemandTab() {
             {/* KPI row */}
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Next Season"
+                    label="Next season"
                     value={summary.next_season?.label ?? "—"}
                     sub={
                         summary.next_season
@@ -578,7 +578,7 @@ function SeasonalDemandTab() {
                     }
                 />
                 <KpiCard
-                    label="Gap Value (est.)"
+                    label="Gap value (est.)"
                     value={fmtKes(summary.total_gap_value)}
                     color={
                         summary.total_gap_value > 0
@@ -587,7 +587,7 @@ function SeasonalDemandTab() {
                     }
                 />
                 <KpiCard
-                    label="Urgent Order-bys"
+                    label="Urgent order-bys"
                     value={summary.urgent_orders}
                     color={
                         summary.urgent_orders > 0
@@ -721,8 +721,8 @@ function ProcurementIntelligence({ start, end }: { start: string; end: string })
             <div className={KPI_GRID}>
                 <KpiCard label="Open POs" value={open_pos.count}
                     sub={open_pos.oldest_days != null ? `oldest ${open_pos.oldest_days}d` : "none in flight"} />
-                <KpiCard label="In-flight Value" value={fmtKes(open_pos.value)} />
-                <KpiCard label="Suggested Buys" value={fmtKes(totalSuggested)}
+                <KpiCard label="In-flight value" value={fmtKes(open_pos.value)} />
+                <KpiCard label="Suggested buys" value={fmtKes(totalSuggested)}
                     color={totalSuggested > 0 ? "text-warning" : "text-success"}
                     sub={`${suggestions.length} materials`} />
             </div>

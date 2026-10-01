@@ -73,17 +73,17 @@ export function NeemaTab({
                     sub="captured by Neema in this period"
                 />
                 <KpiCard
-                    label="Lead → Order"
+                    label="Lead → order"
                     value={fmtPct(d.lead_conversion.conversion_rate)}
                     sub={`${d.lead_conversion.converted} of ${d.leads.total} ordered within ${d.lead_conversion.window_days} days · ${fmtKes(d.lead_conversion.revenue)}`}
                 />
                 <KpiCard
-                    label="WhatsApp Revenue"
+                    label="WhatsApp revenue"
                     value={fmtKes(d.whatsapp_sales.revenue)}
                     sub={`${d.whatsapp_sales.orders} orders · ${fmtKes(d.whatsapp_sales.paid)} paid`}
                 />
                 <KpiCard
-                    label="New Contacts"
+                    label="New contacts"
                     value={newContacts}
                     sub="first seen this period, all platforms"
                 />
@@ -92,7 +92,7 @@ export function NeemaTab({
             {/* Leads funnel: status mix + top intents */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="card p-5">
-                    <SectionHeader title="Leads by Status" />
+                    <SectionHeader title="Leads by status" />
                     {d.leads.total === 0 ? (
                         <p className="text-sm text-surface-500">
                             No leads in this range.
@@ -129,7 +129,7 @@ export function NeemaTab({
                 </div>
 
                 <div className="card p-5">
-                    <SectionHeader title="Top Intents" />
+                    <SectionHeader title="Top intents" />
                     {d.leads.by_intent.length === 0 ? (
                         <p className="text-sm text-surface-500">
                             No leads in this range.
@@ -165,7 +165,7 @@ export function NeemaTab({
             {/* Contacts per platform */}
             <div className="card overflow-hidden">
                 <div className="px-5 pt-5 pb-4">
-                    <SectionHeader title="Contacts by Platform" />
+                    <SectionHeader title="Contacts by platform" />
                     <p className="text-xs text-surface-500 -mt-2">
                         New = first seen in this period. Active = messaged in
                         this period. Matched = linked to a hub customer by
@@ -220,7 +220,7 @@ export function NeemaTab({
             {/* Message volume per platform */}
             <div className="card overflow-hidden">
                 <div className="px-5 pt-5 pb-4">
-                    <SectionHeader title="Message Volume by Platform" />
+                    <SectionHeader title="Message volume by platform" />
                     <p className="text-xs text-surface-500 -mt-2">
                         Period figures come from daily snapshots
                         {d.message_volume.daily_since

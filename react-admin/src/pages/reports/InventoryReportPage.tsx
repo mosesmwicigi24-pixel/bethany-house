@@ -216,17 +216,17 @@ export default function InventoryReportPage() {
             <div className={KPI_GRID}>
                 <KpiCard label="Total SKUs" value={t.total_items ?? 0} />
                 <KpiCard
-                    label="In Stock"
+                    label="In stock"
                     value={inStockCount}
                     color="text-success"
                 />
                 <KpiCard
-                    label="Low Stock"
+                    label="Low stock"
                     value={t.low_stock_count ?? 0}
                     color="text-warning"
                 />
                 <KpiCard
-                    label="Out of Stock"
+                    label="Out of stock"
                     value={t.out_of_stock_count ?? 0}
                     color="text-danger"
                 />
@@ -271,7 +271,7 @@ export default function InventoryReportPage() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {statusPie.length > 0 && (
                             <div className="card p-5">
-                                <SectionHeader title="Stock Health" />
+                                <SectionHeader title="Stock health" />
                                 <ShareBars rows={(statusPie ?? []).map((d: any) => ({ label: String(d.name ?? "—"), value: Number(d.value ?? 0) }))} />
                                 <div className="grid grid-cols-1 gap-3 mt-4 sm:grid-cols-3">
                                     {[
@@ -314,7 +314,7 @@ export default function InventoryReportPage() {
 
                         {byCategory.length > 0 && (
                             <div className="card p-5">
-                                <SectionHeader title="Available Units by Category" />
+                                <SectionHeader title="Available units by category" />
                                 <ResponsiveContainer width="100%" height={240}>
                                     <BarChart
                                         data={byCategory}
@@ -351,7 +351,7 @@ export default function InventoryReportPage() {
                     {/* Outlet distribution */}
                     {outletQtyData.length > 0 && (
                         <div className="card p-5">
-                            <SectionHeader title="Stock Distribution by Outlet" />
+                            <SectionHeader title="Stock distribution by outlet" />
                             <ResponsiveContainer width="100%" height={200}>
                                 <BarChart data={outletQtyData}>
                                     <CartesianGrid
@@ -386,7 +386,7 @@ export default function InventoryReportPage() {
                     {urgentItems.length > 0 && (
                         <div className="card overflow-hidden">
                             <div className="px-5 pt-5 pb-4">
-                                <SectionHeader title="🔴 Critical Stock Alerts">
+                                <SectionHeader title="Critical stock alerts">
                                     <ExportCsvButton
                                         path="inventory/stock-on-hand"
                                         params={{ low_stock_only: true }}
@@ -515,7 +515,7 @@ export default function InventoryReportPage() {
                 <div className="space-y-4">
                     <div className="card overflow-hidden">
                         <div className="px-5 pt-5 pb-4">
-                            <SectionHeader title="Stock on Hand">
+                            <SectionHeader title="Stock on hand">
                                 <div className="flex items-center gap-3">
                                     <label className="flex items-center gap-2 text-sm text-surface-600 cursor-pointer select-none">
                                         <input
@@ -700,7 +700,7 @@ export default function InventoryReportPage() {
                         if (byCat.length === 0) return null;
                         return (
                             <div className="card p-5">
-                                <SectionHeader title="Stock Value by Category" />
+                                <SectionHeader title="Stock value by category" />
                                 <ResponsiveContainer width="100%" height={240}>
                                     <BarChart data={byCat.sort((a: any, b: any) => b.value - a.value).slice(0, 12)} layout="vertical">
                                         <CartesianGrid strokeDasharray="3 3" stroke="#f2f3f2" horizontal={false} />
@@ -718,7 +718,7 @@ export default function InventoryReportPage() {
                     {byOutlet.length > 0 && (
                         <div className="card overflow-hidden">
                             <div className="px-5 pt-5 pb-4">
-                                <SectionHeader title="Inventory by Outlet" />
+                                <SectionHeader title="Inventory by outlet" />
                             </div>
                             <TableWrapper>
                                 <table className="w-full">
@@ -772,7 +772,7 @@ export default function InventoryReportPage() {
                     {byType.length > 0 && (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="card p-5">
-                                <SectionHeader title="Movement by Type" />
+                                <SectionHeader title="Movement by type" />
                                 <div className="space-y-3 mt-2">
                                     {byType.map((bt: any, i: number) => {
                                         const maxUnits = Math.max(
@@ -839,7 +839,7 @@ export default function InventoryReportPage() {
 
                             {movTrendData.length > 0 && (
                                 <div className="card p-5">
-                                    <SectionHeader title="Daily Movement Trend" />
+                                    <SectionHeader title="Daily movement trend" />
                                     <ResponsiveContainer
                                         width="100%"
                                         height={200}
@@ -885,7 +885,7 @@ export default function InventoryReportPage() {
                     {/* Transactions table */}
                     <div className="card overflow-hidden">
                         <div className="px-5 pt-5 pb-4">
-                            <SectionHeader title="Movement Log">
+                            <SectionHeader title="Movement log">
                                 <div className="flex items-center gap-2">
                                     <select
                                         className="input w-40 text-sm"
@@ -1028,11 +1028,11 @@ function InventoryIntelligence({ start, end }: { start: string; end: string }) {
             <div className={KPI_GRID}>
                 {/* cost_value is null without reports.financial (cycle 9): say so,
                     rather than printing KES 0 as though the stock were free. */}
-                <KpiCard label="Stock at Cost" value={health.cost_value == null ? "—" : fmtKes(health.cost_value)}
+                <KpiCard label="Stock at cost" value={health.cost_value == null ? "—" : fmtKes(health.cost_value)}
                          sub={health.cost_value == null ? "needs financial access" : `${health.units} units · ${health.skus} SKUs`} />
-                <KpiCard label="Stock at Retail" value={fmtKes(health.retail_value)} sub="if everything sold at list" />
-                <KpiCard label="Low / Out" value={`${health.low_stock} / ${health.out_of_stock}`} color={health.out_of_stock > 0 ? "text-danger" : "text-warning"} sub="low stock / out of stock" />
-                <KpiCard label="Material Stock" value={materials.cost_value == null ? "—" : fmtKes(materials.cost_value)}
+                <KpiCard label="Stock at retail" value={fmtKes(health.retail_value)} sub="if everything sold at list" />
+                <KpiCard label="Low / out" value={`${health.low_stock} / ${health.out_of_stock}`} color={health.out_of_stock > 0 ? "text-danger" : "text-warning"} sub="low stock / out of stock" />
+                <KpiCard label="Material stock" value={materials.cost_value == null ? "—" : fmtKes(materials.cost_value)}
                          sub={materials.cost_value == null ? "needs financial access" : `${materials.materials} materials at unit cost`} />
             </div>
 
@@ -1040,7 +1040,7 @@ function InventoryIntelligence({ start, end }: { start: string; end: string }) {
 
             {stockout_risks.length > 0 && (
                 <div className="card card-body border border-danger-200 bg-danger-50/40">
-                    <SectionHeader title="⚠ Stockout risk — best sellers running dry" />
+                    <SectionHeader title="Stockout risk — best sellers running dry" />
                     <div className="space-y-1.5 mt-1">
                         {stockout_risks.map((r: any) => (
                             <div key={r.product_id} className="flex items-center gap-3 text-xs">
@@ -1189,7 +1189,7 @@ function StockoutLosses() {
             </SectionHeader>
             <div className={clsx(KPI_GRID, "mt-2 mb-4")}>
                 <KpiCard
-                    label="Bleeding now"
+                    label="Lost to empty shelves"
                     value={`${fmtKes(summary.est_daily_loss_now)}/day`}
                     color={summary.est_daily_loss_now > 0 ? "text-danger" : undefined}
                     sub="products out right now, at their usual pace"

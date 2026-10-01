@@ -249,7 +249,7 @@ export default function SalesReportPage() {
                             ["channels", "Channels"],
                             ["patterns", "Patterns"],
                             ["collections", "Collections"],
-                            ["basket", "Basket Intel"],
+                            ["basket", "Basket insights"],
                             ["international", "International"],
                         ] as const
                     ).map(([tab, label]) => (
@@ -277,7 +277,7 @@ export default function SalesReportPage() {
                     {/* Daily revenue chart */}
                     {daily.length > 0 && (
                         <div className="card p-5">
-                            <SectionHeader title="Daily Revenue">
+                            <SectionHeader title="Daily revenue">
                                 <ChangeBadge pct={cmp?.revenue_change_pct} />
                             </SectionHeader>
                             <ResponsiveContainer width="100%" height={280}>
@@ -347,14 +347,14 @@ export default function SalesReportPage() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {(byCatQuery.data?.categories ?? []).length > 0 && (
                             <div className="card p-5">
-                                <SectionHeader title="Revenue by Category" />
+                                <SectionHeader title="Revenue by category" />
                                 <ShareBars rows={(byCatQuery.data.categories ?? []).map((d: any) => ({ label: String(d.category_name ?? "—"), value: Number(d.total_revenue ?? 0) }))} money />
                             </div>
                         )}
 
                         {pmData.length > 0 && (
                             <div className="card p-5">
-                                <SectionHeader title="Payment Methods" />
+                                <SectionHeader title="Payment methods" />
                                 <div className="space-y-3 mt-2">
                                     {pmData.map((pm: any, i: number) => {
                                         const pct =
@@ -424,7 +424,7 @@ export default function SalesReportPage() {
                     {/* Returns summary */}
                     {returnsQuery.data?.summary && (
                         <div className="card p-5">
-                            <SectionHeader title="Returns & Refunds">
+                            <SectionHeader title="Returns & refunds">
                                 <ExportCsvButton
                                     path="sales/returns"
                                     params={dr.params}
@@ -432,7 +432,7 @@ export default function SalesReportPage() {
                             </SectionHeader>
                             <div className={KPI_GRID}>
                                 <KpiCard
-                                    label="Total Returns"
+                                    label="Total returns"
                                     value={
                                         returnsQuery.data.summary
                                             .total_returns ?? 0
@@ -440,7 +440,7 @@ export default function SalesReportPage() {
                                     color="text-danger"
                                 />
                                 <KpiCard
-                                    label="Total Refunded"
+                                    label="Total refunded"
                                     value={fmtKes(
                                         returnsQuery.data.summary
                                             .total_refunded,
@@ -448,13 +448,13 @@ export default function SalesReportPage() {
                                     color="text-danger"
                                 />
                                 <KpiCard
-                                    label="Avg Refund"
+                                    label="Avg refund"
                                     value={fmtKes(
                                         returnsQuery.data.summary.avg_refund,
                                     )}
                                 />
                                 <KpiCard
-                                    label="Customers Affected"
+                                    label="Customers affected"
                                     value={
                                         returnsQuery.data.summary
                                             .unique_customers ?? 0
@@ -502,7 +502,7 @@ export default function SalesReportPage() {
                 <div className="space-y-6">
                     <div className="card overflow-hidden">
                         <div className="px-5 pt-5 pb-4">
-                            <SectionHeader title="Top Products by Revenue">
+                            <SectionHeader title="Top products by revenue">
                                 <ExportCsvButton
                                     path="sales/by-product"
                                     params={dr.params}
@@ -599,7 +599,7 @@ export default function SalesReportPage() {
                     {(byCatQuery.data?.categories ?? []).length > 0 && (
                         <div className="card overflow-hidden">
                             <div className="px-5 pt-5 pb-4">
-                                <SectionHeader title="Revenue by Category">
+                                <SectionHeader title="Revenue by category">
                                     <ExportCsvButton
                                         path="sales/by-category"
                                         params={dr.params}
@@ -662,7 +662,7 @@ export default function SalesReportPage() {
                 <div className="space-y-6">
                     <div className="card overflow-hidden">
                         <div className="px-5 pt-5 pb-4">
-                            <SectionHeader title="Top Customers by Revenue">
+                            <SectionHeader title="Top customers by revenue">
                                 <ExportCsvButton
                                     path="sales/by-customer"
                                     params={dr.params}
@@ -772,7 +772,7 @@ export default function SalesReportPage() {
                     {/* Hourly heatmap */}
                     {hourly.length > 0 && (
                         <div className="card p-5">
-                            <SectionHeader title="Orders by Hour of Day" />
+                            <SectionHeader title="Orders by hour of day" />
                             <div className="flex gap-1 mt-2 flex-wrap">
                                 {Array.from({ length: 24 }, (_, h) => {
                                     const d = hourly.find(
@@ -823,7 +823,7 @@ export default function SalesReportPage() {
                     {/* Day of week */}
                     {byDow.length > 0 && (
                         <div className="card p-5">
-                            <SectionHeader title="Orders by Day of Week" />
+                            <SectionHeader title="Orders by day of week" />
                             <ResponsiveContainer width="100%" height={200}>
                                 <BarChart
                                     data={byDow.map((d: any) => ({
@@ -875,7 +875,7 @@ function SalesByOutletTable({ params }: { params: Record<string, any> }) {
     return (
         <div className="card overflow-hidden">
             <div className="px-5 pt-5 pb-4">
-                <SectionHeader title="Sales by Outlet">
+                <SectionHeader title="Sales by outlet">
                     <ExportCsvButton path="sales/by-outlet" params={params} />
                 </SectionHeader>
             </div>
@@ -1333,18 +1333,18 @@ function CollectionsTab() {
             {/* Headline: the money */}
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Money on the Table"
+                    label="Open quotes & balances"
                     value={fmtKes(summary.money_on_table)}
                     sub="Open quotes + all unpaid balances"
                     color="text-brand-600"
                 />
                 <KpiCard
-                    label="Open Quotes"
+                    label="Open quotes"
                     value={fmtKes(summary.open_quotes.value)}
                     sub={`${summary.open_quotes.count} quote${summary.open_quotes.count === 1 ? "" : "s"} · avg ${Math.round(summary.open_quotes.avg_age_days)}d old`}
                 />
                 <KpiCard
-                    label="Stalled Deposits"
+                    label="Stalled deposits"
                     value={fmtKes(summary.stalled_deposits.balance_due)}
                     sub={`${summary.stalled_deposits.count} order${summary.stalled_deposits.count === 1 ? "" : "s"} · ${fmtKes(summary.stalled_deposits.deposit_held)} already paid`}
                     color={
@@ -1354,7 +1354,7 @@ function CollectionsTab() {
                     }
                 />
                 <KpiCard
-                    label="Unpaid Balances"
+                    label="Unpaid balances"
                     value={fmtKes(summary.unpaid_balances.value)}
                     sub={`${summary.unpaid_balances.count} open order${summary.unpaid_balances.count === 1 ? "" : "s"}`}
                 />
@@ -1363,7 +1363,7 @@ function CollectionsTab() {
             {/* Funnel speed strip */}
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Quote → Order (90d)"
+                    label="Quote → order (90d)"
                     value={
                         conv.quotes_converted_rate_90d == null
                             ? "—"
@@ -1372,7 +1372,7 @@ function CollectionsTab() {
                     sub="Of quotes raised in the last 90 days"
                 />
                 <KpiCard
-                    label="Avg Days Quote → Order"
+                    label="Avg days quote → order"
                     value={
                         conv.avg_days_quote_to_order == null
                             ? "—"
@@ -1381,7 +1381,7 @@ function CollectionsTab() {
                     sub="Quote raised to order placed"
                 />
                 <KpiCard
-                    label="Avg Days Deposit → Paid"
+                    label="Avg days deposit → paid"
                     value={
                         conv.avg_days_deposit_to_paid == null
                             ? "—"
@@ -1726,23 +1726,23 @@ function BasketIntelTab() {
 
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Missed Revenue Opportunity"
+                    label="Add-ons not sold"
                     value={fmtKes(summary.missed_revenue_estimate_total)}
                     sub="Estimate — if missed baskets attached at the observed rate"
                     color="text-brand-600"
                 />
                 <KpiCard
-                    label="Multi-item Baskets"
+                    label="Multi-item baskets"
                     value={`${summary.multi_item_pct}%`}
                     sub={`Of ${summary.total_baskets.toLocaleString()} baskets (180 days)`}
                 />
                 <KpiCard
-                    label="Avg Items / Basket"
+                    label="Avg items / basket"
                     value={summary.avg_basket_items}
                     sub="Distinct products per order"
                 />
                 <KpiCard
-                    label="Best Pair"
+                    label="Best pair"
                     value={
                         summary.top_pair
                             ? `${summary.top_pair.attach_rate}%`
@@ -1904,18 +1904,18 @@ function InternationalTab() {
 
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Corridor Orders"
+                    label="Corridor orders"
                     value={summary.corridor_orders.toLocaleString()}
                     sub={`Last ${data.window_days} days — non-KES or shipped abroad`}
                     color="text-brand-600"
                 />
                 <KpiCard
-                    label="Corridor Customers"
+                    label="Corridor customers"
                     value={summary.corridor_customers.toLocaleString()}
                     sub="Distinct buyers across the corridor"
                 />
                 <KpiCard
-                    label="Currencies Active"
+                    label="Currencies active"
                     value={summary.currencies_active}
                     sub={
                         summary.kes_equivalent_total != null
@@ -1924,7 +1924,7 @@ function InternationalTab() {
                     }
                 />
                 <KpiCard
-                    label="Share of All Orders"
+                    label="Share of all orders"
                     value={`${summary.share_of_all_orders_pct}%`}
                     sub="Corridor share of every order in the window"
                 />
