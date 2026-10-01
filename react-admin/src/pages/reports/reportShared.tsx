@@ -968,14 +968,16 @@ const LINK_LABEL: Record<string, string> = {
     order: "Order", customer: "Customer", payment: "Payment", production: "Job", expense: "Expense",
 };
 
-export function DrillPanel({ metric, query, onClose, title }: {
+export function DrillPanel({ metric, query, onClose, title, load }: {
     metric: string; query: Record<string, any>; onClose: () => void; title?: string;
+    /** Another backend list in the same shape (the Explorer's rows); defaults to the metric drill. */
+    load?: (query: Record<string, any>) => Promise<any>;
 }) {
     const navigate = useNavigate();
     const [page, setPage] = useState(1);
     const { data, isLoading, isError } = useQuery({
         queryKey: ["drill", metric, query, page],
-        queryFn: () => reportsApi.drillWith(metric, { ...query, page }),
+        queryFn: () => (load ?? ((q: Record<string, any>) => reportsApi.drillWith(metric, q)))({ ...query, page }),
         staleTime: 60_000,
     });
     const rows: any[] = data?.rows ?? [];
@@ -1011,8 +1013,8 @@ export function DrillPanel({ metric, query, onClose, title }: {
                                     <div className="flex-1 min-w-0">
                                         <p className="text-xs font-semibold text-surface-800 font-mono truncate">{r.ref}</p>
                                         <p className="text-2xs text-surface-400 truncate">
-                                            {dayjs(r.at).format("D MMM YYYY")}
-                                            {r.who ? ` · ${r.who}` : ""}{r.detail ? ` · ${r.detail}` : ""}
+                                            {dayjs(r.at ?? r.date).format("D MMM YYYY")}
+                                            {(r.who ?? r.customer) ? ` · ${r.who ?? r.customer}` : ""}{r.detail ? ` · ${r.detail}` : ""}
                                         </p>
                                         {r.links && Object.keys(r.links).length > 0 && (
                                             <div className="flex gap-2 mt-1">
@@ -1028,7 +1030,7 @@ export function DrillPanel({ metric, query, onClose, title }: {
                                     {r.amount != null && (
                                         <span className="text-right shrink-0">
                                             <span className="block text-xs font-bold tabular-nums text-surface-800">
-                                                {money ? `KES ${Number(r.amount).toLocaleString()}` : Number(r.amount).toLocaleString()}
+                                                {money || load ? `KES ${Number(r.amount).toLocaleString()}` : Number(r.amount).toLocaleString()}
                                             </span>
                                             {r.currency && r.currency !== "KES" && r.amount_original != null && (
                                                 <span className="block text-2xs text-surface-400 tabular-nums">

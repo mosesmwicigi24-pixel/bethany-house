@@ -197,6 +197,7 @@ const ProductionReportPage  = lazy(() => import("@/pages/reports/ProductionRepor
 const ProcurementReportPage = lazy(() => import("@/pages/reports/ProcurementReportPage"));
 const PerformanceReportPage = lazy(() => import("@/pages/reports/PerformanceReportPage"));
 const DataQualityReportPage = lazy(() => import("@/pages/reports/DataQualityReportPage"));
+const ExplorerReportPage = lazy(() => import("@/pages/reports/ExplorerReportPage"));
 const FinancialReportPage   = lazy(() => import("@/pages/reports/FinancialReportPage"));
 const ProductCostingReportPage = lazy(() => import("@/pages/reports/ProductCostingReportPage"));
 const IntelligenceDashboard = lazy(() => import("@/pages/intelligence/IntelligenceDashboard"));
@@ -1082,6 +1083,16 @@ export default function App() {
                                 <ProtectedRoute permission="reports.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <PerformanceReportPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/reports/explorer"
+                            element={
+                                <ProtectedRoute permission="reports.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <ExplorerReportPage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }
