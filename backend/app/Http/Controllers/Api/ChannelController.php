@@ -569,7 +569,13 @@ class ChannelController extends Controller
     {
         $path = $request->get('path', '');
 
-        if (!$path || !str_starts_with($path, 'channel-attachments/')) {
+        // A prefix check alone let "channel-attachments/../payment-proofs/…"
+        // through: the storage layer resolves ".." inside the disk, so any staff
+        // member could read payment proofs, shipment papers and archived exports
+        // by name. The path must name a file inside channel-attachments and
+        // nothing else — no "..", no backslashes, no control characters.
+        if (!is_string($path) || !preg_match('#^channel-attachments/[A-Za-z0-9._\-/]+$#', $path)
+            || preg_match('#(^|/)\.\.?(/|$)#', $path) || str_contains($path, '//')) {
             return response()->json(['message' => 'Access denied.'], 403);
         }
 
