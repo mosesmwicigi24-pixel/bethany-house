@@ -145,7 +145,8 @@ Route::prefix('v1')->group(function () {
 
     // ═══ PUBLIC APIS ══════════════════════════════════════════════════════════
 
-    Route::middleware(['throttle:public-api', 'api.key:optional'])->group(function () {
+    // StripsInternalCost: no public response may carry what a product cost us.
+    Route::middleware(['throttle:public-api', 'api.key:optional', \App\Http\Middleware\StripsInternalCost::class])->group(function () {
 
         Route::prefix('products')->group(function () {
             Route::get('/',             [ProductController::class, 'index']);

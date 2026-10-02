@@ -2,6 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\Product;
+use App\Models\ProductPrice;
+use App\Models\ProductTranslation;
+use App\Models\ProductVariant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
@@ -13,7 +17,7 @@ use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
 /**
- * Two exposures found on 2026-10-02 while grounding the role-hardening plan
+ * Three exposures found on 2026-10-02 while grounding the role-hardening plan
  * against production. Both reached data no role is meant to read.
  */
 class StaffExposureTest extends TestCase
@@ -82,5 +86,29 @@ class StaffExposureTest extends TestCase
             $this->assertStringNotContainsString($secret, $res->getContent(), "{$secret} leaked");
         }
         $this->assertArrayNotHasKey('mpesa_passkey', $res->json('settings'));
+    }
+
+    public function test_no_public_product_response_carries_what_the_product_cost_us(): void
+    {
+        $product = Product::factory()->create(['status' => 'active', 'published_at' => now()->subDay(), 'is_featured' => true]);
+        ProductTranslation::create(['product_id' => $product->id, 'language_code' => 'en', 'name' => 'Chasuble']);
+        $variant = ProductVariant::create(['product_id' => $product->id, 'sku' => 'SKU-C1', 'variant_name' => 'M',
+            'attributes' => ['size' => 'M'], 'is_active' => true]);
+        ProductPrice::create(['product_id' => $product->id, 'currency_code' => 'KES', 'regular_price' => 10000, 'cost_price' => 3517]);
+        ProductPrice::create(['product_id' => $product->id, 'product_variant_id' => $variant->id, 'currency_code' => 'KES',
+            'regular_price' => 10000, 'cost_price' => 3517]);
+
+        // Signed out, as anyone on the internet.
+        foreach (['/api/v1/products', "/api/v1/products/{$product->slug}", '/api/v1/products/featured',
+                  '/api/v1/products/new-arrivals', "/api/v1/products/{$product->id}/variants"] as $url) {
+            $res = $this->getJson($url)->assertOk();
+            $this->assertStringNotContainsString('cost_price', $res->getContent(), "{$url} carries cost_price");
+            $this->assertStringNotContainsString('3517', $res->getContent(), "{$url} carries the cost figure");
+        }
+        $this->assertStringContainsString('10000', $this->getJson("/api/v1/products/{$product->slug}")->getContent(), 'the selling price still shows');
+
+        // The admin price editor still gets the cost it edits.
+        $this->staff(['products.view']);
+        $this->assertStringContainsString('cost_price', $this->getJson("/api/v1/admin/products/{$product->id}")->getContent());
     }
 }
