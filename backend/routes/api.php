@@ -352,7 +352,8 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Global search — powers CommandPalette (⌘K) ─────────────────────
-            Route::get('/search', [GlobalSearchController::class, 'search']);
+            Route::get('/search', [GlobalSearchController::class, 'search'])
+                ->middleware('contacts.mask:orders.view|customers.view');
 
             // ── Push subscriptions (PWA Web Push + React Native Expo) ────────
             Route::prefix('push')->group(function () {
@@ -655,7 +656,7 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Orders ───────────────────────────────────────────────────────
-            Route::middleware('permission:orders.view,sanctum')->prefix('orders')->group(function () {
+            Route::middleware(['permission:orders.view,sanctum', 'contacts.mask:orders.view'])->prefix('orders')->group(function () {
                 Route::get('/',                          [OrderController::class, 'index']);
                 // Must come before GET /{id} - otherwise Laravel matches
                 // "export" as the {id} parameter and routes to show() instead.
@@ -716,7 +717,7 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Shipments ────────────────────────────────────────────────────
-            Route::middleware('permission:shipment.view,sanctum')->prefix('shipments')->group(function () {
+            Route::middleware(['permission:shipment.view,sanctum', 'contacts.mask:shipment.view'])->prefix('shipments')->group(function () {
                 Route::get('/',           [ShipmentController::class, 'index']);
                 Route::get('/{id}',       [ShipmentController::class, 'show']);
                 Route::get('/{id}/tracking',  [ShipmentController::class, 'getTracking']);
@@ -751,7 +752,7 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Returns ──────────────────────────────────────────────────────
-            Route::middleware('permission:orders.manage_returns,sanctum')->prefix('returns')->group(function () {
+            Route::middleware(['permission:orders.manage_returns,sanctum', 'contacts.mask:orders.manage_returns'])->prefix('returns')->group(function () {
                 Route::get('/',                     [ReturnController::class, 'index']);
                 Route::get('/{id}',                 [ReturnController::class, 'show']);
                 Route::put('/{id}/status',          [ReturnController::class, 'updateStatus']);
@@ -762,7 +763,7 @@ Route::prefix('v1')->group(function () {
 
             // ── Quotations ───────────────────────────────────────────────────
             // Front of the quotation → invoice → receipt flow.
-            Route::middleware('permission:quotations.view,sanctum')->prefix('quotations')->group(function () {
+            Route::middleware(['permission:quotations.view,sanctum', 'contacts.mask:quotations.view'])->prefix('quotations')->group(function () {
                 Route::get('/',          [QuotationController::class, 'index']);
                 Route::get('/{id}',      [QuotationController::class, 'show']);
 
@@ -785,7 +786,7 @@ Route::prefix('v1')->group(function () {
             // ── Invoices ─────────────────────────────────────────────────────
             // The invoice stage of quotation → invoice → receipt (read views;
             // creation happens via quotation accept, payment via the order).
-            Route::middleware('permission:orders.view,sanctum')->prefix('invoices')->group(function () {
+            Route::middleware(['permission:orders.view,sanctum', 'contacts.mask:orders.view'])->prefix('invoices')->group(function () {
                 Route::get('/',      [InvoiceController::class, 'index']);
                 Route::get('/{id}',  [InvoiceController::class, 'show']);
             });
@@ -795,10 +796,10 @@ Route::prefix('v1')->group(function () {
             // handoff hands customers. orders.view: whoever answers the till
             // answers the handoff.
             Route::get('/interest-carts', [\App\Http\Controllers\Api\InterestCartAdminController::class, 'index'])
-                ->middleware('permission:orders.view,sanctum');
+                ->middleware(['permission:orders.view,sanctum', 'contacts.mask:orders.view']);
 
             // ── Customers ────────────────────────────────────────────────────
-            Route::middleware('permission:customers.view,sanctum')->prefix('customers')->group(function () {
+            Route::middleware(['permission:customers.view,sanctum', 'contacts.mask:customers.view'])->prefix('customers')->group(function () {
                 // customers.view is the PICKER: enough to find and attach a
                 // customer to a sale. The controller strips addresses, credit
                 // and balances from index/show for callers without insights.
@@ -861,7 +862,7 @@ Route::prefix('v1')->group(function () {
             // Eloquent, so the viewer scope applies. This decides who gets the
             // screen, which is a decision rather than a leak.
             Route::get('pos/outstanding-balances', [PosController::class, 'outstandingBalances'])
-                ->middleware('permission:receivables.view,sanctum');
+                ->middleware(['permission:receivables.view,sanctum', 'contacts.mask:receivables.view']);
 
             // EoD review — reading every cashier's report, acknowledging it.
             // Outside the pos.access group for the same reason as receivables:
@@ -869,13 +870,13 @@ Route::prefix('v1')->group(function () {
             // which tied reviewing takings to reading Setup. Commenting stays
             // in the pos group below: the AUTHOR answers there too, and
             // canDiscussEodReport authorises per report.
-            Route::middleware('permission:pos.eod_review,sanctum')->prefix('pos/reports')->group(function () {
+            Route::middleware(['permission:pos.eod_review,sanctum', 'contacts.mask:pos.eod_review'])->prefix('pos/reports')->group(function () {
                 Route::get('eod-admin',                   [PosController::class, 'adminListEodReports']);
                 Route::get('eod-admin/{id}',              [PosController::class, 'adminGetEodReport']);
                 Route::post('eod-admin/{id}/acknowledge', [PosController::class, 'acknowledgeEodReport']);
             });
 
-            Route::middleware('permission:pos.access,sanctum')->prefix('pos')->group(function () {
+            Route::middleware(['permission:pos.access,sanctum', 'contacts.mask:pos.access'])->prefix('pos')->group(function () {
                 Route::get('outlets',                   [PosController::class, 'outlets']);
                 Route::get('register/status',           [PosController::class, 'registerStatus']);
                 Route::get('register/history',          [PosController::class, 'registerHistory']);
@@ -1227,7 +1228,7 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Payments ─────────────────────────────────────────────────────
-            Route::middleware('permission:payments.view,sanctum')->group(function () {
+            Route::middleware(['permission:payments.view,sanctum', 'contacts.mask:payments.view'])->group(function () {
                 // The ledger is NOT the same capability as seeing a payment on
                 // an order. payments.view is held by every cashier so they can
                 // record a takings; payments.transactions — "View the full
@@ -1811,7 +1812,7 @@ Route::prefix('v1')->group(function () {
         // pos.cash_management - could still hit every one of those actions
         // through this alternate route set, since only the role name was
         // ever checked. Mirrored to the same per-action gates as /admin/pos.
-        Route::middleware(['role:pos_clerk|outlet_manager|admin|super_admin', 'permission:pos.access,sanctum'])->prefix('pos')->group(function () {
+        Route::middleware(['role:pos_clerk|outlet_manager|admin|super_admin', 'permission:pos.access,sanctum', 'contacts.mask:pos.access'])->prefix('pos')->group(function () {
             Route::get('/products',                 [PosController::class, 'products']);
             Route::get('/products/search',          [PosController::class, 'searchProducts']);
             Route::get('/suggestions',              [PosController::class, 'suggestions']);

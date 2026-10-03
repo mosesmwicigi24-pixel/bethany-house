@@ -83,6 +83,19 @@ class DocumentPdfController extends Controller
 
     // ─── Purchase Order ───────────────────────────────────────────────────────
 
+    /**
+     * Phase 4A: a rendered PDF cannot be masked afterwards, so the customer's
+     * contacts are masked in the data first — the same rules the JSON screens
+     * get (CustomerContacts::policyFor / apply).
+     */
+    private function masked(array $data, string $permission): array
+    {
+        return \App\Support\CustomerContacts::apply(
+            $data,
+            \App\Support\CustomerContacts::policyFor(request()->user(), $permission),
+        );
+    }
+
     public function purchaseOrder(int $id): Response
     {
         $po = PurchaseOrder::with([
@@ -209,7 +222,7 @@ class DocumentPdfController extends Controller
         // this is missing, which named the shop rather than the person.
         $data['cashier_name']   = $order->creator?->name ?: null;
 
-        $html = PdfService::order($data, $isInvoice);
+        $html = PdfService::order($this->masked($data, 'orders.view'), $isInvoice);
         $prefix = $isInvoice ? 'Invoice' : 'Order';
         return $this->makePdf($html, "{$prefix}-{$order->order_number}");
     }
@@ -228,7 +241,7 @@ class DocumentPdfController extends Controller
         $data = $quotation->toArray();
         $data['outlet_name'] = $quotation->outlet?->name;
 
-        $html = PdfService::quotation($data);
+        $html = PdfService::quotation($this->masked($data, 'quotations.view'));
         return $this->makePdf($html, 'Quotation-' . ($quotation->quote_number ?? $quotation->id));
     }
 
@@ -248,7 +261,7 @@ class DocumentPdfController extends Controller
                     ->whereIn('documentable_id', Quotation::query()->select('quotations.id')))))
             ->findOrFail($id);
 
-        $html = PdfService::receipt($document->snapshot ?? []);
+        $html = PdfService::receipt($this->masked($document->snapshot ?? [], 'orders.view'));
         return $this->makePdf($html, 'Receipt-' . $document->number);
     }
 
@@ -267,7 +280,7 @@ class DocumentPdfController extends Controller
         ]) : null;
         $data['tracking'] = $shipment->tracking?->toArray() ?? [];
 
-        $html = PdfService::shipment($data);
+        $html = PdfService::shipment($this->masked($data, 'shipment.view'));
         return $this->makePdf($html, 'Shipment-' . ($shipment->shipment_number ?? $id));
     }
 
@@ -290,7 +303,7 @@ class DocumentPdfController extends Controller
         $data['customer_email'] = $ret->order?->user?->email ?? $ret->order?->customer_email ?? '';
         $data['customer_email'] = $ret->order?->user?->email ?? '';
 
-        $html = PdfService::orderReturn($data);
+        $html = PdfService::orderReturn($this->masked($data, 'orders.manage_returns'));
         return $this->makePdf($html, 'Return-' . ($ret->return_number ?? $id));
     }
 

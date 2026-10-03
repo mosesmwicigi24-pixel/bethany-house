@@ -52,13 +52,11 @@ class DataScopeResolver
             return DataScope::All;
         }
 
-        if (self::isBusinessWide()) {
-            return DataScope::All;
-        }
-
         // super_admin bypasses every permission check via Gate::before; scope
         // follows the same rule, or the bypass would be half-honoured.
-        if ($user->hasRole('super_admin')) {
+        // (Asked first: it loads the roles relation once, early, and later
+        // checks in the request read it from memory.)
+        if ($user->hasRole('super_admin') || self::isBusinessWide()) {
             return DataScope::All;
         }
 

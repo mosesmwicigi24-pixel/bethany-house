@@ -595,6 +595,24 @@ class PosController extends Controller
      * edit, the order's current phone may be resent as they are — so a sale to
      * a customer whose record holds a legacy note is never blocked.
      */
+    /**
+     * Phase 4A: a cashier is served the attached customer's phone and email
+     * MASKED (07••••1853), and the till sends back what it holds. Swap a mask
+     * for the value on file — the chosen customer's, else the order's — so
+     * the sale records the real number and is never refused for bullets
+     * (CustomerContacts::restoreMasked).
+     */
+    private function restoreMaskedContacts(Request $request, ?Order $order = null): void
+    {
+        $customerId = (int) $request->input('customer_id');
+        $customer   = $customerId > 0 ? \App\Models\Customer::find($customerId) : null;
+
+        \App\Support\CustomerContacts::restoreMasked($request, [
+            'customer_phone' => $customer?->phone ?? $order?->customer_phone,
+            'customer_email' => $customer?->email ?? $order?->customer_email,
+        ]);
+    }
+
     private function customerPhoneRule(Request $request, ?string $orderPhone = null): \App\Rules\CustomerPhone
     {
         $customerId = (int) $request->input('customer_id');
@@ -607,6 +625,7 @@ class PosController extends Controller
 
     public function createSale(Request $request): JsonResponse
     {
+        $this->restoreMaskedContacts($request);
         $validated = $request->validate([
             // Idempotency key: same key = this attempt arriving again. See
             // findReplayedOrder() for why sales cannot use a content heuristic.
@@ -3068,6 +3087,7 @@ class PosController extends Controller
             ], 422);
         }
 
+        $this->restoreMaskedContacts($request, $order);
         $validated = $request->validate([
             'customer_id'                          => 'nullable|exists:customers,id',
             'customer_first_name'                  => 'nullable|string|max:255',
@@ -3461,6 +3481,7 @@ class PosController extends Controller
 
     public function createPendingOrder(Request $request): JsonResponse
     {
+        $this->restoreMaskedContacts($request);
         $validated = $request->validate([
             'client_request_id'                    => 'nullable|string|max:64',
             'outlet_id'                            => 'required|exists:outlets,id',

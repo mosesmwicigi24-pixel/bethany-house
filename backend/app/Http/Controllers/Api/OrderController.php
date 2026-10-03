@@ -1742,6 +1742,11 @@ class OrderController extends Controller
         // phone and the order's current one may be resent as they are
         // (App\Rules\CustomerPhone).
         $customerId = (int) $request->input('customer_id');
+        // Phase 4A: a masked contact sent back is the one on file, not a new one.
+        \App\Support\CustomerContacts::restoreMasked($request, [
+            'customer_phone' => $customerId > 0 ? \App\Models\Customer::whereKey($customerId)->value('phone') : Order::whereKey($id)->value('customer_phone'),
+            'customer_email' => $customerId > 0 ? \App\Models\Customer::whereKey($customerId)->value('email') : Order::whereKey($id)->value('customer_email'),
+        ]);
         $onFile = array_filter([
             $customerId > 0 ? \App\Models\Customer::whereKey($customerId)->value('phone') : null,
             Order::whereKey($id)->value('customer_phone'),
