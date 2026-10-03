@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
+use App\Support\MakerChecker;
 
 class StockTransfersController extends Controller
 {
@@ -198,6 +199,14 @@ class StockTransfersController extends Controller
     public function approve($id)
     {
         $transfer = InventoryTransfer::where('status', 'pending')->findOrFail($id);
+
+        // Whoever raised the transfer does not approve it. requested_by is
+        // checked as well because store() writes it wherever the table has
+        // that column; where it doesn't, it reads as null and is ignored.
+        MakerChecker::assertNotMaker(
+            auth()->user(), 'stock_transfer.approve', $transfer,
+            $transfer->created_by, $transfer->requested_by,
+        );
         $cols = \Illuminate\Support\Facades\Schema::getColumnListing('inventory_transfers');
         $updateData = ['status' => 'approved'];
         if (in_array('approved_by', $cols)) $updateData['approved_by'] = auth()->id();

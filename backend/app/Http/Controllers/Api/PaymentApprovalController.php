@@ -8,6 +8,7 @@ use App\Models\Payment;
 use App\Services\ActivityLogService;
 use App\Services\NotificationService;
 use App\Services\ReceiptService;
+use App\Support\MakerChecker;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -256,6 +257,29 @@ class PaymentApprovalController extends Controller
         if ($payment->approval_status === 'approved') {
             return response()->json(['message' => 'Payment is already approved.'], 422);
         }
+
+        // Maker ≠ checker (role hardening Phase 1B): whoever recorded the
+        // payment does not approve it. `payments` has no recorded_by column,
+        // and the order's created_by is the wrong person whenever someone
+        // other than the order's raiser takes the money (recordPosPay,
+        // OrderController::addPayment, the customer's own pay page). The one
+        // exact record of the recorder is the audit trail: AuditObserver
+        // writes a 'created' row for every Payment::create — every path that
+        // makes a payment goes through it — with the signed-in user as causer.
+        //
+        // It FAILS OPEN where that row is missing: payments created before
+        // the observer shipped (2026-09-21), or an audit write that failed
+        // (those are swallowed by design). It never blocks the wrong person.
+        // The durable fix is a payments.recorded_by column stamped by every
+        // creating path; until then this is the strongest check available.
+        $recordedBy = DB::table('activity_log')
+            ->where('subject_type', Payment::class)
+            ->where('subject_id', $payment->id)
+            ->where('event', 'created')
+            ->where('causer_type', \App\Models\User::class)
+            ->orderBy('id')
+            ->value('causer_id');
+        MakerChecker::assertNotMaker($request->user(), 'payment.approve', $payment, $recordedBy);
 
         // Proof of payment is encouraged but not required — the admin may approve
         // without it at their own discretion (e.g. verbal/in-person confirmation).

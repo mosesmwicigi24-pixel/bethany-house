@@ -68,6 +68,10 @@ return Application::configure(basePath: dirname(__DIR__))
             'report.snapshot' => \App\Http\Middleware\ReadsOneSnapshot::class,
             // Customer phones and emails need customers.view (owner, cycle 9).
             'report.contacts' => \App\Http\Middleware\RedactsCustomerContacts::class,
+            // The owner's accounts never work the till (role hardening 1B).
+            // A route middleware, because Gate::before lets super_admin past
+            // every permission — see the class docblock.
+            'owner.no_transact' => \App\Http\Middleware\OwnerDoesNotTransact::class,
         ]);
 
         // Every staff API call → request_logs (who looked at what). Staff-only
