@@ -42,6 +42,7 @@ export interface LoginResponse {
   token: string
   requires_2fa?: boolean
   user_id?: number
+  challenge?: string
 }
 
 // ─── RBAC ─────────────────────────────────────────────────────────────────────

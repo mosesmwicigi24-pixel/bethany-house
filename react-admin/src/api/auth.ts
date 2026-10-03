@@ -11,8 +11,10 @@ export const authApi = {
   me: () =>
     get<{ user: User }>('/v1/admin/auth/me'),
 
-  verify2fa: (userId: number, code: string) =>
-    post<LoginResponse>('/v1/admin/auth/2fa/verify', { user_id: userId, code }),
+  // `challenge` is the one-time proof the password step returned; the server
+  // refuses the code without it.
+  verify2fa: (userId: number, code: string, challenge: string) =>
+    post<LoginResponse>('/v1/admin/auth/2fa/verify', { user_id: userId, code, challenge }),
 
   forgotPassword: (email: string) =>
     post<{ message: string }>('/v1/admin/auth/forgot-password', { email }),
