@@ -646,6 +646,8 @@ class ShipmentController extends Controller
             abort(404, 'Attachment not found');
         }
 
+        // The customer's tracking page renders these with <img src>: the
+        // tracking token plus is_public is the gate, streamed as before.
         return $this->streamAttachment($attachment->path, $attachment->original_name, $request->boolean('download'));
     }
 
@@ -1033,7 +1035,7 @@ class ShipmentController extends Controller
         if (!$attachment) {
             return response()->json(['message' => 'No attachment found'], 404);
         }
-        return $this->streamAttachment($attachment->path, $attachment->original_name, $request->boolean('download'));
+        return $this->issueAttachmentLink($request, $attachment);
     }
 
     public function serveTrackingAttachment(Request $request, $id, $trackingId, $attachmentId)
@@ -1048,7 +1050,7 @@ class ShipmentController extends Controller
         if (!$attachment) {
             return response()->json(['message' => 'No attachment found'], 404);
         }
-        return $this->streamAttachment($attachment->path, $attachment->original_name, $request->boolean('download'));
+        return $this->issueAttachmentLink($request, $attachment);
     }
 
     // =========================================================================
@@ -1228,6 +1230,21 @@ class ShipmentController extends Controller
                 : $this->buildAttachmentUrl('tracking', $attachment->shipment_id, $attachment->attachable_id, $attachment->id),
             'uploaded_at'   => $attachment->created_at,
         ];
+    }
+
+    /**
+     * Staff attachments: a signed link valid ≤5 minutes (4D), issued after the
+     * shipment.view gate and the shipment/tracking match above. The bytes come
+     * from SignedFileController, which streams the same masked name.
+     */
+    private function issueAttachmentLink(Request $request, ShipmentAttachment $attachment)
+    {
+        if (!Storage::disk('local')->exists($attachment->path)) {
+            return response()->json(['message' => 'Attachment not found'], 404);
+        }
+
+        return \App\Support\SignedFiles::issue($request, 'files.shipment-attachment',
+            ['attachment' => $attachment->id], $attachment->original_name);
     }
 
     private function streamAttachment(string $path, ?string $name, bool $forceDownload = false): \Symfony\Component\HttpFoundation\Response

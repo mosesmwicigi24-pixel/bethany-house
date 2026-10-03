@@ -2,7 +2,8 @@ import { useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
-import { get, post, tokenStorage } from "@/api/client";
+import { get, post } from "@/api/client";
+import { fetchSignedFile } from "@/api/signedFiles";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Modal } from "@/components/ui/Modal";
@@ -639,28 +640,12 @@ function ProofViewer({ proofUrl, paymentNumber }: { proofUrl: string; paymentNum
         setError(null);
 
         try {
-            // The endpoint streams the file as binary - use fetch() with the
-            // Bearer token so we get the raw bytes, then create a local blob URL.
-            const token = tokenStorage.get();
-            const base  = (import.meta.env.VITE_API_URL ?? "").replace(/\/api$/, "");
-            const fullUrl = apiPath.startsWith("http") ? apiPath : `${base}${apiPath}`;
+            // The proof endpoint issues a fresh signed link (≤5 min) after the
+            // order-visibility check; the bytes come from that link.
+            const file = await fetchSignedFile(apiPath);
+            setMimeType(file.contentType);
 
-            const response = await fetch(fullUrl, {
-                headers: {
-                    Authorization: token ? `Bearer ${token}` : "",
-                    Accept: "*/*",
-                },
-            });
-
-            if (!response.ok) {
-                throw new Error(`${response.status} ${response.statusText}`);
-            }
-
-            const contentType = response.headers.get("Content-Type") ?? "image/jpeg";
-            setMimeType(contentType);
-
-            const blob = await response.blob();
-            const url  = URL.createObjectURL(blob);
+            const url = URL.createObjectURL(file.blob);
 
             // Revoke any previous blob URL to avoid memory leaks
             if (blobUrl) URL.revokeObjectURL(blobUrl);

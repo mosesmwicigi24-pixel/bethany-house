@@ -146,6 +146,18 @@ Route::prefix('v1')->group(function () {
         Route::post('/{token}/paystack-verify', [PublicPaymentController::class, 'verifyPaystack']);
     });
 
+    // ═══ SIGNED ATTACHMENT LINKS (role hardening 4D) ═════════════════════════
+    // Issued for ≤5 minutes by the console's attachment endpoints AFTER their
+    // parent-record check (App\Support\SignedFiles). The signature is the only
+    // check here — an unsigned, altered or expired link is a 403.
+    Route::prefix('files')->middleware(['signed:relative', 'throttle:120,1'])->group(function () {
+        $files = \App\Http\Controllers\Api\SignedFileController::class;
+        Route::get('/payment-proofs/{payment}',         [$files, 'paymentProof'])->whereNumber('payment')->name('files.payment-proof');
+        Route::get('/shipment-attachments/{attachment}', [$files, 'shipmentAttachment'])->whereNumber('attachment')->name('files.shipment-attachment');
+        Route::get('/expense-receipts/{expense}',        [$files, 'expenseReceipt'])->whereNumber('expense')->name('files.expense-receipt');
+        Route::get('/channel-attachments',               [$files, 'channelAttachment'])->name('files.channel-attachment');
+    });
+
     // ═══ PUBLIC ORDER PAGE (no auth) ═════════════════════════════════════════
     // /order/{public_token} — the customer's own view of ONE order: the receipt
     // when it is paid, the checkout when it is not. Keyed on the order's durable
@@ -1964,12 +1976,9 @@ Route::prefix('v1')->group(function () {
             Route::get('/cash-register/status',         [PosController::class, 'registerStatus']);
             Route::get('/cash-register/transactions',   [PosController::class, 'cashTransactions']);
             Route::get('/cash-register/summary',        [PosController::class, 'cashSummary']);
-            Route::post('/cash-register/deposit',       [PosController::class, 'cashDeposit'])
-                ->middleware(['permission:pos.cash_management,sanctum', 'owner.no_transact']);
-            Route::post('/cash-register/withdrawal',    [PosController::class, 'cashWithdrawal'])
-                ->middleware(['permission:pos.cash_management,sanctum', 'owner.no_transact']);
-            Route::post('/cash-register/adjustment',    [PosController::class, 'cashAdjustment'])
-                ->middleware(['permission:pos.cash_management,sanctum', 'owner.no_transact']);
+            // deposit / withdrawal / adjustment were removed (4D): they named
+            // PosController methods that never existed, so every call was a 500,
+            // and nothing in the console called them.
             Route::get('/cash-register/reconciliation', [PosController::class, 'reconciliation']);
         });
 

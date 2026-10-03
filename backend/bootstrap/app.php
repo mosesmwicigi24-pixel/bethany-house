@@ -96,6 +96,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->api(append: [
             \App\Http\Middleware\AuditStaffRequests::class,
             \App\Http\Middleware\DownloadGate::class,
+            // A 403 on a sensitive route → activity_log authorization_denied (4D).
+            \App\Http\Middleware\RecordsDeniedAuthorizations::class,
         ]);
 
         // Configure authentication redirects

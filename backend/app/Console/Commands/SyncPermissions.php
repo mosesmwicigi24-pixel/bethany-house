@@ -238,6 +238,10 @@ class SyncPermissions extends Command
         'outlets.create'       => ['Create Outlets',       'Add new outlets',                                         'Outlets'],
         'outlets.edit'         => ['Edit Outlets',         'Edit outlet details and settings',                        'Outlets'],
         'outlets.delete'       => ['Delete Outlets',       'Delete outlets',                                          'Outlets'],
+        // Was a role-name check (admin / super_admin) in PosController and
+        // TimeClockController: not limited to the outlets on outlet_user. A
+        // permission since 4D so the Roles screen says who floats between sites.
+        'outlets.all_access'   => ['Work Across All Outlets', 'Use the till and the time clock at every outlet, not only assigned ones (and see every outlet\'s time entries)', 'Outlets'],
 
         // ── Settings ────────────────────────────────────────────────────────
         'settings.view'             => ['View Settings',             'View system settings and configuration',                     'Settings'],
@@ -416,7 +420,7 @@ class SyncPermissions extends Command
             'reports.data_quality', 'reports.explorer',
             'reports.export',
             'expenses.view',
-            'outlets.view',
+            'outlets.view', 'outlets.all_access',
             'settings.view',
             // Proposes a customer pricing rate; finance signs it (Phase 3C).
             'settings.pricing_rate_propose',
@@ -781,6 +785,8 @@ class SyncPermissions extends Command
                 // Finance's proposal key must never reach another role through
                 // a future 'settings.*' (Phase 3C).
                 'settings.financial_propose',
+                // 4D: who works across every outlet is a deliberate grant.
+                'outlets.all_access',
             ];
 
             // Resolve "@bundle" references first, so wildcard expansion and

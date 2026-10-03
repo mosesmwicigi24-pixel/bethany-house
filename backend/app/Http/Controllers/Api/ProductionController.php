@@ -985,7 +985,9 @@ class ProductionController extends Controller
 
     public function timeline($id)
     {
-        $order = ProductionOrder::with([
+        // Scoped like show() (4D): an order the caller cannot see is a 404,
+        // and the payload goes through the same contact/cost redaction.
+        $order = ProductionOrder::visibleTo(request()->user())->with([
             'tasks.stage:id,name,slug,sort_order',
             'tasks.assignedTo:id,first_name,last_name',
             'materialAllocations.material:id,name,code,unit_of_measure',
@@ -997,10 +999,10 @@ class ProductionController extends Controller
             ->orderByDesc('created_at')
             ->get();
 
-        return response()->json([
-            'order'      => $order,
+        return response()->json(\App\Support\ProductionPayload::forViewer([
+            'order'      => $order->toArray(),
             'qc_results' => $qcResults,
-        ]);
+        ], request()->user()));
     }
 
     // =========================================================================
@@ -1210,7 +1212,7 @@ class ProductionController extends Controller
         $task = ProductionTask::with(['productionOrder.batches', 'stage:id,name'])->findOrFail($id);
 
         if ($task->assigned_to !== $request->user()->id
-            && !$request->user()->hasAnyRole(['admin', 'super_admin'])) {
+            && !$request->user()->can('production.manage_assignees')) {
             return response()->json(['message' => 'You are not assigned to this task.'], 403);
         }
 
@@ -1587,7 +1589,7 @@ class ProductionController extends Controller
         $task = ProductionTask::with('productionOrder')->findOrFail($id);
 
         if ($task->assigned_to !== $request->user()->id
-            && !$request->user()->hasAnyRole(['admin', 'super_admin'])) {
+            && !$request->user()->can('production.manage_assignees')) {
             return response()->json(['message' => 'You are not assigned to this task.'], 403);
         }
 
@@ -1700,7 +1702,7 @@ class ProductionController extends Controller
 
         // Guard: tailor can only see their own task history
         if ($task->assigned_to !== $request->user()->id
-            && !$request->user()->hasAnyRole(['admin', 'super_admin'])) {
+            && !$request->user()->can('production.manage_assignees')) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
@@ -2293,7 +2295,7 @@ class ProductionController extends Controller
 
     public function assignees($id)
     {
-        ProductionOrder::findOrFail($id);
+        ProductionOrder::visibleTo(request()->user())->findOrFail($id);   // 4D: as show()
 
         $assignees = ProductionOrderAssignee::with('user:id,first_name,last_name,email')
             ->where('production_order_id', $id)
@@ -2347,7 +2349,7 @@ class ProductionController extends Controller
 
     public function approvalHistory($id)
     {
-        ProductionOrder::findOrFail($id);
+        ProductionOrder::visibleTo(request()->user())->findOrFail($id);   // 4D: as show()
 
         $approvals = DB::table('production_order_approvals as a')
             ->join('users as u', 'a.approved_by', '=', 'u.id')
@@ -2431,7 +2433,7 @@ class ProductionController extends Controller
 
     public function getMessages($id)
     {
-        $order = ProductionOrder::findOrFail($id);
+        $order = ProductionOrder::visibleTo(request()->user())->findOrFail($id);   // 4D: as show()
 
         $messages = DB::table('production_order_messages as m')
             ->join('users as u', 'u.id', '=', 'm.user_id')
@@ -2466,7 +2468,7 @@ class ProductionController extends Controller
 
     public function postMessage(Request $request, $id)
     {
-        $order = ProductionOrder::findOrFail($id);
+        $order = ProductionOrder::visibleTo($request->user())->findOrFail($id);   // 4D: as show()
 
         $validated = $request->validate([
             'body' => 'required|string|max:2000',
@@ -2521,7 +2523,7 @@ class ProductionController extends Controller
 
     public function auditLog($id)
     {
-        $order = ProductionOrder::findOrFail($id);
+        $order = ProductionOrder::visibleTo(request()->user())->findOrFail($id);   // 4D: as show()
 
         $logs = DB::table('activity_log as al')
             ->leftJoin('users as u', 'u.id', '=', 'al.causer_id')

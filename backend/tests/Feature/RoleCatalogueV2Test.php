@@ -190,6 +190,9 @@ class RoleCatalogueV2Test extends TestCase
             'products.edit_cost', 'settings.pricing_rate_propose',
             // 4B part 1 (2026_10_03_440002): every till, read-only.
             'pos.tills_view_all',
+            // 4D (2026_10_03_480001): works across every outlet — the grant
+            // that replaced the hasRole('admin') checks.
+            'outlets.all_access',
         ],
         'finance_manager' => [
             // 3B (2026_10_03_520002): signs the finance band.
@@ -365,6 +368,14 @@ class RoleCatalogueV2Test extends TestCase
         return require database_path('migrations/' . self::MIGRATION);
     }
 
+    /** 4D's role migration: outlets.all_access for admin (also in LATER_GRANTS). */
+    private const MIGRATION_4D = '2026_10_03_480001_outlets_all_access_permission.php';
+
+    private function migration4d(): object
+    {
+        return require database_path('migrations/' . self::MIGRATION_4D);
+    }
+
     /**
      * Put the database in production's pre-Phase-2 shape: every role as it was,
      * system_admin and accountant on the legacy vocabulary, and neither new
@@ -435,6 +446,29 @@ class RoleCatalogueV2Test extends TestCase
 
         Artisan::call('permission:sync');
         $this->assertRolesAre(self::withLater($this->spec()), 'after the migrations and permission:sync');
+    }
+
+    public function test_on_productions_shape_the_4d_migration_gives_admin_outlets_all_access_and_down_takes_it_back(): void
+    {
+        // Production runs migrations, not sync, on deploy: 4D's own migration
+        // must carry admin's outlets.all_access there, and undo only that.
+        $this->rewindToProductionBefore();
+        $this->migration()->up();
+        $this->migration3a()->up();
+        $this->assertRolesAre($this->spec(), 'before the 4D migration');
+
+        $migration = $this->migration4d();
+        $migration->up();
+        $after = $this->spec();
+        $after['admin'][] = 'outlets.all_access';
+        $this->assertRolesAre($after, 'after the 4D migration, before sync');
+
+        $migration->up();   // idempotent
+        $this->assertRolesAre($after, 'after the 4D migration ran twice');
+
+        $migration->down();
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        $this->assertRolesAre($this->spec(), 'after the 4D migration\'s down()');
     }
 
     public function test_sync_twice_after_the_migration_changes_nothing(): void

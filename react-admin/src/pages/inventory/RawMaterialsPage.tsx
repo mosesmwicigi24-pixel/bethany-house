@@ -90,6 +90,11 @@ const UNITS = [
 
 // ── Stock bar ─────────────────────────────────────────────────────────────────
 
+/** Cost figures arrive only for products.view_cost holders (4D): "—" otherwise. */
+function kes(n?: number): string {
+    return n == null ? "—" : `KES ${n.toLocaleString()}`;
+}
+
 function StockBar({ material }: { material: RawMaterial }) {
     if (material.reorder_point === 0) return null;
     const pct = Math.min(
@@ -167,6 +172,8 @@ function MaterialFormModal({
     const toast = useToastStore();
     const qc = useQueryClient();
     const [codeManual, setCodeManual] = useState(false);
+    // The server ignores a cost from anyone without products.view_cost (4D).
+    const canSeeCost = usePermissions().can("products.view_cost");
 
     const form = useForm<MaterialForm>({
         resolver: zodResolver(materialSchema),
@@ -200,7 +207,7 @@ function MaterialFormModal({
                 description: editing.description ?? "",
                 category: editing.category ?? "",
                 unit_of_measure: editing.unit_of_measure,
-                unit_cost: editing.unit_cost,
+                unit_cost: editing.unit_cost ?? 0,
                 reorder_point: editing.reorder_point,
                 is_active: editing.is_active,
             });
@@ -371,6 +378,7 @@ function MaterialFormModal({
                         </FieldSelect>
                     </Field>
 
+                    {canSeeCost && (
                     <Field label="Cost per Unit (KES)" required>
                         <FieldInput
                             className="input"
@@ -386,6 +394,7 @@ function MaterialFormModal({
                             </NeedsApprovalHint>
                         )}
                     </Field>
+                    )}
                     {editing && <PendingChanges subjectType="material" subjectIds={[editing.id]} />}
 
                     <Field
@@ -439,7 +448,8 @@ function ReceiveModal({
     const [txType, setTxType] = useState<
         "opening_stock" | "purchase" | "adjustment" | "transfer_in"
     >("purchase");
-    const [unitCost, setUnitCost] = useState<number>(material.unit_cost);
+    const [unitCost, setUnitCost] = useState<number>(material.unit_cost ?? 0);
+    const canSeeCost = usePermissions().can("products.view_cost");
     const [notes, setNotes] = useState("");
     const [reference, setReference] = useState("");
 
@@ -567,6 +577,7 @@ function ReceiveModal({
                             }
                         />
                     </Field>
+                    {canSeeCost && (
                     <Field label="Unit Cost (KES)">
                         <FieldInput
                             className="input"
@@ -579,6 +590,7 @@ function ReceiveModal({
                             }
                         />
                     </Field>
+                    )}
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <Field label="Transaction Type">
@@ -965,11 +977,11 @@ function DetailPanel({
                     },
                     {
                         label: "Cost/Unit",
-                        value: `KES ${detail.unit_cost.toLocaleString()}`,
+                        value: kes(detail.unit_cost),
                     },
                     {
                         label: "Stock Value",
-                        value: `KES ${detail.stock_value.toLocaleString()}`,
+                        value: kes(detail.stock_value),
                     },
                 ].map((s) => (
                     <div key={s.label} className="py-3 px-4 text-center">
@@ -1466,8 +1478,7 @@ export default function RawMaterialsPage() {
                                                     </div>
                                                 </td>
                                                 <td className="px-4 py-3 text-right text-sm text-surface-600 tabular-nums">
-                                                    KES{" "}
-                                                    {m.unit_cost.toLocaleString()}
+                                                    {kes(m.unit_cost)}
                                                 </td>
                                                 <td className="px-4 py-3">
                                                     <span

@@ -311,6 +311,7 @@ class DocumentPdfController extends Controller
 
     public function productionOrder(int $id): Response
     {
+        // The printed order is the order (4D): visible to whoever may open it.
         $po = ProductionOrder::visibleTo(request()->user())->with([
             'product:id,sku',
             'product.translations' => fn($q) => $q->where('language_code','en')->select('product_id','name'),

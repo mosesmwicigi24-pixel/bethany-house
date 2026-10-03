@@ -17,7 +17,7 @@ import { shipmentsApi, SHIPMENT_STATUS_LABELS, TRACKING_MILESTONES } from "@/api
 import type { ShipmentStatus, TrackingEvent, ShipmentAttachment } from "@/api/shipments";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
-import { tokenStorage } from "@/api/client";
+import { fetchSignedFile } from "@/api/signedFiles";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import type { ApiError } from "@/types";
@@ -32,16 +32,14 @@ import type { ApiError } from "@/types";
 // response into a local blob: URL the browser can render or save normally.
 
 async function fetchAttachmentBlob(url: string): Promise<{ blobUrl: string; mimeType: string }> {
-    const token = tokenStorage.get();
-    const res = await fetch(url, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok) {
-        throw new Error(`Failed to load attachment (${res.status})`);
+    // The attachment URL is the ISSUER (4D): it answers with a fresh signed
+    // link valid ≤5 minutes, and the bytes come from that link.
+    try {
+        const file = await fetchSignedFile(url);
+        return { blobUrl: URL.createObjectURL(file.blob), mimeType: file.contentType };
+    } catch (e: any) {
+        throw new Error(`Failed to load attachment (${e?.message ?? "error"})`);
     }
-    const mimeType = res.headers.get("Content-Type") ?? "application/octet-stream";
-    const blob = await res.blob();
-    return { blobUrl: URL.createObjectURL(blob), mimeType };
 }
 
 function triggerBlobDownload(blobUrl: string, filename: string) {

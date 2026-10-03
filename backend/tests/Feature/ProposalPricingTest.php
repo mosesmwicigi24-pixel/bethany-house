@@ -472,15 +472,29 @@ class ProposalPricingTest extends TestCase
         ])->assertCreated();
     }
 
-    public function test_a_cost_blind_maker_proposes_a_material_cost_without_seeing_any_cost(): void
+    public function test_a_cost_blind_editor_neither_writes_nor_sees_a_material_cost(): void
     {
-        // The outlet manager edits materials (inventory.adjust) but may not see cost (1C field rule).
+        // The outlet manager edits materials (inventory.adjust) but may not see
+        // cost (1C field rule). Since 4D a cost write from someone who cannot
+        // see cost is ignored — setting a cost is seeing it — so no proposal is
+        // raised; cost writes come from cost viewers, as the 3C plan names the
+        // makers (procurement manager: products.view_cost).
         $m = Material::create(['code' => 'MAT-' . uniqid(), 'name' => 'Linen', 'unit_of_measure' => 'm', 'unit_cost' => 400]);
         Sanctum::actingAs($this->om);
-        $this->putJson("/api/v1/admin/inventory/materials/{$m->id}", ['unit_cost' => 600])->assertOk();
+        $this->putJson("/api/v1/admin/inventory/materials/{$m->id}", ['unit_cost' => 600])->assertOk()
+            ->assertJsonPath('proposal', null);
+        $this->assertSame(400.0, (float) $m->fresh()->unit_cost);
+        $this->assertSame(0, ChangeProposal::where('event', 'supplier_cost_change')->count());
 
+        // A cost viewer's change waits, and the cost-blind editor sees it only masked.
+        Sanctum::actingAs($this->pm);
+        $this->putJson("/api/v1/admin/inventory/materials/{$m->id}", ['unit_cost' => 600])->assertOk()
+            ->assertJsonPath('proposal.status', 'pending');
+
+        Sanctum::actingAs($this->om);
         $res = $this->getJson("/api/v1/admin/proposals?subject_type=material&subject_ids={$m->id}&status=open")->assertOk();
-        $this->assertSame('•••', $res->json('data.0.changes.0.old_display'), 'the old cost is not shown to a cost-blind maker');
+        $this->assertSame('•••', $res->json('data.0.changes.0.old_display'), 'the old cost is not shown to a cost-blind viewer');
+        $this->assertSame('•••', $res->json('data.0.changes.0.new_display'));
         $this->assertNull($res->json('data.0.changes.0.old'));
         $this->assertNull($res->json('data.0.measure'));
 

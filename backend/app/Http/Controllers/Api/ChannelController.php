@@ -550,6 +550,10 @@ class ChannelController extends Controller
 
         Storage::disk('local')->put($path, file_get_contents($file->getRealPath()));
 
+        // Until the message carrying it is sent, the uploader is the only
+        // person who may open it (serveAttachment) — the composer previews it.
+        \Illuminate\Support\Facades\Cache::put(self::uploaderKey($path), $request->user()->id, now()->addDay());
+
         return response()->json([
             'path'      => $path,
             'name'      => $file->getClientOriginalName(),
@@ -579,18 +583,41 @@ class ChannelController extends Controller
             return response()->json(['message' => 'Access denied.'], 403);
         }
 
-        if (!Storage::disk('local')->exists($path)) {
+        // The file belongs to the conversation it was posted in (4D): only a
+        // member of a channel holding a message that carries it — or its
+        // uploader, before sending — gets a link. Any staff member with the
+        // path used to get the bytes. 404, so a guessed path says nothing.
+        if (!$this->mayOpenAttachment($path, (int) $request->user()->id)
+            || !Storage::disk('local')->exists($path)) {
             return response()->json(['message' => 'File not found.'], 404);
         }
 
-        $content  = Storage::disk('local')->get($path);
-        $mimeType = Storage::disk('local')->mimeType($path) ?: 'application/octet-stream';
-        $filename = basename($path);
+        // A signed link valid ≤5 minutes, not the bytes (App\Support\SignedFiles).
+        return \App\Support\SignedFiles::issue($request, 'files.channel-attachment', ['path' => $path], basename($path));
+    }
 
-        return response($content, 200)
-            ->header('Content-Type', $mimeType)
-            ->header('Content-Disposition', 'inline; filename="' . $filename . '"')
-            ->header('Cache-Control', 'private, max-age=3600');
+    private static function uploaderKey(string $path): string
+    {
+        return 'channel-attachment-uploader:' . sha1($path);
+    }
+
+    private function mayOpenAttachment(string $path, int $userId): bool
+    {
+        if ((int) \Illuminate\Support\Facades\Cache::get(self::uploaderKey($path)) === $userId) {
+            return true;
+        }
+
+        // Files are stored under a fresh UUID name, so the name alone finds
+        // the message(s) whose body links it (raw or url-encoded path).
+        $needle = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], basename($path));
+
+        return DB::table('channel_messages as m')
+            ->join('channel_members as cm', function ($j) use ($userId) {
+                $j->on('cm.channel_id', '=', 'm.channel_id')->where('cm.user_id', '=', $userId);
+            })
+            ->whereNull('m.deleted_at')
+            ->where('m.body', 'like', '%' . $needle . '%')
+            ->exists();
     }
 
     // ── POST /channels/context ────────────────────────────────────────────────

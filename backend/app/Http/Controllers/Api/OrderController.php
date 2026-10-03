@@ -1359,6 +1359,7 @@ class OrderController extends Controller
             }
 
             $payment = Payment::create([
+                'recorded_by' => $request->user()->id,   // who recorded it (4D)
                 'order_id'             => $order->id,
                 'payment_method'       => $validated['method'],
                 'amount'               => $collectedAmount,
@@ -1782,9 +1783,10 @@ class OrderController extends Controller
         // attaching a customer to their own pending POS sale without
         // granting the broader orders.edit surface (status changes,
         // shipping fee, deposits, price overrides, etc).
+        // (The old super_admin/admin role-name escape was dead: both hold
+        // orders.edit — super_admin by bypass — so never reached this branch.)
         $user = $request->user();
-        $isAdminTier = $user->isSuperAdmin() || $user->hasRole('super_admin') || $user->hasRole('admin');
-        if (!$user->can('orders.edit') && $user->can('orders.create') && !$isAdminTier) {
+        if (!$user->can('orders.edit') && $user->can('orders.create')) {
             if ((int) $order->created_by !== (int) $user->id) {
                 return response()->json([
                     'message' => 'You can only attach a customer to orders you created.',

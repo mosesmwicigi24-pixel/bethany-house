@@ -247,15 +247,8 @@ class ProfileController extends Controller
 
     private function logActivity(Request $request, string $action, string $description): void
     {
-        try {
-            DB::table('activity_log')->insert([
-                'causer_type' => \App\Models\User::class,
-                'causer_id'   => $request->user()->id,
-                'action'      => $action,
-                'description' => $description,
-                'ip_address'  => $request->ip(),
-                'created_at'  => now(),
-            ]);
-        } catch (\Exception) {}
+        // Through the one audit writer (4D): request id, role(s), token,
+        // channel and outcome, inside a savepoint, never failing the request.
+        \App\Services\ActivityLogService::log($action, null, [], $description, $request->user());
     }
 }

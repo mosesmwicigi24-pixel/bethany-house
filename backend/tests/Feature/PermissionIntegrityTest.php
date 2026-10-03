@@ -59,6 +59,11 @@ class PermissionIntegrityTest extends TestCase
      * the walk-in flag are still real gaps.
      */
     private const KNOWN_INERT = [
+        // Its only gates were /pos/cash-register/deposit|withdrawal|adjustment,
+        // which named controller methods that never existed (every call a 500)
+        // and were removed in 4D. It governed nothing before either; wire it to
+        // a real drawer-movement flow (4B) or retire it.
+        'pos.cash_management',
         'customers.create_without_email',
         'expenses.export',
         'products.export',

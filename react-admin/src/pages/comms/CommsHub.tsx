@@ -403,16 +403,13 @@ function useAuthBlob(url: string, autoFetch = false) {
         if (blobUrl || loading) return blobUrl;
         setLoading(true);
         try {
-            const { tokenStorage } = await import("@/api/client");
-            const token = tokenStorage.get();
-            // Older messages baked in an http:// serve URL — the browser blocks
-            // that as mixed content on this https page (the attachment then can't
-            // load and falls back to a file card). Upgrade to https before fetch.
-            const secureUrl = url.replace(/^http:\/\//i, "https://");
-            const r = await fetch(secureUrl, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-            if (!r.ok) throw new Error(String(r.status));
-            const blob = await r.blob();
-            const obj  = URL.createObjectURL(blob);
+            // The serve URL in the message is the ISSUER (4D): with the staff
+            // token it answers a fresh signed link (≤5 min) if this user is in
+            // the conversation, and the bytes come from that link. Older
+            // http:// URLs are upgraded to https inside fetchSignedFile.
+            const { fetchSignedFile } = await import("@/api/signedFiles");
+            const file = await fetchSignedFile(url);
+            const obj  = URL.createObjectURL(file.blob);
             setBlobUrl(obj);
             setLoading(false);
             return obj;
