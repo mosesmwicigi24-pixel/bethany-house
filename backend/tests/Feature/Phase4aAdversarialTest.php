@@ -129,11 +129,15 @@ class Phase4aAdversarialTest extends TestCase
     public function test_walking_every_id_returns_only_outlet_a(): void
     {
         $this->as('outlet_manager', $this->a);
+        // The window around every id that exists (sequences are not reset
+        // between tests), plus ids that do not exist on either side.
+        $minOrder = Order::withoutGlobalScopes()->min('id');
         $maxOrder = Order::withoutGlobalScopes()->max('id');
+        $minCust  = Customer::min('id');
         $maxCust  = Customer::max('id');
 
         $seen = [];
-        for ($id = 1; $id <= $maxOrder + 2; $id++) {
+        for ($id = max(1, $minOrder - 2); $id <= $maxOrder + 2; $id++) {
             $r = $this->getJson("/api/v1/admin/orders/{$id}");
             $this->assertContains($r->status(), [200, 404], "order {$id}: never 403 (no existence oracle) or 500");
             if ($r->status() === 200) {
@@ -143,7 +147,7 @@ class Phase4aAdversarialTest extends TestCase
         $this->assertSame($this->idsOf($this->ordersA), $seen);
 
         $seen = [];
-        for ($id = 1; $id <= $maxCust + 2; $id++) {
+        for ($id = max(1, $minCust - 2); $id <= $maxCust + 2; $id++) {
             $r = $this->getJson("/api/v1/admin/customers/{$id}");
             $this->assertContains($r->status(), [200, 404]);
             if ($r->status() === 200) {
