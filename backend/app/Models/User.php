@@ -96,6 +96,17 @@ class User extends Authenticatable
                 $user->user_type = UserType::CUSTOMER;
             }
         });
+
+        // Leaving "active" signs the person out everywhere. Production
+        // deactivated staff through the edit form, which never revoked, so
+        // their tokens outlived the decision. Revoking here covers every
+        // Eloquent writer; query-builder bulk writers revoke explicitly.
+        // Reactivating does not bring an old token back.
+        static::updated(function ($user) {
+            if ($user->wasChanged('status') && $user->status !== 'active') {
+                $user->tokens()->delete();
+            }
+        });
     }
 
     // =========================================================================

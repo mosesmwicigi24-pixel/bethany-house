@@ -28,7 +28,9 @@ class EnsureStaff
     {
         $user = $request->user();
 
-        if (! $user || ! $user->canAccessAdmin()) {
+        // isActive(): the token path is refused by Sanctum (AuthServiceProvider);
+        // this catches any other way a non-active staff user is authenticated.
+        if (! $user || ! $user->canAccessAdmin() || ! $user->isActive()) {
             return response()->json(['message' => 'This action is unauthorized.'], 403);
         }
 

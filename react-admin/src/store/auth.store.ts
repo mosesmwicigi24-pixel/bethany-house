@@ -20,6 +20,10 @@ interface AuthStore {
     clearAuth: () => void;
 }
 
+// The password step's one-time proof, held only until the code is entered.
+// Kept out of the store state so it never reaches persistence or devtools.
+let pending2faChallenge: string | null = null;
+
 export const useAuthStore = create<AuthStore>((set, get) => ({
     user: null,
     token: tokenStorage.get(),
@@ -32,6 +36,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
             const res = await authApi.login(credentials);
 
             if (res.requires_2fa && res.user_id) {
+                pending2faChallenge = res.challenge ?? null;
                 set({ isLoading: false });
                 return { requires2fa: true, userId: res.user_id };
             }
@@ -57,7 +62,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     verify2fa: async (userId, code) => {
         set({ isLoading: true });
         try {
-            const res = await authApi.verify2fa(userId, code);
+            const res = await authApi.verify2fa(userId, code, pending2faChallenge ?? '');
+            pending2faChallenge = null;
             tokenStorage.set(res.token);
             set({
                 user: res.user,

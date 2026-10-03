@@ -6,6 +6,7 @@ import { z } from "zod";
 import { usersApi, rolesApi, outletsApi } from "@/api/setup";
 import { useToastStore } from "@/store/toast.store";
 import { useTableState } from "@/hooks/useTableState";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { DataTable, Pagination } from "@/components/ui/DataTable";
@@ -41,7 +42,9 @@ const baseUserSchema = z.object({
 
 const createSchema = baseUserSchema
     .extend({
-        role_ids: z.array(z.number()).min(1, "Assign at least one role"),
+        // Roles are the owner's to give (2026-10-02): an account may be created
+        // without any, and a super administrator assigns them.
+        role_ids: z.array(z.number()),
         password: z.string().min(8, "Minimum 8 characters"),
         password_confirmation: z.string().min(1, "Please confirm the password"),
     })
@@ -103,15 +106,22 @@ interface RolePickerProps {
     onToggle: (id: number) => void;
     error?: string;
     required?: boolean;
+    /** Only a super administrator changes who holds which role (owner, 2026-10-02). */
+    readOnly?: boolean;
 }
 
-function RolePicker({ roles, roleIds, onToggle, error, required = false }: RolePickerProps) {
+function RolePicker({ roles, roleIds, onToggle, error, required = false, readOnly = false }: RolePickerProps) {
     return (
         <div className="border-t border-line pt-4">
             <p className="label mb-2">
                 Roles {required && <span className="text-danger">*</span>}
                 {error && <span className="field-error ml-2">{error}</span>}
-                {!required && roleIds.length === 0 && (
+                {readOnly && (
+                    <span className="text-surface-400 text-xs ml-2 font-normal">
+                        Only the owner (a super administrator) changes roles.
+                    </span>
+                )}
+                {!readOnly && !required && roleIds.length === 0 && (
                     <span className="text-surface-400 text-xs ml-2 font-normal">
                         No roles — this user will have no access until roles are assigned.
                     </span>
@@ -124,7 +134,8 @@ function RolePicker({ roles, roleIds, onToggle, error, required = false }: RoleP
                         <label
                             key={role.id}
                             className={clsx(
-                                "flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors",
+                                "flex items-start gap-2.5 p-2.5 rounded-lg border transition-colors",
+                                readOnly ? "cursor-default opacity-70" : "cursor-pointer",
                                 roleIds.includes(role.id)
                                     ? "border-brand-300 bg-brand-50"
                                     : "border-surface-200 hover:border-surface-300",
@@ -133,6 +144,7 @@ function RolePicker({ roles, roleIds, onToggle, error, required = false }: RoleP
                             <input
                                 type="checkbox"
                                 checked={roleIds.includes(role.id)}
+                                disabled={readOnly}
                                 onChange={() => onToggle(role.id)}
                                 className="accent-brand-500 mt-0.5 shrink-0"
                             />
@@ -185,6 +197,9 @@ export default function UsersPage() {
 
     const roles = rolesData?.data ?? [];
     const outlets = outletsData?.data ?? [];
+    // Mirrors the server rule: only a super administrator changes roles.
+    const { hasRole } = usePermissions();
+    const canAssignRoles = hasRole("super_admin");
     const users = data?.data ?? [];
     const meta = data?.meta;
 
@@ -715,7 +730,7 @@ export default function UsersPage() {
                         roles={roles}
                         roleIds={createForm.watch("role_ids")}
                         onToggle={toggleCreateRole}
-                        required
+                        readOnly={!canAssignRoles}
                         error={
                             createForm.formState.errors.role_ids
                                 ?.message as string
@@ -847,6 +862,7 @@ export default function UsersPage() {
                         roles={roles}
                         roleIds={editForm.watch("role_ids")}
                         onToggle={toggleEditRole}
+                        readOnly={!canAssignRoles}
                         error={
                             editForm.formState.errors.role_ids
                                 ?.message as string

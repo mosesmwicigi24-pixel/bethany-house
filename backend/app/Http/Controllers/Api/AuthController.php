@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Services\ActivityLogService;
 use App\Services\NotificationService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
@@ -431,11 +432,22 @@ class AuthController extends Controller
             $refuse('not_staff', 'Only staff and system users may access the admin panel.');
         }
 
-        // 2FA checkpoint - client follows up with adminVerify2fa()
+        // 2FA checkpoint - client follows up with adminVerify2fa(). The
+        // challenge proves the password step passed: without it the second
+        // step accepted any user_id plus a 6-digit code, i.e. the code alone
+        // was a login. One use, five minutes, bound to this account.
         if ($user->two_factor_enabled) {
+            $challenge = Str::random(64);
+            Cache::put(self::twoFactorChallengeKey($challenge), [
+                'user_id'     => $user->id,
+                'remember_me' => (bool) ($validated['remember_me'] ?? false),
+                'attempts'    => 0,
+            ], now()->addMinutes(5));
+
             return response()->json([
                 'requires_2fa' => true,
                 'user_id'      => $user->id,
+                'challenge'    => $challenge,
             ]);
         }
 
@@ -462,39 +474,45 @@ class AuthController extends Controller
     public function adminVerify2fa(Request $request)
     {
         $validated = $request->validate([
-            'user_id' => 'required|integer|exists:users,id',
-            'code'    => 'required|string|size:6',
+            'user_id'   => 'required|integer',
+            'code'      => 'required|string|size:6',
+            'challenge' => 'required|string|max:128',
         ]);
 
-        $user = User::findOrFail($validated['user_id']);
-
-        if (!$user->two_factor_enabled || !$user->two_factor_secret) {
-            return response()->json([
-                'message' => '2FA is not enabled for this account.',
-            ], 422);
+        // The password step's proof. Missing, expired, used, or issued for a
+        // different account → start again from the password.
+        $key     = self::twoFactorChallengeKey($validated['challenge']);
+        $pending = Cache::get($key);
+        if (!is_array($pending) || (int) $pending['user_id'] !== (int) $validated['user_id']) {
+            return response()->json(['message' => 'This sign-in has expired. Enter your password again.'], 422);
         }
 
-        // Re-check admin gate - prevents a demoted/deactivated account from
-        // completing verification after the first step already passed.
-        if (!$user->canAccessAdmin()) {
+        $user = User::find($validated['user_id']);
+
+        // Re-check the account: deactivated or demoted between the two steps
+        // is refused, and nothing is minted.
+        if (!$user || !$user->isActive() || !$user->canAccessAdmin()) {
+            Cache::forget($key);
             return response()->json(['message' => 'Access denied.'], 403);
         }
 
-        // Gracefully handle a secret encrypted with a different APP_KEY
-        // or a corrupted value - auto-reset 2FA so the user can re-enable.
-        try {
-            $secret = decrypt($user->two_factor_secret);
-        } catch (\Illuminate\Contracts\Encryption\DecryptException) {
-            $user->update([
-                'two_factor_enabled'          => false,
-                'two_factor_secret'           => null,
-                'two_factor_secret_temp'      => null,
-                'two_factor_setup_started_at' => null,
-                'two_factor_enabled_at'       => null,
-            ]);
+        if (!$user->two_factor_enabled || !$user->two_factor_secret) {
+            Cache::forget($key);
+            return response()->json(['message' => '2FA is not enabled for this account.'], 422);
+        }
 
+        // The Livewire screens stored the secret in plain text, the API
+        // encrypted. This endpoint used to treat an undecryptable secret as
+        // corrupt and RESET the account's 2FA — reachable before any proof of
+        // identity, so anyone could switch off another person's 2FA. Read
+        // both forms; never reset from here.
+        $secret = self::readTwoFactorSecret((string) $user->two_factor_secret);
+        if ($secret === null) {
+            Cache::forget($key);
+            ActivityLogService::log('admin_login_2fa_failed', $user, ['reason' => 'unreadable_secret'],
+                'Admin 2FA secret unreadable: ' . strtolower((string) $user->email));
             return response()->json([
-                'message' => '2FA configuration is invalid and has been reset. Please log in and re-enable 2FA in your security settings.',
+                'message' => 'Your two-step sign-in can’t be read. Ask an administrator to reset it.',
             ], 422);
         }
 
@@ -502,15 +520,21 @@ class AuthController extends Controller
 
         if (!$google2fa->verifyKey($secret, $validated['code'])) {
             // A wrong second factor means the password was right: the most
-            // telling failure there is. Recorded against the account.
+            // telling failure there is. Recorded against the account. Five
+            // wrong codes end this sign-in.
             ActivityLogService::log('admin_login_2fa_failed', $user, ['reason' => 'invalid_code'],
                 'Admin 2FA code refused: ' . strtolower((string) $user->email));
+            $pending['attempts'] = (int) $pending['attempts'] + 1;
+            $pending['attempts'] >= 5
+                ? Cache::forget($key)
+                : Cache::put($key, $pending, now()->addMinutes(5));
             throw ValidationException::withMessages([
                 'code' => ['The verification code is invalid or has expired.'],
             ]);
         }
 
-        $token = $user->createAuthToken('auth_token')->plainTextToken;
+        Cache::forget($key);
+        $token = $user->createAuthToken(!empty($pending['remember_me']) ? 'remember_token' : 'auth_token')->plainTextToken;
 
         // Phase 3 - audit log
         try { ActivityLogService::auth('admin_login_2fa', $user); } catch (\Exception) {}
@@ -561,5 +585,20 @@ class AuthController extends Controller
         $user->outlet = $user->primaryOutlet();
 
         return $user;
+    }
+
+    private static function twoFactorChallengeKey(string $challenge): string
+    {
+        return 'admin-2fa-challenge:' . hash('sha256', $challenge);
+    }
+
+    /** The TOTP secret in either stored form (API: encrypted; Livewire: plain base32), or null. */
+    private static function readTwoFactorSecret(string $stored): ?string
+    {
+        try {
+            return decrypt($stored);
+        } catch (\Illuminate\Contracts\Encryption\DecryptException) {
+            return preg_match('/^[A-Z2-7]{16,}=*$/', $stored) ? $stored : null;
+        }
     }
 }
