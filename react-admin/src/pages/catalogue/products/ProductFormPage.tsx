@@ -1397,6 +1397,10 @@ function EditVariantModal({
     productPrices?: { currency_code: string; regular_price: number; sale_price?: number | null; cost_price?: number | null }[];
 }) {
     const toast = useToastStore();
+    // Cost is need-to-know (products.view_cost). Without it the API sends no
+    // cost_price and ignores one on save, so the box would only ever be empty.
+    const { can } = usePermissions();
+    const canSeeCost = can("products.view_cost");
     const form = useForm<VariantForm>({
         resolver: zodResolver(variantSchema),
         mode: "onSubmit",
@@ -1629,7 +1633,7 @@ function EditVariantModal({
                         return (
                             <div
                                 key={currency.code}
-                                className={`grid grid-cols-4 gap-2 items-end rounded-lg p-2.5 mb-2 ${isBase ? "bg-brand-50 border border-brand-200" : "bg-surface-50"}`}
+                                className={`grid ${canSeeCost ? "grid-cols-4" : "grid-cols-3"} gap-2 items-end rounded-lg p-2.5 mb-2 ${isBase ? "bg-brand-50 border border-brand-200" : "bg-surface-50"}`}
                             >
                                 <div className={`text-xs font-mono font-semibold ${isBase ? "text-brand-700" : "text-surface-600"}`}>
                                     {currency.code}
@@ -1657,6 +1661,7 @@ function EditVariantModal({
                                         placeholder="-"
                                     />
                                 </Field>
+                                {canSeeCost && (
                                 <Field label="Cost">
                                     <FieldInput
                                         className="input text-sm"
@@ -1667,6 +1672,7 @@ function EditVariantModal({
                                         placeholder="-"
                                     />
                                 </Field>
+                                )}
                             </div>
                         );
                     })}
@@ -2189,6 +2195,10 @@ const PriceRows = React.memo(function PriceRows({
     onRecalculate: (i: number) => void;
 }) {
     const baseRate = Number(baseCurrency?.exchange_rate ?? 1);
+    // Cost Price shows only to products.view_cost holders — the API strips
+    // cost_price for everyone else and leaves the stored value untouched.
+    const { can } = usePermissions();
+    const canSeeCost = can("products.view_cost");
 
     // Typing a price in the default currency fills in every other currency.
     //
@@ -2305,6 +2315,7 @@ const PriceRows = React.memo(function PriceRows({
                                 )}
                             />
                         </Field>
+                        {canSeeCost && (
                         <Field label="Cost Price">
                             <Controller control={control} name={`prices.${i}.cost_price`}
                                 render={({ field: f }) => (
@@ -2316,6 +2327,7 @@ const PriceRows = React.memo(function PriceRows({
                                 )}
                             />
                         </Field>
+                        )}
                         <Field label="Sale From">
                             <Controller control={control} name={`prices.${i}.sale_start_date`}
                                 render={({ field: f }) => (

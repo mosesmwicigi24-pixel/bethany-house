@@ -123,6 +123,13 @@ class SyncPermissions extends Command
         'products.delete'      => ['Delete Products',      'Delete products from the catalogue',          'Catalogue'],
         'products.import'      => ['Bulk Import Products',  'Import products in bulk from CSV/Excel files', 'Catalogue'],
         'products.export'      => ['Export Products',       'Export product catalogue to CSV',              'Catalogue'],
+        // What a product and a garment COST us — cost_price on price rows,
+        // material unit costs, BOM line costs and totals. Split from
+        // products.view / production.view_bom, which outlet managers hold to
+        // run the shop and the floor; the owner's field rule keeps cost to
+        // admin, finance and procurement (super_admin via Gate::before).
+        // Admin inherits it through products.*.
+        'products.view_cost'   => ['View Product Cost',     'See cost prices, material unit costs and BOM costs', 'Catalogue'],
 
         // ── POS ─────────────────────────────────────────────────────────────
         'pos.access'           => ['POS Access',           'Use the point-of-sale terminal',              'POS'],
@@ -385,6 +392,7 @@ class SyncPermissions extends Command
             'products.view',
             // Costing materials against product BOMs is procurement's job
             'production.view_bom',
+            'products.view_cost',
             // Payments - view transaction history for PO-related payments
             'payments.view',
             // Reports - procurement officers need spend reports
@@ -413,6 +421,7 @@ class SyncPermissions extends Command
             '@self', '@workspace', '@buying', '@stock',
             'products.view',
             'production.view_bom',
+            'products.view_cost',
             'payments.view',
             'reports.view', 'reports.export',
             'expenses.view',
@@ -431,6 +440,10 @@ class SyncPermissions extends Command
             'receivables.view',
             // Orders - view only (for payment context)
             'orders.view',
+            // Cost figures (margins, COGS context). Deliberately NOT given
+            // products.view with it — this role reads cost where it already
+            // reaches it, it does not gain the catalogue screens.
+            'products.view_cost',
         ],
 
     ];

@@ -27,6 +27,9 @@ class BomCostingTest extends TestCase
         $user->givePermissionTo(Permission::findOrCreate('products.view', 'sanctum'));
         // BOM reads carry material costs and sit behind their own gate now.
         $user->givePermissionTo(Permission::findOrCreate('production.view_bom', 'sanctum'));
+        // This test is about the costing arithmetic, so its actor is someone
+        // allowed to see cost (Phase 1C: cost is stripped without it).
+        $user->givePermissionTo(Permission::findOrCreate('products.view_cost', 'sanctum'));
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
         return $user;

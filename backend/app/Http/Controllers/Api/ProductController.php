@@ -14,6 +14,7 @@ use App\Services\ActivityLogService;
 use App\Services\ImageService;
 use App\Jobs\ConvertProductVideo;
 use App\Services\ProductVideoService;
+use App\Support\CostVisibility;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -320,7 +321,9 @@ class ProductController extends Controller
             ->get()
             ->toArray();
 
-        return response()->json(['product' => $detail]);
+        // cost_price rides on every price row; products.view reaches outlet
+        // managers, products.view_cost does not.
+        return response()->json(['product' => CostVisibility::forViewer($detail, request()->user())]);
     }
 
     /**
@@ -467,7 +470,7 @@ class ProductController extends Controller
 
             return response()->json([
                 'message' => 'Product created successfully.',
-                'product' => $detail,
+                'product' => CostVisibility::forViewer($detail, $request->user()),
             ], 201);
 
         } catch (\Exception $e) {
@@ -605,7 +608,12 @@ class ProductController extends Controller
                 }
             }
 
-            // Upsert base prices
+            // Upsert base prices. A cost-blind editor's form has no cost field,
+            // so writing what it sent would null every cost_price it touched —
+            // for them the column is left exactly as it was.
+            $costWrite = fn (array $price) => CostVisibility::allows($request->user())
+                ? ['cost_price' => $price['cost_price'] ?? null]
+                : [];
             if (!empty($validated['prices'])) {
                 foreach ($validated['prices'] as $price) {
                     ProductPrice::updateOrCreate(
@@ -617,10 +625,9 @@ class ProductController extends Controller
                         [
                             'regular_price'   => $price['regular_price'],
                             'sale_price'      => $price['sale_price'] ?? null,
-                            'cost_price'      => $price['cost_price'] ?? null,
                             'sale_start_date' => $price['sale_start_date'] ?? null,
                             'sale_end_date'   => $price['sale_end_date'] ?? null,
-                        ]
+                        ] + $costWrite($price)
                     );
                 }
             }
@@ -656,7 +663,7 @@ class ProductController extends Controller
 
             return response()->json([
                 'message' => 'Product updated successfully.',
-                'product' => $detail,
+                'product' => CostVisibility::forViewer($detail, $request->user()),
             ]);
 
         } catch (\Exception $e) {
@@ -1050,7 +1057,7 @@ class ProductController extends Controller
 
             return response()->json([
                 'message' => 'Variant created.',
-                'variant' => $variant->load(['prices', 'images']),
+                'variant' => CostVisibility::forViewer($variant->load(['prices', 'images'])->toArray(), $request->user()),
             ], 201);
 
         } catch (\Exception $e) {
@@ -1100,8 +1107,10 @@ class ProductController extends Controller
                             'product_id'    => $productId,
                             'regular_price' => $price['regular_price'],
                             'sale_price'    => $price['sale_price'] ?? null,
-                            'cost_price'    => $price['cost_price'] ?? null,
-                        ]
+                        ] + (CostVisibility::allows($request->user())
+                            // Same rule as update(): a cost-blind save leaves cost alone.
+                            ? ['cost_price' => $price['cost_price'] ?? null]
+                            : [])
                     );
                 }
             }
@@ -1120,7 +1129,7 @@ class ProductController extends Controller
 
             return response()->json([
                 'message' => 'Variant updated.',
-                'variant' => $variant->fresh()->load(['prices', 'images']),
+                'variant' => CostVisibility::forViewer($variant->fresh()->load(['prices', 'images'])->toArray(), $request->user()),
             ]);
 
         } catch (\Exception $e) {
