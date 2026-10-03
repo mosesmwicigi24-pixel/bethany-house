@@ -324,6 +324,7 @@ class PublicPaymentController extends Controller
 
             // Record pending payment
             Payment::create([
+                'recorded_by' => null,   // customer on the public pay page (4D)
                 'order_id'           => $order->id,
                 'payment_method'     => 'mpesa',
                 'amount'             => self::amountDue($order),
@@ -379,6 +380,7 @@ class PublicPaymentController extends Controller
             $data = $response->json()['data'];
 
             Payment::create([
+                'recorded_by' => null,   // customer on the public pay page (4D)
                 'order_id'           => $order->id,
                 'payment_method'     => 'card',
                 'amount'             => self::amountDue($order),
@@ -414,6 +416,7 @@ class PublicPaymentController extends Controller
     {
         // Create a pending payment record that the customer will later attach proof to
         $payment = Payment::create([
+            'recorded_by' => null,   // customer on the public pay page (4D)
             'order_id'        => $order->id,
             'payment_method'  => $methodCode,
             'amount'          => self::amountDue($order),
@@ -536,6 +539,7 @@ class PublicPaymentController extends Controller
             // STK callback with real settlement metadata) confirm it. Never paid here.
             DB::transaction(function () use ($order, $code) {
                 Payment::create([
+                    'recorded_by' => null,   // customer on the public pay page (4D)
                     'order_id'           => $order->id,
                     'payment_method'     => 'mpesa',
                     'amount'             => self::amountDue($order),
@@ -692,6 +696,7 @@ class PublicPaymentController extends Controller
                 } else {
                     // Webhook may not have created the payment yet — create it now
                     Payment::create([
+                        'recorded_by' => null,   // customer on the public pay page / gateway (4D)
                         'order_id'           => $order->id,
                         'payment_method'     => 'card_paystack',
                         // What Paystack says actually arrived — the factual

@@ -274,20 +274,15 @@ class PaymentApprovalController extends Controller
         }
 
         // Maker ≠ checker (role hardening Phase 1B): whoever recorded the
-        // payment does not approve it. `payments` has no recorded_by column,
-        // and the order's created_by is the wrong person whenever someone
-        // other than the order's raiser takes the money (recordPosPay,
-        // OrderController::addPayment, the customer's own pay page). The one
-        // exact record of the recorder is the audit trail: AuditObserver
-        // writes a 'created' row for every Payment::create — every path that
-        // makes a payment goes through it — with the signed-in user as causer.
+        // payment does not approve it. The recorder is payments.recorded_by,
+        // stamped by every creation path since 4D (null for the public pay
+        // page and webhooks — no staff member recorded those).
         //
-        // It FAILS OPEN where that row is missing: payments created before
-        // the observer shipped (2026-09-21), or an audit write that failed
-        // (those are swallowed by design). It never blocks the wrong person.
-        // The durable fix is a payments.recorded_by column stamped by every
-        // creating path; until then this is the strongest check available.
-        $recordedBy = DB::table('activity_log')
+        // Rows from before the column, until the owner-approved backfill
+        // (2026_10_03_480003) fills them, fall back to the audit trail's
+        // 'created' entry, as Phase 1B did. That fallback still FAILS OPEN when
+        // the entry is missing too; it never blocks the wrong person.
+        $recordedBy = $payment->recorded_by ?? DB::table('activity_log')
             ->where('subject_type', Payment::class)
             ->where('subject_id', $payment->id)
             ->where('event', 'created')

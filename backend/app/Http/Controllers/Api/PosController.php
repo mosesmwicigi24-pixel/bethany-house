@@ -1058,6 +1058,7 @@ class PosController extends Controller
                 $pmtCashRec = $pmtIsCash ? (float) ($pmt['cash_received'] ?? $pmtAmount) : null;
                 $pmtChange  = $pmtIsCash ? max(0, ($pmtCashRec ?? $pmtAmount) - $pmtAmount) : null;
                 Payment::create([
+                    'recorded_by' => $user->id,   // who took it at the till (4D)
                     'order_id'           => $order->id,
                     'amount'             => $pmtAmount,
                     'currency_code'      => $currencyCode,
@@ -4197,6 +4198,7 @@ class PosController extends Controller
                 }
 
                 $payment = Payment::create([
+                    'recorded_by' => $request->user()->id,   // who took it at the till (4D)
                     'order_id'           => $order->id,
                     'amount'             => $pmtAmount,
                     'currency_code'      => $order->currency_code,

@@ -38,6 +38,9 @@ class Payment extends Model
         'voided_at',
         'voided_by',
         'paid_at',
+        // Who recorded it (4D) — stamped on every creation path; null for the
+        // public pay page and gateway webhooks.
+        'recorded_by',
     ];
 
     protected $casts = [
@@ -64,6 +67,12 @@ class Payment extends Model
             if (empty($payment->payment_number)) {
                 $payment->payment_number = 'PAY-' . strtoupper(uniqid());
             }
+            // A creation path added later that forgets recorded_by still names
+            // the signed-in user (what the audit 'created' row would say). An
+            // explicit null — public pay page, webhooks — is kept as null.
+            if (!array_key_exists('recorded_by', $payment->getAttributes())) {
+                $payment->recorded_by = \Illuminate\Support\Facades\Auth::id();
+            }
         });
     }
 
@@ -75,6 +84,11 @@ class Payment extends Model
     public function transactions()
     {
         return $this->hasMany(PaymentTransaction::class);
+    }
+
+    public function recordedBy()
+    {
+        return $this->belongsTo(User::class, 'recorded_by');
     }
 
     public function approvedBy()

@@ -317,6 +317,7 @@ class NewSale extends Component
 
             // Payments record
             Payment::create([
+                'recorded_by' => auth()->id(),   // who rang it up (4D)
                 'order_id'       => $order->id,
                 'payment_number' => 'PAY-' . strtoupper(uniqid()),
                 'payment_method' => $this->payMethod,

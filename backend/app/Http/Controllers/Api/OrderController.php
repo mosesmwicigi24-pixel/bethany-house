@@ -1367,6 +1367,7 @@ class OrderController extends Controller
             }
 
             $payment = Payment::create([
+                'recorded_by' => $request->user()->id,   // who recorded it (4D)
                 'order_id'             => $order->id,
                 'payment_method'       => $validated['method'],
                 'amount'               => $collectedAmount,

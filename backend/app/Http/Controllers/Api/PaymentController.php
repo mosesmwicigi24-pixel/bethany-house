@@ -328,6 +328,7 @@ class PaymentController extends Controller
 
             // Record pending payment
             $payment = Payment::create([
+                'recorded_by' => auth()->id(),   // who started it: staff, or the customer (4D)
                 'order_id'           => $order->id,
                 'payment_method'     => 'mpesa',
                 'amount'             => $order->total_amount,
@@ -400,6 +401,7 @@ class PaymentController extends Controller
             $data = $response->json()['data'];
 
             $payment = Payment::create([
+                'recorded_by' => auth()->id(),   // who started it: staff, or the customer (4D)
                 'order_id'           => $order->id,
                 'payment_method'     => 'card_paystack',
                 'amount'             => $order->total_amount,
@@ -465,6 +467,7 @@ class PaymentController extends Controller
             $data = $response->json()['data'];
 
             $payment = Payment::create([
+                'recorded_by' => auth()->id(),   // who started it: staff, or the customer (4D)
                 'order_id'           => $order->id,
                 'payment_method'     => 'card_flutterwave',
                 'amount'             => $order->total_amount,
