@@ -343,6 +343,10 @@
                             <input wire:model.live="cashReceived" type="number" step="0.01"
                                    class="w-full rounded-xl border border-primary-200 px-4 py-3 text-lg font-bold text-primary-600 text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-400 transition" />
                             @error('cashReceived') <p class="text-xs text-danger-500 mt-1">{{ $message }}</p> @enderror
+                            @error('orderDiscount') <p class="text-xs text-danger-500 mt-1">{{ $message }}</p> @enderror
+                            @foreach($errors->getMessages() as $key => $msgs)
+                                @if(str_starts_with($key, 'cart.'))<p class="text-xs text-danger-500 mt-1">{{ $msgs[0] }}</p>@endif
+                            @endforeach
                             @if((float)$cashReceived >= $total && $total > 0)
                                 <div class="mt-2 flex items-center justify-between rounded-xl bg-success-50 border border-success-200 px-4 py-2.5">
                                     <span class="text-sm font-semibold text-success-700">Change Due</span>

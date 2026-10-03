@@ -11,6 +11,7 @@ use App\Models\OrderStatusHistory;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductPrice;
+use App\Support\DiscountRule;
 use Livewire\Component;
 use Illuminate\Support\Facades\DB;
 
@@ -244,6 +245,22 @@ class NewSale extends Component
         // A typed phone must be a real number — notes do not go in it
         // (App\Rules\CustomerPhone, the same rule as the main till).
         $this->validate(['customerPhone' => ['nullable', 'string', 'max:30', new \App\Rules\CustomerPhone()]]);
+
+        // The owner's 5% rule (App\Support\DiscountRule), on each line and on
+        // the order discount, before anything is written. This older till took
+        // any discount from anyone; the cart is a public property, so the
+        // figures are re-read here rather than trusted from the screen.
+        foreach ($this->cart as $idx => $item) {
+            $lineBase = (float) $item['unit_price'] * (int) $item['qty'];
+            if ($message = DiscountRule::refusal(auth()->user(), (float) $item['discount'], $lineBase)) {
+                $this->addError("cart.{$idx}.discount", $message);
+                return;
+            }
+        }
+        if ($message = DiscountRule::refusal(auth()->user(), (float) $this->orderDiscount, (float) $this->subtotal)) {
+            $this->addError('orderDiscount', $message);
+            return;
+        }
 
         // Validate cash received covers total
         if ($this->payMethod === 'cash' && (float) $this->cashReceived < $this->total) {

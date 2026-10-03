@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\DiscountAboveMaximum;
 use App\Exceptions\OrderLineEditException;
 use App\Models\InventoryItem;
 use App\Models\Order;
@@ -9,6 +10,7 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Models\User;
+use App\Support\DiscountRule;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -74,6 +76,7 @@ class OrderLineEditor
 
         $this->guardProtectedLines($order, $keep, $removeIds);
         $this->guardConfirmations($order, $opts);
+        $this->guardDiscounts($keep, $add, $actor);
 
         $before = [
             'subtotal'       => (float) $order->subtotal,
@@ -378,7 +381,7 @@ class OrderLineEditor
         $add      = [];
         $seen     = [];
 
-        foreach ($desired as $row) {
+        foreach ($desired as $index => $row) {
             $id = isset($row['id']) ? (int) $row['id'] : 0;
 
             if ($id > 0) {
@@ -391,6 +394,7 @@ class OrderLineEditor
                 }
                 $seen[]  = $id;
                 $keep[]  = [
+                    'index'           => $index,
                     'line'            => $line,
                     'quantity'        => (int) $row['quantity'],
                     'unit_price'      => array_key_exists('unit_price', $row) && $row['unit_price'] !== null
@@ -403,7 +407,7 @@ class OrderLineEditor
                 continue;
             }
 
-            $add[] = $this->resolveNewLine($order, $row);
+            $add[] = ['index' => $index] + $this->resolveNewLine($order, $row);
         }
 
         $removeIds = $existing->keys()
@@ -413,6 +417,59 @@ class OrderLineEditor
             ->all();
 
         return [$keep, $add, $removeIds];
+    }
+
+    /**
+     * The owner's 5% rule on the lines being written (App\Support\DiscountRule).
+     *
+     * A new line is held to it outright. An existing line is held to it when
+     * its figures move — including its QUANTITY, because a flat discount is a
+     * fixed sum and shrinking the line under it makes it a bigger share: 100
+     * off 2 × 1,000 is 5%, off 1 × 1,000 it is 10%.
+     *
+     * What the rule does not do is reprice history. A line that already
+     * carried more than 5% before the rule may still be edited, so long as its
+     * discount does not grow — in money or as a share of the line. The order
+     * keeps what it was sold at; nobody can make it bigger.
+     *
+     * Runs before the transaction, so a refusal writes nothing.
+     */
+    private function guardDiscounts(array $keep, array $add, ?User $actor): void
+    {
+        foreach ($keep as $row) {
+            /** @var OrderItem $line */
+            $line     = $row['line'];
+            $discount = (float) $row['discount_amount'];
+            $base     = (float) $row['unit_price'] * (int) $row['quantity'];
+
+            $moved = (float) $line->unit_price !== (float) $row['unit_price']
+                || (int) $line->quantity !== (int) $row['quantity']
+                || (float) $line->discount_amount !== $discount;
+
+            if (!$moved || DiscountRule::refusal($actor, $discount, $base) === null) {
+                continue;
+            }
+
+            $oldDiscount = (float) $line->discount_amount;
+            $oldBase     = (float) $line->unit_price * (int) $line->quantity;
+            $oldShare    = $oldBase > 0 ? $oldDiscount / $oldBase : 0.0;
+            $newShare    = $base > 0 ? $discount / $base : INF;
+
+            if (round($discount, 2) <= round($oldDiscount, 2) && $newShare <= $oldShare + 1e-9) {
+                continue;   // an older, larger discount, not made any larger
+            }
+
+            throw new DiscountAboveMaximum("items.{$row['index']}.discount_amount", DiscountRule::message());
+        }
+
+        foreach ($add as $row) {
+            DiscountRule::assertWithin(
+                $actor,
+                (float) $row['discount_amount'],
+                (float) $row['unit_price'] * (int) $row['quantity'],
+                "items.{$row['index']}.discount_amount",
+            );
+        }
     }
 
     /**

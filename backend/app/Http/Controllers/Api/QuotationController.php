@@ -7,6 +7,7 @@ use App\Models\Product;
 use App\Models\Quotation;
 use App\Models\QuotationItem;
 use App\Services\ActivityLogService;
+use App\Support\DiscountRule;
 use App\Services\QuotationService;
 use App\Services\TaxCalculationService;
 use Illuminate\Http\JsonResponse;
@@ -56,6 +57,7 @@ class QuotationController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $this->validatePayload($request);
+        $this->assertDiscountsWithinMaximum($request, $validated['items']);
 
         $quotation = DB::transaction(function () use ($validated, $request) {
             $quotation = Quotation::create([
@@ -96,6 +98,7 @@ class QuotationController extends Controller
         }
 
         $validated = $this->validatePayload($request, $quotation->customer_phone);
+        $this->assertDiscountsWithinMaximum($request, $validated['items']);
 
         DB::transaction(function () use ($quotation, $validated) {
             $quotation->update([
@@ -307,6 +310,25 @@ class QuotationController extends Controller
             'items.*.unit_price'          => 'required|numeric|min:0',
             'items.*.discount_amount'     => 'nullable|numeric|min:0',
         ]);
+    }
+
+    /**
+     * The owner's 5% rule on every quoted line: a line's discount is at most 5%
+     * of quantity × unit price, unless a super_admin is quoting. Checked before
+     * anything is written, so a refused quotation leaves no trace.
+     *
+     * @see \App\Support\DiscountRule
+     */
+    private function assertDiscountsWithinMaximum(Request $request, array $items): void
+    {
+        foreach ($items as $idx => $item) {
+            DiscountRule::assertWithin(
+                $request->user(),
+                (float) ($item['discount_amount'] ?? 0),
+                (float) $item['unit_price'] * (int) $item['quantity'],
+                "items.{$idx}.discount_amount",
+            );
+        }
     }
 
     /**

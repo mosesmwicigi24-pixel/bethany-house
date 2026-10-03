@@ -767,7 +767,7 @@ class PosController extends Controller
             $itemsData    = [];
             $itemSubtotal = 0;
 
-            foreach ($validated['items'] as $item) {
+            foreach ($validated['items'] as $idx => $item) {
                 // Resolve variant/product — variant_id is null for simple products.
                 $variantId    = $item['variant_id'] ?? null;
                 $variantModel = $variantId ? ProductVariant::find($variantId) : null;
@@ -828,7 +828,7 @@ class PosController extends Controller
                 $lineDiscount = OrderTotals::resolveDiscount($discType, $discVal, $lineBase);
                 // pos.discount is checked here, against the RESOLVED amount, so
                 // a flat discount cannot walk around the percentage ceiling.
-                PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, 'line');
+                PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, "items.{$idx}.discount_value");
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -874,7 +874,7 @@ class PosController extends Controller
             $cartDiscVal  = (float) ($validated['cart_discount_value'] ?? 0);
             $cartDiscount = OrderTotals::resolveDiscount($cartDiscType, $cartDiscVal, $itemSubtotal);
 
-            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart');
+            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart_discount_value');
 
             // Phase 2 — total tax is sum of per-line taxes already calculated above.
             // This is the goods total, derived BEFORE the shipping charge is read,
@@ -3190,7 +3190,7 @@ class PosController extends Controller
             $itemsData    = [];
             $itemSubtotal = 0;
 
-            foreach ($validated['items'] ?? [] as $item) {
+            foreach ($validated['items'] ?? [] as $idx => $item) {
                 $variantId    = $item['variant_id'] ?? null;
                 $variantModel = $variantId ? ProductVariant::find($variantId) : null;
                 $productId    = $variantModel?->product_id ?? (int)($item['product_id'] ?? 0);
@@ -3234,7 +3234,7 @@ class PosController extends Controller
                 $lineDiscount = OrderTotals::resolveDiscount($discType, $discVal, $lineBase);
                 // pos.discount is checked here, against the RESOLVED amount, so
                 // a flat discount cannot walk around the percentage ceiling.
-                PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, 'line');
+                PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, "items.{$idx}.discount_value");
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -3333,7 +3333,7 @@ class PosController extends Controller
             $cartDiscType = $validated['cart_discount_type'] ?? 'none';
             $cartDiscVal  = (float)($validated['cart_discount_value'] ?? 0);
             $cartDiscount = OrderTotals::resolveDiscount($cartDiscType, $cartDiscVal, $itemSubtotal);
-            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart');
+            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart_discount_value');
             $shippingAmt  = round((float)($validated['shipping_amount'] ?? 0), 2);
             $totals       = OrderTotals::fromParts(
                 $itemSubtotal,
@@ -3593,7 +3593,7 @@ class PosController extends Controller
             $itemsData    = [];
             $itemSubtotal = 0;
 
-            foreach ($validated['items'] ?? [] as $item) {
+            foreach ($validated['items'] ?? [] as $idx => $item) {
                 $variantId    = $item['variant_id'] ?? null;
                 $variantModel = $variantId ? ProductVariant::find($variantId) : null;
                 $productId    = $variantModel?->product_id ?? (int)($item['product_id'] ?? 0);
@@ -3653,6 +3653,7 @@ class PosController extends Controller
                 // nothing. Refusing beats charging a KES number as USD.
                 $unitPrice       = (float) $item['unit_price'];
                 $catalogueSaving = 0.0;   // a till operator types the price they mean
+                $linePromo       = null;  // the running promotion covering this line, if any
                 if ($hubPrices) {
                     $priced = CurrencyPricing::catalogue($productId, $variantId, $currencyCode);
                     if (!$priced) {
@@ -3679,8 +3680,8 @@ class PosController extends Controller
                     $promoProduct = $productId
                         ? ($promoProducts[$productId] ??= Product::find($productId))
                         : null;
-                    if ($promoProduct && ($promo = $promoService->promotionFor($promoProduct))) {
-                        $sellingUnit = $promoService->discountedUnit($sellingUnit, $promo);
+                    if ($promoProduct && ($linePromo = $promoService->promotionFor($promoProduct))) {
+                        $sellingUnit = $promoService->discountedUnit($sellingUnit, $linePromo);
                     }
                     $catalogueSaving = round(max(0, $unitPrice - $sellingUnit) * $item['quantity'], 2);
                 }
@@ -3695,7 +3696,14 @@ class PosController extends Controller
                 // saving below is the shop's own advertised price, not somebody
                 // exercising discretion over the till, and the storefront does
                 // not police it either.
-                PosDiscountPolicy::assertAllowed(auth()->user(), $askedFor, $lineBase, 'line');
+                //
+                // The sales agent may go past 5% only as far as a running
+                // promotion covering this line — the owner's own figure. The
+                // allowance is ignored for anyone who is not the agent.
+                PosDiscountPolicy::assertAllowed(
+                    auth()->user(), $askedFor, $lineBase, "items.{$idx}.discount_value",
+                    \App\Support\DiscountRule::promotionAllowance($linePromo, $unitPrice, (int) $item['quantity']),
+                );
                 // Deliberately NOT rounded here. resolveDiscount's full
                 // precision has always flowed into the line subtotal, and
                 // rounding the sum moved a characterised total by a cent. The
@@ -3798,7 +3806,7 @@ class PosController extends Controller
             $cartDiscType = $validated['cart_discount_type'] ?? 'none';
             $cartDiscVal  = (float)($validated['cart_discount_value'] ?? 0);
             $cartDiscount = OrderTotals::resolveDiscount($cartDiscType, $cartDiscVal, $itemSubtotal);
-            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart');
+            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart_discount_value');
             $shippingAmt  = round((float)($validated['shipping_amount'] ?? 0), 2);
             $totals       = OrderTotals::fromParts(
                 $itemSubtotal,

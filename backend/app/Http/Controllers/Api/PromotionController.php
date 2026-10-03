@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Promotion;
 use App\Services\ActivityLogService;
+use App\Support\DiscountRule;
 use Illuminate\Http\Request;
 
 /**
@@ -12,6 +13,10 @@ use Illuminate\Http\Request;
  * Campaigns"). This is where the owner sets each season's discount (10–20%) and
  * its window. Money is server-authoritative: the discount lives here, never on
  * the storefront.
+ *
+ * Since 2026-10-03 one worth more than 5% is the super_admin's alone to create,
+ * raise, extend or switch on (App\Support\DiscountRule). Seasons carry no
+ * discount of their own — they link to a promotion — so this is the one gate.
  */
 class PromotionController extends Controller
 {
@@ -45,7 +50,12 @@ class PromotionController extends Controller
 
     public function store(Request $request)
     {
-        $promotion = Promotion::create($this->validated($request));
+        $data = $this->validated($request);
+        // Above 5% is the owner's to set — even switched off, because a
+        // switched-off draft is one click from running.
+        DiscountRule::assertPromotionAllowed($request->user(), $data);
+
+        $promotion = Promotion::create($data + ['created_by' => $request->user()?->id]);
         $this->log('promotion_created', $promotion);
 
         return response()->json(['data' => $promotion], 201);
@@ -54,7 +64,16 @@ class PromotionController extends Controller
     public function update(Request $request, $id)
     {
         $promotion = Promotion::findOrFail($id);
-        $promotion->update($this->validated($request));
+        $data      = $this->validated($request);
+
+        // Judged on the promotion as it will stand — the fields sent, over the
+        // ones kept — against how it stands now. Raising, extending, renaming
+        // or switching on one worth more than 5% is the owner's; switching it
+        // off is anyone's who may manage marketing.
+        $before = $promotion->only(['discount_type', 'discount_value', 'conditions', 'is_active']);
+        DiscountRule::assertPromotionAllowed($request->user(), array_merge($before, $data), $before);
+
+        $promotion->update($data);
         $this->log('promotion_updated', $promotion);
 
         return response()->json(['data' => $promotion]);

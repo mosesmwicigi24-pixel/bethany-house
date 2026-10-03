@@ -57,10 +57,16 @@ class PermissionIntegrityTest extends TestCase
      * is enforced by PosDiscountPolicy. The two profile.* entries are benign —
      * self-service is implicit and no route consults them. The export pair and
      * the walk-in flag are still real gaps.
+     *
+     * pos.discount_override is inert BY DECISION: the owner's rule of
+     * 2026-10-03 is that nobody but a super_admin gives more than 5%, so the
+     * override lifts nothing (App\Support\DiscountRule). The slug stays so
+     * existing grants and the Roles screen keep working.
      */
     private const KNOWN_INERT = [
         'customers.create_without_email',
         'expenses.export',
+        'pos.discount_override',
         'products.export',
         'profile.edit',
         'profile.view',
