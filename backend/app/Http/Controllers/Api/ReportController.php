@@ -2567,10 +2567,18 @@ class ReportController extends Controller
      */
     public function listSchedules(Request $request)
     {
+        // Only schedules for report pages the caller can open (Phase 3A): a
+        // schedule names its report and its recipients, and the list used to
+        // show every page's to anyone who could read any report.
+        $user = $request->user();
         $schedules = DB::table('system_settings')
             ->where('key', 'like', 'report_schedule_%')
             ->get()
-            ->map(fn ($s) => json_decode($s->value, true));
+            ->map(fn ($s) => json_decode($s->value, true))
+            ->filter(fn ($s) => is_array($s)
+                && isset(\App\Support\ReportPages::PAGES[$s['report_type'] ?? ''])
+                && \App\Support\ReportPages::canView($user, $s['report_type']))
+            ->values();
 
         return response()->json(['schedules' => $schedules]);
     }
@@ -2594,12 +2602,14 @@ class ReportController extends Controller
         ]);
 
         // A schedule mails the report to whoever is listed, so it may carry no
-        // more than its author can read: the financial report needs
-        // reports.financial, exactly as /reports/pdf/financial does (cycle 9).
-        abort_if(
-            $validated['report_type'] === 'financial' && ! $request->user()?->can('reports.financial'),
+        // more than its author may take out of the building: view of that
+        // report's page and that page's export right — exactly what the same
+        // report's PDF needs (cycle 9; per page since Phase 3A).
+        abort_unless(
+            \App\Support\ReportPages::canExport($request->user(), $validated['report_type']),
             403,
-            'Scheduling the financial report requires the reports.financial permission.',
+            'Scheduling this report requires its page (' . \App\Support\ReportPages::slug($validated['report_type'])
+                . ') and the permission to export it.',
         );
 
         $id  = $validated['report_type'] . '_' . \Illuminate\Support\Str::slug($validated['name']);
@@ -2625,6 +2635,18 @@ class ReportController extends Controller
      */
     public function deleteSchedule(Request $request, string $id)
     {
+        // Stopping a schedule is the same right as starting one (Phase 3A).
+        $row = DB::table('system_settings')->where('key', 'report_schedule_' . $id)->first();
+        $type = $row ? (json_decode($row->value, true)['report_type'] ?? null) : null;
+        if ($row) {
+            abort_unless(
+                is_string($type) && isset(\App\Support\ReportPages::PAGES[$type])
+                    && \App\Support\ReportPages::canExport($request->user(), $type),
+                403,
+                'Deleting this schedule requires its report page and the permission to export it.',
+            );
+        }
+
         DB::table('system_settings')->where('key', 'report_schedule_' . $id)->delete();
         return response()->json(['message' => 'Schedule deleted.']);
     }

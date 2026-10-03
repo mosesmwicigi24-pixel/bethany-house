@@ -376,10 +376,20 @@ Route::prefix('v1')->group(function () {
         // whole block had no permission check at all, so e.g. a tailor or
         // pos_clerk could read customer churn-risk data and budget overruns,
         // and could trigger auto-reorder purchase orders.
+        //
+        // The Signals report page (role hardening 3A, plan §6: admin and
+        // finance) is the only screen that reads reorder-suggestions, the
+        // material-shortages list, churn-risk and budget-warnings, so those four also
+        // need reports.signals on top of their module's view. The preflight,
+        // tailor-workload, geography and channel feeds serve other screens
+        // (production order form, production board, Customers & Neema) and
+        // keep their module gate alone.
         Route::middleware(['auth:sanctum', 'throttle:admin-api', 'ensure.staff'])->prefix('admin/intelligence')->group(function () {
             Route::middleware('permission:inventory.view,sanctum')->group(function () {
-                Route::get('/reorder-suggestions',           [IntelligenceController::class, 'reorderSuggestions']);
-                Route::get('/material-shortages',            [IntelligenceController::class, 'materialShortages']);
+                Route::get('/reorder-suggestions',           [IntelligenceController::class, 'reorderSuggestions'])
+                    ->middleware('report.page:signals');
+                Route::get('/material-shortages',            [IntelligenceController::class, 'materialShortages'])
+                    ->middleware('report.page:signals');
                 Route::post('/material-shortages/preflight', [IntelligenceController::class, 'materialShortagesPreflight']);
             });
             Route::post('/auto-reorder/{itemId}', [IntelligenceController::class, 'triggerAutoReorder'])
@@ -387,13 +397,13 @@ Route::prefix('v1')->group(function () {
             Route::get('/tailor-workload', [IntelligenceController::class, 'tailorWorkload'])
                 ->middleware('permission:production.view,sanctum');
             Route::get('/churn-risk', [IntelligenceController::class, 'churnRisk'])
-                ->middleware('permission:intelligence.view,sanctum');
+                ->middleware(['permission:intelligence.view,sanctum', 'report.page:signals']);
             Route::get('/customer-geography', [IntelligenceController::class, 'customerGeography'])
                 ->middleware('permission:intelligence.view,sanctum');
             Route::get('/channel-engagement', [IntelligenceController::class, 'channelEngagement'])
                 ->middleware('permission:intelligence.view,sanctum');
             Route::get('/budget-warnings', [IntelligenceController::class, 'budgetWarnings'])
-                ->middleware('permission:expenses.view,sanctum');
+                ->middleware(['permission:expenses.view,sanctum', 'report.page:signals']);
             // smart-tasks and entity-previews stay open to all authenticated
             // staff: smart-tasks is a personal to-do aggregation scoped to the
             // current user, and entity-previews only returns data for
@@ -627,7 +637,10 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Insights / analytics ──────────────────────────────────────────
-            Route::middleware('permission:reports.view,sanctum')->prefix('analytics')->group(function () {
+            // Storefront Insights: visitors and online buyers by country — the
+            // storefront's half of the customer picture, so it follows the
+            // Customers & Neema report (was reports.view; role hardening 3A).
+            Route::middleware('report.page:customers')->prefix('analytics')->group(function () {
                 Route::get('/overview', [\App\Http\Controllers\Api\AnalyticsController::class, 'overview']);
             });
 
@@ -1378,51 +1391,56 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Reports ───────────────────────────────────────────────────────
+            // One permission per report page (role hardening 3A, plan §6): the
+            // single front door reports.view opened every page to anyone who
+            // held it. Each group below names its page with report.page:<page>
+            // — first in the chain, so a caller without the page is refused
+            // before their input is read — and an endpoint belongs to the page
+            // that renders it. See App\Support\ReportPages.
             // report.window: one date contract for the whole section — a
             // caller using the other page's spelling got a different window
             // back, silently (D4). See NormalisesReportWindow.
-            Route::middleware(['permission:reports.view,sanctum', 'report.window', 'report.snapshot', 'report.contacts'])->prefix('reports')->group(function () {
-                Route::get('/executive',       [\App\Http\Controllers\Api\ExecutiveReportController::class, 'executive']);
-                Route::get('/drill/{metric}',  [\App\Http\Controllers\Api\ExecutiveReportController::class, 'drill']);
+            $reportPage = fn (string $page) => ["report.page:{$page}", 'report.window', 'report.snapshot', 'report.contacts'];
+
+            // Shared by every page: the outlet filter, and the schedule list
+            // (filtered to the pages the caller can open). Drills inherit the
+            // page they are opened from — RequiresReportPage reads {metric}.
+            Route::middleware($reportPage('any'))->prefix('reports')->group(function () {
                 Route::get('/outlets',         [\App\Http\Controllers\Api\ExecutiveReportController::class, 'outlets']);
-                Route::get('/performance',     [\App\Http\Controllers\Api\ExecutiveReportController::class, 'performance']);
-                Route::get('/data-quality',    [\App\Http\Controllers\Api\ExecutiveReportController::class, 'dataQuality']);
-                Route::get('/outcomes',        [\App\Http\Controllers\Api\ExecutiveReportController::class, 'outcomes']);
-                Route::get('/explorer',        [\App\Http\Controllers\Api\ExecutiveReportController::class, 'explorer']);
-                Route::get('/explorer/orders', [\App\Http\Controllers\Api\ExecutiveReportController::class, 'explorerOrders']);
-                Route::get('/production-intelligence', [\App\Http\Controllers\Api\ExecutiveReportController::class, 'productionIntelligence']);
-                Route::get('/inventory-intelligence',   [\App\Http\Controllers\Api\ExecutiveReportController::class, 'inventoryIntelligence']);
-                Route::get('/procurement-intelligence', [\App\Http\Controllers\Api\ExecutiveReportController::class, 'procurementIntelligence']);
-                Route::get('/customer-intelligence',    [\App\Http\Controllers\Api\ExecutiveReportController::class, 'customerIntelligence']);
-                Route::get('/engine-room',              [\App\Http\Controllers\Api\ExecutiveReportController::class, 'engineRoom']);
-                Route::get('/replenishment',            [\App\Http\Controllers\Api\ExecutiveReportController::class, 'replenishment']);
-                Route::get('/collections',              [\App\Http\Controllers\Api\ExecutiveReportController::class, 'collections']);
-                Route::get('/attach-rates',             [\App\Http\Controllers\Api\ExecutiveReportController::class, 'attachRates']);
-                Route::get('/stockout-loss',            [\App\Http\Controllers\Api\ExecutiveReportController::class, 'stockoutLoss']);
-                Route::get('/seasonal-demand',          [\App\Http\Controllers\Api\ExecutiveReportController::class, 'seasonalDemand']);
-                Route::get('/institutions',             [\App\Http\Controllers\Api\ExecutiveReportController::class, 'institutions']);
-                Route::get('/international',            [\App\Http\Controllers\Api\ExecutiveReportController::class, 'international']);
-                Route::get('/win-back',                 [\App\Http\Controllers\Api\ExecutiveReportController::class, 'winBack']);
-                Route::get('/order-pipeline',           [\App\Http\Controllers\Api\ExecutiveReportController::class, 'orderPipeline']);
-                Route::get('/second-purchase',          [\App\Http\Controllers\Api\ExecutiveReportController::class, 'secondPurchase']);
-                // A WRITE, and a phone-to-revenue lookup for any number given:
-                // it belongs to whoever works the customer book, not to every
-                // report reader (cycle 9).
-                Route::post('/win-back/outreach',       [\App\Http\Controllers\Api\ExecutiveReportController::class, 'winBackOutreach'])
-                    ->middleware('permission:customers.insights,sanctum');
-                Route::get('/outreach-log',             [\App\Http\Controllers\Api\ExecutiveReportController::class, 'outreachLog']);
-                Route::get('/financial-intelligence',   [\App\Http\Controllers\Api\ExecutiveReportController::class, 'financialIntelligence']);
-                Route::get('/dashboard/kpis',  [ReportController::class, 'dashboardKPIs']);
-                Route::get('/purchase-orders', [ReportController::class, 'purchaseOrderReport']);
                 Route::get('/schedules',       [ReportController::class, 'listSchedules']);
-                Route::post('/export/pdf',     [ReportController::class, 'exportPDF'])
-                    ->middleware('permission:reports.export,sanctum');
-                Route::post('/export/excel',   [ReportController::class, 'exportExcel'])
-                    ->middleware('permission:reports.export,sanctum');
+                // A schedule mails a file: saveSchedule/deleteSchedule check the
+                // named page's export rule (view + reports.export, or
+                // export_supply on Inventory / Procurement).
                 Route::post('/schedules',         [ReportController::class, 'saveSchedule'])
-                    ->middleware('permission:reports.export,sanctum');
+                    ->middleware('permission:reports.export|reports.export_supply,sanctum');
                 Route::delete('/schedules/{id}',  [ReportController::class, 'deleteSchedule'])
-                    ->middleware('permission:reports.export,sanctum');
+                    ->middleware('permission:reports.export|reports.export_supply,sanctum');
+                // Legacy stubs (410): no file comes out of them, but they stay
+                // behind a report page and an export right like any file door.
+                Route::post('/export/pdf',     [ReportController::class, 'exportPDF'])
+                    ->middleware('permission:reports.export|reports.export_supply,sanctum');
+                Route::post('/export/excel',   [ReportController::class, 'exportExcel'])
+                    ->middleware('permission:reports.export|reports.export_supply,sanctum');
+            });
+            Route::middleware($reportPage('drill'))->prefix('reports')->group(function () {
+                Route::get('/drill/{metric}',  [\App\Http\Controllers\Api\ExecutiveReportController::class, 'drill']);
+            });
+
+            // Executive Overview.
+            Route::middleware($reportPage('executive'))->prefix('reports')->group(function () {
+                Route::get('/executive',       [\App\Http\Controllers\Api\ExecutiveReportController::class, 'executive']);
+                Route::get('/engine-room',     [\App\Http\Controllers\Api\ExecutiveReportController::class, 'engineRoom']);
+            });
+
+            // Sales & Orders (Unconfirmed is its tab; the dashboard's revenue
+            // row reads the same figures, so it follows this page too).
+            Route::middleware($reportPage('sales'))->prefix('reports')->group(function () {
+                Route::get('/dashboard/kpis',  [ReportController::class, 'dashboardKPIs']);
+                Route::get('/outcomes',        [\App\Http\Controllers\Api\ExecutiveReportController::class, 'outcomes']);
+                Route::get('/collections',     [\App\Http\Controllers\Api\ExecutiveReportController::class, 'collections']);
+                Route::get('/attach-rates',    [\App\Http\Controllers\Api\ExecutiveReportController::class, 'attachRates']);
+                Route::get('/international',   [\App\Http\Controllers\Api\ExecutiveReportController::class, 'international']);
+                Route::get('/order-pipeline',  [\App\Http\Controllers\Api\ExecutiveReportController::class, 'orderPipeline']);
                 Route::prefix('sales')->group(function () {
                     Route::get('/summary',           [ReportController::class, 'salesSummary']);
                     Route::get('/ledger',            [ReportController::class, 'salesLedger']);
@@ -1432,10 +1450,26 @@ Route::prefix('v1')->group(function () {
                     Route::get('/by-outlet',         [ReportController::class, 'salesByOutlet']);
                     Route::get('/by-payment-method', [ReportController::class, 'salesByPaymentMethod']);
                     Route::get('/returns',           [ReportController::class, 'salesReturns']);
-                    // Neema (AI agent) performance: leads funnel, lead→order
-                    // conversion, WhatsApp revenue, contacts, message volume.
-                    Route::get('/neema',             [ReportController::class, 'salesNeema']);
                 });
+            });
+
+            // Customers & Neema.
+            Route::middleware($reportPage('customers'))->prefix('reports')->group(function () {
+                Route::get('/customer-intelligence',    [\App\Http\Controllers\Api\ExecutiveReportController::class, 'customerIntelligence']);
+                Route::get('/replenishment',            [\App\Http\Controllers\Api\ExecutiveReportController::class, 'replenishment']);
+                Route::get('/institutions',             [\App\Http\Controllers\Api\ExecutiveReportController::class, 'institutions']);
+                Route::get('/win-back',                 [\App\Http\Controllers\Api\ExecutiveReportController::class, 'winBack']);
+                Route::get('/second-purchase',          [\App\Http\Controllers\Api\ExecutiveReportController::class, 'secondPurchase']);
+                // A WRITE, and a phone-to-revenue lookup for any number given:
+                // it belongs to whoever works the customer book, not to every
+                // report reader (cycle 9).
+                Route::post('/win-back/outreach',       [\App\Http\Controllers\Api\ExecutiveReportController::class, 'winBackOutreach'])
+                    ->middleware('permission:customers.insights,sanctum');
+                Route::get('/outreach-log',             [\App\Http\Controllers\Api\ExecutiveReportController::class, 'outreachLog']);
+                // Neema (AI agent) performance: leads funnel, lead→order
+                // conversion, WhatsApp revenue, contacts, message volume — a
+                // tab of Customers & Neema, though its path says sales.
+                Route::get('/sales/neema',              [ReportController::class, 'salesNeema']);
                 Route::prefix('customers')->group(function () {
                     Route::get('/analytics',      [ReportController::class, 'customerAnalytics']);
                     Route::get('/summary',        [ReportController::class, 'customerSummary']);
@@ -1443,6 +1477,45 @@ Route::prefix('v1')->group(function () {
                     Route::get('/lifetime-value', [ReportController::class, 'customerLifetimeValue']);
                     Route::get('/retention',      [ReportController::class, 'customerRetention']);
                 });
+            });
+
+            // Finance & Cash — reports.financial, as it has long been. The
+            // Finance group (P&L, revenue, tax, cash-flow) was split from
+            // reports.view because SyncPermissions withholds it from the
+            // outlet and procurement roles; financial-intelligence checks it
+            // in the controller as well.
+            Route::middleware($reportPage('financial'))->prefix('reports')->group(function () {
+                Route::get('/financial-intelligence',   [\App\Http\Controllers\Api\ExecutiveReportController::class, 'financialIntelligence']);
+                Route::prefix('financial')->group(function () {
+                    Route::get('/tax',         [EnhancedReportController::class, 'taxReport']);
+                    Route::get('/cash-flow',  [EnhancedReportController::class, 'cashFlow']);
+                    Route::get('/profit-loss', [ReportController::class, 'profitLoss']);
+                    Route::get('/revenue',     [ReportController::class, 'revenue']);
+                    Route::get('/expenses',    [ReportController::class, 'expenses']);
+                });
+            });
+
+            // Production & Fulfilment.
+            Route::middleware($reportPage('production'))->prefix('reports')->group(function () {
+                Route::get('/production-intelligence', [\App\Http\Controllers\Api\ExecutiveReportController::class, 'productionIntelligence']);
+                Route::prefix('production')->group(function () {
+                    Route::get('/summary',             [ReportController::class, 'productionSummary']);
+                    Route::get('/efficiency',          [ReportController::class, 'productionEfficiency']);
+                    Route::get('/tailor-productivity', [ReportController::class, 'tailorProductivity']);
+                    // Gross profit, net profit and margins per product: the
+                    // financial figures every other page keeps behind
+                    // reports.financial (cycle 9) — on top of the page's own.
+                    Route::get('/costing-summary',     [ReportController::class, 'productionCostingSummary'])
+                        ->middleware('permission:reports.financial,sanctum');
+                    Route::get('/costing/{id}',        [ReportController::class, 'productCostingReport'])
+                        ->middleware('permission:reports.financial,sanctum');
+                });
+            });
+
+            // Inventory.
+            Route::middleware($reportPage('inventory'))->prefix('reports')->group(function () {
+                Route::get('/inventory-intelligence',   [\App\Http\Controllers\Api\ExecutiveReportController::class, 'inventoryIntelligence']);
+                Route::get('/stockout-loss',            [\App\Http\Controllers\Api\ExecutiveReportController::class, 'stockoutLoss']);
                 Route::prefix('inventory')->group(function () {
                     Route::get('/stock-on-hand', [ReportController::class, 'stockOnHand']);
                     Route::get('/low-stock',     [ReportController::class, 'lowStockReport']);
@@ -1450,35 +1523,29 @@ Route::prefix('v1')->group(function () {
                     Route::get('/aging',         [ReportController::class, 'inventoryAging']);
                     Route::get('/movement',      [ReportController::class, 'inventoryMovement']);
                 });
-                // Financial reports (P&L, revenue, tax, cash-flow) require
-                // reports.financial specifically, not just reports.view.
-                // SyncPermissions deliberately withholds reports.financial
-                // from outlet_manager and procurement_officer/manager - its
-                // own comments say those roles get "spend reports", not
-                // full financial statements - while finance_manager gets it
-                // explicitly ("all reports including financial"). This
-                // group previously only checked reports.view, so every role
-                // with general report access could see full P&L/revenue/
-                // tax/cash-flow regardless of that distinction.
-                Route::middleware('permission:reports.financial,sanctum')->prefix('financial')->group(function () {
-                    Route::get('/tax',         [EnhancedReportController::class, 'taxReport']);
-                    Route::get('/cash-flow',  [EnhancedReportController::class, 'cashFlow']);
-                    Route::get('/profit-loss', [ReportController::class, 'profitLoss']);
-                    Route::get('/revenue',     [ReportController::class, 'revenue']);
-                    Route::get('/expenses',    [ReportController::class, 'expenses']);
-                });
-                Route::prefix('production')->group(function () {
-                    Route::get('/summary',             [ReportController::class, 'productionSummary']);
-                    Route::get('/efficiency',          [ReportController::class, 'productionEfficiency']);
-                    Route::get('/tailor-productivity', [ReportController::class, 'tailorProductivity']);
-                    // Gross profit, net profit and margins per product: the
-                    // financial figures every other page keeps behind
-                    // reports.financial (cycle 9).
-                    Route::get('/costing-summary',     [ReportController::class, 'productionCostingSummary'])
-                        ->middleware('permission:reports.financial,sanctum');
-                    Route::get('/costing/{id}',        [ReportController::class, 'productCostingReport'])
-                        ->middleware('permission:reports.financial,sanctum');
-                });
+            });
+
+            // Procurement & Suppliers.
+            Route::middleware($reportPage('procurement'))->prefix('reports')->group(function () {
+                Route::get('/procurement-intelligence', [\App\Http\Controllers\Api\ExecutiveReportController::class, 'procurementIntelligence']);
+                Route::get('/seasonal-demand',          [\App\Http\Controllers\Api\ExecutiveReportController::class, 'seasonalDemand']);
+                Route::get('/purchase-orders', [ReportController::class, 'purchaseOrderReport']);
+            });
+
+            // Staff, Outlets & Performance.
+            Route::middleware($reportPage('performance'))->prefix('reports')->group(function () {
+                Route::get('/performance',     [\App\Http\Controllers\Api\ExecutiveReportController::class, 'performance']);
+            });
+
+            // Audit & Data Quality.
+            Route::middleware($reportPage('data_quality'))->prefix('reports')->group(function () {
+                Route::get('/data-quality',    [\App\Http\Controllers\Api\ExecutiveReportController::class, 'dataQuality']);
+            });
+
+            // Business Explorer.
+            Route::middleware($reportPage('explorer'))->prefix('reports')->group(function () {
+                Route::get('/explorer',        [\App\Http\Controllers\Api\ExecutiveReportController::class, 'explorer']);
+                Route::get('/explorer/orders', [\App\Http\Controllers\Api\ExecutiveReportController::class, 'explorerOrders']);
             });
 
             // ── Settings ────────────────────────────────────────────────────
@@ -1572,21 +1639,21 @@ Route::prefix('v1')->group(function () {
             // date resolver and none of the section's normalisation, so a PDF
             // exported with from/to covered the last 30 days instead of the
             // window on the screen it came from.
-            // reports.export: a PDF leaves the building exactly as a CSV does
-            // (owner, 2026-10-01) — one rule for every file a report produces.
-            Route::middleware(['permission:reports.view,sanctum', 'permission:reports.export,sanctum', 'report.window', 'report.snapshot'])
-                ->prefix('reports/pdf')
-                ->name('reports.pdf.')
-                ->group(function () {
-                    Route::get('/sales',        [ReportPdfController::class, 'sales'])       ->name('sales');
-                    Route::get('/financial',    [ReportPdfController::class, 'financial'])
-                        ->middleware('permission:reports.financial,sanctum')
-                        ->name('financial');
-                    Route::get('/inventory',    [ReportPdfController::class, 'inventory'])   ->name('inventory');
-                    Route::get('/procurement',  [ReportPdfController::class, 'procurement']) ->name('procurement');
-                    Route::get('/production',   [ReportPdfController::class, 'production'])  ->name('production');
-                    Route::get('/customers',    [ReportPdfController::class, 'customers'])   ->name('customers');
-                });
+            // A PDF leaves the building exactly as a CSV does (owner,
+            // 2026-10-01) — one rule for every file a report produces. Since
+            // Phase 3A that rule is per page: view of the page the PDF prints
+            // (report.page) and that page's export right (report.export):
+            // reports.export, or reports.export_supply for Inventory and
+            // Procurement.
+            $reportPdf = fn (string $page) => ["report.page:{$page}", 'report.export', 'report.window', 'report.snapshot'];
+            Route::prefix('reports/pdf')->name('reports.pdf.')->group(function () use ($reportPdf) {
+                Route::get('/sales',        [ReportPdfController::class, 'sales'])       ->middleware($reportPdf('sales'))      ->name('sales');
+                Route::get('/financial',    [ReportPdfController::class, 'financial'])   ->middleware($reportPdf('financial'))  ->name('financial');
+                Route::get('/inventory',    [ReportPdfController::class, 'inventory'])   ->middleware($reportPdf('inventory'))  ->name('inventory');
+                Route::get('/procurement',  [ReportPdfController::class, 'procurement']) ->middleware($reportPdf('procurement'))->name('procurement');
+                Route::get('/production',   [ReportPdfController::class, 'production'])  ->middleware($reportPdf('production')) ->name('production');
+                Route::get('/customers',    [ReportPdfController::class, 'customers'])   ->middleware($reportPdf('customers'))  ->name('customers');
+            });
 
         });
 

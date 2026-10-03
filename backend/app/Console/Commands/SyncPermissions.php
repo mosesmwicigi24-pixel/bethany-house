@@ -177,9 +177,27 @@ class SyncPermissions extends Command
         'receivables.view'     => ['View Outstanding Balances', 'Part-paid orders and what customers still owe', 'Receivables'],
 
         // ── Reports & Analytics ─────────────────────────────────────────────
-        'reports.view'         => ['View Reports',         'Access sales, inventory and financial reports', 'Reports'],
-        'reports.export'       => ['Export Reports',       'Export reports to CSV/PDF',                    'Reports'],
-        'reports.financial'    => ['View Financial Reports','Access revenue, profit and financial analytics', 'Reports'],
+        // One permission per report page (Role Hardening Plan §6, Phase 3A).
+        // The single front door 'reports.view' opened all ten non-financial
+        // pages to whoever held it; it is retired (migration
+        // 2026_10_03_300004) and no longer declared. Finance & Cash keeps
+        // reports.financial. See App\Support\ReportPages for the page → slug
+        // map and the export rule.
+        'reports.executive'    => ['View Executive Overview',      'The Executive report page: headline figures, opportunities and their drill-downs', 'Reports'],
+        'reports.sales'        => ['View Sales & Orders Report',   'Sales & Orders report page (and the dashboard revenue row)', 'Reports'],
+        'reports.customers'    => ['View Customers & Neema Report','Customers & Neema report page, and Storefront Insights',  'Reports'],
+        'reports.financial'    => ['View Financial Reports',       'Finance & Cash report page, and the financial figures on other report pages', 'Reports'],
+        'reports.production'   => ['View Production & Fulfilment Report', 'Production & Fulfilment report page',            'Reports'],
+        'reports.inventory'    => ['View Inventory Report',        'Inventory report page',                                 'Reports'],
+        'reports.procurement'  => ['View Procurement & Suppliers Report', 'Procurement & Suppliers report page',            'Reports'],
+        'reports.performance'  => ['View Staff, Outlets & Performance Report', 'Staff, Outlets & Performance report page',  'Reports'],
+        'reports.signals'      => ['View Signals',                 'Signals report page: reorder, shortage, churn and budget warnings', 'Reports'],
+        'reports.data_quality' => ['View Audit & Data Quality Report', 'Audit & Data Quality report page',                  'Reports'],
+        'reports.explorer'     => ['View Business Explorer',       'Business Explorer report page',                         'Reports'],
+        // A FILE out of a report page — CSV, PDF or a scheduled mailing. Needs
+        // view of that page as well.
+        'reports.export'       => ['Export Reports',               'Download CSV/PDF files from every report page the holder can view', 'Reports'],
+        'reports.export_supply' => ['Export Supply Reports',       'Download CSV/PDF files from the Inventory and Procurement report pages only', 'Reports'],
 
         // ── Expenses ────────────────────────────────────────────────────────
         'expenses.view'        => ['View Expenses',        'List and view expense records',                        'Expenses'],
@@ -349,7 +367,13 @@ class SyncPermissions extends Command
             'intelligence.*',
             // Sees the till and reviews its takings; does not operate it.
             'pos.access', 'pos.eod_review',
-            'reports.*',
+            // Every report page except Finance & Cash (plan §6: ADM "—"), and
+            // files from them. Written out, not 'reports.*', so a future
+            // report slug never reaches admin by expansion.
+            'reports.executive', 'reports.sales', 'reports.customers', 'reports.production',
+            'reports.inventory', 'reports.procurement', 'reports.performance', 'reports.signals',
+            'reports.data_quality', 'reports.explorer',
+            'reports.export',
             'expenses.view',
             'outlets.view',
             'settings.view',
@@ -385,7 +409,9 @@ class SyncPermissions extends Command
             'production.view_bom',
             'shipment.view', 'shipment.create', 'shipment.manage_tracking',
             'products.view',
-            'reports.view',
+            // Report pages for running a shop (plan §6); no files. Outlet
+            // scoping of these is Phase 4 — reports stay business-wide.
+            'reports.sales', 'reports.production', 'reports.inventory', 'reports.performance',
             // Expenses - create and submit; approval is finance's. Deleting an
             // expense record is not a shop manager's call (Phase 2).
             'expenses.view', 'expenses.create', 'expenses.edit',
@@ -402,7 +428,7 @@ class SyncPermissions extends Command
         'pos_clerk' => [
             // @workspace is dashboard.view: the route was ungated before, so
             // clerks already had the screen. The group revenue figure is
-            // withheld separately by buildStats, which checks reports.view.
+            // withheld separately by buildStats, which checks reports.sales.
             '@self', '@workspace', '@till', '@sell', '@take_payment', '@walkin_customer',
             // Front of the sales-documents flow. create covers raising and
             // editing a DRAFT; issuing one is quotations.issue and is
@@ -434,9 +460,8 @@ class SyncPermissions extends Command
             // Costing materials against product BOMs is procurement's job
             'production.view_bom',
             'products.view_cost',
-            // Reports - procurement officers need spend reports (Phase 3
-            // narrows report access per page).
-            'reports.view',
+            // The floor and the stock it buys for (plan §6); no files.
+            'reports.production', 'reports.inventory',
         ],
     ];
 
@@ -459,7 +484,10 @@ class SyncPermissions extends Command
             'products.view_cost',
             'bom.edit',
             'payments.view',
-            'reports.view', 'reports.export',
+            // Plan §6: production, stock and supplier pages; files from the
+            // supply pages only (reports.export_supply, never reports.export).
+            'reports.production', 'reports.inventory', 'reports.procurement',
+            'reports.export_supply',
             'expenses.view',
         ],
 
@@ -471,8 +499,12 @@ class SyncPermissions extends Command
             // Expenses - the checker. Approves, budgets, exports; never creates,
             // edits or deletes the records it approves (plan §3.4).
             'expenses.view', 'expenses.approve', 'expenses.export', 'expenses.budgets',
-            // Reports - all reports including financial
-            'reports.view', 'reports.export', 'reports.financial',
+            // Reports - every page except Customers & Neema (plan §6), Finance
+            // & Cash included, and files from all of them.
+            'reports.executive', 'reports.sales', 'reports.financial', 'reports.production',
+            'reports.inventory', 'reports.procurement', 'reports.performance', 'reports.signals',
+            'reports.data_quality', 'reports.explorer',
+            'reports.export',
             'receivables.view',
             // End-of-day reports: the takings finance reconciles against.
             'pos.eod_review',
@@ -513,6 +545,11 @@ class SyncPermissions extends Command
             'procurement.view',
             'inventory.view',
             'products.view', 'products.view_cost',
+            // Reads six report pages, Finance & Cash among them (plan §6), and
+            // exports none: its reconciliation files are expenses.export and
+            // the payment ledger.
+            'reports.sales', 'reports.financial', 'reports.production', 'reports.inventory',
+            'reports.procurement', 'reports.performance',
         ],
 
     ];
@@ -544,14 +581,21 @@ class SyncPermissions extends Command
             'roles.edit',
             'attendance.manage',
             'bom.edit', 'setup.technical',
+            // Phase 3A: Finance & Cash is not admin's (plan §6), and admin's
+            // files come through reports.export, not the supply split.
+            'reports.financial', 'reports.export_supply',
         ],
         'accountant' => [
             'expenses.approve', 'payments.void', 'payments.reassign',
             'payments.approve_international', 'inventory.approve', 'procurement.approve',
+            // No report files (Phase 3A).
+            'reports.export', 'reports.export_supply',
         ],
         'finance_manager'     => ['expenses.create', 'expenses.edit', 'expenses.delete'],
         'procurement_officer' => ['procurement.approve', 'inventory.approve', 'payments.view', 'expenses.view'],
-        'outlet_manager'      => ['inventory.approve', 'expenses.delete', 'outlets.edit'],
+        'outlet_manager'      => ['inventory.approve', 'expenses.delete', 'outlets.edit',
+                                  // No report files (Phase 3A).
+                                  'reports.export', 'reports.export_supply'],
         'pos_clerk'           => ['expenses.view', 'expenses.create'],
     ];
 
