@@ -5,6 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { rolesApi, permissionsApi } from "@/api/setup";
 import { useToastStore } from "@/store/toast.store";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { DataTable } from "@/components/ui/DataTable";
@@ -85,6 +86,10 @@ const SYSTEM_ROLES = [
 
 export default function RolesPage() {
     const qc = useQueryClient();
+    // Write controls follow roles.edit — the server's own check — so a
+    // read-only viewer (admin, system_admin) sees no buttons that would fail.
+    const { can } = usePermissions();
+    const canEdit = can("roles.edit");
     const toast = useToastStore();
     const [modalOpen, setModalOpen] = useState(false);
     const [permModalOpen, setPermModalOpen] = useState(false);
@@ -222,9 +227,11 @@ export default function RolesPage() {
                         restricted access.
                     </p>
                 </div>
-                <button onClick={openCreate} className="btn-primary shrink-0 self-start sm:self-auto">
-                    + Create Role
-                </button>
+                {canEdit && (
+                    <button onClick={openCreate} className="btn-primary shrink-0 self-start sm:self-auto">
+                        + Create Role
+                    </button>
+                )}
             </div>
 
             {/* SRS-mandated roles reference */}
@@ -268,14 +275,14 @@ export default function RolesPage() {
                     <EmptyState
                         title="No roles configured"
                         description="Create the system roles listed above to get started."
-                        action={
+                        action={canEdit ? (
                             <button
                                 onClick={openCreate}
                                 className="btn-primary btn-sm"
                             >
                                 Create Role
                             </button>
-                        }
+                        ) : undefined}
                     />
                 ) : (
                     <div className="table-wrapper">
@@ -342,6 +349,7 @@ export default function RolesPage() {
                                                 >
                                                     Permissions
                                                 </button>
+                                                {canEdit && (
                                                 <button
                                                     onClick={() =>
                                                         openEdit(role)
@@ -351,7 +359,8 @@ export default function RolesPage() {
                                                 >
                                                     <EditIcon />
                                                 </button>
-                                                {!role.is_system && (
+                                                )}
+                                                {canEdit && !role.is_system && (
                                                     <button
                                                         onClick={() =>
                                                             setDeleting(role)

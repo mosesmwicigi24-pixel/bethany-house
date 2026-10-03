@@ -195,6 +195,9 @@ export default function UsersPage() {
         queryFn: () => outletsApi.list(),
     });
 
+    // Write controls follow the server's user permissions, so a read-only
+    // viewer (admin) sees no buttons that would only fail.
+    const { can: canDo } = usePermissions();
     const roles = rolesData?.data ?? [];
     const outlets = outletsData?.data ?? [];
     // Mirrors the server rule: only a super administrator changes roles.
@@ -371,12 +374,14 @@ export default function UsersPage() {
                         going live.
                     </p>
                 </div>
-                <button
-                    onClick={openCreate}
-                    className="btn-primary shrink-0 self-start sm:self-auto"
-                >
-                    + Create User
-                </button>
+                {canDo("users.create") && (
+                    <button
+                        onClick={openCreate}
+                        className="btn-primary shrink-0 self-start sm:self-auto"
+                    >
+                        + Create User
+                    </button>
+                )}
             </div>
 
             {/* Search - state lives in table hook, never touches form state */}
@@ -514,6 +519,7 @@ export default function UsersPage() {
                                 const user = u as unknown as UserSetup;
                                 return (
                                     <div className="flex items-center gap-1">
+                                        {canDo("users.edit") && (<>
                                         <button
                                             title="Change password"
                                             onClick={(e) => {
@@ -535,7 +541,8 @@ export default function UsersPage() {
                                         >
                                             <EditIcon />
                                         </button>
-                                        {user.user_type === "customer" && (
+                                        </>)}
+                                        {user.user_type === "customer" && canDo("users.edit") && (
                                             <button
                                                 title="Promote to staff"
                                                 onClick={(e) => {
@@ -549,6 +556,7 @@ export default function UsersPage() {
                                                 <PromoteIcon />
                                             </button>
                                         )}
+                                        {canDo("users.delete") && (
                                         <button
                                             title="Delete user"
                                             onClick={(e) => {
@@ -560,6 +568,7 @@ export default function UsersPage() {
                                         >
                                             <TrashIcon />
                                         </button>
+                                        )}
                                     </div>
                                 );
                             },
