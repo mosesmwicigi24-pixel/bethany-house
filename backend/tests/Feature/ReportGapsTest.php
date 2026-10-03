@@ -58,7 +58,7 @@ class ReportGapsTest extends TestCase
 
     public function test_every_order_lands_in_one_outcome_and_sold_is_the_sold_tile(): void
     {
-        $this->actingWith(['reports.view', 'orders.view']);
+        $this->actingWith([...\Tests\ReportAccess::PAGES, 'orders.view']);
         $this->order(10_000, 'completed', 'paid');
         $this->order(4_000, 'pending', 'paid');          // paid: a sale, not a cart
         $this->order(7_000, 'pending', 'pending');       // a cart
@@ -86,7 +86,7 @@ class ReportGapsTest extends TestCase
 
     public function test_executive_profit_states_what_it_leaves_out(): void
     {
-        $this->actingWith(['reports.view', 'reports.financial']);
+        $this->actingWith([...\Tests\ReportAccess::PAGES, 'reports.financial']);
         $o = $this->order(4_000, 'completed', 'paid');
         $product = Product::factory()->create();     // no cost anywhere
         DB::table('order_items')->insert(['order_id' => $o->id, 'product_id' => $product->id, 'sku' => 'GP', 'product_name' => 'Line',
@@ -100,13 +100,13 @@ class ReportGapsTest extends TestCase
         $this->assertCount(1, $earned['limits']);
         $this->assertStringContainsString('1 line sold with no cost', $earned['limits'][0]);
 
-        $this->actingWith(['reports.view']);
+        $this->actingWith([...\Tests\ReportAccess::PAGES]);
         $this->assertNull($this->getJson('/api/v1/admin/reports/executive?period=this_month')->json('kpis.financial'), 'profit stays behind reports.financial');
     }
 
     public function test_stock_aging_buckets_add_up_to_the_stock_value_and_cost_needs_financial(): void
     {
-        $this->actingWith(['reports.view', 'reports.financial']);
+        $this->actingWith([...\Tests\ReportAccess::PAGES, 'reports.financial']);
         $outlet = Outlet::factory()->create();
         $make = function (int $units, ?int $daysAgo, float $cost) use ($outlet) {
             $product = Product::factory()->create();
@@ -139,7 +139,7 @@ class ReportGapsTest extends TestCase
         $this->assertSame(4, $aging['turnover']['sold_90_days'], 'the 120-day-old sale is outside the 90 days');
         $this->assertSame(3, count($aging['slow_items']), 'everything not moved in 30 days is listed');
 
-        $this->actingWith(['reports.view']);
+        $this->actingWith([...\Tests\ReportAccess::PAGES]);
         $plain = $this->getJson('/api/v1/admin/reports/inventory/aging')->assertOk()->json();
         $this->assertNull($plain['totals']['cost_value'], 'stock at cost is a financial figure');
         $this->assertNull($plain['buckets'][0]['cost_value']);

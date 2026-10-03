@@ -62,7 +62,7 @@ class ReportRouteSmokeTest extends TestCase
     {
         $ids  = ReportPermissionAttackTest::seedReportFixture();
         $user = User::factory()->create();
-        foreach (['reports.view', 'reports.financial', 'reports.export', 'customers.view', 'customers.insights'] as $p) {
+        foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial', 'reports.export', 'customers.view', 'customers.insights'] as $p) {
             $user->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();
@@ -95,7 +95,7 @@ class ReportRouteSmokeTest extends TestCase
     {
         ReportPermissionAttackTest::seedReportFixture();
         $user = User::factory()->create();
-        $user->givePermissionTo(Permission::findOrCreate('reports.view', 'sanctum'));
+        \Tests\ReportAccess::grantPages($user);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 

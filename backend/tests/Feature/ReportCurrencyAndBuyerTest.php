@@ -58,7 +58,7 @@ class ReportCurrencyAndBuyerTest extends TestCase
         \App\Support\ReportingCurrency::forget();
 
         $staff = User::factory()->create();
-        foreach (['reports.view', 'reports.financial', 'customers.view', 'customers.insights'] as $p) {
+        foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial', 'customers.view', 'customers.insights'] as $p) {
             $staff->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();
@@ -384,7 +384,7 @@ class ReportCurrencyAndBuyerTest extends TestCase
     private function csv(string $path): string
     {
         $exporter = User::factory()->create();
-        foreach (['reports.view', 'reports.financial', 'reports.export'] as $p) {
+        foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial', 'reports.export'] as $p) {
             $exporter->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();

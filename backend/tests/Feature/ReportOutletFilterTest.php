@@ -68,7 +68,7 @@ class ReportOutletFilterTest extends TestCase
         }
 
         $u = User::factory()->create();
-        foreach (['reports.view', 'reports.financial', 'customers.view'] as $p) {
+        foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial', 'customers.view'] as $p) {
             $u->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();

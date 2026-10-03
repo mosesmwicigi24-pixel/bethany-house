@@ -140,7 +140,7 @@ class PhoneNormalisationTest extends TestCase
     {
         $u = User::factory()->create(['user_type' => 'staff']);
         $u->assignRole(Role::findOrCreate('admin', 'sanctum'));
-        $u->givePermissionTo(Permission::findOrCreate('reports.view', 'sanctum'));
+        \Tests\ReportAccess::grantPages($u);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($u);
     }

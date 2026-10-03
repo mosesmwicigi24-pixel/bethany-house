@@ -31,7 +31,7 @@ class CustomerSummaryBuyersTest extends TestCase
     {
         parent::setUp();
         $staff = User::factory()->create();
-        $staff->givePermissionTo(Permission::findOrCreate('reports.view', 'sanctum'));
+        \Tests\ReportAccess::grantPages($staff);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($staff);
     }

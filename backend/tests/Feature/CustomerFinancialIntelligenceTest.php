@@ -35,7 +35,7 @@ class CustomerFinancialIntelligenceTest extends TestCase
         $user->assignRole(Role::findOrCreate('sales_manager', 'sanctum'));
         // customers.view: the attention feed names a quiet customer's phone,
         // which since cycle 9 needs it.
-        foreach (array_merge(['reports.view', 'customers.view'], $extraPerms) as $perm) {
+        foreach (array_merge([...\Tests\ReportAccess::PAGES, 'customers.view'], $extraPerms) as $perm) {
             $user->givePermissionTo(Permission::findOrCreate($perm, 'sanctum'));
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();

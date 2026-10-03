@@ -62,7 +62,7 @@ class CrossFamilyReconciliationTest extends TestCase
         $this->outlet = Outlet::factory()->create(['name' => 'Sonalux']);
 
         $staff = User::factory()->create();
-        foreach (['reports.view', 'reports.financial', 'customers.view', 'customers.insights'] as $p) {
+        foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial', 'customers.view', 'customers.insights'] as $p) {
             $staff->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();

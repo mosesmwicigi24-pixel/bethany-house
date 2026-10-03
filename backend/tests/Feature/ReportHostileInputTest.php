@@ -33,7 +33,7 @@ class ReportHostileInputTest extends TestCase
         parent::setUp();
 
         $staff = User::factory()->create();
-        foreach (['reports.view', 'reports.financial', 'reports.export', 'customers.view', 'customers.insights'] as $p) {
+        foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial', 'reports.export', 'customers.view', 'customers.insights'] as $p) {
             $staff->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();
