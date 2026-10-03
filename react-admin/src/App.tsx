@@ -892,7 +892,7 @@ export default function App() {
                         <Route
                             path="/approvals"
                             element={
-                                <ProtectedRoute anyOf={["procurement.approve", "inventory.approve", "expenses.approve", "approvals.finance_sign", "payments.void", "payments.reassign", "payments.approve_international", "payments.request_void", "payments.request_reassign", "procurement.create", "inventory.adjust", "inventory.transfer", "expenses.create"]}>
+                                <ProtectedRoute anyOf={["procurement.approve", "inventory.approve", "expenses.approve", "approvals.finance_sign", "payments.void", "payments.reassign", "payments.approve_international", "payments.request_void", "payments.request_reassign", "procurement.create", "inventory.adjust", "inventory.transfer", "expenses.create", "products.edit", "products.edit_cost", "orders.set_deposit", "settings.financial_propose", "settings.pricing_rate_propose"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <ApprovalsPage />
                                 </Suspense>
@@ -1212,7 +1212,7 @@ export default function App() {
                         <Route
                             path="/settings/currencies"
                             element={
-                                <ProtectedRoute permission="settings.view">
+                                <ProtectedRoute anyOf={["settings.view", "settings.financial_propose", "settings.pricing_rate_propose"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <CurrenciesPage />
                                 </Suspense>
@@ -1232,7 +1232,7 @@ export default function App() {
                         <Route
                             path="/settings/taxes"
                             element={
-                                <ProtectedRoute permission="settings.view">
+                                <ProtectedRoute anyOf={["settings.view", "settings.financial_propose"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <TaxRatesPage />
                                 </Suspense>
@@ -1262,7 +1262,7 @@ export default function App() {
                         <Route
                             path="/settings/payment-methods"
                             element={
-                                <ProtectedRoute permission="settings.view">
+                                <ProtectedRoute anyOf={["settings.view", "settings.financial_propose"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <PaymentMethodsPage />
                                 </Suspense>

@@ -1,4 +1,5 @@
 import { get, post, put, patch, del } from "./client";
+import type { Proposal } from "@/api/proposals";
 import type {
     BusinessSettings,
     Currency,
@@ -56,8 +57,10 @@ export const currenciesApi = {
             data,
         ),
 
-    update: (id: number, data: Partial<CurrencyFormData>) =>
-        put<{ message: string; currency: Currency }>(
+    // Phase 3C: the pricing rate (finance signs) and the reporting rate (the
+    // super admin signs, dated) become proposals; `proposals` says which wait.
+    update: (id: number, data: Partial<CurrencyFormData> & { effective_from?: string | null }) =>
+        put<{ message: string; currency: Currency; proposals?: Proposal[] }>(
             `/v1/admin/currencies-management/${id}`,
             data,
         ),
@@ -124,8 +127,10 @@ export const taxRatesApi = {
             data,
         ),
 
-    update: (id: number, data: Partial<TaxRateFormData>) =>
-        put<{ message: string; tax_rate: TaxRate }>(
+    // Phase 3C: rate / active / default become a proposal the super admin
+    // signs; `proposal` says whether it applied or waits.
+    update: (id: number, data: Partial<TaxRateFormData> & { effective_from?: string | null }) =>
+        put<{ message: string; tax_rate: TaxRate; proposal?: Proposal | null }>(
             `/v1/admin/tax-rates/${id}`,
             data,
         ),
@@ -134,7 +139,7 @@ export const taxRatesApi = {
         del<{ message: string }>(`/v1/admin/tax-rates/${id}`),
 
     toggle: (id: number) =>
-        put<{ message: string; tax_rate: TaxRate }>(
+        put<{ message: string; tax_rate: TaxRate; proposal?: Proposal | null }>(
             `/v1/admin/tax-rates/${id}/toggle`,
         ),
 };
@@ -198,8 +203,9 @@ export const paymentMethodsApi = {
             data,
         ),
 
-    update: (id: number, data: Partial<PaymentMethodFormData>) =>
-        put<{ message: string; payment_method: PaymentMethodSetup }>(
+    // Phase 3C: requires_approval (settlement) becomes a proposal the super admin signs.
+    update: (id: number, data: Partial<PaymentMethodFormData> & { effective_from?: string | null }) =>
+        put<{ message: string; payment_method: PaymentMethodSetup; proposal?: Proposal | null }>(
             `/v1/admin/payment-methods-management/${id}`,
             data,
         ),

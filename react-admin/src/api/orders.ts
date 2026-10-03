@@ -1,4 +1,5 @@
 import { get, post, put, patch, del } from "./client";
+import type { Proposal } from "@/api/proposals";
 
 /** A shipping method as the order editor's picker sees it (active only). */
 export interface OrderShippingMethod {
@@ -399,7 +400,8 @@ export const ordersApi = {
         id: number,
         data: { deposit_amount: number; balance_due_date?: string },
     ) =>
-        post<{ message: string; deposit_amount: number; balance_due_date: string | null }>(
+        // Phase 3C: credit past the maker's band (KES 20,000) waits for finance.
+        post<{ message: string; deposit_amount: number; balance_due_date: string | null; proposal?: Proposal | null }>(
             `/v1/admin/orders/${id}/set-deposit`,
             data,
         ),

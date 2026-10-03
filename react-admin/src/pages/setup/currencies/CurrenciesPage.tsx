@@ -22,6 +22,9 @@ import {
 } from "@/components/setup/FormComponents";
 import type { Currency, CurrencyFormData } from "@/types/setup";
 import type { ApiError } from "@/types";
+import { usePermissions } from "@/hooks/usePermissions";
+import { waitsForApproval } from "@/api/proposals";
+import { PendingChanges, NeedsApprovalHint, PROPOSALS_QUERY_KEY } from "@/components/approvals/PendingChanges";
 
 const schema = z.object({
     code: z.string().min(2).max(10).toUpperCase(),
@@ -103,6 +106,11 @@ export default function CurrenciesPage() {
     const toast = useToastStore();
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<Currency | null>(null);
+    // Phase 3C: the two rates are proposals (pricing: admin → finance;
+    // reporting: finance → super admin); everything else is the super admin's.
+    const { can } = usePermissions();
+    const canEdit = can("settings.edit");
+    const [effectiveFrom, setEffectiveFrom] = useState("");
     const [deleting, setDeleting] = useState<Currency | null>(null);
 
     const { data, isLoading } = useQuery({
@@ -131,6 +139,7 @@ export default function CurrenciesPage() {
         setModalOpen(true);
     };
     const openEdit = (c: Currency) => {
+        setEffectiveFrom("");
         reset({
             code: c.code,
             name: c.name,
@@ -152,17 +161,23 @@ export default function CurrenciesPage() {
     // decimals the column holds (150 KES/£ → 0.006667).
     const toPayload = ({ kes_per_unit, ...rest }: FormValues): CurrencyFormData => ({
         ...rest,
-        exchange_rate: Math.round((1 / kes_per_unit) * 1_000_000) / 1_000_000,
+        // An untouched figure sends the stored rate back exactly: the 2-decimal
+        // round trip must never read as a pricing-rate change (Phase 3C).
+        exchange_rate: editing && Number(kes_per_unit) === (editing.exchange_rate > 0 ? Math.round((1 / Number(editing.exchange_rate)) * 100) / 100 : 1)
+            ? Number(editing.exchange_rate)
+            : Math.round((1 / kes_per_unit) * 1_000_000) / 1_000_000,
     });
 
     const saveMutation = useMutation({
         mutationFn: (values: FormValues) =>
             editing
-                ? currenciesApi.update(editing.id, toPayload(values))
+                ? currenciesApi.update(editing.id, { ...toPayload(values), effective_from: effectiveFrom ? new Date(effectiveFrom).toISOString() : null })
                 : currenciesApi.create(toPayload(values)),
-        onSuccess: () => {
+        onSuccess: (res) => {
             qc.invalidateQueries({ queryKey: ["currencies"] });
-            toast.success(editing ? "Currency updated." : "Currency added.");
+            qc.invalidateQueries({ queryKey: [PROPOSALS_QUERY_KEY] });
+            if (waitsForApproval(res)) toast.info(res.message);
+            else toast.success(editing ? "Currency updated." : "Currency added.");
             setModalOpen(false);
         },
         onError: (err: ApiError) => toast.error(err.message),
@@ -208,10 +223,14 @@ export default function CurrenciesPage() {
                         orders use the customer's selected currency.
                     </p>
                 </div>
-                <button onClick={openCreate} className="btn-primary shrink-0 self-start sm:self-auto">
-                    + Add Currency
-                </button>
+                {canEdit && (
+                    <button onClick={openCreate} className="btn-primary shrink-0 self-start sm:self-auto">
+                        + Add Currency
+                    </button>
+                )}
             </div>
+
+            <PendingChanges subjectType="currency" subjectIds={currencies.map((c) => c.id)} />
 
             <Section title="Active Currencies">
                 {isLoading ? (
@@ -279,7 +298,7 @@ export default function CurrenciesPage() {
                                 </div>
                                 {/* Actions */}
                                 <div className="flex items-center gap-1.5 shrink-0">
-                                    {!currency.is_default && (
+                                    {canEdit && !currency.is_default && (
                                         <button
                                             onClick={() =>
                                                 defaultMutation.mutate(
@@ -292,7 +311,7 @@ export default function CurrenciesPage() {
                                             Set default
                                         </button>
                                     )}
-                                    <button
+                                    {canEdit && <button
                                         onClick={() =>
                                             toggleMutation.mutate(currency.id)
                                         }
@@ -302,7 +321,7 @@ export default function CurrenciesPage() {
                                         {currency.is_active
                                             ? "Disable"
                                             : "Enable"}
-                                    </button>
+                                    </button>}
                                     <button
                                         onClick={() => openEdit(currency)}
                                         className="btn-ghost btn-sm"
@@ -310,7 +329,7 @@ export default function CurrenciesPage() {
                                     >
                                         <EditIcon />
                                     </button>
-                                    {!currency.is_default && (
+                                    {canEdit && !currency.is_default && (
                                         <button
                                             onClick={() =>
                                                 setDeleting(currency)
@@ -433,6 +452,7 @@ export default function CurrenciesPage() {
                                 placeholder="150"
                                 {...register("kes_per_unit")}
                             />
+                            {editing && <NeedsApprovalHint>A change needs approval from finance.</NeedsApprovalHint>}
                         </Field>
                         <Field
                             label={`Reporting rate: KES per 1 ${watch("code") || "unit"}`}
@@ -446,7 +466,22 @@ export default function CurrenciesPage() {
                                 placeholder="165"
                                 {...register("reporting_rate_to_kes")}
                             />
+                            {editing && <NeedsApprovalHint>A change needs approval from the super admin.</NeedsApprovalHint>}
                         </Field>
+                        {editing && (
+                            <Field
+                                label="Reporting rate takes effect"
+                                hint="Leave empty for 'when approved'. Never earlier than now."
+                                className="col-span-2"
+                            >
+                                <FieldInput
+                                    className="input"
+                                    type="datetime-local"
+                                    value={effectiveFrom}
+                                    onChange={(e) => setEffectiveFrom(e.target.value)}
+                                />
+                            </Field>
+                        )}
                         <Field label="Decimal Places">
                             <FieldInput
                                 className="input"
