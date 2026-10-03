@@ -99,7 +99,11 @@ class ApprovalFlowsTest extends TestCase
             ]);
         }
 
-        return InventoryItem::factory()->create(['product_id' => $product->id, 'quantity_on_hand' => $onHand]);
+        $item = InventoryItem::factory()->create(['product_id' => $product->id, 'quantity_on_hand' => $onHand]);
+        // Phase 4A: the outlet manager adjusts stock at their own shop.
+        $this->outletManager->outlets()->syncWithoutDetaching([$item->outlet_id]);
+
+        return $item;
     }
 
     private function adjust(User $as, InventoryItem $item, string $reason, int $change)
@@ -204,6 +208,7 @@ class ApprovalFlowsTest extends TestCase
         $from = Outlet::factory()->create();
         $to   = Outlet::factory()->create();
         $product = Product::factory()->create();
+        $this->outletManager->outlets()->attach($from->id);   // Phase 4A: the sending shop's manager
 
         Sanctum::actingAs($this->outletManager);
         $id = $this->postJson('/api/v1/admin/inventory/transfers', [
@@ -224,8 +229,10 @@ class ApprovalFlowsTest extends TestCase
 
     public function test_cancelling_a_transfer_withdraws_its_request(): void
     {
+        $from = Outlet::factory()->create();
+        $this->outletManager->outlets()->attach($from->id);   // Phase 4A: the sending shop's manager
         $transfer = InventoryTransfer::create([
-            'from_outlet_id' => Outlet::factory()->create()->id, 'to_outlet_id' => Outlet::factory()->create()->id,
+            'from_outlet_id' => $from->id, 'to_outlet_id' => Outlet::factory()->create()->id,
             'status' => 'pending', 'transfer_date' => now()->toDateString(), 'created_by' => $this->outletManager->id,
         ]);
         Artisan::call('approvals:adopt-pending');
