@@ -84,6 +84,14 @@ class SyncPermissions extends Command
         // cost garments: managers and procurement.
         'production.view_bom'              => ['View Bill of Materials',        'View product BOMs including material unit costs',    'Production'],
 
+        // Writing a bill of materials — create, edit, delete, activate. Was
+        // products.edit, which made "edit the catalogue" and "decide what a
+        // garment is made of and so what it costs" one key. The plan gives BOMs
+        // to procurement (Role Hardening Plan §3.6); the catalogue stays with
+        // admin. Deliberately NOT named products.* or production.*, so neither
+        // of admin's wildcards picks it up.
+        'bom.edit'                         => ['Edit Bills of Materials',       'Create, edit, delete and activate product BOMs',     'Production'],
+
         // ── Shipments ───────────────────────────────────────────────────────
         'shipment.view'            => ['View Shipments',           'View shipment records and tracking',         'Shipments'],
         'shipment.create'          => ['Create Shipments',         'Create shipment records for orders',         'Shipments'],
@@ -199,6 +207,13 @@ class SyncPermissions extends Command
         // it makes that agreement deliberate instead of accidental.
         'settings.manage'           => ['Manage Recycle Bin',        'View and restore soft-deleted records',                      'Settings'],
 
+        // The platform's technical reference data — countries, languages,
+        // shipping zones and methods — read and edited. settings.view/edit also
+        // open business settings, tax rates, currencies and payment methods,
+        // which the platform head must never touch (plan §3.2). Not settings.*,
+        // so admin's settings grants cannot carry it.
+        'setup.technical'           => ['Technical Setup',           'Read and edit countries, languages, shipping zones and shipping methods', 'Settings'],
+
         // ── Users & Roles ────────────────────────────────────────────────────
         'users.view'           => ['View Users',           'List and view system users',                  'Users & Roles'],
         'users.create'         => ['Create Users',         'Add new staff users',                         'Users & Roles'],
@@ -290,10 +305,11 @@ class SyncPermissions extends Command
         // The shop floor: a worker's own tasks and the QC they submit on them.
         'shop_floor'      => ['production.view', 'production.worker', 'production.submit_qc'],
 
-        // Stock, and buying it.
-        'stock'           => ['inventory.view', 'inventory.adjust', 'inventory.transfer', 'inventory.approve'],
-        'buying'          => ['procurement.view', 'procurement.create',
-                              'procurement.receive', 'procurement.approve'],
+        // Stock, and buying it. The APPROVE keys are not in these bundles: the
+        // person who moves stock or raises a PO is the maker, and approving is
+        // the checker's job (plan §3, Phase 2). Roles that approve name it.
+        'stock'           => ['inventory.view', 'inventory.adjust', 'inventory.transfer'],
+        'buying'          => ['procurement.view', 'procurement.create', 'procurement.receive'],
     ];
 
     /**
@@ -306,35 +322,49 @@ class SyncPermissions extends Command
 
         'super_admin' => '*',   // Wildcard - bypasses all permission checks
 
+        // Operations Head (plan §3.3). Runs the business day to day and reads
+        // all of it; does not hold the money, approval, register, Setup or
+        // people-administration keys — those belong to finance, procurement,
+        // the till and the owner. Wildcards are kept only for modules admin
+        // holds IN FULL; every module it holds in part is written out, so a new
+        // slug in that module never reaches admin by expansion.
         'admin' => [
-            // Full access to everything except super_admin-only operations.
-            // Not @self: admin has never been granted profile.*, and this
-            // refactor does not change who holds what.
-            'dashboard.view',
-            'orders.*', 'quotations.*', 'payments.*',
+            '@self', '@workspace',
+            // orders.* except orders.refund — a refund is money leaving.
+            'orders.view', 'orders.create', 'orders.edit', 'orders.edit_items',
+            'orders.cancel', 'orders.set_shipping_fee', 'orders.reduce_shipping_fee',
+            'orders.set_deposit', 'orders.authorize_dispatch', 'orders.manage_returns',
+            'quotations.*',
+            // Takes and evidences payments; voiding, moving and approving them
+            // is finance's.
+            'payments.view', 'payments.record', 'payments.upload_proof', 'payments.transactions',
             'production.*',
             'shipment.*',
             'customers.*',
-            'procurement.*',
-            'inventory.*',
+            'procurement.view',
+            'inventory.view',
             'products.*',
-            'receivables.*',
+            'receivables.view',
             'marketing.*',
             'intelligence.*',
-            'pos.*',
+            // Sees the till and reviews its takings; does not operate it.
+            'pos.access', 'pos.eod_review',
             'reports.*',
-            'expenses.*',
-            'outlets.*',
-            'settings.*',
-            'users.*', 'roles.*',
-            'attendance.*',
-            'notifications.view',
+            'expenses.view',
+            'outlets.view',
+            'settings.view',
+            'users.view', 'roles.view',
+            'attendance.view_team',
         ],
 
         // Runs one shop: its till, its stock, its production, its people.
         'outlet_manager' => [
             '@self', '@workspace', '@till', '@sell', '@take_payment',
             '@walkin_customer', '@stock',
+            // Quotes for the shop's customers and issues them — the second
+            // person a clerk's draft quotation needs before it reaches a
+            // customer (Phase 2; until now only admin could issue).
+            'quotations.view', 'quotations.create', 'quotations.issue',
             // Beyond a cashier at the same till. discount_override makes this
             // role the escalation target when a cashier hits the 5% ceiling.
             'pos.cash_management', 'pos.discount_override',
@@ -356,9 +386,13 @@ class SyncPermissions extends Command
             'shipment.view', 'shipment.create', 'shipment.manage_tracking',
             'products.view',
             'reports.view',
-            // Expenses - create and submit; approval handled by admin/finance
-            'expenses.view', 'expenses.create', 'expenses.edit', 'expenses.delete',
-            'outlets.view', 'outlets.edit',
+            // Expenses - create and submit; approval is finance's. Deleting an
+            // expense record is not a shop manager's call (Phase 2).
+            'expenses.view', 'expenses.create', 'expenses.edit',
+            // Sees the outlets; editing an outlet's details is the platform
+            // head's (Phase 2). No inventory.approve either: @stock no longer
+            // carries it, and a manager who adjusts stock must not approve it.
+            'outlets.view',
             'attendance.view_team', 'attendance.manage',
         ],
 
@@ -376,17 +410,13 @@ class SyncPermissions extends Command
             // second person's decision. Without create, the scoped list she
             // was given in #297 could only ever be empty — she may see her own
             // quotations and had no way to have any.
-            // Worth knowing: quotations.issue and quotations.delete are held
-            // by admin alone, so that second person is currently always an
-            // administrator. outlet_manager holds no quotation permission.
+            // The second person is the outlet manager or admin, who hold
+            // quotations.issue (outlet_manager since Phase 2).
             'quotations.view', 'quotations.create',
             // Can raise a made-to-order job at the till
             'production.raise_order',
-            // A clerk records the till's running costs — packaging, bags,
-            // airtime — and sees what THEY entered: the role's 'own' data
-            // scope narrows the expenses list and summary to their rows.
-            // Approval, budgets, export and the analytics page stay withheld.
-            'expenses.view', 'expenses.create',
+            // No expenses (owner decision O2, Phase 2): the till's running
+            // costs are recorded by the outlet manager or the accountant.
         ],
 
         // Production worker workspace only.
@@ -394,6 +424,9 @@ class SyncPermissions extends Command
             '@self', '@workspace', '@shop_floor',
         ],
 
+        // Raises POs, receives goods, moves stock. Approves none of it — that is
+        // the procurement manager (Phase 2 closes the officer-approves-own-PO
+        // gap). No payments or expenses: those are finance's records.
         'procurement_officer' => [
             '@self', '@workspace', '@buying', '@stock',
             // Catalogue - view to reference products when purchasing
@@ -401,12 +434,9 @@ class SyncPermissions extends Command
             // Costing materials against product BOMs is procurement's job
             'production.view_bom',
             'products.view_cost',
-            // Payments - view transaction history for PO-related payments
-            'payments.view',
-            // Reports - procurement officers need spend reports
+            // Reports - procurement officers need spend reports (Phase 3
+            // narrows report access per page).
             'reports.view',
-            // Expenses - view expenses linked to purchase orders
-            'expenses.view',
         ],
     ];
 
@@ -419,17 +449,15 @@ class SyncPermissions extends Command
      */
     const EXTRA_ROLES = [
 
-        // NOTE: this differs from procurement_officer by reports.export ALONE.
-        // Both hold procurement.approve, so an officer can approve the purchase
-        // orders they raised themselves. That is a segregation-of-duties gap,
-        // not a refactor artefact — it is preserved here deliberately, because
-        // this change is not allowed to move a single grant. Fixing it is a
-        // policy decision.
+        // The procurement checker: approves POs, returns and stock movements
+        // (maker≠checker per record still applies), and owns BOMs.
         'procurement_manager' => [
             '@self', '@workspace', '@buying', '@stock',
+            'procurement.approve', 'inventory.approve',
             'products.view',
             'production.view_bom',
             'products.view_cost',
+            'bom.edit',
             'payments.view',
             'reports.view', 'reports.export',
             'expenses.view',
@@ -440,9 +468,9 @@ class SyncPermissions extends Command
             // Payments - full approval authority + view transactions ledger
             'payments.view', 'payments.approve_international', 'payments.transactions',
             'payments.void', 'payments.reassign',
-            // Expenses - full control including approval and budgets
-            'expenses.view', 'expenses.create', 'expenses.edit',
-            'expenses.delete', 'expenses.approve', 'expenses.export', 'expenses.budgets',
+            // Expenses - the checker. Approves, budgets, exports; never creates,
+            // edits or deletes the records it approves (plan §3.4).
+            'expenses.view', 'expenses.approve', 'expenses.export', 'expenses.budgets',
             // Reports - all reports including financial
             'reports.view', 'reports.export', 'reports.financial',
             'receivables.view',
@@ -450,12 +478,81 @@ class SyncPermissions extends Command
             'pos.eod_review',
             // Orders - view only (for payment context)
             'orders.view',
-            // Cost figures (margins, COGS context). Deliberately NOT given
-            // products.view with it — this role reads cost where it already
-            // reaches it, it does not gain the catalogue screens.
+            // Cost figures (margins, COGS context), and since Phase 2 the
+            // screens they live on: catalogue, BOMs, stock, customers — read only.
             'products.view_cost',
+            'products.view', 'production.view_bom', 'inventory.view', 'customers.view',
         ],
 
+        // Platform Head (plan §3.2). Runs the platform — staff accounts,
+        // outlets, attendance, technical reference data — and sees no business
+        // data at all: no orders, money, customers, catalogue, stock or reports.
+        // Was 17 legacy space-named permissions ("manage settings", …) that the
+        // API never checks; the Phase 2 migration removes those.
+        // users.delete is withheld: it is not a deactivation (users.edit's
+        // status change is) but a soft delete that strips roles, outlets and
+        // the customer profile. Role changes are super_admin's alone.
+        'system_admin' => [
+            '@self', '@workspace',
+            'users.view', 'users.create', 'users.edit',
+            'outlets.view', 'outlets.create', 'outlets.edit',
+            'roles.view',
+            'attendance.view_team', 'attendance.manage',
+            'setup.technical',
+        ],
+
+        // Ledger Operator (plan §3.5) — the maker on the finance side. Records
+        // and reads; approves nothing (finance_manager is the checker).
+        'accountant' => [
+            '@self', '@workspace',
+            'orders.view',
+            'payments.view', 'payments.transactions',
+            'receivables.view',
+            'pos.eod_review',
+            'expenses.view', 'expenses.create', 'expenses.edit', 'expenses.export',
+            'procurement.view',
+            'inventory.view',
+            'products.view', 'products.view_cost',
+        ],
+
+    ];
+
+    /**
+     * Grants a role must never end up with, whatever its definition, a
+     * wildcard or a dependency would otherwise add.
+     *
+     * Applied LAST in sync, after wildcard expansion and dependency
+     * resolution, so it is the one place that guarantees a Phase 2 removal
+     * stays removed. permission:sync runs on every container start and only
+     * adds; without this a future slug or dependency entry could quietly hand
+     * a removed key back. A denial that a granted permission depends on would
+     * leave a broken role, so RoleCatalogueV2Test checks there is none.
+     */
+    const ROLE_DENIES = [
+        'admin' => [
+            'orders.refund',
+            'payments.void', 'payments.reassign', 'payments.approve_international',
+            'procurement.create', 'procurement.approve', 'procurement.receive',
+            'inventory.adjust', 'inventory.transfer', 'inventory.approve',
+            'pos.discount', 'pos.discount_override', 'pos.void', 'pos.open_register',
+            'pos.close_register', 'pos.returns', 'pos.cash_management',
+            'expenses.create', 'expenses.edit', 'expenses.delete', 'expenses.approve',
+            'expenses.export', 'expenses.budgets',
+            'outlets.create', 'outlets.edit', 'outlets.delete',
+            'settings.edit',
+            'users.create', 'users.edit', 'users.delete',
+            'roles.edit',
+            'attendance.manage',
+            'bom.edit', 'setup.technical',
+        ],
+        'accountant' => [
+            'expenses.approve', 'payments.void', 'payments.reassign',
+            'payments.approve_international', 'inventory.approve', 'procurement.approve',
+        ],
+        'finance_manager'     => ['expenses.create', 'expenses.edit', 'expenses.delete'],
+        'procurement_officer' => ['procurement.approve', 'inventory.approve', 'payments.view', 'expenses.view'],
+        'outlet_manager'      => ['inventory.approve', 'expenses.delete', 'outlets.edit'],
+        'pos_clerk'           => ['expenses.view', 'expenses.create'],
     ];
 
     /**
@@ -566,6 +663,10 @@ class SyncPermissions extends Command
                 // has pos.discount_override, so it loses nothing; the point is
                 // that this is not a thing people should hold by accident.
                 'pos.discount_campaign',
+                // Phase 2's split-out keys. No wildcard in use matches them
+                // today; listed so a future 'bom.*' or 'setup.*' cannot either.
+                'bom.edit',
+                'setup.technical',
             ];
 
             // Resolve "@bundle" references first, so wildcard expansion and
@@ -597,6 +698,9 @@ class SyncPermissions extends Command
             // ROLE_PERMISSIONS above list only the "headline" permission
             // for a role and still get a fully working feature.
             $withDependencies = PermissionDependencyService::resolve($expanded);
+
+            // Phase 2 removals stay removed — see ROLE_DENIES.
+            $withDependencies = array_values(array_diff($withDependencies, self::ROLE_DENIES[$roleName] ?? []));
 
             // Only assign permissions that actually exist in the DB
             $toAssign = array_values(array_unique(array_intersect($withDependencies, $allPermissions)));

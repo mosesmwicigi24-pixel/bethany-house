@@ -696,7 +696,7 @@ export default function App() {
                         <Route
                             path="/pos/outstanding-balances"
                             element={
-                                <ProtectedRoute permission="pos.access">
+                                <ProtectedRoute permission="receivables.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <OutstandingBalancesPage />
                                 </Suspense>
@@ -706,7 +706,7 @@ export default function App() {
                         <Route
                             path="/pos/eod-settings"
                             element={
-                                <ProtectedRoute permission="pos.access">
+                                <ProtectedRoute allOf={["pos.access", "settings.edit"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <EodReportSettingsPage />
                                 </Suspense>
@@ -759,7 +759,7 @@ export default function App() {
                         <Route
                             path="/production/bom"
                             element={
-                                <ProtectedRoute permission="production.view">
+                                <ProtectedRoute permission="production.view_bom">
                                 <Suspense fallback={<PageLoader />}>
                                     <ProductionBOMPage />
                                 </Suspense>
@@ -769,7 +769,7 @@ export default function App() {
                         <Route
                             path="/production/qc"
                             element={
-                                <ProtectedRoute permission="production.view">
+                                <ProtectedRoute anyOf={["production.submit_qc", "production.approve_qc"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <ProductionQCPage />
                                 </Suspense>
@@ -892,7 +892,7 @@ export default function App() {
                         <Route
                             path="/approvals"
                             element={
-                                <ProtectedRoute anyOf={["procurement.approve", "inventory.approve"]}>
+                                <ProtectedRoute anyOf={["procurement.approve", "inventory.approve", "payments.approve_international"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <ApprovalsPage />
                                 </Suspense>
@@ -902,9 +902,11 @@ export default function App() {
                         <Route
                             path="/notifications"
                             element={
+                                <ProtectedRoute permission="notifications.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <NotificationsPage />
                                 </Suspense>
+                                </ProtectedRoute>
                             }
                         />
                         <Route
@@ -967,7 +969,7 @@ export default function App() {
                         <Route
                             path="/expenses/settings"
                             element={
-                                <ProtectedRoute permission="expenses.view">
+                                <ProtectedRoute permission="expenses.budgets">
                                 <Suspense fallback={<PageLoader />}>
                                     <ExpenseCategoriesPage />
                                 </Suspense>
@@ -998,7 +1000,7 @@ export default function App() {
                         <Route
                             path="/finance/transactions"
                             element={
-                                <ProtectedRoute permission="payments.view">
+                                <ProtectedRoute permission="payments.transactions">
                                 <Suspense fallback={<PageLoader />}>
                                     <PaymentTransactionsPage />
                                 </Suspense>
@@ -1128,7 +1130,7 @@ export default function App() {
                         <Route
                             path="/reports/signals"
                             element={
-                                <ProtectedRoute anyOf={["inventory.view", "production.view", "customers.view", "expenses.view"]}>
+                                <ProtectedRoute anyOf={["inventory.view", "production.view", "intelligence.view", "expenses.view"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <IntelligenceDashboard />
                                 </Suspense>
@@ -1189,7 +1191,7 @@ export default function App() {
                         <Route
                             path="/settings/business"
                             element={
-                                <ProtectedRoute anyOfRoles={["super_admin", "admin"]}>
+                                <ProtectedRoute permission="settings.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <BusinessSettingsPage />
                                 </Suspense>
@@ -1199,7 +1201,7 @@ export default function App() {
                         <Route
                             path="/settings/countries"
                             element={
-                                <ProtectedRoute role="super_admin">
+                                <ProtectedRoute anyOf={["settings.view", "setup.technical"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <CountriesPage />
                                 </Suspense>
@@ -1209,7 +1211,7 @@ export default function App() {
                         <Route
                             path="/settings/currencies"
                             element={
-                                <ProtectedRoute role="super_admin">
+                                <ProtectedRoute permission="settings.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <CurrenciesPage />
                                 </Suspense>
@@ -1219,7 +1221,7 @@ export default function App() {
                         <Route
                             path="/settings/languages"
                             element={
-                                <ProtectedRoute role="super_admin">
+                                <ProtectedRoute anyOf={["settings.view", "setup.technical"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <LanguagesPage />
                                 </Suspense>
@@ -1259,7 +1261,7 @@ export default function App() {
                         <Route
                             path="/settings/payment-methods"
                             element={
-                                <ProtectedRoute role="super_admin">
+                                <ProtectedRoute permission="settings.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <PaymentMethodsPage />
                                 </Suspense>
@@ -1269,7 +1271,7 @@ export default function App() {
                         <Route
                             path="/settings/roles"
                             element={
-                                <ProtectedRoute role="super_admin">
+                                <ProtectedRoute permission="roles.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <RolesPage />
                                 </Suspense>
@@ -1289,7 +1291,7 @@ export default function App() {
                         <Route
                             path="/settings/activity-logs"
                             element={
-                                <ProtectedRoute role="super_admin">
+                                <ProtectedRoute superAdminOnly>
                                 <Suspense fallback={<PageLoader />}>
                                     <ActivityLogsPage />
                                 </Suspense>
@@ -1318,7 +1320,7 @@ export default function App() {
                         <Route
                             path="/settings/trash"
                             element={
-                                <ProtectedRoute role="super_admin">
+                                <ProtectedRoute permission="settings.manage">
                                 <Suspense fallback={<PageLoader />}>
                                     <TrashPage />
                                 </Suspense>
@@ -1328,7 +1330,7 @@ export default function App() {
                         <Route
                             path="/settings/database"
                             element={
-                                <ProtectedRoute role="super_admin">
+                                <ProtectedRoute superAdminOnly>
                                 <Suspense fallback={<PageLoader />}>
                                     <DatabaseManagementPage />
                                 </Suspense>
@@ -1346,7 +1348,7 @@ export default function App() {
                         <Route
                             path="/settings/shipping"
                             element={
-                                <ProtectedRoute permission="settings.view">
+                                <ProtectedRoute anyOf={["settings.view", "setup.technical"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <ShippingSettingsPage />
                                 </Suspense>
@@ -1356,7 +1358,7 @@ export default function App() {
                         <Route
                             path="/marketing/seasons"
                             element={
-                                <ProtectedRoute permission="products.view">
+                                <ProtectedRoute permission="marketing.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <SeasonsPage />
                                 </Suspense>
@@ -1366,7 +1368,7 @@ export default function App() {
                         <Route
                             path="/marketing/campaigns"
                             element={
-                                <ProtectedRoute permission="products.view">
+                                <ProtectedRoute permission="marketing.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <CampaignsPage />
                                 </Suspense>
@@ -1376,7 +1378,7 @@ export default function App() {
                         <Route
                             path="/home-front/home"
                             element={
-                                <ProtectedRoute permission="products.view">
+                                <ProtectedRoute permission="marketing.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <HomeContentPage />
                                 </Suspense>
@@ -1386,7 +1388,7 @@ export default function App() {
                         <Route
                             path="/home-front/products"
                             element={
-                                <ProtectedRoute permission="products.view">
+                                <ProtectedRoute permission="marketing.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <ProductPagesPage />
                                 </Suspense>

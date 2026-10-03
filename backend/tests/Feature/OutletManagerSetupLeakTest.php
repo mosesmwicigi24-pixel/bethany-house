@@ -89,7 +89,8 @@ class OutletManagerSetupLeakTest extends TestCase
         $holders = Role::whereHas('permissions', fn ($q) => $q->where('name', 'pos.eod_review'))
             ->pluck('name')->sort()->values()->all();
 
-        $this->assertSame(['admin', 'finance_manager', 'outlet_manager'], $holders);
+        // accountant joined in Phase 2: the ledger operator reconciles takings.
+        $this->assertSame(['accountant', 'admin', 'finance_manager', 'outlet_manager'], $holders);
     }
 
     // ── Setup is closed to the outlet manager ───────────────────────────────

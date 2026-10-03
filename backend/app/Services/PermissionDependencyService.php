@@ -99,6 +99,9 @@ class PermissionDependencyService
         'production.raise_order' => ['production.view', 'products.view'],
         // The BOM read routes are nested inside the products.view group.
         'production.view_bom'    => ['products.view'],
+        // The BOM write routes sit in the same products.view group, and the
+        // editor opens on the BOM list (production.view_bom). Both are reads.
+        'bom.edit'               => ['products.view', 'production.view_bom'],
 
         // ── Shipments ────────────────────────────────────────────────────── 
         'shipment.edit'            => ['shipment.view'],
@@ -170,6 +173,10 @@ class PermissionDependencyService
         // (see the routes/api.php change made in this same review).
         'settings.edit'            => ['settings.view'],
         'settings.manage_database' => ['settings.view'],
+        // setup.technical deliberately has NO prerequisite: the countries,
+        // languages and shipping routes accept it on its own, and pulling in
+        // settings.view would reopen business settings, tax rates, currencies
+        // and payment methods to the platform head (Phase 2).
 
         // ── Users & Roles ────────────────────────────────────────────────── 
         'users.create' => ['users.view'],

@@ -388,7 +388,9 @@ export default function BomTab({ productId, variants }: BomTabProps) {
     const qc = useQueryClient();
     const toast = useToastStore();
     const { can } = usePermissions();
-    const canEdit = can("products.edit");
+    // Create / edit / activate a BOM: bom.edit on the API since Phase 2
+    // (procurement owns BOMs), not products.edit.
+    const canEdit = can("bom.edit");
     // Material costs, line costs and totals are products.view_cost. The BOM
     // itself (materials, quantities) stays readable to production.view_bom.
     const canSeeCost = can("products.view_cost");

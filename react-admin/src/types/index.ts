@@ -1,3 +1,4 @@
+import type { NavGate } from '@/lib/navGate'
 // ─── Auth & User ──────────────────────────────────────────────────────────────
 
 export type UserType = 'system' | 'staff' | 'customer'
@@ -143,14 +144,11 @@ export interface ActivityItem {
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 
-export interface NavItem {
+/** The gate fields (permission / anyOfPermissions / allOfPermissions / superAdminOnly) — see lib/navGate. */
+export interface NavItem extends NavGate {
   label: string
   href: string
   icon: string
-  permission?: string
-  anyOfPermissions?: string[]
-  /** Visible to super admins only — no permission can grant it (e.g. the audit trail). */
-  superAdminOnly?: boolean
   badge?: string | number
   children?: NavItem[]
 }

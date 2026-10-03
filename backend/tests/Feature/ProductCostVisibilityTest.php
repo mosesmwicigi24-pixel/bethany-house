@@ -86,7 +86,8 @@ class ProductCostVisibilityTest extends TestCase
             ->pluck('name')->sort()->values()->all();
 
         $this->assertSame(
-            ['admin', 'finance_manager', 'procurement_manager', 'procurement_officer'],
+            // accountant added in Phase 2 (the ledger operator reads cost).
+            ['accountant', 'admin', 'finance_manager', 'procurement_manager', 'procurement_officer'],
             $holders,
         );
     }

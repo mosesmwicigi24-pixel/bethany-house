@@ -112,7 +112,7 @@ class MakerCheckerTest extends TestCase
 
     public function test_the_officer_who_raised_a_po_cannot_approve_it(): void
     {
-        $officer = $this->user('procurement_officer');   // holds create AND approve
+        $officer = $this->user('procurement_officer', 'procurement_manager');   // holds create AND approve
         $po      = $this->po('pending_approval', $officer);
 
         Sanctum::actingAs($officer);
@@ -125,8 +125,8 @@ class MakerCheckerTest extends TestCase
 
     public function test_whoever_submitted_a_po_cannot_approve_it(): void
     {
-        $raiser    = $this->user('procurement_officer');
-        $submitter = $this->user('procurement_officer');
+        $raiser    = $this->user('procurement_officer', 'procurement_manager');
+        $submitter = $this->user('procurement_officer', 'procurement_manager');
         $po        = $this->po('draft', $raiser);
 
         Sanctum::actingAs($submitter);
@@ -140,7 +140,7 @@ class MakerCheckerTest extends TestCase
     public function test_a_different_officer_can_approve_the_po(): void
     {
         $raiser   = $this->user('procurement_officer');
-        $approver = $this->user('procurement_officer');
+        $approver = $this->user('procurement_manager');
         $po       = $this->po('pending_approval', $raiser);
 
         Sanctum::actingAs($approver);
@@ -173,7 +173,7 @@ class MakerCheckerTest extends TestCase
 
     public function test_the_status_endpoint_cannot_approve_your_own_po_nor_jump_past_approval(): void
     {
-        $officer = $this->user('procurement_officer');
+        $officer = $this->user('procurement_officer', 'procurement_manager');
         $po      = $this->po('pending_approval', $officer);
 
         Sanctum::actingAs($officer);
@@ -191,7 +191,7 @@ class MakerCheckerTest extends TestCase
 
     public function test_the_status_endpoint_cannot_revive_your_own_cancelled_po_into_an_approved_state(): void
     {
-        $officer = $this->user('procurement_officer');
+        $officer = $this->user('procurement_officer', 'procurement_manager');
         $po      = $this->po('cancelled', $officer);
 
         Sanctum::actingAs($officer);
@@ -204,7 +204,7 @@ class MakerCheckerTest extends TestCase
 
     public function test_the_status_endpoint_lets_someone_else_approve_and_records_them(): void
     {
-        $approver = $this->user('procurement_officer');
+        $approver = $this->user('procurement_manager');
         $po       = $this->po('pending_approval', $this->user('procurement_officer'));
 
         Sanctum::actingAs($approver);
@@ -219,8 +219,8 @@ class MakerCheckerTest extends TestCase
     {
         // Approval is done (by someone else); marking it ordered is not a
         // second approval, so the raiser may do it.
-        $officer  = $this->user('procurement_officer');
-        $approver = $this->user('procurement_officer');
+        $officer  = $this->user('procurement_officer', 'procurement_manager');
+        $approver = $this->user('procurement_manager');
         $po       = $this->po('approved', $officer, $approver);
 
         Sanctum::actingAs($officer);
@@ -232,7 +232,7 @@ class MakerCheckerTest extends TestCase
 
     public function test_whoever_approved_a_po_cannot_receive_the_goods_against_it(): void
     {
-        $approver = $this->user('procurement_officer');   // holds approve AND receive
+        $approver = $this->user('procurement_officer', 'procurement_manager');   // holds approve AND receive
         $po       = $this->po('approved', $this->user('procurement_officer'), $approver);
         $item     = $po->items->first();
 
@@ -283,7 +283,7 @@ class MakerCheckerTest extends TestCase
 
     public function test_whoever_raised_a_purchase_return_cannot_approve_it(): void
     {
-        $officer = $this->user('procurement_officer');
+        $officer = $this->user('procurement_officer', 'procurement_manager');
         $return  = $this->pendingReturn($officer);
 
         Sanctum::actingAs($officer);
@@ -320,7 +320,7 @@ class MakerCheckerTest extends TestCase
 
     public function test_whoever_raised_an_adjustment_cannot_approve_it(): void
     {
-        $maker = $this->user('outlet_manager');   // holds inventory.adjust AND inventory.approve
+        $maker = $this->user('outlet_manager', 'procurement_manager');   // holds inventory.adjust AND inventory.approve
         $item  = InventoryItem::factory()->create(['quantity_on_hand' => 10]);
         $id    = $this->raiseAdjustment($maker, $item)->assertCreated()->json('adjustment.id');
 
@@ -335,7 +335,7 @@ class MakerCheckerTest extends TestCase
         $item = InventoryItem::factory()->create(['quantity_on_hand' => 10]);
         $id   = $this->raiseAdjustment($this->user('outlet_manager'), $item)->assertCreated()->json('adjustment.id');
 
-        Sanctum::actingAs($this->user('outlet_manager'));
+        Sanctum::actingAs($this->user('procurement_manager'));
         $this->putJson("/api/v1/admin/inventory/adjustments/{$id}/approve")->assertOk();
 
         $this->assertSame('approved', InventoryTransaction::find($id)->status);
@@ -345,7 +345,9 @@ class MakerCheckerTest extends TestCase
     public function test_an_admins_adjustment_that_needs_approval_now_waits_like_anyone_elses(): void
     {
         foreach (['admin', 'super_admin'] as $role) {
-            $boss = $this->user($role);
+            // Stacked with roles that raise and approve stock adjustments, so the only
+            // thing stopping self-approval is the maker≠checker rule itself.
+            $boss = $this->user($role, 'outlet_manager', 'procurement_manager');
             $item = InventoryItem::factory()->create(['quantity_on_hand' => 10]);
 
             $res = $this->raiseAdjustment($boss, $item, 'correction', 5)->assertCreated();
@@ -366,7 +368,7 @@ class MakerCheckerTest extends TestCase
     public function test_reasons_that_never_needed_approval_still_apply_directly_for_admins(): void
     {
         // The reason-code rule itself is unchanged: 'damaged' applies at once.
-        $admin = $this->user('admin');
+        $admin = $this->user('admin', 'outlet_manager');
         $item  = InventoryItem::factory()->create(['quantity_on_hand' => 10]);
 
         $this->raiseAdjustment($admin, $item, 'damaged', -2)
@@ -391,7 +393,7 @@ class MakerCheckerTest extends TestCase
 
     public function test_whoever_raised_a_transfer_cannot_approve_it(): void
     {
-        $maker    = $this->user('outlet_manager');
+        $maker    = $this->user('outlet_manager', 'procurement_manager');
         $transfer = $this->pendingTransfer($maker);
 
         Sanctum::actingAs($maker);
@@ -403,7 +405,7 @@ class MakerCheckerTest extends TestCase
     {
         $transfer = $this->pendingTransfer($this->user('outlet_manager'));
 
-        Sanctum::actingAs($this->user('outlet_manager'));
+        Sanctum::actingAs($this->user('procurement_manager'));
         $this->putJson("/api/v1/admin/inventory/transfers/{$transfer->id}/approve")->assertOk();
         $this->assertSame('approved', $transfer->fresh()->status);
     }
@@ -432,7 +434,7 @@ class MakerCheckerTest extends TestCase
 
     public function test_whoever_recorded_an_ordinary_expense_cannot_approve_it(): void
     {
-        $finance = $this->user('finance_manager');   // holds expenses.create AND expenses.approve
+        $finance = $this->user('finance_manager', 'accountant');   // holds expenses.create AND expenses.approve
         $expense = $this->pendingExpense($finance);
 
         Sanctum::actingAs($finance);
@@ -445,8 +447,8 @@ class MakerCheckerTest extends TestCase
 
     public function test_whoever_submitted_an_expense_cannot_approve_it(): void
     {
-        $expense   = $this->pendingExpense($this->user('finance_manager'));
-        $submitter = $this->user('finance_manager');
+        $expense   = $this->pendingExpense($this->user('accountant'));
+        $submitter = $this->user('finance_manager', 'accountant');
         DB::table('expenses')->where('id', $expense->id)->update(['submitted_by' => $submitter->id]);
 
         Sanctum::actingAs($submitter);
@@ -456,7 +458,7 @@ class MakerCheckerTest extends TestCase
 
     public function test_someone_else_can_approve_the_expense(): void
     {
-        $expense  = $this->pendingExpense($this->user('finance_manager'));
+        $expense  = $this->pendingExpense($this->user('accountant'));
         $approver = $this->user('finance_manager');
 
         Sanctum::actingAs($approver);

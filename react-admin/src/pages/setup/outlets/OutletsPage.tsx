@@ -5,6 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { outletsApi } from "@/api/setup";
 import { useToastStore } from "@/store/toast.store";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import {
@@ -79,6 +80,9 @@ const TYPE_COLORS = {
 
 export default function OutletsPage() {
     const qc = useQueryClient();
+    // Write controls follow the server's outlet permissions (system_admin
+    // creates and edits outlets; admin and outlet managers only view).
+    const { can } = usePermissions();
     const toast = useToastStore();
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<OutletSetup | null>(null);
@@ -164,9 +168,11 @@ export default function OutletsPage() {
                         outlets, and inventory is tracked per outlet.
                     </p>
                 </div>
-                <button onClick={openCreate} className="btn-primary shrink-0 self-start sm:self-auto">
-                    + Add Outlet
-                </button>
+                {can("outlets.create") && (
+                    <button onClick={openCreate} className="btn-primary shrink-0 self-start sm:self-auto">
+                        + Add Outlet
+                    </button>
+                )}
             </div>
 
             <Section title="Store Locations">
@@ -178,14 +184,14 @@ export default function OutletsPage() {
                     <EmptyState
                         title="No outlets configured"
                         description="Create at least one outlet before using POS or managing inventory."
-                        action={
+                        action={can("outlets.create") ? (
                             <button
                                 onClick={openCreate}
                                 className="btn-primary btn-sm"
                             >
                                 Create Outlet
                             </button>
-                        }
+                        ) : undefined}
                     />
                 ) : (
                     <div className="divide-y divide-line">
@@ -231,20 +237,24 @@ export default function OutletsPage() {
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-1.5 shrink-0">
-                                    <button
-                                        onClick={() => openEdit(outlet)}
-                                        className="btn-ghost btn-sm"
-                                        aria-label="Edit"
-                                    >
-                                        <EditIcon />
-                                    </button>
-                                    <button
-                                        onClick={() => setDeleting(outlet)}
-                                        className="btn-ghost btn-sm text-danger hover:bg-danger-light"
-                                        aria-label="Delete"
-                                    >
-                                        <TrashIcon />
-                                    </button>
+                                    {can("outlets.edit") && (
+                                        <button
+                                            onClick={() => openEdit(outlet)}
+                                            className="btn-ghost btn-sm"
+                                            aria-label="Edit"
+                                        >
+                                            <EditIcon />
+                                        </button>
+                                    )}
+                                    {can("outlets.delete") && (
+                                        <button
+                                            onClick={() => setDeleting(outlet)}
+                                            className="btn-ghost btn-sm text-danger hover:bg-danger-light"
+                                            aria-label="Delete"
+                                        >
+                                            <TrashIcon />
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         ))}

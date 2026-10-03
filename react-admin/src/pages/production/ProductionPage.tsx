@@ -2426,7 +2426,9 @@ function BOMTab() {
     const toast = useToastStore();
     const qc = useQueryClient();
     const { can } = usePermissions();
-    const canEditProducts = can("products.edit");
+    // BOM writes are bom.edit on the API (Phase 2: procurement owns BOMs),
+    // not products.edit.
+    const canEditProducts = can("bom.edit");
     const [search, setSearch] = useState("");
     const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
     const [editingBom, setEditingBom] = useState<Bom | null>(null);
