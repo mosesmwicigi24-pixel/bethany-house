@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
+use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
@@ -23,8 +24,16 @@ class CloseRegisterDenominationTest extends TestCase
 
     public function test_close_derives_and_persists_the_denomination_count(): void
     {
+        // Was a super_admin until role hardening 1B: the owner's accounts no
+        // longer work the till (owner.no_transact refuses them a close), so an
+        // admin holding the close key closes it. What this pins — how the
+        // denomination count is derived and stored — is unchanged.
         $user = User::factory()->create();
-        $user->assignRole(Role::findOrCreate('super_admin', 'sanctum'));
+        $user->assignRole(Role::findOrCreate('admin', 'sanctum'));
+        $user->givePermissionTo(
+            Permission::findOrCreate('pos.access', 'sanctum'),
+            Permission::findOrCreate('pos.close_register', 'sanctum'),
+        );
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 

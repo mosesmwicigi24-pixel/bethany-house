@@ -547,7 +547,8 @@ function ExpenseRowActions({
             toast.success(msg);
             onRefresh();
         } catch (err: any) {
-            toast.error(err?.response?.data?.message ?? "Action failed.");
+            // ApiError carries the server's message (e.g. SELF_APPROVAL).
+            toast.error(err?.message ?? err?.response?.data?.message ?? "Action failed.");
         } finally {
             setBusy(false);
             setOpen(false);

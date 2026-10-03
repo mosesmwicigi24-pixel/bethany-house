@@ -498,8 +498,9 @@ class PurchaseOrderController extends Controller
         // approved straight to ordered/received, IS approving it. Either way
         // the raiser and submitter may not do it (maker ≠ checker), and the
         // approval is recorded against whoever did. Moving an already
-        // approved PO along (approved → ordered) is not a second approval.
-        $preApproval   = in_array($oldStatus, ['draft', 'pending_approval'], true);
+        // approved PO along (approved → ordered) is not a second approval;
+        // reviving a cancelled one into an approved state is.
+        $preApproval   = in_array($oldStatus, ['draft', 'pending_approval', 'cancelled'], true);
         $postApproval  = in_array($validated['status'], ['approved', 'ordered', 'partially_received', 'received'], true);
         $approvesNow   = $validated['status'] === 'approved' || ($preApproval && $postApproval);
 

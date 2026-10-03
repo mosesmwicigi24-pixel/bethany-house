@@ -134,13 +134,9 @@ function NewAdjustmentModal({
                 reference_number: referenceNumber || undefined,
             }),
         onSuccess: (res) => {
-            if ((res as any).auto_approved) {
-                toast.success(
-                    "Adjustment applied directly - admin role bypassed approval.",
-                );
-            } else {
-                toast.success(res.message);
-            }
+            // No role bypasses approval any more (role hardening 1B), so the
+            // server's own message says whether it applied or is pending.
+            toast.success(res.message);
             qc.invalidateQueries({ queryKey: ["adjustments"] });
             qc.invalidateQueries({ queryKey: ["stock-levels"] });
             qc.invalidateQueries({ queryKey: ["adjustments-pending"] });

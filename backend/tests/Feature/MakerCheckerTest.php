@@ -189,6 +189,19 @@ class MakerCheckerTest extends TestCase
         $this->assertNull($po->approved_by);
     }
 
+    public function test_the_status_endpoint_cannot_revive_your_own_cancelled_po_into_an_approved_state(): void
+    {
+        $officer = $this->user('procurement_officer');
+        $po      = $this->po('cancelled', $officer);
+
+        Sanctum::actingAs($officer);
+        $this->assertSelfApprovalBlocked(
+            $this->patchJson("/api/v1/admin/purchase-orders/{$po->id}/status", ['status' => 'ordered']),
+            $officer,
+        );
+        $this->assertSame('cancelled', $po->fresh()->status);
+    }
+
     public function test_the_status_endpoint_lets_someone_else_approve_and_records_them(): void
     {
         $approver = $this->user('procurement_officer');

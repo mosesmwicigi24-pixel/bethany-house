@@ -692,7 +692,10 @@ export default function ExpenseDetailPage() {
             qc.invalidateQueries({ queryKey: ["imprest"] });
             refetch();
         } catch (err: any) {
-            toast.error(err?.response?.data?.message ?? "Action failed.");
+            // The API client rejects with { message } (ApiError), not the raw
+            // axios error — read that first so a refusal such as "you recorded
+            // this expense, someone else must approve it" reaches the user.
+            toast.error(err?.message ?? err?.response?.data?.message ?? "Action failed.");
         } finally {
             setBusy(false);
         }
@@ -747,8 +750,10 @@ export default function ExpenseDetailPage() {
     // ids or, with the relation loaded, as objects.
     const idOf = (v: unknown) => (v && typeof v === "object" ? (v as { id: number }).id : (v as number | null));
     const isImprest = !!expense.imprest_account_id;
+    // Maker ≠ checker applies to every expense now, not only imprest spends;
+    // the server refuses the approval either way (SELF_APPROVAL).
     const recordedByMe =
-        isImprest && !!me && (idOf(expense.created_by) === me.id || idOf(expense.submitted_by) === me.id);
+        !!me && (idOf(expense.created_by) === me.id || idOf(expense.submitted_by) === me.id);
     const canApprove = can("expenses.approve");
     const canApproveThis = canApprove && !recordedByMe;
     const paymentMethod =
@@ -803,7 +808,7 @@ export default function ExpenseDetailPage() {
                     )}
 
                     {expense.status === "pending_approval" && canApprove && recordedByMe && (
-                        <span className="text-xs text-surface-500">You recorded this imprest spend — someone else approves it.</span>
+                        <span className="text-xs text-surface-500">You recorded or submitted this expense — someone else approves it.</span>
                     )}
 
                     {expense.status === "pending_approval" && canApproveThis && (
