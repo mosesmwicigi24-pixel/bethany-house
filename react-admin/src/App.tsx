@@ -95,6 +95,7 @@ const LowStockAlertsPage = lazy(
 // --- POS -────────────────────────────────────────────────────────
 const PosPage = lazy(() => import("@/pages/pos/PosPage"));
 const EodReportsPage = lazy(() => import("@/pages/pos/EodReportsPage"));
+const TillsPage = lazy(() => import("@/pages/pos/TillsPage"));
 const EodReportSettingsPage = lazy(() => import("@/pages/pos/EodReportSettingsPage"));
 const OutstandingBalancesPage = lazy(() => import("@/pages/pos/OutstandingBalancesPage"));
 
@@ -689,6 +690,19 @@ export default function App() {
                                 <ProtectedRoute permission="pos.eod_review">
                                 <Suspense fallback={<PageLoader />}>
                                     <EodReportsPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/pos/tills"
+                            element={
+                                // The gate the API's tills group uses: a cashier
+                                // (her own tills), or a back-office key —
+                                // finance reconciles without holding a till.
+                                <ProtectedRoute anyOf={["pos.access", "pos.tills_view_all", "pos.reconcile", "pos.till_correction"]}>
+                                <Suspense fallback={<PageLoader />}>
+                                    <TillsPage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }

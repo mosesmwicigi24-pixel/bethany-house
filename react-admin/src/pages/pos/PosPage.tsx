@@ -40,7 +40,9 @@ import type {
     PosSale,
     PosShippingMethod,
     PosSuggestion,
+    CashRegister,
 } from "@/api/pos";
+import { Link } from "react-router-dom";
 import type { SplitPayment as ModalSplitPayment, ConfiguredMethod } from "./components/PaymentModal";
 import { useToastStore } from "@/store/toast.store";
 import { useAuthStore } from "@/store/auth.store";
@@ -1545,11 +1547,14 @@ function RegisterGate({
     selectedOutletId,
     onSelectOutlet,
     onOpenRegister,
+    lastRegister,
 }: {
     outlets: PosOutlet[];
     selectedOutletId: number | null;
     onSelectOutlet: (id: number) => void;
     onOpenRegister: () => void;
+    /** Her most recent till here, to say where it stands (Phase 4B). */
+    lastRegister?: CashRegister | null;
 }) {
     const selected = outlets.find((o) => o.id === selectedOutletId);
 
@@ -1599,6 +1604,14 @@ function RegisterGate({
                         : `Open the register at ${selected?.name ?? "this outlet"} to start.`}
                 </p>
             </div>
+
+            {/* Where her last till stands. Blind: no figures, only the stage. */}
+            {lastRegister?.stage === "awaiting_verification" && (
+                <div className="w-full rounded-xl border border-info/40 bg-info-light px-4 py-3 text-xs text-surface-700">
+                    Your last till was counted and is awaiting your outlet manager's verification.{" "}
+                    <Link to="/pos/tills" className="font-semibold text-brand-600 hover:underline">View my tills</Link>
+                </div>
+            )}
 
             {/* Outlet cards */}
             {outlets.length > 1 && (
@@ -2951,6 +2964,7 @@ export default function PosPage() {
                         clearCart();
                     }}
                     onOpenRegister={() => setShowRegisterModal(true)}
+                    lastRegister={register}
                 />
                 {showRegisterModal && (
                     <RegisterModal

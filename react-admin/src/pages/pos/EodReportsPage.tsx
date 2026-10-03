@@ -11,7 +11,7 @@
 
 import { useState, useEffect, Fragment } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { clsx } from "clsx";
 import { get, post } from "@/api/client";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -220,6 +220,10 @@ export default function EodReportsPage() {
                                 End-of-day reports submitted by cashiers
                             </p>
                         </div>
+                        {/* The counts behind the takings: verify, reconcile, correct (Phase 4B). */}
+                        <Link to="/pos/tills" className="btn-secondary btn-sm">
+                            Tills — counts &amp; reconciliation →
+                        </Link>
                     </div>
 
                     {/* Filters */}

@@ -3622,7 +3622,9 @@ export default function OrderDetailPage() {
         onError: (e: ApiError) => {
             // Two of the refusals are "are you sure?", not "no". Surface the
             // confirmation instead of a red toast the operator can't act on.
-            if (e.reason === "confirm_paid_change" || e.reason === "confirm_shipped_change") {
+            // A paid order's edit is a correction and must say why
+            // (reason_required) — same dialog, asking for the reason.
+            if (e.reason === "confirm_paid_change" || e.reason === "confirm_shipped_change" || e.reason === "reason_required") {
                 setItemsConfirm({ reason: e.reason, message: e.message });
                 return;
             }
@@ -4910,14 +4912,35 @@ export default function OrderDetailPage() {
                             actually been collected. Recorded payments are never altered — if the new total falls
                             below what was paid, the difference is flagged as a refund due.
                         </p>
+                        {(itemsConfirm.reason === "confirm_paid_change" || itemsConfirm.reason === "reason_required") && (
+                            <div>
+                                <label className="label">Reason for the correction</label>
+                                <textarea
+                                    value={itemsReason}
+                                    onChange={e => setItemsReason(e.target.value)}
+                                    rows={2}
+                                    placeholder="Why is a paid order changing?"
+                                    className="input resize-none"
+                                />
+                                <p className="text-2xs text-surface-500 mt-1">
+                                    This order has been paid for, so the change is kept as a correction: what it was,
+                                    what it became, who changed it and why.
+                                </p>
+                            </div>
+                        )}
                     </div>
                     <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-line">
                         <button onClick={() => setItemsConfirm(null)} className="btn-secondary btn-sm">Cancel</button>
                         <button
-                            disabled={updateItemsMutation.isPending}
+                            disabled={
+                                updateItemsMutation.isPending
+                                || ((itemsConfirm.reason === "confirm_paid_change" || itemsConfirm.reason === "reason_required")
+                                    && !itemsReason.trim())
+                            }
                             onClick={() => {
                                 const next = {
-                                    paid:    itemsConfirmed.paid    || itemsConfirm.reason === "confirm_paid_change",
+                                    paid:    itemsConfirmed.paid    || itemsConfirm.reason === "confirm_paid_change"
+                                        || itemsConfirm.reason === "reason_required",
                                     shipped: itemsConfirmed.shipped || itemsConfirm.reason === "confirm_shipped_change",
                                 };
                                 setItemsConfirmed(next);
