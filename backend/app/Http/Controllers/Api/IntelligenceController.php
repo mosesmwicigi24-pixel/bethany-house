@@ -205,7 +205,8 @@ class IntelligenceController extends Controller
         ]);
 
         return response()->json([
-            'previews' => IntelligenceService::entityChipPreviews($validated['entities']),
+            // Only what the caller could open: the ids come from the client.
+            'previews' => IntelligenceService::entityChipPreviews($validated['entities'], $request->user()),
         ]);
     }
 }

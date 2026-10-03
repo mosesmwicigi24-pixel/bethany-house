@@ -777,7 +777,10 @@ class ChannelController extends Controller
         // ── Production orders ─────────────────────────────────────────────────
         // Same scoping - production.view required, same reasoning as above.
         if (in_array('production_order', $types) && $user->can('production.view')) {
-            $query = \App\Models\ProductionOrder::with([
+            // visibleTo: production.view alone is every tailor; a tailor tags
+            // the jobs they are on, not the whole floor (same rule as the
+            // production list and the entity-preview chips).
+            $query = \App\Models\ProductionOrder::visibleTo($user)->with([
                     'product.translations' => fn ($q) => $q->where('language_code', 'en')->select('product_id', 'name'),
                 ])
                 ->select('id', 'order_number', 'status', 'priority', 'product_id', 'quantity')

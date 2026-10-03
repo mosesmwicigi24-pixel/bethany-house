@@ -598,12 +598,19 @@ class IntelligenceService
      * Input: [['type' => 'order', 'id' => 123], ['type' => 'production_order', 'id' => 56]]
      * Output: keyed by "type:id" with status, meta, url, colour
      */
-    public static function entityChipPreviews(array $entities): array
+    public static function entityChipPreviews(array $entities, ?\App\Models\User $viewer = null): array
     {
         $previews = [];
 
         foreach ($entities as $entity) {
             $key = "{$entity['type']}:{$entity['id']}";
+
+            // With a viewer, a chip previews only what that viewer could open
+            // (the record's own rule — RecordVisibility). Callers without a
+            // viewer keep the old behaviour.
+            if ($viewer && !\App\Services\RecordVisibility::canViewType($viewer, (string) $entity['type'], (int) $entity['id'])) {
+                continue;
+            }
 
             if ($entity['type'] === 'order') {
                 $order = Order::select(
