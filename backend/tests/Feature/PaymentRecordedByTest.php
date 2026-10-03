@@ -112,6 +112,13 @@ class PaymentRecordedByTest extends TestCase
 
     public function test_the_backfill_fills_only_nulls_from_the_audit_trail_and_records_its_counts(): void
     {
+        // The backfill writes production data and ships separately, only on the
+        // owner's explicit YES (it is not on the integration branch). This test
+        // runs, unchanged, on the branch that carries the migration file.
+        if (!file_exists(database_path('migrations/' . self::BACKFILL))) {
+            $this->markTestSkipped(self::BACKFILL . ' ships separately, on the owner\'s explicit YES.');
+        }
+
         $alice = $this->user('pos_clerk');
         $bob   = $this->user('pos_clerk');
         $gone  = $this->user('pos_clerk');
