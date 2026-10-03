@@ -21,6 +21,7 @@ import { commentApi, type MentionUser } from "@/api/comments";
 import { subscribeToChannel, getEcho } from "@/lib/echo";
 import { neemaChatUrl, neemaCallsUrl, chatChannelLabel } from "@/lib/neema";
 import { useAuthStore } from "@/store/auth.store";
+import { discountCapHint, maxDiscountAmount, useDiscountCap } from "@/lib/discountCap";
 import { RecordHistory } from "@/components/audit/AuditParts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -3578,6 +3579,9 @@ export default function OrderDetailPage() {
     const canEditItems = canDo("orders.edit_items")
         && !["cancelled", "refunded", "voided"].includes(order?.status ?? "");
     const [itemsDraft, setItemsDraft]     = useState<DraftLine[] | null>(null);
+    // The owner's 5% maximum on a line's discount; null for the super_admin.
+    // The server enforces it (and measures a lowered unit price as well).
+    const discountCap = useDiscountCap();
     const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
     const [showAddItem, setShowAddItem]   = useState(false);
     const [itemsReason, setItemsReason]   = useState("");
@@ -4315,9 +4319,18 @@ export default function OrderDetailPage() {
                                                                 Line discount
                                                                 <input
                                                                     type="number" min={0} step="0.01" value={l.discount_amount}
-                                                                    onChange={e => set({ discount_amount: Math.max(0, Number(e.target.value) || 0) })}
+                                                                    max={discountCap !== null ? maxDiscountAmount(l.unit_price * l.quantity, discountCap) : undefined}
+                                                                    onChange={e => set({ discount_amount: Math.min(
+                                                                        Math.max(0, Number(e.target.value) || 0),
+                                                                        maxDiscountAmount(l.unit_price * l.quantity, discountCap),
+                                                                    ) })}
                                                                     className="w-24 border border-line rounded px-2 py-0.5 text-right tabular-nums focus:outline-none focus:border-brand-500"
                                                                 />
+                                                                {discountCap !== null && (
+                                                                    <span className="text-surface-400" title="Larger discounts are set by the owner.">
+                                                                        {discountCapHint(discountCap)} of the line
+                                                                    </span>
+                                                                )}
                                                             </label>
                                                         )}
                                                     </td>

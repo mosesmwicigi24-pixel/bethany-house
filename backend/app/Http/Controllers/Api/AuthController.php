@@ -584,6 +584,12 @@ class AuthController extends Controller
         // for this user - handled gracefully by the React admin.
         $user->outlet = $user->primaryOutlet();
 
+        // The most this user may discount, in percent — null for the owner,
+        // who has no ceiling. The console reads it to show the maximum on
+        // every discount input; the server enforces it regardless
+        // (App\Support\DiscountRule).
+        $user->discount_cap_percent = \App\Support\DiscountRule::capFor($user);
+
         return $user;
     }
 

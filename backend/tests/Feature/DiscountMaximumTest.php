@@ -447,6 +447,17 @@ class DiscountMaximumTest extends TestCase
         $this->assertSame(0, Order::count());
     }
 
+    // ── The console is told the maximum ──────────────────────────────────────
+
+    public function test_the_signed_in_user_carries_their_discount_maximum(): void
+    {
+        $this->actAs('outlet_manager');
+        $this->getJson('/api/v1/admin/auth/me')->assertOk()->assertJsonPath('user.discount_cap_percent', 5);
+
+        $this->actAsSuperAdmin();
+        $this->getJson('/api/v1/admin/auth/me')->assertOk()->assertJsonPath('user.discount_cap_percent', null);
+    }
+
     // ── Nothing already on the books moves ───────────────────────────────────
 
     public function test_orders_already_carrying_a_large_discount_are_left_alone(): void

@@ -22,6 +22,8 @@ export interface User {
   outlet?: Outlet
   roles?: Role[]
   permissions?: string[]
+  /** The most this user may discount, in percent; null = no ceiling (super_admin). */
+  discount_cap_percent?: number | null
 }
 
 export interface AuthState {

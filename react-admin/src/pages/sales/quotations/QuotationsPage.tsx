@@ -14,6 +14,7 @@ import { PdfDownloadButton } from "@/hooks/usePdfDownload";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToastStore } from "@/store/toast.store";
 import { useAuthStore } from "@/store/auth.store";
+import { discountCapMessage, minUnitPrice, useDiscountCap } from "@/lib/discountCap";
 import type { ApiError } from "@/types";
 
 interface CurrencyOption { code: string; name: string; symbol: string }
@@ -291,6 +292,9 @@ interface LineRow {
     sku: string;
     quantity: string;
     unit_price: string;
+    /** The catalogue's price for this line in the quotation's currency, when known —
+     *  what a typed price is measured against (the owner's 5% rule). */
+    catalogue_price?: number | null;
 }
 
 interface ProductHit { id: number; name: string; sku: string; price: number }
@@ -385,13 +389,13 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
     // Pick a catalogue product into a line — fills product, sku, and price.
     function pickForRow(key: string, hit: ProductHit) {
         setRows((r) => r.map((row) => row.key === key
-            ? { ...row, product_id: hit.id, product_name: hit.name, sku: hit.sku, unit_price: String(hit.price || num(row.unit_price) || 0) }
+            ? { ...row, product_id: hit.id, product_name: hit.name, sku: hit.sku, unit_price: String(hit.price || num(row.unit_price) || 0), catalogue_price: hit.price || null }
             : row));
         setActiveRow(null); setRowHits([]);
     }
 
     function addProduct(hit: ProductHit) {
-        setRows((r) => [...r, { key: newKey(), product_id: hit.id, product_name: hit.name, sku: hit.sku, quantity: "1", unit_price: String(hit.price || 0) }]);
+        setRows((r) => [...r, { key: newKey(), product_id: hit.id, product_name: hit.name, sku: hit.sku, quantity: "1", unit_price: String(hit.price || 0), catalogue_price: hit.price || null }]);
         setProductQuery(""); setHits([]);
     }
     // Changing the currency re-prices the lines. Prices are the server's: the
@@ -424,7 +428,11 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
             const priced = new Map(res.lines.map((l) => [l.key, l]));
             setRows((rs) => rs.map((r) => {
                 const hit = priced.get(r.key);
-                return hit ? { ...r, unit_price: String(hit.unit_price) } : r;
+                if (!hit) return r;
+                // A catalogue line priced by the server is the catalogue price
+                // in the new currency; anything else has none we know.
+                const catalogue = r.product_id && hit.source !== "kept" ? hit.unit_price : null;
+                return { ...r, unit_price: String(hit.unit_price), catalogue_price: catalogue };
             }));
             setKeptKeys(res.lines.filter((l) => l.source === "kept").map((l) => l.key));
 
@@ -457,8 +465,23 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
 
     const subtotal = rows.reduce((sum, r) => sum + num(r.quantity) * num(r.unit_price), 0);
 
+    // The owner's 5% rule: a catalogue line may be quoted at most 5% under its
+    // catalogue price (no ceiling for the super_admin). The server enforces it;
+    // this says so beside the price and stops the save before a round trip.
+    const discountCap = useDiscountCap();
+    const belowCatalogue = (r: LineRow) =>
+        discountCap !== null && !!r.product_id && !!r.catalogue_price
+        && num(r.unit_price) < minUnitPrice(r.catalogue_price, discountCap);
+    const priceError = (r: LineRow, idx: number): string | null =>
+        belowCatalogue(r)
+            ? `${discountCapMessage(discountCap)} Lowest: ${money(minUnitPrice(r.catalogue_price ?? 0, discountCap), currency)}.`
+            : (errors[`items.${idx}.unit_price`]?.[0] ?? errors[`items.${idx}.discount_amount`]?.[0] ?? null);
+
     const save = useMutation({
         mutationFn: () => {
+            if (rows.some(belowCatalogue)) {
+                return Promise.reject({ message: discountCapMessage(discountCap) } as ApiError);
+            }
             const items: QuotationItemInput[] = rows.map((r) => ({
                 product_id: r.product_id,
                 product_name: r.product_name.trim() || "Item",
@@ -572,7 +595,7 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
                         <tbody>
                             {rows.length === 0 ? (
                                 <tr><td colSpan={5} className="py-6 text-center text-sm text-surface-500">Add a line, then search a product or type a description.</td></tr>
-                            ) : rows.map((r) => (
+                            ) : rows.map((r, idx) => (
                                 <tr key={r.key}>
                                     <td className="relative">
                                         <input
@@ -610,6 +633,9 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
                                             type="number" min="0" step="0.01" value={r.unit_price}
                                             title={keptKeys.includes(r.key) ? `No ${currency} price on the hub for this line — check the figure before sending.` : undefined}
                                             onChange={(e) => { updateRow(r.key, "unit_price", e.target.value); setKeptKeys((k) => k.filter((x) => x !== r.key)); }} />
+                                        {priceError(r, idx) && (
+                                            <p className="mt-1 text-2xs text-danger text-left">{priceError(r, idx)}</p>
+                                        )}
                                     </td>
                                     <td className="text-right tabular-nums">{money(num(r.quantity) * num(r.unit_price), currency)}</td>
                                     <td>
