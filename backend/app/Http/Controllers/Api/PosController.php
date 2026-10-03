@@ -1779,35 +1779,53 @@ class PosController extends Controller
 
     public function searchCustomers(Request $request): JsonResponse
     {
+        // Phase 4A anti-scraping (App\Support\CustomerSearch): 3 real
+        // characters, wildcards literal, at most 20 rows, 30 a minute
+        // (throttle:customer-search on the route), scope BEFORE matching, and
+        // an answer of id + name + masked phone — nothing that turns the
+        // autocomplete into a phone list.
         $validated = $request->validate([
-            'q'        => 'required|string|min:1|max:100',
-            'per_page' => 'nullable|integer|min:1|max:20',
+            'q'        => 'required|string|max:100',
+            'per_page' => 'nullable|integer|min:1|max:' . \App\Support\CustomerSearch::MAX_RESULTS,
         ]);
 
-        $q      = trim($validated['q']);
-        $like   = "%{$q}%";
-        $prefix = "{$q}%";
+        $q      = \App\Support\CustomerSearch::term($validated['q']);
+        $like   = \App\Support\CustomerSearch::contains($q);
+        $prefix = \App\Support\CustomerSearch::escape($q) . '%';
+        $phone  = \App\Support\CustomerSearch::wholePhone($q);
+        $user   = $request->user();
 
-        $customers = \App\Models\Customer::with('user:id,first_name,last_name,email,phone')
-            ->where(function ($query) use ($like) {
-                // Most customers have their name on the customers row itself (POS
-                // "New", attach-at-order, imports) with no linked user — search
-                // that FIRST. Then also match any linked user account.
-                $query->where('first_name', 'ILIKE', $like)
-                    ->orWhere('last_name', 'ILIKE', $like)
-                    ->orWhere('email',     'ILIKE', $like)
-                    ->orWhere('phone',     'ILIKE', $like)
-                    ->orWhereRaw("TRIM(CONCAT(COALESCE(first_name,''), ' ', COALESCE(last_name,''))) ILIKE ?", [$like])
-                    ->orWhereHas('user', function ($uq) use ($like) {
-                        $uq->where('first_name', 'ILIKE', $like)
-                           ->orWhere('last_name',  'ILIKE', $like)
-                           ->orWhere('email',       'ILIKE', $like)
-                           ->orWhere('phone',       'ILIKE', $like)
-                           ->orWhereRaw("CONCAT(first_name, ' ', last_name) ILIKE ?", [$like]);
+        $customers = \App\Models\Customer::with('user:id,first_name,last_name,phone')
+            ->where(function ($query) use ($like, $phone, $user) {
+                // Inside the caller's customers: match on name, phone, email.
+                $query->where(function ($inScope) use ($like, $user) {
+                    $inScope->searchableBy($user)->where(function ($m) use ($like) {
+                        // Most customers have their name on the customers row
+                        // itself (POS "New", attach-at-order, imports) with no
+                        // linked user — search that FIRST, then a linked user.
+                        $m->where('first_name', 'ILIKE', $like)
+                            ->orWhere('last_name', 'ILIKE', $like)
+                            ->orWhere('email',     'ILIKE', $like)
+                            ->orWhere('phone',     'ILIKE', $like)
+                            ->orWhereRaw("TRIM(CONCAT(COALESCE(first_name,''), ' ', COALESCE(last_name,''))) ILIKE ?", [$like])
+                            ->orWhereHas('user', function ($uq) use ($like) {
+                                $uq->where('first_name', 'ILIKE', $like)
+                                   ->orWhere('last_name',  'ILIKE', $like)
+                                   ->orWhere('email',       'ILIKE', $like)
+                                   ->orWhere('phone',       'ILIKE', $like)
+                                   ->orWhereRaw("CONCAT(first_name, ' ', last_name) ILIKE ?", [$like]);
+                            });
                     });
+                });
+                // Anywhere: the WHOLE number of the person at the counter.
+                // Knowing it is the point — and the answer is a masked echo of
+                // what was typed, so the till never needs a duplicate record.
+                if ($phone !== null) {
+                    $query->orWhereRaw('normalize_phone(customers.phone) = normalize_phone(?)', [$phone]);
+                }
             })
             // Prefix matches (name/phone that STARTS with the query) rank first,
-            // then alphabetically — so typing "mo" surfaces "Moses" at the top.
+            // then alphabetically — so typing "mos" surfaces "Moses" at the top.
             ->orderByRaw(
                 "CASE WHEN first_name ILIKE ? OR last_name ILIKE ? OR phone ILIKE ? THEN 0 ELSE 1 END",
                 [$prefix, $prefix, $prefix],
@@ -1819,11 +1837,12 @@ class PosController extends Controller
                 // Prefer the customer's own name, fall back to a linked user.
                 $first = $c->first_name ?: $c->user?->first_name;
                 $last  = $c->last_name  ?: $c->user?->last_name;
+                $phone = $c->phone ?? $c->user?->phone;
+
                 return [
                     'id'    => $c->id,
-                    'name'  => trim(($first ?? '') . ' ' . ($last ?? '')) ?: ($c->phone ?? "Customer #{$c->id}"),
-                    'phone' => $c->phone ?? $c->user?->phone,
-                    'email' => $c->email ?? $c->user?->email,
+                    'name'  => trim(($first ?? '') . ' ' . ($last ?? '')) ?: "Customer #{$c->id}",
+                    'phone' => $phone ? \App\Support\CustomerContacts::maskPhone($phone) : null,
                 ];
             });
 

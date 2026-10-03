@@ -353,7 +353,7 @@ Route::prefix('v1')->group(function () {
 
             // ── Global search — powers CommandPalette (⌘K) ─────────────────────
             Route::get('/search', [GlobalSearchController::class, 'search'])
-                ->middleware('contacts.mask:orders.view|customers.view');
+                ->middleware(['throttle:customer-search', 'contacts.mask:orders.view|customers.view']);
 
             // ── Push subscriptions (PWA Web Push + React Native Expo) ────────
             Route::prefix('push')->group(function () {
@@ -810,7 +810,8 @@ Route::prefix('v1')->group(function () {
                 // customers.view is the PICKER: enough to find and attach a
                 // customer to a sale. The controller strips addresses, credit
                 // and balances from index/show for callers without insights.
-                Route::get('/',              [CustomerController::class, 'index']);
+                Route::get('/',              [CustomerController::class, 'index'])
+                    ->middleware('throttle:customer-search');
                 Route::get('/{id}',          [CustomerController::class, 'show']);
                 // Purchase history is the customer's financial profile —
                 // manager territory, not the till's. (A /{id}/statistics route
@@ -910,7 +911,8 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:settings.edit,sanctum');
                 Route::post('reports/eod-settings/test', [PosController::class, 'testEodDelivery'])
                     ->middleware('permission:settings.edit,sanctum');
-                Route::get('customers/search',          [PosController::class, 'searchCustomers']);
+                Route::get('customers/search',          [PosController::class, 'searchCustomers'])
+                    ->middleware('throttle:customer-search');
                 Route::get('pending-order/open',        [PosController::class, 'getOpenPendingOrder']);
                 // Read-only, active-only shipping methods for the POS checkout picker.
                 // Uses PosController (not ShippingController::adminMethods, which is

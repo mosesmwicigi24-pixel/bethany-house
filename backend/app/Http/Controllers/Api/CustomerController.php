@@ -97,20 +97,25 @@ class CustomerController extends Controller
         // Search by name, email, or phone.
         // Handles both customers with a linked User and phone-only walk-in
         // customers (user_id IS NULL) whose data lives only on the customers table.
-        if ($request->has('search')) {
-            $search = $request->search;
-            $query->where(function ($q) use ($search) {
+        // Phase 4A anti-scraping: a search obeys App\Support\CustomerSearch
+        // (3 real characters, wildcards literal, 20 rows at most).
+        $searching = $request->filled('search');
+        if ($searching) {
+            $like = \App\Support\CustomerSearch::contains(
+                \App\Support\CustomerSearch::term((string) $request->search, 'search'),
+            );
+            $query->where(function ($q) use ($like) {
                 // Match fields stored directly on the customers table
-                $q->where('first_name', 'ILIKE', "%{$search}%")
-                  ->orWhere('last_name',  'ILIKE', "%{$search}%")
-                  ->orWhere('email',      'ILIKE', "%{$search}%")
-                  ->orWhere('phone',      'ILIKE', "%{$search}%")
+                $q->where('first_name', 'ILIKE', $like)
+                  ->orWhere('last_name',  'ILIKE', $like)
+                  ->orWhere('email',      'ILIKE', $like)
+                  ->orWhere('phone',      'ILIKE', $like)
                   // Also match via the linked User (for portal customers)
-                  ->orWhereHas('user', function ($uq) use ($search) {
-                      $uq->where('first_name', 'ILIKE', "%{$search}%")
-                         ->orWhere('last_name',  'ILIKE', "%{$search}%")
-                         ->orWhere('email',      'ILIKE', "%{$search}%")
-                         ->orWhere('phone',      'ILIKE', "%{$search}%");
+                  ->orWhereHas('user', function ($uq) use ($like) {
+                      $uq->where('first_name', 'ILIKE', $like)
+                         ->orWhere('last_name',  'ILIKE', $like)
+                         ->orWhere('email',      'ILIKE', $like)
+                         ->orWhere('phone',      'ILIKE', $like);
                   });
             });
         }
@@ -144,7 +149,8 @@ class CustomerController extends Controller
             $query->orderBy($sortBy, $sortOrder);
         }
 
-        $perPage = $request->get('per_page', 20);
+        // A search returns at most 20; a plain list pages at up to 100.
+        $perPage   = max(1, min((int) $request->get('per_page', 20), $searching ? \App\Support\CustomerSearch::MAX_RESULTS : 100));
         $customers = $query->paginate($perPage);
 
         if (!$rich) {
