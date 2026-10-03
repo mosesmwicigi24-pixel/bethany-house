@@ -44,8 +44,18 @@ class AuthServiceProvider extends ServiceProvider
         // whole API. Every bearer request now re-reads the account: anything
         // but active is unauthenticated (401), which the console treats as
         // "signed out".
+        //
+        // Phase 4C extends the same check (one mechanism, not two): a staff
+        // session also ends at its role's idle / absolute limit, and a
+        // clerk's idle session is held behind the terminal PIN — see
+        // App\Services\Auth\SessionPolicy. An account held locked after too
+        // many failed sign-ins is refused like an inactive one.
+        Sanctum::usePersonalAccessTokenModel(\App\Models\PersonalAccessToken::class);
         Sanctum::authenticateAccessTokensUsing(
-            fn ($token, bool $isValid) => $isValid && ($token->tokenable?->status ?? null) === 'active'
+            fn ($token, bool $isValid) => $isValid
+                && ($token->tokenable?->status ?? null) === 'active'
+                && $token->tokenable->locked_at === null
+                && app(\App\Services\Auth\SessionPolicy::class)->admit($token)
         );
 
         // Implicitly grant "Super Admin" role all permissions.

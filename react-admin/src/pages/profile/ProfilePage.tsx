@@ -12,6 +12,10 @@ import { Spinner } from '@/components/ui/Spinner'
 import { Field, useFieldAriaProps, Toggle, FieldInput, FieldSelect, FieldTextarea } from '@/components/setup/FormComponents'
 import type { ApiError } from '@/types'
 import { clsx } from 'clsx'
+import { authApi } from '@/api/auth'
+import { QrCode } from '@/components/security/QrCode'
+import { RecoveryCodes } from '@/components/security/RecoveryCodes'
+import { TerminalPinForm } from '@/components/security/TerminalPinForm'
 
 // ── Schemas ────────────────────────────────────────────────────────────────────
 
@@ -86,6 +90,8 @@ export default function ProfilePage() {
   const [twoFaCode, setTwoFaCode]       = useState('')
   const [disable2faPassword, setDisable2faPassword] = useState('')
   const [revokeAllModal, setRevokeAllModal] = useState(false)
+  // Recovery codes are shown once: after 2FA is switched on, or replaced.
+  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null)
 
   // ── Data ─────────────────────────────────────────────────────────────────────
 
@@ -192,11 +198,12 @@ export default function ProfilePage() {
 
   const verify2faMutation = useMutation({
     mutationFn: () => profileApi.verify2fa(twoFaCode),
-    onSuccess: () => {
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['profile'] })
       toast.success('Two-factor authentication enabled.')
       setTwoFaModal(false)
       setTwoFaCode('')
+      if (res.recovery_codes?.length) setRecoveryCodes(res.recovery_codes)
     },
     onError: (err: ApiError) => toast.error(err.message),
   })
@@ -210,6 +217,13 @@ export default function ProfilePage() {
       setDisable2faPassword('')
     },
     onError: (err: ApiError) => toast.error(err.message),
+  })
+
+  // A step-up route: the console asks "confirm it's you" first (client.ts).
+  const recoveryCodesMutation = useMutation({
+    mutationFn: () => authApi.regenerateRecoveryCodes(),
+    onSuccess: (res) => setRecoveryCodes(res.recovery_codes),
+    onError: (err: ApiError) => { if (err.reason !== 'step_up_cancelled') toast.error(err.message) },
   })
 
   const revokeSessionMutation = useMutation({
@@ -495,13 +509,33 @@ export default function ProfilePage() {
                       </p>
                     </div>
                     {profile?.two_factor_enabled
-                      ? <button onClick={() => setDisable2faModal(true)} className="btn-secondary btn-sm text-danger shrink-0">Disable 2FA</button>
+                      ? (authUser?.two_factor_required
+                          ? <span className="text-xs text-surface-500 shrink-0 max-w-[10rem] text-right">Required for your role</span>
+                          : <button onClick={() => setDisable2faModal(true)} className="btn-secondary btn-sm text-danger shrink-0">Disable 2FA</button>)
                       : <button onClick={() => setup2faMutation.mutate()} disabled={setup2faMutation.isPending} className="btn-primary btn-sm shrink-0">
                           {setup2faMutation.isPending && <Spinner size="xs" className="border-white/30 border-t-white" />}
                           Enable 2FA
                         </button>
                     }
                   </div>
+
+                  {profile?.two_factor_enabled && (
+                    <div className="flex items-center justify-between gap-4 p-4 rounded-xl border border-line">
+                      <div>
+                        <p className="text-sm font-semibold text-surface-900">Recovery codes</p>
+                        <p className="text-xs text-surface-500 mt-0.5">
+                          {typeof authUser?.recovery_codes_left === 'number'
+                            ? `${authUser.recovery_codes_left} unused. `
+                            : ''}
+                          Each signs you in once if you lose your phone. Making new ones cancels the old ones.
+                        </p>
+                      </div>
+                      <button onClick={() => recoveryCodesMutation.mutate()} disabled={recoveryCodesMutation.isPending} className="btn-secondary btn-sm shrink-0">
+                        {recoveryCodesMutation.isPending && <Spinner size="xs" />}
+                        New codes
+                      </button>
+                    </div>
+                  )}
 
                   {/* Security checklist */}
                   <div className="space-y-2">
@@ -520,6 +554,24 @@ export default function ProfilePage() {
                     ))}
                   </div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'security' && (
+            <div className="card mt-4">
+              <div className="card-header">
+                <h3 className="font-semibold text-sm text-surface-900">Terminal PIN</h3>
+              </div>
+              <div className="card-body space-y-3">
+                <p className="text-xs text-surface-500">
+                  {authUser?.terminal_pin_set
+                    ? 'Your PIN is set. Change it here.'
+                    : authUser?.session_policy?.on_idle === 'pin_lock'
+                      ? 'Set a PIN: the till locks after a few idle minutes and the PIN unlocks it without signing in again.'
+                      : 'Used on a shop terminal — to unlock the till, or when you approve something on a clerk’s screen.'}
+                </p>
+                <TerminalPinForm />
               </div>
             </div>
           )}
@@ -665,7 +717,9 @@ export default function ProfilePage() {
           <p className="text-sm text-surface-600">Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.)</p>
           {qrData && (
             <div className="flex justify-center">
-              <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(qrData.url)}`} alt="2FA QR Code" className="rounded-xl border border-line" />
+              {/* Drawn locally: the URI carries the 2FA secret, which must not
+                  be sent to a third-party QR image service. */}
+              <QrCode value={qrData.url} size={180} />
             </div>
           )}
           {qrData && (
@@ -684,6 +738,11 @@ export default function ProfilePage() {
             />
           </Field>
         </div>
+      </Modal>
+
+      {/* ── Recovery codes (shown once) ───────────────────────────────────── */}
+      <Modal open={!!recoveryCodes} onClose={() => setRecoveryCodes(null)} title="Your recovery codes" size="sm" closeOnBackdrop={false}>
+        {recoveryCodes && <RecoveryCodes codes={recoveryCodes} doneLabel="Done" onDone={() => setRecoveryCodes(null)} />}
       </Modal>
 
       {/* ── Disable 2FA modal ─────────────────────────────────────────────── */}

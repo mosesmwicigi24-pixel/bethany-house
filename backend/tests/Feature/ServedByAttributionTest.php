@@ -12,6 +12,7 @@ use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
+use Tests\Concerns\StepsUp;
 use Tests\TestCase;
 
 /**
@@ -28,7 +29,7 @@ use Tests\TestCase;
  */
 class ServedByAttributionTest extends TestCase
 {
-    use RefreshDatabase;
+    use RefreshDatabase, StepsUp;
 
     private Outlet $outlet;
 
@@ -161,6 +162,7 @@ class ServedByAttributionTest extends TestCase
 
         Sanctum::actingAs($this->staff('Ann', 'Manager', ['orders.view']));
 
+        $this->stepUp(auth('sanctum')->user());   // bulk export: step-up route (Phase 4C)
         $csv = $this->get('/api/v1/admin/orders/export')->assertOk()->getContent();
         $lines = array_values(array_filter(explode("\n", trim($csv))));
 

@@ -7,6 +7,7 @@ import { AdminLayout } from "@/components/layout/AdminLayout";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ToastContainer } from "@/components/ui/Toast";
+import { SecurityPrompts } from "@/components/security/SecurityPrompts";
 import { useAuthStore } from "@/store/auth.store";
 
 // Pages
@@ -406,6 +407,8 @@ export default function App() {
                 /* ── Admin app — all routes under /admin basename ─────────────── */
                 <BrowserRouter basename={import.meta.env.BASE_URL}>
                     <GlobalEventHandlers />
+                    {/* PIN lock, step-up, set-your-PIN (sign-in safety, Phase 4C) */}
+                    <SecurityPrompts />
 
                     <Routes>
                         {/* Public */}

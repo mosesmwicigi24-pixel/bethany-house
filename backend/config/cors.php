@@ -23,6 +23,7 @@ return [
         'Authorization',
         'X-Requested-With',
         'X-API-Key', // For API key auth
+        'X-Background-Request', // console polling: not activity for the idle limit (Phase 4C)
     ],
 
     'exposed_headers' => [

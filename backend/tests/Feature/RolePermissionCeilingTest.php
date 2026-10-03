@@ -9,6 +9,7 @@ use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
+use Tests\Concerns\StepsUp;
 use Tests\TestCase;
 
 /**
@@ -19,7 +20,7 @@ use Tests\TestCase;
  */
 class RolePermissionCeilingTest extends TestCase
 {
-    use RefreshDatabase;
+    use RefreshDatabase, StepsUp;
 
     private function perm(string $name): Permission
     {
@@ -62,7 +63,8 @@ class RolePermissionCeilingTest extends TestCase
         $granted = $this->perm('roles.view');
         $role    = $this->targetRole();
 
-        Sanctum::actingAs($this->actorWith(['roles.view', 'roles.edit']));
+        Sanctum::actingAs($actor = $this->actorWith(['roles.view', 'roles.edit']));
+        $this->stepUp($actor);   // role permission edits are a step-up route (Phase 4C)
 
         $this->postJson("/api/v1/admin/roles/{$role->id}/permissions", [
             'permissions' => [$granted->id],
@@ -96,6 +98,7 @@ class RolePermissionCeilingTest extends TestCase
         $actor->assignRole($superRole);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($actor);
+        $this->stepUp($actor);
 
         $this->postJson("/api/v1/admin/roles/{$role->id}/permissions", [
             'permissions' => [$powerful->id],
