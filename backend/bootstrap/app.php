@@ -76,6 +76,9 @@ return Application::configure(basePath: dirname(__DIR__))
             // A route middleware, because Gate::before lets super_admin past
             // every permission — see the class docblock.
             'owner.no_transact' => \App\Http\Middleware\OwnerDoesNotTransact::class,
+            // Privileged actions need a recent re-confirmation of identity on
+            // this session (Phase 4C, role plan §12.3).
+            'step.up' => \App\Http\Middleware\RequireStepUp::class,
         ]);
 
         // Every staff API call → request_logs (who looked at what). Staff-only
@@ -108,6 +111,7 @@ return Application::configure(basePath: dirname(__DIR__))
         \App\Console\Commands\VerifyAuditTrail::class,
         \App\Console\Commands\SendAuditDigest::class,
         \App\Console\Commands\PruneDownloadArchive::class,
+        \App\Console\Commands\UnlockAccount::class,
     ])
     ->withSchedule(function (\Illuminate\Console\Scheduling\Schedule $schedule): void {
         // EoD report delivery — runs every minute, command handles time-of-day

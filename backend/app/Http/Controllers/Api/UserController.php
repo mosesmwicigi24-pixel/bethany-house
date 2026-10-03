@@ -171,6 +171,10 @@ class UserController extends Controller
         if (!empty($validated['role_ids']) && !$request->user()?->hasRole('super_admin')) {
             return response()->json(['message' => 'Only a super administrator can give a new account its roles. Create it without roles; the owner assigns them.'], 403);
         }
+        // Granting roles is a role change: step-up (Phase 4C).
+        if (!empty($validated['role_ids'])) {
+            app(\App\Services\Auth\StepUp::class)->ensure($request);
+        }
 
         // Create the user — no wrapping transaction; DB::beginTransaction() was
         // causing silent rollbacks in PostgreSQL due to a nested transaction issue.
@@ -302,8 +306,16 @@ class UserController extends Controller
 
         // A refused role change must refuse the whole save, not land the other
         // fields and then fail (the role sync runs after the transaction).
-        if (isset($validated['role_ids'])) {
-            $this->assertMayAssignRoles($user->id, $validated['role_ids']);
+        $rolesChange = isset($validated['role_ids'])
+            && $this->assertMayAssignRoles($user->id, $validated['role_ids']);
+
+        // Changing who holds which role, or whether a person must use
+        // two-step sign-in, needs a fresh step-up (Phase 4C, plan §12.3).
+        // Other edits to the same form do not.
+        $twoFaRequirementChange = array_key_exists('must_setup_2fa', $validated)
+            && (bool) $validated['must_setup_2fa'] !== (bool) $user->must_setup_2fa;
+        if ($rolesChange || $twoFaRequirementChange) {
+            app(\App\Services\Auth\StepUp::class)->ensure($request);
         }
 
         DB::beginTransaction();
@@ -854,11 +866,12 @@ class UserController extends Controller
         }
     }
 
-    private function assertMayAssignRoles(int $targetUserId, array $roleIds): void
+    /** @return bool whether the request changes the person's roles at all */
+    private function assertMayAssignRoles(int $targetUserId, array $roleIds): bool
     {
         $actor = auth()->user();
         if (! $actor) {
-            return;   // console / seeders
+            return true;   // console / seeders
         }
 
         // The edit form re-sends every role on any save; an unchanged set is
@@ -867,7 +880,7 @@ class UserController extends Controller
             ->pluck('role_id')->map(fn ($id) => (int) $id)->sort()->values()->all();
         $requested = collect($roleIds)->map(fn ($id) => (int) $id)->unique()->sort()->values()->all();
         if ($current === $requested) {
-            return;
+            return false;
         }
 
         // Owner decision, 2026-10-02: "I will set the roles for each person."
@@ -882,10 +895,14 @@ class UserController extends Controller
         if ((int) $actor->id === $targetUserId) {
             abort(403, 'Nobody can change their own roles — another super administrator must make this change.');
         }
+
+        return true;
     }
 
     private function syncUserRoles(int $userId, array $roleIds): void
     {
+        $before = DB::table('model_has_roles')->where('model_id', $userId)->where('model_type', User::class)
+            ->pluck('role_id')->map(fn ($id) => (int) $id)->sort()->values()->all();
         $this->assertMayAssignRoles($userId, $roleIds);
 
         $modelType = (new \App\Models\User())->getMorphClass();
@@ -911,5 +928,17 @@ class UserController extends Controller
         try {
             app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
         } catch (\Exception) {}
+
+        // A role change ends every session the person holds (plan §12.4,
+        // §17: an old session reused after a role is removed → 401). The
+        // next sign-in is evaluated against the new roles, including their
+        // session limits and 2FA requirement.
+        $after = collect($roleIds)->map(fn ($id) => (int) $id)->unique()->sort()->values()->all();
+        if ($before !== $after) {
+            DB::table('personal_access_tokens')
+                ->where('tokenable_type', (new User())->getMorphClass())
+                ->where('tokenable_id', $userId)
+                ->delete();
+        }
     }
 }

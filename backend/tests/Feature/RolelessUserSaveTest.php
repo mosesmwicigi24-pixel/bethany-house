@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
+use Tests\Concerns\StepsUp;
 use Tests\TestCase;
 
 /**
@@ -17,7 +18,7 @@ use Tests\TestCase;
  */
 class RolelessUserSaveTest extends TestCase
 {
-    use RefreshDatabase;
+    use RefreshDatabase, StepsUp;
 
     private function admin(): User
     {
@@ -34,7 +35,8 @@ class RolelessUserSaveTest extends TestCase
         $staff = User::factory()->create(['status' => 'active']);
         $staff->assignRole(Role::findOrCreate('pos_clerk', 'sanctum'));
 
-        $this->actingAs($this->admin(), 'sanctum')
+        $this->stepUp($admin = $this->admin());   // role changes are a step-up route (Phase 4C)
+        $this->actingAs($admin, 'sanctum')
             ->putJson("/api/v1/admin/users/{$staff->id}", ['role_ids' => []])
             ->assertOk();
 
@@ -70,7 +72,8 @@ class RolelessUserSaveTest extends TestCase
         $staff = User::factory()->create(['status' => 'active']);
         $staff->assignRole(Role::findOrCreate('pos_clerk', 'sanctum'));
 
-        $this->actingAs($this->admin(), 'sanctum')
+        $this->stepUp($admin = $this->admin());   // role changes are a step-up route (Phase 4C)
+        $this->actingAs($admin, 'sanctum')
             ->putJson("/api/v1/admin/users/{$staff->id}", [
                 'status' => 'inactive', 'role_ids' => [],
             ])->assertOk();
@@ -134,6 +137,7 @@ class RolelessUserSaveTest extends TestCase
         $other = User::factory()->create(['status' => 'active']);
         $other->assignRole(Role::findOrCreate('super_admin', 'sanctum'));
 
+        $this->stepUp($me);
         $this->actingAs($me, 'sanctum')
             ->putJson("/api/v1/admin/users/{$other->id}", ['role_ids' => []])
             ->assertOk();

@@ -78,6 +78,9 @@ class User extends Authenticatable
         'last_login_at'              => 'datetime',
         'deleted_at'                 => 'datetime',
         'two_factor_setup_started_at'=> 'datetime',
+        'locked_until'               => 'datetime',
+        'locked_at'                  => 'datetime',
+        'unlocked_at'                => 'datetime',
     ];
 
     /**

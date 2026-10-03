@@ -158,7 +158,10 @@ class ProfileController extends Controller
             ->map(fn ($t) => [
                 'id'         => (string) $t->id,
                 'ip'         => $t->ip_address ?? '-',
-                'agent'      => $this->parseAgent($t->name ?? ''),
+                // Sign-in safety stamps the browser on each new session (Phase 4C).
+                'agent'      => !empty($t->user_agent)
+                    ? \App\Services\Auth\LoginDevices::agentFamily($t->user_agent)
+                    : $this->parseAgent($t->name ?? ''),
                 'last_used'  => $t->last_used_at ?? $t->created_at,
                 'is_current' => $t->token === $currentToken,
             ]);

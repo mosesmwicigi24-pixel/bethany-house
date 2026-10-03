@@ -10,6 +10,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
+use Tests\Concerns\StepsUp;
 use Tests\TestCase;
 
 /**
@@ -25,7 +26,7 @@ use Tests\TestCase;
  */
 class ReportingExchangeRateTest extends TestCase
 {
-    use RefreshDatabase;
+    use RefreshDatabase, StepsUp;
 
     protected function setUp(): void
     {
@@ -239,6 +240,7 @@ class ReportingExchangeRateTest extends TestCase
 
         $id = DB::table('currencies')->where('code', 'USD')->value('id');
 
+        $this->stepUp($admin);   // currency edits are a step-up route (Phase 4C)
         $this->actingAs($admin, 'sanctum')
             ->putJson("/api/v1/admin/currencies-management/{$id}", ['reporting_rate_to_kes' => 130])
             ->assertOk();

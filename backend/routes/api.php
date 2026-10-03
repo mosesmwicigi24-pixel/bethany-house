@@ -4,6 +4,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\{
     AuthController,
+    AccountSecurityController,
+    UserSecurityController,
     ProductController,
     CategoryController,
     OrderController,
@@ -97,6 +99,11 @@ Route::prefix('v1')->group(function () {
         Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
         Route::post('/reset-password',  [AuthController::class, 'resetPassword']);
         Route::post('/2fa/verify',      [AuthController::class, 'adminVerify2fa']);
+        // Staged 2FA rollout (Phase 4C): the role requires 2FA and it is not
+        // on yet — set it up before any session is issued. Proof = the
+        // setup token the password step returned.
+        Route::post('/2fa/setup',         [AuthController::class, 'adminSetup2fa']);
+        Route::post('/2fa/setup/confirm', [AuthController::class, 'adminConfirm2faSetup']);
 
         Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
             Route::post('/logout',      [AuthController::class, 'logout']);
@@ -111,6 +118,18 @@ Route::prefix('v1')->group(function () {
             Route::post('/2fa/confirm', [AuthController::class, 'verify2FA']);
             Route::post('/2fa/disable', [AuthController::class, 'disable2FA']);
         });
+    });
+
+    // ═══ SIGN-IN SAFETY — the signed-in person (Phase 4C) ════════════════════
+    // Outside the throttle:auth group above (5/min per IP): each has its own
+    // per-account limiter, and the PIN unlock must work for a shop full of
+    // clerks behind one address. pin/unlock is the one route a PIN-locked
+    // session may call (App\Services\Auth\SessionPolicy).
+    Route::prefix('admin/auth')->middleware(['auth:sanctum', 'throttle:api', 'ensure.staff'])->group(function () {
+        Route::post('/step-up',             [AccountSecurityController::class, 'stepUp']);
+        Route::post('/pin/unlock',          [AccountSecurityController::class, 'unlock']);
+        Route::post('/2fa/recovery-codes',  [AccountSecurityController::class, 'regenerateRecoveryCodes'])
+            ->middleware('step.up');
     });
 
     // ═══ PUBLIC PAYMENT LINK (no auth) ═══════════════════════════════════════
@@ -430,7 +449,13 @@ Route::prefix('v1')->group(function () {
                 Route::post('/sessions/revoke-all',       [ProfileController::class, 'revokeAllSessions']);
                 Route::post('/sessions/{tokenId}/revoke', [ProfileController::class, 'revokeSession']);
                 Route::get('/activity',                   [ProfileController::class, 'activity']);
+                // The person's own terminal PIN (Phase 4C) — set/change with their password.
+                Route::put('/terminal-pin',               [AccountSecurityController::class, 'setTerminalPin']);
             });
+
+            // A clerk's PIN is cleared by their outlet manager (shared outlet),
+            // or the owner — decided in the controller, not by users.* (Phase 4C).
+            Route::post('/users/{id}/terminal-pin/reset', [UserSecurityController::class, 'resetTerminalPin'])->whereNumber('id');
 
             // ── Users by role — all staff (assignee dropdowns) ───────────────
             Route::get('/users/role/{role}', [UserController::class, 'byRole']);
@@ -459,7 +484,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/requests',           [AuditLogController::class, 'requests']);
                 Route::get('/integrity',          [AuditLogController::class, 'integrity']);
                 Route::get('/record/{type}/{id}', [AuditLogController::class, 'record'])->whereNumber('id');
-                Route::get('/export',             [AuditLogController::class, 'export']);
+                Route::get('/export',             [AuditLogController::class, 'export'])->middleware('step.up');
                 Route::post('/clear',             [AuditLogController::class, 'clear']);
                 Route::get('/{id}',               [AuditLogController::class, 'show'])->whereNumber('id');
             });
@@ -475,12 +500,12 @@ Route::prefix('v1')->group(function () {
                 Route::get('/requests',                 [DownloadRequestController::class, 'index']);
                 Route::post('/requests/{uuid}/cancel',  [DownloadRequestController::class, 'cancel'])->whereUuid('uuid');
                 Route::post('/requests/{uuid}/token',   [DownloadRequestController::class, 'token'])->whereUuid('uuid');
-                Route::post('/requests/{uuid}/approve', [DownloadRequestController::class, 'approve'])->whereUuid('uuid');
+                Route::post('/requests/{uuid}/approve', [DownloadRequestController::class, 'approve'])->whereUuid('uuid')->middleware('step.up');
                 Route::post('/requests/{uuid}/deny',    [DownloadRequestController::class, 'deny'])->whereUuid('uuid');
                 Route::get('/all',                      [DownloadRequestController::class, 'all']);
                 Route::get('/approvers',                [DownloadRequestController::class, 'approvers']);
-                Route::post('/approvers',               [DownloadRequestController::class, 'addApprover']);
-                Route::delete('/approvers/{userId}',    [DownloadRequestController::class, 'removeApprover'])->whereNumber('userId');
+                Route::post('/approvers',               [DownloadRequestController::class, 'addApprover'])->middleware('step.up');
+                Route::delete('/approvers/{userId}',    [DownloadRequestController::class, 'removeApprover'])->whereNumber('userId')->middleware('step.up');
                 Route::get('/{uuid}/archive',           [DownloadRequestController::class, 'archive'])->whereUuid('uuid');
             });
 
@@ -657,7 +682,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/',                          [OrderController::class, 'index']);
                 // Must come before GET /{id} - otherwise Laravel matches
                 // "export" as the {id} parameter and routes to show() instead.
-                Route::get('/export',                    [OrderController::class, 'exportCsv']);
+                Route::get('/export',                    [OrderController::class, 'exportCsv'])->middleware('step.up');
                 // Also before /{id} for the same reason as /export.
                 Route::get('/pending-queue',             [OrderController::class, 'pendingQueue']);
                 // The shipping-fee modal's method picker: active methods only,
@@ -826,7 +851,7 @@ Route::prefix('v1')->group(function () {
             // ── Users ────────────────────────────────────────────────────────
             Route::middleware('permission:users.view,sanctum')->prefix('users')->group(function () {
                 Route::get('/',         [UserController::class, 'index']);
-                Route::get('/export',   [UserController::class, 'export']);
+                Route::get('/export',   [UserController::class, 'export'])->middleware('step.up');
                 Route::get('/{id}',     [UserController::class, 'show']);
                 Route::get('/{id}/activity',    [AuditLogController::class, 'userActivity']);
                 Route::get('/{id}/permissions', [UserController::class, 'permissions']);
@@ -840,7 +865,17 @@ Route::prefix('v1')->group(function () {
                 Route::delete('/{id}',              [UserController::class, 'destroy'])
                     ->middleware('permission:users.delete,sanctum');
                 Route::put('/{id}/role',            [UserController::class, 'updateRole'])
-                    ->middleware('permission:users.edit,sanctum');
+                    ->middleware(['permission:users.edit,sanctum', 'step.up']);
+
+                // Another person's sign-in (Phase 4C): system_admin for Tier
+                // 2–3, super_admin for anyone else — decided in the controller
+                // (StaffAuthority). Resetting 2FA needs step-up.
+                Route::post('/{id}/unlock',                    [UserSecurityController::class, 'unlock'])->whereNumber('id');
+                Route::post('/{id}/2fa/reset',                 [UserSecurityController::class, 'resetTwoFactor'])->whereNumber('id')
+                    ->middleware('step.up');
+                Route::get('/{id}/sessions',                   [UserSecurityController::class, 'sessions'])->whereNumber('id');
+                Route::post('/{id}/sessions/revoke-all',       [UserSecurityController::class, 'revokeAll'])->whereNumber('id');
+                Route::post('/{id}/sessions/{tokenId}/revoke', [UserSecurityController::class, 'revoke'])->whereNumber('id')->whereNumber('tokenId');
                 Route::put('/{id}/status',          [UserController::class, 'updateStatus'])
                     ->middleware('permission:users.edit,sanctum');
                 Route::post('/{id}/reset-password', [UserController::class, 'resetPassword'])
@@ -1051,7 +1086,7 @@ Route::prefix('v1')->group(function () {
             Route::middleware('permission:procurement.view,sanctum')->group(function () {
                 Route::prefix('suppliers')->group(function () {
                     Route::get('/',                     [SupplierController::class, 'index']);
-                    Route::get('/export',               [SupplierController::class, 'export']);
+                    Route::get('/export',               [SupplierController::class, 'export'])->middleware('step.up');
                     Route::get('/{id}',                 [SupplierController::class, 'show']);
                     Route::get('/{id}/purchase-orders', [SupplierController::class, 'purchaseOrders']);
                     Route::get('/{id}/performance',     [SupplierController::class, 'performance']);
@@ -1242,7 +1277,7 @@ Route::prefix('v1')->group(function () {
                     Route::middleware('permission:payments.transactions,sanctum')->group(function () {
                         Route::get('/',          [PaymentController::class, 'allTransactions']);
                         Route::get('/analytics', [PaymentController::class, 'transactionAnalytics']);
-                        Route::get('/export',    [PaymentController::class, 'exportTransactions']);
+                        Route::get('/export',    [PaymentController::class, 'exportTransactions'])->middleware('step.up');
                         Route::get('/{id}',      [PaymentController::class, 'transactionDetails']);
                     });
                     Route::post('/{id}/refund',    [PaymentController::class, 'refundTransaction'])
@@ -1282,13 +1317,13 @@ Route::prefix('v1')->group(function () {
                 Route::get('/',            [TaxRateController::class, 'index']);
                 Route::get('/{id}',        [TaxRateController::class, 'show']);
                 Route::post('/',           [TaxRateController::class, 'store'])
-                    ->middleware('permission:settings.edit,sanctum');
+                    ->middleware(['permission:settings.edit,sanctum', 'step.up']);
                 Route::put('/{id}',        [TaxRateController::class, 'update'])
-                    ->middleware('permission:settings.edit,sanctum');
+                    ->middleware(['permission:settings.edit,sanctum', 'step.up']);
                 Route::delete('/{id}',     [TaxRateController::class, 'destroy'])
-                    ->middleware('permission:settings.edit,sanctum');
+                    ->middleware(['permission:settings.edit,sanctum', 'step.up']);
                 Route::put('/{id}/toggle', [TaxRateController::class, 'toggleStatus'])
-                    ->middleware('permission:settings.edit,sanctum');
+                    ->middleware(['permission:settings.edit,sanctum', 'step.up']);
             });
 
             // ── Shipping ──────────────────────────────────────────────────────
@@ -1420,7 +1455,7 @@ Route::prefix('v1')->group(function () {
                 Route::post('/export/pdf',     [ReportController::class, 'exportPDF'])
                     ->middleware('permission:reports.export|reports.export_supply,sanctum');
                 Route::post('/export/excel',   [ReportController::class, 'exportExcel'])
-                    ->middleware('permission:reports.export|reports.export_supply,sanctum');
+                    ->middleware(['permission:reports.export|reports.export_supply,sanctum', 'step.up']);
             });
             Route::middleware($reportPage('drill'))->prefix('reports')->group(function () {
                 Route::get('/drill/{metric}',  [\App\Http\Controllers\Api\ExecutiveReportController::class, 'drill']);
@@ -1563,7 +1598,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/tax',                 [SettingController::class, 'taxSettings']);
                 Route::get('/maintenance',         [SettingController::class, 'maintenanceMode']);
 
-                Route::middleware('permission:settings.edit,sanctum')->group(function () {
+                Route::middleware(['permission:settings.edit,sanctum', 'step.up'])->group(function () {
                     Route::put('/',                    [SettingController::class, 'update']);
                     Route::post('/logo',               [SettingController::class, 'uploadLogo']);
                     Route::put('/payment-providers',   [SettingController::class, 'updatePaymentProviders']);
@@ -1680,7 +1715,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{id}',              [RoleController::class, 'show']);
                 Route::get('/{id}/permissions',  [RoleController::class, 'permissions']);
 
-                Route::middleware('permission:roles.edit,sanctum')->group(function () {
+                Route::middleware(['permission:roles.edit,sanctum', 'step.up'])->group(function () {
                     Route::post('/',                 [RoleController::class, 'store']);
                     Route::put('/{id}',              [RoleController::class, 'update']);
                     Route::delete('/{id}',           [RoleController::class, 'destroy']);
@@ -1692,7 +1727,7 @@ Route::prefix('v1')->group(function () {
             Route::middleware('permission:roles.view,sanctum')->prefix('permissions')->group(function () {
                 Route::get('/',        [PermissionController::class, 'index']);
 
-                Route::middleware('permission:roles.edit,sanctum')->group(function () {
+                Route::middleware(['permission:roles.edit,sanctum', 'step.up'])->group(function () {
                     Route::post('/',       [PermissionController::class, 'store']);
                     Route::put('/{id}',    [PermissionController::class, 'update']);
                     Route::delete('/{id}', [PermissionController::class, 'destroy']);
@@ -1720,7 +1755,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/',                 [CurrencyController::class, 'index']);
                 Route::get('/{id}',             [CurrencyController::class, 'show']);
 
-                Route::middleware('permission:settings.edit,sanctum')->group(function () {
+                Route::middleware(['permission:settings.edit,sanctum', 'step.up'])->group(function () {
                     Route::post('/',                [CurrencyController::class, 'store']);
                     Route::put('/{id}',             [CurrencyController::class, 'update']);
                     Route::delete('/{id}',          [CurrencyController::class, 'destroy']);
@@ -1747,7 +1782,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/',            [PaymentMethodController::class, 'index']);
                 Route::get('/{id}',        [PaymentMethodController::class, 'show']);
 
-                Route::middleware('permission:settings.edit,sanctum')->group(function () {
+                Route::middleware(['permission:settings.edit,sanctum', 'step.up'])->group(function () {
                     Route::post('/',           [PaymentMethodController::class, 'store']);
                     Route::put('/{id}',        [PaymentMethodController::class, 'update']);
                     Route::delete('/{id}',     [PaymentMethodController::class, 'destroy']);
@@ -1776,27 +1811,27 @@ Route::prefix('v1')->group(function () {
                 // Transaction clear-by-date
                 Route::get('/clearable-tables',   [DatabaseManagementController::class, 'clearableTables']);
                 Route::post('/clear-preview',     [DatabaseManagementController::class, 'clearPreview']);
-                Route::post('/clear',             [DatabaseManagementController::class, 'clear']);
+                Route::post('/clear',             [DatabaseManagementController::class, 'clear'])->middleware('step.up');
 
                 // Backups
                 Route::get('/backups',                  [DatabaseManagementController::class, 'backupsIndex']);
-                Route::post('/backups',                 [DatabaseManagementController::class, 'backupsStore']);
-                Route::get('/backups/{id}/download',    [DatabaseManagementController::class, 'backupsDownload']);
-                Route::post('/backups/{id}/restore',    [DatabaseManagementController::class, 'backupsRestore']);
-                Route::delete('/backups/{id}',          [DatabaseManagementController::class, 'backupsDestroy']);
+                Route::post('/backups',                 [DatabaseManagementController::class, 'backupsStore'])->middleware('step.up');
+                Route::get('/backups/{id}/download',    [DatabaseManagementController::class, 'backupsDownload'])->middleware('step.up');
+                Route::post('/backups/{id}/restore',    [DatabaseManagementController::class, 'backupsRestore'])->middleware('step.up');
+                Route::delete('/backups/{id}',          [DatabaseManagementController::class, 'backupsDestroy'])->middleware('step.up');
 
                 // Scheduled backup config
                 Route::get('/schedule',           [DatabaseManagementController::class, 'scheduleShow']);
-                Route::put('/schedule',           [DatabaseManagementController::class, 'scheduleUpdate']);
+                Route::put('/schedule',           [DatabaseManagementController::class, 'scheduleUpdate'])->middleware('step.up');
 
                 // Backup storage destination config (local / S3-compatible)
                 Route::get('/storage-settings',         [DatabaseManagementController::class, 'storageSettingsShow']);
-                Route::put('/storage-settings',         [DatabaseManagementController::class, 'storageSettingsUpdate']);
-                Route::post('/storage-settings/test',   [DatabaseManagementController::class, 'storageSettingsTest']);
+                Route::put('/storage-settings',         [DatabaseManagementController::class, 'storageSettingsUpdate'])->middleware('step.up');
+                Route::post('/storage-settings/test',   [DatabaseManagementController::class, 'storageSettingsTest'])->middleware('step.up');
 
                 // Full factory-reset wipe — extremely destructive, guarded in the
                 // controller by confirm phrase + password re-auth + mandatory pre-wipe backup.
-                Route::post('/wipe',              [DatabaseManagementController::class, 'wipe']);
+                Route::post('/wipe',              [DatabaseManagementController::class, 'wipe'])->middleware('step.up');
             });
         });
 

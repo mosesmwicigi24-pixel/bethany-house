@@ -8,6 +8,7 @@ use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
+use Tests\Concerns\StepsUp;
 use Tests\TestCase;
 
 /**
@@ -17,7 +18,7 @@ use Tests\TestCase;
  */
 class RoleAssignmentRuleTest extends TestCase
 {
-    use RefreshDatabase;
+    use RefreshDatabase, StepsUp;
 
     private function role(string $name): Role
     {
@@ -84,7 +85,8 @@ class RoleAssignmentRuleTest extends TestCase
     public function test_the_owner_sets_roles_for_others_and_may_stack_them(): void
     {
         $person = User::factory()->create(['user_type' => 'staff']);
-        Sanctum::actingAs($this->owner());
+        Sanctum::actingAs($owner = $this->owner());
+        $this->stepUp($owner);   // role changes are a step-up route (Phase 4C)
 
         $ids = [$this->role('outlet_manager')->id, $this->role('pos_clerk')->id];
         $this->putJson("/api/v1/admin/users/{$person->id}", ['role_ids' => $ids])->assertOk();
