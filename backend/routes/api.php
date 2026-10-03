@@ -799,6 +799,13 @@ Route::prefix('v1')->group(function () {
                 ->middleware(['permission:orders.view,sanctum', 'contacts.mask:orders.view']);
 
             // ── Customers ────────────────────────────────────────────────────
+            // Phase 4A reveal: OUTSIDE the masked customers group — its answer
+            // is the unmasked value, for one field, one reason, one sale.
+            // Audited and capped inside (CustomerContactRevealController).
+            Route::post('/customers/{id}/reveal', [\App\Http\Controllers\Api\CustomerContactRevealController::class, 'reveal'])
+                ->whereNumber('id')
+                ->middleware('permission:customers.view|pos.access,sanctum');
+
             Route::middleware(['permission:customers.view,sanctum', 'contacts.mask:customers.view'])->prefix('customers')->group(function () {
                 // customers.view is the PICKER: enough to find and attach a
                 // customer to a sale. The controller strips addresses, credit

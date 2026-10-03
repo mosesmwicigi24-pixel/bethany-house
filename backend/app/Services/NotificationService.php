@@ -841,6 +841,30 @@ class NotificationService
     /**
      * Fired when a user account is suspended.
      */
+    /**
+     * Phase 4A: a staff member hit the hourly cap on revealing customer
+     * contacts. The managers of their outlets and the super admins hear of
+     * it — ids and a summary only, never a customer's details.
+     */
+    public static function customerRevealLimitReached(User $actor, int $perHour): void
+    {
+        $outletIds = DB::table('outlet_user')->where('user_id', $actor->id)->pluck('outlet_id');
+        $managers  = $outletIds->isEmpty() ? collect() : self::usersWithRole('outlet_manager')
+            ->filter(fn (User $u) => DB::table('outlet_user')->where('user_id', $u->id)->whereIn('outlet_id', $outletIds)->exists());
+        $recipients = $managers->merge(self::usersWithRole('super_admin'))
+            ->unique('id')
+            ->reject(fn (User $u) => $u->id === $actor->id)
+            ->values();
+
+        self::send($recipients, new InAppNotification(
+            title:     'Customer reveal limit reached',
+            body:      trim("{$actor->first_name} {$actor->last_name}") . " tried to reveal more than {$perHour} customer contacts in an hour and was blocked.",
+            actionUrl: null,
+            icon:      'shield',
+            data:      ['kind' => 'customer_reveal_limit', 'user_id' => $actor->id],
+        ));
+    }
+
     public static function userSuspended(int $userId, string $reason = ''): void
     {
         $user = self::user($userId);
