@@ -685,8 +685,9 @@ export default function ExpenseDetailPage() {
     const doAction = async (fn: () => Promise<any>, msg: string) => {
         setBusy(true);
         try {
-            await fn();
-            toast.success(msg);
+            const res = await fn();
+            // An approval may be one band of several (Phase 3B).
+            toast.success(res?.approval ? res.message : msg);
             qc.invalidateQueries({ queryKey: ["expense", id] });
             qc.invalidateQueries({ queryKey: ["expenses"] });
             qc.invalidateQueries({ queryKey: ["imprest"] });

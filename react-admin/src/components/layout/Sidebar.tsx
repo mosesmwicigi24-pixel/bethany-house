@@ -39,10 +39,12 @@ const NAV: NavGroup[] = [
                 label: "Approvals",
                 href: "/approvals",
                 icon: "approvals",
-                // Only actionable queues: the page's three approval actions.
-                // procurement.view used to open it to every buyer and to
-                // finance's non-approvers, and then the page guard refused them.
-                anyOfPermissions: ["procurement.approve", "inventory.approve", "payments.approve_international"],
+                // Phase 3B: one queue for everyone who signs a band (procurement,
+                // stock, expenses, finance, payment void/move, payment proofs)
+                // and "My submissions" for everyone who raises something that
+                // needs approval. Same list as the App.tsx route guard and the
+                // command palette. The server decides what each person can sign.
+                anyOfPermissions: ["procurement.approve", "inventory.approve", "expenses.approve", "approvals.finance_sign", "payments.void", "payments.reassign", "payments.approve_international", "payments.request_void", "payments.request_reassign", "procurement.create", "inventory.adjust", "inventory.transfer", "expenses.create"],
             },
             {
                 label: "Notifications",

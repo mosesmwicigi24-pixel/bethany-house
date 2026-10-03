@@ -499,8 +499,9 @@ function ApprovalModal({
     const approveMutation = useMutation({
         mutationFn: () =>
             adjustmentsApi.approve(adjustment.id, notes || undefined),
-        onSuccess: () => {
-            toast.success("Adjustment approved and applied.");
+        onSuccess: (r) => {
+            // One band of several, or the last (Phase 3B): the server says which.
+            toast.success(r?.message ?? "Adjustment approved and applied.");
             qc.invalidateQueries({ queryKey: ["adjustments"] });
             qc.invalidateQueries({ queryKey: ["stock-levels"] });
             qc.invalidateQueries({ queryKey: ["adjustments-pending"] });
