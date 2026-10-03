@@ -213,6 +213,10 @@ return [
         'archive_retention_days' => 90,     // server copy; the owner's emailed copy is the long-term one
         'attach_max_bytes'       => 10 * 1024 * 1024,
 
+        // Phase 4A (App\Support\ContactExport): the most rows one export of a
+        // screen may carry; the response says X-Export-Truncated when it cut.
+        'export_row_cap'         => 10000,
+
         // Invoices, quotations, receipts — and a blank template that carries
         // no data. Recorded, never held; reported in the owner's daily digest.
         'exempt' => [

@@ -2,6 +2,16 @@ import { get, post, patch } from "./client";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+/** Why a contact is being revealed — the server accepts only these. */
+export type RevealReason = "payment_follow_up" | "delivery" | "customer_callback" | "order_issue";
+
+export const REVEAL_REASONS: { value: RevealReason; label: string }[] = [
+    { value: "payment_follow_up", label: "Payment follow-up" },
+    { value: "delivery",          label: "Delivery" },
+    { value: "customer_callback", label: "Calling the customer back" },
+    { value: "order_issue",       label: "A problem with the order" },
+];
+
 export interface PosOutlet {
     id: number;
     name: string;
@@ -507,10 +517,27 @@ export const posApi = {
             data,
         ),
 
+    // Phase 4A: the autocomplete returns name + MASKED phone + id only, from
+    // 3 characters, at most 20 results, scoped before matching.
     searchCustomers: (q: string) =>
-        get<{ data: { id: number; name: string; phone: string; email: string }[] }>(
+        get<{ data: { id: number; name: string; phone: string | null; email?: string | null }[] }>(
             "/v1/admin/pos/customers/search",
             { params: { q } },
+        ),
+
+    // Phase 4A: reveal one contact of the customer on THIS sale. Audited
+    // server-side (actor, field, reason, sale, IP, session); 20 an hour.
+    revealCustomerContact: (
+        customerId: number,
+        data: {
+            field: "phone" | "email" | "address";
+            reason: RevealReason;
+            context: { type: "order" | "shipment"; id: number };
+        },
+    ) =>
+        post<{ field: string; value: string | Record<string, string | null> | null }>(
+            `/v1/admin/customers/${customerId}/reveal`,
+            data,
         ),
 
     // Uses the POS-scoped route (pos.access permission), NOT

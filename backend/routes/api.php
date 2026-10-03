@@ -372,7 +372,8 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Global search — powers CommandPalette (⌘K) ─────────────────────
-            Route::get('/search', [GlobalSearchController::class, 'search']);
+            Route::get('/search', [GlobalSearchController::class, 'search'])
+                ->middleware(['throttle:customer-search', 'contacts.mask:orders.view|customers.view']);
 
             // ── Push subscriptions (PWA Web Push + React Native Expo) ────────
             Route::prefix('push')->group(function () {
@@ -403,13 +404,15 @@ Route::prefix('v1')->group(function () {
         // need reports.signals on top of their module's view. The preflight,
         // tailor-workload, geography and channel feeds serve other screens
         // (production order form, production board, Customers & Neema) and
-        // keep their module gate alone.
+        // keep their module gate alone. The four Signals feeds carry
+        // report.business_wide like every other report page (Phase 4A): a
+        // report is business-wide for whoever may read it.
         Route::middleware(['auth:sanctum', 'throttle:admin-api', 'ensure.staff'])->prefix('admin/intelligence')->group(function () {
             Route::middleware('permission:inventory.view,sanctum')->group(function () {
                 Route::get('/reorder-suggestions',           [IntelligenceController::class, 'reorderSuggestions'])
-                    ->middleware('report.page:signals');
+                    ->middleware(['report.page:signals', 'report.business_wide']);
                 Route::get('/material-shortages',            [IntelligenceController::class, 'materialShortages'])
-                    ->middleware('report.page:signals');
+                    ->middleware(['report.page:signals', 'report.business_wide']);
                 Route::post('/material-shortages/preflight', [IntelligenceController::class, 'materialShortagesPreflight']);
             });
             Route::post('/auto-reorder/{itemId}', [IntelligenceController::class, 'triggerAutoReorder'])
@@ -417,13 +420,13 @@ Route::prefix('v1')->group(function () {
             Route::get('/tailor-workload', [IntelligenceController::class, 'tailorWorkload'])
                 ->middleware('permission:production.view,sanctum');
             Route::get('/churn-risk', [IntelligenceController::class, 'churnRisk'])
-                ->middleware(['permission:intelligence.view,sanctum', 'report.page:signals']);
+                ->middleware(['permission:intelligence.view,sanctum', 'report.page:signals', 'report.business_wide']);
             Route::get('/customer-geography', [IntelligenceController::class, 'customerGeography'])
                 ->middleware('permission:intelligence.view,sanctum');
             Route::get('/channel-engagement', [IntelligenceController::class, 'channelEngagement'])
                 ->middleware('permission:intelligence.view,sanctum');
             Route::get('/budget-warnings', [IntelligenceController::class, 'budgetWarnings'])
-                ->middleware(['permission:expenses.view,sanctum', 'report.page:signals']);
+                ->middleware(['permission:expenses.view,sanctum', 'report.page:signals', 'report.business_wide']);
             // smart-tasks and entity-previews stay open to all authenticated
             // staff: smart-tasks is a personal to-do aggregation scoped to the
             // current user, and entity-previews only returns data for
@@ -701,7 +704,7 @@ Route::prefix('v1')->group(function () {
             // Storefront Insights: visitors and online buyers by country — the
             // storefront's half of the customer picture, so it follows the
             // Customers & Neema report (was reports.view; role hardening 3A).
-            Route::middleware('report.page:customers')->prefix('analytics')->group(function () {
+            Route::middleware(['report.page:customers', 'report.business_wide'])->prefix('analytics')->group(function () {
                 Route::get('/overview', [\App\Http\Controllers\Api\AnalyticsController::class, 'overview']);
             });
 
@@ -714,7 +717,7 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Orders ───────────────────────────────────────────────────────
-            Route::middleware('permission:orders.view,sanctum')->prefix('orders')->group(function () {
+            Route::middleware(['permission:orders.view,sanctum', 'contacts.mask:orders.view'])->prefix('orders')->group(function () {
                 Route::get('/',                          [OrderController::class, 'index']);
                 // Must come before GET /{id} - otherwise Laravel matches
                 // "export" as the {id} parameter and routes to show() instead.
@@ -775,7 +778,7 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Shipments ────────────────────────────────────────────────────
-            Route::middleware('permission:shipment.view,sanctum')->prefix('shipments')->group(function () {
+            Route::middleware(['permission:shipment.view,sanctum', 'contacts.mask:shipment.view'])->prefix('shipments')->group(function () {
                 Route::get('/',           [ShipmentController::class, 'index']);
                 Route::get('/{id}',       [ShipmentController::class, 'show']);
                 Route::get('/{id}/tracking',  [ShipmentController::class, 'getTracking']);
@@ -810,7 +813,7 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Returns ──────────────────────────────────────────────────────
-            Route::middleware('permission:orders.manage_returns,sanctum')->prefix('returns')->group(function () {
+            Route::middleware(['permission:orders.manage_returns,sanctum', 'contacts.mask:orders.manage_returns'])->prefix('returns')->group(function () {
                 Route::get('/',                     [ReturnController::class, 'index']);
                 Route::get('/{id}',                 [ReturnController::class, 'show']);
                 Route::put('/{id}/status',          [ReturnController::class, 'updateStatus']);
@@ -821,7 +824,7 @@ Route::prefix('v1')->group(function () {
 
             // ── Quotations ───────────────────────────────────────────────────
             // Front of the quotation → invoice → receipt flow.
-            Route::middleware('permission:quotations.view,sanctum')->prefix('quotations')->group(function () {
+            Route::middleware(['permission:quotations.view,sanctum', 'contacts.mask:quotations.view'])->prefix('quotations')->group(function () {
                 Route::get('/',          [QuotationController::class, 'index']);
                 Route::get('/{id}',      [QuotationController::class, 'show']);
 
@@ -844,7 +847,7 @@ Route::prefix('v1')->group(function () {
             // ── Invoices ─────────────────────────────────────────────────────
             // The invoice stage of quotation → invoice → receipt (read views;
             // creation happens via quotation accept, payment via the order).
-            Route::middleware('permission:orders.view,sanctum')->prefix('invoices')->group(function () {
+            Route::middleware(['permission:orders.view,sanctum', 'contacts.mask:orders.view'])->prefix('invoices')->group(function () {
                 Route::get('/',      [InvoiceController::class, 'index']);
                 Route::get('/{id}',  [InvoiceController::class, 'show']);
             });
@@ -854,14 +857,22 @@ Route::prefix('v1')->group(function () {
             // handoff hands customers. orders.view: whoever answers the till
             // answers the handoff.
             Route::get('/interest-carts', [\App\Http\Controllers\Api\InterestCartAdminController::class, 'index'])
-                ->middleware('permission:orders.view,sanctum');
+                ->middleware(['permission:orders.view,sanctum', 'contacts.mask:orders.view']);
 
             // ── Customers ────────────────────────────────────────────────────
-            Route::middleware('permission:customers.view,sanctum')->prefix('customers')->group(function () {
+            // Phase 4A reveal: OUTSIDE the masked customers group — its answer
+            // is the unmasked value, for one field, one reason, one sale.
+            // Audited and capped inside (CustomerContactRevealController).
+            Route::post('/customers/{id}/reveal', [\App\Http\Controllers\Api\CustomerContactRevealController::class, 'reveal'])
+                ->whereNumber('id')
+                ->middleware('permission:customers.view|pos.access,sanctum');
+
+            Route::middleware(['permission:customers.view,sanctum', 'contacts.mask:customers.view'])->prefix('customers')->group(function () {
                 // customers.view is the PICKER: enough to find and attach a
                 // customer to a sale. The controller strips addresses, credit
                 // and balances from index/show for callers without insights.
-                Route::get('/',              [CustomerController::class, 'index']);
+                Route::get('/',              [CustomerController::class, 'index'])
+                    ->middleware('throttle:customer-search');
                 Route::get('/{id}',          [CustomerController::class, 'show']);
                 // Purchase history is the customer's financial profile —
                 // manager territory, not the till's. (A /{id}/statistics route
@@ -930,7 +941,7 @@ Route::prefix('v1')->group(function () {
             // Eloquent, so the viewer scope applies. This decides who gets the
             // screen, which is a decision rather than a leak.
             Route::get('pos/outstanding-balances', [PosController::class, 'outstandingBalances'])
-                ->middleware('permission:receivables.view,sanctum');
+                ->middleware(['permission:receivables.view,sanctum', 'contacts.mask:receivables.view']);
 
             // EoD review — reading every cashier's report, acknowledging it.
             // Outside the pos.access group for the same reason as receivables:
@@ -938,7 +949,7 @@ Route::prefix('v1')->group(function () {
             // which tied reviewing takings to reading Setup. Commenting stays
             // in the pos group below: the AUTHOR answers there too, and
             // canDiscussEodReport authorises per report.
-            Route::middleware('permission:pos.eod_review,sanctum')->prefix('pos/reports')->group(function () {
+            Route::middleware(['permission:pos.eod_review,sanctum', 'contacts.mask:pos.eod_review'])->prefix('pos/reports')->group(function () {
                 Route::get('eod-admin',                   [PosController::class, 'adminListEodReports']);
                 Route::get('eod-admin/{id}',              [PosController::class, 'adminGetEodReport']);
                 Route::post('eod-admin/{id}/acknowledge', [PosController::class, 'acknowledgeEodReport']);
@@ -961,7 +972,7 @@ Route::prefix('v1')->group(function () {
                         ->middleware('permission:pos.till_correction,sanctum');
                 });
 
-            Route::middleware('permission:pos.access,sanctum')->prefix('pos')->group(function () {
+            Route::middleware(['permission:pos.access,sanctum', 'contacts.mask:pos.access'])->prefix('pos')->group(function () {
                 Route::get('outlets',                   [PosController::class, 'outlets']);
                 Route::get('register/status',           [PosController::class, 'registerStatus']);
                 Route::get('register/history',          [PosController::class, 'registerHistory']);
@@ -988,7 +999,8 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:settings.edit,sanctum');
                 Route::post('reports/eod-settings/test', [PosController::class, 'testEodDelivery'])
                     ->middleware('permission:settings.edit,sanctum');
-                Route::get('customers/search',          [PosController::class, 'searchCustomers']);
+                Route::get('customers/search',          [PosController::class, 'searchCustomers'])
+                    ->middleware('throttle:customer-search');
                 Route::get('pending-order/open',        [PosController::class, 'getOpenPendingOrder']);
                 // Read-only, active-only shipping methods for the POS checkout picker.
                 // Uses PosController (not ShippingController::adminMethods, which is
@@ -1324,7 +1336,7 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Payments ─────────────────────────────────────────────────────
-            Route::middleware('permission:payments.view,sanctum')->group(function () {
+            Route::middleware(['permission:payments.view,sanctum', 'contacts.mask:payments.view'])->group(function () {
                 // The ledger is NOT the same capability as seeing a payment on
                 // an order. payments.view is held by every cashier so they can
                 // record a takings; payments.transactions — "View the full
@@ -1511,7 +1523,7 @@ Route::prefix('v1')->group(function () {
             // report.window: one date contract for the whole section — a
             // caller using the other page's spelling got a different window
             // back, silently (D4). See NormalisesReportWindow.
-            $reportPage = fn (string $page) => ["report.page:{$page}", 'report.window', 'report.snapshot', 'report.contacts'];
+            $reportPage = fn (string $page) => ["report.page:{$page}", 'report.business_wide', 'report.window', 'report.snapshot', 'report.contacts'];
 
             // Shared by every page: the outlet filter, and the schedule list
             // (filtered to the pages the caller can open). Drills inherit the
@@ -1756,7 +1768,7 @@ Route::prefix('v1')->group(function () {
             // (report.page) and that page's export right (report.export):
             // reports.export, or reports.export_supply for Inventory and
             // Procurement.
-            $reportPdf = fn (string $page) => ["report.page:{$page}", 'report.export', 'report.window', 'report.snapshot'];
+            $reportPdf = fn (string $page) => ["report.page:{$page}", 'report.export', 'report.business_wide', 'report.window', 'report.snapshot'];
             Route::prefix('reports/pdf')->name('reports.pdf.')->group(function () use ($reportPdf) {
                 Route::get('/sales',        [ReportPdfController::class, 'sales'])       ->middleware($reportPdf('sales'))      ->name('sales');
                 Route::get('/financial',    [ReportPdfController::class, 'financial'])   ->middleware($reportPdf('financial'))  ->name('financial');
@@ -1933,7 +1945,7 @@ Route::prefix('v1')->group(function () {
         // pos.cash_management - could still hit every one of those actions
         // through this alternate route set, since only the role name was
         // ever checked. Mirrored to the same per-action gates as /admin/pos.
-        Route::middleware(['role:pos_clerk|outlet_manager|admin|super_admin', 'permission:pos.access,sanctum'])->prefix('pos')->group(function () {
+        Route::middleware(['role:pos_clerk|outlet_manager|admin|super_admin', 'permission:pos.access,sanctum', 'contacts.mask:pos.access'])->prefix('pos')->group(function () {
             Route::get('/products',                 [PosController::class, 'products']);
             Route::get('/products/search',          [PosController::class, 'searchProducts']);
             Route::get('/suggestions',              [PosController::class, 'suggestions']);

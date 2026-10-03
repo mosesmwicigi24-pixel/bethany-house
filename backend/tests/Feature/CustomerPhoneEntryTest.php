@@ -104,7 +104,11 @@ class CustomerPhoneEntryTest extends TestCase
             $u->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
         if ($admin) {
-            $u->assignRole(Role::findOrCreate('admin', 'sanctum'));
+            // Phase 4A: a role that grants nothing now resolves to no orders
+            // at all; the admin role reads every order, as the catalogue's does.
+            $role = Role::findOrCreate('admin', 'sanctum');
+            $role->givePermissionTo(Permission::findOrCreate('orders.view', 'sanctum'));
+            $u->assignRole($role);
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($u);

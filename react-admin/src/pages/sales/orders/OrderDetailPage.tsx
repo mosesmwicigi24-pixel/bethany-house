@@ -15,6 +15,7 @@ import { Modal } from "@/components/ui/Modal";
 import type { ApiError } from "@/types";
 import { ShipmentSection } from "@/components/orders/ShipmentSection";
 import { usePdfDownload } from "@/hooks/usePdfDownload";
+import { useCustomerSearchTerm } from "@/hooks/useCustomerSearchTerm";
 import { channelApi, type Channel, type ChannelMessage, type LinkedEntity, type EntitySearchResult } from "@/api/channels";
 import { parseBodyToNodes } from "@/pages/comms/CommsHub";
 import { commentApi, type MentionUser } from "@/api/comments";
@@ -3293,9 +3294,11 @@ function AttachCustomerModal({ order, onClose, onDone }: {
     // what customer matching keys on across the hub and Neema.
     const [company,   setCompany]   = useState("");
 
+    // Phase 4A: 3 real characters at least, sent once typing settles.
+    const searchTerm = useCustomerSearchTerm(search);
     const { data: searchData } = useQuery({
-        queryKey: ["customer-search", search],
-        queryFn:  () => search.length >= 2 ? get<{ data: any[] }>(`/v1/admin/customers?search=${encodeURIComponent(search)}&per_page=8`) : Promise.resolve({ data: [] }),
+        queryKey: ["customer-search", searchTerm],
+        queryFn:  () => searchTerm ? get<{ data: any[] }>(`/v1/admin/customers?search=${encodeURIComponent(searchTerm)}&per_page=8`) : Promise.resolve({ data: [] }),
         enabled:  mode === "existing",
     });
     const customers = (searchData as any)?.data ?? [];

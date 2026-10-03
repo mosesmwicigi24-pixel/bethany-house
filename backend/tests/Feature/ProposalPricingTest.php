@@ -503,11 +503,23 @@ class ProposalPricingTest extends TestCase
 
     // ── customer credit (deposit terms) ──────────────────────────────────────
 
+    private ?int $shopId = null;
+
+    /**
+     * An order at the outlet manager's own shop: since Phase 4A an outlet
+     * manager sees (and so sets terms on) only orders at outlets they are
+     * assigned to; another shop's order is absent to them.
+     */
     private function order(float $total, ?int $customerId = null, string $currency = 'KES'): Order
     {
+        if ($this->shopId === null) {
+            $this->shopId = \App\Models\Outlet::factory()->create()->id;
+            $this->om->outlets()->attach($this->shopId);
+        }
+
         return Order::factory()->create([
             'total_amount' => $total, 'subtotal' => $total, 'payment_status' => 'pending',
-            'customer_id' => $customerId, 'currency_code' => $currency,
+            'customer_id' => $customerId, 'currency_code' => $currency, 'outlet_id' => $this->shopId,
         ]);
     }
 

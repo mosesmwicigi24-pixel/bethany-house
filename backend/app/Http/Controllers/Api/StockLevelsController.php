@@ -7,6 +7,7 @@ use App\Models\InventoryItem;
 use App\Models\InventoryTransaction;
 use App\Models\Product;
 use App\Models\Outlet;
+use App\Services\DataScopeResolver;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Services\IntelligenceService;
@@ -29,11 +30,24 @@ class StockLevelsController extends Controller
     // Paginated stock levels across all products, outlets, variants.
     // =========================================================================
 
+    /**
+     * Stock rows this caller may see (Phase 4A): an outlet manager's outlets,
+     * a cashier's assigned outlet; everyone else the whole network. A row at
+     * another outlet is absent — its id answers 404.
+     */
+    private function scoped()
+    {
+        $query = InventoryItem::query();
+        DataScopeResolver::boundToOutlets($query, request()->user(), 'inventory.view', 'inventory_items.outlet_id');
+
+        return $query;
+    }
+
     public function index(Request $request)
     {
         $perPage = min((int) $request->get('per_page', 30), 100);
 
-        $query = InventoryItem::with([
+        $query = $this->scoped()->with([
             'product:id,sku,status',
             'product.translations' => fn($q) => $q->where('language_code', 'en')->select('product_id', 'name'),
             'product.images'       => fn($q) => $q->where('is_primary', true)->select('product_id', 'image_url'),
@@ -93,11 +107,12 @@ class StockLevelsController extends Controller
 
         // Stats
         $stats = [
-            'total_skus'      => InventoryItem::count(),
-            'in_stock'        => InventoryItem::inStock()->count(),
-            'low_stock'       => InventoryItem::lowStock()->count(),
-            'out_of_stock'    => InventoryItem::outOfStock()->count(),
-            'total_value'     => InventoryItem::sum(DB::raw('quantity_on_hand * COALESCE(reorder_point, 0)')),
+            // Same boundary as the rows: a manager's cards count their shop.
+            'total_skus'      => $this->scoped()->count(),
+            'in_stock'        => $this->scoped()->inStock()->count(),
+            'low_stock'       => $this->scoped()->lowStock()->count(),
+            'out_of_stock'    => $this->scoped()->outOfStock()->count(),
+            'total_value'     => $this->scoped()->sum(DB::raw('quantity_on_hand * COALESCE(reorder_point, 0)')),
         ];
 
         return response()->json([
@@ -120,7 +135,7 @@ class StockLevelsController extends Controller
 
     public function show($id)
     {
-        $item = InventoryItem::with([
+        $item = $this->scoped()->with([
             'product.translations',
             'product.images' => fn($q) => $q->where('is_primary', true),
             'variant',
@@ -157,6 +172,15 @@ class StockLevelsController extends Controller
             'entries.*.reorder_quantity' => 'nullable|integer|min:0',
             'entries.*.notes'           => 'nullable|string|max:255',
         ]);
+
+        // Opening stock names its outlet: a write, so a bounded manager may
+        // only write their own shops' figures.
+        foreach ($validated['entries'] as $entry) {
+            abort_unless(
+                DataScopeResolver::allowsOutlet($request->user(), 'inventory.view', (int) $entry['outlet_id']),
+                403, 'You do not have access to this outlet.',
+            );
+        }
 
         DB::beginTransaction();
         try {
@@ -225,7 +249,7 @@ class StockLevelsController extends Controller
 
     public function history(Request $request, $id)
     {
-        $item = InventoryItem::findOrFail($id);
+        $item = $this->scoped()->findOrFail($id);
 
         $perPage = min((int) $request->get('per_page', 50), 200);
 
@@ -269,7 +293,7 @@ class StockLevelsController extends Controller
             'variants:id,sku,variant_name,attributes',
         ])->findOrFail($productId);
 
-        $items = InventoryItem::with(['outlet:id,name,code', 'variant:id,sku,variant_name'])
+        $items = $this->scoped()->with(['outlet:id,name,code', 'variant:id,sku,variant_name'])
             ->where('product_id', $productId)
             ->get()
             ->map(fn($i) => $this->formatItem($i));
@@ -308,7 +332,7 @@ class StockLevelsController extends Controller
 
     public function update(Request $request, $id)
     {
-        $item = InventoryItem::findOrFail($id);
+        $item = $this->scoped()->findOrFail($id);
 
         $validated = $request->validate([
             'reorder_point'    => 'sometimes|integer|min:0',

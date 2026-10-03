@@ -45,6 +45,38 @@ class QuotationController extends Controller
         return response()->json($query->paginate(min((int) $request->integer('per_page', 25), 100)));
     }
 
+    /**
+     * Phase 4A: a quotation's outlet is a write naming an outlet. A bounded
+     * caller (outlet manager, cashier) raises quotations at their own shops
+     * only, and one raised with no outlet lands at their primary shop — a
+     * head-office (null-outlet) quotation would vanish from the manager who
+     * wrote it, and from the manager who must issue a cashier's draft.
+     */
+    private function outletInScope(Request $request, ?int $outletId): ?int
+    {
+        $user  = $request->user();
+        $scope = \App\Services\DataScopeResolver::for($user, 'quotations.view');
+        if (!in_array($scope, [\App\Enums\DataScope::Outlet, \App\Enums\DataScope::Own], true)) {
+            return $outletId;
+        }
+
+        // A cashier's draft lands at her shop too, so the manager who issues
+        // it (quotations.issue, outlet scope) can find it.
+        if ($outletId === null) {
+            $outletId = $user->outlets()->orderByDesc('outlet_user.is_primary')->orderBy('outlets.id')->value('outlets.id');
+            $outletId = $outletId ? (int) $outletId : null;
+        }
+
+        if ($scope === \App\Enums\DataScope::Outlet || $outletId !== null) {
+            abort_unless(
+                $outletId !== null && in_array($outletId, \App\Services\DataScopeResolver::outletIds($user), true),
+                403, 'You do not have access to this outlet.',
+            );
+        }
+
+        return $outletId;
+    }
+
     public function show(int $id): JsonResponse
     {
         $quotation = Quotation::with(['items', 'documents', 'convertedOrder:id,order_number,status,payment_status'])
@@ -56,6 +88,7 @@ class QuotationController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $this->validatePayload($request);
+        $validated['outlet_id'] = $this->outletInScope($request, $validated['outlet_id'] ?? null);
 
         $quotation = DB::transaction(function () use ($validated, $request) {
             $quotation = Quotation::create([
@@ -95,7 +128,16 @@ class QuotationController extends Controller
             return response()->json(['message' => 'Only a draft quotation can be edited.'], 422);
         }
 
+        // Phase 4A: the edit form was filled from a masked screen for a
+        // masked role; a mask sent back is the value on file.
+        \App\Support\CustomerContacts::restoreMasked($request, [
+            'customer_phone' => $quotation->customer_phone,
+            'customer_email' => $quotation->customer_email,
+        ]);
         $validated = $this->validatePayload($request, $quotation->customer_phone);
+        if (array_key_exists('outlet_id', $validated) && $validated['outlet_id'] !== null) {
+            $validated['outlet_id'] = $this->outletInScope($request, (int) $validated['outlet_id']);
+        }
 
         DB::transaction(function () use ($quotation, $validated) {
             $quotation->update([
@@ -104,8 +146,10 @@ class QuotationController extends Controller
                 'currency_code'       => $validated['currency_code'] ?? $quotation->currency_code,
                 'shipping_amount'     => $validated['shipping_amount'] ?? $quotation->shipping_amount,
                 'served_by'           => $validated['served_by'] ?? $quotation->served_by,
-                'customer_email'      => $validated['customer_email'] ?? null,
-                'customer_phone'      => $validated['customer_phone'] ?? null,
+                // A key absent from the request (a mask that matched nothing
+                // on file was dropped) leaves the stored value alone.
+                'customer_email'      => array_key_exists('customer_email', $validated) ? $validated['customer_email'] : $quotation->customer_email,
+                'customer_phone'      => array_key_exists('customer_phone', $validated) ? $validated['customer_phone'] : $quotation->customer_phone,
                 'customer_first_name' => $validated['customer_first_name'] ?? null,
                 'customer_last_name'  => $validated['customer_last_name'] ?? null,
                 'valid_until'         => $validated['valid_until'] ?? null,

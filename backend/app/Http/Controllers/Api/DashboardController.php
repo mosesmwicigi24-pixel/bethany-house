@@ -120,7 +120,8 @@ class DashboardController extends Controller
         // view is already narrower than the whole business.
         $user        = $request->user();
         $scope       = DataScopeResolver::for($user, 'orders.view');
-        $maySeeMoney = ($user?->can('reports.sales') ?? false) || $scope !== DataScope::All;
+        // None (no role grants orders.view) is not "a narrower view" — it is no view.
+        $maySeeMoney = ($user?->can('reports.sales') ?? false) || in_array($scope, [DataScope::Own, DataScope::Outlet], true);
 
         $stats = [
             // What the figures below are counted over, so the UI can say "your

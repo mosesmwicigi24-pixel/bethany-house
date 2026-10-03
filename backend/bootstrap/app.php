@@ -72,6 +72,13 @@ return Application::configure(basePath: dirname(__DIR__))
             // page (role hardening 3A) — see App\Support\ReportPages.
             'report.page'   => \App\Http\Middleware\RequiresReportPage::class,
             'report.export' => \App\Http\Middleware\RequiresReportExport::class,
+            // Reports are business-wide for whoever may read them (owner,
+            // 2026-10-03): lifts the Phase 4A outlet/own row scope for the
+            // section, nothing else.
+            'report.business_wide' => \App\Http\Middleware\ReportsAreBusinessWide::class,
+            // Customer phones, emails and addresses by role on the
+            // operational screens (Phase 4A) — see CustomerContacts::policyFor.
+            'contacts.mask' => \App\Http\Middleware\MasksCustomerContacts::class,
             // The owner's accounts never work the till (role hardening 1B).
             // A route middleware, because Gate::before lets super_admin past
             // every permission — see the class docblock.

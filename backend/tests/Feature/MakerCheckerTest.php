@@ -350,7 +350,10 @@ class MakerCheckerTest extends TestCase
     public function test_someone_else_can_approve_the_adjustment(): void
     {
         $item = $this->costedItem();
-        $id   = $this->raiseAdjustment($this->user('outlet_manager'), $item)->assertCreated()->json('adjustment.id');
+        // Phase 4A: the manager adjusts stock at their own shop.
+        $maker = $this->user('outlet_manager');
+        $maker->outlets()->attach($item->outlet_id);
+        $id   = $this->raiseAdjustment($maker, $item)->assertCreated()->json('adjustment.id');
 
         Sanctum::actingAs($this->user('procurement_manager'));
         $this->putJson("/api/v1/admin/inventory/adjustments/{$id}/approve")->assertOk();

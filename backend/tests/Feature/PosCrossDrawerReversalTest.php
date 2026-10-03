@@ -35,7 +35,11 @@ class PosCrossDrawerReversalTest extends TestCase
     private function actingAsVoidingAdmin(): User
     {
         $user = User::factory()->create();
-        $user->assignRole(Role::findOrCreate('admin', 'sanctum'));
+        // The admin role reads every order, as the catalogue's does (Phase 4A:
+        // a role granting nothing resolves to no orders).
+        $admin = Role::findOrCreate('admin', 'sanctum');
+        $admin->givePermissionTo(Permission::findOrCreate('orders.view', 'sanctum'));
+        $user->assignRole($admin);
         $user->givePermissionTo(
             Permission::findOrCreate('pos.access', 'sanctum'),
             Permission::findOrCreate('pos.void', 'sanctum'),

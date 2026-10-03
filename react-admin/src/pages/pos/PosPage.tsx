@@ -28,7 +28,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
-import { posApi } from "@/api/pos";
+import { posApi, REVEAL_REASONS } from "@/api/pos";
+import type { RevealReason } from "@/api/pos";
 import { get } from "@/api/client";
 import { paymentMethodsApi } from "@/api/setup";
 import type {
@@ -590,14 +591,61 @@ aria-label="Close">
 // CustomerSearchPanel - typeahead to attach a known customer to the order
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Phase 4A: a cashier is served the attached customer's phone MASKED
+ * (07••••1853). When the sale exists on the server (held, resumed, part-paid)
+ * she can reveal it for that sale, with a reason — audited, 20 an hour. Before
+ * the sale is saved there is no sale to tie the reveal to, and the till does
+ * not need the number: M-Pesa prompts go to the phone on file server-side.
+ */
+function RevealPhone({ customerId, saleId }: { customerId: number; saleId: number | null }) {
+    const toast = useToastStore();
+    const [reason, setReason] = useState<RevealReason>("payment_follow_up");
+    const [value, setValue] = useState<string | null>(null);
+    const [asking, setAsking] = useState(false);
+    const reveal = useMutation({
+        mutationFn: () => posApi.revealCustomerContact(customerId, {
+            field: "phone", reason, context: { type: "order", id: saleId! },
+        }),
+        onSuccess: (res) => { setValue(typeof res.value === "string" ? res.value : null); setAsking(false); },
+        onError: (e: { message?: string }) => toast.error(e?.message ?? "Could not reveal the number."),
+    });
+
+    if (value) {
+        return <span className="text-2xs font-semibold text-brand-700 select-all">{value}</span>;
+    }
+    if (!saleId) {
+        return <span className="text-2xs text-surface-400" title="Save or hold the sale to reveal the number for it">(masked)</span>;
+    }
+    if (!asking) {
+        return (
+            <button type="button" onClick={() => setAsking(true)}
+                className="text-2xs text-brand-600 hover:underline font-medium">Show</button>
+        );
+    }
+    return (
+        <span className="inline-flex items-center gap-1">
+            <select value={reason} onChange={(e) => setReason(e.target.value as RevealReason)}
+                aria-label="Reason for revealing the number" className="text-2xs border border-surface-200 rounded px-1 py-0.5">
+                {REVEAL_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </select>
+            <button type="button" onClick={() => reveal.mutate()} disabled={reveal.isPending}
+                className="text-2xs text-brand-600 hover:underline font-medium">Reveal</button>
+        </span>
+    );
+}
+
 function CustomerSearchPanel({
     attached,
     onAttach,
     onClear,
+    saleId = null,
 }: {
     attached: AttachedCustomer | null;
     onAttach: (c: AttachedCustomer) => void;
     onClear: () => void;
+    /** The open sale on the server, if any — the reveal is tied to it. */
+    saleId?: number | null;
 }) {
     const [q, setQ] = useState("");
     const [open, setOpen] = useState(false);
@@ -615,7 +663,8 @@ function CustomerSearchPanel({
     const { data, isFetching } = useQuery({
         queryKey: ["pos-customer-search", q],
         queryFn: () => posApi.searchCustomers(q),
-        enabled: q.trim().length >= 2,
+        // The server refuses fewer than 3 characters (anti-scraping, Phase 4A).
+        enabled: q.trim().length >= 3,
         staleTime: 10_000,
     });
 
@@ -626,7 +675,7 @@ function CustomerSearchPanel({
         setQ(val);
         clearTimeout(searchTimer.current);
         searchTimer.current = setTimeout(() => {
-            if (val.trim().length >= 2) setOpen(true);
+            if (val.trim().length >= 3) setOpen(true);
         }, 250);
     };
 
@@ -659,8 +708,11 @@ function CustomerSearchPanel({
                             <span className="shrink-0 text-2xs bg-brand-100 text-brand-700 font-bold px-1.5 py-0.5 rounded-md">New</span>
                         )}
                     </div>
-                    <p className="text-2xs text-brand-500 truncate">
-                        {attached.phone ?? attached.email ?? "Walk-in"}
+                    <p className="text-2xs text-brand-500 truncate flex items-center gap-1.5">
+                        <span className="truncate">{attached.phone ?? attached.email ?? "Walk-in"}</span>
+                        {attached.id > 0 && attached.phone?.includes("•") && (
+                            <RevealPhone customerId={attached.id} saleId={saleId} />
+                        )}
                     </p>
                 </div>
                 <button onClick={onClear} className="text-brand-400 hover:text-danger transition-colors shrink-0"
@@ -816,7 +868,7 @@ aria-label="Close" title="Remove customer">
                 <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white border border-surface-200 rounded-xl shadow-xl overflow-hidden">
                     {hits.length === 0 &&
                     !isFetching &&
-                    q.trim().length >= 2 ? (
+                    q.trim().length >= 3 ? (
                         <div className="px-4 py-3 text-xs text-surface-500 flex items-center justify-between">
                             <span>No customer found for "{q}"</span>
                             <button
@@ -3368,6 +3420,7 @@ export default function PosPage() {
                                 attached={attachedCustomer}
                                 onAttach={setAttachedCustomer}
                                 onClear={() => setAttachedCustomer(null)}
+                                saleId={pendingOrderId}
                             />
                         </div>
                         {/* Order note — notes belong here, never in the phone */}
