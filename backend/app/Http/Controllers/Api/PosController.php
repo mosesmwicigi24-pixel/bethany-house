@@ -548,6 +548,10 @@ class PosController extends Controller
             'per_page'  => 'nullable|integer|min:5|max:50',
         ]);
 
+        // Same outlet guard as every other till action: without it any
+        // cashier could page through every shop's sessions by outlet_id.
+        $this->authoriseOutletAccess($request->user(), (int) $validated['outlet_id']);
+
         $sessions = CashRegister::with(['openedBy:id,first_name,last_name', 'closedBy:id,first_name,last_name'])
             ->where('outlet_id', $validated['outlet_id'])
             ->latest('opened_at')
@@ -2178,6 +2182,11 @@ class PosController extends Controller
                 'total'        => $paginated->total(),
             ],
             'users' => $users->values(),
+            // The outlet filter. Served here because a reviewer need not hold
+            // a till (finance does not), and /admin/pos/outlets is pos.access.
+            // A reviewer reads every outlet's reports, so the names are no
+            // wider than the list itself.
+            'outlets' => DB::table('outlets')->where('is_active', true)->orderBy('name')->get(['id', 'name']),
         ]);
     }
 
@@ -2216,9 +2225,9 @@ class PosController extends Controller
      * May this user take part in this report's thread?
      *
      * Either side: whoever wrote the report (so she can answer the question that
-     * was asked of her) or anyone who can read reports at all. Deliberately not
-     * settings.view alone — that would let the owner ask and leave the clerk
-     * unable to answer, which is the current situation with extra steps.
+     * was asked of her) or anyone who reviews reports (pos.eod_review — the key
+     * on the review screens). Deliberately not the review key alone — that
+     * would let the owner ask and leave the clerk unable to answer.
      */
     private function canDiscussEodReport(?\App\Models\User $user, object $report): bool
     {
@@ -2227,7 +2236,7 @@ class PosController extends Controller
         }
 
         return (int) $report->user_id === (int) $user->id
-            || $user->can('settings.view');
+            || $user->can('pos.eod_review');
     }
 
     /**

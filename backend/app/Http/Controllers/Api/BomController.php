@@ -8,6 +8,7 @@ use App\Models\BomItem;
 use App\Models\Material;
 use App\Models\Product;
 use App\Services\ActivityLogService;
+use App\Support\CostVisibility;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -35,7 +36,9 @@ class BomController extends Controller
                 'name'        => $product->translations->firstWhere('language_code', 'en')?->name ?? $product->sku,
                 'is_producible' => $product->is_producible,
             ],
-            'data' => $boms,
+            // production.view_bom opens the BOM to outlet managers, who run the
+            // floor; what it costs is products.view_cost.
+            'data' => CostVisibility::forViewer($boms->toArray(), request()->user()),
         ]);
     }
 
@@ -106,7 +109,7 @@ class BomController extends Controller
 
             return response()->json([
                 'message' => 'Bill of Materials saved.',
-                'bom'     => $this->formatBom($bom->fresh()->load(['items.material', 'variant'])),
+                'bom'     => CostVisibility::forViewer($this->formatBom($bom->fresh()->load(['items.material', 'variant'])), $request->user()),
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -125,7 +128,7 @@ class BomController extends Controller
             ->where('product_id', $productId)
             ->findOrFail($bomId);
 
-        return response()->json(['bom' => $this->formatBom($bom, true)]);
+        return response()->json(['bom' => CostVisibility::forViewer($this->formatBom($bom, true), request()->user())]);
     }
 
     // =========================================================================
@@ -176,7 +179,7 @@ class BomController extends Controller
 
             return response()->json([
                 'message' => 'BOM updated.',
-                'bom'     => $this->formatBom($bom->fresh()->load(['items.material', 'variant'])),
+                'bom'     => CostVisibility::forViewer($this->formatBom($bom->fresh()->load(['items.material', 'variant'])), $request->user()),
             ]);
         } catch (\Exception $e) {
             DB::rollBack();

@@ -123,6 +123,13 @@ class SyncPermissions extends Command
         'products.delete'      => ['Delete Products',      'Delete products from the catalogue',          'Catalogue'],
         'products.import'      => ['Bulk Import Products',  'Import products in bulk from CSV/Excel files', 'Catalogue'],
         'products.export'      => ['Export Products',       'Export product catalogue to CSV',              'Catalogue'],
+        // What a product and a garment COST us — cost_price on price rows,
+        // material unit costs, BOM line costs and totals. Split from
+        // products.view / production.view_bom, which outlet managers hold to
+        // run the shop and the floor; the owner's field rule keeps cost to
+        // admin, finance and procurement (super_admin via Gate::before).
+        // Admin inherits it through products.*.
+        'products.view_cost'   => ['View Product Cost',     'See cost prices, material unit costs and BOM costs', 'Catalogue'],
 
         // ── POS ─────────────────────────────────────────────────────────────
         'pos.access'           => ['POS Access',           'Use the point-of-sale terminal',              'POS'],
@@ -134,6 +141,12 @@ class SyncPermissions extends Command
         'pos.close_register'   => ['Close Cash Register',  'Close and reconcile a cash register',         'POS'],
         'pos.returns'          => ['Process Returns',      'Process item returns at POS',                 'POS'],
         'pos.cash_management'  => ['POS Cash Management',  'Perform cash deposits, withdrawals and adjustments on a register', 'POS'],
+        // Reading every cashier's end-of-day report, acknowledging it and
+        // answering in its thread. Was settings.view, which made reviewing
+        // takings the same key as reading Setup — and handed Setup to every
+        // outlet manager. Not a till permission: finance reviews takings and
+        // has no till, so the review routes stand outside pos.access.
+        'pos.eod_review'       => ['Review EoD Reports',   'Read, acknowledge and discuss cashiers\' end-of-day reports', 'POS'],
 
         // ── Marketing & storefront ──────────────────────────────────────────
         // Split out of products.view, which is a READ permission on the
@@ -325,6 +338,8 @@ class SyncPermissions extends Command
             // Beyond a cashier at the same till. discount_override makes this
             // role the escalation target when a cashier hits the 5% ceiling.
             'pos.cash_management', 'pos.discount_override',
+            // Reviewing the shop's end-of-day reports (was settings.view).
+            'pos.eod_review',
             // Chasing what a customer still owes is a manager's job, not a
             // cashier's — the till key stopped carrying it.
             'receivables.view',
@@ -385,6 +400,7 @@ class SyncPermissions extends Command
             'products.view',
             // Costing materials against product BOMs is procurement's job
             'production.view_bom',
+            'products.view_cost',
             // Payments - view transaction history for PO-related payments
             'payments.view',
             // Reports - procurement officers need spend reports
@@ -413,6 +429,7 @@ class SyncPermissions extends Command
             '@self', '@workspace', '@buying', '@stock',
             'products.view',
             'production.view_bom',
+            'products.view_cost',
             'payments.view',
             'reports.view', 'reports.export',
             'expenses.view',
@@ -429,8 +446,14 @@ class SyncPermissions extends Command
             // Reports - all reports including financial
             'reports.view', 'reports.export', 'reports.financial',
             'receivables.view',
+            // End-of-day reports: the takings finance reconciles against.
+            'pos.eod_review',
             // Orders - view only (for payment context)
             'orders.view',
+            // Cost figures (margins, COGS context). Deliberately NOT given
+            // products.view with it — this role reads cost where it already
+            // reaches it, it does not gain the catalogue screens.
+            'products.view_cost',
         ],
 
     ];

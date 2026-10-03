@@ -7,6 +7,7 @@ use App\Models\Comment;
 use App\Models\User;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
+use App\Services\RecordVisibility;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -52,6 +53,14 @@ class CommentController extends Controller
 
         $modelClass = self::MODEL_MAP[$request->model];
 
+        // A thread is as private as its record. The route is open to all
+        // staff, so this is the only check between a tailor and the
+        // discussion on any sales or purchase order. 404, not 403: the
+        // record's existence is not the caller's business either.
+        if (!RecordVisibility::canView($request->user(), $modelClass, (int) $request->id)) {
+            return response()->json(['message' => 'Not found.'], 404);
+        }
+
         $comments = Comment::with('user:id,first_name,last_name')
             ->where('commentable_type', $modelClass)
             ->where('commentable_id', $request->id)
@@ -78,6 +87,11 @@ class CommentController extends Controller
         ]);
 
         $modelClass = self::MODEL_MAP[$validated['model']];
+
+        // Same rule as reading: you post only where you could open the record.
+        if (!RecordVisibility::canView($request->user(), $modelClass, (int) $validated['id'])) {
+            return response()->json(['message' => 'Not found.'], 404);
+        }
 
         // Verify the model exists
         $modelInstance = $modelClass::findOrFail($validated['id']);

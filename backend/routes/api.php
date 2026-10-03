@@ -644,6 +644,12 @@ Route::prefix('v1')->group(function () {
                 Route::get('/export',                    [OrderController::class, 'exportCsv']);
                 // Also before /{id} for the same reason as /export.
                 Route::get('/pending-queue',             [OrderController::class, 'pendingQueue']);
+                // The shipping-fee modal's method picker: active methods only,
+                // read-only. Gated by the action it serves, not settings.view —
+                // the Setup endpoint it used to call is what dragged Setup into
+                // every outlet manager's login. Same data as the POS picker.
+                Route::get('/shipping-methods',          [PosController::class, 'shippingMethods'])
+                    ->middleware('permission:orders.set_shipping_fee,sanctum');
                 Route::get('/{id}',                      [OrderController::class, 'show']);
                 Route::get('/{id}/audit-log',            [OrderController::class, 'auditLog']);
                 Route::get('/{id}/invoice',              [OrderController::class, 'generateInvoice']);
@@ -839,6 +845,18 @@ Route::prefix('v1')->group(function () {
             Route::get('pos/outstanding-balances', [PosController::class, 'outstandingBalances'])
                 ->middleware('permission:receivables.view,sanctum');
 
+            // EoD review — reading every cashier's report, acknowledging it.
+            // Outside the pos.access group for the same reason as receivables:
+            // finance reviews takings and holds no till. Was settings.view,
+            // which tied reviewing takings to reading Setup. Commenting stays
+            // in the pos group below: the AUTHOR answers there too, and
+            // canDiscussEodReport authorises per report.
+            Route::middleware('permission:pos.eod_review,sanctum')->prefix('pos/reports')->group(function () {
+                Route::get('eod-admin',                   [PosController::class, 'adminListEodReports']);
+                Route::get('eod-admin/{id}',              [PosController::class, 'adminGetEodReport']);
+                Route::post('eod-admin/{id}/acknowledge', [PosController::class, 'acknowledgeEodReport']);
+            });
+
             Route::middleware('permission:pos.access,sanctum')->prefix('pos')->group(function () {
                 Route::get('outlets',                   [PosController::class, 'outlets']);
                 Route::get('register/status',           [PosController::class, 'registerStatus']);
@@ -853,18 +871,12 @@ Route::prefix('v1')->group(function () {
                 Route::get('reports/end-of-day',        [PosController::class, 'endOfDay']);
                 Route::get('reports/user-eod',          [PosController::class, 'getUserEodReport']);
                 Route::post('reports/user-eod',         [PosController::class, 'saveUserEodReport']);
-                // Admin EoD report listing + delivery settings (settings.view / settings.edit gated)
-                Route::get('reports/eod-admin',         [PosController::class, 'adminListEodReports'])
-                    ->middleware('permission:settings.view,sanctum');
-                Route::get('reports/eod-admin/{id}',    [PosController::class, 'adminGetEodReport'])
-                    ->middleware('permission:settings.view,sanctum');
-                // Acknowledging is an owner act, so it keeps the settings.view gate.
-                Route::post('reports/eod-admin/{id}/acknowledge', [PosController::class, 'acknowledgeEodReport'])
-                    ->middleware('permission:settings.view,sanctum');
-                // Commenting is deliberately NOT settings.view-gated: the clerk who
+                // EoD review (list, detail, acknowledge) moved above, outside
+                // this group, on pos.eod_review. Delivery settings stay Setup.
+                // Commenting is deliberately NOT review-gated: the clerk who
                 // wrote the report must be able to answer the question asked of it.
                 // Authorisation is per-report in canDiscussEodReport() — author or
-                // anyone who can read reports.
+                // anyone who reviews reports.
                 Route::post('reports/eod/{id}/comments', [PosController::class, 'addEodReportComment']);
                 Route::get('reports/eod-settings',      [PosController::class, 'getEodDeliverySettings'])
                     ->middleware('permission:settings.view,sanctum');

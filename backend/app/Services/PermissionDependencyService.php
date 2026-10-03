@@ -60,12 +60,15 @@ class PermissionDependencyService
         'orders.edit_items'       => ['orders.view', 'orders.edit', 'products.view'],
         'orders.cancel'           => ['orders.view'],
         'orders.set_deposit'      => ['orders.view'],
-        // The shipping-fee modal loads GET /admin/shipping/methods, gated
-        // by settings.view - without it the method picker 403s.
-        'orders.set_shipping_fee' => ['orders.view', 'settings.view'],
+        // The shipping-fee modal's method picker reads
+        // GET /admin/orders/shipping-methods, gated by set_shipping_fee
+        // itself. It used to read the Setup endpoint /admin/shipping/methods,
+        // which is why this entry once pulled in settings.view — and with it
+        // all of Setup for every outlet manager (Phase 1C, "Setup leak").
+        'orders.set_shipping_fee' => ['orders.view'],
         'orders.authorize_dispatch' => ['orders.view'],
         // Reducing a paid receipt's shipping is a superset of setting it.
-        'orders.reduce_shipping_fee' => ['orders.set_shipping_fee', 'orders.view', 'settings.view'],
+        'orders.reduce_shipping_fee' => ['orders.set_shipping_fee', 'orders.view'],
         // Refunds are also reachable via the payment-transactions ledger
         // (nested under permission:payments.view) and need the underlying
         // payment record either way.

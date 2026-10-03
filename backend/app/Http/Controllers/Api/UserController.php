@@ -576,16 +576,34 @@ class UserController extends Controller
 
     /**
      * Get users by Spatie role name.
+     *
+     * Open to every staff login (assignee pickers), so by default it answers
+     * with who and where only: id, name, outlet. Email and phone are staff
+     * contact details and stay with users.view — the permission that opens
+     * the staff list itself.
      */
-    public function byRole($role)
+    public function byRole(Request $request, $role)
     {
+        $withContacts = $request->user()->can('users.view');
+
         $users = User::whereHas('roles', fn ($q) => $q->where('name', $role))
             ->where('status', 'active')
             ->select('id', 'first_name', 'last_name', 'email', 'phone')
             ->get()
-            ->map(function ($user) {
-                $user->outlet = $user->primaryOutlet();
-                return $user;
+            ->map(function ($user) use ($withContacts) {
+                $outlet = $user->primaryOutlet();
+
+                if ($withContacts) {
+                    $user->outlet = $outlet;
+                    return $user;
+                }
+
+                return [
+                    'id'         => $user->id,
+                    'first_name' => $user->first_name,
+                    'last_name'  => $user->last_name,
+                    'outlet'     => $outlet ? ['id' => $outlet->id, 'name' => $outlet->name] : null,
+                ];
             });
 
         return response()->json(['data' => $users]);

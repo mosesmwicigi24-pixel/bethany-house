@@ -107,8 +107,10 @@ class StaffExposureTest extends TestCase
         }
         $this->assertStringContainsString('10000', $this->getJson("/api/v1/products/{$product->slug}")->getContent(), 'the selling price still shows');
 
-        // The admin price editor still gets the cost it edits.
-        $this->staff(['products.view']);
+        // The admin price editor still gets the cost it edits — when its user
+        // may see cost. Phase 1C: products.view alone (an outlet manager) no
+        // longer carries cost; products.view_cost does.
+        $this->staff(['products.view', 'products.view_cost']);
         $this->assertStringContainsString('cost_price', $this->getJson("/api/v1/admin/products/{$product->id}")->getContent());
     }
 }
