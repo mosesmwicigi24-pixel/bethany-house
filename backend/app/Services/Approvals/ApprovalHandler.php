@@ -90,6 +90,26 @@ abstract class ApprovalHandler
     abstract public function reopen(Model $record, User $maker): void;
 
     /**
+     * Can a signer send this kind of record back to its maker for changes
+     * (ApprovalEngine::requestChanges)? Off unless the handler says how the
+     * record goes back — onChangesRequested below.
+     */
+    public function supportsChangeRequests(): bool
+    {
+        return false;
+    }
+
+    /**
+     * A signer asked for changes: put the record back with its maker, who
+     * edits it and submits it again (a new version). Runs INSIDE the engine's
+     * transaction, like onRejected.
+     */
+    public function onChangesRequested(ApprovalRequest $request, Model $record, User $by, string $note): void
+    {
+        throw new \LogicException(static::class . ' does not support change requests.');
+    }
+
+    /**
      * Where the record sits, for a signer bounded to outlets (Phase 4A data
      * scope): [the capability that governs reading it, the outlet ids it
      * belongs to]. A record at several outlets (a transfer) is in scope when

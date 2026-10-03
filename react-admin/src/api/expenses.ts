@@ -45,7 +45,7 @@ export interface Expense {
   is_recurring: boolean
   recurrence_frequency: string | null
   recurrence_end_date: string | null
-  status: 'draft' | 'pending_approval' | 'approved' | 'rejected' | 'paid' | 'cancelled'
+  status: 'draft' | 'pending_approval' | 'changes_requested' | 'approved' | 'rejected' | 'paid' | 'cancelled'
   submitted_by: number | null
   submitted_at: string | null
   approved_by: number | null
@@ -75,7 +75,7 @@ export interface ExpenseApproval {
   id: number
   expense_id: number
   approver_id: number
-  action: 'approved' | 'rejected' | 'requested_info'
+  action: 'approved' | 'rejected' | 'changes_requested' | 'requested_info'
   comments: string | null
   acted_at: string
   step: number
@@ -151,6 +151,29 @@ export interface CreateExpensePayload {
   }>
 }
 
+export type ExpenseBulkAction = 'approve' | 'reject' | 'request_changes' | 'mark_paid'
+
+export interface ExpenseBulkResult {
+  id: number
+  /** null when the expense was not found or is not one the caller can see. */
+  reference: string | null
+  ok: boolean
+  status_after: Expense['status'] | null
+  /** e.g. APPROVED, SIGNED_AWAITING_NEXT_BAND, SELF_APPROVAL, NOT_YOUR_BAND, NOT_FOUND */
+  code: string
+  /** Plain words, ready to show. */
+  message: string
+}
+
+export interface ExpenseBulkResponse {
+  action: ExpenseBulkAction
+  results: ExpenseBulkResult[]
+  summary: { requested: number; succeeded: number; failed: number; by_code: Record<string, number> }
+}
+
+/** The bulk cap the server enforces (ids: 1..100). */
+export const EXPENSE_BULK_MAX = 100
+
 // ── API Calls ─────────────────────────────────────────────────────────────────
 
 const BASE = '/v1/admin/expenses'
@@ -185,6 +208,16 @@ export const expensesApi = {
 
   reject: (id: number, reason: string) =>
     post<{ message: string; expense: Expense }>(`${BASE}/${id}/reject`, { reason }),
+
+  // Back to its maker with a note; the maker edits it and submits it again
+  // (a new approval version). Whoever may reject it now may do this.
+  requestChanges: (id: number, reason: string) =>
+    post<{ message: string; expense: Expense }>(`${BASE}/${id}/request-changes`, { reason }),
+
+  // Up to 100 at once. Each item runs its single action's own path and rules
+  // on the server and is reported on its own — never all-or-nothing.
+  bulk: (ids: number[], action: ExpenseBulkAction, reason?: string) =>
+    post<ExpenseBulkResponse>(`${BASE}/bulk`, { ids, action, reason: reason || undefined }),
 
   markPaid: (id: number, data?: { payment_reference?: string; payment_method?: string }) =>
     post<{ message: string; expense: Expense }>(`${BASE}/${id}/mark-paid`, data ?? {}),
@@ -239,6 +272,7 @@ export const expensesApi = {
 export const EXPENSE_STATUS_CONFIG = {
   draft:            { label: 'Draft',            bg: 'bg-surface-100',   text: 'text-surface-500',   dot: 'bg-surface-400'   },
   pending_approval: { label: 'Pending Approval', bg: 'bg-warning-light', text: 'text-warning',       dot: 'bg-warning'       },
+  changes_requested:{ label: 'Changes Requested', bg: 'bg-brand-50',     text: 'text-brand-700',     dot: 'bg-brand-500'     },
   approved:         { label: 'Approved',          bg: 'bg-info-light',    text: 'text-info',          dot: 'bg-info'          },
   paid:             { label: 'Paid',              bg: 'bg-success-light', text: 'text-success',       dot: 'bg-success'       },
   rejected:         { label: 'Rejected',          bg: 'bg-danger-light',  text: 'text-danger',        dot: 'bg-danger'        },

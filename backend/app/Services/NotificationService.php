@@ -758,6 +758,31 @@ class NotificationService
         );
     }
 
+    /**
+     * A signer sent a record back to the people who raised it, asking for
+     * changes (ApprovalEngine::requestChanges). They edit it and submit again.
+     *
+     * @param  int[]  $makerIds
+     */
+    public static function changesRequested(array $makerIds, int $requestId, string $title, string $note, ?User $by, ?string $link): void
+    {
+        $makers = User::whereIn('id', array_values(array_unique(array_filter($makerIds))))->get();
+        if ($makers->isEmpty()) {
+            return;
+        }
+        $who = $by ? (trim("{$by->first_name} {$by->last_name}") ?: $by->email) : null;
+        self::send(
+            $makers,
+            new InAppNotification(
+                title:     "{$title} — changes requested",
+                body:      ($who ? "{$who} asks: " : 'Asked: ') . $note . ' Edit it and submit it again.',
+                actionUrl: $link ?? '/approvals?tab=mine',
+                icon:      'approval',
+                data:      ['approval_request_id' => $requestId, 'status' => 'changes_requested'],
+            )
+        );
+    }
+
     public static function stockAdjustmentPendingApproval(
         int $adjustmentId,
         string $productName,
