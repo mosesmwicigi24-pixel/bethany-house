@@ -74,7 +74,7 @@ class ScopedDashboardTest extends TestCase
 
     public function test_a_tailor_still_gets_no_revenue_figure(): void
     {
-        // Holds neither orders.view nor reports.view; the group's takings are
+        // Holds neither orders.view nor reports.sales; the group's takings are
         // exactly what the gate exists to withhold.
         $this->actAs('tailor');
         $this->paidSaleBy(User::factory()->create(), 90000);

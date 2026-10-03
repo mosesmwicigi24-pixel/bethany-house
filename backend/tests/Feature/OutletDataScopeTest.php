@@ -178,4 +178,26 @@ class OutletDataScopeTest extends TestCase
         $ids = collect($this->getJson('/api/v1/admin/orders')->assertOk()->json('data'))->pluck('outlet_id')->unique();
         $this->assertSame([$this->mine->id], $ids->values()->all());
     }
+
+    public function test_every_report_page_route_is_business_wide(): void
+    {
+        // Phase 3A split the one reports group into a group per page; the
+        // business-wide switch has to ride on every one of them (and on the
+        // PDFs, Storefront Insights and the Signals feeds) or a page quietly
+        // drops to the manager's outlet while its neighbours do not.
+        $pageRoutes = 0;
+        foreach (app('router')->getRoutes() as $route) {
+            $middleware = $route->gatherMiddleware();
+            $isReportPage = collect($middleware)->contains(
+                fn ($m) => is_string($m) && str_starts_with($m, 'report.page:'));
+            if (! $isReportPage) {
+                continue;
+            }
+            $pageRoutes++;
+            $this->assertContains('report.business_wide', $middleware,
+                "{$route->uri()} names a report page but is not business-wide");
+        }
+
+        $this->assertGreaterThan(20, $pageRoutes, 'the report routes were found');
+    }
 }
