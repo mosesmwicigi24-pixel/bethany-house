@@ -19,7 +19,7 @@ use Illuminate\Http\Request;
  *   POST /admin/approvals/{id}/sign        {approvable_id, version, notes?}
  *   POST /admin/approvals/{id}/reject      {approvable_id, version, reason}
  *   POST /admin/approvals/{id}/resubmit    the maker, after a rejection or expiry → a new version
- *   GET  /admin/approvals/thresholds       the bands in force (any signer may read them)
+ *   GET  /admin/approvals/thresholds       the bands in force (signers and the owner)
  *   PUT  /admin/approvals/thresholds/{event}  super admin only; audited
  *
  * Who may sign is the engine's decision (band key, maker ≠ checker, one
@@ -111,8 +111,17 @@ class ApprovalController extends Controller
         ], 201);
     }
 
-    public function thresholds(): JsonResponse
+    public function thresholds(Request $request): JsonResponse
     {
+        // The bands are for the people who sign them (and the owner).
+        $u = $request->user();
+        abort_unless(
+            $u->can('procurement.approve') || $u->can('inventory.approve') || $u->can('expenses.approve')
+            || $u->can('approvals.finance_sign') || $u->can('payments.void') || $u->can('payments.reassign')
+            || $u->can('approvals.super_sign'),
+            403, 'The approval thresholds are for those who sign them.',
+        );
+
         return response()->json(['data' => $this->engine->thresholds()->overview()]);
     }
 

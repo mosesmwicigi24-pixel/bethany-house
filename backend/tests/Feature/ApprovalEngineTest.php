@@ -478,6 +478,8 @@ class ApprovalEngineTest extends TestCase
         Sanctum::actingAs($this->fm);
         $this->getJson('/api/v1/admin/approvals/thresholds')->assertOk()
             ->assertJsonFragment(['event' => 'purchase_order']);
+        Sanctum::actingAs($this->user('pos_clerk'));
+        $this->getJson('/api/v1/admin/approvals/thresholds')->assertForbidden();
     }
 
     public function test_a_threshold_set_for_later_does_nothing_until_then_and_never_backdates(): void
