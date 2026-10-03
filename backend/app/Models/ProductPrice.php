@@ -82,7 +82,9 @@ class ProductPrice extends Model
             // save is judged: a console seed or migration is not staff
             // discretion. An existing row may be saved again, or changed, so
             // long as its markdown does not get deeper — nothing is repriced.
-            $actor = auth()->user();
+            // (DiscountRule::actor(): the signed-in user, or the maker of a
+            // signed proposal being applied — Phase 3C.)
+            $actor = \App\Support\DiscountRule::actor();
             if ($actor instanceof User) {
                 $oldRegular = $price->exists ? (float) $price->getOriginal('regular_price') : null;
                 $oldSale    = $price->exists && $price->getOriginal('sale_price') !== null

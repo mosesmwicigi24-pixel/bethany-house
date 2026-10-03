@@ -152,7 +152,11 @@ final class SellingPriceChangeHandler extends ProposalHandler
     {
         $row = ProductPrice::whereKey($p->subject_id)->lockForUpdate()->firstOrFail();
         $row->fill(array_intersect_key($new, $this->fields()));
-        $row->save();   // the model's own rule (sale below regular) still holds
+        // The model's own rules still hold (sale below regular; the owner's 5%),
+        // judged on the MAKER's discretion: a markdown the owner proposed stays
+        // his when finance signs it (App\Support\DiscountRule::judgingAs()).
+        $maker = $p->maker_id ? User::find($p->maker_id) : $by;
+        \App\Support\DiscountRule::judgingAs($maker ?? $by, fn () => $row->save());
     }
 
     public function link(ChangeProposal $p): ?string

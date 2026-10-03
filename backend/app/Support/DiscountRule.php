@@ -69,6 +69,41 @@ final class DiscountRule
     /** The one role that may exceed the maximum. */
     public const OWNER_ROLE = 'super_admin';
 
+    /** Set while a signed proposal applies: whose discretion the save is. */
+    private static ?User $judged = null;
+
+    /**
+     * The person whose discretion a price save is: the signed-in user, unless
+     * a signed proposal is being applied (judgingAs()), when it is the
+     * proposal's MAKER — a finance signature on the owner's markdown is still
+     * the owner's markdown, and a signer never widens what a maker asked for.
+     */
+    public static function actor(): ?User
+    {
+        if (self::$judged !== null) {
+            return self::$judged;
+        }
+        $user = auth()->user();
+
+        return $user instanceof User ? $user : null;
+    }
+
+    /**
+     * @template T
+     * @param  callable(): T  $fn
+     * @return T
+     */
+    public static function judgingAs(?User $user, callable $fn): mixed
+    {
+        $previous     = self::$judged;
+        self::$judged = $user;
+        try {
+            return $fn();
+        } finally {
+            self::$judged = $previous;
+        }
+    }
+
     /** The single number. */
     public static function capPercent(): float
     {

@@ -59,6 +59,20 @@ final class PriceRowWriter
             return [];
         }
 
+        // The owner's 5% rule judges the person asking, before anything is
+        // proposed: a markdown deeper than 5% is the super admin's alone, and
+        // no signature can make it anyone else's (App\Support\DiscountRule).
+        $askedSale = $price['sale_price'] ?? null;
+        $askedSale = ($askedSale === null || !is_numeric($askedSale) || (float) $askedSale <= 0) ? null : (float) $askedSale;
+        if (is_numeric($price['regular_price'] ?? null)
+            && ($refusal = \App\Support\DiscountRule::salePriceRefusal(
+                $user, (float) $price['regular_price'], $askedSale,
+                $row->regular_price === null ? null : (float) $row->regular_price,
+                $row->sale_price === null ? null : (float) $row->sale_price,
+            ))) {
+            throw new \App\Exceptions\DiscountAboveMaximum('sale_price', $refusal);
+        }
+
         if ($withDates) {
             $row->sale_start_date = $price['sale_start_date'] ?? null;
             $row->sale_end_date   = $price['sale_end_date'] ?? null;

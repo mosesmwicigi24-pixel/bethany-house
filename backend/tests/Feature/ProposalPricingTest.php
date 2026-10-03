@@ -209,13 +209,15 @@ class ProposalPricingTest extends TestCase
 
     public function test_a_new_sale_price_below_cost_is_judged_on_the_sale(): void
     {
-        $row = $this->priced(1000, 800);
+        // A 5% sale — the most anyone but the owner may mark down (the owner's
+        // discount rule) — that still lands under a thin 980 cost.
+        $row = $this->priced(1000, 980);
 
-        $this->savePrice($this->admin, $row, ['regular_price' => 1000, 'sale_price' => 700])->assertOk();
+        $this->savePrice($this->admin, $row, ['regular_price' => 1000, 'sale_price' => 950])->assertOk();
         $p = $this->latest('selling_price_change');
-        $this->assertEqualsWithDelta(12.5, $p->measures['below_cost_pct'], 0.001, '700 vs 800 cost');
-        $this->assertEqualsWithDelta(30.0, $p->measures['change_pct']['sale_price'], 0.001, 'a new sale 30% off');
-        $this->assertNull($row->fresh()->sale_price, 'no sale until it is signed');
+        $this->assertEqualsWithDelta(3.06, $p->measures['below_cost_pct'], 0.001, '950 vs 980 cost, to the cent of a percent');
+        $this->assertEqualsWithDelta(5.0, $p->measures['change_pct']['sale_price'], 0.001, 'a new sale 5% off');
+        $this->assertNull($row->fresh()->sale_price, 'below cost: no sale until it is signed');
     }
 
     public function test_with_no_cost_on_the_book_a_price_change_needs_every_band(): void

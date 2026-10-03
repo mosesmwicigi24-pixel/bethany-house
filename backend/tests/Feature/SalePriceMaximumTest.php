@@ -67,13 +67,17 @@ class SalePriceMaximumTest extends TestCase
         return $user;
     }
 
-    /** Written as existing data — before anybody signs in. */
+    /**
+     * Written as existing data — before anybody signs in. The row carries a
+     * book cost, so Phase 3C can judge a price change against it: a change
+     * within 10% that stays above cost applies at once; more waits for finance.
+     */
     private function product(float $regular = 1000, ?float $sale = null): Product
     {
         $product = Product::factory()->create();
         ProductPrice::create([
             'product_id' => $product->id, 'product_variant_id' => null, 'currency_code' => 'KES',
-            'regular_price' => $regular, 'sale_price' => $sale,
+            'regular_price' => $regular, 'sale_price' => $sale, 'cost_price' => 500,
         ]);
 
         return $product;
@@ -117,7 +121,21 @@ class SalePriceMaximumTest extends TestCase
         $p = $this->product();
         $this->owner();
 
-        $this->putPrice($p, 1000, 800)->assertOk();
+        // The 5% rule lets the owner through; a 20% move is still a Phase 3C
+        // selling-price change over 10%, so it waits for finance's signature.
+        $this->putPrice($p, 1000, 800)->assertOk()->assertJsonPath('proposals.0.status', 'pending');
+        $this->assertNull($this->salePrice($p));
+
+        // Finance signs. The markdown is the OWNER's discretion, not the
+        // signer's: the price record judges its maker and saves it.
+        $finance = User::factory()->create(['status' => 'active']);
+        $finance->givePermissionTo(Permission::findOrCreate('approvals.finance_sign', 'sanctum'));
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        $request = \App\Models\ApprovalRequest::where('event', 'selling_price_change')->latest('id')->firstOrFail();
+        Sanctum::actingAs($finance->fresh());
+        $this->postJson("/api/v1/admin/approvals/{$request->id}/sign", [
+            'approvable_id' => $request->approvable_id, 'version' => $request->version,
+        ])->assertOk()->assertJsonPath('request.status', 'approved');
         $this->assertSame(800.0, $this->salePrice($p));
     }
 
@@ -166,8 +184,10 @@ class SalePriceMaximumTest extends TestCase
 
         $this->assertEquals($before, ProductPrice::where('product_id', $p->id)->first()->toArray());
 
-        // Taking it off, or making it shallower, is always fine.
-        $this->putPrice($p, 1000, 900)->assertOk();
+        // Taking it off, or making it shallower, is always fine. (Within 10%,
+        // so Phase 3C applies the shallower price at once.)
+        $this->putPrice($p, 1000, 850)->assertOk();
+        $this->assertSame(850.0, $this->salePrice($p));
         $this->putPrice($p, 1000, null)->assertOk();
         $this->assertNull($this->salePrice($p));
     }
