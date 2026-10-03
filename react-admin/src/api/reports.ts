@@ -166,7 +166,7 @@ export const reportsApi = {
     dataQuality: (params: Record<string, string | number>) =>
         get<DataQualityReport>(`${BASE}/data-quality`, { params }),
 
-    // Outlets a report can be filtered by (reports.view; no POS access needed).
+    // Outlets a report can be filtered by (any report page; no POS access needed).
     outlets: () => get<{ data: { id: number; name: string }[] }>(`${BASE}/outlets`),
 
     // Row-level drill-down: the same query as the KPI, aggregation removed.

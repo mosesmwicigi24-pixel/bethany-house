@@ -2400,8 +2400,10 @@ export default function ProductionOrderDetailPage() {
                     <PdfDownloadButton type="production-orders" id={order.id} label="PDF"
                         className="!rounded-lg !px-2.5 !h-[30px] !min-h-[30px] sm:!h-9 sm:!min-h-[36px] !text-[11px] sm:!text-xs" />
                     {/* Costing shows profit and margins: reports.financial, as
-                        the server now requires (cycle 9). */}
-                    {can("reports.financial") && (
+                        the server now requires (cycle 9) — and it is a page of
+                        the Production report, so reports.production too
+                        (Phase 3A; same pair as its route guard). */}
+                    {can("reports.financial") && can("reports.production") && (
                     <button
                         onClick={() => navigate(`/reports/production/costing/${order.id}`)}
                         className={clsx(ACT_BTN, "hover:!border-success-300 hover:!text-success-700")}
