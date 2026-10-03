@@ -248,6 +248,36 @@ class ProposalPricingTest extends TestCase
         $this->assertSame(1000.0, (float) $row->fresh()->regular_price, 'expired: still 1,000 — never approved by time');
     }
 
+    public function test_a_rejected_price_comes_back_only_as_a_new_version_of_the_same_value(): void
+    {
+        $row = $this->priced(1000, 800);
+        $this->savePrice($this->admin, $row, ['regular_price' => 1300])->assertOk();
+        $p = $this->latest('selling_price_change');
+        $this->reject($this->fm, $this->requestOf($p))->assertOk();
+
+        // Only the maker resubmits; it becomes version 2, linked to version 1.
+        Sanctum::actingAs($this->fm);
+        $old = $this->requestOf($p);
+        $this->postJson("/api/v1/admin/approvals/{$old->id}/resubmit")->assertForbidden();
+        Sanctum::actingAs($this->admin);
+        $this->postJson("/api/v1/admin/approvals/{$old->id}/resubmit")->assertCreated()
+            ->assertJsonPath('request.version', 2)->assertJsonPath('request.supersedes_id', $old->id);
+        $this->assertSame(ChangeProposal::PENDING, $p->fresh()->status);
+        $this->assertSame(1000.0, (float) $row->fresh()->regular_price);
+
+        $this->sign($this->fm, $this->requestOf($p))->assertOk();
+        $this->assertSame(1300.0, (float) $row->fresh()->regular_price);
+
+        // Once the live value has moved on, an old rejected proposal cannot come back.
+        $this->savePrice($this->admin, $row->fresh(), ['regular_price' => 1700])->assertOk();
+        $q = $this->latest('selling_price_change');
+        $this->reject($this->fm, $this->requestOf($q))->assertOk();
+        DB::table('product_prices')->where('id', $row->id)->update(['regular_price' => 1310]);
+        Sanctum::actingAs($this->admin);
+        $this->postJson("/api/v1/admin/approvals/{$this->requestOf($q)->id}/resubmit")->assertStatus(422);
+        $this->assertSame(1310.0, (float) $row->fresh()->regular_price);
+    }
+
     public function test_a_second_change_while_one_waits_is_refused_and_nothing_of_the_save_is_kept(): void
     {
         $row = $this->priced(1000, 800);
