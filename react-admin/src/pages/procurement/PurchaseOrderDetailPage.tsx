@@ -314,7 +314,8 @@ export default function PurchaseOrderDetailPage() {
     });
 
     const markOrderedMutation = useMutation({
-        mutationFn: () => post<any>(`/v1/admin/purchase-orders/${id}/status`, { status: "ordered" }),
+        // The route is PATCH (POST was a 405) — through the API helper (4D).
+        mutationFn: () => purchaseOrderApi.updateStatus(Number(id), "ordered"),
         onSuccess: () => { toast.success("PO marked as ordered - sent to supplier"); refresh(); },
         onError: (e: any) => toast.error(e?.message ?? "Failed to update status"),
     });

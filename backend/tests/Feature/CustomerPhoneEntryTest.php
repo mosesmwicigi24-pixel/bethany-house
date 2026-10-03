@@ -105,6 +105,8 @@ class CustomerPhoneEntryTest extends TestCase
         }
         if ($admin) {
             $u->assignRole(Role::findOrCreate('admin', 'sanctum'));
+            // The catalogue admin's outlet reach — a permission since 4D.
+            $u->givePermissionTo(Permission::findOrCreate('outlets.all_access', 'sanctum'));
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($u);

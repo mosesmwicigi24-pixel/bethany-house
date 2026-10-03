@@ -456,6 +456,12 @@ class StockAdjustmentsController extends Controller
         $reverseChange  = -$original->quantity_change;
         $user           = auth()->user();
 
+        // A reversal undoes an approval, so it is the next check in the chain:
+        // whoever approved the original may not also be the one to reverse it
+        // (4D; approved_by is the creator when the reason needed no approval).
+        // Before the transaction, so the refusal's audit row is not rolled back.
+        \App\Support\MakerChecker::assertNotMaker($user, 'stock_adjustment.reverse', $original, $original->approved_by);
+
         // Check won't go negative
         if ($reverseChange < 0 && ($item->quantity_on_hand + $reverseChange) < 0) {
             return response()->json([

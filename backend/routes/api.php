@@ -1840,12 +1840,9 @@ Route::prefix('v1')->group(function () {
             Route::get('/cash-register/status',         [PosController::class, 'registerStatus']);
             Route::get('/cash-register/transactions',   [PosController::class, 'cashTransactions']);
             Route::get('/cash-register/summary',        [PosController::class, 'cashSummary']);
-            Route::post('/cash-register/deposit',       [PosController::class, 'cashDeposit'])
-                ->middleware(['permission:pos.cash_management,sanctum', 'owner.no_transact']);
-            Route::post('/cash-register/withdrawal',    [PosController::class, 'cashWithdrawal'])
-                ->middleware(['permission:pos.cash_management,sanctum', 'owner.no_transact']);
-            Route::post('/cash-register/adjustment',    [PosController::class, 'cashAdjustment'])
-                ->middleware(['permission:pos.cash_management,sanctum', 'owner.no_transact']);
+            // deposit / withdrawal / adjustment were removed (4D): they named
+            // PosController methods that never existed, so every call was a 500,
+            // and nothing in the console called them.
             Route::get('/cash-register/reconciliation', [PosController::class, 'reconciliation']);
         });
 

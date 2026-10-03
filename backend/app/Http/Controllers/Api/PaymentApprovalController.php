@@ -354,7 +354,10 @@ class PaymentApprovalController extends Controller
 
             // Append note to order
             $note = "Payment {$payment->payment_number} approved by " . $request->user()->first_name . '.';
-            if ($validated['notes']) {
+            // notes is optional (nullable): absent, it is not a key at all —
+            // reading it bare was an "Undefined array key" 500 that rolled the
+            // whole approval back (4D).
+            if (!empty($validated['notes'])) {
                 $note .= ' Note: ' . $validated['notes'];
             }
             $order->update(['notes' => ($order->notes ? $order->notes . "\n\n" : '') . $note]);

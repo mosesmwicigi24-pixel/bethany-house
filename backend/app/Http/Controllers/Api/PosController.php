@@ -2707,11 +2707,15 @@ class PosController extends Controller
 
     // --- Private helpers ------------------------------------------------------
 
+    /**
+     * Not limited to assigned outlets at the till: outlets.all_access (admin,
+     * and super_admin by bypass). A permission since 4D, where it was the role
+     * names — so a role granted it, or a role edited to lose it, behaves as
+     * the Roles screen says. Outlet scope only; discounts never read this.
+     */
     private function isAdminUser($user): bool
     {
-        return $user->isSuperAdmin()
-            || $user->hasRole('super_admin')
-            || $user->hasRole('admin');
+        return $user->can('outlets.all_access');
     }
 
     /**

@@ -56,7 +56,7 @@ class RoleCatalogueV2Test extends TestCase
             'notifications.view',
             'orders.authorize_dispatch', 'orders.cancel', 'orders.create', 'orders.edit', 'orders.edit_items',
             'orders.manage_returns', 'orders.reduce_shipping_fee', 'orders.set_deposit', 'orders.set_shipping_fee',
-            'orders.view', 'outlets.view',
+            'orders.view', 'outlets.all_access', 'outlets.view',
             'payments.record', 'payments.transactions', 'payments.upload_proof', 'payments.view',
             'pos.access', 'pos.eod_review', 'procurement.view',
             'production.approve_qc', 'production.configure_auto_assignees', 'production.confirm_order',
@@ -302,9 +302,38 @@ class RoleCatalogueV2Test extends TestCase
             ->map(fn ($row) => "{$row->r}:{$row->p}")->all();
     }
 
+    /**
+     * Later role migrations that carry the catalogue forward: the path from
+     * production's pre-Phase-2 shape to SPEC is Phase 2's migration and then
+     * these, in order (4D added outlets.all_access for admin).
+     */
+    private const LATER = ['2026_10_03_480001_outlets_all_access_permission.php'];
+
+    /** The whole chain as one migration: up() in order, down() in reverse. */
     private function migration(): object
     {
-        return require database_path('migrations/' . self::MIGRATION);
+        $chain = array_map(
+            fn (string $file) => require database_path('migrations/' . $file),
+            array_merge([self::MIGRATION], self::LATER),
+        );
+
+        return new class($chain) {
+            public function __construct(private array $chain) {}
+
+            public function up(): void
+            {
+                foreach ($this->chain as $m) {
+                    $m->up();
+                }
+            }
+
+            public function down(): void
+            {
+                foreach (array_reverse($this->chain) as $m) {
+                    $m->down();
+                }
+            }
+        };
     }
 
     /**

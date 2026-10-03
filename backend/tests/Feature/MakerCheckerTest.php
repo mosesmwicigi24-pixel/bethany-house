@@ -565,9 +565,8 @@ class MakerCheckerTest extends TestCase
         ['POST',  '/api/v1/pos/sales/1/return'],
         ['POST',  '/api/v1/pos/cash-register/open'],
         ['POST',  '/api/v1/pos/cash-register/close'],
-        ['POST',  '/api/v1/pos/cash-register/deposit'],
-        ['POST',  '/api/v1/pos/cash-register/withdrawal'],
-        ['POST',  '/api/v1/pos/cash-register/adjustment'],
+        // deposit / withdrawal / adjustment: removed in 4D (they named
+        // controller methods that never existed).
     ];
 
     public function test_a_super_admin_cannot_transact_on_any_pos_write_endpoint(): void

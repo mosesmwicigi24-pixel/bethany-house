@@ -31,6 +31,7 @@ final class MakerChecker
         'purchase_order.receive' => 'You approved this purchase order, so someone else must receive the goods against it.',
         'purchase_return.approve' => 'You raised this purchase return, so someone else must approve it.',
         'stock_adjustment.approve' => 'You raised this stock adjustment, so someone else must approve it.',
+        'stock_adjustment.reverse' => 'You approved this stock adjustment, so someone else must reverse it.',
         'stock_transfer.approve' => 'You raised this stock transfer, so someone else must approve it.',
         'expense.approve' => 'You recorded or submitted this expense, so someone else must approve it.',
         'payment.approve' => 'You recorded this payment, so someone else must approve it.',

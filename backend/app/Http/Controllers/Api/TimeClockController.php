@@ -63,11 +63,12 @@ class TimeClockController extends Controller
     private function availableOutletsFor($user)
     {
         // Staff are scoped to outlets they're assigned to via outlet_user.
-        // Admins/super admins aren't restricted - they may float between sites.
+        // outlets.all_access (admin; super_admin by bypass) is not restricted —
+        // they may float between sites. A permission since 4D, not role names.
         $query = Outlet::query()->active()
             ->select('id', 'name', 'outlet_type', 'latitude', 'longitude', 'geofence_radius_meters');
 
-        if (!$user->hasAnyRole(['admin', 'super_admin'])) {
+        if (!$user->can('outlets.all_access')) {
             $outletIds = DB::table('outlet_user')->where('user_id', $user->id)->pluck('outlet_id');
             $query->whereIn('id', $outletIds);
         }
@@ -114,7 +115,7 @@ class TimeClockController extends Controller
             $radius = $outlet->geofence_radius_meters;
 
             if ($radius !== null && $distance > $radius) {
-                $canOverride = $user->can('attendance.manage') || $user->hasAnyRole(['admin', 'super_admin']);
+                $canOverride = $user->can('attendance.manage') || $user->can('outlets.all_access');
 
                 if (!($validated['force'] ?? false) || !$canOverride) {
                     return response()->json([
@@ -321,7 +322,7 @@ class TimeClockController extends Controller
 
         // Outlet managers (and anyone without the .* admin wildcard) only see
         // entries for outlets they're assigned to.
-        if (!$user->hasAnyRole(['admin', 'super_admin'])) {
+        if (!$user->can('outlets.all_access')) {
             $managedOutletIds = DB::table('outlet_user')->where('user_id', $user->id)->pluck('outlet_id');
             $query->whereIn('outlet_id', $managedOutletIds);
         }
@@ -362,7 +363,7 @@ class TimeClockController extends Controller
             ->flagged()
             ->orderByDesc('clock_in_at');
 
-        if (!$user->hasAnyRole(['admin', 'super_admin'])) {
+        if (!$user->can('outlets.all_access')) {
             $managedOutletIds = DB::table('outlet_user')->where('user_id', $user->id)->pluck('outlet_id');
             $query->whereIn('outlet_id', $managedOutletIds);
         }
@@ -425,7 +426,7 @@ class TimeClockController extends Controller
 
     private function authorizeOutletAccess($user, $outletId): void
     {
-        if ($user->hasAnyRole(['admin', 'super_admin'])) {
+        if ($user->can('outlets.all_access')) {
             return;
         }
         $managed = DB::table('outlet_user')->where('user_id', $user->id)->where('outlet_id', $outletId)->exists();
