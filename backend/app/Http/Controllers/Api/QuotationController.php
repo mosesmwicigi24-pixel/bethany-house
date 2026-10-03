@@ -313,31 +313,40 @@ class QuotationController extends Controller
     }
 
     /**
-     * The owner's 5% rule on every quoted line: what a line gives away — its
-     * discount, plus any shortfall of a catalogue line's price under the
-     * catalogue in the quotation's currency — is at most 5% of the line,
-     * unless a super_admin is quoting. An ad-hoc line has no catalogue price
+     * The owner's 5% rule on every quoted line and on the quotation as a
+     * whole: what is given away — discounts, plus any shortfall of a catalogue
+     * line's price under the catalogue in the quotation's currency — is at
+     * most 5% of the line, and of the quotation, unless a super_admin quotes. An ad-hoc line has no catalogue price
      * to fall short of. Checked before anything is written.
      *
      * @see \App\Support\DiscountRule
      */
     private function assertDiscountsWithinMaximum(Request $request, array $items, string $currency): void
     {
+        $tally = DiscountRule::tally();
+
         foreach ($items as $idx => $item) {
-            DiscountRule::assertLineWithin(
-                $request->user(),
-                (float) $item['unit_price'],
-                (int) $item['quantity'],
-                (float) ($item['discount_amount'] ?? 0),
-                DiscountRule::catalogueUnit(
-                    !empty($item['product_id']) ? (int) $item['product_id'] : null,
-                    !empty($item['product_variant_id']) ? (int) $item['product_variant_id'] : null,
-                    strtoupper($currency),
-                ),
-                "items.{$idx}.unit_price",
-                "items.{$idx}.discount_amount",
+            $catalogue = DiscountRule::catalogueUnit(
+                !empty($item['product_id']) ? (int) $item['product_id'] : null,
+                !empty($item['product_variant_id']) ? (int) $item['product_variant_id'] : null,
+                strtoupper($currency),
             );
+            $unitPrice = (float) $item['unit_price'];
+            $quantity  = (int) $item['quantity'];
+            $discount  = (float) ($item['discount_amount'] ?? 0);
+
+            DiscountRule::assertLineWithin(
+                $request->user(), $unitPrice, $quantity, $discount, $catalogue,
+                "items.{$idx}.unit_price", "items.{$idx}.discount_amount",
+            );
+
+            [$given, $base, $short] = DiscountRule::lineGiven($unitPrice, $quantity, $discount, $catalogue);
+            $tally->line($given, $base, $short ? "items.{$idx}.unit_price" : "items.{$idx}.discount_amount");
         }
+
+        // The quotation as a whole: at most 5% of its gross (it has no
+        // order-level discount, so this is the lines together).
+        $tally->assert($request->user());
     }
 
     /**

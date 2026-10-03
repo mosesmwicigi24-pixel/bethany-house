@@ -473,6 +473,12 @@ class ProductController extends Controller
                 'product' => CostVisibility::forViewer($detail, $request->user()),
             ], 201);
 
+        } catch (\App\Exceptions\DiscountAboveMaximum|\Illuminate\Validation\ValidationException $e) {
+            // A refusal the price record MEANT to give — the owner's 5% rule or
+            // a sale price that is not a discount. Without this arm the catch
+            // below answers 500, telling the editor the server broke.
+            DB::rollBack();
+            throw $e;
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['message' => 'Failed to create product.', 'error' => $e->getMessage()], 500);
@@ -666,6 +672,12 @@ class ProductController extends Controller
                 'product' => CostVisibility::forViewer($detail, $request->user()),
             ]);
 
+        } catch (\App\Exceptions\DiscountAboveMaximum|\Illuminate\Validation\ValidationException $e) {
+            // A refusal the price record MEANT to give — the owner's 5% rule or
+            // a sale price that is not a discount. Without this arm the catch
+            // below answers 500, telling the editor the server broke.
+            DB::rollBack();
+            throw $e;
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['message' => 'Failed to update product.', 'error' => $e->getMessage()], 500);
@@ -1060,6 +1072,12 @@ class ProductController extends Controller
                 'variant' => CostVisibility::forViewer($variant->load(['prices', 'images'])->toArray(), $request->user()),
             ], 201);
 
+        } catch (\App\Exceptions\DiscountAboveMaximum|\Illuminate\Validation\ValidationException $e) {
+            // A refusal the price record MEANT to give — the owner's 5% rule or
+            // a sale price that is not a discount. Without this arm the catch
+            // below answers 500, telling the editor the server broke.
+            DB::rollBack();
+            throw $e;
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['message' => 'Failed to create variant.', 'error' => $e->getMessage()], 500);
@@ -1132,6 +1150,12 @@ class ProductController extends Controller
                 'variant' => CostVisibility::forViewer($variant->fresh()->load(['prices', 'images'])->toArray(), $request->user()),
             ]);
 
+        } catch (\App\Exceptions\DiscountAboveMaximum|\Illuminate\Validation\ValidationException $e) {
+            // A refusal the price record MEANT to give — the owner's 5% rule or
+            // a sale price that is not a discount. Without this arm the catch
+            // below answers 500, telling the editor the server broke.
+            DB::rollBack();
+            throw $e;
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['message' => 'Failed to update variant.', 'error' => $e->getMessage()], 500);

@@ -250,15 +250,22 @@ class NewSale extends Component
         // the order discount, before anything is written. This older till took
         // any discount from anyone; the cart is a public property, so the
         // figures are re-read here rather than trusted from the screen.
+        $tally = DiscountRule::tally();
         foreach ($this->cart as $idx => $item) {
             $lineBase = (float) $item['unit_price'] * (int) $item['qty'];
             if ($message = DiscountRule::refusal(auth()->user(), (float) $item['discount'], $lineBase)) {
                 $this->addError("cart.{$idx}.discount", $message);
                 return;
             }
+            $tally->line((float) $item['discount'], $lineBase, "cart.{$idx}.discount");
         }
         if ($message = DiscountRule::refusal(auth()->user(), (float) $this->orderDiscount, (float) $this->subtotal)) {
             $this->addError('orderDiscount', $message);
+            return;
+        }
+        // The lines and the order discount together: at most 5% of the gross.
+        if ($field = $tally->amount((float) $this->orderDiscount, 'orderDiscount')->tippingField(auth()->user())) {
+            $this->addError($field, DiscountRule::message());
             return;
         }
 

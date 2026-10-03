@@ -22,8 +22,9 @@ use App\Support\DiscountRule;
  *
  * `pos.discount_override` used to lift rule 2. Since the owner's rule of
  * 2026-10-03 it lifts nothing; the slug stays so existing grants and the Roles
- * screen keep working. The sales agent's `pos.discount_campaign` is handled
- * inside DiscountRule (a running owner-set promotion is its only lift).
+ * screen keep working. The sales agent's `pos.discount_campaign` likewise
+ * lifts nothing any more: a line a running promotion covers may lose up to
+ * that promotion's value, whoever is selling it, and nothing on top.
  *
  * @see \App\Support\DiscountRule
  * @see \Tests\Feature\PosDiscountPolicyTest
@@ -38,9 +39,12 @@ final class PosDiscountPolicy
      * @param  float   $base            What it is applied to: the line's gross, or the
      *                                  cart's subtotal before the cart discount.
      * @param  string  $field           The request field the discount came in on.
-     * @param  float   $agentAllowance  See DiscountRule::refusal().
+     * @param  float   $promotionSaving What a running promotion already took off this line
+     *                                  (hub-priced lines only). The asked-for discount comes
+     *                                  on top of it: the two together may not pass
+     *                                  max(5%, the promotion). See DiscountRule::refusal().
      */
-    public static function assertAllowed(?User $user, float $discount, float $base, string $field, float $agentAllowance = 0.0): void
+    public static function assertAllowed(?User $user, float $discount, float $base, string $field, float $promotionSaving = 0.0): void
     {
         // No discount, nothing to authorise. Keeps the ordinary sale — which is
         // the overwhelming majority — free of any permission lookup.
@@ -52,6 +56,6 @@ final class PosDiscountPolicy
             abort(403, 'You are not permitted to apply discounts.');
         }
 
-        DiscountRule::assertWithin($user, $discount, $base, $field, $agentAllowance);
+        DiscountRule::assertWithin($user, $discount + $promotionSaving, $base, $field, $promotionSaving);
     }
 }

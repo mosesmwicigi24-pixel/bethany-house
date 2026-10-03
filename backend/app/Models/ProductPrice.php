@@ -74,6 +74,24 @@ class ProductPrice extends Model
                     ),
                 ]);
             }
+
+            // The owner's 5% rule (App\Support\DiscountRule): a markdown deeper
+            // than 5% is the super_admin's to save. Here, on the model, for the
+            // same reason as the rule above — every screen, endpoint and import
+            // that writes a price passes through it. Only a signed-in person's
+            // save is judged: a console seed or migration is not staff
+            // discretion. An existing row may be saved again, or changed, so
+            // long as its markdown does not get deeper — nothing is repriced.
+            $actor = auth()->user();
+            if ($actor instanceof User) {
+                $oldRegular = $price->exists ? (float) $price->getOriginal('regular_price') : null;
+                $oldSale    = $price->exists && $price->getOriginal('sale_price') !== null
+                    ? (float) $price->getOriginal('sale_price') : null;
+
+                if ($message = \App\Support\DiscountRule::salePriceRefusal($actor, $regular, $sale, $oldRegular, $oldSale)) {
+                    throw new \App\Exceptions\DiscountAboveMaximum('sale_price', $message);
+                }
+            }
         });
     }
 

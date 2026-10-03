@@ -145,7 +145,9 @@ class SyncPermissions extends Command
         // Kept so existing grants keep working; since the owner's rule of
         // 2026-10-03 it lifts nothing — only a super_admin exceeds 5%.
         'pos.discount_override' => ['Discount Beyond the Ceiling (retired)', 'No longer has any effect: nobody but the super admin may give more than 5%', 'POS'],
-        'pos.discount_campaign' => ['Pass Through a Campaign Discount', 'Carry a campaign discount into an order: up to 5%, or up to a running promotion the owner set. For the sales agent\'s service account, not for people.', 'POS'],
+        // Kept on the agent's account so nothing that names it breaks; since
+        // 2026-10-03 the agent is held exactly like everyone else.
+        'pos.discount_campaign' => ['Pass Through a Campaign Discount (retired)', 'No longer has any effect: the sales agent is held to 5%, or to a running promotion the owner set, like everyone else. For the sales agent\'s service account, not for people.', 'POS'],
         'pos.void'             => ['Void Transactions',    'Void completed POS transactions',             'POS'],
         'pos.open_register'    => ['Open Cash Register',   'Open a new cash register session',            'POS'],
         'pos.close_register'   => ['Close Cash Register',  'Close and reconcile a cash register',         'POS'],

@@ -61,11 +61,15 @@ class PermissionIntegrityTest extends TestCase
      * pos.discount_override is inert BY DECISION: the owner's rule of
      * 2026-10-03 is that nobody but a super_admin gives more than 5%, so the
      * override lifts nothing (App\Support\DiscountRule). The slug stays so
-     * existing grants and the Roles screen keep working.
+     * existing grants and the Roles screen keep working. pos.discount_campaign
+     * likewise: the sales agent is held exactly like everyone else (5%, or a
+     * running promotion's own value, never stacked); its grant stays on the
+     * agent's account so nothing that names it breaks.
      */
     private const KNOWN_INERT = [
         'customers.create_without_email',
         'expenses.export',
+        'pos.discount_campaign',
         'pos.discount_override',
         'products.export',
         'profile.edit',

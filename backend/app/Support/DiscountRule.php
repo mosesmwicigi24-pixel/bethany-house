@@ -38,12 +38,23 @@ use App\Services\PromotionService;
  *      and Neema both honour it. Worth, for a fixed amount, is measured against
  *      the cheapest thing it can reach (see promotionPercent()).
  *
- *   3. NEEMA. The sales agent's service account (`pos.discount_campaign`) is
- *      held to 5% like everyone else, except on a line that a running hub
- *      promotion covers — then up to that promotion's value and no further.
- *      The hub cannot see who typed a campaign into Neema's own dashboard; it
- *      can see its own promotions, and since this rule only the owner can set
- *      one above 5%. That is what makes a running promotion his word.
+ *   3. NEEMA, and any line a promotion covers. The hub applies a running
+ *      promotion by itself, so anything asked for on that line comes ON TOP
+ *      of it: the line's whole reduction (promotion + discount) is at most
+ *      max(5%, the promotion's value). Without a promotion, 5% in all. The
+ *      sales agent is held exactly like everyone else; `pos.discount_campaign`
+ *      no longer lifts anything. The hub cannot see who typed a campaign into
+ *      Neema's own dashboard; it can see its own promotions, and only the
+ *      owner can set one above 5%.
+ *
+ *   4. THE ORDER AS A WHOLE. Line discounts, the cart/order discount and any
+ *      typed-price shortfall together are at most 5% of the order's gross
+ *      before any discount (DiscountTally) — "the max is 5%" is about the
+ *      sale, not each discount on it.
+ *
+ *   5. SALE PRICES. A product or variant sale_price more than 5% under its
+ *      regular price is the super_admin's to save (salePriceRefusal(), on the
+ *      ProductPrice model so every screen and import is covered).
  *
  * Nothing here reprices history. Orders, promotions and coupons that already
  * carry more than 5% are left exactly as they are; the rule stops a discount
@@ -75,12 +86,6 @@ final class DiscountRule
         return $user !== null && $user->hasRole(self::OWNER_ROLE);
     }
 
-    /** The sales agent's service account — never the owner, who passes every can(). */
-    public static function isAgent(?User $user): bool
-    {
-        return $user !== null && !self::isOwner($user) && $user->can('pos.discount_campaign');
-    }
-
     /** The most this caller may give, as a percentage. Null: no ceiling (the owner). */
     public static function capFor(?User $user): ?float
     {
@@ -101,12 +106,13 @@ final class DiscountRule
     /**
      * Null when this discount may be given, otherwise the sentence to refuse it with.
      *
-     * @param  float  $discount        the resolved discount AMOUNT, never the raw input
-     * @param  float  $base            what it is applied to: the line's gross, or the cart's subtotal
-     * @param  float  $agentAllowance  money a running owner-set promotion lets the AGENT carry on
-     *                                 this line; ignored for anybody else
+     * @param  float  $discount         everything taken off: the resolved discount AMOUNT (never the
+     *                                  raw input), plus any promotion the hub already applied
+     * @param  float  $base             what it is applied to: the line's gross, or the cart's subtotal
+     * @param  float  $promotionSaving  what a running owner-set promotion already took off this
+     *                                  line; the line may lose that much if it is more than 5%
      */
-    public static function refusal(?User $user, float $discount, float $base, float $agentAllowance = 0.0): ?string
+    public static function refusal(?User $user, float $discount, float $base, float $promotionSaving = 0.0): ?string
     {
         $discount = round($discount, 2);
 
@@ -120,17 +126,17 @@ final class DiscountRule
         // maximum. A base of zero gives a ceiling of zero.
         $ceiling = round(max(0.0, $base) * self::capPercent() / 100, 2);
 
-        if ($agentAllowance > 0 && self::isAgent($user)) {
-            $ceiling = max($ceiling, round($agentAllowance, 2));
+        if ($promotionSaving > 0) {
+            $ceiling = max($ceiling, round($promotionSaving, 2));
         }
 
         return $discount > $ceiling ? self::message() : null;
     }
 
     /** 422 naming $field unless refusal() is null. */
-    public static function assertWithin(?User $user, float $discount, float $base, string $field, float $agentAllowance = 0.0): void
+    public static function assertWithin(?User $user, float $discount, float $base, string $field, float $promotionSaving = 0.0): void
     {
-        if ($message = self::refusal($user, $discount, $base, $agentAllowance)) {
+        if ($message = self::refusal($user, $discount, $base, $promotionSaving)) {
             throw new DiscountAboveMaximum($field, $message);
         }
     }
@@ -169,11 +175,10 @@ final class DiscountRule
         ?float $catalogueUnit,
         string $priceField,
         string $discountField,
-        float $agentAllowance = 0.0,
     ): void {
         [$given, $base, $short] = self::lineGiven($unitPrice, $quantity, $discount, $catalogueUnit);
 
-        if ($message = self::refusal($user, $given, $base, $agentAllowance)) {
+        if ($message = self::refusal($user, $given, $base)) {
             throw new DiscountAboveMaximum($short ? $priceField : $discountField, $message);
         }
     }
@@ -191,23 +196,55 @@ final class DiscountRule
         return [round($shortfall + $discount, 2), $reference * $quantity, $shortfall > 0.0];
     }
 
-    /**
-     * What a running promotion lets the agent carry on one line: the
-     * promotion's own value applied to the line — its percentage of the line,
-     * or its fixed amount per unit, never more than the line itself.
-     */
-    public static function promotionAllowance(?Promotion $promotion, float $unitPrice, int $quantity): float
+    /** A fresh tally for measuring one order's reductions together. */
+    public static function tally(): DiscountTally
     {
-        if (!$promotion || !$promotion->isRunning() || $unitPrice <= 0 || $quantity <= 0) {
+        return new DiscountTally();
+    }
+
+    /** The field a line's reduction is named by: its price when typed under the catalogue, else its discount. */
+    public static function lineField(bool $short, string $priceField, string $discountField): string
+    {
+        return $short ? $priceField : $discountField;
+    }
+
+    // ── Sale prices ───────────────────────────────────────────────────────────
+
+    /**
+     * Null when this caller may save a price record with this regular and sale
+     * price, else the sentence.
+     *
+     * A sale price is a markdown the shop puts on the shelf — the storefront,
+     * Neema and the till all honour it — so one more than 5% under the
+     * regular price is the owner's. What is already on the books is not
+     * repriced: an existing record may be saved again, or changed, so long as
+     * its markdown does not become a bigger share of the regular price.
+     */
+    public static function salePriceRefusal(?User $user, float $regular, ?float $sale, ?float $oldRegular = null, ?float $oldSale = null): ?string
+    {
+        if (self::isOwner($user)) {
+            return null;
+        }
+
+        $share = self::markdown($regular, $sale);
+        if (round($share * 100, 4) <= self::capPercent()) {
+            return null;
+        }
+        if ($oldRegular !== null && $share <= self::markdown($oldRegular, $oldSale) + 1e-9) {
+            return null;   // an older, deeper markdown, not made any deeper
+        }
+
+        return self::message();
+    }
+
+    /** How far a sale price sits under its regular price, as a fraction (0 when there is no live markdown). */
+    private static function markdown(float $regular, ?float $sale): float
+    {
+        if ($sale === null || $sale <= 0 || $regular <= 0 || $sale >= $regular) {
             return 0.0;
         }
 
-        $value   = max(0.0, (float) $promotion->discount_value);
-        $perUnit = $promotion->discount_type === 'percentage'
-            ? $unitPrice * min($value, 100.0) / 100
-            : min($value, $unitPrice);
-
-        return round($perUnit * $quantity, 2);
+        return ($regular - $sale) / $regular;
     }
 
     // ── Promotions and coupons ────────────────────────────────────────────────

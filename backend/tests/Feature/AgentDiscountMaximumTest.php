@@ -19,10 +19,10 @@ use Tests\TestCase;
 /**
  * Neema, the sales agent, under the owner's 5% rule.
  *
- * She used to carry any campaign she was told about up to 70%. Now she may give
- * at most 5% — unless the discount she applies is backed by a promotion the
- * owner set in the hub that is running and covers the item, in which case she
- * may go as far as that promotion and no further.
+ * She used to carry any campaign she was told about up to 70%. Now a line she
+ * sells may lose at most 5% in all — or, where a running promotion the owner
+ * set covers the item, at most that promotion's value. The hub applies the
+ * promotion itself, so what she adds may not stack on top of it.
  *
  * The hub cannot see who typed a campaign into Neema's own dashboard. It can
  * see its own promotions, and since 2026-10-03 only a super_admin can create,
@@ -134,14 +134,33 @@ class AgentDiscountMaximumTest extends TestCase
 
     // ── A running promotion the owner set: up to its value ───────────────────
 
-    public function test_a_running_promotion_lets_her_go_to_its_value_and_no_further(): void
+    /**
+     * No stacking. The hub already takes a running promotion off the line by
+     * itself, so whatever Neema adds comes on top of it — and the line's whole
+     * reduction may not pass max(5%, the promotion's value).
+     */
+    public function test_a_running_10_percent_promotion_leaves_her_nothing_to_add(): void
     {
         $this->neema();
         $stole = $this->stole();
         $this->promotion(['discount_value' => 10]);
 
-        $this->push($stole, 'percent', 10)->assertStatus(201);
-        $this->assertRefused($this->push($stole, 'percent', 11));
+        $res = $this->push($stole, 'none', 0)->assertStatus(201);
+        $this->assertSame(18000.0, (float) Order::find($res->json('order_id'))->total_amount,
+            'the promotion alone is applied');
+
+        $this->assertRefused($this->push($stole, 'percent', 1));
+        $this->assertRefused($this->push($stole, 'percent', 10));   // the old double discount
+    }
+
+    public function test_under_a_3_percent_promotion_she_may_add_up_to_5_percent_in_all(): void
+    {
+        $this->neema();
+        $stole = $this->stole();
+        $this->promotion(['discount_value' => 3]);   // 600 off 20,000; 5% is 1,000
+
+        $this->push($stole, 'flat', 400)->assertStatus(201);
+        $this->assertRefused($this->push($stole, 'flat', 401));
     }
 
     public function test_a_fixed_amount_promotion_is_measured_in_money(): void
@@ -150,8 +169,9 @@ class AgentDiscountMaximumTest extends TestCase
         $stole = $this->stole();
         $this->promotion(['discount_type' => 'fixed', 'discount_value' => 1500]);   // 7.5% of 20,000
 
-        $this->push($stole, 'flat', 1500)->assertStatus(201);
-        $this->assertRefused($this->push($stole, 'flat', 1501));
+        $res = $this->push($stole, 'none', 0)->assertStatus(201);
+        $this->assertSame(18500.0, (float) Order::find($res->json('order_id'))->total_amount);
+        $this->assertRefused($this->push($stole, 'flat', 1));
     }
 
     public function test_a_promotion_on_other_items_lifts_nothing(): void

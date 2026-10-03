@@ -488,6 +488,70 @@ class OrderLineEditor
                 "items.{$row['index']}.discount_amount",
             );
         }
+
+        $this->guardOrderTotal($order, $keep, $add, $actor, $currency);
+    }
+
+    /**
+     * The order as a whole: its order-level discount plus everything the
+     * lines give away is at most 5% of the order's gross. Counted in the
+     * order "already there → asked for": the order discount, then lines that
+     * did not move, then lines that moved, then new lines — so the field
+     * named is the one that tipped it. An order that was already over before
+     * the rule may still be edited as long as the share does not grow.
+     */
+    private function guardOrderTotal(Order $order, array $keep, array $add, ?User $actor, string $currency): void
+    {
+        if (DiscountRule::isOwner($actor)) {
+            return;
+        }
+
+        $catalogue = [];
+        $catFor = function (?int $productId, ?int $variantId) use (&$catalogue, $currency): ?float {
+            $key = ($productId ?? 0) . ':' . ($variantId ?? 0);
+            return array_key_exists($key, $catalogue)
+                ? $catalogue[$key]
+                : ($catalogue[$key] = DiscountRule::catalogueUnit($productId, $variantId, $currency));
+        };
+
+        $before = DiscountRule::tally()->amount((float) $order->discount_amount, 'discount_amount');
+        foreach ($order->items as $line) {
+            [$g, $b] = DiscountRule::lineGiven(
+                (float) $line->unit_price, (int) $line->quantity, (float) $line->discount_amount,
+                $catFor($line->product_id ? (int) $line->product_id : null, $line->product_variant_id ? (int) $line->product_variant_id : null),
+            );
+            $before->line($g, $b, 'items');
+        }
+
+        $after = DiscountRule::tally()->amount((float) $order->discount_amount, 'discount_amount');
+        $moved = [];
+        foreach ($keep as $row) {
+            $line = $row['line'];
+            $isMoved = (float) $line->unit_price !== (float) $row['unit_price']
+                || (int) $line->quantity !== (int) $row['quantity']
+                || (float) $line->discount_amount !== (float) $row['discount_amount'];
+            $entry = [$row, $catFor($line->product_id ? (int) $line->product_id : null, $line->product_variant_id ? (int) $line->product_variant_id : null)];
+            if ($isMoved) {
+                $moved[] = $entry;
+                continue;
+            }
+            [$g, $b, $short] = DiscountRule::lineGiven((float) $row['unit_price'], (int) $row['quantity'], (float) $row['discount_amount'], $entry[1]);
+            $after->line($g, $b, "items.{$row['index']}." . ($short ? 'unit_price' : 'discount_amount'));
+        }
+        foreach ($add as $row) {
+            $moved[] = [$row, $catFor((int) $row['product_id'], $row['product_variant_id'] ? (int) $row['product_variant_id'] : null)];
+        }
+        foreach ($moved as [$row, $cat]) {
+            [$g, $b, $short] = DiscountRule::lineGiven((float) $row['unit_price'], (int) $row['quantity'], (float) $row['discount_amount'], $cat);
+            $after->line($g, $b, "items.{$row['index']}." . ($short ? 'unit_price' : 'discount_amount'));
+        }
+
+        $field = $after->tippingField($actor);
+        if ($field === null || $after->share() <= $before->share() + 1e-9) {
+            return;
+        }
+
+        throw new DiscountAboveMaximum($field, DiscountRule::message());
     }
 
     /**
