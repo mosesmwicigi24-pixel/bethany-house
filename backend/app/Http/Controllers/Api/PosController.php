@@ -829,6 +829,13 @@ class PosController extends Controller
                 // pos.discount is checked here, against the RESOLVED amount, so
                 // a flat discount cannot walk around the percentage ceiling.
                 PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, "items.{$idx}.discount_value");
+                // A price typed under the catalogue is a discount too, and
+                // counts toward the same 5% (App\Support\DiscountRule).
+                \App\Support\DiscountRule::assertLineWithin(
+                    auth()->user(), (float) $item['unit_price'], (int) $item['quantity'], $lineDiscount,
+                    \App\Support\DiscountRule::catalogueUnit($productId ?: null, $variantId, $currencyCode),
+                    "items.{$idx}.unit_price", "items.{$idx}.discount_value",
+                );
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -3235,6 +3242,11 @@ class PosController extends Controller
                 // pos.discount is checked here, against the RESOLVED amount, so
                 // a flat discount cannot walk around the percentage ceiling.
                 PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, "items.{$idx}.discount_value");
+                \App\Support\DiscountRule::assertLineWithin(
+                    auth()->user(), (float) $item['unit_price'], (int) $item['quantity'], $lineDiscount,
+                    \App\Support\DiscountRule::catalogueUnit($productId ?: null, $variantId, $resolvedCurrency),
+                    "items.{$idx}.unit_price", "items.{$idx}.discount_value",
+                );
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -3270,7 +3282,7 @@ class PosController extends Controller
             }
 
             // ── Build order lines for MTO items (no stock deduction) ──────────
-            foreach ($validated['production_items'] ?? [] as $pi) {
+            foreach ($validated['production_items'] ?? [] as $pidx => $pi) {
                 $mtoVariantId = $pi['variant_id'] ?? null;
                 $mtoVariant   = $mtoVariantId ? ProductVariant::with('product.translations')->find($mtoVariantId) : null;
                 $mtoProductId = $mtoVariant?->product_id ?? (int)($pi['product_id'] ?? 0);
@@ -3304,6 +3316,13 @@ class PosController extends Controller
                     }
                 }
 
+                // A made-to-order line carries no discount column, so a lower
+                // price IS its discount: measured against the catalogue too.
+                \App\Support\DiscountRule::assertLineWithin(
+                    auth()->user(), $mtoUnitPrice, (int) $pi['quantity'], 0.0,
+                    \App\Support\DiscountRule::catalogueUnit($mtoProductId ?: null, $mtoVariantId, $resolvedCurrency),
+                    "production_items.{$pidx}.unit_price", "production_items.{$pidx}.unit_price",
+                );
                 $mtoBase      = $mtoUnitPrice * (int)$pi['quantity'];
                 $mtoTaxCalc   = TaxCalculationService::calculateLine($mtoUnitPrice, (int)$pi['quantity'], $mtoProductId, $taxInclusive);
                 $mtoLineTotal = $taxInclusive ? $mtoBase : $mtoBase + round($mtoTaxCalc['tax_amount'], 2);
@@ -3704,6 +3723,15 @@ class PosController extends Controller
                     auth()->user(), $askedFor, $lineBase, "items.{$idx}.discount_value",
                     \App\Support\DiscountRule::promotionAllowance($linePromo, $unitPrice, (int) $item['quantity']),
                 );
+                // A till operator's typed price is measured against the
+                // catalogue (an agent-taken line is priced by the hub itself).
+                if (!$hubPrices) {
+                    \App\Support\DiscountRule::assertLineWithin(
+                        auth()->user(), $unitPrice, (int) $item['quantity'], $askedFor,
+                        \App\Support\DiscountRule::catalogueUnit($productId ?: null, $variantId, $currencyCode),
+                        "items.{$idx}.unit_price", "items.{$idx}.discount_value",
+                    );
+                }
                 // Deliberately NOT rounded here. resolveDiscount's full
                 // precision has always flowed into the line subtotal, and
                 // rounding the sum moved a characterised total by a cent. The
@@ -3742,7 +3770,7 @@ class PosController extends Controller
             // ── Build order lines for MTO (production) items ──────────────────
             // These travel via production_items[] only. No stock deduction;
             // the item is made to order and inventory will be added on completion.
-            foreach ($validated['production_items'] ?? [] as $pi) {
+            foreach ($validated['production_items'] ?? [] as $pidx => $pi) {
                 $mtoVariantId = $pi['variant_id'] ?? null;
                 $mtoVariant  = $mtoVariantId ? ProductVariant::with('product.translations')->find($mtoVariantId) : null;
                 $mtoProductId = $mtoVariant?->product_id ?? (int)($pi['product_id'] ?? 0);
@@ -3778,6 +3806,15 @@ class PosController extends Controller
                     }
                 }
 
+                // A made-to-order line carries no discount column, so a lower
+                // price IS its discount: measured against the catalogue too.
+                if (!$hubPrices) {
+                    \App\Support\DiscountRule::assertLineWithin(
+                        auth()->user(), $mtoUnitPrice, (int) $pi['quantity'], 0.0,
+                        \App\Support\DiscountRule::catalogueUnit($mtoProductId ?: null, $mtoVariantId, $currencyCode),
+                        "production_items.{$pidx}.unit_price", "production_items.{$pidx}.unit_price",
+                    );
+                }
                 $mtoBase         = $mtoUnitPrice * (int)$pi['quantity'];
                 $mtoTaxCalc      = TaxCalculationService::calculateLine($mtoUnitPrice, (int)$pi['quantity'], $mtoProductId, $taxInclusive);
                 $mtoLineTotal    = $taxInclusive ? $mtoBase : $mtoBase + round($mtoTaxCalc['tax_amount'], 2);

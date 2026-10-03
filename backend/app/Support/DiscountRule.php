@@ -27,7 +27,9 @@ use App\Services\PromotionService;
  *      managers and admins; it no longer lifts anything. Only a holder of the
  *      super_admin role goes further. The cap is measured on the RESOLVED
  *      amount, so a flat discount cannot walk around a percentage: 500 off a
- *      1,000 line is 50% however it was typed.
+ *      1,000 line is 50% however it was typed. And a unit price TYPED below
+ *      the catalogue's selling price is a discount by another name, so the
+ *      shortfall counts toward the same 5% (assertLineWithin()).
  *
  *   2. PROMOTIONS, CAMPAIGNS, COUPONS. A promotion runs by itself for every
  *      customer until it ends, so the rule bites where it is SET. Creating,
@@ -131,6 +133,62 @@ final class DiscountRule
         if ($message = self::refusal($user, $discount, $base, $agentAllowance)) {
             throw new DiscountAboveMaximum($field, $message);
         }
+    }
+
+    /**
+     * The catalogue's selling price for one line in a currency — what a typed
+     * unit price is measured against. Null when the line names no product, or
+     * the hub has no price it can express in that currency: then there is
+     * nothing to be "below", and the typed figure stands.
+     */
+    public static function catalogueUnit(?int $productId, ?int $variantId, string $currency): ?float
+    {
+        if (!$productId && !$variantId) {
+            return null;
+        }
+        $priced = CurrencyPricing::catalogue($productId ?: null, $variantId ?: null, $currency);
+
+        return $priced ? (float) $priced['effective_price'] : null;
+    }
+
+    /**
+     * A whole line under the rule: a unit price typed below the catalogue's
+     * selling price is a discount by another name, so the shortfall counts
+     * toward the same 5% together with any discount on the line, measured
+     * against the line at the catalogue price.
+     *
+     * Throws on $priceField when there is a shortfall (that is the unusual
+     * input), otherwise on $discountField. Without a catalogue price this is
+     * exactly assertWithin() on the discount.
+     */
+    public static function assertLineWithin(
+        ?User $user,
+        float $unitPrice,
+        int $quantity,
+        float $discount,
+        ?float $catalogueUnit,
+        string $priceField,
+        string $discountField,
+        float $agentAllowance = 0.0,
+    ): void {
+        [$given, $base, $short] = self::lineGiven($unitPrice, $quantity, $discount, $catalogueUnit);
+
+        if ($message = self::refusal($user, $given, $base, $agentAllowance)) {
+            throw new DiscountAboveMaximum($short ? $priceField : $discountField, $message);
+        }
+    }
+
+    /**
+     * What a line gives away and what it is measured against.
+     *
+     * @return array{0: float, 1: float, 2: bool}  [given, base, priced below the catalogue]
+     */
+    public static function lineGiven(float $unitPrice, int $quantity, float $discount, ?float $catalogueUnit): array
+    {
+        $reference = ($catalogueUnit !== null && $catalogueUnit > $unitPrice) ? $catalogueUnit : $unitPrice;
+        $shortfall = round(($reference - $unitPrice) * $quantity, 2);
+
+        return [round($shortfall + $discount, 2), $reference * $quantity, $shortfall > 0.0];
     }
 
     /**

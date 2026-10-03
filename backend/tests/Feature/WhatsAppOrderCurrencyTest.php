@@ -218,18 +218,21 @@ class WhatsAppOrderCurrencyTest extends TestCase
 
         $product = $this->product(['KES' => 4500]);
 
-        // No channel → 'pos'. The cashier knocked 500 off at the till.
+        // No channel → 'pos'. The cashier's typed price stands — the hub does
+        // not reprice a till order. Since the owner's rule (2026-10-03) a
+        // typed price may sit at most 5% under the catalogue: 4,300 of 4,500
+        // is 4.4%. (Knocking 500 off, 11%, is refused — UnitPriceBelowCatalogueTest.)
         $res = $this->postJson('/api/v1/admin/pos/pending-order', [
             'outlet_id' => $this->outlet()->id,
             'items'     => [[
                 'product_id' => $product->id,
                 'quantity'   => 1,
-                'unit_price' => 4000,
+                'unit_price' => 4300,
             ]],
         ])->assertSuccessful();
 
         $order = Order::with('items')->find($res->json('order_id'));
-        $this->assertEqualsWithDelta(4000.0, (float) $order->items->first()->unit_price, 0.01);
+        $this->assertEqualsWithDelta(4300.0, (float) $order->items->first()->unit_price, 0.01);
     }
 
     // ── The Set Country / Currency button ────────────────────────────────────

@@ -57,7 +57,7 @@ class QuotationController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $this->validatePayload($request);
-        $this->assertDiscountsWithinMaximum($request, $validated['items']);
+        $this->assertDiscountsWithinMaximum($request, $validated['items'], $validated['currency_code'] ?? 'KES');
 
         $quotation = DB::transaction(function () use ($validated, $request) {
             $quotation = Quotation::create([
@@ -98,7 +98,7 @@ class QuotationController extends Controller
         }
 
         $validated = $this->validatePayload($request, $quotation->customer_phone);
-        $this->assertDiscountsWithinMaximum($request, $validated['items']);
+        $this->assertDiscountsWithinMaximum($request, $validated['items'], $validated['currency_code'] ?? $quotation->currency_code ?? 'KES');
 
         DB::transaction(function () use ($quotation, $validated) {
             $quotation->update([
@@ -313,19 +313,28 @@ class QuotationController extends Controller
     }
 
     /**
-     * The owner's 5% rule on every quoted line: a line's discount is at most 5%
-     * of quantity × unit price, unless a super_admin is quoting. Checked before
-     * anything is written, so a refused quotation leaves no trace.
+     * The owner's 5% rule on every quoted line: what a line gives away — its
+     * discount, plus any shortfall of a catalogue line's price under the
+     * catalogue in the quotation's currency — is at most 5% of the line,
+     * unless a super_admin is quoting. An ad-hoc line has no catalogue price
+     * to fall short of. Checked before anything is written.
      *
      * @see \App\Support\DiscountRule
      */
-    private function assertDiscountsWithinMaximum(Request $request, array $items): void
+    private function assertDiscountsWithinMaximum(Request $request, array $items, string $currency): void
     {
         foreach ($items as $idx => $item) {
-            DiscountRule::assertWithin(
+            DiscountRule::assertLineWithin(
                 $request->user(),
+                (float) $item['unit_price'],
+                (int) $item['quantity'],
                 (float) ($item['discount_amount'] ?? 0),
-                (float) $item['unit_price'] * (int) $item['quantity'],
+                DiscountRule::catalogueUnit(
+                    !empty($item['product_id']) ? (int) $item['product_id'] : null,
+                    !empty($item['product_variant_id']) ? (int) $item['product_variant_id'] : null,
+                    strtoupper($currency),
+                ),
+                "items.{$idx}.unit_price",
                 "items.{$idx}.discount_amount",
             );
         }
