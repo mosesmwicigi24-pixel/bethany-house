@@ -44,7 +44,7 @@ import type {
 import type { SplitPayment as ModalSplitPayment, ConfiguredMethod } from "./components/PaymentModal";
 import { useToastStore } from "@/store/toast.store";
 import { useAuthStore } from "@/store/auth.store";
-import { clampDiscount, discountCapHint, useDiscountCap } from "@/lib/discountCap";
+import { clampCartDiscount, clampDiscount, discountCapHint, useDiscountCap } from "@/lib/discountCap";
 import { Spinner } from "@/components/ui/Spinner";
 import RegisterModal from "./components/RegisterModal";
 import PaymentModal from "./components/PaymentModal";
@@ -2521,6 +2521,9 @@ export default function PosPage() {
         [selectedOutletId, currencyForQuery, handleProductClick, addingSuggestion],
     );
 
+    // The order's gross before any discount — the owner's 5% is of this, for
+    // the line discounts and the order discount together.
+    const cartGross = useMemo(() => cart.reduce((s, i) => s + i.price * i.quantity, 0), [cart]);
     const totals = useMemo(
         () => calcTotals(cart, cartDiscType, cartDiscVal, shippingFeeFromMethod || shippingAmount, taxInclusive),
         [cart, cartDiscType, cartDiscVal, shippingFeeFromMethod, shippingAmount, taxInclusive],
@@ -3481,7 +3484,7 @@ export default function PosPage() {
                                         onChange={(e) => {
                                             const t = e.target.value as "none"|"flat"|"percent";
                                             setCartDiscType(t);
-                                            setCartDiscVal((v) => clampDiscount(t, v, totals.subtotal, discountCap));
+                                            setCartDiscVal((v) => clampCartDiscount(t, v, totals.subtotal, cartGross, cartGross - totals.subtotal, discountCap));
                                         }}
                                         className="text-2xs border border-surface-200 rounded px-1.5 py-0.5 bg-white focus:outline-none focus:border-brand-400"
                                     >
@@ -3494,7 +3497,7 @@ export default function PosPage() {
                                             type="number" min={0}
                                             max={cartDiscType === "percent" && discountCap !== null ? discountCap : undefined}
                                             value={cartDiscVal}
-                                            onChange={(e) => setCartDiscVal(clampDiscount(cartDiscType, parseFloat(e.target.value) || 0, totals.subtotal, discountCap))}
+                                            onChange={(e) => setCartDiscVal(clampCartDiscount(cartDiscType, parseFloat(e.target.value) || 0, totals.subtotal, cartGross, cartGross - totals.subtotal, discountCap))}
                                             className="w-16 text-2xs border border-surface-200 rounded px-1.5 py-0.5 focus:outline-none focus:border-brand-400"
                                         />
                                     )}

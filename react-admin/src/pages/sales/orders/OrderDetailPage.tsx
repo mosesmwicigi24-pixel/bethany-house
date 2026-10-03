@@ -3582,6 +3582,17 @@ export default function OrderDetailPage() {
     // The owner's 5% maximum on a line's discount; null for the super_admin.
     // The server enforces it (and measures a lowered unit price as well).
     const discountCap = useDiscountCap();
+    // What one staged line may still take off: 5% of the line, and no more
+    // than the ORDER has left — 5% of its gross, less the order discount and
+    // the other lines' discounts. (Infinity for the super_admin.)
+    const lineDiscountRoom = (l: DraftLine): number => {
+        if (discountCap === null) return Infinity;
+        const lines = itemsDraft ?? [];
+        const gross = lines.reduce((s, x) => s + x.unit_price * x.quantity, 0);
+        const others = lines.filter((x) => x.key !== l.key).reduce((s, x) => s + x.discount_amount, 0);
+        const orderRoom = maxDiscountAmount(gross, discountCap) - Number(order?.discount_amount ?? 0) - others;
+        return Math.max(0, Math.min(maxDiscountAmount(l.unit_price * l.quantity, discountCap), orderRoom));
+    };
     const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
     const [showAddItem, setShowAddItem]   = useState(false);
     const [itemsReason, setItemsReason]   = useState("");
@@ -4319,10 +4330,10 @@ export default function OrderDetailPage() {
                                                                 Line discount
                                                                 <input
                                                                     type="number" min={0} step="0.01" value={l.discount_amount}
-                                                                    max={discountCap !== null ? maxDiscountAmount(l.unit_price * l.quantity, discountCap) : undefined}
+                                                                    max={discountCap !== null ? lineDiscountRoom(l) : undefined}
                                                                     onChange={e => set({ discount_amount: Math.min(
                                                                         Math.max(0, Number(e.target.value) || 0),
-                                                                        maxDiscountAmount(l.unit_price * l.quantity, discountCap),
+                                                                        lineDiscountRoom(l),
                                                                     ) })}
                                                                     className="w-24 border border-line rounded px-2 py-0.5 text-right tabular-nums focus:outline-none focus:border-brand-500"
                                                                 />
