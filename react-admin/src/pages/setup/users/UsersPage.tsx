@@ -197,11 +197,10 @@ export default function UsersPage() {
 
     // Write controls follow the server's user permissions, so a read-only
     // viewer (admin) sees no buttons that would only fail.
-    const { can: canDo } = usePermissions();
+    const { can: canDo, hasRole } = usePermissions();
     const roles = rolesData?.data ?? [];
     const outlets = outletsData?.data ?? [];
     // Mirrors the server rule: only a super administrator changes roles.
-    const { hasRole } = usePermissions();
     const canAssignRoles = hasRole("super_admin");
     const users = data?.data ?? [];
     const meta = data?.meta;
