@@ -70,7 +70,8 @@ class PaymentProofVisibilityTest extends TestCase
     public function test_procurement_holds_payments_view_but_sees_no_customer_proofs(): void
     {
         $payment = $this->pendingProofOn(Order::factory()->create());
-        Sanctum::actingAs($this->user('procurement_officer'));
+        // procurement_manager: the officer lost payments.view in Phase 2.
+        Sanctum::actingAs($this->user('procurement_manager'));
 
         $this->get("/api/v1/admin/payments/{$payment->id}/proof")->assertNotFound();
 

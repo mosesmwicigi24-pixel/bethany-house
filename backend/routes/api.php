@@ -553,15 +553,18 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:products.edit,sanctum');
                 Route::post('/{productId}/tax-rates',         [TaxRateController::class, 'syncProductRates'])
                     ->middleware('permission:products.edit,sanctum');
+                // BOM writes have their own key (Phase 2): what a garment is
+                // made of — and so what it costs — is procurement's to decide,
+                // not whoever may edit the catalogue.
                 Route::prefix('/{productId}/bom')->group(function () {
                     Route::post('/',                   [BomController::class, 'store'])
-                        ->middleware('permission:products.edit,sanctum');
+                        ->middleware('permission:bom.edit,sanctum');
                     Route::put('/{bomId}',             [BomController::class, 'update'])
-                        ->middleware('permission:products.edit,sanctum');
+                        ->middleware('permission:bom.edit,sanctum');
                     Route::delete('/{bomId}',          [BomController::class, 'destroy'])
-                        ->middleware('permission:products.edit,sanctum');
+                        ->middleware('permission:bom.edit,sanctum');
                     Route::put('/{bomId}/activate',    [BomController::class, 'activate'])
-                        ->middleware('permission:products.edit,sanctum');
+                        ->middleware('permission:bom.edit,sanctum');
                 });
             });
 
@@ -1276,27 +1279,30 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Shipping ──────────────────────────────────────────────────────
-            Route::middleware('permission:settings.view,sanctum')->prefix('shipping')->group(function () {
+            // Technical reference data (Phase 2): setup.technical reads and
+            // edits it without opening the rest of Setup; settings.view still
+            // reads it and settings.edit still edits it.
+            Route::middleware('permission:settings.view|setup.technical,sanctum')->prefix('shipping')->group(function () {
                 Route::get('/zones',                          [ShippingController::class, 'adminZones']);
                 Route::get('/zones/{id}',                     [ShippingController::class, 'showZone']);
                 Route::get('/zones/{id}/countries',           [ShippingController::class, 'zoneCountries']);
                 Route::get('/methods',                        [ShippingController::class, 'adminMethods']);
                 Route::post('/zones',                         [ShippingController::class, 'createZone'])
-                    ->middleware('permission:settings.edit,sanctum');
+                    ->middleware('permission:settings.edit|setup.technical,sanctum');
                 Route::put('/zones/{id}',                     [ShippingController::class, 'updateZone'])
-                    ->middleware('permission:settings.edit,sanctum');
+                    ->middleware('permission:settings.edit|setup.technical,sanctum');
                 Route::delete('/zones/{id}',                  [ShippingController::class, 'deleteZone'])
-                    ->middleware('permission:settings.edit,sanctum');
+                    ->middleware('permission:settings.edit|setup.technical,sanctum');
                 Route::post('/zones/{id}/countries',          [ShippingController::class, 'addCountries'])
-                    ->middleware('permission:settings.edit,sanctum');
+                    ->middleware('permission:settings.edit|setup.technical,sanctum');
                 Route::delete('/zones/{id}/countries/{code}', [ShippingController::class, 'removeCountry'])
-                    ->middleware('permission:settings.edit,sanctum');
+                    ->middleware('permission:settings.edit|setup.technical,sanctum');
                 Route::post('/methods',                       [ShippingController::class, 'createMethod'])
-                    ->middleware('permission:settings.edit,sanctum');
+                    ->middleware('permission:settings.edit|setup.technical,sanctum');
                 Route::put('/methods/{id}',                   [ShippingController::class, 'updateMethod'])
-                    ->middleware('permission:settings.edit,sanctum');
+                    ->middleware('permission:settings.edit|setup.technical,sanctum');
                 Route::delete('/methods/{id}',                [ShippingController::class, 'deleteMethod'])
-                    ->middleware('permission:settings.edit,sanctum');
+                    ->middleware('permission:settings.edit|setup.technical,sanctum');
             });
 
             // ── Content pages ─────────────────────────────────────────────────
@@ -1627,11 +1633,14 @@ Route::prefix('v1')->group(function () {
                 });
             });
 
-            Route::middleware('permission:settings.view,sanctum')->prefix('languages')->group(function () {
+            // Languages and countries are technical reference data (Phase 2):
+            // setup.technical reads and edits them; currencies and payment
+            // methods below stay on settings.* alone.
+            Route::middleware('permission:settings.view|setup.technical,sanctum')->prefix('languages')->group(function () {
                 Route::get('/',                 [LanguageController::class, 'index']);
                 Route::get('/{id}',             [LanguageController::class, 'show']);
 
-                Route::middleware('permission:settings.edit,sanctum')->group(function () {
+                Route::middleware('permission:settings.edit|setup.technical,sanctum')->group(function () {
                     Route::post('/',                [LanguageController::class, 'store']);
                     Route::put('/{id}',             [LanguageController::class, 'update']);
                     Route::delete('/{id}',          [LanguageController::class, 'destroy']);
@@ -1655,11 +1664,11 @@ Route::prefix('v1')->group(function () {
                 });
             });
 
-            Route::middleware('permission:settings.view,sanctum')->prefix('countries')->group(function () {
+            Route::middleware('permission:settings.view|setup.technical,sanctum')->prefix('countries')->group(function () {
                 Route::get('/',                         [CountryController::class, 'adminIndex']);
                 Route::get('/regions',                  [CountryController::class, 'regions']);
 
-                Route::middleware('permission:settings.edit,sanctum')->group(function () {
+                Route::middleware('permission:settings.edit|setup.technical,sanctum')->group(function () {
                     Route::post('/',                        [CountryController::class, 'store']);
                     Route::put('/{code}',                   [CountryController::class, 'update']);
                     Route::put('/{code}/shipping-settings', [CountryController::class, 'updateShippingSettings']);
