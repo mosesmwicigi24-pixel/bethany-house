@@ -22,6 +22,7 @@ import { commentApi, type MentionUser } from "@/api/comments";
 import { subscribeToChannel, getEcho } from "@/lib/echo";
 import { neemaChatUrl, neemaCallsUrl, chatChannelLabel } from "@/lib/neema";
 import { useAuthStore } from "@/store/auth.store";
+import { discountCapHint, maxDiscountAmount, useDiscountCap } from "@/lib/discountCap";
 import { RecordHistory } from "@/components/audit/AuditParts";
 import { PendingChanges, NeedsApprovalHint, PROPOSALS_QUERY_KEY } from "@/components/approvals/PendingChanges";
 
@@ -3595,6 +3596,20 @@ export default function OrderDetailPage() {
     const canEditItems = canDo("orders.edit_items")
         && !["cancelled", "refunded", "voided"].includes(order?.status ?? "");
     const [itemsDraft, setItemsDraft]     = useState<DraftLine[] | null>(null);
+    // The owner's 5% maximum on a line's discount; null for the super_admin.
+    // The server enforces it (and measures a lowered unit price as well).
+    const discountCap = useDiscountCap();
+    // What one staged line may still take off: 5% of the line, and no more
+    // than the ORDER has left — 5% of its gross, less the order discount and
+    // the other lines' discounts. (Infinity for the super_admin.)
+    const lineDiscountRoom = (l: DraftLine): number => {
+        if (discountCap === null) return Infinity;
+        const lines = itemsDraft ?? [];
+        const gross = lines.reduce((s, x) => s + x.unit_price * x.quantity, 0);
+        const others = lines.filter((x) => x.key !== l.key).reduce((s, x) => s + x.discount_amount, 0);
+        const orderRoom = maxDiscountAmount(gross, discountCap) - Number(order?.discount_amount ?? 0) - others;
+        return Math.max(0, Math.min(maxDiscountAmount(l.unit_price * l.quantity, discountCap), orderRoom));
+    };
     const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
     const [showAddItem, setShowAddItem]   = useState(false);
     const [itemsReason, setItemsReason]   = useState("");
@@ -4334,9 +4349,18 @@ export default function OrderDetailPage() {
                                                                 Line discount
                                                                 <input
                                                                     type="number" min={0} step="0.01" value={l.discount_amount}
-                                                                    onChange={e => set({ discount_amount: Math.max(0, Number(e.target.value) || 0) })}
+                                                                    max={discountCap !== null ? lineDiscountRoom(l) : undefined}
+                                                                    onChange={e => set({ discount_amount: Math.min(
+                                                                        Math.max(0, Number(e.target.value) || 0),
+                                                                        lineDiscountRoom(l),
+                                                                    ) })}
                                                                     className="w-24 border border-line rounded px-2 py-0.5 text-right tabular-nums focus:outline-none focus:border-brand-500"
                                                                 />
+                                                                {discountCap !== null && (
+                                                                    <span className="text-surface-400" title="Larger discounts are set by the owner.">
+                                                                        {discountCapHint(discountCap)} of the line
+                                                                    </span>
+                                                                )}
                                                             </label>
                                                         )}
                                                     </td>

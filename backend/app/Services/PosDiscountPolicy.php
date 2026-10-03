@@ -3,53 +3,52 @@
 namespace App\Services;
 
 use App\Models\User;
+use App\Support\DiscountRule;
 
 /**
  * Who may discount at the till, and by how much.
  *
- * `pos.discount` — "Apply manual discounts at POS" — has existed in the
- * catalogue since the permission system was built, is granted to pos_clerk and
- * outlet_manager, and was checked NOWHERE. Every one of the three POS entry
- * points accepted `discount_type` / `discount_value` with `min:0` and no upper
- * bound, from any caller who could reach the till. Discount authority was a
- * line on the Roles screen and nothing else.
- *
- * That matters more than it first looks. A void at least leaves a reversal
- * somebody can count; a discount just completes the sale for less, and the only
- * trace is a number on a line nobody re-reads. It is the quietest way money
- * leaves a till.
+ * `pos.discount` — "Apply manual discounts at POS" — existed in the catalogue
+ * for a long time and was checked NOWHERE: every POS entry point accepted
+ * `discount_type` / `discount_value` with `min:0` and no upper bound. A void
+ * at least leaves a reversal somebody can count; a discount just completes the
+ * sale for less, and the only trace is a number on a line nobody re-reads.
  *
  * Two rules, applied identically to a line discount and to a cart discount:
  *
- *   1. No `pos.discount`, no discount. At all.
- *   2. With it, up to config('pos.discount_cap_percent') of whatever the
- *      discount is being applied to. Beyond that needs
- *      `pos.discount_override`.
+ *   1. No `pos.discount`, no discount. At all. (403 — a missing permission.)
+ *   2. With it, at most what App\Support\DiscountRule allows: 5% of whatever
+ *      the discount is applied to, for everyone but a super_admin. (422.)
  *
- * The cap is checked against the EFFECTIVE percentage, not the input, so a flat
- * discount cannot walk around a percentage ceiling — 500 off a 1,000 line is
- * 50% however it was typed.
+ * `pos.discount_override` used to lift rule 2. Since the owner's rule of
+ * 2026-10-03 it lifts nothing; the slug stays so existing grants and the Roles
+ * screen keep working. The sales agent's `pos.discount_campaign` likewise
+ * lifts nothing any more: a line a running promotion covers may lose up to
+ * that promotion's value, whoever is selling it, and nothing on top.
  *
+ * @see \App\Support\DiscountRule
  * @see \Tests\Feature\PosDiscountPolicyTest
  */
 final class PosDiscountPolicy
 {
     /**
-     * 403 unless this discount is one the caller may give.
+     * 403 without `pos.discount`; 422 (naming $field) above the maximum.
      *
-     * @param  float   $discount  The resolved discount AMOUNT, after flat/percent
-     *                            has been worked out — never the raw input.
-     * @param  float   $base      What it is applied to: the line's gross, or the
-     *                            cart's subtotal before the cart discount.
-     * @param  string  $scope     'line' or 'cart', for the message only.
+     * @param  float   $discount        The resolved discount AMOUNT, after flat/percent
+     *                                  has been worked out — never the raw input.
+     * @param  float   $base            What it is applied to: the line's gross, or the
+     *                                  cart's subtotal before the cart discount.
+     * @param  string  $field           The request field the discount came in on.
+     * @param  float   $promotionSaving What a running promotion already took off this line
+     *                                  (hub-priced lines only). The asked-for discount comes
+     *                                  on top of it: the two together may not pass
+     *                                  max(5%, the promotion). See DiscountRule::refusal().
      */
-    public static function assertAllowed(?User $user, float $discount, float $base, string $scope = 'line'): void
+    public static function assertAllowed(?User $user, float $discount, float $base, string $field, float $promotionSaving = 0.0): void
     {
-        $discount = round($discount, 2);
-
         // No discount, nothing to authorise. Keeps the ordinary sale — which is
         // the overwhelming majority — free of any permission lookup.
-        if ($discount <= 0.0) {
+        if (round($discount, 2) <= 0.0) {
             return;
         }
 
@@ -57,62 +56,6 @@ final class PosDiscountPolicy
             abort(403, 'You are not permitted to apply discounts.');
         }
 
-        if ($user->can('pos.discount_override')) {
-            return;
-        }
-
-        $cap = self::capFor($user);
-
-        // Rounded to the column before comparing, so float noise in
-        // ($base * $cap / 100) cannot refuse a discount that is exactly at the
-        // ceiling. A base of zero yields a ceiling of zero, which is right: a
-        // discount on nothing is unbounded by definition.
-        $ceiling = round($base * $cap / 100, 2);
-
-        if ($discount > $ceiling) {
-            abort(403, sprintf(
-                'A %s%% ceiling applies to POS discounts. This %s discount of %s exceeds the %s allowed on %s. A supervisor can approve a larger one.',
-                rtrim(rtrim(number_format($cap, 2, '.', ''), '0'), '.'),
-                $scope,
-                number_format($discount, 2),
-                number_format($ceiling, 2),
-                number_format($base, 2),
-            ));
-        }
-    }
-
-    public static function capPercent(): float
-    {
-        return (float) config('pos.discount_cap_percent', 5.0);
-    }
-
-    /**
-     * The ceiling that applies to THIS caller.
-     *
-     * The 5% cap above is about clerk discretion: a person at a till deciding,
-     * in the moment, to let a sale go for less. Neema is not exercising
-     * discretion — she is executing a campaign the owner declared, and the
-     * price she states is computed by code, not chosen. Holding her to the
-     * clerk ceiling meant a 10% campaign refused every order it touched, which
-     * is why the discount travelled as a NOTE for a human to apply by hand and
-     * the customer could pay the undiscounted link before anyone read it.
-     *
-     * So the pass-through is a capability, never a channel string: `channel`
-     * is caller-supplied, and keying off it would have let any clerk walk past
-     * the ceiling by posting channel=whatsapp. `pos.discount_campaign` is
-     * granted to the agent's service account and to nobody at a till, and it
-     * is still bounded — by the agent ceiling, which matches the hard 70% limit
-     * Neema's own campaign parser enforces.
-     */
-    public static function capFor(?User $user): float
-    {
-        return $user?->can('pos.discount_campaign')
-            ? self::agentCapPercent()
-            : self::capPercent();
-    }
-
-    public static function agentCapPercent(): float
-    {
-        return (float) config('pos.agent_discount_cap_percent', 70.0);
+        DiscountRule::assertWithin($user, $discount + $promotionSaving, $base, $field, $promotionSaving);
     }
 }

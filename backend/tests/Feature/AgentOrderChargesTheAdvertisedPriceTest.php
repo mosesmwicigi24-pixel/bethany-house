@@ -181,11 +181,15 @@ class AgentOrderChargesTheAdvertisedPriceTest extends TestCase
 
     /** ── the campaign a customer was actually promised ──────────────────── */
 
-    public function test_the_agent_can_carry_a_campaign_discount_the_till_could_not(): void
+    /**
+     * The campaign discount travels as MONEY on the order, so the customer pays
+     * the price they were quoted at the moment they were quoted it. Since the
+     * owner's rule (2026-10-03) the agent carries at most 5% of her own — more
+     * only on a line a running owner-set promotion covers, and then no more
+     * than that promotion. AgentDiscountMaximumTest holds the rule in full.
+     */
+    public function test_the_agent_carries_a_campaign_discount_as_money_on_the_order(): void
     {
-        // 10% is twice the cashier ceiling. Refusing it is what forced the
-        // discount to travel as a note a human had to apply by hand — while the
-        // customer could already pay the undiscounted link.
         $product = $this->gown(sale: null);
         $agent   = $this->agent();
         $agent->givePermissionTo(Permission::findOrCreate('pos.discount', 'sanctum'));
@@ -198,22 +202,22 @@ class AgentOrderChargesTheAdvertisedPriceTest extends TestCase
             'client_request_id' => 'req-' . bin2hex(random_bytes(6)),
             'items'             => [[
                 'product_id' => $product->id, 'quantity' => 1, 'unit_price' => 20000,
-                'discount_type' => 'percent', 'discount_value' => 10,
+                'discount_type' => 'percent', 'discount_value' => 5,
             ]],
         ])->assertStatus(201);
 
-        $this->assertSame(18000.0, (float) Order::find($res->json('order_id'))->total_amount,
+        $this->assertSame(19000.0, (float) Order::find($res->json('order_id'))->total_amount,
             'the customer pays the price they were quoted, at the moment they were quoted it');
     }
 
-    public function test_the_campaign_ceiling_still_bounds_the_agent(): void
+    public function test_without_a_promotion_the_agent_is_held_to_5_percent(): void
     {
+        // The old 70% agent ceiling is gone (pos.agent_discount_cap_percent).
         $product = $this->gown(sale: null);
         $agent   = $this->agent();
         $agent->givePermissionTo(Permission::findOrCreate('pos.discount', 'sanctum'));
         $agent->givePermissionTo(Permission::findOrCreate('pos.discount_campaign', 'sanctum'));
         app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
-        config(['pos.agent_discount_cap_percent' => 70.0]);
 
         $this->postJson('/api/v1/admin/pos/pending-order', [
             'outlet_id'         => $this->outlet->id,
@@ -221,9 +225,9 @@ class AgentOrderChargesTheAdvertisedPriceTest extends TestCase
             'client_request_id' => 'req-' . bin2hex(random_bytes(6)),
             'items'             => [[
                 'product_id' => $product->id, 'quantity' => 1, 'unit_price' => 20000,
-                'discount_type' => 'percent', 'discount_value' => 85,
+                'discount_type' => 'percent', 'discount_value' => 10,
             ]],
-        ])->assertStatus(403);
+        ])->assertStatus(422);
     }
 
     public function test_a_clerk_cannot_reach_the_agent_ceiling_by_posting_a_chat_channel(): void
@@ -243,7 +247,7 @@ class AgentOrderChargesTheAdvertisedPriceTest extends TestCase
                 'product_id' => $product->id, 'quantity' => 1, 'unit_price' => 20000,
                 'discount_type' => 'percent', 'discount_value' => 10,
             ]],
-        ])->assertStatus(403);
+        ])->assertStatus(422);
     }
 
     public function test_the_feed_publishes_the_number_the_order_will_charge(): void

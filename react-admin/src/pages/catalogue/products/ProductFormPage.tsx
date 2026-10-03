@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm, useFieldArray, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { discountCapHint, useDiscountCap, withSalePriceCap } from "@/lib/discountCap";
 import { z } from "zod";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -1403,8 +1404,17 @@ function EditVariantModal({
     // cost_price and ignores one on save, so the box would only ever be empty.
     const { can } = usePermissions();
     const canSeeCost = can("products.view_cost");
+    // The owner's 5% rule on sale prices (null for the super_admin).
+    const discountCap = useDiscountCap();
+    const capRef  = useRef(discountCap);
+    capRef.current = discountCap;
+    const formRef = useRef<any>(null);
     const form = useForm<VariantForm>({
-        resolver: zodResolver(variantSchema),
+        resolver: withSalePriceCap(
+            zodResolver(variantSchema),
+            () => capRef.current,
+            () => formRef.current?.formState?.defaultValues?.prices as any,
+        ),
         mode: "onSubmit",
         reValidateMode: "onSubmit",
         defaultValues: {
@@ -1417,6 +1427,7 @@ function EditVariantModal({
             prices: [],
         },
     });
+    formRef.current = form;
     const {
         register,
         handleSubmit,
@@ -1654,7 +1665,11 @@ function EditVariantModal({
                                         onChange={(e) => { regReg.onChange(e); cascade("regular_price")(e); }}
                                     />
                                 </Field>
-                                <Field label="Sale">
+                                <Field
+                                    label="Sale"
+                                    error={(errors as any).prices?.[i]?.sale_price?.message}
+                                    hint={discountCap !== null ? `${discountCapHint(discountCap)} under regular` : undefined}
+                                >
                                     <FieldInput
                                         className="input text-sm"
                                         type="number"
@@ -2203,6 +2218,8 @@ const PriceRows = React.memo(function PriceRows({
     // cost_price for everyone else and leaves the stored value untouched.
     const { can } = usePermissions();
     const canSeeCost = can("products.view_cost");
+    // The owner's 5% rule on sale prices (null for the super_admin).
+    const discountCap = useDiscountCap();
 
     // Typing a price in the default currency fills in every other currency.
     //
@@ -2305,17 +2322,22 @@ const PriceRows = React.memo(function PriceRows({
                                 )}
                             />
                         </Field>
-                        <Field label="Sale Price">
+                        <Field label="Sale Price" hint={discountCap !== null ? `${discountCapHint(discountCap)} under regular` : undefined}>
                             <Controller control={control} name={`prices.${i}.sale_price`}
-                                render={({ field: f }) => (
-                                    <MoneyInput
-                                        name={f.name} inputRef={f.ref} onBlur={f.onBlur} placeholder="-"
-                                        value={f.value}
-                                        onValue={(v) => {
-                                            f.onChange(v);
-                                            if (isBase) cascade("sale_price", v);
-                                        }}
-                                    />
+                                render={({ field: f, fieldState }) => (
+                                    <>
+                                        <MoneyInput
+                                            name={f.name} inputRef={f.ref} onBlur={f.onBlur} placeholder="-"
+                                            value={f.value}
+                                            onValue={(v) => {
+                                                f.onChange(v);
+                                                if (isBase) cascade("sale_price", v);
+                                            }}
+                                        />
+                                        {fieldState.error?.message && (
+                                            <p className="text-2xs text-danger mt-1">{fieldState.error.message}</p>
+                                        )}
+                                    </>
                                 )}
                             />
                         </Field>
@@ -2601,8 +2623,17 @@ export default function ProductFormPage() {
 
     // ── Form ──────────────────────────────────────────────────────────────────
 
+    // The owner's 5% rule on sale prices (null for the super_admin).
+    const discountCap = useDiscountCap();
+    const capRef  = useRef(discountCap);
+    capRef.current = discountCap;
+    const formRef = useRef<any>(null);
     const form = useForm<FormValues>({
-        resolver: zodResolver(schema),
+        resolver: withSalePriceCap(
+            zodResolver(schema),
+            () => capRef.current,
+            () => formRef.current?.formState?.defaultValues?.prices as any,
+        ),
         mode: "onSubmit",
         reValidateMode: "onChange",
         defaultValues: {
@@ -2645,6 +2676,7 @@ export default function ProductFormPage() {
             production_stage_ids: [],
         },
     });
+    formRef.current = form;
     const {
         register,
         handleSubmit,

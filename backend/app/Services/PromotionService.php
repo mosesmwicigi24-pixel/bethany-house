@@ -50,16 +50,12 @@ class PromotionService
      */
     private function applies(Promotion $promo, Product $product): bool
     {
-        $c = $promo->conditions;
-        if (!is_array($c) || $c === []) {
+        $scope = self::scopeOf($promo->conditions);
+        if ($scope === null) {
             return true; // site-wide
         }
-        // Legacy admin editor shape: a list of {key,value} — not a real scope.
-        if (isset($c[0]) && is_array($c[0]) && array_key_exists('key', $c[0])) {
-            return true;
-        }
-        $productIds  = $c['product_ids']  ?? null;
-        $categoryIds = $c['category_ids'] ?? null;
+        $productIds  = $scope['product_ids'];
+        $categoryIds = $scope['category_ids'];
         if (is_array($productIds) && in_array($product->id, $productIds)) {
             return true;
         }
@@ -67,10 +63,38 @@ class PromotionService
             return true;
         }
         // A structured scope was given and this product is outside it.
-        if (is_array($productIds) || is_array($categoryIds)) {
-            return false;
+        return false;
+    }
+
+    /**
+     * What a promotion's `conditions` reach: null for site-wide, otherwise
+     * {product_ids, category_ids} (either may be null). Public so that
+     * DiscountRule measures a promotion against exactly the items it applies to.
+     *
+     * Site-wide when conditions is empty, the legacy admin [{key,value},…]
+     * shape, or an unknown structured shape (don't accidentally exclude).
+     *
+     * @return array{product_ids:?array, category_ids:?array}|null
+     */
+    public static function scopeOf(mixed $c): ?array
+    {
+        if (!is_array($c) || $c === []) {
+            return null;
         }
-        return true; // unknown structured shape → don't accidentally exclude
+        // Legacy admin editor shape: a list of {key,value} — not a real scope.
+        if (isset($c[0]) && is_array($c[0]) && array_key_exists('key', $c[0])) {
+            return null;
+        }
+        $productIds  = $c['product_ids']  ?? null;
+        $categoryIds = $c['category_ids'] ?? null;
+        if (!is_array($productIds) && !is_array($categoryIds)) {
+            return null;
+        }
+
+        return [
+            'product_ids'  => is_array($productIds) ? $productIds : null,
+            'category_ids' => is_array($categoryIds) ? $categoryIds : null,
+        ];
     }
 
     /**

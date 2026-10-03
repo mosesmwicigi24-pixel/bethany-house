@@ -52,6 +52,8 @@ class CampaignPermissionIsServiceAccountOnlyTest extends TestCase
         // operates the till), so the escalation target for a cashier who hits
         // the ceiling is the outlet manager — who holds the override, and still
         // not the agent's pass-through.
+        // Since the owner's rule (2026-10-03) the override no longer lifts the 5%
+        // maximum for anyone — see DiscountMaximumTest; the grant only stays put.
         $this->artisan('permission:sync')->assertExitCode(0);
 
         $admin   = Role::where('name', 'admin')->where('guard_name', 'sanctum')->first();

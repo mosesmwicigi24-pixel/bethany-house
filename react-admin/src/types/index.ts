@@ -31,6 +31,8 @@ export interface User {
   locked_at?: string | null
   locked_until?: string | null
   lock_reason?: string | null
+  /** The most this user may discount, in percent; null = no ceiling (super_admin). */
+  discount_cap_percent?: number | null
 }
 
 export interface AuthState {

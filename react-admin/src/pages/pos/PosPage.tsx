@@ -47,6 +47,7 @@ import { Link } from "react-router-dom";
 import type { SplitPayment as ModalSplitPayment, ConfiguredMethod } from "./components/PaymentModal";
 import { useToastStore } from "@/store/toast.store";
 import { useAuthStore } from "@/store/auth.store";
+import { clampCartDiscount, clampDiscount, discountCapHint, useDiscountCap } from "@/lib/discountCap";
 import { Spinner } from "@/components/ui/Spinner";
 import RegisterModal from "./components/RegisterModal";
 import PaymentModal from "./components/PaymentModal";
@@ -1315,6 +1316,8 @@ function CartRow({
     onPriceOverride: (i: number, price: number) => void;
     currency?: string;
 }) {
+    // The owner's 5% maximum (null for the super_admin); the server enforces it.
+    const discountCap = useDiscountCap();
     const [showDisc, setShowDisc] = useState(false);
     const [showPriceEdit, setShowPriceEdit] = useState(false);
     const [priceInput, setPriceInput] = useState<string>("");
@@ -1544,10 +1547,14 @@ function CartRow({
                     {item.discount_type !== "none" && (
                         <input
                             type="number" min={0}
+                            max={item.discount_type === "percent" && discountCap !== null ? discountCap : undefined}
                             value={item.discount_value}
                             onChange={(e) => onDiscount(index, item.discount_type, parseFloat(e.target.value) || 0)}
                             className="w-16 text-2xs border border-surface-200 rounded px-2 py-1 focus:outline-none focus:border-brand-400"
                         />
+                    )}
+                    {item.discount_type !== "none" && discountCap !== null && (
+                        <span className="text-2xs text-surface-400" title="Larger discounts are set by the owner.">{discountCapHint(discountCap)}</span>
                     )}
                     <button onClick={() => { onDiscount(index, "none", 0); setShowDisc(false); }} className="text-2xs text-danger ml-auto">Clear</button>
                 </div>
@@ -1897,6 +1904,8 @@ export default function PosPage() {
     const [cart, setCart] = useState<ExtCartItem[]>(_draft?.cart ?? []);
     const [cartDiscType, setCartDiscType] = useState<"none" | "flat" | "percent">(_draft?.cartDiscType ?? "none");
     const [cartDiscVal, setCartDiscVal] = useState(_draft?.cartDiscVal ?? 0);
+    // The owner's 5% maximum on any discount given here; null for the super_admin.
+    const discountCap = useDiscountCap();
     // ── Checkout config: tax settings + app_country ─────────────────────────────
     // Uses the POS-scoped /pos/checkout-config endpoint (pos.access
     // permission), NOT settingsApi.get() -> /v1/admin/settings, which
@@ -2303,10 +2312,12 @@ export default function PosPage() {
         (i: number, t: "none" | "flat" | "percent", v: number) =>
             setCart((p) => {
                 const u = [...p];
-                u[i] = { ...u[i], discount_type: t, discount_value: v };
+                // Stops at the owner's 5% of the line (no ceiling for the super_admin).
+                const value = clampDiscount(t, v, u[i].price * u[i].quantity, discountCap);
+                u[i] = { ...u[i], discount_type: t, discount_value: value };
                 return u;
             }),
-        [],
+        [discountCap],
     );
 
     const updatePriceOverride = useCallback(
@@ -2575,6 +2586,9 @@ export default function PosPage() {
         [selectedOutletId, currencyForQuery, handleProductClick, addingSuggestion],
     );
 
+    // The order's gross before any discount — the owner's 5% is of this, for
+    // the line discounts and the order discount together.
+    const cartGross = useMemo(() => cart.reduce((s, i) => s + i.price * i.quantity, 0), [cart]);
     const totals = useMemo(
         () => calcTotals(cart, cartDiscType, cartDiscVal, shippingFeeFromMethod || shippingAmount, taxInclusive),
         [cart, cartDiscType, cartDiscVal, shippingFeeFromMethod, shippingAmount, taxInclusive],
@@ -3534,7 +3548,11 @@ export default function PosPage() {
                                     <span className="text-2xs text-surface-400 flex-1">Order discount</span>
                                     <select
                                         value={cartDiscType}
-                                        onChange={(e) => setCartDiscType(e.target.value as "none"|"flat"|"percent")}
+                                        onChange={(e) => {
+                                            const t = e.target.value as "none"|"flat"|"percent";
+                                            setCartDiscType(t);
+                                            setCartDiscVal((v) => clampCartDiscount(t, v, totals.subtotal, cartGross, cartGross - totals.subtotal, discountCap));
+                                        }}
                                         className="text-2xs border border-surface-200 rounded px-1.5 py-0.5 bg-white focus:outline-none focus:border-brand-400"
                                     >
                                         <option value="none">None</option>
@@ -3544,10 +3562,14 @@ export default function PosPage() {
                                     {cartDiscType !== "none" && (
                                         <input
                                             type="number" min={0}
+                                            max={cartDiscType === "percent" && discountCap !== null ? discountCap : undefined}
                                             value={cartDiscVal}
-                                            onChange={(e) => setCartDiscVal(parseFloat(e.target.value) || 0)}
+                                            onChange={(e) => setCartDiscVal(clampCartDiscount(cartDiscType, parseFloat(e.target.value) || 0, totals.subtotal, cartGross, cartGross - totals.subtotal, discountCap))}
                                             className="w-16 text-2xs border border-surface-200 rounded px-1.5 py-0.5 focus:outline-none focus:border-brand-400"
                                         />
+                                    )}
+                                    {cartDiscType !== "none" && discountCap !== null && (
+                                        <span className="text-2xs text-surface-400" title="Larger discounts are set by the owner.">{discountCapHint(discountCap)}</span>
                                     )}
                                 </div>
 

@@ -828,8 +828,10 @@ class PosController extends Controller
             // -- 1. Stock check & per-item totals ------------------------------
             $itemsData    = [];
             $itemSubtotal = 0;
+            // Everything taken off this sale, measured together (owner's 5%).
+            $tally        = \App\Support\DiscountRule::tally();
 
-            foreach ($validated['items'] as $item) {
+            foreach ($validated['items'] as $idx => $item) {
                 // Resolve variant/product — variant_id is null for simple products.
                 $variantId    = $item['variant_id'] ?? null;
                 $variantModel = $variantId ? ProductVariant::find($variantId) : null;
@@ -890,7 +892,17 @@ class PosController extends Controller
                 $lineDiscount = OrderTotals::resolveDiscount($discType, $discVal, $lineBase);
                 // pos.discount is checked here, against the RESOLVED amount, so
                 // a flat discount cannot walk around the percentage ceiling.
-                PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, 'line');
+                PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, "items.{$idx}.discount_value");
+                // A price typed under the catalogue is a discount too, and
+                // counts toward the same 5% (App\Support\DiscountRule) — on
+                // the line, and in the order's total below.
+                $catUnit = \App\Support\DiscountRule::catalogueUnit($productId ?: null, $variantId, $currencyCode);
+                \App\Support\DiscountRule::assertLineWithin(
+                    auth()->user(), (float) $item['unit_price'], (int) $item['quantity'], $lineDiscount,
+                    $catUnit, "items.{$idx}.unit_price", "items.{$idx}.discount_value",
+                );
+                [$given, $givenBase, $short] = \App\Support\DiscountRule::lineGiven((float) $item['unit_price'], (int) $item['quantity'], $lineDiscount, $catUnit);
+                $tally->line($given, $givenBase, $short ? "items.{$idx}.unit_price" : "items.{$idx}.discount_value");
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -936,7 +948,9 @@ class PosController extends Controller
             $cartDiscVal  = (float) ($validated['cart_discount_value'] ?? 0);
             $cartDiscount = OrderTotals::resolveDiscount($cartDiscType, $cartDiscVal, $itemSubtotal);
 
-            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart');
+            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart_discount_value');
+            // The lines and the cart together: at most 5% of the sale's gross.
+            $tally->amount($cartDiscount, 'cart_discount_value')->assert(auth()->user());
 
             // Phase 2 — total tax is sum of per-line taxes already calculated above.
             // This is the goods total, derived BEFORE the shipping charge is read,
@@ -3044,8 +3058,10 @@ class PosController extends Controller
             // ── 3. Validate stock + build new items ───────────────────────────
             $itemsData    = [];
             $itemSubtotal = 0;
+            // Everything taken off this order, measured together (owner's 5%).
+            $tally        = \App\Support\DiscountRule::tally();
 
-            foreach ($validated['items'] ?? [] as $item) {
+            foreach ($validated['items'] ?? [] as $idx => $item) {
                 $variantId    = $item['variant_id'] ?? null;
                 $variantModel = $variantId ? ProductVariant::find($variantId) : null;
                 $productId    = $variantModel?->product_id ?? (int)($item['product_id'] ?? 0);
@@ -3089,7 +3105,14 @@ class PosController extends Controller
                 $lineDiscount = OrderTotals::resolveDiscount($discType, $discVal, $lineBase);
                 // pos.discount is checked here, against the RESOLVED amount, so
                 // a flat discount cannot walk around the percentage ceiling.
-                PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, 'line');
+                PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, "items.{$idx}.discount_value");
+                $catUnit = \App\Support\DiscountRule::catalogueUnit($productId ?: null, $variantId, $resolvedCurrency);
+                \App\Support\DiscountRule::assertLineWithin(
+                    auth()->user(), (float) $item['unit_price'], (int) $item['quantity'], $lineDiscount,
+                    $catUnit, "items.{$idx}.unit_price", "items.{$idx}.discount_value",
+                );
+                [$given, $givenBase, $short] = \App\Support\DiscountRule::lineGiven((float) $item['unit_price'], (int) $item['quantity'], $lineDiscount, $catUnit);
+                $tally->line($given, $givenBase, $short ? "items.{$idx}.unit_price" : "items.{$idx}.discount_value");
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -3125,7 +3148,7 @@ class PosController extends Controller
             }
 
             // ── Build order lines for MTO items (no stock deduction) ──────────
-            foreach ($validated['production_items'] ?? [] as $pi) {
+            foreach ($validated['production_items'] ?? [] as $pidx => $pi) {
                 $mtoVariantId = $pi['variant_id'] ?? null;
                 $mtoVariant   = $mtoVariantId ? ProductVariant::with('product.translations')->find($mtoVariantId) : null;
                 $mtoProductId = $mtoVariant?->product_id ?? (int)($pi['product_id'] ?? 0);
@@ -3159,6 +3182,15 @@ class PosController extends Controller
                     }
                 }
 
+                // A made-to-order line carries no discount column, so a lower
+                // price IS its discount: measured against the catalogue too.
+                $mtoCat = \App\Support\DiscountRule::catalogueUnit($mtoProductId ?: null, $mtoVariantId, $resolvedCurrency);
+                \App\Support\DiscountRule::assertLineWithin(
+                    auth()->user(), $mtoUnitPrice, (int) $pi['quantity'], 0.0,
+                    $mtoCat, "production_items.{$pidx}.unit_price", "production_items.{$pidx}.unit_price",
+                );
+                [$given, $givenBase] = \App\Support\DiscountRule::lineGiven($mtoUnitPrice, (int) $pi['quantity'], 0.0, $mtoCat);
+                $tally->line($given, $givenBase, "production_items.{$pidx}.unit_price");
                 $mtoBase      = $mtoUnitPrice * (int)$pi['quantity'];
                 $mtoTaxCalc   = TaxCalculationService::calculateLine($mtoUnitPrice, (int)$pi['quantity'], $mtoProductId, $taxInclusive);
                 $mtoLineTotal = $taxInclusive ? $mtoBase : $mtoBase + round($mtoTaxCalc['tax_amount'], 2);
@@ -3188,7 +3220,9 @@ class PosController extends Controller
             $cartDiscType = $validated['cart_discount_type'] ?? 'none';
             $cartDiscVal  = (float)($validated['cart_discount_value'] ?? 0);
             $cartDiscount = OrderTotals::resolveDiscount($cartDiscType, $cartDiscVal, $itemSubtotal);
-            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart');
+            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart_discount_value');
+            // The lines and the cart together: at most 5% of the order's gross.
+            $tally->amount($cartDiscount, 'cart_discount_value')->assert(auth()->user());
             $shippingAmt  = round((float)($validated['shipping_amount'] ?? 0), 2);
             $totals       = OrderTotals::fromParts(
                 $itemSubtotal,
@@ -3448,8 +3482,10 @@ class PosController extends Controller
         try {
             $itemsData    = [];
             $itemSubtotal = 0;
+            // Everything taken off this order, measured together (owner's 5%).
+            $tally        = \App\Support\DiscountRule::tally();
 
-            foreach ($validated['items'] ?? [] as $item) {
+            foreach ($validated['items'] ?? [] as $idx => $item) {
                 $variantId    = $item['variant_id'] ?? null;
                 $variantModel = $variantId ? ProductVariant::find($variantId) : null;
                 $productId    = $variantModel?->product_id ?? (int)($item['product_id'] ?? 0);
@@ -3509,6 +3545,7 @@ class PosController extends Controller
                 // nothing. Refusing beats charging a KES number as USD.
                 $unitPrice       = (float) $item['unit_price'];
                 $catalogueSaving = 0.0;   // a till operator types the price they mean
+                $promotionSaving = 0.0;   // what a running promotion takes off this line
                 if ($hubPrices) {
                     $priced = CurrencyPricing::catalogue($productId, $variantId, $currencyCode);
                     if (!$priced) {
@@ -3536,7 +3573,9 @@ class PosController extends Controller
                         ? ($promoProducts[$productId] ??= Product::find($productId))
                         : null;
                     if ($promoProduct && ($promo = $promoService->promotionFor($promoProduct))) {
-                        $sellingUnit = $promoService->discountedUnit($sellingUnit, $promo);
+                        $promotedUnit    = $promoService->discountedUnit($sellingUnit, $promo);
+                        $promotionSaving = round(max(0, $sellingUnit - $promotedUnit) * $item['quantity'], 2);
+                        $sellingUnit     = $promotedUnit;
                     }
                     $catalogueSaving = round(max(0, $unitPrice - $sellingUnit) * $item['quantity'], 2);
                 }
@@ -3547,11 +3586,27 @@ class PosController extends Controller
                 $askedFor     = OrderTotals::resolveDiscount($discType, $discVal, $lineBase);
                 // pos.discount is checked here, against the RESOLVED amount, so
                 // a flat discount cannot walk around the percentage ceiling.
-                // Only what the CALLER asked for is policed: the catalogue
-                // saving below is the shop's own advertised price, not somebody
-                // exercising discretion over the till, and the storefront does
-                // not police it either.
-                PosDiscountPolicy::assertAllowed(auth()->user(), $askedFor, $lineBase, 'line');
+                // A product's own sale price is the shop's price, not anyone's
+                // discretion, and is not counted. A running PROMOTION is: the
+                // hub applies it by itself, so what the caller asks for comes
+                // on top of it, and the two together may not pass max(5%, the
+                // promotion's value) — no stacking, for Neema or anyone.
+                PosDiscountPolicy::assertAllowed(
+                    auth()->user(), $askedFor, $lineBase, "items.{$idx}.discount_value", $promotionSaving,
+                );
+                if ($hubPrices) {
+                    $tally->line($askedFor + $promotionSaving, $lineBase, "items.{$idx}.discount_value", $promotionSaving);
+                } else {
+                    // A till operator's typed price is measured against the
+                    // catalogue (an agent-taken line is priced by the hub itself).
+                    $catUnit = \App\Support\DiscountRule::catalogueUnit($productId ?: null, $variantId, $currencyCode);
+                    \App\Support\DiscountRule::assertLineWithin(
+                        auth()->user(), $unitPrice, (int) $item['quantity'], $askedFor,
+                        $catUnit, "items.{$idx}.unit_price", "items.{$idx}.discount_value",
+                    );
+                    [$given, $givenBase, $short] = \App\Support\DiscountRule::lineGiven($unitPrice, (int) $item['quantity'], $askedFor, $catUnit);
+                    $tally->line($given, $givenBase, $short ? "items.{$idx}.unit_price" : "items.{$idx}.discount_value");
+                }
                 // Deliberately NOT rounded here. resolveDiscount's full
                 // precision has always flowed into the line subtotal, and
                 // rounding the sum moved a characterised total by a cent. The
@@ -3590,7 +3645,7 @@ class PosController extends Controller
             // ── Build order lines for MTO (production) items ──────────────────
             // These travel via production_items[] only. No stock deduction;
             // the item is made to order and inventory will be added on completion.
-            foreach ($validated['production_items'] ?? [] as $pi) {
+            foreach ($validated['production_items'] ?? [] as $pidx => $pi) {
                 $mtoVariantId = $pi['variant_id'] ?? null;
                 $mtoVariant  = $mtoVariantId ? ProductVariant::with('product.translations')->find($mtoVariantId) : null;
                 $mtoProductId = $mtoVariant?->product_id ?? (int)($pi['product_id'] ?? 0);
@@ -3626,6 +3681,16 @@ class PosController extends Controller
                     }
                 }
 
+                // A made-to-order line carries no discount column, so a lower
+                // price IS its discount: measured against the catalogue too.
+                $mtoCat = $hubPrices ? null
+                    : \App\Support\DiscountRule::catalogueUnit($mtoProductId ?: null, $mtoVariantId, $currencyCode);
+                \App\Support\DiscountRule::assertLineWithin(
+                    auth()->user(), $mtoUnitPrice, (int) $pi['quantity'], 0.0,
+                    $mtoCat, "production_items.{$pidx}.unit_price", "production_items.{$pidx}.unit_price",
+                );
+                [$given, $givenBase] = \App\Support\DiscountRule::lineGiven($mtoUnitPrice, (int) $pi['quantity'], 0.0, $mtoCat);
+                $tally->line($given, $givenBase, "production_items.{$pidx}.unit_price");
                 $mtoBase         = $mtoUnitPrice * (int)$pi['quantity'];
                 $mtoTaxCalc      = TaxCalculationService::calculateLine($mtoUnitPrice, (int)$pi['quantity'], $mtoProductId, $taxInclusive);
                 $mtoLineTotal    = $taxInclusive ? $mtoBase : $mtoBase + round($mtoTaxCalc['tax_amount'], 2);
@@ -3654,7 +3719,9 @@ class PosController extends Controller
             $cartDiscType = $validated['cart_discount_type'] ?? 'none';
             $cartDiscVal  = (float)($validated['cart_discount_value'] ?? 0);
             $cartDiscount = OrderTotals::resolveDiscount($cartDiscType, $cartDiscVal, $itemSubtotal);
-            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart');
+            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart_discount_value');
+            // The lines and the cart together: at most 5% of the order's gross.
+            $tally->amount($cartDiscount, 'cart_discount_value')->assert(auth()->user());
             $shippingAmt  = round((float)($validated['shipping_amount'] ?? 0), 2);
             $totals       = OrderTotals::fromParts(
                 $itemSubtotal,

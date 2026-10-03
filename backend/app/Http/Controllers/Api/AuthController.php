@@ -763,6 +763,12 @@ class AuthController extends Controller
         $user->two_factor_required = app(TwoFactor::class)->requiredFor($user);
         $user->recovery_codes_left = $user->two_factor_enabled ? app(TwoFactor::class)->recoveryCodesLeft($user) : null;
 
+        // The most this user may discount, in percent — null for the owner,
+        // who has no ceiling. The console reads it to show the maximum on
+        // every discount input; the server enforces it regardless
+        // (App\Support\DiscountRule).
+        $user->discount_cap_percent = \App\Support\DiscountRule::capFor($user);
+
         return $user;
     }
 

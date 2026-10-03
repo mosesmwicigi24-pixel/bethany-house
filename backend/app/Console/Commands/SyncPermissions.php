@@ -156,9 +156,13 @@ class SyncPermissions extends Command
 
         // ── POS ─────────────────────────────────────────────────────────────
         'pos.access'           => ['POS Access',           'Use the point-of-sale terminal',              'POS'],
-        'pos.discount'         => ['Apply Discounts',      'Apply manual discounts at POS, up to the configured ceiling', 'POS'],
-        'pos.discount_override' => ['Discount Beyond the Ceiling', 'Apply a POS discount larger than the percentage ceiling that limits cashiers', 'POS'],
-        'pos.discount_campaign' => ['Pass Through a Campaign Discount', 'Carry an owner-declared campaign discount into an order, bounded by the agent ceiling rather than the cashier one. For the sales agent\'s service account, not for people.', 'POS'],
+        'pos.discount'         => ['Apply Discounts',      'Apply manual discounts at POS, up to the 5% maximum', 'POS'],
+        // Kept so existing grants keep working; since the owner's rule of
+        // 2026-10-03 it lifts nothing — only a super_admin exceeds 5%.
+        'pos.discount_override' => ['Discount Beyond the Ceiling (retired)', 'No longer has any effect: nobody but the super admin may give more than 5%', 'POS'],
+        // Kept on the agent's account so nothing that names it breaks; since
+        // 2026-10-03 the agent is held exactly like everyone else.
+        'pos.discount_campaign' => ['Pass Through a Campaign Discount (retired)', 'No longer has any effect: the sales agent is held to 5%, or to a running promotion the owner set, like everyone else. For the sales agent\'s service account, not for people.', 'POS'],
         'pos.void'             => ['Void Transactions',    'Void completed POS transactions',             'POS'],
         'pos.open_register'    => ['Open Cash Register',   'Open a new cash register session',            'POS'],
         'pos.close_register'   => ['Close Cash Register',  'Close and reconcile a cash register',         'POS'],
@@ -436,8 +440,9 @@ class SyncPermissions extends Command
             // person a clerk's draft quotation needs before it reaches a
             // customer (Phase 2; until now only admin could issue).
             'quotations.view', 'quotations.create', 'quotations.issue',
-            // Beyond a cashier at the same till. discount_override makes this
-            // role the escalation target when a cashier hits the 5% ceiling.
+            // Beyond a cashier at the same till. discount_override is kept so
+            // the grant does not move, but it no longer lifts the 5% maximum
+            // (owner's rule, 2026-10-03) — only a super_admin exceeds it.
             'pos.cash_management', 'pos.discount_override',
             // The first signature on a till void or refund (Phase 4B part 2).
             'pos.approve_reversal',

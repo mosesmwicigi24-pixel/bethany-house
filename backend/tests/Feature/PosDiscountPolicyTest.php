@@ -153,9 +153,11 @@ class PosDiscountPolicyTest extends TestCase
         $payload['items'][0]['discount_type']  = 'percent';
         $payload['items'][0]['discount_value'] = 6;
 
+        // 422 naming the field since the owner's rule (2026-10-03); a missing
+        // pos.discount is still a 403 — that is a permission, this is a limit.
         $this->postSale($payload)
-            ->assertForbidden()
-            ->assertJsonPath('message', fn ($m) => str_contains($m, '5% ceiling'));
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'The most anyone can give is 5%. Larger discounts are set by the owner.');
     }
 
     /**
@@ -171,7 +173,7 @@ class PosDiscountPolicyTest extends TestCase
         $payload['items'][0]['discount_type']  = 'flat';
         $payload['items'][0]['discount_value'] = 500;   // 50% of a 1,000 line
 
-        $this->postSale($payload)->assertForbidden();
+        $this->postSale($payload)->assertStatus(422);
     }
 
     public function test_a_flat_discount_within_the_ceiling_is_allowed(): void
@@ -199,13 +201,19 @@ class PosDiscountPolicyTest extends TestCase
         ]);
 
         $this->postSale($payload)
-            ->assertForbidden()
-            ->assertJsonPath('message', fn ($m) => str_contains($m, 'cart discount'));
+            ->assertStatus(422)
+            ->assertJsonStructure(['errors' => ['cart_discount_value']]);
     }
 
-    // ── The override ─────────────────────────────────────────────────────────
+    // ── The override no longer overrides ─────────────────────────────────────
 
-    public function test_an_override_holder_may_exceed_the_ceiling(): void
+    /**
+     * pos.discount_override used to lift the ceiling for outlet managers and
+     * admins. The owner's rule (2026-10-03) is that nobody but a super_admin
+     * gives more than 5%, so holding it changes nothing; the slug is kept only
+     * so existing grants keep working. See DiscountMaximumTest.
+     */
+    public function test_an_override_holder_may_no_longer_exceed_the_ceiling(): void
     {
         $this->actingAsCashier(['pos.discount', 'pos.discount_override']);
         $product = $this->sellableProduct();
@@ -214,7 +222,7 @@ class PosDiscountPolicyTest extends TestCase
         $payload['items'][0]['discount_type']  = 'percent';
         $payload['items'][0]['discount_value'] = 40;
 
-        $this->postSale($payload)->assertSuccessful();
+        $this->postSale($payload)->assertStatus(422);
     }
 
     // ── The other two entry points ───────────────────────────────────────────
@@ -235,6 +243,6 @@ class PosDiscountPolicyTest extends TestCase
                 'discount_type'  => 'percent',
                 'discount_value' => 30,
             ]],
-        ])->assertForbidden();
+        ])->assertStatus(422);
     }
 }
