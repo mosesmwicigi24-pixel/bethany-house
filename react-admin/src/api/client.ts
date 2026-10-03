@@ -183,11 +183,15 @@ function createApiClient(): AxiosInstance {
             }
 
             if (status === 429) {
+                // A refusal that explains itself (it carries a code, e.g. a
+                // locked approver PIN on the till) keeps its own message.
                 return Promise.reject({
                     status,
-                    message:
-                        "Too many requests. Please wait a moment and try again.",
+                    message: data?.code && data?.message
+                        ? data.message
+                        : "Too many requests. Please wait a moment and try again.",
                     errors: {},
+                    reason: data?.code,
                 } satisfies ApiError);
             }
 
@@ -198,7 +202,7 @@ function createApiClient(): AxiosInstance {
                     status,
                 message: data?.message ?? "An unexpected error occurred.",
                 errors: data?.errors ?? {},
-                reason: data?.reason,
+                reason: data?.reason ?? data?.code,
             } satisfies ApiError);
         },
     );

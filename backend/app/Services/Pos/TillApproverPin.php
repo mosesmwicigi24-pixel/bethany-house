@@ -69,7 +69,7 @@ class TillApproverPin
         }
 
         throw new HttpResponseException(response()->json([
-            'message'       => 'Wrong PIN.',
+            'message'       => 'Wrong PIN. ' . $left . ' attempt' . ($left === 1 ? '' : 's') . ' left before this approver\'s PIN locks.',
             'code'          => 'PIN_INCORRECT',
             'attempts_left' => $left,
         ], 422));

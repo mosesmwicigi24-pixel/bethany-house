@@ -181,6 +181,47 @@ export interface PosSale {
     /** HMAC token for the public /pay/:token payment page */
     payment_token?: string | null;
     created_at: string;
+    /** Void / refund requests on this sale still waiting for a signature (Phase 4B). */
+    pending_reversals?: PosPendingReversal[];
+}
+
+// ── Till voids and refunds (Phase 4B part 2) ─────────────────────────────────
+// A void or a return at the till is a REQUEST. An approver signs it on this
+// till with their own PIN, or later from the Approvals inbox.
+
+export interface PosPendingReversal {
+    approval_id: number;
+    event: "pos_void" | "pos_refund";
+    kind: "void" | "refund";
+    approvable_id: number;
+    version: number;
+    amount: number | null;
+    currency_code: string | null;
+    /** The band key the request is waiting on, e.g. pos.approve_reversal. */
+    awaiting: string | null;
+    requested_by: string | null;
+    requested_at: string | null;
+    expires_at: string | null;
+}
+
+/** The engine's view of one approval request (the parts the till shows). */
+export interface TillApprovalRequest {
+    id: number;
+    event: string;
+    status: "pending" | "approved" | "rejected" | "expired" | "cancelled";
+    version: number;
+    approvable_id: number;
+    amount: number | null;
+    currency_code: string | null;
+    bands: { order: number; permission: string; up_to_kes: number | null; signed: boolean }[];
+    awaiting: { order: number; permission: string } | null;
+    summary: { title: string; reference?: string | null; lines: string[] } | null;
+}
+
+export interface TillApprover {
+    id: number;
+    name: string;
+    pin_set: boolean;
 }
 
 export interface DailySummary {
@@ -309,8 +350,29 @@ export const posApi = {
     saleDetail: (id: number) =>
         get<{ sale: PosSale }>(`/v1/admin/pos/sales/${id}`),
 
+    /** Ask for a void (202). The sale is voided only when an approver signs. */
     voidSale: (id: number, reason: string) =>
-        post<{ message: string }>(`/v1/admin/pos/sales/${id}/void`, { reason }),
+        post<{ message: string; approval: TillApprovalRequest; pending: PosPendingReversal[] }>(
+            `/v1/admin/pos/sales/${id}/void`, { reason }),
+
+    saleReversals: (id: number) =>
+        get<{ sale_id: number; pending: PosPendingReversal[]; till_closed: boolean }>(
+            `/v1/admin/pos/sales/${id}/reversals`),
+
+    /** Who could sign this request now, at this till. */
+    tillApprovers: (approvalId: number) =>
+        get<{ data: TillApprover[] }>(`/v1/admin/pos/approvals/${approvalId}/approvers`),
+
+    /** The approver signs on this till with THEIR terminal PIN. */
+    pinSign: (approvalId: number, data: {
+        approver_id: number;
+        pin: string;
+        decision?: "approve" | "reject";
+        reason?: string;
+        version?: number;
+    }) =>
+        post<{ message: string; request: TillApprovalRequest; pending: PosPendingReversal[] }>(
+            `/v1/admin/pos/approvals/${approvalId}/pin-sign`, data),
 
     /**
      * Phase 2 two-step checkout: create the order without a payment so that
@@ -382,7 +444,14 @@ export const posApi = {
         reason: string;
         refund_method: string;
     }) =>
-        post<{ message: string; return_number: string; refund_amount: number }>(
+        // Ask for a refund (202). It is made only when an approver signs.
+        post<{
+            message: string;
+            refund_request_id: number;
+            refund_amount: number;
+            approval: TillApprovalRequest;
+            pending: PosPendingReversal[];
+        }>(
             "/v1/admin/pos/returns",
             data,
         ),
