@@ -929,12 +929,14 @@ class UserController extends Controller
             app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
         } catch (\Exception) {}
 
-        // A role change ends every session the person holds (plan §12.4,
-        // §17: an old session reused after a role is removed → 401). The
-        // next sign-in is evaluated against the new roles, including their
-        // session limits and 2FA requirement.
+        // Removing a role ends every session the person holds (plan §17: an
+        // old session reused after a role is removed → 401); the next sign-in
+        // is evaluated against the remaining roles. ADDING a role does not:
+        // the owner assigns roles himself, and permissions are re-read on
+        // every request anyway, so a cashier is not signed out mid-shift each
+        // time the owner gives them another role.
         $after = collect($roleIds)->map(fn ($id) => (int) $id)->unique()->sort()->values()->all();
-        if ($before !== $after) {
+        if (array_diff($before, $after) !== []) {
             DB::table('personal_access_tokens')
                 ->where('tokenable_type', (new User())->getMorphClass())
                 ->where('tokenable_id', $userId)

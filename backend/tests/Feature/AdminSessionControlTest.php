@@ -123,4 +123,22 @@ class AdminSessionControlTest extends TestCase
 
         $this->withBearer($old, 'GET', '/api/v1/admin/auth/me')->assertOk();
     }
+
+    public function test_adding_a_role_keeps_the_person_signed_in(): void
+    {
+        // The owner assigns roles himself; giving a cashier another role must
+        // not sign them out mid-shift (permissions are re-read per request).
+        $owner = $this->staffWithRoles(['super_admin']);
+        $u     = $this->staffWithRoles(['accountant']);
+        $old   = $this->bearerFor($u);
+
+        $t = $this->bearerFor($owner);
+        $this->withBearer($t, 'POST', '/api/v1/admin/auth/step-up', ['password' => 'password'])->assertOk();
+        $this->withBearer($t, 'PUT', "/api/v1/admin/users/{$u->id}", ['role_ids' => [
+            Role::findByName('accountant', 'sanctum')->id, Role::findOrCreate('finance_manager', 'sanctum')->id,
+        ]])->assertOk();
+
+        $this->withBearer($old, 'GET', '/api/v1/admin/auth/me')->assertOk();
+        $this->assertSame(1, $this->tokens($u));
+    }
 }
