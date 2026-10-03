@@ -63,6 +63,15 @@ final class ApprovalEngine
             // Phase 4B part 2: till voids and refunds.
             Handlers\PosVoidHandler::class,
             Handlers\PosRefundHandler::class,
+            // Phase 3C: proposals — a guarded value changes only once signed.
+            Handlers\SellingPriceChangeHandler::class,
+            Handlers\ProductCostChangeHandler::class,
+            Handlers\SupplierCostChangeHandler::class,
+            Handlers\TaxRateChangeHandler::class,
+            Handlers\ReportingFxChangeHandler::class,
+            Handlers\PaymentSettlementChangeHandler::class,
+            Handlers\CustomerPricingFxChangeHandler::class,
+            Handlers\CustomerCreditHandler::class,
         ] as $class) {
             $handler = app($class);
             $this->handlers[$handler->event()] = $handler;

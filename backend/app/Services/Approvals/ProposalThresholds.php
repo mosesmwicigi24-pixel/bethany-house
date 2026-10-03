@@ -17,8 +17,12 @@ use Illuminate\Validation\ValidationException;
  * replace() accept only the 3B events, and 3C must not edit it. This class
  * does the same two things for the 3C events with the same rules — a set per
  * effective_from, never retroactive, history never edited, super admin only
- * (the caller checks), audited as approval_thresholds_changed. When 3B lands,
- * folding these events into ThresholdRepository::EVENTS makes this redundant.
+ * (the caller checks), audited as approval_thresholds_changed.
+ *
+ * Kept apart from ThresholdRepository::EVENTS on purpose: these events carry a
+ * unit (percent / kes / none) and a maker's own "_direct" band, which is one
+ * band WITH a ceiling — a shape 3B's validator rightly refuses for a signature
+ * ladder. Reading still goes through ThresholdRepository::bands().
  */
 final class ProposalThresholds
 {

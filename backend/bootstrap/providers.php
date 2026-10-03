@@ -20,7 +20,6 @@ return [
     App\Providers\AppServiceProvider::class,
     App\Providers\RouteServiceProvider::class,
     App\Providers\AuthServiceProvider::class,
-    App\Providers\ProposalServiceProvider::class,   // Phase 3C: proposal handlers on the approval engine
     Barryvdh\DomPDF\ServiceProvider::class,
     Mews\Purifier\PurifierServiceProvider::class,
 ];
