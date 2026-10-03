@@ -62,6 +62,30 @@ return [
         'redact_query_keys' => ['token', 'signature', 'password', 'code', 'key', 'secret', 'otp'],
     ],
 
+    // authorization_denied (4D): a 403 on one of these route URIs (Laravel's
+    // Str::is patterns over the route template) is written to activity_log,
+    // once per user + route per dedupe window. Every other refusal stays in
+    // request_logs only — a refusal on an ordinary screen is not a signal.
+    'denied' => [
+        'dedupe_seconds' => (int) env('AUDIT_DENIED_DEDUPE_SECONDS', 300),
+        'sensitive_routes' => [
+            'api/v1/admin/users', 'api/v1/admin/users/*',
+            'api/v1/admin/roles', 'api/v1/admin/roles/*',
+            'api/v1/admin/permissions', 'api/v1/admin/permissions/*',
+            'api/v1/admin/settings', 'api/v1/admin/settings/*',
+            'api/v1/admin/payment-methods-management*',
+            'api/v1/admin/payments', 'api/v1/admin/payments/*',
+            'api/v1/admin/payment-transactions*',
+            'api/v1/admin/database', 'api/v1/admin/database/*',
+            'api/v1/admin/activity-logs', 'api/v1/admin/activity-logs/*',
+            'api/v1/admin/audit*',
+            'api/v1/admin/downloads*',
+            'api/v1/admin/reports/pdf/*',
+            'api/v1/admin/*export*',
+            'api/v1/admin/*approv*',
+        ],
+    ],
+
     // activity_log is never pruned. Business records are kept five years for
     // KRA (Tax Procedures Act s.23); the trail that explains them is kept as
     // long. logs:purge-old refuses to touch it.
