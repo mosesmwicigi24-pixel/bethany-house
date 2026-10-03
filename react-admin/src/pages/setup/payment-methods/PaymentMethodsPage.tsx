@@ -22,6 +22,9 @@ import {
 } from "@/components/setup/FormComponents";
 import type { PaymentMethodSetup } from "@/types/setup";
 import type { ApiError } from "@/types";
+import { usePermissions } from "@/hooks/usePermissions";
+import { PendingChanges, NeedsApprovalHint, PROPOSALS_QUERY_KEY } from "@/components/approvals/PendingChanges";
+import { waitsForApproval } from "@/api/proposals";
 
 const schema = z.object({
     name: z.string().min(1, "Name is required"),
@@ -190,6 +193,11 @@ export default function PaymentMethodsPage() {
         null,
     );
     const [deleting, setDeleting] = useState<PaymentMethodSetup | null>(null);
+    // Phase 3C: whether payments wait for review (settlement) is proposed by
+    // finance and signed by the super admin; the rest is the super admin's.
+    const { can } = usePermissions();
+    const canEdit = can("settings.edit");
+    const [effectiveFrom, setEffectiveFrom] = useState("");
 
     const { data, isLoading } = useQuery({
         queryKey: ["payment-methods"],
@@ -244,6 +252,7 @@ export default function PaymentMethodsPage() {
         setModalOpen(true);
     };
     const openEdit = (m: PaymentMethodSetup) => {
+        setEffectiveFrom("");
         reset({
             name: m.name,
             code: m.code,
@@ -268,11 +277,13 @@ export default function PaymentMethodsPage() {
     const saveMutation = useMutation({
         mutationFn: (v: FormValues) =>
             editing
-                ? paymentMethodsApi.update(editing.id, v)
+                ? paymentMethodsApi.update(editing.id, { ...v, effective_from: effectiveFrom ? new Date(effectiveFrom).toISOString() : null })
                 : paymentMethodsApi.create(v),
-        onSuccess: () => {
+        onSuccess: (res) => {
             qc.invalidateQueries({ queryKey: ["payment-methods"] });
-            toast.success(
+            qc.invalidateQueries({ queryKey: [PROPOSALS_QUERY_KEY] });
+            if (waitsForApproval(res)) toast.info(res.message);
+            else toast.success(
                 editing ? "Payment method updated." : "Payment method added.",
             );
             setModalOpen(false);
@@ -328,10 +339,14 @@ export default function PaymentMethodsPage() {
                         Paystack or Flutterwave for card payments.
                     </p>
                 </div>
-                <button onClick={openCreate} className="btn-primary shrink-0 self-start sm:self-auto">
-                    + Add Method
-                </button>
+                {canEdit && (
+                    <button onClick={openCreate} className="btn-primary shrink-0 self-start sm:self-auto">
+                        + Add Method
+                    </button>
+                )}
             </div>
+
+            <PendingChanges subjectType="payment_method" subjectIds={methods.map((m) => m.id)} />
 
             <Section title="Configured Methods">
                 {isLoading ? (
@@ -410,7 +425,7 @@ export default function PaymentMethodsPage() {
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-1.5 shrink-0">
-                                        {method.code !== "cash" && (
+                                        {canEdit && method.code !== "cash" && (
                                             <button
                                                 onClick={() =>
                                                     openConfig(method)
@@ -420,7 +435,7 @@ export default function PaymentMethodsPage() {
                                                 Credentials
                                             </button>
                                         )}
-                                        <button
+                                        {canEdit && <button
                                             onClick={() =>
                                                 toggleMutation.mutate(method.id)
                                             }
@@ -429,7 +444,7 @@ export default function PaymentMethodsPage() {
                                             {method.is_active
                                                 ? "Disable"
                                                 : "Enable"}
-                                        </button>
+                                        </button>}
                                         <button
                                             onClick={() => openEdit(method)}
                                             className="btn-ghost btn-sm"
@@ -437,13 +452,13 @@ export default function PaymentMethodsPage() {
                                         >
                                             <EditIcon />
                                         </button>
-                                        <button
+                                        {canEdit && <button
                                             onClick={() => setDeleting(method)}
                                             className="btn-ghost btn-sm text-danger hover:bg-danger-light"
                                             aria-label="Delete"
                                         >
                                             <TrashIcon />
-                                        </button>
+                                        </button>}
                                     </div>
                                 </div>
                             ))}
@@ -612,6 +627,21 @@ export default function PaymentMethodsPage() {
                                 (cheque, bank transfer, Western Union, MoneyGram). Off → they
                                 settle immediately with a notification (cash, I&M, M-Pesa, card).
                             </p>
+                            {editing && (
+                                <>
+                                    <NeedsApprovalHint>
+                                        Changing this needs approval from the super admin.
+                                    </NeedsApprovalHint>
+                                    <Field label="Takes effect" hint="Leave empty for 'when approved'. Never earlier than now.">
+                                        <FieldInput
+                                            className="input"
+                                            type="datetime-local"
+                                            value={effectiveFrom}
+                                            onChange={(e) => setEffectiveFrom(e.target.value)}
+                                        />
+                                    </Field>
+                                </>
+                            )}
                         </div>
                     </div>
                 </div>

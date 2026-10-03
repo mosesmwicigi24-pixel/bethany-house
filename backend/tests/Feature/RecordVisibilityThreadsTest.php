@@ -185,14 +185,18 @@ class RecordVisibilityThreadsTest extends TestCase
 
     public function test_return_threads_need_manage_returns(): void
     {
-        $order = Order::factory()->create();
+        $shop  = Outlet::factory()->create();
+        $order = Order::factory()->create(['outlet_id' => $shop->id]);
         $return = OrderReturn::create(['return_number' => 'RET-' . uniqid(), 'order_id' => $order->id, 'status' => 'requested']);
         $this->thread(OrderReturn::class, $return->id);
 
         $this->actAs($this->user('pos_clerk'));
         $this->readThread('OrderReturn', $return->id)->assertNotFound();
 
-        $this->actAs($this->user('outlet_manager'));
+        // Phase 4A: the manager of the shop the sale was made at.
+        $manager = $this->user('outlet_manager');
+        $manager->outlets()->attach($shop->id);
+        $this->actAs($manager->fresh());
         $this->readThread('OrderReturn', $return->id)->assertOk();
     }
 

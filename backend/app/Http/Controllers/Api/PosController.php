@@ -24,6 +24,8 @@ use App\Services\OrderTotals;
 use App\Services\PosDiscountPolicy;
 use App\Services\PosInventoryService;
 use App\Services\TaxCalculationService;
+use App\Services\Approvals\ApprovalEngine;
+use App\Services\Pos\TillReversals;
 use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -337,7 +339,9 @@ class PosController extends Controller
         }
 
         return response()->json([
-            'register'          => $register ? $this->transformRegister($register) : null,
+            // Blind to its operator until finalized (Phase 4B): no expected
+            // cash, no variance, no totals that add up to them.
+            'register'          => $register ? $this->transformRegister($register, $user) : null,
             'has_open_register' => $hasOpen,
             'eod_submitted'     => $eodSubmitted,
         ]);
@@ -385,24 +389,38 @@ class PosController extends Controller
 
         DB::beginTransaction();
         try {
-            // Check: THIS USER must not already have an open register at this outlet
-            $existingForUser = CashRegister::where('outlet_id', $outletId)
-                ->where('opened_by', $user->id)
-                ->where('status', 'open')
-                ->lockForUpdate()
-                ->exists();
+            // One open till per person, across every outlet (Phase 4B). The
+            // user row is locked so two simultaneous opens cannot both pass the
+            // check — a lock on her registers locks nothing when she has none.
+            \App\Models\User::whereKey($user->id)->lockForUpdate()->first();
 
-            if ($existingForUser) {
+            $existing = CashRegister::where('opened_by', $user->id)
+                ->where('status', 'open')
+                ->with('outlet:id,name')
+                ->first();
+
+            if ($existing) {
                 DB::rollBack();
-                return response()->json(['message' => 'You already have an open cash register for this outlet.'], 422);
+                return response()->json([
+                    'message' => (int) $existing->outlet_id === $outletId
+                        ? 'You already have an open cash register for this outlet.'
+                        : 'You already have an open till at ' . ($existing->outlet?->name ?? 'another outlet')
+                          . '. Count and close it before opening another.',
+                ], 422);
             }
+
+            // The float is typed blind: the opener counts what is in the drawer
+            // and is never shown the last count. Any difference from it is
+            // logged on this till; the previous till is never touched.
+            $float = app(\App\Services\Tills\TillService::class)
+                ->compareFloat($outletId, (float) $validated['opening_cash']);
 
             $userName     = trim("{$user->first_name} {$user->last_name}") ?: $user->email;
             $registerName = $outlet->name . ' – ' . $userName . ' – ' . now()->format('d M Y');
 
             $register = CashRegister::create([
                 'outlet_id'         => $outletId,
-                'user_id'           => $user->id,   // column confirmed present in DB; not yet in CashRegister::$fillable - see model fix
+                'user_id'           => $user->id,   // the operator (fillable since Phase 4B; was silently dropped before)
                 'register_name'     => $registerName,
                 'opened_by'         => $user->id,
                 'opening_balance'   => $validated['opening_cash'],
@@ -419,9 +437,23 @@ class PosController extends Controller
                 'total_mpesa_sales' => 0,
                 'total_refunds'     => 0,
                 'transaction_count' => 0,
+                'lifecycle_version'       => CashRegister::LIFECYCLE_VERSION,
+                'previous_register_id'    => $float['previous_register_id'],
+                'float_vs_previous_close' => $float['float_vs_previous_close'],
             ]);
 
             DB::commit();
+
+            if ($float['float_vs_previous_close'] !== null && abs($float['float_vs_previous_close']) >= 0.005) {
+                ActivityLogService::log('till_float_difference', $register, [
+                    'register_id'          => $register->id,
+                    'outlet_id'            => $outletId,
+                    'opening_float'        => (float) $validated['opening_cash'],
+                    'previous_register_id' => $float['previous_register_id'],
+                    'previous_close'       => $float['previous_close'],
+                    'difference'           => $float['float_vs_previous_close'],
+                ], "Till #{$register->id} opened with a float that differs from the last count", $user);
+            }
 
             try {
                 ActivityLogService::log('register_opened', null, [
@@ -438,7 +470,7 @@ class PosController extends Controller
 
             return response()->json([
                 'message'  => 'Cash register opened successfully.',
-                'register' => $this->transformRegister($register->load('openedBy')),
+                'register' => $this->transformRegister($register->load('openedBy'), $user),
             ], 201);
 
         } catch (\Throwable $e) {
@@ -451,9 +483,18 @@ class PosController extends Controller
     /**
      * POST /admin/pos/register/close
      *
-     * USER-SCOPED: closes THIS user's register only.
-     * GUARD: requires EoD report to be submitted for today first.
-     * Returns 422 with requires_eod:true if not submitted — frontend opens EoD modal.
+     * Step one of a two-step close (Phase 4B): the operator submits a BLIND
+     * count of her drawer. The till moves to `counted` — it takes no more
+     * sales — and the server works out what it should hold from the drawer's
+     * own ledger and freezes that beside her count. She is told neither: no
+     * expected cash, no variance, not even the totals that add up to them.
+     * An outlet manager (never her) verifies and finalizes it next
+     * (TillController::finalize).
+     *
+     * Registers opened before the lifecycle existed close through exactly
+     * this path; they are not forced closed or rewritten.
+     *
+     * GUARD: requires today's EoD report first (422 requires_eod:true).
      */
     public function closeRegister(Request $request): JsonResponse
     {
@@ -505,39 +546,30 @@ class PosController extends Controller
             ))
             : (float) $validated['closing_cash'];
 
-        $variance = $countedCash - ($register->expected_cash ?? $register->opening_balance ?? 0);
-
-        // `variance` is not a column (nor fillable) — it was silently dropped.
-        // The discrepancy is the `cash_difference` accessor (actual − expected),
-        // valid once actual_cash is set below. $variance is kept for response/log.
-        $register->update([
-            'closed_by'          => $user->id,
-            'closing_balance'    => $countedCash,
-            'actual_cash'        => $countedCash,
-            'status'             => 'closed',
-            'closing_notes'      => $validated['notes'] ?? null,
-            'denomination_count' => $denominations,
-            'closed_at'          => now(),
-        ]);
+        $counted = app(\App\Services\Tills\TillService::class)->submitCount(
+            $register, $user, round($countedCash, 2), $denominations, $validated['notes'] ?? null,
+        );
 
         try {
+            // Kept for the existing activity feed. The figures are for the
+            // audit trail (super_admin only), never for the operator.
             ActivityLogService::log('register_closed', null, [
-                'register_id'      => $register->id,
-                'register_name'    => $register->register_name,
-                'outlet_id'        => $outletId,
-                'opening_balance'  => $register->opening_balance,
-                'closing_balance'  => $validated['closing_cash'],
-                'expected_cash'    => $register->expected_cash,
-                'variance'         => $variance,
-                'total_sales'      => $register->total_sales,
-                'transaction_count'=> $register->transaction_count,
+                'register_id'       => $counted->id,
+                'register_name'     => $counted->register_name,
+                'outlet_id'         => $outletId,
+                'opening_balance'   => $counted->opening_balance,
+                'closing_balance'   => $countedCash,
+                'expected_cash'     => $counted->expected_cash_at_count,
+                'variance'          => $counted->variance,
+                'total_sales'       => $counted->total_sales,
+                'transaction_count' => $counted->transaction_count,
+                'stage'             => 'counted',
             ]);
         } catch (\Exception) {}
 
         return response()->json([
-            'message'  => 'Cash register closed successfully.',
-            'register' => $this->transformRegister($register->fresh(['openedBy', 'closedBy'])),
-            'variance' => $variance,
+            'message'  => 'Count submitted. Your outlet manager will verify it and finalize the till.',
+            'register' => $this->transformRegister($counted->fresh(['openedBy', 'closedBy']), $user),
         ]);
     }
 
@@ -552,10 +584,21 @@ class PosController extends Controller
         // cashier could page through every shop's sessions by outlet_id.
         $this->authoriseOutletAccess($request->user(), (int) $validated['outlet_id']);
 
-        $sessions = CashRegister::with(['openedBy:id,first_name,last_name', 'closedBy:id,first_name,last_name'])
+        // Phase 4B: the same visibility as the tills list — a clerk sees her
+        // own tills (last 7 days, plus any still unfinished), an outlet manager
+        // the outlet's, finance and admin everything — and each row blind to
+        // its own operator until it is finalized. This used to return the raw
+        // rows, counted cash and variance included, to anyone at the outlet.
+        $viewer   = $request->user();
+        $sessions = \App\Services\Tills\TillVisibility::scope(CashRegister::query(), $viewer)
+            ->with(['openedBy:id,first_name,last_name', 'closedBy:id,first_name,last_name'])
             ->where('outlet_id', $validated['outlet_id'])
             ->latest('opened_at')
             ->paginate($validated['per_page'] ?? 15);
+
+        $sessions->setCollection(
+            $sessions->getCollection()->map(fn (CashRegister $r) => $this->transformRegister($r, $viewer)),
+        );
 
         return response()->json($sessions);
     }
@@ -595,6 +638,24 @@ class PosController extends Controller
      * edit, the order's current phone may be resent as they are — so a sale to
      * a customer whose record holds a legacy note is never blocked.
      */
+    /**
+     * Phase 4A: a cashier is served the attached customer's phone and email
+     * MASKED (07••••1853), and the till sends back what it holds. Swap a mask
+     * for the value on file — the chosen customer's, else the order's — so
+     * the sale records the real number and is never refused for bullets
+     * (CustomerContacts::restoreMasked).
+     */
+    private function restoreMaskedContacts(Request $request, ?Order $order = null): void
+    {
+        $customerId = (int) $request->input('customer_id');
+        $customer   = $customerId > 0 ? \App\Models\Customer::find($customerId) : null;
+
+        \App\Support\CustomerContacts::restoreMasked($request, [
+            'customer_phone' => $customer?->phone ?? $order?->customer_phone,
+            'customer_email' => $customer?->email ?? $order?->customer_email,
+        ]);
+    }
+
     private function customerPhoneRule(Request $request, ?string $orderPhone = null): \App\Rules\CustomerPhone
     {
         $customerId = (int) $request->input('customer_id');
@@ -607,6 +668,7 @@ class PosController extends Controller
 
     public function createSale(Request $request): JsonResponse
     {
+        $this->restoreMaskedContacts($request);
         $validated = $request->validate([
             // Idempotency key: same key = this attempt arriving again. See
             // findReplayedOrder() for why sales cannot use a content heuristic.
@@ -766,8 +828,10 @@ class PosController extends Controller
             // -- 1. Stock check & per-item totals ------------------------------
             $itemsData    = [];
             $itemSubtotal = 0;
+            // Everything taken off this sale, measured together (owner's 5%).
+            $tally        = \App\Support\DiscountRule::tally();
 
-            foreach ($validated['items'] as $item) {
+            foreach ($validated['items'] as $idx => $item) {
                 // Resolve variant/product — variant_id is null for simple products.
                 $variantId    = $item['variant_id'] ?? null;
                 $variantModel = $variantId ? ProductVariant::find($variantId) : null;
@@ -828,7 +892,17 @@ class PosController extends Controller
                 $lineDiscount = OrderTotals::resolveDiscount($discType, $discVal, $lineBase);
                 // pos.discount is checked here, against the RESOLVED amount, so
                 // a flat discount cannot walk around the percentage ceiling.
-                PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, 'line');
+                PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, "items.{$idx}.discount_value");
+                // A price typed under the catalogue is a discount too, and
+                // counts toward the same 5% (App\Support\DiscountRule) — on
+                // the line, and in the order's total below.
+                $catUnit = \App\Support\DiscountRule::catalogueUnit($productId ?: null, $variantId, $currencyCode);
+                \App\Support\DiscountRule::assertLineWithin(
+                    auth()->user(), (float) $item['unit_price'], (int) $item['quantity'], $lineDiscount,
+                    $catUnit, "items.{$idx}.unit_price", "items.{$idx}.discount_value",
+                );
+                [$given, $givenBase, $short] = \App\Support\DiscountRule::lineGiven((float) $item['unit_price'], (int) $item['quantity'], $lineDiscount, $catUnit);
+                $tally->line($given, $givenBase, $short ? "items.{$idx}.unit_price" : "items.{$idx}.discount_value");
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -874,7 +948,9 @@ class PosController extends Controller
             $cartDiscVal  = (float) ($validated['cart_discount_value'] ?? 0);
             $cartDiscount = OrderTotals::resolveDiscount($cartDiscType, $cartDiscVal, $itemSubtotal);
 
-            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart');
+            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart_discount_value');
+            // The lines and the cart together: at most 5% of the sale's gross.
+            $tally->amount($cartDiscount, 'cart_discount_value')->assert(auth()->user());
 
             // Phase 2 — total tax is sum of per-line taxes already calculated above.
             // This is the goods total, derived BEFORE the shipping charge is read,
@@ -1058,6 +1134,7 @@ class PosController extends Controller
                 $pmtCashRec = $pmtIsCash ? (float) ($pmt['cash_received'] ?? $pmtAmount) : null;
                 $pmtChange  = $pmtIsCash ? max(0, ($pmtCashRec ?? $pmtAmount) - $pmtAmount) : null;
                 Payment::create([
+                    'recorded_by' => $user->id,   // who took it at the till (4D)
                     'order_id'           => $order->id,
                     'amount'             => $pmtAmount,
                     'currency_code'      => $currencyCode,
@@ -1373,6 +1450,13 @@ class PosController extends Controller
         return response()->json(['sale' => $this->transformSaleOrder($order)]);
     }
 
+    /**
+     * Ask for a sale to be voided (Phase 4B part 2). Nobody voids directly any
+     * more: this raises a pos_void request on the approval engine, and the
+     * sale is voided only when its last band signs — the outlet manager's PIN
+     * on this till, or the Approvals inbox (App\Services\Pos\TillReversals).
+     * Refused once the sale's till is closed: a refund is the route then.
+     */
     public function voidSale(Request $request, int $id): JsonResponse
     {
         $validated = $request->validate(['reason' => 'required|string|max:500']);
@@ -1380,102 +1464,13 @@ class PosController extends Controller
         $order = $this->findPosSaleForAction($id);
         $this->authoriseOutletAccess($request->user(), $order->outlet_id);
 
-        if ($order->status === 'voided') {
-            return response()->json(['message' => 'Order is already voided.'], 422);
-        }
+        $approval = app(TillReversals::class)->requestVoid($order, $validated['reason'], $request->user());
 
-        DB::beginTransaction();
-        try {
-            $order->update([
-                'status'      => 'voided',
-                'customer_notes' => ($order->customer_notes ? $order->customer_notes . ' | ' : '') . "Void: {$validated['reason']}",
-            ]);
-
-            // Capture what the sale ACTUALLY collected, by method, BEFORE voiding
-            // the payment rows — so the register is reversed by the real cash
-            // taken, not the order total (fixes the drift where a deposit/partial/
-            // split cash sale was over-debited on void).
-            $cashCodes = DB::table('payment_methods')->where('type', 'cash')
-                ->pluck('code')->push('cash')->map(fn ($c) => strtolower($c))->unique();
-            $vCash = $vCard = $vMpesa = $vTotal = 0.0;
-            foreach ($order->payments()->where('status', 'paid')->get() as $p) {
-                $amt = (float) $p->amount;
-                $vTotal += $amt;
-                $m = strtolower($p->payment_method);
-                if ($cashCodes->contains($m))                    { $vCash  += $amt; }
-                elseif (in_array($m, ['card', 'card_paystack']))  { $vCard  += $amt; }
-                elseif (in_array($m, ['mpesa', 'm-pesa']))        { $vMpesa += $amt; }
-            }
-
-            // MON-1: POS void previously left payment rows as 'paid'. Void the
-            // settled payments and reconcile payment_status so voided sales stop
-            // counting as collected.
-            $order->payments()
-                ->whereNotIn('status', ['voided', 'refunded'])
-                ->update(['status' => 'voided', 'updated_at' => now()]);
-            $order->syncPaymentStatus();
-
-            // Return this sale's stock: restore the physical count if it had been
-            // committed (paid), otherwise just release the reservation. Idempotent.
-            PosInventoryService::unwindForOrder($order, $request->user()->id);
-
-            // Return this sale's serialized units to the shelf.
-            ProductSerialService::releaseForOrder($order);
-
-            // Reverse the register by what the sale ACTUALLY collected (drawer row
-            // locked), keyed on the real payments rather than the order's
-            // payment_method label, and ledger the true cash delta.
-            if ($vTotal > 0) {
-                // D8: reverse against the drawer that ACTUALLY took the sale
-                // (from the ledger); if that shift is closed, the acting cashier's
-                // current drawer — not blindly "my latest open register".
-                $register = $this->resolveDrawerForReversal($order->id, $request->user(), $order->outlet_id);
-                if ($register) {
-                    DB::table('cash_registers')->where('id', $register->id)->update([
-                        'total_sales'       => DB::raw('GREATEST(0, total_sales - ' . $vTotal . ')'),
-                        'total_cash_sales'  => DB::raw('GREATEST(0, total_cash_sales - ' . $vCash . ')'),
-                        'total_card_sales'  => DB::raw('GREATEST(0, total_card_sales - ' . $vCard . ')'),
-                        'total_mpesa_sales' => DB::raw('GREATEST(0, total_mpesa_sales - ' . $vMpesa . ')'),
-                        'transaction_count' => DB::raw('GREATEST(0, transaction_count - 1)'),
-                        'expected_cash'     => DB::raw('GREATEST(0, expected_cash - ' . $vCash . ')'),
-                        'updated_at'        => now(),
-                    ]);
-
-                    // MON-3: ledger the cash reversal (only the cash actually moved).
-                    if ($vCash > 0) {
-                        $this->recordCashLedger(
-                            $register,
-                            'void',
-                            'cash',
-                            $vCash,
-                            max(0, (float) $register->expected_cash - $vCash),
-                            $order->id,
-                            $request->user()->id,
-                            'POS void',
-                        );
-                    }
-                }
-            }
-
-            DB::commit();
-
-            try {
-                ActivityLogService::log('pos_sale_voided', $order, [
-                    'order_number'   => $order->order_number,
-                    'outlet_id'      => $order->outlet_id,
-                    'total_amount'   => $order->total_amount,
-                    'reason'         => $validated['reason'],
-                    'payment_method' => $order->payment_method,
-                ]);
-            } catch (\Exception) {}
-
-            return response()->json(['message' => 'Sale voided successfully.']);
-
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            Log::error('POS void failed', ['error' => $e->getMessage()]);
-            return response()->json(['message' => 'Failed to void sale.'], 500);
-        }
+        return response()->json([
+            'message'  => 'Void requested. It needs an approver\'s signature before the sale is voided.',
+            'approval' => app(ApprovalEngine::class)->present($approval->load(['signatures.signer', 'maker']), $request->user()),
+            'pending'  => app(TillReversals::class)->pendingForOrder($order->id),
+        ], 202);
     }
 
     public function emailReceipt(Request $request, int $id): JsonResponse
@@ -1546,6 +1541,13 @@ class PosController extends Controller
 
     // --- Returns --------------------------------------------------------------
 
+    /**
+     * Ask for a refund (POS return) (Phase 4B part 2). Prices the lines as the
+     * till always has and raises a pos_refund request; nothing moves — no
+     * stock, no cash, no order_returns row — until the last band signs, and
+     * then the refund is written as a NEW transaction, never an edit of the
+     * sale (App\Services\Pos\TillReversals::executeRefund).
+     */
     public function processReturn(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -1565,156 +1567,15 @@ class PosController extends Controller
 
         $this->authoriseOutletAccess($request->user(), $order->outlet_id);
 
-        DB::beginTransaction();
-        try {
-            $refundTotal = 0;
-            $returnItems = [];
+        [$refund, $approval] = app(TillReversals::class)->requestRefund($order, $validated, $request->user());
 
-            foreach ($validated['items'] as $req) {
-                $orderItem = $order->items->firstWhere('product_variant_id', $req['variant_id']);
-
-                if (!$orderItem) {
-                    DB::rollBack();
-                    return response()->json(['message' => "Variant #{$req['variant_id']} not found in this order."], 422);
-                }
-
-                // Check how much has already been returned for this item
-                $alreadyReturned = DB::table('return_items')
-                    ->whereIn('return_id', fn ($q) => $q->select('id')->from('order_returns')->where('order_id', $order->id))
-                    ->where('order_item_id', $orderItem->id)
-                    ->sum('quantity');
-
-                $maxReturnable = $orderItem->quantity - $alreadyReturned;
-                if ($req['quantity'] > $maxReturnable) {
-                    DB::rollBack();
-                    return response()->json([
-                        'message' => "Cannot return {$req['quantity']} - only {$maxReturnable} returnable for this item.",
-                    ], 422);
-                }
-
-                $lineRefund   = $orderItem->unit_price * $req['quantity'];
-                $refundTotal += $lineRefund;
-
-                $returnItems[] = [
-                    'order_item_id' => $orderItem->id,
-                    'quantity'      => $req['quantity'],
-                    'reason'        => $validated['reason'],
-                    'restock'       => true,
-                ];
-
-                // Restore inventory
-                $inventory = InventoryItem::where('product_variant_id', $req['variant_id'])
-                    ->where('outlet_id', $order->outlet_id)
-                    ->first();
-                $inventory?->adjustQuantity(
-                    $req['quantity'],
-                    'return',
-                    Order::class,
-                    $order->id,
-                    $request->user()->id
-                );
-
-                // Bring the returned units' serials back to stock too, so the
-                // per-unit ledger tracks the physical restock (previously a return
-                // restocked quantity_on_hand but left the serials sold/dispatched,
-                // widening the serial-vs-count gap on every return).
-                ProductSerialService::returnUnitsForOrder(
-                    $order,
-                    (int) $orderItem->product_id,
-                    (int) $req['quantity'],
-                );
-            }
-
-            // Bound the refund to what was ACTUALLY collected on this order, net
-            // of prior refunds. The line total above is unit_price × qty, which
-            // ignores discounts and tax and could pay out more than the customer
-            // ever paid — this cap closes that cash leak.
-            $collected    = (float) $order->payments()->where('status', 'paid')->sum('amount');
-            $priorRefunds = (float) DB::table('order_returns')
-                ->where('order_id', $order->id)->where('status', 'completed')->sum('refund_amount');
-            $refundTotal  = min($refundTotal, max(0, $collected - $priorRefunds));
-
-            // Create return record
-            $orderReturn = OrderReturn::create([
-                'order_id'      => $order->id,
-                'status'        => 'completed',
-                'return_reason' => $validated['reason'],
-                'refund_amount' => round($refundTotal, 2),
-                'refund_method' => $validated['refund_method'],
-                'created_by'    => $request->user()->id,
-                'approved_by'   => $request->user()->id,
-                'approved_at'   => now(),
-                'refunded_at'   => now(),
-            ]);
-
-            // Create return_items rows
-            foreach ($returnItems as $ri) {
-                DB::table('return_items')->insert([
-                    'return_id'     => $orderReturn->id,
-                    'order_item_id' => $ri['order_item_id'],
-                    'quantity'      => $ri['quantity'],
-                    'reason'        => $ri['reason'],
-                    'restock'       => $ri['restock'],
-                    'created_at'    => now(),
-                ]);
-            }
-
-            // Deduct the cash refund from the drawer that took the sale (D8) — or,
-            // if that shift is closed, the acting cashier's current drawer (the
-            // cash is paid out of the till in front of them). Drawer locked.
-            if ($validated['refund_method'] === 'cash' && $refundTotal > 0) {
-                $register = $this->resolveDrawerForReversal($order->id, $request->user(), $order->outlet_id);
-                if ($register) {
-                    // Reject rather than silently clamp if the drawer can't cover it.
-                    if ($refundTotal > (float) $register->expected_cash) {
-                        DB::rollBack();
-                        return response()->json(['message' => 'Insufficient cash in the register to make this refund.'], 422);
-                    }
-                    DB::table('cash_registers')->where('id', $register->id)->update([
-                        'total_refunds' => DB::raw('total_refunds + ' . $refundTotal),
-                        'expected_cash' => DB::raw('GREATEST(0, expected_cash - ' . $refundTotal . ')'),
-                        'updated_at'    => now(),
-                    ]);
-
-                    // MON-3: ledger the cash refund.
-                    $this->recordCashLedger(
-                        $register,
-                        'refund',
-                        'cash',
-                        (float) $refundTotal,
-                        max(0, (float) $register->expected_cash - (float) $refundTotal),
-                        $order->id,
-                        $request->user()->id,
-                        'POS return',
-                    );
-                }
-            }
-
-            DB::commit();
-
-            try {
-                ActivityLogService::log('pos_return_processed', $order, [
-                    'return_id'     => $orderReturn->id,
-                    'return_number' => $orderReturn->return_number,
-                    'outlet_id'     => $order->outlet_id,
-                    'refund_amount' => round($refundTotal, 2),
-                    'refund_method' => $validated['refund_method'],
-                    'reason'        => $validated['reason'],
-                    'items_count'   => count($validated['items']),
-                ]);
-            } catch (\Exception) {}
-
-            return response()->json([
-                'message'       => 'Return processed successfully.',
-                'return_number' => $orderReturn->return_number,
-                'refund_amount' => $refundTotal,
-            ]);
-
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            Log::error('POS return failed', ['error' => $e->getMessage()]);
-            return response()->json(['message' => 'Failed to process return.'], 500);
-        }
+        return response()->json([
+            'message'           => 'Refund requested. It needs an approver\'s signature before the refund is made.',
+            'refund_request_id' => $refund->id,
+            'refund_amount'     => (float) $refund->refund_amount,
+            'approval'          => app(ApprovalEngine::class)->present($approval->load(['signatures.signer', 'maker']), $request->user()),
+            'pending'           => app(TillReversals::class)->pendingForOrder($order->id),
+        ], 202);
     }
 
     public function returns(Request $request): JsonResponse
@@ -1760,35 +1621,53 @@ class PosController extends Controller
 
     public function searchCustomers(Request $request): JsonResponse
     {
+        // Phase 4A anti-scraping (App\Support\CustomerSearch): 3 real
+        // characters, wildcards literal, at most 20 rows, 30 a minute
+        // (throttle:customer-search on the route), scope BEFORE matching, and
+        // an answer of id + name + masked phone — nothing that turns the
+        // autocomplete into a phone list.
         $validated = $request->validate([
-            'q'        => 'required|string|min:1|max:100',
-            'per_page' => 'nullable|integer|min:1|max:20',
+            'q'        => 'required|string|max:100',
+            'per_page' => 'nullable|integer|min:1|max:' . \App\Support\CustomerSearch::MAX_RESULTS,
         ]);
 
-        $q      = trim($validated['q']);
-        $like   = "%{$q}%";
-        $prefix = "{$q}%";
+        $q      = \App\Support\CustomerSearch::term($validated['q']);
+        $like   = \App\Support\CustomerSearch::contains($q);
+        $prefix = \App\Support\CustomerSearch::escape($q) . '%';
+        $phone  = \App\Support\CustomerSearch::wholePhone($q);
+        $user   = $request->user();
 
-        $customers = \App\Models\Customer::with('user:id,first_name,last_name,email,phone')
-            ->where(function ($query) use ($like) {
-                // Most customers have their name on the customers row itself (POS
-                // "New", attach-at-order, imports) with no linked user — search
-                // that FIRST. Then also match any linked user account.
-                $query->where('first_name', 'ILIKE', $like)
-                    ->orWhere('last_name', 'ILIKE', $like)
-                    ->orWhere('email',     'ILIKE', $like)
-                    ->orWhere('phone',     'ILIKE', $like)
-                    ->orWhereRaw("TRIM(CONCAT(COALESCE(first_name,''), ' ', COALESCE(last_name,''))) ILIKE ?", [$like])
-                    ->orWhereHas('user', function ($uq) use ($like) {
-                        $uq->where('first_name', 'ILIKE', $like)
-                           ->orWhere('last_name',  'ILIKE', $like)
-                           ->orWhere('email',       'ILIKE', $like)
-                           ->orWhere('phone',       'ILIKE', $like)
-                           ->orWhereRaw("CONCAT(first_name, ' ', last_name) ILIKE ?", [$like]);
+        $customers = \App\Models\Customer::with('user:id,first_name,last_name,phone')
+            ->where(function ($query) use ($like, $phone, $user) {
+                // Inside the caller's customers: match on name, phone, email.
+                $query->where(function ($inScope) use ($like, $user) {
+                    $inScope->searchableBy($user)->where(function ($m) use ($like) {
+                        // Most customers have their name on the customers row
+                        // itself (POS "New", attach-at-order, imports) with no
+                        // linked user — search that FIRST, then a linked user.
+                        $m->where('first_name', 'ILIKE', $like)
+                            ->orWhere('last_name', 'ILIKE', $like)
+                            ->orWhere('email',     'ILIKE', $like)
+                            ->orWhere('phone',     'ILIKE', $like)
+                            ->orWhereRaw("TRIM(CONCAT(COALESCE(first_name,''), ' ', COALESCE(last_name,''))) ILIKE ?", [$like])
+                            ->orWhereHas('user', function ($uq) use ($like) {
+                                $uq->where('first_name', 'ILIKE', $like)
+                                   ->orWhere('last_name',  'ILIKE', $like)
+                                   ->orWhere('email',       'ILIKE', $like)
+                                   ->orWhere('phone',       'ILIKE', $like)
+                                   ->orWhereRaw("CONCAT(first_name, ' ', last_name) ILIKE ?", [$like]);
+                            });
                     });
+                });
+                // Anywhere: the WHOLE number of the person at the counter.
+                // Knowing it is the point — and the answer is a masked echo of
+                // what was typed, so the till never needs a duplicate record.
+                if ($phone !== null) {
+                    $query->orWhereRaw('normalize_phone(customers.phone) = normalize_phone(?)', [$phone]);
+                }
             })
             // Prefix matches (name/phone that STARTS with the query) rank first,
-            // then alphabetically — so typing "mo" surfaces "Moses" at the top.
+            // then alphabetically — so typing "mos" surfaces "Moses" at the top.
             ->orderByRaw(
                 "CASE WHEN first_name ILIKE ? OR last_name ILIKE ? OR phone ILIKE ? THEN 0 ELSE 1 END",
                 [$prefix, $prefix, $prefix],
@@ -1800,11 +1679,12 @@ class PosController extends Controller
                 // Prefer the customer's own name, fall back to a linked user.
                 $first = $c->first_name ?: $c->user?->first_name;
                 $last  = $c->last_name  ?: $c->user?->last_name;
+                $phone = $c->phone ?? $c->user?->phone;
+
                 return [
                     'id'    => $c->id,
-                    'name'  => trim(($first ?? '') . ' ' . ($last ?? '')) ?: ($c->phone ?? "Customer #{$c->id}"),
-                    'phone' => $c->phone ?? $c->user?->phone,
-                    'email' => $c->email ?? $c->user?->email,
+                    'name'  => trim(($first ?? '') . ' ' . ($last ?? '')) ?: "Customer #{$c->id}",
+                    'phone' => $phone ? \App\Support\CustomerContacts::maskPhone($phone) : null,
                 ];
             });
 
@@ -2707,11 +2587,15 @@ class PosController extends Controller
 
     // --- Private helpers ------------------------------------------------------
 
+    /**
+     * Not limited to assigned outlets at the till: outlets.all_access (admin,
+     * and super_admin by bypass). A permission since 4D, where it was the role
+     * names — so a role granted it, or a role edited to lose it, behaves as
+     * the Roles screen says. Outlet scope only; discounts never read this.
+     */
     private function isAdminUser($user): bool
     {
-        return $user->isSuperAdmin()
-            || $user->hasRole('super_admin')
-            || $user->hasRole('admin');
+        return $user->can('outlets.all_access');
     }
 
     /**
@@ -2720,40 +2604,6 @@ class PosController extends Controller
      * register only carried running aggregate totals with no auditable trail.
      * `balance_after` is the drawer's expected_cash after this movement.
      */
-    /**
-     * D8: resolve which drawer a void/refund for this order should hit. Prefer
-     * the register that ACTUALLY recorded the sale (from the cash ledger), so a
-     * void/refund by a different cashier reverses the right till. If that shift
-     * is already closed, fall back to the acting cashier's current open drawer —
-     * the cash is paid out of the till in front of them. Returned register is
-     * locked for update; null when no suitable open drawer exists.
-     */
-    private function resolveDrawerForReversal(int $orderId, $user, int $outletId): ?CashRegister
-    {
-        $originId = DB::table('cash_register_transactions')
-            ->where('order_id', $orderId)
-            ->where('transaction_type', 'sale')
-            ->orderBy('id')
-            ->value('cash_register_id');
-
-        if ($originId) {
-            $origin = CashRegister::whereKey($originId)
-                ->where('status', 'open')
-                ->lockForUpdate()
-                ->first();
-            if ($origin) {
-                return $origin;
-            }
-        }
-
-        return CashRegister::where('outlet_id', $outletId)
-            ->where('opened_by', $user->id)
-            ->where('status', 'open')
-            ->latest('opened_at')
-            ->lockForUpdate()
-            ->first();
-    }
-
     private function recordCashLedger(
         CashRegister $register,
         string $type,
@@ -2972,29 +2822,31 @@ class PosController extends Controller
         ];
     }
 
-    private function transformRegister(CashRegister $r): array
+    /**
+     * The till as the POS screens have always read it, plus its lifecycle
+     * stage. Blind to its own operator until finalized (Phase 4B): the
+     * expected figure, the variance and every sales total that adds up to
+     * them are left out entirely — not zeroed, absent — so nothing on the
+     * terminal can show or derive what the drawer "should" hold.
+     */
+    private function transformRegister(CashRegister $r, ?\App\Models\User $viewer = null): array
     {
         $openedByName = $r->openedBy
             ? trim($r->openedBy->first_name . ' ' . $r->openedBy->last_name) : null;
         $closedByName = $r->closedBy
             ? trim($r->closedBy->first_name . ' ' . $r->closedBy->last_name) : null;
 
-        return [
+        $base = [
             'id'                => $r->id,
             'outlet_id'         => $r->outlet_id,
             'opened_by'         => $openedByName,
             'closed_by'         => $closedByName,
             'opening_cash'      => (float) ($r->opening_balance ?? 0),
-            'closing_cash'      => $r->closing_balance !== null ? (float) $r->closing_balance : null,
-            'expected_cash'     => (float) ($r->expected_cash ?? $r->opening_balance ?? 0),
+            'closing_cash'      => $r->status !== 'open' && $r->closing_balance !== null ? (float) $r->closing_balance : null,
             'transaction_count' => (int) ($r->transaction_count ?? 0),
-            'total_sales'       => (float) ($r->total_sales ?? 0),
-            'total_cash_sales'  => (float) ($r->total_cash_sales ?? 0),
-            'total_card_sales'  => (float) ($r->total_card_sales ?? 0),
-            'total_mpesa_sales' => (float) ($r->total_mpesa_sales ?? 0),
-            'total_refunds'     => (float) ($r->total_refunds ?? 0),
-            'variance'          => $r->variance !== null ? (float) $r->variance : null,
             'status'            => $r->status,
+            'stage'             => \App\Services\Tills\TillPresenter::stage($r),
+            'legacy'            => $r->lifecycle_version === null,
             'notes'             => $r->opening_notes,
             'opened_at'         => $r->opened_at instanceof \Carbon\Carbon
                 ? $r->opened_at->toIso8601String()
@@ -3002,6 +2854,22 @@ class PosController extends Controller
             'closed_at'         => $r->closed_at instanceof \Carbon\Carbon
                 ? $r->closed_at->toIso8601String()
                 : (string) ($r->closed_at ?? ''),
+            'finalized_at'      => $r->finalized_at?->toIso8601String(),
+        ];
+
+        if (\App\Services\Tills\TillPresenter::isBlindFor($r, $viewer)) {
+            return $base + ['blind' => true];
+        }
+
+        return $base + [
+            'blind'             => false,
+            'expected_cash'     => (float) ($r->expected_cash_at_count ?? $r->expected_cash ?? $r->opening_balance ?? 0),
+            'total_sales'       => (float) ($r->total_sales ?? 0),
+            'total_cash_sales'  => (float) ($r->total_cash_sales ?? 0),
+            'total_card_sales'  => (float) ($r->total_card_sales ?? 0),
+            'total_mpesa_sales' => (float) ($r->total_mpesa_sales ?? 0),
+            'total_refunds'     => (float) ($r->total_refunds ?? 0),
+            'variance'          => $r->variance !== null ? (float) $r->variance : null,
         ];
     }
 
@@ -3068,6 +2936,7 @@ class PosController extends Controller
             ], 422);
         }
 
+        $this->restoreMaskedContacts($request, $order);
         $validated = $request->validate([
             'customer_id'                          => 'nullable|exists:customers,id',
             'customer_first_name'                  => 'nullable|string|max:255',
@@ -3189,8 +3058,10 @@ class PosController extends Controller
             // ── 3. Validate stock + build new items ───────────────────────────
             $itemsData    = [];
             $itemSubtotal = 0;
+            // Everything taken off this order, measured together (owner's 5%).
+            $tally        = \App\Support\DiscountRule::tally();
 
-            foreach ($validated['items'] ?? [] as $item) {
+            foreach ($validated['items'] ?? [] as $idx => $item) {
                 $variantId    = $item['variant_id'] ?? null;
                 $variantModel = $variantId ? ProductVariant::find($variantId) : null;
                 $productId    = $variantModel?->product_id ?? (int)($item['product_id'] ?? 0);
@@ -3234,7 +3105,14 @@ class PosController extends Controller
                 $lineDiscount = OrderTotals::resolveDiscount($discType, $discVal, $lineBase);
                 // pos.discount is checked here, against the RESOLVED amount, so
                 // a flat discount cannot walk around the percentage ceiling.
-                PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, 'line');
+                PosDiscountPolicy::assertAllowed(auth()->user(), $lineDiscount, $lineBase, "items.{$idx}.discount_value");
+                $catUnit = \App\Support\DiscountRule::catalogueUnit($productId ?: null, $variantId, $resolvedCurrency);
+                \App\Support\DiscountRule::assertLineWithin(
+                    auth()->user(), (float) $item['unit_price'], (int) $item['quantity'], $lineDiscount,
+                    $catUnit, "items.{$idx}.unit_price", "items.{$idx}.discount_value",
+                );
+                [$given, $givenBase, $short] = \App\Support\DiscountRule::lineGiven((float) $item['unit_price'], (int) $item['quantity'], $lineDiscount, $catUnit);
+                $tally->line($given, $givenBase, $short ? "items.{$idx}.unit_price" : "items.{$idx}.discount_value");
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -3270,7 +3148,7 @@ class PosController extends Controller
             }
 
             // ── Build order lines for MTO items (no stock deduction) ──────────
-            foreach ($validated['production_items'] ?? [] as $pi) {
+            foreach ($validated['production_items'] ?? [] as $pidx => $pi) {
                 $mtoVariantId = $pi['variant_id'] ?? null;
                 $mtoVariant   = $mtoVariantId ? ProductVariant::with('product.translations')->find($mtoVariantId) : null;
                 $mtoProductId = $mtoVariant?->product_id ?? (int)($pi['product_id'] ?? 0);
@@ -3304,6 +3182,15 @@ class PosController extends Controller
                     }
                 }
 
+                // A made-to-order line carries no discount column, so a lower
+                // price IS its discount: measured against the catalogue too.
+                $mtoCat = \App\Support\DiscountRule::catalogueUnit($mtoProductId ?: null, $mtoVariantId, $resolvedCurrency);
+                \App\Support\DiscountRule::assertLineWithin(
+                    auth()->user(), $mtoUnitPrice, (int) $pi['quantity'], 0.0,
+                    $mtoCat, "production_items.{$pidx}.unit_price", "production_items.{$pidx}.unit_price",
+                );
+                [$given, $givenBase] = \App\Support\DiscountRule::lineGiven($mtoUnitPrice, (int) $pi['quantity'], 0.0, $mtoCat);
+                $tally->line($given, $givenBase, "production_items.{$pidx}.unit_price");
                 $mtoBase      = $mtoUnitPrice * (int)$pi['quantity'];
                 $mtoTaxCalc   = TaxCalculationService::calculateLine($mtoUnitPrice, (int)$pi['quantity'], $mtoProductId, $taxInclusive);
                 $mtoLineTotal = $taxInclusive ? $mtoBase : $mtoBase + round($mtoTaxCalc['tax_amount'], 2);
@@ -3333,7 +3220,9 @@ class PosController extends Controller
             $cartDiscType = $validated['cart_discount_type'] ?? 'none';
             $cartDiscVal  = (float)($validated['cart_discount_value'] ?? 0);
             $cartDiscount = OrderTotals::resolveDiscount($cartDiscType, $cartDiscVal, $itemSubtotal);
-            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart');
+            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart_discount_value');
+            // The lines and the cart together: at most 5% of the order's gross.
+            $tally->amount($cartDiscount, 'cart_discount_value')->assert(auth()->user());
             $shippingAmt  = round((float)($validated['shipping_amount'] ?? 0), 2);
             $totals       = OrderTotals::fromParts(
                 $itemSubtotal,
@@ -3461,6 +3350,7 @@ class PosController extends Controller
 
     public function createPendingOrder(Request $request): JsonResponse
     {
+        $this->restoreMaskedContacts($request);
         $validated = $request->validate([
             'client_request_id'                    => 'nullable|string|max:64',
             'outlet_id'                            => 'required|exists:outlets,id',
@@ -3592,8 +3482,10 @@ class PosController extends Controller
         try {
             $itemsData    = [];
             $itemSubtotal = 0;
+            // Everything taken off this order, measured together (owner's 5%).
+            $tally        = \App\Support\DiscountRule::tally();
 
-            foreach ($validated['items'] ?? [] as $item) {
+            foreach ($validated['items'] ?? [] as $idx => $item) {
                 $variantId    = $item['variant_id'] ?? null;
                 $variantModel = $variantId ? ProductVariant::find($variantId) : null;
                 $productId    = $variantModel?->product_id ?? (int)($item['product_id'] ?? 0);
@@ -3653,6 +3545,7 @@ class PosController extends Controller
                 // nothing. Refusing beats charging a KES number as USD.
                 $unitPrice       = (float) $item['unit_price'];
                 $catalogueSaving = 0.0;   // a till operator types the price they mean
+                $promotionSaving = 0.0;   // what a running promotion takes off this line
                 if ($hubPrices) {
                     $priced = CurrencyPricing::catalogue($productId, $variantId, $currencyCode);
                     if (!$priced) {
@@ -3680,7 +3573,9 @@ class PosController extends Controller
                         ? ($promoProducts[$productId] ??= Product::find($productId))
                         : null;
                     if ($promoProduct && ($promo = $promoService->promotionFor($promoProduct))) {
-                        $sellingUnit = $promoService->discountedUnit($sellingUnit, $promo);
+                        $promotedUnit    = $promoService->discountedUnit($sellingUnit, $promo);
+                        $promotionSaving = round(max(0, $sellingUnit - $promotedUnit) * $item['quantity'], 2);
+                        $sellingUnit     = $promotedUnit;
                     }
                     $catalogueSaving = round(max(0, $unitPrice - $sellingUnit) * $item['quantity'], 2);
                 }
@@ -3691,11 +3586,27 @@ class PosController extends Controller
                 $askedFor     = OrderTotals::resolveDiscount($discType, $discVal, $lineBase);
                 // pos.discount is checked here, against the RESOLVED amount, so
                 // a flat discount cannot walk around the percentage ceiling.
-                // Only what the CALLER asked for is policed: the catalogue
-                // saving below is the shop's own advertised price, not somebody
-                // exercising discretion over the till, and the storefront does
-                // not police it either.
-                PosDiscountPolicy::assertAllowed(auth()->user(), $askedFor, $lineBase, 'line');
+                // A product's own sale price is the shop's price, not anyone's
+                // discretion, and is not counted. A running PROMOTION is: the
+                // hub applies it by itself, so what the caller asks for comes
+                // on top of it, and the two together may not pass max(5%, the
+                // promotion's value) — no stacking, for Neema or anyone.
+                PosDiscountPolicy::assertAllowed(
+                    auth()->user(), $askedFor, $lineBase, "items.{$idx}.discount_value", $promotionSaving,
+                );
+                if ($hubPrices) {
+                    $tally->line($askedFor + $promotionSaving, $lineBase, "items.{$idx}.discount_value", $promotionSaving);
+                } else {
+                    // A till operator's typed price is measured against the
+                    // catalogue (an agent-taken line is priced by the hub itself).
+                    $catUnit = \App\Support\DiscountRule::catalogueUnit($productId ?: null, $variantId, $currencyCode);
+                    \App\Support\DiscountRule::assertLineWithin(
+                        auth()->user(), $unitPrice, (int) $item['quantity'], $askedFor,
+                        $catUnit, "items.{$idx}.unit_price", "items.{$idx}.discount_value",
+                    );
+                    [$given, $givenBase, $short] = \App\Support\DiscountRule::lineGiven($unitPrice, (int) $item['quantity'], $askedFor, $catUnit);
+                    $tally->line($given, $givenBase, $short ? "items.{$idx}.unit_price" : "items.{$idx}.discount_value");
+                }
                 // Deliberately NOT rounded here. resolveDiscount's full
                 // precision has always flowed into the line subtotal, and
                 // rounding the sum moved a characterised total by a cent. The
@@ -3734,7 +3645,7 @@ class PosController extends Controller
             // ── Build order lines for MTO (production) items ──────────────────
             // These travel via production_items[] only. No stock deduction;
             // the item is made to order and inventory will be added on completion.
-            foreach ($validated['production_items'] ?? [] as $pi) {
+            foreach ($validated['production_items'] ?? [] as $pidx => $pi) {
                 $mtoVariantId = $pi['variant_id'] ?? null;
                 $mtoVariant  = $mtoVariantId ? ProductVariant::with('product.translations')->find($mtoVariantId) : null;
                 $mtoProductId = $mtoVariant?->product_id ?? (int)($pi['product_id'] ?? 0);
@@ -3770,6 +3681,16 @@ class PosController extends Controller
                     }
                 }
 
+                // A made-to-order line carries no discount column, so a lower
+                // price IS its discount: measured against the catalogue too.
+                $mtoCat = $hubPrices ? null
+                    : \App\Support\DiscountRule::catalogueUnit($mtoProductId ?: null, $mtoVariantId, $currencyCode);
+                \App\Support\DiscountRule::assertLineWithin(
+                    auth()->user(), $mtoUnitPrice, (int) $pi['quantity'], 0.0,
+                    $mtoCat, "production_items.{$pidx}.unit_price", "production_items.{$pidx}.unit_price",
+                );
+                [$given, $givenBase] = \App\Support\DiscountRule::lineGiven($mtoUnitPrice, (int) $pi['quantity'], 0.0, $mtoCat);
+                $tally->line($given, $givenBase, "production_items.{$pidx}.unit_price");
                 $mtoBase         = $mtoUnitPrice * (int)$pi['quantity'];
                 $mtoTaxCalc      = TaxCalculationService::calculateLine($mtoUnitPrice, (int)$pi['quantity'], $mtoProductId, $taxInclusive);
                 $mtoLineTotal    = $taxInclusive ? $mtoBase : $mtoBase + round($mtoTaxCalc['tax_amount'], 2);
@@ -3798,7 +3719,9 @@ class PosController extends Controller
             $cartDiscType = $validated['cart_discount_type'] ?? 'none';
             $cartDiscVal  = (float)($validated['cart_discount_value'] ?? 0);
             $cartDiscount = OrderTotals::resolveDiscount($cartDiscType, $cartDiscVal, $itemSubtotal);
-            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart');
+            PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart_discount_value');
+            // The lines and the cart together: at most 5% of the order's gross.
+            $tally->amount($cartDiscount, 'cart_discount_value')->assert(auth()->user());
             $shippingAmt  = round((float)($validated['shipping_amount'] ?? 0), 2);
             $totals       = OrderTotals::fromParts(
                 $itemSubtotal,
@@ -4193,6 +4116,7 @@ class PosController extends Controller
                 }
 
                 $payment = Payment::create([
+                    'recorded_by' => $request->user()->id,   // who took it at the till (4D)
                     'order_id'           => $order->id,
                     'amount'             => $pmtAmount,
                     'currency_code'      => $order->currency_code,
@@ -4518,6 +4442,9 @@ class PosController extends Controller
             'status'              => $order->status,
             'notes'               => $order->notes,
             'created_at'          => $order->created_at->toIso8601String(),
+            // Phase 4B part 2: void / refund requests on this sale still
+            // waiting for a signature, so the till shows them as pending.
+            'pending_reversals'   => app(TillReversals::class)->pendingForOrder($order->id),
         ];
     }
 }

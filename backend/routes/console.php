@@ -78,3 +78,17 @@ Schedule::command(\App\Console\Commands\SweepAbandonedInterestCarts::class)
     ->dailyAt('03:30')
     ->withoutOverlapping()
     ->runInBackground();
+
+// ── Approval requests — hourly ───────────────────────────────────────────────
+// A request pending more than 72 hours goes back to its maker (Phase 3B).
+// Never approves anything. Manual run: php artisan approvals:expire
+Schedule::command(\App\Console\Commands\ExpireApprovalRequests::class)
+    ->hourly()
+    ->withoutOverlapping();
+
+// ── Scheduled proposals — every minute ──────────────────────────────────────
+// A signed tax-rate, reporting-FX or settlement change takes effect at its
+// effective_from, never before (Phase 3C). Manual run: php artisan proposals:apply-due
+Schedule::command(\App\Console\Commands\ApplyDueProposals::class)
+    ->everyMinute()
+    ->withoutOverlapping();

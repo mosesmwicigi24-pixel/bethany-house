@@ -209,7 +209,10 @@ class ProductionPayloadRedactionTest extends TestCase
         $tailor = User::factory()->create();
         $tailor->assignRole(Role::findByName('tailor', 'sanctum'));
         $this->job($tailor);
-        $this->actAs('outlet_manager');
+        // Phase 4A: a manager sees the jobs raised at their shop.
+        $shop = \App\Models\Outlet::factory()->create();
+        $this->po->forceFill(['outlet_id' => $shop->id])->save();
+        $this->actAs('outlet_manager')->outlets()->attach($shop->id);
 
         $res  = $this->getJson("/api/v1/admin/production-orders/{$this->po->id}")->assertOk();
         $body = $res->getContent();

@@ -33,6 +33,8 @@ class CloseRegisterDenominationTest extends TestCase
         $user->givePermissionTo(
             Permission::findOrCreate('pos.access', 'sanctum'),
             Permission::findOrCreate('pos.close_register', 'sanctum'),
+            // The catalogue admin's outlet reach — a permission since 4D.
+            Permission::findOrCreate('outlets.all_access', 'sanctum'),
         );
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);

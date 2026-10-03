@@ -29,16 +29,27 @@ class InvoiceController extends Controller
      * SCREENS are the only reads that should follow the viewer, so only they
      * do. Own-scope keys on created_by — the user shown as "served by".
      */
+    /**
+     * The invoices this caller may see — the same answer as the orders they
+     * may see, because an invoice IS its order's bill.
+     *
+     *   Own     invoices they issued (sales_documents.created_by)
+     *   Outlet  invoices whose order sits at one of their outlets — the
+     *           Order query below carries Order's ViewerScope, so the outlet
+     *           rule is the one ViewerScope applies, not a copy of it
+     *   None    nothing (no role of theirs grants orders.view)
+     */
     private function scopeToViewer(Builder $query, Request $request): Builder
     {
         $scope = DataScopeResolver::for($request->user(), 'orders.view');
 
-        if ($scope !== DataScope::All) {
-            // Outlet scope collapses to Own here: sales_documents carries no
-            // outlet column. No outlet-scoped role holds orders.view today; if
-            // one ever does, this errs on showing less, never more.
-            $query->where('created_by', $request->user()->id);
-        }
+        match ($scope) {
+            DataScope::All    => null,
+            DataScope::Own    => $query->where('created_by', $request->user()->id),
+            DataScope::Outlet => $query->where('documentable_type', Order::class)
+                ->whereIn('documentable_id', Order::query()->select('orders.id')),
+            DataScope::None   => $query->whereRaw('1 = 0'),
+        };
 
         return $query;
     }

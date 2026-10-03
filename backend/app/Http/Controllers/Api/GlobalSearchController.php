@@ -61,7 +61,10 @@ class GlobalSearchController extends Controller
         if (in_array('orders', $types) && $user->can('orders.view')) {
             $results = array_merge($results, $this->searchOrders($q));
         }
-        if (in_array('customers', $types) && $user->can('customers.view')) {
+        // Customers obey the anti-scraping rules (App\Support\CustomerSearch):
+        // 3 real characters, wildcards literal, scope before matching.
+        if (in_array('customers', $types) && $user->can('customers.view')
+            && mb_strlen(preg_replace('/[\s%_*?]+/u', '', $q) ?? '') >= \App\Support\CustomerSearch::MIN) {
             $results = array_merge($results, $this->searchCustomers($q));
         }
         if (in_array('suppliers', $types) && $user->can('procurement.view')) {
@@ -130,13 +133,15 @@ class GlobalSearchController extends Controller
 
     private function searchCustomers(string $q): array
     {
-        $rows = Customer::where(function ($w) use ($q) {
-                $w->where('first_name',  'ILIKE', "%{$q}%")
-                  ->orWhere('last_name',  'ILIKE', "%{$q}%")
-                  ->orWhere('email',      'ILIKE', "%{$q}%")
-                  ->orWhere('phone',      'ILIKE', "%{$q}%")
-                  ->orWhere('company',    'ILIKE', "%{$q}%")
-                  ->orWhere(\DB::raw("CONCAT(first_name, ' ', last_name)"), 'ILIKE', "%{$q}%");
+        // Phase 4A: the caller's customers only, bounded before matching.
+        $like = \App\Support\CustomerSearch::contains($q);
+        $rows = Customer::visibleTo(request()->user())->where(function ($w) use ($like) {
+                $w->where('first_name',  'ILIKE', $like)
+                  ->orWhere('last_name',  'ILIKE', $like)
+                  ->orWhere('email',      'ILIKE', $like)
+                  ->orWhere('phone',      'ILIKE', $like)
+                  ->orWhere('company',    'ILIKE', $like)
+                  ->orWhere(\DB::raw("CONCAT(first_name, ' ', last_name)"), 'ILIKE', $like);
             })
             ->select('id', 'first_name', 'last_name', 'email', 'phone', 'company', 'status')
             ->orderByDesc('created_at')

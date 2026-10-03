@@ -84,8 +84,16 @@ class PaymentRefundIntegrityTest extends TestCase
         $this->assertSame('paid', $order->fresh()->payment_status);
         $this->actor(['payments.view', 'payments.void']);
 
-        $this->postJson("/api/v1/admin/payment-transactions/{$payment->id}/void",
-            ['reason' => 'entered in error'])->assertOk();
+        // Since Phase 3B a void is a request; it is carried out when someone
+        // else with the finance band signs it.
+        $approval = $this->postJson("/api/v1/admin/payment-transactions/{$payment->id}/void",
+            ['reason' => 'entered in error'])->assertStatus(202)->json('approval');
+        $this->assertSame('paid', $order->fresh()->payment_status, 'asking voids nothing');
+
+        $this->actor(['payments.view', 'payments.void']);
+        $this->postJson("/api/v1/admin/approvals/{$approval['id']}/sign", [
+            'approvable_id' => $payment->id, 'version' => $approval['version'],
+        ])->assertOk()->assertJsonPath('request.status', 'approved');
 
         // The voided payment no longer counts as collected → back to pending.
         $this->assertSame('pending', $order->fresh()->payment_status);

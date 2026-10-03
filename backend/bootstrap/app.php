@@ -72,10 +72,20 @@ return Application::configure(basePath: dirname(__DIR__))
             // page (role hardening 3A) — see App\Support\ReportPages.
             'report.page'   => \App\Http\Middleware\RequiresReportPage::class,
             'report.export' => \App\Http\Middleware\RequiresReportExport::class,
+            // Reports are business-wide for whoever may read them (owner,
+            // 2026-10-03): lifts the Phase 4A outlet/own row scope for the
+            // section, nothing else.
+            'report.business_wide' => \App\Http\Middleware\ReportsAreBusinessWide::class,
+            // Customer phones, emails and addresses by role on the
+            // operational screens (Phase 4A) — see CustomerContacts::policyFor.
+            'contacts.mask' => \App\Http\Middleware\MasksCustomerContacts::class,
             // The owner's accounts never work the till (role hardening 1B).
             // A route middleware, because Gate::before lets super_admin past
             // every permission — see the class docblock.
             'owner.no_transact' => \App\Http\Middleware\OwnerDoesNotTransact::class,
+            // Privileged actions need a recent re-confirmation of identity on
+            // this session (Phase 4C, role plan §12.3).
+            'step.up' => \App\Http\Middleware\RequireStepUp::class,
         ]);
 
         // Every staff API call → request_logs (who looked at what). Staff-only
@@ -86,6 +96,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->api(append: [
             \App\Http\Middleware\AuditStaffRequests::class,
             \App\Http\Middleware\DownloadGate::class,
+            // A 403 on a sensitive route → activity_log authorization_denied (4D).
+            \App\Http\Middleware\RecordsDeniedAuthorizations::class,
         ]);
 
         // Configure authentication redirects
@@ -108,6 +120,7 @@ return Application::configure(basePath: dirname(__DIR__))
         \App\Console\Commands\VerifyAuditTrail::class,
         \App\Console\Commands\SendAuditDigest::class,
         \App\Console\Commands\PruneDownloadArchive::class,
+        \App\Console\Commands\UnlockAccount::class,
     ])
     ->withSchedule(function (\Illuminate\Console\Scheduling\Schedule $schedule): void {
         // EoD report delivery — runs every minute, command handles time-of-day

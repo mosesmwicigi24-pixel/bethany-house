@@ -138,11 +138,28 @@ class CurrencyController extends Controller
             'thousand_separator' => 'sometimes|string|max:5',
             'decimal_separator'  => 'sometimes|string|max:5',
             'is_active'          => 'sometimes|boolean',
+            // Phase 3C: when a reporting-rate change takes effect (now or later).
+            'effective_from'     => 'sometimes|nullable|date',
         ]);
 
-        DB::table('currencies')
-            ->where('id', $id)
-            ->update(array_merge($validated, ['updated_at' => now()]));
+        // The two rates are proposals (Phase 3C); everything else about a
+        // currency is a plain edit, and stays the super admin's (settings.edit).
+        $plain = array_diff_key($validated, array_flip(['exchange_rate', 'reporting_rate_to_kes', 'effective_from']));
+        $plain = array_filter($plain, fn ($v, $k) => !property_exists($currency, $k) || (string) $currency->{$k} !== (string) (is_bool($v) ? (int) $v : $v), ARRAY_FILTER_USE_BOTH);
+        if ($plain !== [] && !$request->user()->can('settings.edit')) {
+            return response()->json([
+                'message' => 'You can propose rate changes; the currency\'s other details are the super admin\'s to edit.',
+                'code'    => 'NOT_A_SETTINGS_EDITOR',
+            ], 403);
+        }
+
+        $proposals = DB::transaction(function () use ($id, $plain, $validated, $request) {
+            if ($plain !== []) {
+                DB::table('currencies')->where('id', $id)->update(array_merge($plain, ['updated_at' => now()]));
+            }
+
+            return $this->proposeRates((int) $id, $validated, $request);
+        });
 
         // Both rate caches, because a currency row feeds both: pricing (what a
         // customer is quoted) and reporting (what earned money is worth). Left
@@ -151,18 +168,53 @@ class CurrencyController extends Controller
         \App\Services\CurrencyPricing::forget();
         \App\Support\ReportingCurrency::forget();
 
-        try {
-            ActivityLogService::log('currency_updated', null, [
-                'currency_id' => $id,
-                'code'        => $currency->code,
-                'changes'     => array_keys($validated),
-            ]);
-        } catch (\Exception) {}
+        if ($plain !== []) {
+            try {
+                ActivityLogService::log('currency_updated', null, [
+                    'currency_id' => $id,
+                    'code'        => $currency->code,
+                    'changes'     => array_keys($plain),
+                ]);
+            } catch (\Exception) {}
+        }
+
+        return $this->ratesResponse('Currency updated successfully.', (int) $id, $proposals, $request);
+    }
+
+    /**
+     * The pricing and reporting rates as proposals (Phase 3C):
+     *   exchange_rate          customer_pricing_fx_change — admin proposes, finance signs
+     *   reporting_rate_to_kes  reporting_fx_change — finance proposes, the super admin
+     *                          signs; effective-dated
+     * A rate that does not change raises nothing.
+     *
+     * @return list<\App\Models\ChangeProposal>
+     */
+    private function proposeRates(int $id, array $validated, Request $request): array
+    {
+        $service = app(\App\Services\Approvals\ProposalService::class);
+        $out = [];
+        if (array_key_exists('exchange_rate', $validated)) {
+            $out[] = $service->propose('customer_pricing_fx_change', $id, ['exchange_rate' => $validated['exchange_rate']], $request->user());
+        }
+        if (array_key_exists('reporting_rate_to_kes', $validated)) {
+            $out[] = $service->propose('reporting_fx_change', $id, ['reporting_rate_to_kes' => $validated['reporting_rate_to_kes']],
+                $request->user(), $validated['effective_from'] ?? null);
+        }
+
+        return array_values(array_filter($out));
+    }
+
+    /** @param list<\App\Models\ChangeProposal> $proposals */
+    private function ratesResponse(string $base, int $id, array $proposals, Request $request)
+    {
+        $waiting = array_filter($proposals, fn ($p) => $p->status !== \App\Models\ChangeProposal::APPLIED);
 
         return response()->json([
-            'message'  => 'Currency updated successfully.',
-            'currency' => DB::table('currencies')->find($id),
-        ]);
+            'message'   => \App\Services\Approvals\ProposalMessages::saved($base, $proposals),
+            'currency'  => DB::table('currencies')->find($id),
+            'proposals' => \App\Services\Approvals\ProposalMessages::present($proposals, $request->user()),
+        ], $waiting !== [] ? 202 : 200);
     }
 
     /**
@@ -327,6 +379,7 @@ class CurrencyController extends Controller
         $validated = $request->validate([
             'exchange_rate' => 'required|numeric|min:0.000001',
             'reporting_rate_to_kes' => 'sometimes|nullable|numeric|min:0.000001',
+            'effective_from' => 'sometimes|nullable|date',
         ]);
 
         $currency = DB::table('currencies')->find($id);
@@ -341,32 +394,14 @@ class CurrencyController extends Controller
             ], 422);
         }
 
-        // NOT array_filter: null is a legitimate reporting rate meaning "do not
-        // convert this currency", and filtering would silently discard it.
-        DB::table('currencies')->where('id', $id)->update([
-            'exchange_rate' => $validated['exchange_rate'],
-            'reporting_rate_to_kes' => array_key_exists('reporting_rate_to_kes', $validated)
-                ? $validated['reporting_rate_to_kes']
-                : $currency->reporting_rate_to_kes,
-            'updated_at'    => now(),
-        ]);
+        // Both rates are proposals (Phase 3C). NOT array_filter on the
+        // reporting rate: null is a legitimate value meaning "do not convert".
+        $proposals = DB::transaction(fn () => $this->proposeRates((int) $id, $validated, $request));
 
         \App\Services\CurrencyPricing::forget();
         \App\Support\ReportingCurrency::forget();
 
-        try {
-            ActivityLogService::log('currency_rate_updated', null, [
-                'currency_id'   => $id,
-                'code'          => $currency->code,
-                'old_rate'      => $currency->exchange_rate,
-                'new_rate'      => $validated['exchange_rate'],
-            ]);
-        } catch (\Exception) {}
-
-        return response()->json([
-            'message'  => 'Exchange rate updated.',
-            'currency' => DB::table('currencies')->find($id),
-        ]);
+        return $this->ratesResponse('Exchange rate updated.', (int) $id, $proposals, $request);
     }
 
     /**

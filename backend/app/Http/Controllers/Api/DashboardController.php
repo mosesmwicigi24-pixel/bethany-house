@@ -9,6 +9,7 @@ use App\Models\Product;
 use Illuminate\Http\Request;
 use App\Enums\DataScope;
 use App\Services\DataScopeResolver;
+use App\Support\ReportPages;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -44,6 +45,11 @@ class DashboardController extends Controller
     {
         $user   = $request->user();
         $badges = [];
+
+        // Platform-only accounts get no business counts (4D).
+        if (self::isPlatformOnly($user)) {
+            return response()->json($badges);
+        }
 
         try { $badges['orders'] = Order::whereIn('status', ['pending', 'processing'])->count(); }
         catch (\Exception) { $badges['orders'] = 0; }
@@ -120,7 +126,8 @@ class DashboardController extends Controller
         // view is already narrower than the whole business.
         $user        = $request->user();
         $scope       = DataScopeResolver::for($user, 'orders.view');
-        $maySeeMoney = ($user?->can('reports.sales') ?? false) || $scope !== DataScope::All;
+        // None (no role grants orders.view) is not "a narrower view" — it is no view.
+        $maySeeMoney = ($user?->can('reports.sales') ?? false) || in_array($scope, [DataScope::Own, DataScope::Outlet], true);
 
         $stats = [
             // What the figures below are counted over, so the UI can say "your
@@ -129,8 +136,19 @@ class DashboardController extends Controller
             'total_users'  => User::count(),
             'active_users' => User::where('status', 'active')->count(),
             'staff_users'  => User::staffUsers()->count(),
-            'customers'    => User::customers()->count(),
         ];
+
+        // The system administrator runs the platform, not the business (4D):
+        // accounts and their own notifications — no order, product, stock,
+        // shipment, production, customer or money counts.
+        if (self::isPlatformOnly($user)) {
+            $stats['platform_only'] = true;
+            $stats['unread_notifications'] = $this->unreadNotifications($user);
+            return $stats;
+        }
+
+        $stats['platform_only'] = false;
+        $stats['customers']     = User::customers()->count();
 
         try {
             $stats['total_orders']   = Order::count();
@@ -190,6 +208,45 @@ class DashboardController extends Controller
         } catch (\Exception) {}
 
         return $stats;
+    }
+
+    /**
+     * A caller who holds no business-domain permission at all — the system
+     * administrator in the Phase 2 catalogue (accounts, outlets, roles,
+     * attendance, technical setup). Decided by permission, not role name, so
+     * a role edited the same way gets the same platform-only dashboard.
+     * Any report page counts as business (one permission per page since
+     * Phase 3A — see ReportPages; reports.view is retired).
+     */
+    private const BUSINESS_PERMISSIONS = [
+        'orders.view', 'products.view', 'inventory.view', 'production.view', 'shipment.view',
+        'payments.view', 'customers.view', 'procurement.view', 'expenses.view', 'pos.access',
+    ];
+
+    private static function isPlatformOnly($user): bool
+    {
+        if (!$user) {
+            return true;
+        }
+        foreach (self::BUSINESS_PERMISSIONS as $permission) {
+            if ($user->can($permission)) {
+                return false;
+            }
+        }
+        return !ReportPages::canViewAny($user, ReportPages::keys());
+    }
+
+    private function unreadNotifications($user): int
+    {
+        try {
+            return DB::table('notifications')
+                ->where('notifiable_type', get_class($user))
+                ->where('notifiable_id', $user->id)
+                ->whereNull('read_at')
+                ->count();
+        } catch (\Exception) {
+            return 0;
+        }
     }
 
     /**

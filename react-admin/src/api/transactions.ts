@@ -87,11 +87,14 @@ export const transactionsApi = {
   refund: (id: number, data: { amount: number; reason: string }) =>
     post<{ message: string; payment: PaymentTransaction }>(`${BASE}/${id}/refund`, data),
 
+  // Phase 3B: both are REQUESTS. Nothing happens to the payment until the
+  // approval engine has its signatures (finance; above KES 50,000 also the
+  // super admin); the request then shows in the Approvals inbox.
   void: (id: number, data: { reason: string }) =>
-    post<{ message: string; payment: PaymentTransaction }>(`${BASE}/${id}/void`, data),
+    post<{ message: string; payment: PaymentTransaction }>(`${BASE}/${id}/void-request`, data),
 
   reassign: (id: number, data: { order_id: number; reason: string }) =>
-    post<{ message: string; payment: PaymentTransaction }>(`${BASE}/${id}/reassign`, data),
+    post<{ message: string; payment: PaymentTransaction }>(`${BASE}/${id}/reassign-request`, data),
 
   export: (params: TransactionListParams = {}) =>
     get<{ data: PaymentTransaction[] }>(`${BASE}/export`, { params }),

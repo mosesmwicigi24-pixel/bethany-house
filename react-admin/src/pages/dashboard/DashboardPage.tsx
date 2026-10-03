@@ -14,6 +14,8 @@ import { clsx } from "clsx";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface DashboardStats {
+    /** The server's verdict (4D): no business counts for this account. */
+    platform_only?: boolean;
     total_users?: number;
     active_users?: number;
     staff_users?: number;
@@ -605,6 +607,26 @@ function RoleStatGrid({
     can: (p: string) => boolean; isAdmin: boolean; fmtCurrency: (n?: number) => string;
     kpis: any; kpiLoading: boolean;
 }) {
+    // ── Platform-only (system admin) — accounts, not the business (4D) ──────
+    if (stats?.platform_only) {
+        return (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatCard label="Staff Accounts"  value={stats?.staff_users}
+                    loading={isLoading} color="bg-brand-50 text-brand-600"
+                    href="/settings/users" icon={<ClipboardIcon />} />
+                <StatCard label="Active Accounts" value={stats?.active_users}
+                    loading={isLoading} color="bg-success-light text-success"
+                    href="/settings/users" icon={<ClipboardIcon />} />
+                <StatCard label="All Accounts"    value={stats?.total_users}
+                    loading={isLoading} color="bg-surface-100 text-surface-600"
+                    href="/settings/users" icon={<ClipboardIcon />} />
+                <StatCard label="Notifications"   value={stats?.unread_notifications}
+                    loading={isLoading} color="bg-warning-light text-warning-dark"
+                    href="/notifications" badge={stats?.unread_notifications} icon={<PaymentIcon />} />
+            </div>
+        );
+    }
+
     // ── Tailor view — the full worker home, not just a stat grid ─────────────
     if (roles.includes("tailor")) {
         return <TailorHome stats={stats} isLoading={isLoading} can={can} />;
@@ -747,7 +769,9 @@ export default function DashboardPage() {
 
     // Roles that should not see business-wide financials. The revenue row is
     // the Sales & Orders report's figures, and its endpoints check
-    // reports.sales (Phase 3A) — without it the row could only fail.
+    // reports.sales (Phase 3A) — without it the row could only fail. That
+    // covers anyone the reports engine would refuse, the system admin among
+    // them (4D).
     const hideFinancials = !can("reports.sales")
         || roles.some(r => ["tailor", "procurement_officer"].includes(r));
 

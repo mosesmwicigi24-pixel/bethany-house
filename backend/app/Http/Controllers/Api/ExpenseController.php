@@ -9,7 +9,6 @@ use App\Services\ActivityLogService;
 use App\Services\IntelligenceService;
 use App\Services\NotificationService;
 use App\Services\Reporting\MetricEngine;
-use App\Support\MakerChecker;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\{DB, Storage};
 use Carbon\Carbon;
@@ -31,7 +30,7 @@ class ExpenseController extends Controller
     /** 403 unless this expense belongs to an outlet the caller is assigned to. */
     private function authoriseExpenseAccess(Expense $expense, User $user): void
     {
-        $this->authoriseOutletScopeFor($user, $expense->outlet_id);
+        $this->authoriseOutletScopeFor($user, $expense->outlet_id, 'expenses.view');
     }
 
     /** Fetch an expense and authorise it in one step. */
@@ -97,7 +96,7 @@ class ExpenseController extends Controller
         // Role-scoped access: outlet managers see only expenses for the outlets
         // they are assigned to. One definition, shared with every other method
         // on this controller — see assignedOutletIdsOrNull().
-        $assignedOutletIds = $this->assignedOutletIdsOrNull($request->user());
+        $assignedOutletIds = $this->assignedOutletIdsOrNull($request->user(), 'expenses.view');
         if ($assignedOutletIds !== null) {
             $query->whereIn('outlet_id', $assignedOutletIds);
         }
@@ -228,7 +227,7 @@ class ExpenseController extends Controller
         // outlets. (Omitting outlet_id books it to head office, as before.)
         if (isset($validated['outlet_id'])) {
             $this->authoriseOutletScope(
-                $this->assignedOutletIdsOrNull($request->user()),
+                $this->assignedOutletIdsOrNull($request->user(), 'expenses.view'),
                 (int) $validated['outlet_id'],
             );
         }
@@ -296,6 +295,13 @@ class ExpenseController extends Controller
                 $this->imprest()->debitForExpense($expense, $imprestAccount, $user);
             }
 
+            // Above the category's threshold (or paid from the imprest) it goes
+            // to the approval engine: finance ≤ KES 50,000, + super admin above,
+            // judged on the rolling 24h total to this category (Phase 3B).
+            if ($needsApproval) {
+                app(\App\Services\Approvals\ApprovalEngine::class)->submit('expense', $expense, $user);
+            }
+
             // Notify finance managers if pending approval
             if ($needsApproval) {
                 $financeManagers = User::whereHas('roles.permissions', function ($q) {
@@ -320,7 +326,7 @@ class ExpenseController extends Controller
                 'expense' => $expense->fresh(['category', 'outlet', 'createdBy']),
             ], 201);
 
-        } catch (\Illuminate\Validation\ValidationException $e) {
+        } catch (\Illuminate\Validation\ValidationException|\Illuminate\Http\Exceptions\HttpResponseException $e) {
             // e.g. "the imprest has only KES 1,240 left" — a 422 the form can
             // show, not a 500. Nothing was saved: the expense rolls back too.
             DB::rollBack();
@@ -375,7 +381,7 @@ class ExpenseController extends Controller
         // Re-check on the way out too: a scoped manager must not move an
         // expense into an outlet they aren't assigned to.
         if (array_key_exists('outlet_id', $validated)) {
-            $this->authoriseOutletScopeFor($request->user(), $validated['outlet_id']);
+            $this->authoriseOutletScopeFor($request->user(), $validated['outlet_id'], 'expenses.view');
         }
 
         DB::beginTransaction();
@@ -443,8 +449,10 @@ class ExpenseController extends Controller
         $user    = $request->user();
         $expense = $this->findScopedExpense($id, $user);
 
-        if ($expense->status !== 'draft') {
-            return response()->json(['message' => 'Only draft expenses can be submitted.'], 422);
+        // A rejected expense comes back only as a new approval version,
+        // linked to the rejected one (Phase 3B) — so it may be submitted again.
+        if (!in_array($expense->status, ['draft', 'rejected'], true)) {
+            return response()->json(['message' => 'Only draft or rejected expenses can be submitted.'], 422);
         }
 
         DB::beginTransaction();
@@ -454,6 +462,7 @@ class ExpenseController extends Controller
                 'submitted_by' => $user->id,
                 'submitted_at' => now(),
             ]);
+            app(\App\Services\Approvals\ApprovalEngine::class)->submit('expense', $expense->fresh(), $user);
 
             // Notify approvers
             $approvers = User::whereHas('roles.permissions', function ($q) {
@@ -468,6 +477,9 @@ class ExpenseController extends Controller
             DB::commit();
 
             return response()->json(['message' => 'Expense submitted for approval.', 'expense' => $expense->fresh()]);
+        } catch (\Illuminate\Http\Exceptions\HttpResponseException $e) {
+            DB::rollBack();
+            throw $e;
         } catch (\Throwable $e) {
             DB::rollBack();
             return response()->json(['message' => $e->getMessage()], 500);
@@ -482,80 +494,31 @@ class ExpenseController extends Controller
         $user    = $request->user();
         $expense = $this->findScopedExpense($id, $user);
 
-        if (!$user->can('expenses.approve')) {
-            return response()->json(['message' => 'Forbidden. You do not have permission to approve expenses.'], 403);
-        }
-
         if ($expense->status !== 'pending_approval') {
             return response()->json(['message' => 'Only pending expenses can be approved.'], 422);
         }
-        // Owner decision 2026-09-22 made imprest cash approved by someone
-        // other than the person who recorded it; Phase 1B extends that to
-        // every expense: neither the recorder nor the submitter approves it.
-        MakerChecker::assertNotMaker(
-            $user, 'expense.approve', $expense, $expense->created_by, $expense->submitted_by,
-        );
 
         $validated = $request->validate([
             'comments' => 'nullable|string|max:1000',
         ]);
 
-        DB::beginTransaction();
-        try {
-            $expense->update([
-                'status'      => 'approved',
-                'approved_by' => $user->id,
-                'approved_at' => now(),
-            ]);
+        // Since Phase 3B this SIGNS the band the expense is waiting on
+        // (finance ≤ KES 50,000; above, then the super admin). The engine
+        // refuses the recorder and the submitter (maker ≠ checker — owner
+        // decision 2026-09-22 for imprest cash, Phase 1B for every expense)
+        // and approves the expense (ExpenseHandler) only on the last band.
+        $engine   = app(\App\Services\Approvals\ApprovalEngine::class);
+        $approval = $engine->sign(
+            $engine->openOrAdopt('expense', $expense), $user,
+            \App\Models\ApprovalSignature::APPROVED, $validated['comments'] ?? null, $expense->id,
+        );
+        $done = $approval->status === \App\Models\ApprovalRequest::APPROVED;
 
-            ExpenseApproval::create([
-                'expense_id'  => $expense->id,
-                'approver_id' => $user->id,
-                'action'      => 'approved',
-                'comments'    => $validated['comments'] ?? null,
-                'acted_at'    => now(),
-                'step'        => 1,
-            ]);
-
-            // Notify submitter
-            if ($expense->submitted_by) {
-                $expense->submittedBy->notify(
-                    new \App\Notifications\ExpenseApprovalDecisionNotification($expense, 'approved', $validated['comments'] ?? null)
-                );
-            }
-
-            $this->activityLog->log('expense_approved', $expense, ['comments' => $validated['comments'] ?? null], null, $user);
-            DB::commit();
-
-            // Intelligence #6 — check budget warnings after approval and notify if exceeded
-            try {
-                $warnings = IntelligenceService::expenseBudgetWarnings();
-                $exceeded = array_filter($warnings, fn ($w) =>
-                    $w['severity'] === 'exceeded' && $w['category_id'] === $expense->category_id
-                );
-                if (!empty($exceeded)) {
-                    $approvers = User::whereHas('roles.permissions', function ($q) {
-                        $q->where('permissions.name', 'expenses.approve')
-                          ->where('permissions.guard_name', 'sanctum');
-                    })->get();
-                    $w = reset($exceeded);
-                    foreach ($approvers as $approver) {
-                        $approver->notify(new \App\Notifications\BudgetExceededNotification(
-                            $w['budget_id'],
-                            $w['category_name'],
-                            $w['budgeted_amount'],
-                            $w['actual_spend'],
-                            $w['utilization_percent']
-                        ));
-                    }
-                }
-            } catch (\Exception) {}
-
-            return response()->json(['message' => 'Expense approved.', 'expense' => $expense->fresh()]);
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            return response()->json(['message' => $e->getMessage()], 500);
-        }
+        return response()->json([
+            'message'  => $done ? 'Expense approved.' : 'Signed. The expense now waits for the next band.',
+            'expense'  => $expense->fresh(),
+            'approval' => $engine->present($approval->load(['signatures', 'maker']), $user),
+        ]);
     }
 
     /**
@@ -566,10 +529,6 @@ class ExpenseController extends Controller
         $user    = $request->user();
         $expense = $this->findScopedExpense($id, $user);
 
-        if (!$user->can('expenses.approve')) {
-            return response()->json(['message' => 'Forbidden. You do not have permission to reject expenses.'], 403);
-        }
-
         if ($expense->status !== 'pending_approval') {
             return response()->json(['message' => 'Only pending expenses can be rejected.'], 422);
         }
@@ -578,40 +537,15 @@ class ExpenseController extends Controller
             'reason' => 'required|string|max:1000',
         ]);
 
-        DB::beginTransaction();
-        try {
-            $expense->update([
-                'status'           => 'rejected',
-                'rejected_by'      => $user->id,
-                'rejected_at'      => now(),
-                'rejection_reason' => $validated['reason'],
-            ]);
+        // A decision at the band the expense waits on; ExpenseHandler records
+        // the rejection, tells the submitter and flags imprest cash.
+        $engine = app(\App\Services\Approvals\ApprovalEngine::class);
+        $engine->sign(
+            $engine->openOrAdopt('expense', $expense), $user,
+            \App\Models\ApprovalSignature::REJECTED, $validated['reason'], $expense->id,
+        );
 
-            ExpenseApproval::create([
-                'expense_id'  => $expense->id,
-                'approver_id' => $user->id,
-                'action'      => 'rejected',
-                'comments'    => $validated['reason'],
-                'acted_at'    => now(),
-                'step'        => 1,
-            ]);
-
-            if ($expense->submitted_by) {
-                $expense->submittedBy->notify(
-                    new \App\Notifications\ExpenseApprovalDecisionNotification($expense, 'rejected', $validated['reason'])
-                );
-            }
-
-            $this->activityLog->log('expense_rejected', $expense, ['reason' => $validated['reason']], null, $user);
-            $this->imprest()->flagForResolution($expense, $user, 'rejected');
-
-            DB::commit();
-
-            return response()->json(['message' => 'Expense rejected.', 'expense' => $expense->fresh()]);
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            return response()->json(['message' => $e->getMessage()], 500);
-        }
+        return response()->json(['message' => 'Expense rejected.', 'expense' => $expense->fresh()]);
     }
 
     /**
@@ -663,6 +597,7 @@ class ExpenseController extends Controller
         }
 
         $expense->update(['status' => 'cancelled']);
+        app(\App\Services\Approvals\ApprovalEngine::class)->cancelOpen('expense', $expense, $request->user(), 'Expense cancelled.');
         $this->imprest()->flagForResolution($expense, $request->user(), 'cancelled');
         $this->activityLog->log('expense_cancelled', $expense, ['status' => 'cancelled'], null, $request->user());
 
@@ -712,19 +647,15 @@ class ExpenseController extends Controller
             return response()->json(['message' => 'No receipt attached.'], 404);
         }
 
-        $fullPath = Storage::disk('private')->path($expense->receipt_path);
-
-        if (!file_exists($fullPath)) {
+        if (!Storage::disk('private')->exists($expense->receipt_path)) {
             return response()->json(['message' => 'Receipt file not found.'], 404);
         }
 
-        $mimeType = mime_content_type($fullPath) ?: 'application/octet-stream';
-        $filename = basename($expense->receipt_path);
-
-        return response()->file($fullPath, [
-            'Content-Type'        => $mimeType,
-            'Content-Disposition' => 'inline; filename="' . $filename . '"',
-        ]);
+        // A signed link valid ≤5 minutes (4D), issued after the outlet-scope
+        // check above; SignedFileController streams it and records the
+        // exempt download for the owner's digest.
+        return \App\Support\SignedFiles::issue($request, 'files.expense-receipt',
+            ['expense' => $expense->id], basename($expense->receipt_path));
     }
 
     // =========================================================================
@@ -735,7 +666,7 @@ class ExpenseController extends Controller
     {
         // The category list itself is reference data, but the spend figures
         // hung off it are money — scope them to the caller's outlets.
-        $scope = $this->assignedOutletIdsOrNull($request->user());
+        $scope = $this->assignedOutletIdsOrNull($request->user(), 'expenses.view');
 
         $categories = ExpenseCategory::with('children')
             ->whereNull('parent_id')
@@ -810,7 +741,7 @@ class ExpenseController extends Controller
         // actual-vs-budget figures derived from them) for their own outlets
         // only. Group-wide budgets — outlet_id NULL — are not theirs to see,
         // exactly as head-office expenses are excluded from index().
-        $scope = $this->assignedOutletIdsOrNull($request->user());
+        $scope = $this->assignedOutletIdsOrNull($request->user(), 'expenses.view');
         if (isset($validated['outlet_id'])) {
             $this->authoriseOutletScope($scope, (int) $validated['outlet_id']);
         }
@@ -846,7 +777,7 @@ class ExpenseController extends Controller
 
         if (isset($validated['outlet_id'])) {
             $this->authoriseOutletScope(
-                $this->assignedOutletIdsOrNull($request->user()),
+                $this->assignedOutletIdsOrNull($request->user(), 'expenses.view'),
                 (int) $validated['outlet_id'],
             );
         }
@@ -872,7 +803,7 @@ class ExpenseController extends Controller
     public function updateBudget(Request $request, int $id)
     {
         $budget = ExpenseBudget::findOrFail($id);
-        $this->authoriseOutletScopeFor($request->user(), $budget->outlet_id);
+        $this->authoriseOutletScopeFor($request->user(), $budget->outlet_id, 'expenses.view');
 
         $validated = $request->validate([
             'budgeted_amount' => 'required|numeric|min:0',
@@ -914,7 +845,7 @@ class ExpenseController extends Controller
         // Every figure below is money. A scoped manager gets their outlets'
         // numbers, never the group's; an explicit outlet_id may narrow that
         // scope but can never escape it (403, as MetricEngine::for does).
-        $scope = $this->assignedOutletIdsOrNull($request->user());
+        $scope = $this->assignedOutletIdsOrNull($request->user(), 'expenses.view');
         if ($outletId !== null) {
             $this->authoriseOutletScope($scope, (int) $outletId);
         }

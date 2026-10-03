@@ -81,6 +81,8 @@ class PermissionDependencyService
         'payments.approve_international' => ['payments.view'],
         'payments.void'                  => ['payments.view'],
         'payments.reassign'              => ['payments.view'],
+        'payments.request_void'          => ['payments.view'],
+        'payments.request_reassign'      => ['payments.view'],
         'payments.transactions'          => ['payments.view'],
         // Recording a payment happens at POST /orders/{id}/payments, nested
         // inside permission:orders.view, not the payments module itself.
@@ -135,6 +137,8 @@ class PermissionDependencyService
         'products.edit'   => ['products.view'],
         'products.delete' => ['products.view'],
         'products.import' => ['products.view', 'products.create'],
+        // Writing a cost means seeing one (Phase 3C).
+        'products.edit_cost' => ['products.view', 'products.view_cost'],
 
         // ── POS ──────────────────────────────────────────────────────────── 
         // All of these sit inside the permission:pos.access admin/pos
@@ -148,6 +152,10 @@ class PermissionDependencyService
         'pos.close_register'  => ['pos.access'],
         'pos.returns'         => ['pos.access'],
         'pos.cash_management' => ['pos.access'],
+        // Verifying is done from the till screens (Phase 4B). Reconciling,
+        // correcting and reading all tills are back-office keys and stand
+        // outside pos.access, like pos.eod_review.
+        'pos.till_verify'     => ['pos.access'],
 
         // ── Reports ──────────────────────────────────────────────────────── 
         // Each report page stands alone (Phase 3A): there is no section-wide

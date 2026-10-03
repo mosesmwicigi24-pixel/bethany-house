@@ -10,6 +10,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { Field, FieldInput, FieldSelect, FieldTextarea } from "@/components/setup/FormComponents";
 import type { TimeEntry } from "@/api/attendance";
 import type { ApiError } from "@/types";
+import { ClerkPinsPanel } from "@/components/security/ClerkPinsPanel";
 
 // ── Status display ────────────────────────────────────────────────────────────
 
@@ -339,6 +340,9 @@ export default function AttendancePage() {
                     </div>
                 )}
             </div>
+
+            {/* Outlet manager: clear a clerk's forgotten terminal PIN (Phase 4C) */}
+            <ClerkPinsPanel />
 
             {editing && <CorrectionModal entry={editing} onClose={() => setEditing(null)} />}
         </div>

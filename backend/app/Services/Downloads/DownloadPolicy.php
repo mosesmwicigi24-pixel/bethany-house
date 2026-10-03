@@ -18,6 +18,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  *   view          a file the hub shows inside its own screens — not a download
  *   never_attach  held, owner told, file never emailed (database backups)
  *   gated         everything else that is a file, including endpoints nobody listed
+ *   bulk_contacts a gated export carrying > 200 customers' contacts in full — super admin decides
  *
  * Approval: the owner account approves; so does any manager on the owner's
  * delegation list — never their own request. The owner's own downloads are
@@ -29,6 +30,12 @@ class DownloadPolicy
     public const VIEW         = 'view';
     public const NEVER_ATTACH = 'never_attach';
     public const GATED        = 'gated';
+    /**
+     * A gated export that turned out to carry more than 200 customers'
+     * contacts in full (App\Support\ContactExport, Phase 4A): decided only by
+     * an approver who is a super admin.
+     */
+    public const BULK_CONTACTS = 'bulk_contacts';
 
     /** File-ish content types. Images are not listed: in-app media is declared per route. */
     private const FILE_TYPES = [
@@ -106,7 +113,20 @@ class DownloadPolicy
     public function mayDecide(User $approver, DownloadRequest $request): bool
     {
         // Nobody approves their own request; the owner never has one pending.
-        return $this->canApprove($approver) && $request->user_id !== $approver->id;
+        // A bulk export of customer contacts is a super admin's call (plan §9).
+        return $this->canApprove($approver) && $request->user_id !== $approver->id
+            && ($request->category !== self::BULK_CONTACTS || $this->mayDecideBulkContacts($approver));
+    }
+
+    /**
+     * Who decides a bulk-contacts export: the owner, or an approver on his
+     * delegation list who is a super admin. Not every super admin — the
+     * delegation list stays the owner's (see the download_requests migration).
+     */
+    public function mayDecideBulkContacts(?User $approver): bool
+    {
+        return $approver !== null && $this->canApprove($approver)
+            && ($this->isOwner($approver) || $approver->hasRole('super_admin'));
     }
 
     /** @return \Illuminate\Support\Collection<int, User> */

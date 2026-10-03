@@ -274,20 +274,15 @@ class PaymentApprovalController extends Controller
         }
 
         // Maker ≠ checker (role hardening Phase 1B): whoever recorded the
-        // payment does not approve it. `payments` has no recorded_by column,
-        // and the order's created_by is the wrong person whenever someone
-        // other than the order's raiser takes the money (recordPosPay,
-        // OrderController::addPayment, the customer's own pay page). The one
-        // exact record of the recorder is the audit trail: AuditObserver
-        // writes a 'created' row for every Payment::create — every path that
-        // makes a payment goes through it — with the signed-in user as causer.
+        // payment does not approve it. The recorder is payments.recorded_by,
+        // stamped by every creation path since 4D (null for the public pay
+        // page and webhooks — no staff member recorded those).
         //
-        // It FAILS OPEN where that row is missing: payments created before
-        // the observer shipped (2026-09-21), or an audit write that failed
-        // (those are swallowed by design). It never blocks the wrong person.
-        // The durable fix is a payments.recorded_by column stamped by every
-        // creating path; until then this is the strongest check available.
-        $recordedBy = DB::table('activity_log')
+        // Rows from before the column, until the owner-approved backfill
+        // (2026_10_03_480003) fills them, fall back to the audit trail's
+        // 'created' entry, as Phase 1B did. That fallback still FAILS OPEN when
+        // the entry is missing too; it never blocks the wrong person.
+        $recordedBy = $payment->recorded_by ?? DB::table('activity_log')
             ->where('subject_type', Payment::class)
             ->where('subject_id', $payment->id)
             ->where('event', 'created')
@@ -354,7 +349,10 @@ class PaymentApprovalController extends Controller
 
             // Append note to order
             $note = "Payment {$payment->payment_number} approved by " . $request->user()->first_name . '.';
-            if ($validated['notes']) {
+            // notes is optional (nullable): absent, it is not a key at all —
+            // reading it bare was an "Undefined array key" 500 that rolled the
+            // whole approval back (4D).
+            if (!empty($validated['notes'])) {
                 $note .= ' Note: ' . $validated['notes'];
             }
             $order->update(['notes' => ($order->notes ? $order->notes . "\n\n" : '') . $note]);
@@ -468,8 +466,8 @@ class PaymentApprovalController extends Controller
     // =========================================================================
     // GET /admin/payments/{id}/proof
     //
-    // Returns a short-lived signed URL to download the proof file.
-    // Only accessible to admin users - enforced via route middleware.
+    // Issues a signed link to the proof, valid ≤5 minutes (App\Support\SignedFiles),
+    // after the order-visibility check below.
     // =========================================================================
 
     public function serveProof($id)
@@ -493,17 +491,10 @@ class PaymentApprovalController extends Controller
             return response()->json(['message' => 'Proof file not found on storage.'], 404);
         }
 
-        // Always stream the raw file bytes so the frontend can load them
-        // directly as a blob URL - works with any storage driver and avoids
-        // the JSON-wrapping / signed-URL approach that breaks image rendering.
-        $content  = Storage::disk('local')->get($payment->proof_of_payment_path);
-        $mime     = Storage::disk('local')->mimeType($payment->proof_of_payment_path) ?: 'application/octet-stream';
-        $filename = basename($payment->proof_of_payment_path);
-
-        return response($content, 200)
-            ->header('Content-Type',        $mime)
-            ->header('Content-Disposition', 'inline; filename="' . $filename . '"')
-            ->header('Cache-Control',       'private, max-age=300');
+        // A signed link valid ≤5 minutes, not the bytes (4D): the check above
+        // is the issuer's whole job; the file route trusts only the signature.
+        return \App\Support\SignedFiles::issue(request(), 'files.payment-proof',
+            ['payment' => $payment->id], basename($payment->proof_of_payment_path));
     }
 
     // =========================================================================

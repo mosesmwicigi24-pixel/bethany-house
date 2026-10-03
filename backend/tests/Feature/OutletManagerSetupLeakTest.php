@@ -115,14 +115,17 @@ class OutletManagerSetupLeakTest extends TestCase
     public function test_outlet_manager_still_sets_an_orders_shipping_fee(): void
     {
         $this->shippingMethods();
-        $this->actAs('outlet_manager');
+        $manager = $this->actAs('outlet_manager');
+        // Phase 4A: a manager works the orders of their own shop.
+        $shop = Outlet::factory()->create();
+        $manager->outlets()->attach($shop->id);
 
         $methods = $this->getJson('/api/v1/admin/orders/shipping-methods')->assertOk()->json('data');
         $this->assertSame(['Nairobi courier'], collect($methods)->pluck('name')->all(), 'active methods only');
         $this->assertArrayHasKey('flat_rate', $methods[0]);
         $this->assertArrayHasKey('cost_type', $methods[0]);
 
-        $order = Order::factory()->create(['shipping_amount' => 0]);
+        $order = Order::factory()->create(['shipping_amount' => 0, 'outlet_id' => $shop->id]);
         $this->patchJson("/api/v1/admin/orders/{$order->id}/shipping-fee", ['amount' => 350, 'note' => 'Nairobi courier'])
             ->assertOk();
         $this->assertEquals(350.0, (float) $order->fresh()->shipping_amount);

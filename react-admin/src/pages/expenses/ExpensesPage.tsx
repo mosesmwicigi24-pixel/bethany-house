@@ -543,8 +543,10 @@ function ExpenseRowActions({
     const doAction = async (fn: () => Promise<any>, msg: string) => {
         setBusy(true);
         try {
-            await fn();
-            toast.success(msg);
+            const res = await fn();
+            // An approval may be one band of several (Phase 3B): prefer the
+            // server's own words ("Signed. … waits for the next band.").
+            toast.success(res?.approval ? res.message : msg);
             onRefresh();
         } catch (err: any) {
             // ApiError carries the server's message (e.g. SELF_APPROVAL).

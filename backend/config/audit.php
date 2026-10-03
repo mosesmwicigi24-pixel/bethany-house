@@ -62,6 +62,37 @@ return [
         'redact_query_keys' => ['token', 'signature', 'password', 'code', 'key', 'secret', 'otp'],
     ],
 
+    // authorization_denied (4D): a 403 on one of these route URIs (Laravel's
+    // Str::is patterns over the route template) is written to activity_log,
+    // once per user + route per dedupe window. Every other refusal stays in
+    // request_logs only — a refusal on an ordinary screen is not a signal.
+    'denied' => [
+        'dedupe_seconds' => (int) env('AUDIT_DENIED_DEDUPE_SECONDS', 300),
+        'sensitive_routes' => [
+            'api/v1/admin/users', 'api/v1/admin/users/*',
+            'api/v1/admin/roles', 'api/v1/admin/roles/*',
+            'api/v1/admin/permissions', 'api/v1/admin/permissions/*',
+            'api/v1/admin/settings', 'api/v1/admin/settings/*',
+            'api/v1/admin/payment-methods-management*',
+            'api/v1/admin/payments', 'api/v1/admin/payments/*',
+            'api/v1/admin/payment-transactions*',
+            'api/v1/admin/database', 'api/v1/admin/database/*',
+            'api/v1/admin/activity-logs', 'api/v1/admin/activity-logs/*',
+            'api/v1/admin/audit*',
+            'api/v1/admin/downloads*',
+            'api/v1/admin/reports/pdf/*',
+            'api/v1/admin/*export*',
+            'api/v1/admin/*approv*',
+        ],
+    ],
+
+    // Attachments (payment proofs, shipment papers, chat files, expense
+    // receipts) are handed out as signed links for this many minutes —
+    // App\Support\SignedFiles clamps it to 1..5 whatever the environment says.
+    'attachments' => [
+        'signed_url_minutes' => (int) env('AUDIT_ATTACHMENT_LINK_MINUTES', 5),
+    ],
+
     // activity_log is never pruned. Business records are kept five years for
     // KRA (Tax Procedures Act s.23); the trail that explains them is kept as
     // long. logs:purge-old refuses to touch it.
@@ -85,6 +116,10 @@ return [
         \App\Models\PaymentMethod::class,
         \App\Models\CashRegister::class,
         \App\Models\CashRegisterTransaction::class,
+        \App\Models\TillDiscrepancy::class,
+        \App\Models\TillReconciliation::class,
+        \App\Models\TillCorrection::class,
+        \App\Models\OrderCorrection::class,
         \App\Models\Quotation::class,
         \App\Models\QuotationItem::class,
         \App\Models\SalesDocument::class,
@@ -113,6 +148,12 @@ return [
         \App\Models\Inventory::class,
         \App\Models\InventoryItem::class,
         \App\Models\InventoryTransfer::class,
+        // Approvals (Phase 3B engine)
+        \App\Models\ApprovalThreshold::class,
+        \App\Models\ApprovalRequest::class,
+        \App\Models\ApprovalSignature::class,
+        // Proposals (Phase 3C)
+        \App\Models\ChangeProposal::class,
         \App\Models\InventoryTransferItem::class,
         \App\Models\PurchaseOrder::class,
         \App\Models\PurchaseOrderItem::class,
@@ -203,6 +244,10 @@ return [
         'archive_retention_days' => 90,     // server copy; the owner's emailed copy is the long-term one
         'attach_max_bytes'       => 10 * 1024 * 1024,
 
+        // Phase 4A (App\Support\ContactExport): the most rows one export of a
+        // screen may carry; the response says X-Export-Truncated when it cut.
+        'export_row_cap'         => 10000,
+
         // Invoices, quotations, receipts — and a blank template that carries
         // no data. Recorded, never held; reported in the owner's daily digest.
         'exempt' => [
@@ -212,6 +257,7 @@ return [
             'PosController@printReceipt',
             'PosController@emailReceipt',
             'ExpenseController@downloadReceipt',
+            'SignedFileController@expenseReceipt',
             'ProductController@exportTemplate',
         ],
 
@@ -223,6 +269,11 @@ return [
             'PaymentApprovalController@serveProof',
             'ShipmentController@serveShipmentAttachment',
             'ShipmentController@serveTrackingAttachment',
+            // The signed-link ends of the four above (4D): the decision and the
+            // request-log entry happen when the link is issued.
+            'SignedFileController@paymentProof',
+            'SignedFileController@shipmentAttachment',
+            'SignedFileController@channelAttachment',
             // The owner opening a file already recorded (and logged as such) —
             // not a new download, and not archived a second time.
             'DownloadRequestController@archive',

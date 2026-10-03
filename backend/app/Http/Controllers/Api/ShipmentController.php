@@ -60,10 +60,33 @@ class ShipmentController extends Controller
     // GET /admin/shipments  - admin list
     // =========================================================================
 
+    /**
+     * Shipments this caller may see (Phase 4A): a shipment is its order's,
+     * so it is visible exactly when the order is. Order::query() carries the
+     * order's ViewerScope — the outlet manager's outlets, a cashier's own —
+     * so this is that rule, not a copy of it. Another outlet's id is a 404.
+     */
+    private function visibleOrderIds()
+    {
+        return Order::query()->select('orders.id');
+    }
+
+    private function visibleShipments()
+    {
+        return DB::table('order_shipments')->whereIn('order_shipments.order_id', $this->visibleOrderIds());
+    }
+
+    /** 404 unless the shipment is visible — for the routes that only take its id. */
+    private function assertShipmentVisible($id): void
+    {
+        abort_unless($this->visibleShipments()->where('order_shipments.id', $id)->exists(), 404, 'Shipment not found.');
+    }
+
     public function index(Request $request)
     {
         $query = DB::table('order_shipments as s')
             ->join('orders as o', 's.order_id', '=', 'o.id')
+            ->whereIn('s.order_id', $this->visibleOrderIds())
             ->leftJoin('users as u', 'o.user_id', '=', 'u.id')
             ->select(
                 's.id',
@@ -123,6 +146,7 @@ class ShipmentController extends Controller
             ->join('orders as o', 's.order_id', '=', 'o.id')
             ->leftJoin('users as u', 'o.user_id', '=', 'u.id')
             ->where('s.id', $id)
+            ->whereIn('s.order_id', $this->visibleOrderIds())
             ->select(
                 's.id',
                 's.order_id',
@@ -310,7 +334,7 @@ class ShipmentController extends Controller
 
     public function update(Request $request, $id)
     {
-        $shipment = DB::table('order_shipments')->find($id);
+        $shipment = $this->visibleShipments()->find($id);
         if (!$shipment) return response()->json(['message' => 'Shipment not found'], 404);
 
         $validated = $request->validate([
@@ -399,7 +423,7 @@ class ShipmentController extends Controller
             'is_public'   => 'boolean',   // default true
         ]);
 
-        $shipment = DB::table('order_shipments')->find($id);
+        $shipment = $this->visibleShipments()->find($id);
         if (!$shipment) return response()->json(['message' => 'Shipment not found'], 404);
 
         if (in_array($shipment->status, ['delivered', 'cancelled'])) {
@@ -470,7 +494,7 @@ class ShipmentController extends Controller
 
     public function getTracking($id)
     {
-        $shipment = DB::table('order_shipments')->find($id);
+        $shipment = $this->visibleShipments()->find($id);
         if (!$shipment) return response()->json(['message' => 'Shipment not found'], 404);
 
         $tracking = DB::table('shipment_tracking as t')
@@ -622,6 +646,8 @@ class ShipmentController extends Controller
             abort(404, 'Attachment not found');
         }
 
+        // The customer's tracking page renders these with <img src>: the
+        // tracking token plus is_public is the gate, streamed as before.
         return $this->streamAttachment($attachment->path, $attachment->original_name, $request->boolean('download'));
     }
 
@@ -676,7 +702,7 @@ class ShipmentController extends Controller
             'notes'        => 'nullable|string',
         ]);
 
-        $shipment = DB::table('order_shipments')->find($id);
+        $shipment = $this->visibleShipments()->find($id);
         if (!$shipment) return response()->json(['message' => 'Shipment not found'], 404);
 
         if ($shipment->status === 'delivered') {
@@ -741,7 +767,7 @@ class ShipmentController extends Controller
             'reason' => 'required|string|max:500',
         ]);
 
-        $shipment = DB::table('order_shipments')->find($id);
+        $shipment = $this->visibleShipments()->find($id);
         if (!$shipment) return response()->json(['message' => 'Shipment not found'], 404);
 
         if (in_array($shipment->status, ['delivered', 'cancelled'])) {
@@ -808,7 +834,7 @@ class ShipmentController extends Controller
             'is_public'      => ['sometimes'],
         ]);
 
-        $shipment = DB::table('order_shipments')->find($id);
+        $shipment = $this->visibleShipments()->find($id);
         if (!$shipment) {
             return response()->json(['message' => 'Shipment not found'], 404);
         }
@@ -872,6 +898,7 @@ class ShipmentController extends Controller
 
     public function uploadTrackingAttachment(Request $request, $id, $trackingId)
     {
+        $this->assertShipmentVisible($id);
         $request->validate([
             'attachment'     => ['sometimes', 'file', 'max:' . self::MAX_ATTACHMENT_KB, 'mimetypes:' . implode(',', self::ALLOWED_ATTACHMENT_MIMES)],
             'attachments'    => ['sometimes', 'array'],
@@ -940,6 +967,7 @@ class ShipmentController extends Controller
 
     public function deleteAttachment(Request $request, $id, $attachmentId)
     {
+        $this->assertShipmentVisible($id);
         $attachment = ShipmentAttachment::where('shipment_id', $id)
             ->where('id', $attachmentId)
             ->first();
@@ -961,6 +989,7 @@ class ShipmentController extends Controller
 
     public function updateAttachmentVisibility(Request $request, $id, $attachmentId)
     {
+        $this->assertShipmentVisible($id);
         $validated = $request->validate([
             'is_public' => 'required|boolean',
         ]);
@@ -998,6 +1027,7 @@ class ShipmentController extends Controller
 
     public function serveShipmentAttachment(Request $request, $id, $attachmentId)
     {
+        $this->assertShipmentVisible($id);
         $attachment = ShipmentAttachment::where('shipment_id', $id)
             ->where('id', $attachmentId)
             ->first();
@@ -1005,11 +1035,12 @@ class ShipmentController extends Controller
         if (!$attachment) {
             return response()->json(['message' => 'No attachment found'], 404);
         }
-        return $this->streamAttachment($attachment->path, $attachment->original_name, $request->boolean('download'));
+        return $this->issueAttachmentLink($request, $attachment);
     }
 
     public function serveTrackingAttachment(Request $request, $id, $trackingId, $attachmentId)
     {
+        $this->assertShipmentVisible($id);
         $attachment = ShipmentAttachment::where('shipment_id', $id)
             ->where('attachable_type', 'tracking')
             ->where('attachable_id', $trackingId)
@@ -1019,7 +1050,7 @@ class ShipmentController extends Controller
         if (!$attachment) {
             return response()->json(['message' => 'No attachment found'], 404);
         }
-        return $this->streamAttachment($attachment->path, $attachment->original_name, $request->boolean('download'));
+        return $this->issueAttachmentLink($request, $attachment);
     }
 
     // =========================================================================
@@ -1029,7 +1060,7 @@ class ShipmentController extends Controller
     public function auditLog($id)
     {
         // 404 guard
-        $exists = DB::table('order_shipments')->where('id', $id)->exists();
+        $exists = $this->visibleShipments()->where('order_shipments.id', $id)->exists();
         if (!$exists) {
             return response()->json(['message' => 'Shipment not found'], 404);
         }
@@ -1199,6 +1230,21 @@ class ShipmentController extends Controller
                 : $this->buildAttachmentUrl('tracking', $attachment->shipment_id, $attachment->attachable_id, $attachment->id),
             'uploaded_at'   => $attachment->created_at,
         ];
+    }
+
+    /**
+     * Staff attachments: a signed link valid ≤5 minutes (4D), issued after the
+     * shipment.view gate and the shipment/tracking match above. The bytes come
+     * from SignedFileController, which streams the same masked name.
+     */
+    private function issueAttachmentLink(Request $request, ShipmentAttachment $attachment)
+    {
+        if (!Storage::disk('local')->exists($attachment->path)) {
+            return response()->json(['message' => 'Attachment not found'], 404);
+        }
+
+        return \App\Support\SignedFiles::issue($request, 'files.shipment-attachment',
+            ['attachment' => $attachment->id], $attachment->original_name);
     }
 
     private function streamAttachment(string $path, ?string $name, bool $forceDownload = false): \Symfony\Component\HttpFoundation\Response

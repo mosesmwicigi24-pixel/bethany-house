@@ -26,7 +26,9 @@ class InventoryController extends Controller
     {
         // Low stock = available (on_hand - reserved) at or below reorder_point,
         // still in stock.
-        $query = InventoryItem::with(['variant.product', 'outlet'])
+        $query = InventoryItem::query()
+            ->tap(fn ($q) => \App\Services\DataScopeResolver::boundToOutlets($q, $request->user(), 'inventory.view', 'inventory_items.outlet_id'))
+            ->with(['variant.product', 'outlet'])
             ->lowStock()
             ->where('quantity_on_hand', '>', 0);
 

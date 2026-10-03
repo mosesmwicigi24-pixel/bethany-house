@@ -25,6 +25,19 @@ class ProductionTask extends Model
         return 'assigned_to';
     }
 
+    /**
+     * A task has no outlet of its own: it belongs to the outlet its
+     * production order was raised at (Phase 4A — an outlet manager sees the
+     * floor work of the jobs raised at their shop).
+     */
+    public function constrainToOutlets(\Illuminate\Database\Eloquent\Builder $builder, array $outletIds): void
+    {
+        $builder->whereIn(
+            $builder->getModel()->getTable() . '.production_order_id',
+            \Illuminate\Support\Facades\DB::table('production_orders')->select('id')->whereIn('outlet_id', $outletIds),
+        );
+    }
+
     use HasFactory;
 
     protected $fillable = [

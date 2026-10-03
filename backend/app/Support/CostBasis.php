@@ -29,6 +29,23 @@ final class CostBasis
                 LIMIT 1)";
     }
 
+    /**
+     * The price book's KES unit cost for one product / variant — the same
+     * lookup as bookCostSql(), for a value that is not an order line (a stock
+     * adjustment valued for approval, Phase 3B). NULL when the book has none:
+     * the caller treats that as an unknown value, never as zero.
+     */
+    public static function unitCostFor(int $productId, ?int $variantId): ?float
+    {
+        $row = \Illuminate\Support\Facades\DB::selectOne(
+            'SELECT ' . self::bookCostSql('x') . ' AS cost
+               FROM (SELECT CAST(? AS bigint) AS product_id, CAST(? AS bigint) AS product_variant_id) x',
+            [$productId, $variantId],
+        );
+
+        return $row === null || $row->cost === null ? null : (float) $row->cost;
+    }
+
     /** A line's unit cost: the snapshot, else the price book; NULL when neither has one. */
     public static function unitCostSql(string $oi = 'oi'): string
     {

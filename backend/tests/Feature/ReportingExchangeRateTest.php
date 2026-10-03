@@ -10,6 +10,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
+use Tests\Concerns\StepsUp;
 use Tests\TestCase;
 
 /**
@@ -25,7 +26,7 @@ use Tests\TestCase;
  */
 class ReportingExchangeRateTest extends TestCase
 {
-    use RefreshDatabase;
+    use RefreshDatabase, StepsUp;
 
     protected function setUp(): void
     {
@@ -239,8 +240,19 @@ class ReportingExchangeRateTest extends TestCase
 
         $id = DB::table('currencies')->where('code', 'USD')->value('id');
 
+        $this->stepUp($admin);   // currency edits are a step-up route (Phase 4C)
+        // Phase 3C: a reporting-rate change is a proposal; it takes effect when
+        // a super admin other than its maker signs it.
         $this->actingAs($admin, 'sanctum')
             ->putJson("/api/v1/admin/currencies-management/{$id}", ['reporting_rate_to_kes' => 130])
+            ->assertStatus(202);
+        $this->assertSame(128.0, ReportingCurrency::rates()['USD'], 'unsigned: reports keep the old rate');
+
+        $owner = User::factory()->create(['status' => 'active']);
+        $owner->assignRole(Role::findOrCreate('super_admin', 'sanctum'));
+        $request = \App\Models\ApprovalRequest::where('event', 'reporting_fx_change')->latest('id')->firstOrFail();
+        $this->actingAs($owner, 'sanctum')
+            ->postJson("/api/v1/admin/approvals/{$request->id}/sign", ['approvable_id' => $request->approvable_id, 'version' => $request->version])
             ->assertOk();
 
         $this->assertSame(130.0, ReportingCurrency::rates()['USD'],

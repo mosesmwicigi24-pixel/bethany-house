@@ -328,6 +328,7 @@ class PaymentController extends Controller
 
             // Record pending payment
             $payment = Payment::create([
+                'recorded_by' => auth()->id(),   // who started it: staff, or the customer (4D)
                 'order_id'           => $order->id,
                 'payment_method'     => 'mpesa',
                 'amount'             => $order->total_amount,
@@ -400,6 +401,7 @@ class PaymentController extends Controller
             $data = $response->json()['data'];
 
             $payment = Payment::create([
+                'recorded_by' => auth()->id(),   // who started it: staff, or the customer (4D)
                 'order_id'           => $order->id,
                 'payment_method'     => 'card_paystack',
                 'amount'             => $order->total_amount,
@@ -465,6 +467,7 @@ class PaymentController extends Controller
             $data = $response->json()['data'];
 
             $payment = Payment::create([
+                'recorded_by' => auth()->id(),   // who started it: staff, or the customer (4D)
                 'order_id'           => $order->id,
                 'payment_method'     => 'card_flutterwave',
                 'amount'             => $order->total_amount,
@@ -964,14 +967,18 @@ class PaymentController extends Controller
     }
 
     // =========================================================================
-    // Admin — Void & Reassign
+    // Admin — Void & Reassign (Phase 3B: a request, executed on approval)
     // =========================================================================
 
     /**
-     * POST /payment-transactions/{id}/void
+     * POST /payment-transactions/{id}/void-request   (payments.request_void | payments.void)
+     * POST /payment-transactions/{id}/void           (payments.void — kept for older clients)
      *
-     * Marks a payment as voided, records who did it and why, and resets the
-     * order's paid/balance state so it reflects the removed payment.
+     * Asks for the payment to be voided. Nothing happens to the payment now:
+     * the approval engine routes the request (≤ KES 50,000 finance; above,
+     * finance then the super admin) and the void is carried out by
+     * App\Services\PaymentCorrections when the last band signs. The person
+     * who asks never signs it (maker ≠ checker).
      */
     public function voidPayment(Request $request, int $id): \Illuminate\Http\JsonResponse
     {
@@ -979,56 +986,28 @@ class PaymentController extends Controller
             'reason' => 'required|string|max:1000',
         ]);
 
-        $payment = \App\Models\Payment::with('order')->findOrFail($id);
+        $payment = \App\Models\Payment::findOrFail($id);
 
         if ($payment->status === 'voided') {
             return response()->json(['message' => 'Payment is already voided.'], 422);
         }
 
-        $oldStatus   = $payment->status;
-        $oldOrderId  = $payment->order_id;
-
-        $payment->update([
-            'status'     => 'voided',
-            'void_reason' => $validated['reason'],
-            'voided_at'  => now(),
-            'voided_by'  => auth()->id(),
-        ]);
-
-        // Recompute the order's payment state. syncPaymentStatus() is the
-        // authoritative source (it drives payment_status from the net of the
-        // remaining paid payments); the amount_paid/balance_due columns are kept
-        // in sync with the SAME net figure so the two don't diverge.
-        if ($payment->order) {
-            $order = $payment->order;
-            $netPaid = $order->totalPaid();   // SUM(amount - refund_amount) over paid
-            $order->update([
-                'amount_paid' => $netPaid,
-                'balance_due' => max(0, (float) $order->total_amount - $netPaid),
-            ]);
-            $order->syncPaymentStatus();
-        }
-
-        ActivityLogService::log('payment_voided', $payment, [
-            'payment_number' => $payment->payment_number,
-            'amount'         => $payment->amount,
-            'order_id'       => $oldOrderId,
-            'previous_status'=> $oldStatus,
-            'reason'         => $validated['reason'],
-            'voided_by'      => auth()->id(),
-        ]);
+        $engine   = app(\App\Services\Approvals\ApprovalEngine::class);
+        $approval = $engine->submit('payment_void', $payment, $request->user(), ['reason' => $validated['reason']]);
 
         return response()->json([
-            'message' => 'Payment voided successfully.',
-            'payment' => $payment->fresh(),
-        ]);
+            'message'  => 'Void requested. It takes effect when finance approves it.',
+            'payment'  => $payment->fresh(),
+            'approval' => $engine->present($approval->load(['signatures', 'maker']), $request->user()),
+        ], 202);
     }
 
     /**
-     * POST /payment-transactions/{id}/reassign
+     * POST /payment-transactions/{id}/reassign-request   (payments.request_reassign | payments.reassign)
+     * POST /payment-transactions/{id}/reassign           (payments.reassign — kept for older clients)
      *
-     * Moves a payment from its current order to a different order, then
-     * recomputes the balance on both the old and the new order.
+     * Asks for the payment to be moved to another order; carried out on
+     * approval, exactly as a void.
      */
     public function reassignPayment(Request $request, int $id): \Illuminate\Http\JsonResponse
     {
@@ -1037,48 +1016,26 @@ class PaymentController extends Controller
             'reason'   => 'required|string|max:1000',
         ]);
 
-        $payment = \App\Models\Payment::with('order')->findOrFail($id);
+        $payment = \App\Models\Payment::findOrFail($id);
 
         if ($payment->status === 'voided') {
             return response()->json(['message' => 'Voided payments cannot be reassigned.'], 422);
         }
-
-        $newOrderId = (int) $validated['order_id'];
-
-        if ($payment->order_id === $newOrderId) {
+        if ((int) $payment->order_id === (int) $validated['order_id']) {
             return response()->json(['message' => 'Payment is already assigned to that order.'], 422);
         }
 
-        $oldOrderId = $payment->order_id;
-
-        $payment->update(['order_id' => $newOrderId]);
-
-        // Recompute balances on both orders
-        foreach (array_filter([$oldOrderId, $newOrderId]) as $oid) {
-            $order = \App\Models\Order::find($oid);
-            if (!$order) continue;
-            $totalPaid = \App\Models\Payment::where('order_id', $oid)
-                ->where('status', 'paid')
-                ->sum('amount');
-            $order->update([
-                'amount_paid' => $totalPaid,
-                'balance_due' => max(0, $order->total_amount - $totalPaid),
-            ]);
-        }
-
-        ActivityLogService::log('payment_reassigned', $payment, [
-            'payment_number' => $payment->payment_number,
-            'amount'         => $payment->amount,
-            'from_order_id'  => $oldOrderId,
-            'to_order_id'    => $newOrderId,
-            'reason'         => $validated['reason'],
-            'reassigned_by'  => auth()->id(),
+        $engine   = app(\App\Services\Approvals\ApprovalEngine::class);
+        $approval = $engine->submit('payment_reassign', $payment, $request->user(), [
+            'order_id' => (int) $validated['order_id'],
+            'reason'   => $validated['reason'],
         ]);
 
         return response()->json([
-            'message' => 'Payment reassigned successfully.',
-            'payment' => $payment->fresh()->load('order'),
-        ]);
+            'message'  => 'Move requested. It takes effect when finance approves it.',
+            'payment'  => $payment->fresh(),
+            'approval' => $engine->present($approval->load(['signatures', 'maker']), $request->user()),
+        ], 202);
     }
 
     // =========================================================================

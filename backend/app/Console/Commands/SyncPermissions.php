@@ -60,6 +60,16 @@ class SyncPermissions extends Command
         'payments.transactions'            => ['View Payment Transactions',     'View the full payment transaction ledger and analytics', 'Payments'],
         'payments.void'                    => ['Void Payments',                 'Void a payment applied to the wrong order',              'Payments'],
         'payments.reassign'                => ['Reassign Payments',             'Move a payment from one order to another',               'Payments'],
+        // Phase 3B: the accountant ASKS; finance executes on approval.
+        'payments.request_void'            => ['Request Payment Void',          'Ask for a payment applied to the wrong order to be voided; finance executes it on approval', 'Payments'],
+        'payments.request_reassign'        => ['Request Payment Reassign',      'Ask for a payment to be moved to another order; finance executes it on approval',           'Payments'],
+
+        // ── Approvals (Phase 3B engine) ─────────────────────────────────────
+        // The band keys the threshold table names that no module key covers.
+        // super_sign is granted to no role: super_admin reaches it through
+        // Gate::before (see ROLE_PERMISSIONS and $wildcardExcluded).
+        'approvals.finance_sign'           => ['Sign Approvals (Finance Band)', 'Sign the finance band of a purchase order or stock adjustment above the procurement band', 'Approvals'],
+        'approvals.super_sign'             => ['Sign Approvals (Top Band)',     'Sign the top band of any approval (super admin only)',                                      'Approvals'],
 
         // ── Production ──────────────────────────────────────────────────────
         'production.view'                  => ['View Production',               'View production orders and schedule',                'Production'],
@@ -138,16 +148,29 @@ class SyncPermissions extends Command
         // admin, finance and procurement (super_admin via Gate::before).
         // Admin inherits it through products.*.
         'products.view_cost'   => ['View Product Cost',     'See cost prices, material unit costs and BOM costs', 'Catalogue'],
+        // Writing the KES cost price (Phase 3C). Applies at once within the
+        // cost band (5%); beyond it the change waits for finance (and the
+        // super admin past 25%) as a product_cost_change proposal. The
+        // procurement manager is the cost maker; admin keeps it via products.*.
+        'products.edit_cost'   => ['Edit Product Cost',     'Change a product\'s KES cost price; above the cost band it waits for finance (and the super admin above that)', 'Catalogue'],
 
         // ── POS ─────────────────────────────────────────────────────────────
         'pos.access'           => ['POS Access',           'Use the point-of-sale terminal',              'POS'],
-        'pos.discount'         => ['Apply Discounts',      'Apply manual discounts at POS, up to the configured ceiling', 'POS'],
-        'pos.discount_override' => ['Discount Beyond the Ceiling', 'Apply a POS discount larger than the percentage ceiling that limits cashiers', 'POS'],
-        'pos.discount_campaign' => ['Pass Through a Campaign Discount', 'Carry an owner-declared campaign discount into an order, bounded by the agent ceiling rather than the cashier one. For the sales agent\'s service account, not for people.', 'POS'],
+        'pos.discount'         => ['Apply Discounts',      'Apply manual discounts at POS, up to the 5% maximum', 'POS'],
+        // Kept so existing grants keep working; since the owner's rule of
+        // 2026-10-03 it lifts nothing — only a super_admin exceeds 5%.
+        'pos.discount_override' => ['Discount Beyond the Ceiling (retired)', 'No longer has any effect: nobody but the super admin may give more than 5%', 'POS'],
+        // Kept on the agent's account so nothing that names it breaks; since
+        // 2026-10-03 the agent is held exactly like everyone else.
+        'pos.discount_campaign' => ['Pass Through a Campaign Discount (retired)', 'No longer has any effect: the sales agent is held to 5%, or to a running promotion the owner set, like everyone else. For the sales agent\'s service account, not for people.', 'POS'],
         'pos.void'             => ['Void Transactions',    'Void completed POS transactions',             'POS'],
         'pos.open_register'    => ['Open Cash Register',   'Open a new cash register session',            'POS'],
         'pos.close_register'   => ['Close Cash Register',  'Close and reconcile a cash register',         'POS'],
         'pos.returns'          => ['Process Returns',      'Process item returns at POS',                 'POS'],
+        // Phase 4B part 2: pos.void / pos.returns now only ASK; this signs the
+        // outlet manager's band of a till void (≤ 20,000) or refund (≤ 5,000).
+        // A key no clerk holds, so one clerk can never sign another's void.
+        'pos.approve_reversal' => ['Approve Till Voids & Refunds', 'Sign the outlet manager\'s band of a till void or refund, on the till with a PIN or from the Approvals inbox', 'POS'],
         'pos.cash_management'  => ['POS Cash Management',  'Perform cash deposits, withdrawals and adjustments on a register', 'POS'],
         // Reading every cashier's end-of-day report, acknowledging it and
         // answering in its thread. Was settings.view, which made reviewing
@@ -155,6 +178,12 @@ class SyncPermissions extends Command
         // outlet manager. Not a till permission: finance reviews takings and
         // has no till, so the review routes stand outside pos.access.
         'pos.eod_review'       => ['Review EoD Reports',   'Read, acknowledge and discuss cashiers\' end-of-day reports', 'POS'],
+        // The till lifecycle (Phase 4B). Opening and the blind count are
+        // pos.open_register / pos.close_register; these are the steps after it.
+        'pos.till_verify'      => ['Verify & Finalize Tills', 'Verify a cashier\'s blind till count at your outlet and finalize it', 'POS'],
+        'pos.reconcile'        => ['Reconcile Tills',      'Record the next-day check of a finalized till against the payments ledger', 'POS'],
+        'pos.till_correction'  => ['Correct Finalized Tills', 'Open a linked correction against a finalized till (the original is never changed)', 'POS'],
+        'pos.tills_view_all'   => ['View All Tills',       'Read every outlet\'s till sessions, counts and variances', 'POS'],
 
         // ── Marketing & storefront ──────────────────────────────────────────
         // Split out of products.view, which is a READ permission on the
@@ -213,6 +242,10 @@ class SyncPermissions extends Command
         'outlets.create'       => ['Create Outlets',       'Add new outlets',                                         'Outlets'],
         'outlets.edit'         => ['Edit Outlets',         'Edit outlet details and settings',                        'Outlets'],
         'outlets.delete'       => ['Delete Outlets',       'Delete outlets',                                          'Outlets'],
+        // Was a role-name check (admin / super_admin) in PosController and
+        // TimeClockController: not limited to the outlets on outlet_user. A
+        // permission since 4D so the Roles screen says who floats between sites.
+        'outlets.all_access'   => ['Work Across All Outlets', 'Use the till and the time clock at every outlet, not only assigned ones (and see every outlet\'s time entries)', 'Outlets'],
 
         // ── Settings ────────────────────────────────────────────────────────
         'settings.view'             => ['View Settings',             'View system settings and configuration',                     'Settings'],
@@ -231,6 +264,14 @@ class SyncPermissions extends Command
         // which the platform head must never touch (plan §3.2). Not settings.*,
         // so admin's settings grants cannot carry it.
         'setup.technical'           => ['Technical Setup',           'Read and edit countries, languages, shipping zones and shipping methods', 'Settings'],
+
+        // Proposals (Phase 3C). Finance PROPOSES a tax-rate, reporting-FX or
+        // payment-settlement change and the super admin signs it; admin
+        // proposes a customer pricing rate and finance signs it. Each also
+        // opens its screens read-only. Not settings.edit: nothing here writes
+        // a value directly.
+        'settings.financial_propose'    => ['Propose Financial Settings', 'Propose tax-rate, reporting exchange-rate and payment settlement changes; the super admin signs them', 'Settings'],
+        'settings.pricing_rate_propose' => ['Propose Pricing Rate',     'Propose a change to a currency\'s customer-facing pricing rate; finance signs it', 'Settings'],
 
         // ── Users & Roles ────────────────────────────────────────────────────
         'users.view'           => ['View Users',           'List and view system users',                  'Users & Roles'],
@@ -284,6 +325,12 @@ class SyncPermissions extends Command
         // them, so 'own' resolves through assigned_to on a task and through
         // either relationship on a production order.
         'tailor'    => 'own',
+        // Phase 4A (plan §8): a shop manager runs ONE shop. Orders, payments,
+        // stock, production raised there and its customers — the outlet_user
+        // pivot decides which shops. Reports are NOT narrowed by this: the
+        // owner kept them business-wide (2026-10-03), and the reports route
+        // groups say so with the report.business_wide middleware.
+        'outlet_manager' => 'outlet',
     ];
 
     /**
@@ -366,7 +413,9 @@ class SyncPermissions extends Command
             'marketing.*',
             'intelligence.*',
             // Sees the till and reviews its takings; does not operate it.
-            'pos.access', 'pos.eod_review',
+            // Reads every outlet's tills (Phase 4B); verifies, reconciles and
+            // corrects none of them.
+            'pos.access', 'pos.eod_review', 'pos.tills_view_all',
             // Every report page except Finance & Cash (plan §6: ADM "—"), and
             // files from them. Written out, not 'reports.*', so a future
             // report slug never reaches admin by expansion.
@@ -375,8 +424,10 @@ class SyncPermissions extends Command
             'reports.data_quality', 'reports.explorer',
             'reports.export',
             'expenses.view',
-            'outlets.view',
+            'outlets.view', 'outlets.all_access',
             'settings.view',
+            // Proposes a customer pricing rate; finance signs it (Phase 3C).
+            'settings.pricing_rate_propose',
             'users.view', 'roles.view',
             'attendance.view_team',
         ],
@@ -389,11 +440,17 @@ class SyncPermissions extends Command
             // person a clerk's draft quotation needs before it reaches a
             // customer (Phase 2; until now only admin could issue).
             'quotations.view', 'quotations.create', 'quotations.issue',
-            // Beyond a cashier at the same till. discount_override makes this
-            // role the escalation target when a cashier hits the 5% ceiling.
+            // Beyond a cashier at the same till. discount_override is kept so
+            // the grant does not move, but it no longer lifts the 5% maximum
+            // (owner's rule, 2026-10-03) — only a super_admin exceeds it.
             'pos.cash_management', 'pos.discount_override',
+            // The first signature on a till void or refund (Phase 4B part 2).
+            'pos.approve_reversal',
             // Reviewing the shop's end-of-day reports (was settings.view).
             'pos.eod_review',
+            // Verifies and finalizes the shop's till counts (Phase 4B) — at
+            // their own outlets, and never a count they made themselves.
+            'pos.till_verify',
             // Chasing what a customer still owes is a manager's job, not a
             // cashier's — the till key stopped carrying it.
             'receivables.view',
@@ -482,6 +539,8 @@ class SyncPermissions extends Command
             'products.view',
             'production.view_bom',
             'products.view_cost',
+            // The cost maker: within 5% at once, beyond it a proposal (3C).
+            'products.edit_cost',
             'bom.edit',
             'payments.view',
             // Plan §6: production, stock and supplier pages; files from the
@@ -496,6 +555,12 @@ class SyncPermissions extends Command
             // Payments - full approval authority + view transactions ledger
             'payments.view', 'payments.approve_international', 'payments.transactions',
             'payments.void', 'payments.reassign',
+            // Finance's signature on purchase-order and stock-adjustment bands
+            // above the procurement manager's (Phase 3B approval engine).
+            'approvals.finance_sign',
+            // Proposes tax-rate, reporting-FX and settlement changes; the super
+            // admin signs them (Phase 3C).
+            'settings.financial_propose',
             // Expenses - the checker. Approves, budgets, exports; never creates,
             // edits or deletes the records it approves (plan §3.4).
             'expenses.view', 'expenses.approve', 'expenses.export', 'expenses.budgets',
@@ -508,6 +573,9 @@ class SyncPermissions extends Command
             'receivables.view',
             // End-of-day reports: the takings finance reconciles against.
             'pos.eod_review',
+            // Tills (Phase 4B): reads all, reconciles, and is the only role that
+            // opens a correction against a finalized till.
+            'pos.tills_view_all', 'pos.reconcile', 'pos.till_correction',
             // Orders - view only (for payment context)
             'orders.view',
             // Cost figures (margins, COGS context), and since Phase 2 the
@@ -539,8 +607,12 @@ class SyncPermissions extends Command
             '@self', '@workspace',
             'orders.view',
             'payments.view', 'payments.transactions',
+            // Asks for a void or a move; finance executes it once signed (3B).
+            'payments.request_void', 'payments.request_reassign',
             'receivables.view',
             'pos.eod_review',
+            // The next-day independent check of every finalized till (Phase 4B).
+            'pos.tills_view_all', 'pos.reconcile',
             'expenses.view', 'expenses.create', 'expenses.edit', 'expenses.export',
             'procurement.view',
             'inventory.view',
@@ -711,6 +783,15 @@ class SyncPermissions extends Command
                 // today; listed so a future 'bom.*' or 'setup.*' cannot either.
                 'bom.edit',
                 'setup.technical',
+                // The approval engine's top band is the owner's alone; a
+                // future 'approvals.*' must never hand it to a role.
+                'approvals.super_sign',
+                'approvals.finance_sign',
+                // Finance's proposal key must never reach another role through
+                // a future 'settings.*' (Phase 3C).
+                'settings.financial_propose',
+                // 4D: who works across every outlet is a deliberate grant.
+                'outlets.all_access',
             ];
 
             // Resolve "@bundle" references first, so wildcard expansion and

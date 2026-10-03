@@ -25,6 +25,19 @@ class AuditContext
     /** @var array<string, true> */
     private array $observed = [];
 
+    /** Set while a queue job runs (AppServiceProvider): a job has no route to derive it from. */
+    private ?string $channel = null;
+
+    public function channel(): ?string
+    {
+        return $this->channel;
+    }
+
+    public function setChannel(?string $channel): void
+    {
+        $this->channel = $channel;
+    }
+
     public function requestId(): string
     {
         return $this->requestId ??= (string) Str::uuid();

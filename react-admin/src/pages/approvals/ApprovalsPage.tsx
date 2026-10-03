@@ -1,73 +1,122 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, type ReactNode } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
-import { get, post, put, tokenStorage } from "@/api/client";
+import { get, post } from "@/api/client";
+import { fetchSignedFile } from "@/api/signedFiles";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import type { ApiError } from "@/types";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+/*
+ * Approvals (Phase 3B). One queue — everything the approval engine says you
+ * can sign NOW (your band, never your own) — and "My submissions", where a
+ * maker sees each request's band, who signed, why it was rejected and when it
+ * expires. Purchase orders, stock adjustments and transfers, expenses, imprest
+ * top-ups and payment void / move requests all arrive in the one queue.
+ *
+ * Purchase returns and payment proofs are not on the engine yet; they keep
+ * their own tabs, gated by the key their endpoints check.
+ */
 
-type ApprovalTab =
-    | "purchase_orders"
-    | "purchase_returns"
-    | "stock_adjustments"
-    | "stock_transfers"
-    | "payment_approvals";
+type ApprovalTab = "inbox" | "mine" | "purchase_returns" | "payment_approvals";
 
-interface PendingPO {
-    id: number;
-    po_number: string;
-    supplier: { id: number; name: string } | null;
-    total_amount: number;
-    currency_code: string;
-    items_count?: number;
-    submitted_at?: string;
-    created_at: string;
-    notes?: string | null;
-    created_by?: { first_name: string; last_name: string } | null;
+/** Keys that sign a band somewhere (route guard and sidebar use the same list plus the makers' keys). */
+export const SIGNING_PERMISSIONS = [
+    "procurement.approve", "inventory.approve", "expenses.approve", "approvals.finance_sign",
+    "payments.void", "payments.reassign",
+];
+
+interface ApprovalBand {
+    order: number;
+    permission: string;
+    up_to_kes: number | null;
+    signed?: boolean;
 }
 
-interface PendingReturn {
-    id: number;
-    return_number: string;
-    purchase_order?: { po_number: string };
-    supplier?: { name: string };
-    reason?: string;
-    notes?: string;
-    created_at: string;
-    items_count?: number;
-    created_by_user?: { first_name: string; last_name: string };
+interface ApprovalSignatureRow {
+    band_order: number;
+    covers: number[] | null;
+    decision: "approved" | "rejected";
+    reason: string | null;
+    signed_at: string | null;
+    signer: { id: number; name: string } | null;
 }
 
-interface PendingAdjustment {
+interface ApprovalItem {
     id: number;
-    reference_number?: string;
-    reason_code: string;
-    reason_label: string;
-    quantity_change: number;
-    product_name?: string;
-    variant_name?: string;
-    outlet_name?: string;
-    created_at: string;
-    created_by?: { first_name: string; last_name: string };
-    notes?: string;
+    event: string;
+    approvable_type: string;
+    approvable_id: number;
+    version: number;
+    status: "pending" | "approved" | "rejected" | "expired" | "cancelled";
+    maker: { id: number; name: string } | null;
+    counterparty: string | null;
+    amount: number | null;
+    currency_code: string | null;
+    amount_kes: number | null;
+    basis_kes: number | null;
+    value_unknown: boolean;
+    bands: ApprovalBand[];
+    current_band: ApprovalBand | null;
+    awaiting: ApprovalBand | null;
+    escalated: boolean;
+    signatures: ApprovalSignatureRow[];
+    rejected_reason: string | null;
+    supersedes_id: number | null;
+    expires_at: string | null;
+    decided_at: string | null;
+    created_at: string | null;
+    // unit (Phase 3C proposals): what amount means — "percent" and "none"
+    // are not money, so the KES amount line is not shown for them.
+    summary: { title: string; reference?: string; link?: string; lines?: string[]; unit?: "percent" | "kes" | "none" } | null;
+    can_sign: boolean;
+    can_resubmit: boolean;
 }
 
-interface PendingTransfer {
-    id: number;
-    transfer_number: string;
-    from_outlet?: { name: string };
-    to_outlet?: { name: string };
-    status: string;
-    created_at: string;
-    total_items?: number;
-    requested_by?: { first_name: string; last_name: string };
-    notes?: string;
-}
+const EVENT_LABELS: Record<string, string> = {
+    purchase_order:       "Purchase order",
+    stock_adjustment:     "Stock adjustment",
+    serialized_write_off: "Serialized write-off",
+    stock_transfer:       "Stock transfer",
+    expense:              "Expense",
+    imprest_topup:        "Imprest top-up",
+    payment_void:         "Payment void",
+    payment_reassign:     "Payment move",
+    // Phase 3C proposals: the new value applies only once signed.
+    selling_price_change:       "Selling price",
+    product_cost_change:        "Product cost",
+    supplier_cost_change:       "Supplier cost",
+    tax_rate_change:            "Tax rate",
+    reporting_fx_change:        "Reporting rate",
+    customer_pricing_fx_change: "Pricing rate",
+    payment_settlement_change:  "Payment settlement",
+    customer_credit:            "Customer credit",
+};
+
+/** Who a band's key belongs to, in words. */
+const BAND_LABELS: Record<string, string> = {
+    "procurement.approve":    "Procurement manager",
+    "inventory.approve":      "Procurement manager",
+    "approvals.finance_sign": "Finance",
+    "expenses.approve":       "Finance",
+    "payments.void":          "Finance",
+    "payments.reassign":      "Finance",
+    "approvals.super_sign":   "Super admin",
+};
+const bandLabel = (b: ApprovalBand) => BAND_LABELS[b.permission] ?? b.permission;
+
+const kes = (n: number) => `KES ${n.toLocaleString("en-KE", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+
+const STATUS_BADGE: Record<ApprovalItem["status"], string> = {
+    pending:   "badge-warning",
+    approved:  "badge-success",
+    rejected:  "badge-danger",
+    expired:   "badge-neutral",
+    cancelled: "badge-neutral",
+};
 
 // ─── Action Modal ─────────────────────────────────────────────────────────────
 
@@ -156,175 +205,207 @@ function WaitingAge({ since }: { since: string }) {
     return <span className="text-2xs text-surface-400">Just submitted</span>;
 }
 
-// ─── Purchase Orders Panel ────────────────────────────────────────────────────
 
-function PurchaseOrdersPanel() {
+// ─── Shared: one request, as a card ───────────────────────────────────────────
+
+function ExpiresIn({ at }: { at: string | null }) {
+    if (!at) return null;
+    const hours = Math.round((new Date(at).getTime() - Date.now()) / 3_600_000);
+    if (hours <= 0) return <span className="text-2xs text-danger font-medium">Expiring now</span>;
+    return (
+        <span className={clsx("text-2xs font-medium", hours <= 12 ? "text-danger" : hours <= 24 ? "text-warning-dark" : "text-surface-400")}>
+            Expires in {hours >= 24 ? `${Math.floor(hours / 24)}d ${hours % 24}h` : `${hours}h`}
+        </span>
+    );
+}
+
+function BandTrail({ item }: { item: ApprovalItem }) {
+    return (
+        <div className="flex flex-wrap items-center gap-1.5">
+            {item.bands.map((b, i) => {
+                const isCurrent = item.status === "pending" && item.current_band?.order === b.order;
+                return (
+                    <span key={b.order} className="flex items-center gap-1.5">
+                        {i > 0 && <span className="text-surface-300 text-2xs">→</span>}
+                        <span className={clsx(
+                            "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-2xs font-medium border",
+                            b.signed ? "bg-success-light text-success-dark border-success/30"
+                                : isCurrent ? "bg-warning-light text-warning-dark border-warning/40"
+                                : "bg-surface-50 text-surface-500 border-line",
+                        )}>
+                            {b.signed && (
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                </svg>
+                            )}
+                            {bandLabel(b)}
+                        </span>
+                    </span>
+                );
+            })}
+            {item.escalated && item.awaiting && (
+                <span className="badge text-2xs bg-info-light text-info" title="Nobody but the maker holds this band, so it escalated">
+                    Escalated to {bandLabel(item.awaiting)}
+                </span>
+            )}
+        </div>
+    );
+}
+
+function RequestCard({ item, actions }: { item: ApprovalItem; actions?: ReactNode }) {
+    const navigate = useNavigate();
+    const notMoney = item.summary?.unit === "percent" || item.summary?.unit === "none";
+    const amountLine = !notMoney && item.amount !== null && item.currency_code
+        ? `${item.currency_code} ${item.amount.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        : null;
+
+    return (
+        <div className="px-3.5 py-3 sm:px-4 sm:py-4 hover:bg-surface-50 transition-colors">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                <div className="flex-1 min-w-0 space-y-1.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <span className="badge badge-neutral text-2xs">{EVENT_LABELS[item.event] ?? item.event}</span>
+                        {item.summary?.link ? (
+                            <button onClick={() => navigate(item.summary!.link!)}
+                                className="font-semibold text-sm text-brand-600 hover:underline text-left line-clamp-2">
+                                {item.summary?.title ?? `#${item.approvable_id}`}
+                            </button>
+                        ) : (
+                            <span className="font-semibold text-sm text-surface-900 line-clamp-2">{item.summary?.title ?? `#${item.approvable_id}`}</span>
+                        )}
+                        {item.version > 1 && <span className="badge text-2xs bg-surface-100 text-surface-600">Version {item.version}</span>}
+                        <span className={clsx("badge text-2xs capitalize", STATUS_BADGE[item.status])}>{item.status}</span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-surface-600">
+                        {amountLine && <span className="font-semibold text-surface-900">{amountLine}</span>}
+                        {item.amount_kes !== null && item.currency_code !== "KES" && <span>≈ {kes(item.amount_kes)} at the reporting rate</span>}
+                        {item.value_unknown && (
+                            <span className="text-warning-dark font-medium" title="No reporting rate or no product cost — every band is required">
+                                Value unknown — every band required
+                            </span>
+                        )}
+                        {!notMoney && item.basis_kes !== null && item.amount_kes !== null && item.basis_kes > item.amount_kes && (
+                            <span className="text-warning-dark" title="The band is judged on the same maker's submissions to the same counterparty in the last 24 hours">
+                                24h total: {kes(item.basis_kes)}
+                            </span>
+                        )}
+                        {item.maker && <span>Raised by {item.maker.name}</span>}
+                        {item.created_at && <WaitingAge since={item.created_at} />}
+                        {item.status === "pending" && <ExpiresIn at={item.expires_at} />}
+                    </div>
+
+                    {item.summary?.lines && item.summary.lines.length > 0 && (
+                        <ul className="text-xs text-surface-500 space-y-0.5">
+                            {item.summary.lines.map((l, i) => <li key={i} className="line-clamp-1">{l}</li>)}
+                        </ul>
+                    )}
+
+                    <BandTrail item={item} />
+
+                    {item.signatures.length > 0 && (
+                        <ul className="text-2xs text-surface-500 space-y-0.5">
+                            {item.signatures.map((s, i) => (
+                                <li key={i}>
+                                    <span className={s.decision === "rejected" ? "text-danger font-medium" : "text-success-dark font-medium"}>
+                                        {s.decision === "rejected" ? "Rejected" : "Signed"}
+                                    </span>
+                                    {" "}by {s.signer?.name ?? "—"}
+                                    {s.signed_at && ` · ${new Date(s.signed_at).toLocaleString("en-KE", { dateStyle: "medium", timeStyle: "short" })}`}
+                                    {s.reason && <span className="italic"> — “{s.reason}”</span>}
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                    {item.status === "rejected" && item.rejected_reason && !item.signatures.some(s => s.decision === "rejected") && (
+                        <p className="text-xs text-danger">Rejected: {item.rejected_reason}</p>
+                    )}
+                    {item.status === "expired" && (
+                        <p className="text-xs text-surface-500">Not decided within 72 hours — it came back to the person who raised it.</p>
+                    )}
+                </div>
+                {actions && <div className="flex gap-2 shrink-0">{actions}</div>}
+            </div>
+        </div>
+    );
+}
+
+// ─── To sign: the one queue ───────────────────────────────────────────────────
+
+function InboxPanel() {
     const toast = useToastStore();
     const qc    = useQueryClient();
-    const { canAny } = usePermissions();
-    const canApprove = canAny("procurement.approve", "admin.all");
-
-    const navigate = useNavigate();
-    const [selected, setSelected]   = useState<PendingPO | null>(null);
-    const [action,   setAction]     = useState<"approve" | "reject" | null>(null);
-    const [bulkSelected, setBulkSelected] = useState<Set<number>>(new Set());
+    const [selected, setSelected] = useState<ApprovalItem | null>(null);
+    const [action,   setAction]   = useState<"approve" | "reject" | null>(null);
 
     const { data, isLoading } = useQuery({
-        queryKey: ["approvals-pos"],
-        queryFn:  () => get<{ data: PendingPO[] }>("/v1/admin/purchase-orders", {
-            params: { status: "pending_approval", per_page: "50" },
-        }),
+        queryKey: ["approvals-inbox"],
+        queryFn:  () => get<{ data: ApprovalItem[]; count: number }>("/v1/admin/approvals/inbox"),
         refetchInterval: 30_000,
         staleTime: 0,
     });
     const items = data?.data ?? [];
 
-    const removeFromList = (id: number) =>
-        qc.setQueryData(["approvals-pos"], (old: any) =>
-            old ? { ...old, data: old.data.filter((p: PendingPO) => p.id !== id) } : old
-        );
+    const done = (message: string) => {
+        toast.success(message);
+        qc.invalidateQueries({ queryKey: ["approvals-inbox"] });
+        qc.invalidateQueries({ queryKey: ["approvals-mine"] });
+        setAction(null); setSelected(null);
+    };
 
-    const approveMutation = useMutation({
-        mutationFn: ({ id, notes }: { id: number; notes: string }) =>
-            post(`/v1/admin/purchase-orders/${id}/approve`, { notes }),
-        onSuccess: (_, { id }) => {
-            removeFromList(id);
-            setBulkSelected(prev => { const n = new Set(prev); n.delete(id); return n; });
-            toast.success("Purchase order approved");
-            qc.invalidateQueries({ queryKey: ["approvals-pos"] });
-            qc.invalidateQueries({ queryKey: ["approval-count-po"] });
-            setAction(null); setSelected(null);
-        },
+    // Every signature carries the record id and version the signer was
+    // shown: the server refuses a mismatch (422) rather than sign something else.
+    const signMutation = useMutation({
+        mutationFn: ({ item, notes }: { item: ApprovalItem; notes: string }) =>
+            post<{ message: string }>(`/v1/admin/approvals/${item.id}/sign`, {
+                approvable_id: item.approvable_id, version: item.version, notes: notes || undefined,
+            }),
+        onSuccess: (res: any) => done(res?.message ?? "Signed"),
         onError: (e: ApiError) => toast.error(e.message),
     });
 
     const rejectMutation = useMutation({
-        mutationFn: ({ id, reason }: { id: number; reason: string }) =>
-            post(`/v1/admin/purchase-orders/${id}/reject`, { reason }),
-        onSuccess: (_, { id }) => {
-            removeFromList(id);
-            toast.success("Purchase order rejected");
-            qc.invalidateQueries({ queryKey: ["approvals-pos"] });
-            qc.invalidateQueries({ queryKey: ["approval-count-po"] });
-            setAction(null); setSelected(null);
-        },
+        mutationFn: ({ item, reason }: { item: ApprovalItem; reason: string }) =>
+            post<{ message: string }>(`/v1/admin/approvals/${item.id}/reject`, {
+                approvable_id: item.approvable_id, version: item.version, reason,
+            }),
+        onSuccess: () => done("Rejected — it went back to the person who raised it"),
         onError: (e: ApiError) => toast.error(e.message),
     });
-
-    const bulkApproveMutation = useMutation({
-        mutationFn: async (ids: number[]) => {
-            await Promise.all(ids.map(id =>
-                post(`/v1/admin/purchase-orders/${id}/approve`, { notes: "Bulk approved" })
-            ));
-        },
-        onSuccess: () => {
-            toast.success(`${bulkSelected.size} purchase order${bulkSelected.size !== 1 ? "s" : ""} approved`);
-            setBulkSelected(new Set());
-            qc.invalidateQueries({ queryKey: ["approvals-pos"] });
-        },
-        onError: (e: ApiError) => toast.error(e.message),
-    });
-
-    const toggleBulk = (id: number) => setBulkSelected(prev => {
-        const next = new Set(prev);
-        next.has(id) ? next.delete(id) : next.add(id);
-        return next;
-    });
-    const allSelected = items.length > 0 && items.every(i => bulkSelected.has(i.id));
-    const toggleAll = () => setBulkSelected(allSelected ? new Set() : new Set(items.map(i => i.id)));
 
     if (isLoading) return <div className="flex justify-center py-12"><Spinner size="lg" /></div>;
-
-    if (items.length === 0) return (
-        <EmptyState label="No purchase orders awaiting approval" />
-    );
+    if (items.length === 0) return <EmptyState label="Nothing is waiting for your signature" />;
 
     return (
         <>
-            {/* Bulk action toolbar */}
-            {canApprove && items.length > 1 && (
-                <div className="px-5 py-2.5 border-b border-line flex items-center gap-3 bg-surface-50">
-                    <label className="flex items-center gap-2 cursor-pointer text-xs text-surface-600 select-none">
-                        <input type="checkbox" checked={allSelected} onChange={toggleAll}
-                            className="w-3.5 h-3.5 rounded border-surface-300 cursor-pointer" />
-                        Select all
-                    </label>
-                    {bulkSelected.size > 0 && (
+            <div className="divide-y divide-line">
+                {items.map(item => (
+                    <RequestCard key={item.id} item={item} actions={item.can_sign && (
                         <>
-                            <span className="text-xs text-surface-500">{bulkSelected.size} selected</span>
-                            <button
-                                onClick={() => bulkApproveMutation.mutate(Array.from(bulkSelected))}
-                                disabled={bulkApproveMutation.isPending}
-                                className="btn-primary btn-sm ml-auto gap-1.5">
-                                {bulkApproveMutation.isPending
-                                    ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                    : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
-                                }
-                                Approve {bulkSelected.size}
+                            <button onClick={() => { setSelected(item); setAction("reject"); }}
+                                className="btn-secondary btn-sm text-danger border-danger/30 hover:bg-danger-light flex-1 sm:flex-none">
+                                Reject
+                            </button>
+                            <button onClick={() => { setSelected(item); setAction("approve"); }}
+                                className="btn-primary btn-sm flex-1 sm:flex-none">
+                                {item.awaiting ? `Sign as ${bandLabel(item.awaiting)}` : "Approve"}
                             </button>
                         </>
-                    )}
-                </div>
-            )}
-            <div className="divide-y divide-line">
-                {items.map(po => (
-                    <div key={po.id} className={clsx("px-3.5 py-3 sm:px-4 sm:py-4 hover:bg-surface-50 transition-colors", bulkSelected.has(po.id) && "bg-brand-50/50")}>
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-                            <div className="flex items-start gap-3 flex-1 min-w-0">
-                                {canApprove && items.length > 1 && (
-                                    <input type="checkbox" checked={bulkSelected.has(po.id)}
-                                        onChange={() => toggleBulk(po.id)}
-                                        className="w-3.5 h-3.5 mt-1 rounded border-surface-300 cursor-pointer shrink-0" />
-                                )}
-                                <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        <button onClick={() => navigate(`/procurement/purchase-orders/${po.id}`)}
-                                            className="font-mono font-semibold text-brand-600 text-sm hover:underline">
-                                            {po.po_number}
-                                        </button>
-                                        <span className="badge badge-warning text-2xs">Pending Approval</span>
-                                        {po.items_count !== undefined && (
-                                            <span className="text-2xs text-surface-400">{po.items_count} item{po.items_count !== 1 ? "s" : ""}</span>
-                                        )}
-                                    </div>
-                                    <p className="text-sm font-medium text-surface-900 mt-0.5 truncate">{po.supplier?.name ?? "Unknown Supplier"}</p>
-                                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-xs text-surface-500">
-                                        <span>Total: <strong className="text-surface-900">{po.currency_code} {(po.total_amount ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</strong></span>
-                                        {po.created_by && <span>By: {po.created_by.first_name} {po.created_by.last_name}</span>}
-                                        <span>Submitted: {new Date(po.submitted_at ?? po.created_at).toLocaleDateString("en-KE", { dateStyle: "medium" })}</span>
-                                        <WaitingAge since={po.submitted_at ?? po.created_at} />
-                                    </div>
-                                    {po.notes && <p className="text-xs text-surface-500 mt-1 line-clamp-1 italic">{po.notes}</p>}
-                                </div>
-                            </div>
-                            {canApprove && (
-                                <div className="flex gap-2 shrink-0 sm:flex-col sm:gap-1.5 md:flex-row md:gap-2">
-                                    <button onClick={() => { setSelected(po); setAction("reject"); }}
-                                        className="btn-secondary btn-sm text-danger border-danger/30 hover:bg-danger-light flex-1 sm:flex-none">
-                                        Reject
-                                    </button>
-                                    <button onClick={() => { setSelected(po); setAction("approve"); }}
-                                        className="btn-primary btn-sm flex-1 sm:flex-none">
-                                        Approve
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    </div>
+                    )} />
                 ))}
             </div>
 
             {selected && action && (
                 <ActionModal
-                    title={action === "approve" ? `Approve ${selected.po_number}` : `Reject ${selected.po_number}`}
+                    title={`${action === "approve" ? "Sign" : "Reject"} — ${selected.summary?.title ?? EVENT_LABELS[selected.event]}`}
                     action={action}
                     requireReason={action === "reject"}
-                    reasonLabel={action === "approve" ? "Approval Notes" : "Rejection Reason"}
-                    isPending={approveMutation.isPending || rejectMutation.isPending}
+                    reasonLabel={action === "approve" ? "Notes" : "Reason (the maker sees this)"}
+                    isPending={signMutation.isPending || rejectMutation.isPending}
                     onClose={() => { setAction(null); setSelected(null); }}
                     onConfirm={(notes) => {
-                        if (action === "approve") approveMutation.mutate({ id: selected.id, notes });
-                        else rejectMutation.mutate({ id: selected.id, reason: notes });
+                        if (action === "approve") signMutation.mutate({ item: selected, notes });
+                        else rejectMutation.mutate({ item: selected, reason: notes });
                     }}
                 />
             )}
@@ -332,13 +413,66 @@ function PurchaseOrdersPanel() {
     );
 }
 
-// ─── Purchase Returns Panel ───────────────────────────────────────────────────
+// ─── My submissions ───────────────────────────────────────────────────────────
+
+function MinePanel() {
+    const toast = useToastStore();
+    const qc    = useQueryClient();
+
+    const { data, isLoading } = useQuery({
+        queryKey: ["approvals-mine"],
+        queryFn:  () => get<{ data: ApprovalItem[] }>("/v1/admin/approvals/mine"),
+        refetchInterval: 60_000,
+        staleTime: 0,
+    });
+    const items = data?.data ?? [];
+
+    const resubmit = useMutation({
+        mutationFn: (item: ApprovalItem) => post(`/v1/admin/approvals/${item.id}/resubmit`, {}),
+        onSuccess: () => {
+            toast.success("Resubmitted as a new version");
+            qc.invalidateQueries({ queryKey: ["approvals-mine"] });
+            qc.invalidateQueries({ queryKey: ["approvals-inbox"] });
+        },
+        onError: (e: ApiError) => toast.error(e.message),
+    });
+
+    if (isLoading) return <div className="flex justify-center py-12"><Spinner size="lg" /></div>;
+    if (items.length === 0) return <EmptyState label="You have not submitted anything for approval" />;
+
+    return (
+        <div className="divide-y divide-line">
+            {items.map(item => (
+                <RequestCard key={item.id} item={item} actions={item.can_resubmit && (
+                    <button onClick={() => resubmit.mutate(item)} disabled={resubmit.isPending}
+                        className="btn-secondary btn-sm flex-1 sm:flex-none">
+                        Resubmit
+                    </button>
+                )} />
+            ))}
+        </div>
+    );
+}
+
+// ─── Purchase returns (not on the engine yet) ─────────────────────────────────
+
+interface PendingReturn {
+    id: number;
+    return_number: string;
+    purchase_order?: { po_number: string };
+    supplier?: { name: string };
+    reason?: string;
+    notes?: string;
+    created_at: string;
+    items_count?: number;
+    created_by_user?: { first_name: string; last_name: string };
+}
 
 function PurchaseReturnsPanel() {
     const toast = useToastStore();
     const qc    = useQueryClient();
     const { canAny } = usePermissions();
-    const canApprove = canAny("procurement.approve", "admin.all");
+    const canApprove = canAny("procurement.approve");
 
     const navigate = useNavigate();
     const [selected, setSelected] = useState<PendingReturn | null>(null);
@@ -455,248 +589,6 @@ function PurchaseReturnsPanel() {
     );
 }
 
-// ─── Stock Adjustments Panel ──────────────────────────────────────────────────
-
-function StockAdjustmentsPanel() {
-    const toast = useToastStore();
-    const qc    = useQueryClient();
-    const { canAny } = usePermissions();
-    const canApprove = canAny("inventory.approve", "admin.all");
-
-    const [selected, setSelected] = useState<PendingAdjustment | null>(null);
-    const [action,   setAction]   = useState<"approve" | "reject" | null>(null);
-
-    const { data, isLoading } = useQuery({
-        queryKey: ["approvals-adjustments"],
-        queryFn: () => get<{ data: PendingAdjustment[] }>(
-            "/v1/admin/inventory/adjustments",
-            { params: { status: "pending_approval", per_page: "50" } }
-        ),
-        refetchInterval: 30_000,
-        staleTime: 0,
-    });
-    const items = data?.data ?? [];
-
-    const removeFromList = (id: number) =>
-        qc.setQueryData(["approvals-adjustments"], (old: any) =>
-            old ? { ...old, data: old.data.filter((a: PendingAdjustment) => a.id !== id) } : old
-        );
-
-    const approveMutation = useMutation({
-        mutationFn: ({ id, notes }: { id: number; notes: string }) =>
-            put(`/v1/admin/inventory/adjustments/${id}/approve`, { notes }),
-        onSuccess: (_, { id }) => {
-            removeFromList(id);
-            toast.success("Adjustment approved and applied");
-            qc.invalidateQueries({ queryKey: ["approvals-adjustments"] });
-            qc.invalidateQueries({ queryKey: ["approval-count-adj"] });
-            setAction(null); setSelected(null);
-        },
-        onError: (e: ApiError) => toast.error(e.message),
-    });
-
-    const rejectMutation = useMutation({
-        mutationFn: ({ id, notes }: { id: number; notes: string }) =>
-            put(`/v1/admin/inventory/adjustments/${id}/reject`, { notes }),
-        onSuccess: (_, { id }) => {
-            removeFromList(id);
-            toast.success("Adjustment rejected");
-            qc.invalidateQueries({ queryKey: ["approvals-adjustments"] });
-            qc.invalidateQueries({ queryKey: ["approval-count-adj"] });
-            setAction(null); setSelected(null);
-        },
-        onError: (e: ApiError) => toast.error(e.message),
-    });
-
-    if (isLoading) return <div className="flex justify-center py-12"><Spinner size="lg" /></div>;
-    if (items.length === 0) return <EmptyState label="No stock adjustments awaiting approval" />;
-
-    return (
-        <>
-            <div className="divide-y divide-line">
-                {items.map(adj => (
-                    <div key={adj.id} className="px-3.5 py-3 sm:px-4 sm:py-4 hover:bg-surface-50 transition-colors">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-                            <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                    <span className={clsx("font-bold text-base tabular-nums",
-                                        adj.quantity_change > 0 ? "text-success" : "text-danger")}>
-                                        {adj.quantity_change > 0 ? "+" : ""}{adj.quantity_change}
-                                    </span>
-                                    <span className="badge badge-neutral text-2xs capitalize">{adj.reason_label}</span>
-                                    <span className="badge badge-warning text-2xs">Pending</span>
-                                </div>
-                                {/* Two-part line (product · variant): clamp to 2 lines rather than
-                                    `truncate`, or a long product name eats the variant on a phone. */}
-                                <p className="text-sm font-medium text-surface-900 mt-0.5 line-clamp-2">
-                                    {adj.product_name ?? "-"}
-                                    {adj.variant_name && <span className="text-surface-400 ml-1">· {adj.variant_name}</span>}
-                                </p>
-                                <div className="flex flex-wrap gap-x-4 mt-1 text-xs text-surface-500">
-                                    {adj.outlet_name && <span>Outlet: {adj.outlet_name}</span>}
-                                    {adj.created_by && <span>By: {adj.created_by.first_name} {adj.created_by.last_name}</span>}
-                                    <span>{new Date(adj.created_at).toLocaleDateString("en-KE", { dateStyle: "medium" })}</span>
-                                    <WaitingAge since={adj.created_at} />
-                                    {adj.reference_number && <span className="font-mono">Ref: {adj.reference_number}</span>}
-                                </div>
-                                {adj.notes && <p className="text-xs text-surface-500 mt-1 italic line-clamp-1">{adj.notes}</p>}
-                            </div>
-                            {canApprove && (
-                                <div className="flex gap-2 shrink-0">
-                                    <button onClick={() => { setSelected(adj); setAction("reject"); }}
-                                        className="btn-secondary btn-sm text-danger border-danger/30 hover:bg-danger-light flex-1 sm:flex-none">
-                                        Reject
-                                    </button>
-                                    <button onClick={() => { setSelected(adj); setAction("approve"); }}
-                                        className="btn-primary btn-sm flex-1 sm:flex-none">
-                                        Approve
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                ))}
-            </div>
-
-            {selected && action && (
-                <ActionModal
-                    title={action === "approve" ? "Approve Adjustment" : "Reject Adjustment"}
-                    action={action}
-                    requireReason={action === "reject"}
-                    reasonLabel={action === "approve" ? "Approval Notes" : "Rejection Reason"}
-                    isPending={approveMutation.isPending || rejectMutation.isPending}
-                    onClose={() => { setAction(null); setSelected(null); }}
-                    onConfirm={(notes) => {
-                        if (action === "approve") approveMutation.mutate({ id: selected.id, notes });
-                        else rejectMutation.mutate({ id: selected.id, notes });
-                    }}
-                />
-            )}
-        </>
-    );
-}
-
-// ─── Stock Transfers Panel ────────────────────────────────────────────────────
-
-function StockTransfersPanel() {
-    const toast = useToastStore();
-    const qc    = useQueryClient();
-    const { canAny } = usePermissions();
-    const canApprove = canAny("inventory.approve", "admin.all");
-
-    const navigate = useNavigate();
-    const [selected, setSelected] = useState<PendingTransfer | null>(null);
-    const [action,   setAction]   = useState<"approve" | "reject" | null>(null);
-
-    const { data, isLoading } = useQuery({
-        queryKey: ["approvals-transfers"],
-        queryFn: () => get<{ data: PendingTransfer[] }>(
-            "/v1/admin/inventory/transfers",
-            { params: { status: "pending", per_page: "50" } }
-        ),
-        refetchInterval: 30_000,
-        staleTime: 0,
-    });
-    const items = data?.data ?? [];
-
-    const removeFromList = (id: number) =>
-        qc.setQueryData(["approvals-transfers"], (old: any) =>
-            old ? { ...old, data: old.data.filter((t: PendingTransfer) => t.id !== id) } : old
-        );
-
-    const approveMutation = useMutation({
-        mutationFn: (id: number) => put(`/v1/admin/inventory/transfers/${id}/approve`, {}),
-        onSuccess: (_, id) => {
-            removeFromList(id);
-            toast.success("Transfer approved");
-            qc.invalidateQueries({ queryKey: ["approvals-transfers"] });
-            qc.invalidateQueries({ queryKey: ["approval-count-txf"] });
-            setSelected(null); setAction(null);
-        },
-        onError: (e: ApiError) => toast.error(e.message),
-    });
-
-    const cancelMutation = useMutation({
-        mutationFn: ({ id, reason }: { id: number; reason: string }) =>
-            put(`/v1/admin/inventory/transfers/${id}/cancel`, { reason }),
-        onSuccess: (_, { id }) => {
-            removeFromList(id);
-            toast.success("Transfer cancelled");
-            qc.invalidateQueries({ queryKey: ["approvals-transfers"] });
-            qc.invalidateQueries({ queryKey: ["approval-count-txf"] });
-            setSelected(null); setAction(null);
-        },
-        onError: (e: ApiError) => toast.error(e.message),
-    });
-
-    if (isLoading) return <div className="flex justify-center py-12"><Spinner size="lg" /></div>;
-    if (items.length === 0) return <EmptyState label="No stock transfers awaiting approval" />;
-
-    return (
-        <>
-        <div className="divide-y divide-line">
-            {items.map(t => (
-                <div key={t.id} className="px-3.5 py-3 sm:px-4 sm:py-4 hover:bg-surface-50 transition-colors">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-                        <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                                {/* Was an inert <span> styled in link colour — misleading on a phone,
-                                    where the card reads as tappable. /inventory/transfers/:id exists
-                                    (App.tsx), so match the other panels and actually navigate. */}
-                                <button onClick={() => navigate(`/inventory/transfers/${t.id}`)}
-                                    className="font-mono font-semibold text-brand-600 text-sm hover:underline">
-                                    {t.transfer_number}
-                                </button>
-                                <span className="badge badge-warning text-2xs">Pending</span>
-                            </div>
-                            <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                <span className="text-sm font-medium text-surface-900 min-w-0 truncate">{t.from_outlet?.name ?? "-"}</span>
-                                <svg className="w-4 h-4 text-surface-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
-                                </svg>
-                                <span className="text-sm font-medium text-surface-900 min-w-0 truncate">{t.to_outlet?.name ?? "-"}</span>
-                            </div>
-                            <div className="flex flex-wrap gap-x-4 mt-1 text-xs text-surface-500">
-                                {t.requested_by && <span>By: {t.requested_by.first_name} {t.requested_by.last_name}</span>}
-                                <span>{new Date(t.created_at).toLocaleDateString("en-KE", { dateStyle: "medium" })}</span>
-                                <WaitingAge since={t.created_at} />
-                                {t.total_items !== undefined && <span>{t.total_items} items</span>}
-                            </div>
-                            {t.notes && <p className="text-xs text-surface-500 mt-1 italic line-clamp-1">{t.notes}</p>}
-                        </div>
-                        {canApprove && (
-                            <div className="flex gap-2 shrink-0">
-                                <button onClick={() => { setSelected(t); setAction("reject"); }}
-                                    className="btn-secondary btn-sm text-danger border-danger/30 hover:bg-danger-light flex-1 sm:flex-none">
-                                    Cancel
-                                </button>
-                                <button onClick={() => approveMutation.mutate(t.id)}
-                                    disabled={approveMutation.isPending}
-                                    className="btn-primary btn-sm flex-1 sm:flex-none">
-                                    Approve
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            ))}
-        </div>
-        {selected && action === "reject" && (
-            <ActionModal
-                title={`Cancel Transfer ${selected.transfer_number}`}
-                action="reject"
-                requireReason={false}
-                reasonLabel="Reason for cancellation"
-                isPending={cancelMutation.isPending}
-                onClose={() => { setAction(null); setSelected(null); }}
-                onConfirm={(reason) => cancelMutation.mutate({ id: selected.id, reason })}
-            />
-        )}
-        </>
-    );
-}
-
-
 // ─── Payment Approvals Panel (Phase 5 - International Orders) ────────────────
 
 interface PendingPayment {
@@ -748,28 +640,12 @@ function ProofViewer({ proofUrl, paymentNumber }: { proofUrl: string; paymentNum
         setError(null);
 
         try {
-            // The endpoint streams the file as binary - use fetch() with the
-            // Bearer token so we get the raw bytes, then create a local blob URL.
-            const token = tokenStorage.get();
-            const base  = (import.meta.env.VITE_API_URL ?? "").replace(/\/api$/, "");
-            const fullUrl = apiPath.startsWith("http") ? apiPath : `${base}${apiPath}`;
+            // The proof endpoint issues a fresh signed link (≤5 min) after the
+            // order-visibility check; the bytes come from that link.
+            const file = await fetchSignedFile(apiPath);
+            setMimeType(file.contentType);
 
-            const response = await fetch(fullUrl, {
-                headers: {
-                    Authorization: token ? `Bearer ${token}` : "",
-                    Accept: "*/*",
-                },
-            });
-
-            if (!response.ok) {
-                throw new Error(`${response.status} ${response.statusText}`);
-            }
-
-            const contentType = response.headers.get("Content-Type") ?? "image/jpeg";
-            setMimeType(contentType);
-
-            const blob = await response.blob();
-            const url  = URL.createObjectURL(blob);
+            const url = URL.createObjectURL(file.blob);
 
             // Revoke any previous blob URL to avoid memory leaks
             if (blobUrl) URL.revokeObjectURL(blobUrl);
@@ -878,7 +754,7 @@ function PaymentApprovalsPanel() {
     // Mirrors the server: POST /v1/admin/payments/{id}/{approve,reject} is behind
     // `permission:payments.approve_international`. Without this gate the buttons
     // render for every user who can reach the page and 403 on click.
-    const canApprove = canAny("payments.approve_international", "admin.all");
+    const canApprove = canAny("payments.approve_international");
 
     const [selected, setSelected] = useState<PendingPayment | null>(null);
     const [action,   setAction]   = useState<"approve" | "reject" | null>(null);
@@ -1094,24 +970,32 @@ function EmptyState({ label }: { label: string }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ApprovalsPage() {
-    const [activeTab, setActiveTab] = useState<ApprovalTab>("payment_approvals");
     const qc = useQueryClient();
+    const { canAny } = usePermissions();
+    const [params, setParams] = useSearchParams();
 
-    // Fetch counts for badges
+    const canSign      = canAny(...SIGNING_PERMISSIONS);
+    const canReturns   = canAny("procurement.approve");
+    const canProofs    = canAny("payments.approve_international");
+
+    const initial = (params.get("tab") as ApprovalTab | null) ?? (canSign ? "inbox" : "mine");
+    const [activeTab, setActiveTab] = useState<ApprovalTab>(initial);
+    const choose = (t: ApprovalTab) => { setActiveTab(t); setParams(t === "inbox" ? {} : { tab: t }, { replace: true }); };
+
+    const { data: inboxData } = useQuery({
+        queryKey: ["approvals-inbox"],
+        queryFn:  () => get<{ data: ApprovalItem[]; count: number }>("/v1/admin/approvals/inbox"),
+        refetchInterval: 30_000,
+        enabled: canSign,
+    });
+
     const { data: payCount } = useQuery({
         queryKey: ["approval-count-payments"],
         queryFn: () => get<{ pending_count: number }>("/v1/admin/payments/pending-approval", {
             params: { per_page: "1" } as any,
         }).then(r => (r as any).pending_count ?? 0),
         refetchInterval: 60_000,
-    });
-
-    const { data: poCount } = useQuery({
-        queryKey: ["approval-count-po"],
-        queryFn: () => get<{ data: unknown[] }>("/v1/admin/purchase-orders", {
-            params: { status: "pending_approval", per_page: "1" },
-        }).then(r => (r as any)?.total ?? (r as any)?.meta?.total ?? 0),
-        refetchInterval: 60_000,
+        enabled: canProofs,
     });
 
     const { data: retCount } = useQuery({
@@ -1120,35 +1004,19 @@ export default function ApprovalsPage() {
             params: { status: "pending", per_page: "1" },
         }).then(r => (r as any)?.total ?? (r as any)?.meta?.total ?? 0),
         refetchInterval: 60_000,
+        enabled: canReturns,
     });
 
-    const { data: adjData } = useQuery({
-        queryKey: ["approval-count-adj"],
-        queryFn: () => get<{ stats: { pending_approval: number } }>(
-            "/v1/admin/inventory/adjustments",
-            { params: { per_page: "1" } }
-        ),
-        refetchInterval: 60_000,
-    });
-
-    const { data: txfData } = useQuery({
-        queryKey: ["approval-count-txf"],
-        queryFn: () => get<{ stats: { pending: number } }>(
-            "/v1/admin/inventory/transfers",
-            { params: { per_page: "1" } }
-        ),
-        refetchInterval: 60_000,
-    });
-
-    const tabs: { key: ApprovalTab; label: string; count: number }[] = [
-        { key: "payment_approvals", label: "Payment Approvals", count: typeof payCount === "number" ? payCount : 0 },
-        { key: "purchase_orders",   label: "Purchase Orders",  count: typeof poCount  === "number" ? poCount  : 0 },
-        { key: "purchase_returns",  label: "Purchase Returns", count: typeof retCount === "number" ? retCount : 0 },
-        { key: "stock_adjustments", label: "Stock Adjustments", count: (adjData as any)?.stats?.pending_approval ?? 0 },
-        { key: "stock_transfers",   label: "Stock Transfers",   count: (txfData as any)?.stats?.pending ?? 0 },
+    const inboxCount = inboxData?.count ?? 0;
+    const tabs: { key: ApprovalTab; label: string; count: number; show: boolean }[] = [
+        { key: "inbox",             label: "To sign",          count: inboxCount, show: canSign },
+        { key: "mine",              label: "My submissions",   count: 0,          show: true },
+        { key: "purchase_returns",  label: "Purchase returns", count: typeof retCount === "number" ? retCount : 0, show: canReturns },
+        { key: "payment_approvals", label: "Payment proofs",   count: typeof payCount === "number" ? payCount : 0, show: canProofs },
     ];
-
-    const totalPending = tabs.reduce((s, t) => s + t.count, 0);
+    const visible = tabs.filter(t => t.show);
+    const current = visible.some(t => t.key === activeTab) ? activeTab : visible[0]?.key ?? "mine";
+    const totalPending = visible.reduce((s, t) => s + t.count, 0);
 
     return (
         <div className="flex flex-col gap-5 animate-fade-in">
@@ -1158,8 +1026,8 @@ export default function ApprovalsPage() {
                     <h1 className="page-title">Approvals</h1>
                     <p className="page-subtitle">
                         {totalPending > 0
-                            ? `${totalPending} item${totalPending !== 1 ? "s" : ""} pending your review`
-                            : "All items reviewed - nothing pending"}
+                            ? `${totalPending} item${totalPending !== 1 ? "s" : ""} waiting for you`
+                            : "Nothing is waiting for you"}
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -1172,8 +1040,8 @@ export default function ApprovalsPage() {
                         </div>
                     )}
                     <button onClick={() => {
-                        ["approvals-payments","approvals-pos","approvals-returns","approvals-adjustments","approvals-transfers",
-                         "approval-count-payments","approval-count-po","approval-count-ret","approval-count-adj","approval-count-txf"]
+                        ["approvals-inbox", "approvals-mine", "approvals-payments", "approvals-returns",
+                         "approval-count-payments", "approval-count-ret"]
                         .forEach(key => qc.invalidateQueries({ queryKey: [key] }));
                     }} className="btn-secondary btn-icon btn-sm"
                     aria-label="Refresh" title="Refresh">
@@ -1186,13 +1054,12 @@ export default function ApprovalsPage() {
 
             {/* Tabs + content */}
             <div className="card overflow-hidden">
-                {/* Tab bar */}
                 <div className="flex border-b border-line overflow-x-auto no-scrollbar">
-                    {tabs.map(tab => (
-                        <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+                    {visible.map(tab => (
+                        <button key={tab.key} onClick={() => choose(tab.key)}
                             className={clsx(
                                 "flex items-center gap-1.5 px-5 py-3.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap shrink-0",
-                                activeTab === tab.key
+                                current === tab.key
                                     ? "border-brand-500 text-brand-600"
                                     : "border-transparent text-surface-500 hover:text-surface-700",
                             )}>
@@ -1202,13 +1069,11 @@ export default function ApprovalsPage() {
                     ))}
                 </div>
 
-                {/* Panel */}
                 <div>
-                    {activeTab === "payment_approvals" && <PaymentApprovalsPanel />}
-                    {activeTab === "purchase_orders"   && <PurchaseOrdersPanel />}
-                    {activeTab === "purchase_returns"  && <PurchaseReturnsPanel />}
-                    {activeTab === "stock_adjustments" && <StockAdjustmentsPanel />}
-                    {activeTab === "stock_transfers"   && <StockTransfersPanel />}
+                    {current === "inbox"             && <InboxPanel />}
+                    {current === "mine"              && <MinePanel />}
+                    {current === "purchase_returns"  && <PurchaseReturnsPanel />}
+                    {current === "payment_approvals" && <PaymentApprovalsPanel />}
                 </div>
             </div>
         </div>

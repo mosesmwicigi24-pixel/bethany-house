@@ -1,4 +1,5 @@
 import { get, post, put, del } from "./client";
+import type { Proposal } from "@/api/proposals";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -166,8 +167,10 @@ export const productsApi = {
     create: (data: ProductCreatePayload) =>
         post<{ message: string; product: Product }>("/v1/admin/products", data),
 
+    // Phase 3C: price and cost changes on existing rows come back as
+    // proposals — applied at once inside the maker's band, or waiting.
     update: (id: number, data: Partial<ProductCreatePayload>) =>
-        put<{ message: string; product: Product }>(
+        put<{ message: string; product: Product; proposals?: Proposal[] }>(
             `/v1/admin/products/${id}`,
             data,
         ),
@@ -269,7 +272,7 @@ export const productsApi = {
         variantId: number,
         data: Partial<VariantPayload>,
     ) =>
-        put<{ message: string; variant: ProductVariant }>(
+        put<{ message: string; variant: ProductVariant; proposals?: Proposal[] }>(
             `/v1/admin/products/${productId}/variants/${variantId}`,
             data,
         ),

@@ -16,6 +16,15 @@ namespace App\Enums;
  */
 enum DataScope: string
 {
+    /**
+     * Nothing. What a staff member gets for a capability no role of theirs
+     * grants (Phase 4A). Never stored on a role — it is an answer, not a
+     * setting: the resolver used to say All here, so a role WITHOUT
+     * orders.view saw the whole order book wherever a route forgot the
+     * permission check.
+     */
+    case None = 'none';
+
     /** Only rows this user created. */
     case Own = 'own';
 
@@ -31,6 +40,7 @@ enum DataScope: string
     public function rank(): int
     {
         return match ($this) {
+            self::None   => -1,
             self::Own    => 0,
             self::Outlet => 1,
             self::All    => 2,
@@ -66,6 +76,12 @@ enum DataScope: string
 
     public static function tryFromName(?string $value): self
     {
+        // 'none' is not a role setting; a role row carrying it (by hand) is
+        // read as the narrowest STORED scope rather than as everything.
+        if ($value === self::None->value) {
+            return self::Own;
+        }
+
         return $value === null ? self::All : (self::tryFrom($value) ?? self::All);
     }
 }

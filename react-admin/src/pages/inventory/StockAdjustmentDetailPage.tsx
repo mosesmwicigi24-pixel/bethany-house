@@ -117,7 +117,7 @@ export default function StockAdjustmentDetailPage() {
 
     const approveMutation = useMutation({
         mutationFn: (notes: string) => put<any>(`/v1/admin/inventory/adjustments/${id}/approve`, { notes }),
-        onSuccess: () => { toast.success("Adjustment approved"); refresh(); },
+        onSuccess: (r) => { toast.success(r?.message ?? "Adjustment approved"); refresh(); },
         onError: (e: any) => toast.error(e?.message ?? "Approval failed"),
     });
 

@@ -37,8 +37,18 @@ class ExpensePdfScopingTest extends TestCase
         foreach ($permissions as $p) {
             $user->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
+        // Phase 4A: the outlet boundary is the ROLE's data_scope (the
+        // catalogue's ROLE_SCOPES), resolved among the roles that grant the
+        // capability — no longer the role's name. So the fixture role grants
+        // what the user holds and carries the catalogue's scope.
         foreach ($roles as $r) {
-            $user->assignRole(Role::findOrCreate($r, 'sanctum'));
+            $role = Role::findOrCreate($r, 'sanctum');
+            foreach ($permissions as $p) {
+                $role->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
+            }
+            \Illuminate\Support\Facades\DB::table('roles')->where('id', $role->id)
+                ->update(['data_scope' => \App\Console\Commands\SyncPermissions::ROLE_SCOPES[$r] ?? 'all']);
+            $user->assignRole($role);
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
@@ -73,7 +83,7 @@ class ExpensePdfScopingTest extends TestCase
 
     // ── The IDOR ──────────────────────────────────────────────────────────────
 
-    public function test_outlet_manager_gets_403_for_another_outlets_expense_pdf_and_200_for_their_own(): void
+    public function test_outlet_manager_gets_404_for_another_outlets_expense_pdf_and_200_for_their_own(): void
     {
         $outletA = Outlet::factory()->create();
         $outletB = Outlet::factory()->create();
@@ -88,9 +98,9 @@ class ExpensePdfScopingTest extends TestCase
         // Their own outlet still renders.
         $this->assertRenderedPdf($this->get("/api/v1/admin/pdf/expenses/{$mine->id}"));
 
-        // Another outlet's does not — and the body is the 403, not a PDF.
+        // Another outlet's does not — and the body is a 404 (Phase 4A: out of scope reads as absent), not a PDF.
         $res = $this->get("/api/v1/admin/pdf/expenses/{$their->id}");
-        $res->assertForbidden();
+        $res->assertNotFound();
         $this->assertStringNotContainsString('%PDF', $res->getContent());
     }
 
@@ -106,7 +116,7 @@ class ExpensePdfScopingTest extends TestCase
 
         // A NULL outlet_id is out of scope for a scoped manager, exactly as it
         // is excluded from their expense list.
-        $this->get("/api/v1/admin/pdf/expenses/{$headOffice->id}")->assertForbidden();
+        $this->get("/api/v1/admin/pdf/expenses/{$headOffice->id}")->assertNotFound();
     }
 
     public function test_unassigned_outlet_manager_gets_nothing_not_everything(): void
@@ -119,7 +129,7 @@ class ExpensePdfScopingTest extends TestCase
         $cat = ExpenseCategory::create(['name' => 'Rent', 'code' => 'RENT']);
         $exp = $this->makeExpense('EXP-A', $cat->id, $outletA->id, $manager->id);
 
-        $this->get("/api/v1/admin/pdf/expenses/{$exp->id}")->assertForbidden();
+        $this->get("/api/v1/admin/pdf/expenses/{$exp->id}")->assertNotFound();
     }
 
     // ── Unrestricted roles ────────────────────────────────────────────────────

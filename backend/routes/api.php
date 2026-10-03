@@ -4,6 +4,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\{
     AuthController,
+    AccountSecurityController,
+    UserSecurityController,
     ProductController,
     CategoryController,
     OrderController,
@@ -14,6 +16,7 @@ use App\Http\Controllers\Api\{
     InventoryController,
     OutletController,
     PosController,
+    TillController,
     ProductionController,
     ProductSerialController,
     PurchaseOrderController,
@@ -97,6 +100,11 @@ Route::prefix('v1')->group(function () {
         Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
         Route::post('/reset-password',  [AuthController::class, 'resetPassword']);
         Route::post('/2fa/verify',      [AuthController::class, 'adminVerify2fa']);
+        // Staged 2FA rollout (Phase 4C): the role requires 2FA and it is not
+        // on yet — set it up before any session is issued. Proof = the
+        // setup token the password step returned.
+        Route::post('/2fa/setup',         [AuthController::class, 'adminSetup2fa']);
+        Route::post('/2fa/setup/confirm', [AuthController::class, 'adminConfirm2faSetup']);
 
         Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
             Route::post('/logout',      [AuthController::class, 'logout']);
@@ -113,6 +121,18 @@ Route::prefix('v1')->group(function () {
         });
     });
 
+    // ═══ SIGN-IN SAFETY — the signed-in person (Phase 4C) ════════════════════
+    // Outside the throttle:auth group above (5/min per IP): each has its own
+    // per-account limiter, and the PIN unlock must work for a shop full of
+    // clerks behind one address. pin/unlock is the one route a PIN-locked
+    // session may call (App\Services\Auth\SessionPolicy).
+    Route::prefix('admin/auth')->middleware(['auth:sanctum', 'throttle:api', 'ensure.staff'])->group(function () {
+        Route::post('/step-up',             [AccountSecurityController::class, 'stepUp']);
+        Route::post('/pin/unlock',          [AccountSecurityController::class, 'unlock']);
+        Route::post('/2fa/recovery-codes',  [AccountSecurityController::class, 'regenerateRecoveryCodes'])
+            ->middleware('step.up');
+    });
+
     // ═══ PUBLIC PAYMENT LINK (no auth) ═══════════════════════════════════════
     // Phase 1 - customer-facing payment page served at /pay/{token}
 
@@ -124,6 +144,18 @@ Route::prefix('v1')->group(function () {
         Route::post('/{token}/upload-proof',   [PublicPaymentController::class, 'uploadProof']);
         Route::post('/{token}/mpesa-confirm',  [PublicPaymentController::class, 'confirmMpesa']);
         Route::post('/{token}/paystack-verify', [PublicPaymentController::class, 'verifyPaystack']);
+    });
+
+    // ═══ SIGNED ATTACHMENT LINKS (role hardening 4D) ═════════════════════════
+    // Issued for ≤5 minutes by the console's attachment endpoints AFTER their
+    // parent-record check (App\Support\SignedFiles). The signature is the only
+    // check here — an unsigned, altered or expired link is a 403.
+    Route::prefix('files')->middleware(['signed:relative', 'throttle:120,1'])->group(function () {
+        $files = \App\Http\Controllers\Api\SignedFileController::class;
+        Route::get('/payment-proofs/{payment}',         [$files, 'paymentProof'])->whereNumber('payment')->name('files.payment-proof');
+        Route::get('/shipment-attachments/{attachment}', [$files, 'shipmentAttachment'])->whereNumber('attachment')->name('files.shipment-attachment');
+        Route::get('/expense-receipts/{expense}',        [$files, 'expenseReceipt'])->whereNumber('expense')->name('files.expense-receipt');
+        Route::get('/channel-attachments',               [$files, 'channelAttachment'])->name('files.channel-attachment');
     });
 
     // ═══ PUBLIC ORDER PAGE (no auth) ═════════════════════════════════════════
@@ -352,7 +384,8 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Global search — powers CommandPalette (⌘K) ─────────────────────
-            Route::get('/search', [GlobalSearchController::class, 'search']);
+            Route::get('/search', [GlobalSearchController::class, 'search'])
+                ->middleware(['throttle:customer-search', 'contacts.mask:orders.view|customers.view']);
 
             // ── Push subscriptions (PWA Web Push + React Native Expo) ────────
             Route::prefix('push')->group(function () {
@@ -383,13 +416,15 @@ Route::prefix('v1')->group(function () {
         // need reports.signals on top of their module's view. The preflight,
         // tailor-workload, geography and channel feeds serve other screens
         // (production order form, production board, Customers & Neema) and
-        // keep their module gate alone.
+        // keep their module gate alone. The four Signals feeds carry
+        // report.business_wide like every other report page (Phase 4A): a
+        // report is business-wide for whoever may read it.
         Route::middleware(['auth:sanctum', 'throttle:admin-api', 'ensure.staff'])->prefix('admin/intelligence')->group(function () {
             Route::middleware('permission:inventory.view,sanctum')->group(function () {
                 Route::get('/reorder-suggestions',           [IntelligenceController::class, 'reorderSuggestions'])
-                    ->middleware('report.page:signals');
+                    ->middleware(['report.page:signals', 'report.business_wide']);
                 Route::get('/material-shortages',            [IntelligenceController::class, 'materialShortages'])
-                    ->middleware('report.page:signals');
+                    ->middleware(['report.page:signals', 'report.business_wide']);
                 Route::post('/material-shortages/preflight', [IntelligenceController::class, 'materialShortagesPreflight']);
             });
             Route::post('/auto-reorder/{itemId}', [IntelligenceController::class, 'triggerAutoReorder'])
@@ -397,13 +432,13 @@ Route::prefix('v1')->group(function () {
             Route::get('/tailor-workload', [IntelligenceController::class, 'tailorWorkload'])
                 ->middleware('permission:production.view,sanctum');
             Route::get('/churn-risk', [IntelligenceController::class, 'churnRisk'])
-                ->middleware(['permission:intelligence.view,sanctum', 'report.page:signals']);
+                ->middleware(['permission:intelligence.view,sanctum', 'report.page:signals', 'report.business_wide']);
             Route::get('/customer-geography', [IntelligenceController::class, 'customerGeography'])
                 ->middleware('permission:intelligence.view,sanctum');
             Route::get('/channel-engagement', [IntelligenceController::class, 'channelEngagement'])
                 ->middleware('permission:intelligence.view,sanctum');
             Route::get('/budget-warnings', [IntelligenceController::class, 'budgetWarnings'])
-                ->middleware(['permission:expenses.view,sanctum', 'report.page:signals']);
+                ->middleware(['permission:expenses.view,sanctum', 'report.page:signals', 'report.business_wide']);
             // smart-tasks and entity-previews stay open to all authenticated
             // staff: smart-tasks is a personal to-do aggregation scoped to the
             // current user, and entity-previews only returns data for
@@ -430,7 +465,13 @@ Route::prefix('v1')->group(function () {
                 Route::post('/sessions/revoke-all',       [ProfileController::class, 'revokeAllSessions']);
                 Route::post('/sessions/{tokenId}/revoke', [ProfileController::class, 'revokeSession']);
                 Route::get('/activity',                   [ProfileController::class, 'activity']);
+                // The person's own terminal PIN (Phase 4C) — set/change with their password.
+                Route::put('/terminal-pin',               [AccountSecurityController::class, 'setTerminalPin']);
             });
+
+            // A clerk's PIN is cleared by their outlet manager (shared outlet),
+            // or the owner — decided in the controller, not by users.* (Phase 4C).
+            Route::post('/users/{id}/terminal-pin/reset', [UserSecurityController::class, 'resetTerminalPin'])->whereNumber('id');
 
             // ── Users by role — all staff (assignee dropdowns) ───────────────
             Route::get('/users/role/{role}', [UserController::class, 'byRole']);
@@ -459,7 +500,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/requests',           [AuditLogController::class, 'requests']);
                 Route::get('/integrity',          [AuditLogController::class, 'integrity']);
                 Route::get('/record/{type}/{id}', [AuditLogController::class, 'record'])->whereNumber('id');
-                Route::get('/export',             [AuditLogController::class, 'export']);
+                Route::get('/export',             [AuditLogController::class, 'export'])->middleware('step.up');
                 Route::post('/clear',             [AuditLogController::class, 'clear']);
                 Route::get('/{id}',               [AuditLogController::class, 'show'])->whereNumber('id');
             });
@@ -475,13 +516,48 @@ Route::prefix('v1')->group(function () {
                 Route::get('/requests',                 [DownloadRequestController::class, 'index']);
                 Route::post('/requests/{uuid}/cancel',  [DownloadRequestController::class, 'cancel'])->whereUuid('uuid');
                 Route::post('/requests/{uuid}/token',   [DownloadRequestController::class, 'token'])->whereUuid('uuid');
-                Route::post('/requests/{uuid}/approve', [DownloadRequestController::class, 'approve'])->whereUuid('uuid');
+                Route::post('/requests/{uuid}/approve', [DownloadRequestController::class, 'approve'])->whereUuid('uuid')->middleware('step.up');
                 Route::post('/requests/{uuid}/deny',    [DownloadRequestController::class, 'deny'])->whereUuid('uuid');
                 Route::get('/all',                      [DownloadRequestController::class, 'all']);
                 Route::get('/approvers',                [DownloadRequestController::class, 'approvers']);
-                Route::post('/approvers',               [DownloadRequestController::class, 'addApprover']);
-                Route::delete('/approvers/{userId}',    [DownloadRequestController::class, 'removeApprover'])->whereNumber('userId');
+                Route::post('/approvers',               [DownloadRequestController::class, 'addApprover'])->middleware('step.up');
+                Route::delete('/approvers/{userId}',    [DownloadRequestController::class, 'removeApprover'])->whereNumber('userId')->middleware('step.up');
                 Route::get('/{uuid}/archive',           [DownloadRequestController::class, 'archive'])->whereUuid('uuid');
+            });
+
+            // ── Approvals inbox (Phase 3B engine) ────────────────────────────
+            // One queue for every approval: what the caller can sign now, and
+            // what they submitted. Who may sign each band is the engine's
+            // decision (band key, maker ≠ checker, one signature per person) —
+            // not route middleware, which super_admin's Gate::before would pass.
+            // Thresholds: readable by staff, changed by the super admin alone
+            // (checked in the controller, on the role).
+            Route::prefix('approvals')->group(function () {
+                Route::get('/inbox',                [\App\Http\Controllers\Api\ApprovalController::class, 'inbox']);
+                Route::get('/mine',                 [\App\Http\Controllers\Api\ApprovalController::class, 'mine']);
+                Route::get('/thresholds',           [\App\Http\Controllers\Api\ApprovalController::class, 'thresholds']);
+                Route::put('/thresholds/{event}',   [\App\Http\Controllers\Api\ApprovalController::class, 'updateThresholds'])
+                    ->where('event', '[a-z_]+');
+                Route::get('/{id}',                 [\App\Http\Controllers\Api\ApprovalController::class, 'show'])->whereNumber('id');
+                Route::post('/{id}/sign',           [\App\Http\Controllers\Api\ApprovalController::class, 'sign'])->whereNumber('id');
+                Route::post('/{id}/reject',         [\App\Http\Controllers\Api\ApprovalController::class, 'reject'])->whereNumber('id');
+                Route::post('/{id}/resubmit',       [\App\Http\Controllers\Api\ApprovalController::class, 'resubmit'])->whereNumber('id');
+            });
+
+            // ── Proposals (Phase 3C) ─────────────────────────────────────────
+            // Changes to money-relevant values (prices, costs, tax, FX,
+            // settlement, credit) that apply only once signed. Who may propose
+            // each is the event's maker keys, checked in ProposalService; the
+            // signing is the Approvals inbox above.
+            Route::prefix('proposals')->group(function () {
+                Route::get('/',                   [\App\Http\Controllers\Api\ProposalController::class, 'index']);
+                Route::post('/',                  [\App\Http\Controllers\Api\ProposalController::class, 'store']);
+                Route::post('/preview',           [\App\Http\Controllers\Api\ProposalController::class, 'preview']);
+                Route::get('/thresholds',         [\App\Http\Controllers\Api\ProposalController::class, 'thresholds']);
+                Route::put('/thresholds/{event}', [\App\Http\Controllers\Api\ProposalController::class, 'updateThresholds'])
+                    ->where('event', '[a-z_]+');
+                Route::get('/{id}',               [\App\Http\Controllers\Api\ProposalController::class, 'show'])->whereNumber('id');
+                Route::post('/{id}/withdraw',     [\App\Http\Controllers\Api\ProposalController::class, 'withdraw'])->whereNumber('id');
             });
 
             // ── Trash / Recycle Bin (super_admin only) ────────────────────────
@@ -640,7 +716,7 @@ Route::prefix('v1')->group(function () {
             // Storefront Insights: visitors and online buyers by country — the
             // storefront's half of the customer picture, so it follows the
             // Customers & Neema report (was reports.view; role hardening 3A).
-            Route::middleware('report.page:customers')->prefix('analytics')->group(function () {
+            Route::middleware(['report.page:customers', 'report.business_wide'])->prefix('analytics')->group(function () {
                 Route::get('/overview', [\App\Http\Controllers\Api\AnalyticsController::class, 'overview']);
             });
 
@@ -653,11 +729,11 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Orders ───────────────────────────────────────────────────────
-            Route::middleware('permission:orders.view,sanctum')->prefix('orders')->group(function () {
+            Route::middleware(['permission:orders.view,sanctum', 'contacts.mask:orders.view'])->prefix('orders')->group(function () {
                 Route::get('/',                          [OrderController::class, 'index']);
                 // Must come before GET /{id} - otherwise Laravel matches
                 // "export" as the {id} parameter and routes to show() instead.
-                Route::get('/export',                    [OrderController::class, 'exportCsv']);
+                Route::get('/export',                    [OrderController::class, 'exportCsv'])->middleware('step.up');
                 // Also before /{id} for the same reason as /export.
                 Route::get('/pending-queue',             [OrderController::class, 'pendingQueue']);
                 // The shipping-fee modal's method picker: active methods only,
@@ -714,7 +790,7 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Shipments ────────────────────────────────────────────────────
-            Route::middleware('permission:shipment.view,sanctum')->prefix('shipments')->group(function () {
+            Route::middleware(['permission:shipment.view,sanctum', 'contacts.mask:shipment.view'])->prefix('shipments')->group(function () {
                 Route::get('/',           [ShipmentController::class, 'index']);
                 Route::get('/{id}',       [ShipmentController::class, 'show']);
                 Route::get('/{id}/tracking',  [ShipmentController::class, 'getTracking']);
@@ -749,7 +825,7 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Returns ──────────────────────────────────────────────────────
-            Route::middleware('permission:orders.manage_returns,sanctum')->prefix('returns')->group(function () {
+            Route::middleware(['permission:orders.manage_returns,sanctum', 'contacts.mask:orders.manage_returns'])->prefix('returns')->group(function () {
                 Route::get('/',                     [ReturnController::class, 'index']);
                 Route::get('/{id}',                 [ReturnController::class, 'show']);
                 Route::put('/{id}/status',          [ReturnController::class, 'updateStatus']);
@@ -760,7 +836,7 @@ Route::prefix('v1')->group(function () {
 
             // ── Quotations ───────────────────────────────────────────────────
             // Front of the quotation → invoice → receipt flow.
-            Route::middleware('permission:quotations.view,sanctum')->prefix('quotations')->group(function () {
+            Route::middleware(['permission:quotations.view,sanctum', 'contacts.mask:quotations.view'])->prefix('quotations')->group(function () {
                 Route::get('/',          [QuotationController::class, 'index']);
                 Route::get('/{id}',      [QuotationController::class, 'show']);
 
@@ -783,7 +859,7 @@ Route::prefix('v1')->group(function () {
             // ── Invoices ─────────────────────────────────────────────────────
             // The invoice stage of quotation → invoice → receipt (read views;
             // creation happens via quotation accept, payment via the order).
-            Route::middleware('permission:orders.view,sanctum')->prefix('invoices')->group(function () {
+            Route::middleware(['permission:orders.view,sanctum', 'contacts.mask:orders.view'])->prefix('invoices')->group(function () {
                 Route::get('/',      [InvoiceController::class, 'index']);
                 Route::get('/{id}',  [InvoiceController::class, 'show']);
             });
@@ -793,14 +869,22 @@ Route::prefix('v1')->group(function () {
             // handoff hands customers. orders.view: whoever answers the till
             // answers the handoff.
             Route::get('/interest-carts', [\App\Http\Controllers\Api\InterestCartAdminController::class, 'index'])
-                ->middleware('permission:orders.view,sanctum');
+                ->middleware(['permission:orders.view,sanctum', 'contacts.mask:orders.view']);
 
             // ── Customers ────────────────────────────────────────────────────
-            Route::middleware('permission:customers.view,sanctum')->prefix('customers')->group(function () {
+            // Phase 4A reveal: OUTSIDE the masked customers group — its answer
+            // is the unmasked value, for one field, one reason, one sale.
+            // Audited and capped inside (CustomerContactRevealController).
+            Route::post('/customers/{id}/reveal', [\App\Http\Controllers\Api\CustomerContactRevealController::class, 'reveal'])
+                ->whereNumber('id')
+                ->middleware('permission:customers.view|pos.access,sanctum');
+
+            Route::middleware(['permission:customers.view,sanctum', 'contacts.mask:customers.view'])->prefix('customers')->group(function () {
                 // customers.view is the PICKER: enough to find and attach a
                 // customer to a sale. The controller strips addresses, credit
                 // and balances from index/show for callers without insights.
-                Route::get('/',              [CustomerController::class, 'index']);
+                Route::get('/',              [CustomerController::class, 'index'])
+                    ->middleware('throttle:customer-search');
                 Route::get('/{id}',          [CustomerController::class, 'show']);
                 // Purchase history is the customer's financial profile —
                 // manager territory, not the till's. (A /{id}/statistics route
@@ -826,7 +910,7 @@ Route::prefix('v1')->group(function () {
             // ── Users ────────────────────────────────────────────────────────
             Route::middleware('permission:users.view,sanctum')->prefix('users')->group(function () {
                 Route::get('/',         [UserController::class, 'index']);
-                Route::get('/export',   [UserController::class, 'export']);
+                Route::get('/export',   [UserController::class, 'export'])->middleware('step.up');
                 Route::get('/{id}',     [UserController::class, 'show']);
                 Route::get('/{id}/activity',    [AuditLogController::class, 'userActivity']);
                 Route::get('/{id}/permissions', [UserController::class, 'permissions']);
@@ -840,7 +924,17 @@ Route::prefix('v1')->group(function () {
                 Route::delete('/{id}',              [UserController::class, 'destroy'])
                     ->middleware('permission:users.delete,sanctum');
                 Route::put('/{id}/role',            [UserController::class, 'updateRole'])
-                    ->middleware('permission:users.edit,sanctum');
+                    ->middleware(['permission:users.edit,sanctum', 'step.up']);
+
+                // Another person's sign-in (Phase 4C): system_admin for Tier
+                // 2–3, super_admin for anyone else — decided in the controller
+                // (StaffAuthority). Resetting 2FA needs step-up.
+                Route::post('/{id}/unlock',                    [UserSecurityController::class, 'unlock'])->whereNumber('id');
+                Route::post('/{id}/2fa/reset',                 [UserSecurityController::class, 'resetTwoFactor'])->whereNumber('id')
+                    ->middleware('step.up');
+                Route::get('/{id}/sessions',                   [UserSecurityController::class, 'sessions'])->whereNumber('id');
+                Route::post('/{id}/sessions/revoke-all',       [UserSecurityController::class, 'revokeAll'])->whereNumber('id');
+                Route::post('/{id}/sessions/{tokenId}/revoke', [UserSecurityController::class, 'revoke'])->whereNumber('id')->whereNumber('tokenId');
                 Route::put('/{id}/status',          [UserController::class, 'updateStatus'])
                     ->middleware('permission:users.edit,sanctum');
                 Route::post('/{id}/reset-password', [UserController::class, 'resetPassword'])
@@ -859,7 +953,7 @@ Route::prefix('v1')->group(function () {
             // Eloquent, so the viewer scope applies. This decides who gets the
             // screen, which is a decision rather than a leak.
             Route::get('pos/outstanding-balances', [PosController::class, 'outstandingBalances'])
-                ->middleware('permission:receivables.view,sanctum');
+                ->middleware(['permission:receivables.view,sanctum', 'contacts.mask:receivables.view']);
 
             // EoD review — reading every cashier's report, acknowledging it.
             // Outside the pos.access group for the same reason as receivables:
@@ -867,13 +961,30 @@ Route::prefix('v1')->group(function () {
             // which tied reviewing takings to reading Setup. Commenting stays
             // in the pos group below: the AUTHOR answers there too, and
             // canDiscussEodReport authorises per report.
-            Route::middleware('permission:pos.eod_review,sanctum')->prefix('pos/reports')->group(function () {
+            Route::middleware(['permission:pos.eod_review,sanctum', 'contacts.mask:pos.eod_review'])->prefix('pos/reports')->group(function () {
                 Route::get('eod-admin',                   [PosController::class, 'adminListEodReports']);
                 Route::get('eod-admin/{id}',              [PosController::class, 'adminGetEodReport']);
                 Route::post('eod-admin/{id}/acknowledge', [PosController::class, 'acknowledgeEodReport']);
             });
 
-            Route::middleware('permission:pos.access,sanctum')->prefix('pos')->group(function () {
+            // Till lifecycle back office (Phase 4B). Outside pos.access for the
+            // same reason as EoD review: the accountant and finance reconcile
+            // and correct tills without holding one. Who sees which till is
+            // TillVisibility, inside the controller; each step carries its key.
+            Route::middleware('permission:pos.access|pos.tills_view_all|pos.reconcile|pos.till_correction,sanctum')
+                ->prefix('pos/tills')->group(function () {
+                    Route::get('/',                  [TillController::class, 'index']);
+                    Route::get('{id}',               [TillController::class, 'show'])->whereNumber('id');
+                    Route::patch('{id}',             [TillController::class, 'update'])->whereNumber('id');
+                    Route::post('{id}/finalize',     [TillController::class, 'finalize'])->whereNumber('id')
+                        ->middleware('permission:pos.till_verify,sanctum');
+                    Route::post('{id}/reconcile',    [TillController::class, 'reconcile'])->whereNumber('id')
+                        ->middleware('permission:pos.reconcile,sanctum');
+                    Route::post('{id}/corrections',  [TillController::class, 'storeCorrection'])->whereNumber('id')
+                        ->middleware('permission:pos.till_correction,sanctum');
+                });
+
+            Route::middleware(['permission:pos.access,sanctum', 'contacts.mask:pos.access'])->prefix('pos')->group(function () {
                 Route::get('outlets',                   [PosController::class, 'outlets']);
                 Route::get('register/status',           [PosController::class, 'registerStatus']);
                 Route::get('register/history',          [PosController::class, 'registerHistory']);
@@ -900,7 +1011,8 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:settings.edit,sanctum');
                 Route::post('reports/eod-settings/test', [PosController::class, 'testEodDelivery'])
                     ->middleware('permission:settings.edit,sanctum');
-                Route::get('customers/search',          [PosController::class, 'searchCustomers']);
+                Route::get('customers/search',          [PosController::class, 'searchCustomers'])
+                    ->middleware('throttle:customer-search');
                 Route::get('pending-order/open',        [PosController::class, 'getOpenPendingOrder']);
                 // Read-only, active-only shipping methods for the POS checkout picker.
                 // Uses PosController (not ShippingController::adminMethods, which is
@@ -941,6 +1053,17 @@ Route::prefix('v1')->group(function () {
                 Route::post('sales/{id}/email-receipt', [PosController::class, 'emailReceipt']);
                 Route::post('returns',                  [PosController::class, 'processReturn'])
                     ->middleware(['permission:pos.returns,sanctum', 'owner.no_transact']);
+
+                // Phase 4B part 2: a void or a return above is only a REQUEST.
+                // The approver signs here, on this till, with their own PIN
+                // (or from the Approvals inbox). No owner.no_transact: the
+                // owner may APPROVE at a till, never ring.
+                Route::get('sales/{id}/reversals',      [\App\Http\Controllers\Api\PosTillApprovalController::class, 'forSale'])
+                    ->whereNumber('id');
+                Route::get('approvals/{id}/approvers',  [\App\Http\Controllers\Api\PosTillApprovalController::class, 'approvers'])
+                    ->whereNumber('id');
+                Route::post('approvals/{id}/pin-sign',  [\App\Http\Controllers\Api\PosTillApprovalController::class, 'pinSign'])
+                    ->whereNumber('id')->middleware('throttle:30,1');
             });
 
             // ── Inventory ────────────────────────────────────────────────────
@@ -1051,7 +1174,7 @@ Route::prefix('v1')->group(function () {
             Route::middleware('permission:procurement.view,sanctum')->group(function () {
                 Route::prefix('suppliers')->group(function () {
                     Route::get('/',                     [SupplierController::class, 'index']);
-                    Route::get('/export',               [SupplierController::class, 'export']);
+                    Route::get('/export',               [SupplierController::class, 'export'])->middleware('step.up');
                     Route::get('/{id}',                 [SupplierController::class, 'show']);
                     Route::get('/{id}/purchase-orders', [SupplierController::class, 'purchaseOrders']);
                     Route::get('/{id}/performance',     [SupplierController::class, 'performance']);
@@ -1225,7 +1348,7 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Payments ─────────────────────────────────────────────────────
-            Route::middleware('permission:payments.view,sanctum')->group(function () {
+            Route::middleware(['permission:payments.view,sanctum', 'contacts.mask:payments.view'])->group(function () {
                 // The ledger is NOT the same capability as seeing a payment on
                 // an order. payments.view is held by every cashier so they can
                 // record a takings; payments.transactions — "View the full
@@ -1242,15 +1365,24 @@ Route::prefix('v1')->group(function () {
                     Route::middleware('permission:payments.transactions,sanctum')->group(function () {
                         Route::get('/',          [PaymentController::class, 'allTransactions']);
                         Route::get('/analytics', [PaymentController::class, 'transactionAnalytics']);
-                        Route::get('/export',    [PaymentController::class, 'exportTransactions']);
+                        Route::get('/export',    [PaymentController::class, 'exportTransactions'])->middleware('step.up');
                         Route::get('/{id}',      [PaymentController::class, 'transactionDetails']);
                     });
                     Route::post('/{id}/refund',    [PaymentController::class, 'refundTransaction'])
                         ->middleware('permission:orders.refund,sanctum');
+                    // Phase 3B: voiding or moving a payment is a REQUEST that
+                    // finance executes when the approval engine has its
+                    // signatures (≤ KES 50,000 finance; above, + super admin).
+                    // The old endpoints still answer — for the keys that could
+                    // act directly before — but they now ask, not act.
                     Route::post('/{id}/void',      [PaymentController::class, 'voidPayment'])
                         ->middleware('permission:payments.void,sanctum');
                     Route::post('/{id}/reassign',  [PaymentController::class, 'reassignPayment'])
                         ->middleware('permission:payments.reassign,sanctum');
+                    Route::post('/{id}/void-request',     [PaymentController::class, 'voidPayment'])
+                        ->middleware('permission:payments.request_void|payments.void,sanctum');
+                    Route::post('/{id}/reassign-request', [PaymentController::class, 'reassignPayment'])
+                        ->middleware('permission:payments.request_reassign|payments.reassign,sanctum');
                 });
 
                 Route::prefix('payments')->group(function () {
@@ -1278,17 +1410,20 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Tax rates ─────────────────────────────────────────────────────
-            Route::middleware('permission:settings.view,sanctum')->prefix('tax-rates')->group(function () {
+            // Phase 3C: finance (settings.financial_propose) reads tax rates and
+            // PROPOSES what one charges; the controller sends rate / active /
+            // default through a tax_rate_change proposal the super admin signs.
+            Route::middleware('permission:settings.view|settings.financial_propose,sanctum')->prefix('tax-rates')->group(function () {
                 Route::get('/',            [TaxRateController::class, 'index']);
                 Route::get('/{id}',        [TaxRateController::class, 'show']);
                 Route::post('/',           [TaxRateController::class, 'store'])
-                    ->middleware('permission:settings.edit,sanctum');
+                    ->middleware(['permission:settings.edit,sanctum', 'step.up']);
                 Route::put('/{id}',        [TaxRateController::class, 'update'])
-                    ->middleware('permission:settings.edit,sanctum');
+                    ->middleware(['permission:settings.edit|settings.financial_propose,sanctum', 'step.up']);
                 Route::delete('/{id}',     [TaxRateController::class, 'destroy'])
-                    ->middleware('permission:settings.edit,sanctum');
+                    ->middleware(['permission:settings.edit,sanctum', 'step.up']);
                 Route::put('/{id}/toggle', [TaxRateController::class, 'toggleStatus'])
-                    ->middleware('permission:settings.edit,sanctum');
+                    ->middleware(['permission:settings.edit|settings.financial_propose,sanctum', 'step.up']);
             });
 
             // ── Shipping ──────────────────────────────────────────────────────
@@ -1400,7 +1535,7 @@ Route::prefix('v1')->group(function () {
             // report.window: one date contract for the whole section — a
             // caller using the other page's spelling got a different window
             // back, silently (D4). See NormalisesReportWindow.
-            $reportPage = fn (string $page) => ["report.page:{$page}", 'report.window', 'report.snapshot', 'report.contacts'];
+            $reportPage = fn (string $page) => ["report.page:{$page}", 'report.business_wide', 'report.window', 'report.snapshot', 'report.contacts'];
 
             // Shared by every page: the outlet filter, and the schedule list
             // (filtered to the pages the caller can open). Drills inherit the
@@ -1420,7 +1555,7 @@ Route::prefix('v1')->group(function () {
                 Route::post('/export/pdf',     [ReportController::class, 'exportPDF'])
                     ->middleware('permission:reports.export|reports.export_supply,sanctum');
                 Route::post('/export/excel',   [ReportController::class, 'exportExcel'])
-                    ->middleware('permission:reports.export|reports.export_supply,sanctum');
+                    ->middleware(['permission:reports.export|reports.export_supply,sanctum', 'step.up']);
             });
             Route::middleware($reportPage('drill'))->prefix('reports')->group(function () {
                 Route::get('/drill/{metric}',  [\App\Http\Controllers\Api\ExecutiveReportController::class, 'drill']);
@@ -1563,7 +1698,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/tax',                 [SettingController::class, 'taxSettings']);
                 Route::get('/maintenance',         [SettingController::class, 'maintenanceMode']);
 
-                Route::middleware('permission:settings.edit,sanctum')->group(function () {
+                Route::middleware(['permission:settings.edit,sanctum', 'step.up'])->group(function () {
                     Route::put('/',                    [SettingController::class, 'update']);
                     Route::post('/logo',               [SettingController::class, 'uploadLogo']);
                     Route::put('/payment-providers',   [SettingController::class, 'updatePaymentProviders']);
@@ -1645,7 +1780,7 @@ Route::prefix('v1')->group(function () {
             // (report.page) and that page's export right (report.export):
             // reports.export, or reports.export_supply for Inventory and
             // Procurement.
-            $reportPdf = fn (string $page) => ["report.page:{$page}", 'report.export', 'report.window', 'report.snapshot'];
+            $reportPdf = fn (string $page) => ["report.page:{$page}", 'report.export', 'report.business_wide', 'report.window', 'report.snapshot'];
             Route::prefix('reports/pdf')->name('reports.pdf.')->group(function () use ($reportPdf) {
                 Route::get('/sales',        [ReportPdfController::class, 'sales'])       ->middleware($reportPdf('sales'))      ->name('sales');
                 Route::get('/financial',    [ReportPdfController::class, 'financial'])   ->middleware($reportPdf('financial'))  ->name('financial');
@@ -1680,7 +1815,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{id}',              [RoleController::class, 'show']);
                 Route::get('/{id}/permissions',  [RoleController::class, 'permissions']);
 
-                Route::middleware('permission:roles.edit,sanctum')->group(function () {
+                Route::middleware(['permission:roles.edit,sanctum', 'step.up'])->group(function () {
                     Route::post('/',                 [RoleController::class, 'store']);
                     Route::put('/{id}',              [RoleController::class, 'update']);
                     Route::delete('/{id}',           [RoleController::class, 'destroy']);
@@ -1692,7 +1827,7 @@ Route::prefix('v1')->group(function () {
             Route::middleware('permission:roles.view,sanctum')->prefix('permissions')->group(function () {
                 Route::get('/',        [PermissionController::class, 'index']);
 
-                Route::middleware('permission:roles.edit,sanctum')->group(function () {
+                Route::middleware(['permission:roles.edit,sanctum', 'step.up'])->group(function () {
                     Route::post('/',       [PermissionController::class, 'store']);
                     Route::put('/{id}',    [PermissionController::class, 'update']);
                     Route::delete('/{id}', [PermissionController::class, 'destroy']);
@@ -1716,17 +1851,25 @@ Route::prefix('v1')->group(function () {
                 });
             });
 
-            Route::middleware('permission:settings.view,sanctum')->prefix('currencies-management')->group(function () {
+            // Phase 3C: the two rates are proposals. Finance proposes a reporting
+            // rate (the super admin signs), admin a pricing rate (finance signs);
+            // both may read the screen and reach the two rate-writing routes,
+            // where the controller sends each rate through its proposal and
+            // keeps every other field the super admin's (settings.edit).
+            Route::middleware('permission:settings.view|settings.financial_propose|settings.pricing_rate_propose,sanctum')->prefix('currencies-management')->group(function () {
                 Route::get('/',                 [CurrencyController::class, 'index']);
                 Route::get('/{id}',             [CurrencyController::class, 'show']);
 
-                Route::middleware('permission:settings.edit,sanctum')->group(function () {
-                    Route::post('/',                [CurrencyController::class, 'store']);
+                Route::middleware(['permission:settings.edit|settings.financial_propose|settings.pricing_rate_propose,sanctum', 'step.up'])->group(function () {
                     Route::put('/{id}',             [CurrencyController::class, 'update']);
+                    Route::put('/{id}/rates',       [CurrencyController::class, 'updateRates']);
+                });
+
+                Route::middleware(['permission:settings.edit,sanctum', 'step.up'])->group(function () {
+                    Route::post('/',                [CurrencyController::class, 'store']);
                     Route::delete('/{id}',          [CurrencyController::class, 'destroy']);
                     Route::put('/{id}/toggle',      [CurrencyController::class, 'toggleStatus']);
                     Route::put('/{id}/set-default', [CurrencyController::class, 'setDefault']);
-                    Route::put('/{id}/rates',       [CurrencyController::class, 'updateRates']);
                     Route::post('/sync-rates',      [CurrencyController::class, 'syncRates']);
                 });
             });
@@ -1743,13 +1886,18 @@ Route::prefix('v1')->group(function () {
                 });
             });
 
-            Route::middleware('permission:settings.view,sanctum')->prefix('payment-methods-management')->group(function () {
+            // Phase 3C: finance reads payment methods and proposes settlement
+            // changes (requires_approval); the controller sends that field
+            // through a proposal the super admin signs and keeps every other
+            // field the super admin's (settings.edit).
+            Route::middleware('permission:settings.view|settings.financial_propose,sanctum')->prefix('payment-methods-management')->group(function () {
                 Route::get('/',            [PaymentMethodController::class, 'index']);
                 Route::get('/{id}',        [PaymentMethodController::class, 'show']);
+                Route::put('/{id}',        [PaymentMethodController::class, 'update'])
+                    ->middleware(['permission:settings.edit|settings.financial_propose,sanctum', 'step.up']);
 
-                Route::middleware('permission:settings.edit,sanctum')->group(function () {
+                Route::middleware(['permission:settings.edit,sanctum', 'step.up'])->group(function () {
                     Route::post('/',           [PaymentMethodController::class, 'store']);
-                    Route::put('/{id}',        [PaymentMethodController::class, 'update']);
                     Route::delete('/{id}',     [PaymentMethodController::class, 'destroy']);
                     Route::put('/{id}/toggle', [PaymentMethodController::class, 'toggleStatus']);
                     Route::put('/{id}/config', [PaymentMethodController::class, 'updateConfig']);
@@ -1776,27 +1924,27 @@ Route::prefix('v1')->group(function () {
                 // Transaction clear-by-date
                 Route::get('/clearable-tables',   [DatabaseManagementController::class, 'clearableTables']);
                 Route::post('/clear-preview',     [DatabaseManagementController::class, 'clearPreview']);
-                Route::post('/clear',             [DatabaseManagementController::class, 'clear']);
+                Route::post('/clear',             [DatabaseManagementController::class, 'clear'])->middleware('step.up');
 
                 // Backups
                 Route::get('/backups',                  [DatabaseManagementController::class, 'backupsIndex']);
-                Route::post('/backups',                 [DatabaseManagementController::class, 'backupsStore']);
-                Route::get('/backups/{id}/download',    [DatabaseManagementController::class, 'backupsDownload']);
-                Route::post('/backups/{id}/restore',    [DatabaseManagementController::class, 'backupsRestore']);
-                Route::delete('/backups/{id}',          [DatabaseManagementController::class, 'backupsDestroy']);
+                Route::post('/backups',                 [DatabaseManagementController::class, 'backupsStore'])->middleware('step.up');
+                Route::get('/backups/{id}/download',    [DatabaseManagementController::class, 'backupsDownload'])->middleware('step.up');
+                Route::post('/backups/{id}/restore',    [DatabaseManagementController::class, 'backupsRestore'])->middleware('step.up');
+                Route::delete('/backups/{id}',          [DatabaseManagementController::class, 'backupsDestroy'])->middleware('step.up');
 
                 // Scheduled backup config
                 Route::get('/schedule',           [DatabaseManagementController::class, 'scheduleShow']);
-                Route::put('/schedule',           [DatabaseManagementController::class, 'scheduleUpdate']);
+                Route::put('/schedule',           [DatabaseManagementController::class, 'scheduleUpdate'])->middleware('step.up');
 
                 // Backup storage destination config (local / S3-compatible)
                 Route::get('/storage-settings',         [DatabaseManagementController::class, 'storageSettingsShow']);
-                Route::put('/storage-settings',         [DatabaseManagementController::class, 'storageSettingsUpdate']);
-                Route::post('/storage-settings/test',   [DatabaseManagementController::class, 'storageSettingsTest']);
+                Route::put('/storage-settings',         [DatabaseManagementController::class, 'storageSettingsUpdate'])->middleware('step.up');
+                Route::post('/storage-settings/test',   [DatabaseManagementController::class, 'storageSettingsTest'])->middleware('step.up');
 
                 // Full factory-reset wipe — extremely destructive, guarded in the
                 // controller by confirm phrase + password re-auth + mandatory pre-wipe backup.
-                Route::post('/wipe',              [DatabaseManagementController::class, 'wipe']);
+                Route::post('/wipe',              [DatabaseManagementController::class, 'wipe'])->middleware('step.up');
             });
         });
 
@@ -1809,7 +1957,7 @@ Route::prefix('v1')->group(function () {
         // pos.cash_management - could still hit every one of those actions
         // through this alternate route set, since only the role name was
         // ever checked. Mirrored to the same per-action gates as /admin/pos.
-        Route::middleware(['role:pos_clerk|outlet_manager|admin|super_admin', 'permission:pos.access,sanctum'])->prefix('pos')->group(function () {
+        Route::middleware(['role:pos_clerk|outlet_manager|admin|super_admin', 'permission:pos.access,sanctum', 'contacts.mask:pos.access'])->prefix('pos')->group(function () {
             Route::get('/products',                 [PosController::class, 'products']);
             Route::get('/products/search',          [PosController::class, 'searchProducts']);
             Route::get('/suggestions',              [PosController::class, 'suggestions']);
@@ -1828,12 +1976,9 @@ Route::prefix('v1')->group(function () {
             Route::get('/cash-register/status',         [PosController::class, 'registerStatus']);
             Route::get('/cash-register/transactions',   [PosController::class, 'cashTransactions']);
             Route::get('/cash-register/summary',        [PosController::class, 'cashSummary']);
-            Route::post('/cash-register/deposit',       [PosController::class, 'cashDeposit'])
-                ->middleware(['permission:pos.cash_management,sanctum', 'owner.no_transact']);
-            Route::post('/cash-register/withdrawal',    [PosController::class, 'cashWithdrawal'])
-                ->middleware(['permission:pos.cash_management,sanctum', 'owner.no_transact']);
-            Route::post('/cash-register/adjustment',    [PosController::class, 'cashAdjustment'])
-                ->middleware(['permission:pos.cash_management,sanctum', 'owner.no_transact']);
+            // deposit / withdrawal / adjustment were removed (4D): they named
+            // PosController methods that never existed, so every call was a 500,
+            // and nothing in the console called them.
             Route::get('/cash-register/reconciliation', [PosController::class, 'reconciliation']);
         });
 

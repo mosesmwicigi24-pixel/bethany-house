@@ -39,10 +39,12 @@ const NAV: NavGroup[] = [
                 label: "Approvals",
                 href: "/approvals",
                 icon: "approvals",
-                // Only actionable queues: the page's three approval actions.
-                // procurement.view used to open it to every buyer and to
-                // finance's non-approvers, and then the page guard refused them.
-                anyOfPermissions: ["procurement.approve", "inventory.approve", "payments.approve_international"],
+                // Phase 3B: one queue for everyone who signs a band (procurement,
+                // stock, expenses, finance, payment void/move, payment proofs)
+                // and "My submissions" for everyone who raises something that
+                // needs approval. Same list as the App.tsx route guard and the
+                // command palette. The server decides what each person can sign.
+                anyOfPermissions: ["procurement.approve", "inventory.approve", "expenses.approve", "approvals.finance_sign", "payments.void", "payments.reassign", "payments.approve_international", "payments.request_void", "payments.request_reassign", "procurement.create", "inventory.adjust", "inventory.transfer", "expenses.create", "products.edit", "products.edit_cost", "orders.set_deposit", "settings.financial_propose", "settings.pricing_rate_propose"],
             },
             {
                 label: "Notifications",
@@ -164,6 +166,14 @@ const NAV: NavGroup[] = [
                 // Chasing what customers owe is a manager's job, not a
                 // cashier's.
                 permission: "receivables.view",
+            },
+            {
+                label: "Tills",
+                href: "/pos/tills",
+                icon: "eod-reports",
+                // Count, verify, reconcile, correct (Phase 4B). Same gate as
+                // the API's tills group; each step inside has its own key.
+                anyOfPermissions: ["pos.access", "pos.tills_view_all", "pos.reconcile", "pos.till_correction"],
             },
             {
                 label: "EoD Reports",
@@ -514,7 +524,8 @@ const NAV: NavGroup[] = [
                 label: "Currencies",
                 href: "/settings/currencies",
                 icon: "currencies",
-                permission: "settings.view",
+                // Phase 3C: finance and admin read it to propose rate changes.
+                anyOfPermissions: ["settings.view", "settings.financial_propose", "settings.pricing_rate_propose"],
             },
             {
                 label: "Languages",
@@ -527,13 +538,15 @@ const NAV: NavGroup[] = [
                 label: "Tax Rates",
                 href: "/settings/taxes",
                 icon: "taxes",
-                permission: "settings.view",
+                // Phase 3C: finance reads it to propose rate changes.
+                anyOfPermissions: ["settings.view", "settings.financial_propose"],
             },
             {
                 label: "Payment Methods",
                 href: "/settings/payment-methods",
                 icon: "payments-setup",
-                permission: "settings.view",
+                // Phase 3C: finance reads it to propose settlement changes.
+                anyOfPermissions: ["settings.view", "settings.financial_propose"],
             },
             {
                 label: "Shipping",

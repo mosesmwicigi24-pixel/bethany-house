@@ -473,6 +473,12 @@ class ProductController extends Controller
                 'product' => CostVisibility::forViewer($detail, $request->user()),
             ], 201);
 
+        } catch (\App\Exceptions\DiscountAboveMaximum|\Illuminate\Validation\ValidationException $e) {
+            // A refusal the price record MEANT to give — the owner's 5% rule or
+            // a sale price that is not a discount. Without this arm the catch
+            // below answers 500, telling the editor the server broke.
+            DB::rollBack();
+            throw $e;
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['message' => 'Failed to create product.', 'error' => $e->getMessage()], 500);
@@ -608,27 +614,15 @@ class ProductController extends Controller
                 }
             }
 
-            // Upsert base prices. A cost-blind editor's form has no cost field,
-            // so writing what it sent would null every cost_price it touched —
-            // for them the column is left exactly as it was.
-            $costWrite = fn (array $price) => CostVisibility::allows($request->user())
-                ? ['cost_price' => $price['cost_price'] ?? null]
-                : [];
+            // Base prices (Phase 3C): a change to an existing price or cost is
+            // a proposal — at once inside the maker's band, otherwise waiting
+            // for signatures with the live value untouched. A cost-blind
+            // editor (no products.edit_cost) leaves cost exactly as it was.
+            $proposals = [];
             if (!empty($validated['prices'])) {
                 foreach ($validated['prices'] as $price) {
-                    ProductPrice::updateOrCreate(
-                        [
-                            'product_id'         => $product->id,
-                            'product_variant_id' => null,
-                            'currency_code'      => $price['currency_code'],
-                        ],
-                        [
-                            'regular_price'   => $price['regular_price'],
-                            'sale_price'      => $price['sale_price'] ?? null,
-                            'sale_start_date' => $price['sale_start_date'] ?? null,
-                            'sale_end_date'   => $price['sale_end_date'] ?? null,
-                        ] + $costWrite($price)
-                    );
+                    array_push($proposals, ...app(\App\Services\Approvals\PriceRowWriter::class)
+                        ->write($product->id, null, $price, $request->user(), true));
                 }
             }
 
@@ -662,10 +656,19 @@ class ProductController extends Controller
             $detail['tax_rates']    = $this->loadTaxRates($id);
 
             return response()->json([
-                'message' => 'Product updated successfully.',
-                'product' => CostVisibility::forViewer($detail, $request->user()),
+                'message'   => \App\Services\Approvals\ProposalMessages::saved('Product updated successfully.', $proposals),
+                'product'   => CostVisibility::forViewer($detail, $request->user()),
+                'proposals' => \App\Services\Approvals\ProposalMessages::present($proposals, $request->user()),
             ]);
 
+        } catch (\Illuminate\Http\Exceptions\HttpResponseException|\App\Exceptions\DiscountAboveMaximum|\Illuminate\Validation\ValidationException $e) {
+            // A refusal the save MEANT to give — a proposal refused (one already
+            // waiting, a value it cannot take; Phase 3C), the owner's 5% rule, or
+            // a sale price that is not a discount: nothing of this save is kept,
+            // and the reason reaches the editor. Without this arm the catch
+            // below answers 500, telling the editor the server broke.
+            DB::rollBack();
+            throw $e;
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['message' => 'Failed to update product.', 'error' => $e->getMessage()], 500);
@@ -1060,6 +1063,12 @@ class ProductController extends Controller
                 'variant' => CostVisibility::forViewer($variant->load(['prices', 'images'])->toArray(), $request->user()),
             ], 201);
 
+        } catch (\App\Exceptions\DiscountAboveMaximum|\Illuminate\Validation\ValidationException $e) {
+            // A refusal the price record MEANT to give — the owner's 5% rule or
+            // a sale price that is not a discount. Without this arm the catch
+            // below answers 500, telling the editor the server broke.
+            DB::rollBack();
+            throw $e;
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['message' => 'Failed to create variant.', 'error' => $e->getMessage()], 500);
@@ -1099,19 +1108,12 @@ class ProductController extends Controller
 
             $variant->update($updateData);
 
+            // Same rule as update() (Phase 3C): price and cost changes are proposals.
+            $proposals = [];
             if (!empty($validated['prices'])) {
                 foreach ($validated['prices'] as $price) {
-                    ProductPrice::updateOrCreate(
-                        ['product_variant_id' => $variant->id, 'currency_code' => $price['currency_code']],
-                        [
-                            'product_id'    => $productId,
-                            'regular_price' => $price['regular_price'],
-                            'sale_price'    => $price['sale_price'] ?? null,
-                        ] + (CostVisibility::allows($request->user())
-                            // Same rule as update(): a cost-blind save leaves cost alone.
-                            ? ['cost_price' => $price['cost_price'] ?? null]
-                            : [])
-                    );
+                    array_push($proposals, ...app(\App\Services\Approvals\PriceRowWriter::class)
+                        ->write((int) $productId, $variant->id, $price, $request->user(), false));
                 }
             }
 
@@ -1128,10 +1130,16 @@ class ProductController extends Controller
             } catch (\Exception) {}
 
             return response()->json([
-                'message' => 'Variant updated.',
-                'variant' => CostVisibility::forViewer($variant->fresh()->load(['prices', 'images'])->toArray(), $request->user()),
+                'message'   => \App\Services\Approvals\ProposalMessages::saved('Variant updated.', $proposals),
+                'variant'   => CostVisibility::forViewer($variant->fresh()->load(['prices', 'images'])->toArray(), $request->user()),
+                'proposals' => \App\Services\Approvals\ProposalMessages::present($proposals, $request->user()),
             ]);
 
+        } catch (\Illuminate\Http\Exceptions\HttpResponseException|\App\Exceptions\DiscountAboveMaximum|\Illuminate\Validation\ValidationException $e) {
+            // As in update(): a proposal refused, the 5% rule, or a sale price
+            // that is not a discount — rolled back, the reason passed on.
+            DB::rollBack();
+            throw $e;
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['message' => 'Failed to update variant.', 'error' => $e->getMessage()], 500);

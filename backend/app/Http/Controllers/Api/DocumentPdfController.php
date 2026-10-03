@@ -83,6 +83,19 @@ class DocumentPdfController extends Controller
 
     // ─── Purchase Order ───────────────────────────────────────────────────────
 
+    /**
+     * Phase 4A: a rendered PDF cannot be masked afterwards, so the customer's
+     * contacts are masked in the data first — the same rules the JSON screens
+     * get (CustomerContacts::policyFor / apply).
+     */
+    private function masked(array $data, string $permission): array
+    {
+        return \App\Support\CustomerContacts::apply(
+            $data,
+            \App\Support\CustomerContacts::policyFor(request()->user(), $permission),
+        );
+    }
+
     public function purchaseOrder(int $id): Response
     {
         $po = PurchaseOrder::with([
@@ -209,7 +222,7 @@ class DocumentPdfController extends Controller
         // this is missing, which named the shop rather than the person.
         $data['cashier_name']   = $order->creator?->name ?: null;
 
-        $html = PdfService::order($data, $isInvoice);
+        $html = PdfService::order($this->masked($data, 'orders.view'), $isInvoice);
         $prefix = $isInvoice ? 'Invoice' : 'Order';
         return $this->makePdf($html, "{$prefix}-{$order->order_number}");
     }
@@ -228,7 +241,7 @@ class DocumentPdfController extends Controller
         $data = $quotation->toArray();
         $data['outlet_name'] = $quotation->outlet?->name;
 
-        $html = PdfService::quotation($data);
+        $html = PdfService::quotation($this->masked($data, 'quotations.view'));
         return $this->makePdf($html, 'Quotation-' . ($quotation->quote_number ?? $quotation->id));
     }
 
@@ -237,9 +250,18 @@ class DocumentPdfController extends Controller
     /** Renders a receipt from its immutable sales_documents snapshot. */
     public function receipt(int $id): Response
     {
-        $document = SalesDocument::where('type', SalesDocument::RECEIPT)->findOrFail($id);
+        // Phase 4A: a receipt is visible when the sale (or quotation) it was
+        // issued against is — the document's ViewerScoped parent decides.
+        $unbounded = \App\Services\DataScopeResolver::for(request()->user(), 'orders.view') === \App\Enums\DataScope::All;
+        $document = SalesDocument::where('type', SalesDocument::RECEIPT)
+            ->when(!$unbounded, fn ($q) => $q->where(fn ($w) => $w
+                ->where(fn ($o) => $o->where('documentable_type', Order::class)
+                    ->whereIn('documentable_id', Order::query()->select('orders.id')))
+                ->orWhere(fn ($o) => $o->where('documentable_type', Quotation::class)
+                    ->whereIn('documentable_id', Quotation::query()->select('quotations.id')))))
+            ->findOrFail($id);
 
-        $html = PdfService::receipt($document->snapshot ?? []);
+        $html = PdfService::receipt($this->masked($document->snapshot ?? [], 'orders.view'));
         return $this->makePdf($html, 'Receipt-' . $document->number);
     }
 
@@ -247,7 +269,7 @@ class DocumentPdfController extends Controller
 
     public function shipment(int $id): Response
     {
-        $shipment = OrderShipment::with([
+        $shipment = OrderShipment::whereIn('order_id', Order::query()->select('orders.id'))->with([
             'order:id,order_number,customer_first_name,customer_last_name,customer_email,customer_phone',
             'tracking',
         ])->findOrFail($id);
@@ -258,7 +280,7 @@ class DocumentPdfController extends Controller
         ]) : null;
         $data['tracking'] = $shipment->tracking?->toArray() ?? [];
 
-        $html = PdfService::shipment($data);
+        $html = PdfService::shipment($this->masked($data, 'shipment.view'));
         return $this->makePdf($html, 'Shipment-' . ($shipment->shipment_number ?? $id));
     }
 
@@ -266,7 +288,7 @@ class DocumentPdfController extends Controller
 
     public function orderReturn(int $id): Response
     {
-        $ret = OrderReturn::with([
+        $ret = OrderReturn::whereIn('order_id', Order::query()->select('orders.id'))->with([
             'order:id,order_number,customer_first_name,customer_last_name,customer_email',
             'order.user:id,first_name,last_name,email',
             'items',
@@ -281,7 +303,7 @@ class DocumentPdfController extends Controller
         $data['customer_email'] = $ret->order?->user?->email ?? $ret->order?->customer_email ?? '';
         $data['customer_email'] = $ret->order?->user?->email ?? '';
 
-        $html = PdfService::orderReturn($data);
+        $html = PdfService::orderReturn($this->masked($data, 'orders.manage_returns'));
         return $this->makePdf($html, 'Return-' . ($ret->return_number ?? $id));
     }
 
@@ -289,7 +311,8 @@ class DocumentPdfController extends Controller
 
     public function productionOrder(int $id): Response
     {
-        $po = ProductionOrder::with([
+        // The printed order is the order (4D): visible to whoever may open it.
+        $po = ProductionOrder::visibleTo(request()->user())->with([
             'product:id,sku',
             'product.translations' => fn($q) => $q->where('language_code','en')->select('product_id','name'),
             'variant:id,variant_name,sku',
@@ -322,7 +345,7 @@ class DocumentPdfController extends Controller
 
     public function stockTransfer(int $id): Response
     {
-        $transfer = InventoryTransfer::with([
+        $transfer = InventoryTransfer::visibleTo(request()->user())->with([
             'fromOutlet:id,name',
             'toOutlet:id,name',
             'requestedBy:id,first_name,last_name',
@@ -362,7 +385,14 @@ class DocumentPdfController extends Controller
 
     public function stockAdjustment(int $id): Response
     {
-        $adj = \App\Models\InventoryTransaction::with([
+        $adj = \App\Models\InventoryTransaction::query()
+            ->tap(function ($q) {
+                $ids = \App\Services\DataScopeResolver::outletIdsForUnowned(request()->user(), 'inventory.view');
+                if ($ids !== null) {
+                    $q->whereIn('inventory_item_id', \Illuminate\Support\Facades\DB::table('inventory_items')->select('id')->whereIn('outlet_id', $ids));
+                }
+            })
+            ->with([
             'inventoryItem.product:id,sku',
             'inventoryItem.product.translations' => fn ($q) => $q->where('language_code', 'en')->select('product_id', 'name'),
             'inventoryItem.variant:id,sku,variant_name',
@@ -422,6 +452,7 @@ class DocumentPdfController extends Controller
         $this->authoriseOutletScopeFor(
             $request->user(),
             Expense::findOrFail($id)->outlet_id,
+            'expenses.view',
         );
 
         $exp = Expense::with([

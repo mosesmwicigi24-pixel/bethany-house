@@ -59,6 +59,10 @@ const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
 
 export default function PaymentTransactionsPage() {
     const { can }  = usePermissions();
+    // Asking is the accountant's (request_*); finance's keys ask too. Either
+    // way it executes only once the Approvals inbox has the signatures (3B).
+    const canVoid     = can('payments.void') || can('payments.request_void');
+    const canReassign = can('payments.reassign') || can('payments.request_reassign');
     const table    = useTableState();
     const dr       = useDateRange("last_30_days");
 
@@ -619,22 +623,22 @@ export default function PaymentTransactionsPage() {
                                     </div>
 
                                     {/* Admin actions — Void & Reassign */}
-                                    {p.status !== 'voided' && (can('payments.void') || can('payments.reassign')) && (
+                                    {p.status !== 'voided' && (canVoid || canReassign) && (
                                         <div className="border-t border-line pt-4 space-y-2">
                                             <p className="text-2xs text-surface-400 font-semibold uppercase tracking-widest">Admin Actions</p>
                                             <div className="flex gap-2">
-                                                {can('payments.reassign') && (
+                                                {canReassign && (
                                                     <button
                                                         onClick={() => { setReassignTarget(p.id); setSelectedId(null); }}
                                                         className="btn-secondary text-xs flex-1">
-                                                        Reassign to Order
+                                                        Request move to order
                                                     </button>
                                                 )}
-                                                {can('payments.void') && (
+                                                {canVoid && (
                                                     <button
                                                         onClick={() => { setVoidTarget(p.id); setSelectedId(null); }}
                                                         className="flex-1 px-3 py-2 rounded-lg border border-danger/30 text-danger text-xs font-medium hover:bg-danger-light transition-colors">
-                                                        Void Payment
+                                                        Request void
                                                     </button>
                                                 )}
                                             </div>
@@ -668,8 +672,8 @@ export default function PaymentTransactionsPage() {
                             </svg>
                         </div>
                         <div>
-                            <h3 className="font-semibold text-surface-900">Void Payment</h3>
-                            <p className="text-xs text-surface-500">This cannot be undone. The order balance will be recalculated.</p>
+                            <h3 className="font-semibold text-surface-900">Request a void</h3>
+                            <p className="text-xs text-surface-500">Nothing changes until finance approves it (above KES 50,000 the super admin too). It then cannot be undone, and the order balance is recalculated.</p>
                         </div>
                     </div>
                     <div className="space-y-1">
@@ -694,7 +698,7 @@ export default function PaymentTransactionsPage() {
                             onClick={() => voidMutation.mutate({ id: voidTarget!, reason: voidReason })}
                             disabled={!voidReason.trim() || voidMutation.isPending}
                             className="flex-1 px-4 py-2 rounded-lg bg-danger text-white text-sm font-semibold hover:bg-danger/90 disabled:opacity-50 transition-colors">
-                            {voidMutation.isPending ? 'Voiding…' : 'Confirm Void'}
+                            {voidMutation.isPending ? 'Sending…' : 'Send for approval'}
                         </button>
                     </div>
                 </div>
@@ -712,8 +716,8 @@ export default function PaymentTransactionsPage() {
                             </svg>
                         </div>
                         <div>
-                            <h3 className="font-semibold text-surface-900">Reassign Payment</h3>
-                            <p className="text-xs text-surface-500">Move this payment to a different sales order.</p>
+                            <h3 className="font-semibold text-surface-900">Request a move to another order</h3>
+                            <p className="text-xs text-surface-500">The payment moves only when finance approves it (above KES 50,000 the super admin too).</p>
                         </div>
                     </div>
 
@@ -779,7 +783,7 @@ export default function PaymentTransactionsPage() {
                             onClick={() => reassignMutation.mutate({ id: reassignTarget!, order_id: reassignOrderId!, reason: reassignReason })}
                             disabled={!reassignOrderId || !reassignReason.trim() || reassignMutation.isPending}
                             className="btn-primary flex-1 disabled:opacity-50">
-                            {reassignMutation.isPending ? 'Reassigning…' : 'Confirm Reassign'}
+                            {reassignMutation.isPending ? 'Sending…' : 'Send for approval'}
                         </button>
                     </div>
                 </div>

@@ -159,10 +159,15 @@ class RawMaterialsController extends Controller
             'description'     => 'nullable|string',
             'category'        => 'nullable|string|max:100',
             'unit_of_measure' => 'required|string|max:20',
-            'unit_cost'       => 'required|numeric|min:0',
+            // Setting a cost is seeing it (4D): required of cost viewers,
+            // ignored from anyone else, who never sees the figure they'd overwrite.
+            'unit_cost'       => (\App\Support\CostVisibility::allows($request->user()) ? 'required' : 'nullable') . '|numeric|min:0',
             'reorder_point'   => 'nullable|numeric|min:0',
             'is_active'       => 'boolean',
         ]);
+        if (!\App\Support\CostVisibility::allows($request->user())) {
+            unset($validated['unit_cost']);
+        }
 
         $material = Material::create($validated);
 
@@ -199,19 +204,38 @@ class RawMaterialsController extends Controller
             'reorder_point'   => 'nullable|numeric|min:0',
             'is_active'       => 'sometimes|boolean',
         ]);
+        if (!\App\Support\CostVisibility::allows($request->user())) {
+            unset($validated['unit_cost']);   // see store()
+        }
 
-        $material->update($validated);
+        // The unit cost — what we pay the supplier — is a supplier_cost_change
+        // proposal (Phase 3C): at once within 5%, otherwise it waits for finance
+        // (and the super admin past 25%) and the material keeps its cost.
+        $plain    = array_diff_key($validated, ['unit_cost' => true]);
+        $service  = app(\App\Services\Approvals\ProposalService::class);
+        $proposal = DB::transaction(function () use ($material, $plain, $validated, $service, $request) {
+            if ($plain !== []) {
+                $material->update($plain);
+            }
+
+            return array_key_exists('unit_cost', $validated)
+                ? $service->propose('supplier_cost_change', $material->id, ['unit_cost' => $validated['unit_cost']], $request->user())
+                : null;
+        });
 
         try {
             ActivityLogService::log('raw_material_updated', null, [
                 'material_id' => $material->id,
                 'code'        => $material->code,
-                'changes'     => array_keys($validated),
+                'changes'     => array_keys($plain),
             ]);
         } catch (\Exception) {}
 
+        $waiting = $proposal && $proposal->status !== \App\Models\ChangeProposal::APPLIED;
+
         return response()->json([
-            'message'  => 'Material updated.',
+            'proposal' => $proposal ? $service->present($proposal->fresh('maker'), $request->user()) : null,
+            'message'  => $waiting ? 'Material updated. ' . $service->message($proposal) : 'Material updated.',
             'material' => $this->formatMaterial(
                 $material->fresh()->load(['inventory.outlet'])
                     ->loadSum('inventory as total_stock', 'quantity_on_hand')
@@ -271,6 +295,9 @@ class RawMaterialsController extends Controller
             'notes'            => 'nullable|string|max:500',
             'reference'        => 'nullable|string|max:100',
         ]);
+        if (!\App\Support\CostVisibility::allows($request->user())) {
+            unset($validated['unit_cost']);   // see store(): no cost writes without cost rights
+        }
 
         DB::beginTransaction();
         try {
@@ -296,9 +323,15 @@ class RawMaterialsController extends Controller
                 'created_by'            => auth()->id(),
             ]);
 
-            if (!empty($validated['unit_cost'])) {
-                $material->update(['unit_cost' => $validated['unit_cost']]);
-            }
+            // The receipt records what was paid (above). Moving the material's
+            // own cost to it is a supplier_cost_change proposal (Phase 3C): at
+            // once within 5%, otherwise it waits and the cost stays. A cost
+            // change already waiting is left to its signers — a receipt never
+            // fails because of one.
+            $service  = app(\App\Services\Approvals\ProposalService::class);
+            $proposal = !empty($validated['unit_cost']) && !$service->openFor('supplier_cost_change', 'material', $material->id)
+                ? $service->propose('supplier_cost_change', $material->id, ['unit_cost' => $validated['unit_cost']], $request->user())
+                : null;
 
             DB::commit();
 
@@ -315,11 +348,18 @@ class RawMaterialsController extends Controller
                 ]);
             } catch (\Exception) {}
 
+            $waiting = $proposal && $proposal->status !== \App\Models\ChangeProposal::APPLIED;
+
             return response()->json([
-                'message'  => "Received {$validated['quantity']} {$material->unit_of_measure} of {$material->name}.",
+                'message'  => "Received {$validated['quantity']} {$material->unit_of_measure} of {$material->name}."
+                    . ($waiting ? ' ' . app(\App\Services\Approvals\ProposalService::class)->message($proposal) : ''),
                 'inventory' => $this->formatInventoryRecord($inv->fresh()->load('outlet')),
+                'proposal'  => $proposal ? app(\App\Services\Approvals\ProposalService::class)->present($proposal->fresh('maker'), $request->user()) : null,
             ], 201);
 
+        } catch (\Illuminate\Http\Exceptions\HttpResponseException|\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            throw $e;
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['message' => 'Failed to receive stock.', 'error' => $e->getMessage()], 500);
@@ -497,6 +537,20 @@ class RawMaterialsController extends Controller
             )->values();
         }
 
+        return $this->withoutCostUnlessAllowed($data);
+    }
+
+    /**
+     * What a material costs is products.view_cost, like every other cost
+     * figure (4D): inventory.view reaches clerks and the shop floor.
+     * stock_value goes too — it is stock × unit cost, so it gives the cost away.
+     */
+    private function withoutCostUnlessAllowed(array $data): array
+    {
+        if (\App\Support\CostVisibility::allows(request()->user())) {
+            return $data;
+        }
+        unset($data['unit_cost'], $data['cost_per_unit'], $data['stock_value']);
         return $data;
     }
 
@@ -516,7 +570,7 @@ class RawMaterialsController extends Controller
 
     private function formatTransaction(MaterialTransaction $t): array
     {
-        return [
+        return $this->withoutCostUnlessAllowed([
             'id'               => $t->id,
             'transaction_type' => $t->transaction_type,
             'type_label'       => self::TX_TYPES[$t->transaction_type] ?? ucfirst(str_replace('_', ' ', $t->transaction_type)),
@@ -532,6 +586,6 @@ class RawMaterialsController extends Controller
             'created_by'       => $t->createdBy
                 ? ['id' => $t->createdBy->id, 'name' => $this->userName($t->createdBy)]
                 : null,
-        ];
+        ]);
     }
 }

@@ -3,8 +3,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { posApi } from "@/api/pos";
 import type { PosSale } from "@/api/pos";
+import type { ApiError } from "@/types";
 import { useToastStore } from "@/store/toast.store";
 import { Spinner } from "@/components/ui/Spinner";
+import TillApprovalPinModal, { bandLabel } from "./TillApprovalPinModal";
 
 interface Props {
     outletId: number;
@@ -32,6 +34,9 @@ export default function PosReturnsModal({ outletId, outletName, onClose }: Props
     const [customReason, setCustomReason] = useState("");
     const [refundMethod, setRefundMethod] = useState("cash");
     const [step, setStep] = useState<"search" | "select" | "confirm">("search");
+    // Phase 4B part 2: the refund is a request; an approver signs it here with
+    // their PIN (or later from the inbox) before anything is refunded.
+    const [pinFor, setPinFor] = useState<{ approvalId: number; title: string; awaiting: string | null } | null>(null);
 
     // Search sales
     const { data: salesData, isFetching: searching } = useQuery({
@@ -57,12 +62,16 @@ export default function PosReturnsModal({ outletId, outletName, onClose }: Props
                 reason: reason === "Other" ? customReason : reason,
                 refund_method: refundMethod,
             }),
-        onSuccess: () => {
-            toast.success("Return processed successfully!");
+        onSuccess: (res) => {
+            toast.success(res.message);
             qc.invalidateQueries({ queryKey: ["pos-sales"] });
-            onClose();
+            setPinFor({
+                approvalId: res.approval.id,
+                title: `Refund on ${selectedSale!.order_number} · KES ${fmt(res.refund_amount)}`,
+                awaiting: res.approval.awaiting?.permission ?? null,
+            });
         },
-        onError: (err: { message: string }) => toast.error(err.message),
+        onError: (err: ApiError) => toast.error(err.message),
     });
 
     const refundTotal = selectedSale
@@ -78,6 +87,14 @@ export default function PosReturnsModal({ outletId, outletName, onClose }: Props
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            {pinFor && (
+                <TillApprovalPinModal
+                    approvalId={pinFor.approvalId}
+                    title={pinFor.title}
+                    awaiting={pinFor.awaiting}
+                    onClose={() => { setPinFor(null); onClose(); }}
+                />
+            )}
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col animate-slide-up">
                 {/* Header */}
                 <div className="px-5 py-4 border-b border-line flex items-center gap-3 shrink-0">
@@ -95,7 +112,7 @@ export default function PosReturnsModal({ outletId, outletName, onClose }: Props
                         </button>
                     )}
                     <div className="flex-1">
-                        <h2 className="font-bold text-surface-900">Process Return</h2>
+                        <h2 className="font-bold text-surface-900">Request a Return</h2>
                         <p className="text-xs text-surface-500">{outletName}</p>
                     </div>
                     <button onClick={onClose} className="btn-ghost btn-icon btn-sm"
@@ -174,6 +191,11 @@ aria-label="Close">
                         <div className="px-4 py-3 bg-surface-50 border-b border-line text-xs text-surface-600 shrink-0">
                             <p><strong>{selectedSale.order_number}</strong> · {new Date(selectedSale.created_at).toLocaleDateString("en-KE")}</p>
                             <p>{selectedSale.customer_name ?? "Walk-in"} · KES {fmt(selectedSale.total)}</p>
+                            {(selectedSale.pending_reversals ?? []).map((p) => (
+                                <p key={p.approval_id} className="mt-1 text-warning-dark font-medium">
+                                    {p.kind === "void" ? "A void" : "A refund"} on this sale is waiting for {bandLabel(p.awaiting)}.
+                                </p>
+                            ))}
                         </div>
                         <div className="flex-1 overflow-y-auto p-4 space-y-3">
                             <p className="text-xs font-semibold text-surface-600">Select items to return:</p>
@@ -234,6 +256,9 @@ aria-label="Close">
                             <div className="bg-brand-50 rounded-xl p-4 text-center">
                                 <p className="text-xs text-brand-600">Refund Amount</p>
                                 <p className="text-2xl font-bold text-brand-700 mt-1">KES {fmt(refundTotal)}</p>
+                                <p className="text-2xs text-brand-600 mt-1">
+                                    Capped at what the customer paid. Needs an approver's signature before it is refunded.
+                                </p>
                             </div>
 
                             {/* Return items */}
@@ -308,7 +333,7 @@ aria-label="Close">
                                 {returnMutation.isPending ? (
                                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                                 ) : null}
-                                Process Return
+                                Request refund
                             </button>
                         </div>
                     </div>

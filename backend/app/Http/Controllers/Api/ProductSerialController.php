@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ProductSerial;
+use App\Services\DataScopeResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -26,7 +27,9 @@ class ProductSerialController extends Controller
         $agingDays  = (int) $request->get('aging_days', self::AGING_DAYS);
         $agedCutoff = now()->subDays(max(1, $agingDays));
 
+        // Phase 4A: a bounded caller sees units at their outlets.
         $query = ProductSerial::query()
+            ->tap(fn ($q) => DataScopeResolver::boundToOutlets($q, $request->user(), 'inventory.view', 'product_serials.outlet_id'))
             ->with([
                 'product:id,sku',
                 'product.translations:product_id,name',
@@ -59,7 +62,9 @@ class ProductSerialController extends Controller
             ->pluck('count', 'status');
 
         // How many units are aging on the shelf (regardless of the aged filter).
-        $agedCount = ProductSerial::where('status', ProductSerial::IN_STOCK)
+        $agedCount = ProductSerial::query()
+            ->tap(fn ($q) => DataScopeResolver::boundToOutlets($q, $request->user(), 'inventory.view', 'product_serials.outlet_id'))
+            ->where('status', ProductSerial::IN_STOCK)
             ->where('stocked_at', '<', $agedCutoff)
             ->when($request->filled('product_id'), fn ($q) => $q->where('product_id', (int) $request->product_id))
             ->count();
@@ -96,6 +101,14 @@ class ProductSerialController extends Controller
             'flag_missing'  => 'sometimes|boolean',
         ]);
 
+        // A reconcile with no outlet covers the whole network; a bounded
+        // manager reconciles one of their own outlets, named.
+        abort_unless(
+            DataScopeResolver::allowsOutlet($request->user(), 'inventory.view',
+                isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null),
+            403, 'You do not have access to this outlet.',
+        );
+
         $report = \App\Services\ProductSerialService::reconcile(
             $validated['product_id'],
             $validated['outlet_id'] ?? null,
@@ -120,7 +133,9 @@ class ProductSerialController extends Controller
      */
     public function show($id): JsonResponse
     {
-        $serial = ProductSerial::with([
+        $serial = ProductSerial::query()
+            ->tap(fn ($q) => DataScopeResolver::boundToOutlets($q, request()->user(), 'inventory.view', 'product_serials.outlet_id'))
+            ->with([
             'product:id,sku',
             'product.translations:product_id,name',
             'productionOrder:id,order_number,status,created_at',

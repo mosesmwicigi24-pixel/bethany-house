@@ -15,13 +15,16 @@ import { Modal } from "@/components/ui/Modal";
 import type { ApiError } from "@/types";
 import { ShipmentSection } from "@/components/orders/ShipmentSection";
 import { usePdfDownload } from "@/hooks/usePdfDownload";
+import { useCustomerSearchTerm } from "@/hooks/useCustomerSearchTerm";
 import { channelApi, type Channel, type ChannelMessage, type LinkedEntity, type EntitySearchResult } from "@/api/channels";
 import { parseBodyToNodes } from "@/pages/comms/CommsHub";
 import { commentApi, type MentionUser } from "@/api/comments";
 import { subscribeToChannel, getEcho } from "@/lib/echo";
 import { neemaChatUrl, neemaCallsUrl, chatChannelLabel } from "@/lib/neema";
 import { useAuthStore } from "@/store/auth.store";
+import { discountCapHint, maxDiscountAmount, useDiscountCap } from "@/lib/discountCap";
 import { RecordHistory } from "@/components/audit/AuditParts";
+import { PendingChanges, NeedsApprovalHint, PROPOSALS_QUERY_KEY } from "@/components/approvals/PendingChanges";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -1184,6 +1187,7 @@ function SetDepositModal({ order, onClose, onDone }: {
     order: Order; onClose: () => void; onDone: () => void;
 }) {
     const toast = useToastStore();
+    const qc = useQueryClient();
     const [depositAmount, setDepositAmount] = useState(
         order.deposit_amount ?? Math.round(order.total_amount * 0.5 * 100) / 100
     );
@@ -1194,7 +1198,13 @@ function SetDepositModal({ order, onClose, onDone }: {
             deposit_amount: depositAmount,
             balance_due_date: balanceDueDate || undefined,
         }),
-        onSuccess: () => { toast.success("Deposit terms saved"); onDone(); onClose(); },
+        onSuccess: (res) => {
+            // Phase 3C: credit past the maker's band waits for finance; the terms stay until signed.
+            if (res.proposal && res.proposal.status !== "applied") toast.info(res.message);
+            else toast.success("Deposit terms saved");
+            qc.invalidateQueries({ queryKey: [PROPOSALS_QUERY_KEY] });
+            onDone(); onClose();
+        },
         onError:   (e: ApiError) => toast.error(e.message),
     });
 
@@ -1210,6 +1220,12 @@ function SetDepositModal({ order, onClose, onDone }: {
                 <p className="text-xs text-surface-500">
                     The customer will pay this deposit now and settle the balance later.
                 </p>
+                <NeedsApprovalHint>
+                    The balance left on credit is what is approved: up to KES 20,000 (with the same
+                    customer&apos;s other credit today) applies at once; more needs finance, and above
+                    KES 200,000 the super admin too.
+                </NeedsApprovalHint>
+                <PendingChanges subjectType="order" subjectIds={[order.id]} />
                 <div>
                     <label className="label">Minimum Deposit ({cc})</label>
                     <input type="number" min={0.01} step={0.01}
@@ -3279,9 +3295,11 @@ function AttachCustomerModal({ order, onClose, onDone }: {
     // what customer matching keys on across the hub and Neema.
     const [company,   setCompany]   = useState("");
 
+    // Phase 4A: 3 real characters at least, sent once typing settles.
+    const searchTerm = useCustomerSearchTerm(search);
     const { data: searchData } = useQuery({
-        queryKey: ["customer-search", search],
-        queryFn:  () => search.length >= 2 ? get<{ data: any[] }>(`/v1/admin/customers?search=${encodeURIComponent(search)}&per_page=8`) : Promise.resolve({ data: [] }),
+        queryKey: ["customer-search", searchTerm],
+        queryFn:  () => searchTerm ? get<{ data: any[] }>(`/v1/admin/customers?search=${encodeURIComponent(searchTerm)}&per_page=8`) : Promise.resolve({ data: [] }),
         enabled:  mode === "existing",
     });
     const customers = (searchData as any)?.data ?? [];
@@ -3578,6 +3596,20 @@ export default function OrderDetailPage() {
     const canEditItems = canDo("orders.edit_items")
         && !["cancelled", "refunded", "voided"].includes(order?.status ?? "");
     const [itemsDraft, setItemsDraft]     = useState<DraftLine[] | null>(null);
+    // The owner's 5% maximum on a line's discount; null for the super_admin.
+    // The server enforces it (and measures a lowered unit price as well).
+    const discountCap = useDiscountCap();
+    // What one staged line may still take off: 5% of the line, and no more
+    // than the ORDER has left — 5% of its gross, less the order discount and
+    // the other lines' discounts. (Infinity for the super_admin.)
+    const lineDiscountRoom = (l: DraftLine): number => {
+        if (discountCap === null) return Infinity;
+        const lines = itemsDraft ?? [];
+        const gross = lines.reduce((s, x) => s + x.unit_price * x.quantity, 0);
+        const others = lines.filter((x) => x.key !== l.key).reduce((s, x) => s + x.discount_amount, 0);
+        const orderRoom = maxDiscountAmount(gross, discountCap) - Number(order?.discount_amount ?? 0) - others;
+        return Math.max(0, Math.min(maxDiscountAmount(l.unit_price * l.quantity, discountCap), orderRoom));
+    };
     const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
     const [showAddItem, setShowAddItem]   = useState(false);
     const [itemsReason, setItemsReason]   = useState("");
@@ -3622,7 +3654,9 @@ export default function OrderDetailPage() {
         onError: (e: ApiError) => {
             // Two of the refusals are "are you sure?", not "no". Surface the
             // confirmation instead of a red toast the operator can't act on.
-            if (e.reason === "confirm_paid_change" || e.reason === "confirm_shipped_change") {
+            // A paid order's edit is a correction and must say why
+            // (reason_required) — same dialog, asking for the reason.
+            if (e.reason === "confirm_paid_change" || e.reason === "confirm_shipped_change" || e.reason === "reason_required") {
                 setItemsConfirm({ reason: e.reason, message: e.message });
                 return;
             }
@@ -4315,9 +4349,18 @@ export default function OrderDetailPage() {
                                                                 Line discount
                                                                 <input
                                                                     type="number" min={0} step="0.01" value={l.discount_amount}
-                                                                    onChange={e => set({ discount_amount: Math.max(0, Number(e.target.value) || 0) })}
+                                                                    max={discountCap !== null ? lineDiscountRoom(l) : undefined}
+                                                                    onChange={e => set({ discount_amount: Math.min(
+                                                                        Math.max(0, Number(e.target.value) || 0),
+                                                                        lineDiscountRoom(l),
+                                                                    ) })}
                                                                     className="w-24 border border-line rounded px-2 py-0.5 text-right tabular-nums focus:outline-none focus:border-brand-500"
                                                                 />
+                                                                {discountCap !== null && (
+                                                                    <span className="text-surface-400" title="Larger discounts are set by the owner.">
+                                                                        {discountCapHint(discountCap)} of the line
+                                                                    </span>
+                                                                )}
                                                             </label>
                                                         )}
                                                     </td>
@@ -4638,6 +4681,7 @@ export default function OrderDetailPage() {
                                     {canAddPayment && <button onClick={() => setShowPaymentModal(true)} className="mt-2 text-xs text-brand-500 hover:underline font-semibold">Record first payment →</button>}
                                 </div>
                             )}
+                            <PendingChanges subjectType="order" subjectIds={[order.id]} className="mt-3" />
                             {outstanding > 0 && !order.deposit_amount && order.payment_status === "pending" && (
                                 <div className="mt-3 flex justify-end">
                                     <button onClick={() => setShowDepositModal(true)}
@@ -4910,14 +4954,35 @@ export default function OrderDetailPage() {
                             actually been collected. Recorded payments are never altered — if the new total falls
                             below what was paid, the difference is flagged as a refund due.
                         </p>
+                        {(itemsConfirm.reason === "confirm_paid_change" || itemsConfirm.reason === "reason_required") && (
+                            <div>
+                                <label className="label">Reason for the correction</label>
+                                <textarea
+                                    value={itemsReason}
+                                    onChange={e => setItemsReason(e.target.value)}
+                                    rows={2}
+                                    placeholder="Why is a paid order changing?"
+                                    className="input resize-none"
+                                />
+                                <p className="text-2xs text-surface-500 mt-1">
+                                    This order has been paid for, so the change is kept as a correction: what it was,
+                                    what it became, who changed it and why.
+                                </p>
+                            </div>
+                        )}
                     </div>
                     <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-line">
                         <button onClick={() => setItemsConfirm(null)} className="btn-secondary btn-sm">Cancel</button>
                         <button
-                            disabled={updateItemsMutation.isPending}
+                            disabled={
+                                updateItemsMutation.isPending
+                                || ((itemsConfirm.reason === "confirm_paid_change" || itemsConfirm.reason === "reason_required")
+                                    && !itemsReason.trim())
+                            }
                             onClick={() => {
                                 const next = {
-                                    paid:    itemsConfirmed.paid    || itemsConfirm.reason === "confirm_paid_change",
+                                    paid:    itemsConfirmed.paid    || itemsConfirm.reason === "confirm_paid_change"
+                                        || itemsConfirm.reason === "reason_required",
                                     shipped: itemsConfirmed.shipped || itemsConfirm.reason === "confirm_shipped_change",
                                 };
                                 setItemsConfirmed(next);

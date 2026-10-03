@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -6,6 +6,7 @@ import { z } from "zod";
 import { promotionsApi, type Promotion } from "@/api/marketing";
 import type { ApiError } from "@/types";
 import { useToastStore } from "@/store/toast.store";
+import { discountCapMessage, useDiscountCap } from "@/lib/discountCap";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import {
@@ -20,25 +21,36 @@ import {
     FieldTextarea,
 } from "@/components/setup/FormComponents";
 
-/* Blessed Friday campaigns = hub promotions. This is where the owner sets each
-   season's discount (10–20%) + window. The discount is applied server-side
-   (never on the storefront); a season links to one of these. */
+/* Blessed Friday campaigns = hub promotions. The discount is applied
+   server-side (never on the storefront); a season links to one of these.
 
-const schema = z
-    .object({
-        name: z.string().min(1, "Name is required"),
-        description: z.string().optional(),
-        discount_type: z.enum(["percentage", "fixed"]),
-        discount_value: z.coerce.number().min(0, "Must be 0 or more"),
-        starts_at: z.string().optional(),
-        ends_at: z.string().optional(),
-        is_active: z.boolean(),
-        priority: z.coerce.number().int().min(0).optional(),
-    })
-    .refine((v) => v.discount_type !== "percentage" || v.discount_value <= 100, {
-        path: ["discount_value"],
-        message: "A percentage cannot exceed 100.",
-    });
+   The owner's rule (2026-10-03): a campaign worth more than 5% is the
+   super_admin's alone to create, raise or switch on. Everyone else is stopped
+   here at 5% for a percentage; a fixed amount is checked by the server against
+   the cheapest item it reaches, and refused with the same sentence. */
+
+const makeSchema = (cap: number | null) =>
+    z
+        .object({
+            name: z.string().min(1, "Name is required"),
+            description: z.string().optional(),
+            discount_type: z.enum(["percentage", "fixed"]),
+            discount_value: z.coerce.number().min(0, "Must be 0 or more"),
+            starts_at: z.string().optional(),
+            ends_at: z.string().optional(),
+            is_active: z.boolean(),
+            priority: z.coerce.number().int().min(0).optional(),
+        })
+        .refine((v) => v.discount_type !== "percentage" || v.discount_value <= 100, {
+            path: ["discount_value"],
+            message: "A percentage cannot exceed 100.",
+        })
+        .refine((v) => cap === null || v.discount_type !== "percentage" || v.discount_value <= cap, {
+            path: ["discount_value"],
+            message: discountCapMessage(cap),
+        });
+
+const schema = makeSchema(null);
 
 type FormValues = z.infer<typeof schema>;
 
@@ -63,7 +75,14 @@ export default function CampaignsPage() {
     const [editing, setEditing] = useState<Promotion | null>(null);
     const [deleting, setDeleting] = useState<Promotion | null>(null);
 
-    const form = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: DEFAULTS });
+    // The owner's 5% maximum; null for the super_admin, who sets larger ones.
+    const discountCap = useDiscountCap();
+    const capSchema = useMemo(() => makeSchema(discountCap), [discountCap]);
+    const defaults = useMemo<FormValues>(
+        () => ({ ...DEFAULTS, discount_value: discountCap === null ? DEFAULTS.discount_value : discountCap }),
+        [discountCap],
+    );
+    const form = useForm<FormValues>({ resolver: zodResolver(capSchema), defaultValues: defaults });
     const {
         register,
         handleSubmit,
@@ -81,7 +100,7 @@ export default function CampaignsPage() {
     const stats = data?.stats;
 
     const openCreate = () => {
-        reset(DEFAULTS);
+        reset(defaults);
         setEditing(null);
         setModalOpen(true);
     };
@@ -239,6 +258,7 @@ export default function CampaignsPage() {
                         <Field
                             label="Discount value"
                             error={errors.discount_value?.message}
+                            hint={discountCap === null ? undefined : `At most ${discountCap}% (a fixed amount: ${discountCap}% of the cheapest item it reaches). Larger campaigns are set by the owner.`}
                             required
                         >
                             <FieldInput

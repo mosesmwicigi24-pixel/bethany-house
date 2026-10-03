@@ -7,6 +7,7 @@ import { AdminLayout } from "@/components/layout/AdminLayout";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ToastContainer } from "@/components/ui/Toast";
+import { SecurityPrompts } from "@/components/security/SecurityPrompts";
 import { useAuthStore } from "@/store/auth.store";
 
 // Pages
@@ -95,6 +96,7 @@ const LowStockAlertsPage = lazy(
 // --- POS -────────────────────────────────────────────────────────
 const PosPage = lazy(() => import("@/pages/pos/PosPage"));
 const EodReportsPage = lazy(() => import("@/pages/pos/EodReportsPage"));
+const TillsPage = lazy(() => import("@/pages/pos/TillsPage"));
 const EodReportSettingsPage = lazy(() => import("@/pages/pos/EodReportSettingsPage"));
 const OutstandingBalancesPage = lazy(() => import("@/pages/pos/OutstandingBalancesPage"));
 
@@ -406,6 +408,8 @@ export default function App() {
                 /* ── Admin app — all routes under /admin basename ─────────────── */
                 <BrowserRouter basename={import.meta.env.BASE_URL}>
                     <GlobalEventHandlers />
+                    {/* PIN lock, step-up, set-your-PIN (sign-in safety, Phase 4C) */}
+                    <SecurityPrompts />
 
                     <Routes>
                         {/* Public */}
@@ -694,6 +698,19 @@ export default function App() {
                             }
                         />
                         <Route
+                            path="/pos/tills"
+                            element={
+                                // The gate the API's tills group uses: a cashier
+                                // (her own tills), or a back-office key —
+                                // finance reconciles without holding a till.
+                                <ProtectedRoute anyOf={["pos.access", "pos.tills_view_all", "pos.reconcile", "pos.till_correction"]}>
+                                <Suspense fallback={<PageLoader />}>
+                                    <TillsPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
                             path="/pos/outstanding-balances"
                             element={
                                 <ProtectedRoute permission="receivables.view">
@@ -892,7 +909,7 @@ export default function App() {
                         <Route
                             path="/approvals"
                             element={
-                                <ProtectedRoute anyOf={["procurement.approve", "inventory.approve", "payments.approve_international"]}>
+                                <ProtectedRoute anyOf={["procurement.approve", "inventory.approve", "expenses.approve", "approvals.finance_sign", "payments.void", "payments.reassign", "payments.approve_international", "payments.request_void", "payments.request_reassign", "procurement.create", "inventory.adjust", "inventory.transfer", "expenses.create", "products.edit", "products.edit_cost", "orders.set_deposit", "settings.financial_propose", "settings.pricing_rate_propose"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <ApprovalsPage />
                                 </Suspense>
@@ -1212,7 +1229,7 @@ export default function App() {
                         <Route
                             path="/settings/currencies"
                             element={
-                                <ProtectedRoute permission="settings.view">
+                                <ProtectedRoute anyOf={["settings.view", "settings.financial_propose", "settings.pricing_rate_propose"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <CurrenciesPage />
                                 </Suspense>
@@ -1232,7 +1249,7 @@ export default function App() {
                         <Route
                             path="/settings/taxes"
                             element={
-                                <ProtectedRoute permission="settings.view">
+                                <ProtectedRoute anyOf={["settings.view", "settings.financial_propose"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <TaxRatesPage />
                                 </Suspense>
@@ -1262,7 +1279,7 @@ export default function App() {
                         <Route
                             path="/settings/payment-methods"
                             element={
-                                <ProtectedRoute permission="settings.view">
+                                <ProtectedRoute anyOf={["settings.view", "settings.financial_propose"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <PaymentMethodsPage />
                                 </Suspense>

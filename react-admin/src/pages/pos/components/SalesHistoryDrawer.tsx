@@ -2,10 +2,12 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { posApi } from "@/api/pos";
-import type { PosSale } from "@/api/pos";
+import type { PosSale, PosPendingReversal } from "@/api/pos";
+import type { ApiError } from "@/types";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
+import TillApprovalPinModal, { bandLabel } from "./TillApprovalPinModal";
 
 interface Props {
     outletId: number;
@@ -24,18 +26,27 @@ function isRestorable(sale: PosSale): boolean {
 function SaleDetailPanel({
     sale,
     onClose,
-    onVoid,
+    onRequestVoid,
+    requestingVoid,
+    onApproveAtTill,
     onRestore,
 }: {
     sale: PosSale;
     onClose: () => void;
-    onVoid: (id: number) => void;
+    /** Phase 4B: a void is a request; the sale is voided once an approver signs. */
+    onRequestVoid: (id: number, reason: string) => void;
+    requestingVoid: boolean;
+    onApproveAtTill: (pending: PosPendingReversal) => void;
     onRestore?: (sale: PosSale) => void;
 }) {
     const fmt = (n: number | null | undefined) => (n ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 });
     const restorable = isRestorable(sale);
     const { can } = usePermissions();
     const canVoid = can("pos.void");
+    const pending = sale.pending_reversals ?? [];
+    const voidPending = pending.some((p) => p.kind === "void");
+    const [voidReason, setVoidReason] = useState("");
+    const [askingVoid, setAskingVoid] = useState(false);
 
     return (
         <div className="absolute inset-0 bg-white z-10 flex flex-col animate-slide-left">
@@ -60,6 +71,26 @@ function SaleDetailPanel({
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
+
+                {/* Void / refund requests waiting for a signature */}
+                {pending.map((p) => (
+                    <div key={p.approval_id} className="bg-warning-light border border-warning rounded-xl px-4 py-3 text-xs text-warning-dark">
+                        <p className="font-semibold">
+                            {p.kind === "void" ? "Void requested" : "Refund requested"}
+                            {p.amount !== null && <> · {p.currency_code ?? "KES"} {fmt(p.amount)}</>}
+                        </p>
+                        <p className="mt-0.5 opacity-80">
+                            Waiting for {bandLabel(p.awaiting)}{p.requested_by ? ` · asked by ${p.requested_by}` : ""}.
+                            {" "}Nothing has changed on the sale yet.
+                        </p>
+                        <button
+                            onClick={() => onApproveAtTill(p)}
+                            className="mt-2 btn-secondary btn-sm"
+                        >
+                            Approver here? Enter their PIN
+                        </button>
+                    </div>
+                ))}
 
                 {/* Restore notice */}
                 {restorable && (
@@ -167,14 +198,41 @@ function SaleDetailPanel({
                             Restore to Cart
                         </button>
                     )}
-                    {/* Void — available for all non-voided sales the user has pos.void for */}
-                    {canVoid && (
+                    {/* Request a void — the sale is voided only once an approver signs */}
+                    {canVoid && !voidPending && !askingVoid && (
                     <button
-                        onClick={() => onVoid(sale.id)}
+                        onClick={() => setAskingVoid(true)}
                         className={clsx("w-full btn-sm", restorable ? "btn-ghost text-danger hover:bg-danger-light" : "btn-danger")}
                     >
-                        Void Sale
+                        Request void
                     </button>
+                    )}
+                    {canVoid && !voidPending && askingVoid && (
+                        <div className="space-y-2">
+                            <textarea
+                                className="input resize-none text-xs"
+                                rows={2}
+                                placeholder="Why should this sale be voided?"
+                                value={voidReason}
+                                onChange={(e) => setVoidReason(e.target.value)}
+                                autoFocus
+                            />
+                            <div className="flex gap-2">
+                                <button onClick={() => { setAskingVoid(false); setVoidReason(""); }} className="btn-secondary btn-sm flex-1">
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={() => onRequestVoid(sale.id, voidReason.trim())}
+                                    disabled={voidReason.trim().length < 3 || requestingVoid}
+                                    className="btn-danger btn-sm flex-1"
+                                >
+                                    {requestingVoid ? "Requesting…" : "Request void"}
+                                </button>
+                            </div>
+                            <p className="text-2xs text-surface-400">
+                                An approver signs it — here with their PIN, or from their Approvals inbox.
+                            </p>
+                        </div>
                     )}
                 </div>
             )}
@@ -190,7 +248,7 @@ export default function SalesHistoryDrawer({ outletId, outletName, onClose, onRe
     const [dateFilter, setDateFilter] = useState(todayStr);
     const [search, setSearch] = useState("");
     const [selectedSale, setSelectedSale] = useState<PosSale | null>(null);
-    const [voidingId, setVoidingId] = useState<number | null>(null);
+    const [pinFor, setPinFor] = useState<{ approvalId: number; title: string; awaiting: string | null } | null>(null);
 
     const { data, isLoading } = useQuery({
         queryKey: ["pos-sales", outletId, dateFilter],
@@ -205,18 +263,24 @@ export default function SalesHistoryDrawer({ outletId, outletName, onClose, onRe
         )
         : sales;
 
+    // Phase 4B part 2: a void is a request. Nothing happens to the sale until
+    // an approver signs — on this till with their PIN, or from the inbox.
     const voidMutation = useMutation({
         mutationFn: ({ id, reason }: { id: number; reason: string }) =>
             posApi.voidSale(id, reason),
-        onSuccess: () => {
-            toast.success("Sale voided");
-            setSelectedSale(null);
-            setVoidingId(null);
+        onSuccess: (res, { id }) => {
+            toast.success(res.message);
+            const sale = sales.find((s) => s.id === id) ?? selectedSale;
+            if (sale) setSelectedSale({ ...sale, pending_reversals: res.pending });
+            setPinFor({
+                approvalId: res.approval.id,
+                title: `Void ${sale?.order_number ?? ""}`.trim(),
+                awaiting: res.approval.awaiting?.permission ?? null,
+            });
             qc.invalidateQueries({ queryKey: ["pos-sales", outletId] });
         },
-        onError: () => {
-            toast.error("Failed to void sale");
-            setVoidingId(null);
+        onError: (err: ApiError) => {
+            toast.error(err.message || "Could not request the void");
         },
     });
 
@@ -241,17 +305,28 @@ export default function SalesHistoryDrawer({ outletId, outletName, onClose, onRe
                 {/* Detail panel overlay */}
                 {selectedSale && (
                     <SaleDetailPanel
+                        key={selectedSale.id}
                         sale={selectedSale}
                         onClose={() => setSelectedSale(null)}
                         onRestore={handleRestore}
-                        onVoid={(id) => {
-                            setVoidingId(id);
-                            if (confirm("Are you sure you want to void this sale? This cannot be undone.")) {
-                                voidMutation.mutate({ id, reason: "Voided by manager" });
-                            } else {
-                                setVoidingId(null);
-                            }
-                        }}
+                        requestingVoid={voidMutation.isPending}
+                        onRequestVoid={(id, reason) => voidMutation.mutate({ id, reason })}
+                        onApproveAtTill={(p) => setPinFor({
+                            approvalId: p.approval_id,
+                            title: `${p.kind === "void" ? "Void" : "Refund on"} ${selectedSale.order_number}`,
+                            awaiting: p.awaiting,
+                        })}
+                    />
+                )}
+
+                {/* An approver present at the till signs with their own PIN */}
+                {pinFor && (
+                    <TillApprovalPinModal
+                        approvalId={pinFor.approvalId}
+                        title={pinFor.title}
+                        awaiting={pinFor.awaiting}
+                        onClose={() => setPinFor(null)}
+                        onDecided={() => setSelectedSale(null)}
                     />
                 )}
 
@@ -333,6 +408,11 @@ export default function SalesHistoryDrawer({ outletId, outletName, onClose, onRe
                                             <div className="flex items-center gap-2">
                                                 <span className="text-xs font-semibold text-surface-900">{sale.order_number}</span>
                                                 {sale.status === "voided" && <span className="badge-danger text-2xs">Voided</span>}
+                                                {(sale.pending_reversals ?? []).length > 0 && (
+                                                    <span className="text-2xs font-semibold px-1.5 py-0.5 rounded-full bg-warning-light text-warning-dark">
+                                                        {(sale.pending_reversals ?? []).some((p) => p.kind === "void") ? "Void pending" : "Refund pending"}
+                                                    </span>
+                                                )}
                                                 {pending && <span className="text-2xs font-semibold px-1.5 py-0.5 rounded-full bg-warning-light text-warning-dark">Unpaid</span>}
                                             </div>
                                             <p className="text-2xs text-surface-400 truncate">

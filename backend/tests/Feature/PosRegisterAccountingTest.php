@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
+use Tests\Concerns\ApprovesTillReversals;
 use Tests\TestCase;
 
 /**
@@ -24,7 +25,7 @@ use Tests\TestCase;
  */
 class PosRegisterAccountingTest extends TestCase
 {
-    use RefreshDatabase;
+    use RefreshDatabase, ApprovesTillReversals;
 
     private function actingWithPermissions(array $permissions): User
     {
@@ -73,8 +74,10 @@ class PosRegisterAccountingTest extends TestCase
             'payment_method' => 'cash',
         ]);
 
-        $this->postJson("/api/v1/admin/pos/sales/{$order->id}/void", ['reason' => 'test'])
-            ->assertOk();
+        // Phase 4B part 2: the till only asks; sign every band, then assert as before.
+        $this->approveTillReversal(
+            $this->postJson("/api/v1/admin/pos/sales/{$order->id}/void", ['reason' => 'test'])->assertStatus(202)->json('approval.id')
+        );
 
         $register->refresh();
         // Reversed by the 300 actually collected — NOT the 1000 order total.
@@ -132,12 +135,15 @@ class PosRegisterAccountingTest extends TestCase
             'payment_method' => 'cash',
         ]);
 
-        $this->postJson('/api/v1/admin/pos/returns', [
+        // Phase 4B part 2: the till only asks; sign every band, then assert as before.
+        $this->approveTillReversal(
+            $this->postJson('/api/v1/admin/pos/returns', [
             'original_order_id' => $order->id,
             'items'             => [['variant_id' => $variant->id, 'quantity' => 1]],
             'reason'            => 'changed mind',
             'refund_method'     => 'cash',
-        ])->assertOk();
+        ])->assertStatus(202)->json('approval.id')
+        );
 
         // unit_price × qty = 1000, but only 300 was collected — refund is capped.
         $this->assertDatabaseHas('order_returns', [

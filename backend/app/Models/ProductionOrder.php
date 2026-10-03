@@ -147,9 +147,18 @@ class ProductionOrder extends Model
         return $this->belongsTo(Customer::class);
     }
 
+    /**
+     * The sales order this job was raised for. Read WITHOUT the order's viewer
+     * scope: whoever may see the production order (visibleTo) may see who it
+     * is for — the order is its label, not a second record to open, and
+     * ProductionPayload already decides how much of the customer each role
+     * sees. Scoped, a tailor (no orders.view → DataScope::None since Phase
+     * 4A) would read every job as customer-less.
+     */
     public function customerOrder()
     {
-        return $this->belongsTo(Order::class, 'customer_order_id');
+        return $this->belongsTo(Order::class, 'customer_order_id')
+            ->withoutGlobalScope(\App\Models\Scopes\ViewerScope::class);
     }
 
     public function orderItem()
@@ -241,25 +250,41 @@ class ProductionOrder extends Model
      */
     public function scopeVisibleTo($query, \App\Models\User $user)
     {
+        $own = function ($q) use ($user) {
+            $q->where('production_orders.created_by', $user->id)
+              ->orWhereHas('tasks', fn ($t) => $t->withoutGlobalScopes()->where('assigned_to', $user->id))
+              ->orWhereHas('assignees', fn ($a) => $a->where('user_id', $user->id));
+        };
+
+        // Phase 4A: an outlet-bounded coordinator (outlet manager) runs the
+        // floor of the jobs RAISED at their shops — production_orders.outlet_id
+        // on the outlet_user pivot — plus anything that is theirs. An empty
+        // assignment leaves only their own.
+        $scope = \App\Services\DataScopeResolver::for($user, 'production.view');
+        if ($scope === \App\Enums\DataScope::Outlet) {
+            $outlets = \App\Services\DataScopeResolver::outletIds($user);
+
+            return $query->where(function ($q) use ($outlets, $own) {
+                $q->whereIn('production_orders.outlet_id', $outlets)->orWhere($own);
+            });
+        }
+
         // Floor-wide visibility belongs to the people who RUN the floor —
         // managers who assign and confirm work. Deliberately NOT
         // production.raise_order: raising a made-to-order job at the till is
         // a sales action, and it used to drag the whole order book (every
         // customer's job, every deadline) into a cashier's login.
-        if ($user->hasAnyRole(['admin', 'super_admin'])
+        if ($scope === \App\Enums\DataScope::All && (
+            $user->hasAnyRole(['admin', 'super_admin'])
             || $user->can('production.manage_assignees')
-            || $user->can('production.confirm_order')) {
+            || $user->can('production.confirm_order'))) {
             return $query;
         }
 
         // Everyone else sees the orders that are THEIRS: work assigned to
         // them (tailors), or orders they raised (a clerk following up the
         // job she promised a customer).
-        return $query->where(function ($q) use ($user) {
-            $q->where('created_by', $user->id)
-              ->orWhereHas('tasks', fn ($t) => $t->where('assigned_to', $user->id))
-              ->orWhereHas('assignees', fn ($a) => $a->where('user_id', $user->id));
-        });
+        return $query->where($own);
     }
 
     public function approvals()

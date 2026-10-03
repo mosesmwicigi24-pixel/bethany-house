@@ -205,6 +205,18 @@ class AuditPermissions extends Command
         }
         $found = array_merge($scanPages, $pages);
 
+        // A signing key is enforced through data, not a route: the approval
+        // engine checks the approver_permission of each band in
+        // approval_thresholds (Phases 3B/3C/4B). Read them from the table.
+        try {
+            if (\Illuminate\Support\Facades\Schema::hasTable('approval_thresholds')) {
+                $found = array_merge($found, \Illuminate\Support\Facades\DB::table('approval_thresholds')
+                    ->distinct()->pluck('approver_permission')->filter()->all());
+            }
+        } catch (\Throwable) {
+            // No database (static run): the code scan above still stands.
+        }
+
         return array_values(array_unique($found));
     }
 }

@@ -173,6 +173,67 @@ class RoleCatalogueV2Test extends TestCase
         return require database_path('migrations/' . self::MIGRATION_3A);
     }
 
+    /**
+     * ONE expected shape for every later phase. SPEC is the Phase 2 decision and
+     * spec() is SPEC with Phase 3A applied; the grants below are added on top by
+     * later phases' own migrations and by permission:sync (which runs after the
+     * migrations on every container start) — never by the Phase 2 or 3A
+     * migration. After sync a role holds spec() plus these, so every assertion
+     * that runs after a sync compares against withLater(...).
+     *
+     * One list, grouped by the phase (and migration) that grants each key, so a
+     * new phase adds its grants here and nowhere else.
+     */
+    private const LATER_GRANTS = [
+        'admin' => [
+            // 3C (2026_10_03_530001): cost edits and the customer pricing rate are proposals.
+            'products.edit_cost', 'settings.pricing_rate_propose',
+            // 4B part 1 (2026_10_03_440002): every till, read-only.
+            'pos.tills_view_all',
+            // 4D (2026_10_03_480001): works across every outlet — the grant
+            // that replaced the hasRole('admin') checks.
+            'outlets.all_access',
+        ],
+        'finance_manager' => [
+            // 3B (2026_10_03_520002): signs the finance band.
+            'approvals.finance_sign',
+            // 3C (2026_10_03_530001): proposes tax, reporting FX and settlement changes.
+            'settings.financial_propose',
+            // 4B part 1 (2026_10_03_440002): reconciles and corrects finalized tills.
+            'pos.reconcile', 'pos.till_correction', 'pos.tills_view_all',
+        ],
+        'accountant' => [
+            // 3B (2026_10_03_520002): asks for payment voids and moves; signs nothing.
+            'payments.request_reassign', 'payments.request_void',
+            // 4B part 1 (2026_10_03_440002): reconciles tills.
+            'pos.reconcile', 'pos.tills_view_all',
+        ],
+        'outlet_manager' => [
+            // 4B part 1 (2026_10_03_440002): verifies a clerk's blind count.
+            'pos.till_verify',
+            // 4B part 2 (2026_10_03_860002): the band key for till voids and
+            // refunds — a key no clerk holds.
+            'pos.approve_reversal',
+        ],
+        'procurement_manager' => [
+            // 3C (2026_10_03_530001): proposes cost changes.
+            'products.edit_cost',
+        ],
+    ];
+
+    /**
+     * @param array<string,list<string>> $shape
+     * @return array<string,list<string>> $shape plus what later phases' migrations and sync add.
+     */
+    private static function withLater(array $shape): array
+    {
+        foreach (self::LATER_GRANTS as $role => $perms) {
+            $shape[$role] = array_values(array_unique(array_merge($shape[$role] ?? [], $perms)));
+        }
+
+        return $shape;
+    }
+
     /** Production's system_admin / accountant held the legacy vocabulary (2026-10-02 read). */
     private const LEGACY = [
         'system_admin' => ['assign roles', 'create users', 'manage settings', 'edit orders', 'create products'],
@@ -307,6 +368,14 @@ class RoleCatalogueV2Test extends TestCase
         return require database_path('migrations/' . self::MIGRATION);
     }
 
+    /** 4D's role migration: outlets.all_access for admin (also in LATER_GRANTS). */
+    private const MIGRATION_4D = '2026_10_03_480001_outlets_all_access_permission.php';
+
+    private function migration4d(): object
+    {
+        return require database_path('migrations/' . self::MIGRATION_4D);
+    }
+
     /**
      * Put the database in production's pre-Phase-2 shape: every role as it was,
      * system_admin and accountant on the legacy vocabulary, and neither new
@@ -355,7 +424,7 @@ class RoleCatalogueV2Test extends TestCase
 
     public function test_every_role_matches_the_spec_exactly_after_sync(): void
     {
-        $this->assertRolesAre($this->spec(), 'after permission:sync on a fresh database');
+        $this->assertRolesAre(self::withLater($this->spec()), 'after permission:sync on a fresh database');
 
         $roles = Role::where('guard_name', 'sanctum')->orderBy('name')->pluck('name')->all();
         $expected = array_keys(self::SPEC);
@@ -376,7 +445,30 @@ class RoleCatalogueV2Test extends TestCase
         $this->assertRolesAre($this->spec(), 'after the 3A migration, before sync');
 
         Artisan::call('permission:sync');
-        $this->assertRolesAre($this->spec(), 'after the migrations and permission:sync');
+        $this->assertRolesAre(self::withLater($this->spec()), 'after the migrations and permission:sync');
+    }
+
+    public function test_on_productions_shape_the_4d_migration_gives_admin_outlets_all_access_and_down_takes_it_back(): void
+    {
+        // Production runs migrations, not sync, on deploy: 4D's own migration
+        // must carry admin's outlets.all_access there, and undo only that.
+        $this->rewindToProductionBefore();
+        $this->migration()->up();
+        $this->migration3a()->up();
+        $this->assertRolesAre($this->spec(), 'before the 4D migration');
+
+        $migration = $this->migration4d();
+        $migration->up();
+        $after = $this->spec();
+        $after['admin'][] = 'outlets.all_access';
+        $this->assertRolesAre($after, 'after the 4D migration, before sync');
+
+        $migration->up();   // idempotent
+        $this->assertRolesAre($after, 'after the 4D migration ran twice');
+
+        $migration->down();
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        $this->assertRolesAre($this->spec(), 'after the 4D migration\'s down()');
     }
 
     public function test_sync_twice_after_the_migration_changes_nothing(): void
@@ -414,13 +506,16 @@ class RoleCatalogueV2Test extends TestCase
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 
         // Sync's additions made after up() are part of the new code, so they
-        // are not the migration's to undo — but sync adds nothing the
-        // migration did not already grant (previous test), so the shape is
-        // exactly BEFORE.
-        $this->assertRolesAre(self::BEFORE, 'after down()');
+        // are not the migration's to undo. Of Phase 2's own grants sync adds
+        // nothing the migration did not already give (previous test), so the
+        // shape is exactly BEFORE plus the later phases' grants.
+        $this->assertRolesAre(self::withLater(self::BEFORE), 'after down()');
         $this->assertNull(Permission::where('name', 'bom.edit')->first());
         $this->assertNull(Permission::where('name', 'setup.technical')->first());
-        $this->assertFalse(Schema::hasTable('role_grant_changes'));
+        // Its own log rows are gone (the table stays while a later migration's rows remain).
+        $this->assertSame(0, Schema::hasTable('role_grant_changes')
+            ? DB::table('role_grant_changes')->where('migration', '2026_10_03_300003_role_catalogue_v2')->count()
+            : 0);
     }
 
     public function test_the_migration_never_touches_direct_user_grants(): void
