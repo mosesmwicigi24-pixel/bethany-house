@@ -63,7 +63,7 @@ class ReportDrillLinksTest extends TestCase
 
     public function test_rows_lead_to_the_order_the_customer_and_the_payment_itself(): void
     {
-        $this->actAs(['reports.view', 'orders.view', 'customers.view', 'payments.transactions']);
+        $this->actAs([...\Tests\ReportAccess::PAGES, 'orders.view', 'customers.view', 'payments.transactions']);
 
         $rev = $this->drill('revenue');
         $this->assertNotEmpty($rev['definition'], 'the number says what it is');
@@ -78,7 +78,7 @@ class ReportDrillLinksTest extends TestCase
 
     public function test_a_drill_never_offers_a_door_the_viewer_cannot_open(): void
     {
-        $this->actAs(['reports.view']);
+        $this->actAs([...\Tests\ReportAccess::PAGES]);
 
         $row = $this->drill('collected')['rows'][0];
         $this->assertSame([], $row['links'] ?? [], 'no orders.view, customers.view or payments.transactions — no links');
@@ -89,7 +89,7 @@ class ReportDrillLinksTest extends TestCase
     {
         Outlet::factory()->create(['name' => 'Sonalux Store', 'is_active' => true]);
         Outlet::factory()->create(['name' => 'Closed Shop', 'is_active' => false]);
-        $this->actAs(['reports.view']);
+        $this->actAs([...\Tests\ReportAccess::PAGES]);
 
         $names = collect($this->getJson('/api/v1/admin/reports/outlets')->assertOk()->json('data'))->pluck('name');
         $this->assertTrue($names->contains('Sonalux Store'));

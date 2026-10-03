@@ -1008,10 +1008,11 @@ export default function App() {
                             }
                         />
                         {/* ── Reports & Analytics ───────────────────────────── */}
+                        {/* One permission per page (Phase 3A) — lib/reportPages.ts. */}
                         <Route
                             path="/reports"
                             element={
-                                <ProtectedRoute permission="reports.view">
+                                <ProtectedRoute permission="reports.executive">
                                 <Suspense fallback={<PageLoader />}>
                                     <ReportsPage />
                                 </Suspense>
@@ -1023,7 +1024,7 @@ export default function App() {
                         <Route
                             path="/reports/sales"
                             element={
-                                <ProtectedRoute permission="reports.view">
+                                <ProtectedRoute permission="reports.sales">
                                 <Suspense fallback={<PageLoader />}>
                                     <SalesReportPage />
                                 </Suspense>
@@ -1033,7 +1034,7 @@ export default function App() {
                         <Route
                             path="/reports/customers"
                             element={
-                                <ProtectedRoute permission="reports.view">
+                                <ProtectedRoute permission="reports.customers">
                                 <Suspense fallback={<PageLoader />}>
                                     <CustomersReportPage />
                                 </Suspense>
@@ -1043,7 +1044,7 @@ export default function App() {
                         <Route
                             path="/reports/inventory"
                             element={
-                                <ProtectedRoute permission="reports.view">
+                                <ProtectedRoute permission="reports.inventory">
                                 <Suspense fallback={<PageLoader />}>
                                     <InventoryReportPage />
                                 </Suspense>
@@ -1053,7 +1054,7 @@ export default function App() {
                         <Route
                             path="/reports/production"
                             element={
-                                <ProtectedRoute permission="reports.view">
+                                <ProtectedRoute permission="reports.production">
                                 <Suspense fallback={<PageLoader />}>
                                     <ProductionReportPage />
                                 </Suspense>
@@ -1063,7 +1064,7 @@ export default function App() {
                         <Route
                             path="/reports/procurement"
                             element={
-                                <ProtectedRoute permission="reports.view">
+                                <ProtectedRoute permission="reports.procurement">
                                 <Suspense fallback={<PageLoader />}>
                                     <ProcurementReportPage />
                                 </Suspense>
@@ -1086,7 +1087,7 @@ export default function App() {
                         <Route
                             path="/reports/performance"
                             element={
-                                <ProtectedRoute permission="reports.view">
+                                <ProtectedRoute permission="reports.performance">
                                 <Suspense fallback={<PageLoader />}>
                                     <PerformanceReportPage />
                                 </Suspense>
@@ -1096,7 +1097,7 @@ export default function App() {
                         <Route
                             path="/reports/explorer"
                             element={
-                                <ProtectedRoute permission="reports.view">
+                                <ProtectedRoute permission="reports.explorer">
                                 <Suspense fallback={<PageLoader />}>
                                     <ExplorerReportPage />
                                 </Suspense>
@@ -1106,7 +1107,7 @@ export default function App() {
                         <Route
                             path="/reports/data-quality"
                             element={
-                                <ProtectedRoute permission="reports.view">
+                                <ProtectedRoute permission="reports.data_quality">
                                 <Suspense fallback={<PageLoader />}>
                                     <DataQualityReportPage />
                                 </Suspense>
@@ -1116,7 +1117,7 @@ export default function App() {
                         <Route
                             path="/reports/production/costing/:id"
                             element={
-                                <ProtectedRoute permission="reports.view">
+                                <ProtectedRoute allOf={["reports.production", "reports.financial"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <ProductCostingReportPage />
                                 </Suspense>
@@ -1130,7 +1131,7 @@ export default function App() {
                         <Route
                             path="/reports/signals"
                             element={
-                                <ProtectedRoute anyOf={["inventory.view", "production.view", "intelligence.view", "expenses.view"]}>
+                                <ProtectedRoute permission="reports.signals">
                                 <Suspense fallback={<PageLoader />}>
                                     <IntelligenceDashboard />
                                 </Suspense>
@@ -1398,7 +1399,7 @@ export default function App() {
                         <Route
                             path="/insights"
                             element={
-                                <ProtectedRoute permission="reports.view">
+                                <ProtectedRoute permission="reports.customers">
                                 <Suspense fallback={<PageLoader />}>
                                     <InsightsPage />
                                 </Suspense>

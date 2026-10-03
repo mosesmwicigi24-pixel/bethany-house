@@ -80,7 +80,7 @@ class ReportFinalRebreakTest extends TestCase
     /** ZMW 1,000 order, ZMW 400 paid: owed is 600 × 6.5 = 3,900 KES — not 600, not 2,600. */
     public function test_a_kwacha_balance_is_owed_in_shillings_everywhere(): void
     {
-        $this->actAs(['reports.view', 'reports.financial']);
+        $this->actAs([...\Tests\ReportAccess::PAGES, 'reports.financial']);
         $o = $this->order(['currency_code' => 'ZMW', 'total_amount' => 1_000]);
         $this->pay($o, 400);
 
@@ -97,7 +97,7 @@ class ReportFinalRebreakTest extends TestCase
     /** A refund on a DOLLAR payment: collected is (100 − 20) × 128, on every page that states it. */
     public function test_a_refunded_dollar_payment_is_collected_net_everywhere(): void
     {
-        $this->actAs(['reports.view', 'reports.financial']);
+        $this->actAs([...\Tests\ReportAccess::PAGES, 'reports.financial']);
         $o = $this->order(['currency_code' => 'USD', 'total_amount' => 100, 'payment_status' => 'paid']);
         $this->pay($o, 100, ['refund_amount' => 20]);
 
@@ -116,7 +116,7 @@ class ReportFinalRebreakTest extends TestCase
     /** Overpaid in dollars: the attention item states the excess in shillings; a refund back to the total clears it. */
     public function test_a_dollar_overpayment_is_stated_in_shillings_and_cleared_by_a_refund(): void
     {
-        $this->actAs(['reports.view']);
+        $this->actAs([...\Tests\ReportAccess::PAGES]);
         $over = $this->order(['currency_code' => 'USD', 'total_amount' => 100, 'payment_status' => 'paid']);
         $this->pay($over, 120);
         $fixed = $this->order(['currency_code' => 'USD', 'total_amount' => 50, 'payment_status' => 'paid']);
@@ -145,7 +145,7 @@ class ReportFinalRebreakTest extends TestCase
     #[\PHPUnit\Framework\Attributes\DataProvider('arrayShapedInputs')]
     public function test_array_shaped_parameters_are_refused_not_crashed(string $query): void
     {
-        $this->actAs(['reports.view']);
+        $this->actAs([...\Tests\ReportAccess::PAGES]);
         foreach (['sales/summary', 'executive', 'sales/ledger'] as $endpoint) {
             $status = $this->getJson("/api/v1/admin/reports/{$endpoint}?{$query}")->status();
             $this->assertSame(422, $status, "{$endpoint}?{$query} → {$status}");
@@ -159,7 +159,7 @@ class ReportFinalRebreakTest extends TestCase
      */
     public function test_contradictory_date_spellings_are_refused(): void
     {
-        $this->actAs(['reports.view']);
+        $this->actAs([...\Tests\ReportAccess::PAGES]);
         $q = 'start_date=2026-09-01&from=2026-08-01&end_date=2026-09-30&to=2026-09-30';
         foreach (['sales/summary', 'executive'] as $endpoint) {
             $this->getJson("/api/v1/admin/reports/{$endpoint}?{$q}")->assertStatus(422);
@@ -181,7 +181,7 @@ class ReportFinalRebreakTest extends TestCase
             ]);
             $this->pay($o, 5_000, ['paid_at' => now()->subDays(10)]);
         }
-        $this->actAs(['reports.view', 'reports.export']);
+        $this->actAs([...\Tests\ReportAccess::PAGES, 'reports.export']);
 
         foreach (['sales/by-customer', 'second-purchase', 'customers/lifetime-value', 'drill/new_customers?period=last_30',
                   'drill/revenue?period=last_30', 'sales/by-customer?export=csv'] as $route) {
@@ -203,7 +203,7 @@ class ReportFinalRebreakTest extends TestCase
      */
     public function test_one_person_is_one_buyer_on_every_page(): void
     {
-        $this->actAs(['reports.view', 'customers.view']);
+        $this->actAs([...\Tests\ReportAccess::PAGES, 'customers.view']);
         $grace = \App\Models\Customer::create([
             'customer_number' => 'C-RB-1', 'first_name' => 'Grace', 'last_name' => 'W', 'phone' => '0711000111',
         ]);
@@ -246,7 +246,7 @@ class ReportFinalRebreakTest extends TestCase
      */
     public function test_a_customer_with_a_phone_who_returns_is_retained(): void
     {
-        $this->actAs(['reports.view']);
+        $this->actAs([...\Tests\ReportAccess::PAGES]);
         $joined = now()->startOfMonth()->subMonth()->addDays(2);
         $back   = \App\Models\Customer::create(['customer_number' => 'C-RET-1', 'first_name' => 'Ruth', 'phone' => '0722000222']);
         $gone   = \App\Models\Customer::create(['customer_number' => 'C-RET-2', 'first_name' => 'Gone', 'phone' => '0733000333']);
@@ -282,7 +282,7 @@ class ReportFinalRebreakTest extends TestCase
      */
     public function test_a_sale_in_a_currency_without_a_reporting_rate_is_named_then_counted(): void
     {
-        $this->actAs(['reports.view']);
+        $this->actAs([...\Tests\ReportAccess::PAGES]);
         DB::table('currencies')->updateOrInsert(['code' => 'GBP'], [
             'name' => 'Sterling Pounds', 'symbol' => '£', 'exchange_rate' => 0.006667,
             'reporting_rate_to_kes' => null, 'is_base' => false, 'is_active' => true,
@@ -313,7 +313,7 @@ class ReportFinalRebreakTest extends TestCase
      */
     public function test_markets_revenue_is_recognised_and_in_shillings(): void
     {
-        $this->actAs(['reports.view']);
+        $this->actAs([...\Tests\ReportAccess::PAGES]);
         $base = ['order_type' => 'online', 'customer_country_code' => 'KE'];
         $this->order($base + ['total_amount' => 6_000, 'status' => 'processing', 'payment_status' => 'paid']);
         $this->order($base + ['total_amount' => 100, 'currency_code' => 'USD', 'status' => 'confirmed', 'payment_status' => 'paid']);

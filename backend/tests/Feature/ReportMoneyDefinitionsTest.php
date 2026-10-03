@@ -35,7 +35,7 @@ class ReportMoneyDefinitionsTest extends TestCase
         \App\Support\ReportingCurrency::forget();
 
         $u = User::factory()->create();
-        foreach (['reports.view', 'reports.financial'] as $p) {
+        foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial'] as $p) {
             $u->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();

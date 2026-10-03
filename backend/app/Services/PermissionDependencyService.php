@@ -150,8 +150,12 @@ class PermissionDependencyService
         'pos.cash_management' => ['pos.access'],
 
         // ── Reports ──────────────────────────────────────────────────────── 
-        'reports.export'    => ['reports.view'],
-        'reports.financial' => ['reports.view'],
+        // Each report page stands alone (Phase 3A): there is no section-wide
+        // view left for them to need. reports.export applies to whichever
+        // pages its holder can view, so it implies none of them;
+        // export_supply exists only for the two supply pages, so it brings
+        // their view with it.
+        'reports.export_supply' => ['reports.inventory', 'reports.procurement'],
 
         // ── Expenses ─────────────────────────────────────────────────────── 
         // Every expenses.* action lives inside permission:expenses.view.

@@ -18,7 +18,8 @@ use Illuminate\Support\Facades\DB;
  * Every figure is computed by MetricEngine (the canonical metric layer per
  * docs/REPORTS_SPEC.md); this controller only decides WHICH blocks the
  * caller may see:
- *   - route gate: reports.view
+ *   - route gate: the page each endpoint belongs to (report.page:<page>,
+ *     Phase 3A — see App\Support\ReportPages); drills inherit their page
  *   - financial block (expenses, net position): reports.financial only
  *   - outlet managers: every number auto-scoped to their assigned outlets
  */

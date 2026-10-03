@@ -48,7 +48,7 @@ class ReportSnapshotConsistencyTest extends TestCase
         config(['database.connections.writer' => config('database.connections.' . config('database.default'))]);
 
         $this->staff = User::factory()->create();
-        foreach (['reports.view', 'reports.financial'] as $name) {
+        foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial'] as $name) {
             if (! Permission::where(['name' => $name, 'guard_name' => 'sanctum'])->exists()) {
                 $this->createdPermissions[] = $name;
             }

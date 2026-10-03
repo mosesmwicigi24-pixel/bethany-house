@@ -6,6 +6,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { tokenStorage } from "@/api/client";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
+import { canExportReport, reportPageOfEndpoint, type ReportPage } from "@/lib/reportPages";
 import { clsx } from "clsx";
 import { Spinner } from "@/components/ui/Spinner";
 import { fmtKes } from "@/api/expenses";
@@ -339,9 +340,11 @@ export function ExportCsvButton({
         }
     }, [path, params, toast]);
 
-    // The server refuses a file without reports.export; a button that can
-    // only fail ("CSV export failed") is worse than no button.
-    if (!can("reports.export")) return null;
+    // The server refuses a file without the export right for the page this
+    // endpoint belongs to (reports.export, or reports.export_supply on
+    // Inventory / Procurement — Phase 3A); a button that can only fail
+    // ("CSV export failed") is worse than no button.
+    if (!canExportReport(can, reportPageOfEndpoint(path))) return null;
 
     return (
         <button
@@ -563,7 +566,8 @@ export function ScheduleModal({
 export function SchedulesList({ reportType }: { reportType: ReportType }) {
     const qc = useQueryClient();
     const { can } = usePermissions();
-    const canExport = can("reports.export");
+    // A schedule mails a file: that report page's export right (Phase 3A).
+    const canExport = canExportReport(can, reportType as ReportPage);
     const { data } = useQuery({
         queryKey: ["report-schedules"],
         queryFn: () => reportsApi.listSchedules(),
@@ -645,7 +649,8 @@ export function ReportActionBar({
     const [showSchedule, setShowSchedule] = useState(false);
     const [showSchedules, setShowSchedules] = useState(false);
     const { can } = usePermissions();
-    const canExport = can("reports.export");
+    // A schedule mails a file: that report page's export right (Phase 3A).
+    const canExport = canExportReport(can, reportType as ReportPage);
 
     return (
         <>
@@ -803,7 +808,9 @@ export function ReportPageHeader({
     const { data: outletList } = useQuery({ queryKey: ["report-outlets"], queryFn: () => reportsApi.outlets(), staleTime: 300_000, enabled: !!onOutletChange });
     const outletName = outlet ? outletList?.data?.find((o) => String(o.id) === String(outlet))?.name : null;
     const { can } = usePermissions();
-    const canExport = can("reports.export");
+    // A schedule mails a file: the export right for THIS page (Phase 3A) —
+    // reports.export, or reports.export_supply on Inventory / Procurement.
+    const canExport = reportType ? canExportReport(can, reportType as ReportPage) : false;
     const dated = !!(preset && start && end && onPresetChange && onStartChange && onEndChange);
     const hasFilters = dated || !!onOutletChange;
 
@@ -819,7 +826,10 @@ export function ReportPageHeader({
                     {/* The way back to the overview. It used to repeat the title,
                         which the top bar and the heading already say — three
                         times on a phone. The overview itself needs no link. */}
-                    {!atOverview && (
+                    {/* Offered only to those who may open the overview — since
+                        Phase 3A an accountant or outlet manager reads pages
+                        without it. */}
+                    {!atOverview && can("reports.executive") && (
                         <Link to="/reports"
                             className="inline-flex items-center gap-1 mb-1.5 text-xs text-surface-400 hover:text-brand-500 transition-colors">
                             <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
@@ -1504,9 +1514,10 @@ export function ReportPdfButton({
     const { download, loading } = useReportPdf();
     const { can } = usePermissions();
 
-    // A PDF is a file out of the building, like a CSV: reports.export
-    // (owner, 2026-10-01). The server refuses it without; so does the button.
-    if (!can("reports.export")) return null;
+    // A PDF is a file out of the building, like a CSV (owner, 2026-10-01):
+    // the export right for the page it prints (Phase 3A). The server refuses
+    // it without; so does the button.
+    if (!canExportReport(can, type as ReportPage)) return null;
 
     return (
         <button

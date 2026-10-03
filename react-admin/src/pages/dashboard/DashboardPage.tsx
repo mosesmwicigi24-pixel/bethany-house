@@ -745,8 +745,11 @@ export default function DashboardPage() {
         retry: false,
     });
 
-    // Roles that should not see business-wide financials
-    const hideFinancials = roles.some(r => ["tailor", "procurement_officer"].includes(r));
+    // Roles that should not see business-wide financials. The revenue row is
+    // the Sales & Orders report's figures, and its endpoints check
+    // reports.sales (Phase 3A) — without it the row could only fail.
+    const hideFinancials = !can("reports.sales")
+        || roles.some(r => ["tailor", "procurement_officer"].includes(r));
 
     // Rich KPIs + revenue trend from the reporting engine
     // Skipped for roles that won't see the revenue row.

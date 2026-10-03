@@ -116,6 +116,63 @@ class RoleCatalogueV2Test extends TestCase
         ],
     ];
 
+    /**
+     * Phase 3A (one permission per report page) changes only the report
+     * grants, by its own migration (2026_10_03_300004). SPEC above stays the
+     * shape THIS migration produces; spec() is SPEC with 3A applied — what
+     * permission:sync produces today. Per-page access is asserted in
+     * ReportPageAccessTest.
+     */
+    private const PHASE_3A = [
+        'admin' => [
+            'remove' => ['reports.financial', 'reports.view'],
+            'add'    => ['reports.executive', 'reports.sales', 'reports.customers', 'reports.production',
+                'reports.inventory', 'reports.procurement', 'reports.performance', 'reports.signals',
+                'reports.data_quality', 'reports.explorer'],
+        ],
+        'finance_manager' => [
+            'remove' => ['reports.view'],
+            'add'    => ['reports.executive', 'reports.sales', 'reports.production', 'reports.inventory',
+                'reports.procurement', 'reports.performance', 'reports.signals', 'reports.data_quality',
+                'reports.explorer'],
+        ],
+        'accountant' => [
+            'remove' => [],
+            'add'    => ['reports.sales', 'reports.financial', 'reports.production', 'reports.inventory',
+                'reports.procurement', 'reports.performance'],
+        ],
+        'outlet_manager' => [
+            'remove' => ['reports.view'],
+            'add'    => ['reports.sales', 'reports.production', 'reports.inventory', 'reports.performance'],
+        ],
+        'procurement_manager' => [
+            'remove' => ['reports.view', 'reports.export'],
+            'add'    => ['reports.production', 'reports.inventory', 'reports.procurement', 'reports.export_supply'],
+        ],
+        'procurement_officer' => [
+            'remove' => ['reports.view'],
+            'add'    => ['reports.production', 'reports.inventory'],
+        ],
+    ];
+
+    private const MIGRATION_3A = '2026_10_03_300004_report_page_permissions.php';
+
+    /** @return array<string,list<string>> SPEC with Phase 3A's report grants applied. */
+    private function spec(): array
+    {
+        $out = self::SPEC;
+        foreach (self::PHASE_3A as $role => ['remove' => $remove, 'add' => $add]) {
+            $out[$role] = array_values(array_unique(array_merge(array_diff($out[$role], $remove), $add)));
+        }
+
+        return $out;
+    }
+
+    private function migration3a(): object
+    {
+        return require database_path('migrations/' . self::MIGRATION_3A);
+    }
+
     /** Production's system_admin / accountant held the legacy vocabulary (2026-10-02 read). */
     private const LEGACY = [
         'system_admin' => ['assign roles', 'create users', 'manage settings', 'edit orders', 'create products'],
@@ -298,7 +355,7 @@ class RoleCatalogueV2Test extends TestCase
 
     public function test_every_role_matches_the_spec_exactly_after_sync(): void
     {
-        $this->assertRolesAre(self::SPEC, 'after permission:sync on a fresh database');
+        $this->assertRolesAre($this->spec(), 'after permission:sync on a fresh database');
 
         $roles = Role::where('guard_name', 'sanctum')->orderBy('name')->pluck('name')->all();
         $expected = array_keys(self::SPEC);
@@ -314,14 +371,19 @@ class RoleCatalogueV2Test extends TestCase
         $this->migration()->up();
         $this->assertRolesAre(self::SPEC, 'after the migration, before sync');
 
+        // Phase 3A's migration runs next in production, before any sync.
+        $this->migration3a()->up();
+        $this->assertRolesAre($this->spec(), 'after the 3A migration, before sync');
+
         Artisan::call('permission:sync');
-        $this->assertRolesAre(self::SPEC, 'after the migration and permission:sync');
+        $this->assertRolesAre($this->spec(), 'after the migrations and permission:sync');
     }
 
     public function test_sync_twice_after_the_migration_changes_nothing(): void
     {
         $this->rewindToProductionBefore();
         $this->migration()->up();
+        $this->migration3a()->up();
         Artisan::call('permission:sync');
         $first = $this->snapshot();
 
@@ -344,8 +406,10 @@ class RoleCatalogueV2Test extends TestCase
         $this->rewindToProductionBefore();
         $migration = $this->migration();
         $migration->up();
+        $this->migration3a()->up();          // the next migration in production
         Artisan::call('permission:sync');   // what a container start does next
 
+        $this->migration3a()->down();        // rollback runs newest first
         $migration->down();
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 

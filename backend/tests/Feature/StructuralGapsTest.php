@@ -38,7 +38,7 @@ class StructuralGapsTest extends TestCase
     {
         parent::setUp();
         $staff = User::factory()->create();
-        foreach (['reports.view', 'reports.financial'] as $p) {
+        foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial'] as $p) {
             $staff->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();

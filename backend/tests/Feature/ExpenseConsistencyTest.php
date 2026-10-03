@@ -40,7 +40,7 @@ class ExpenseConsistencyTest extends TestCase
     {
         $user = User::factory()->create();
         $user->assignRole(Role::findOrCreate('sales_manager', 'sanctum'));
-        foreach (['reports.view', 'reports.financial'] as $perm) {
+        foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial'] as $perm) {
             $user->givePermissionTo(Permission::findOrCreate($perm, 'sanctum'));
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();

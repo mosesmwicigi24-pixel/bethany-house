@@ -25,7 +25,7 @@ class AnalyticsTest extends TestCase
     {
         $user = User::factory()->create();
         $user->assignRole(Role::findOrCreate('analyst', 'sanctum'));
-        $user->givePermissionTo(Permission::findOrCreate('reports.view', 'sanctum'));
+        \Tests\ReportAccess::grantPages($user);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 

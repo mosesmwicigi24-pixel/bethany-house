@@ -89,7 +89,7 @@ class ReportOutletPolicyTest extends TestCase
     {
         $user = User::factory()->create();
         $role = Role::findOrCreate('outlet_manager', 'sanctum');
-        foreach (['reports.view', 'reports.financial', 'customers.view', 'customers.insights'] as $p) {
+        foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial', 'customers.view', 'customers.insights'] as $p) {
             $role->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
         $user->assignRole($role);

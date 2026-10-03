@@ -70,7 +70,7 @@ class ReportExplorerTest extends TestCase
         $sale($ben, [[$alb, 9_999]], 'KES', 'cash', ['status' => 'pending', 'payment_status' => 'pending']); // a cart
 
         $u = User::factory()->create();
-        foreach (['reports.view', 'orders.view'] as $p) {
+        foreach ([...\Tests\ReportAccess::PAGES, 'orders.view'] as $p) {
             $u->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();

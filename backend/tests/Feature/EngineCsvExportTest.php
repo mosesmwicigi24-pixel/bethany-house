@@ -42,7 +42,7 @@ class EngineCsvExportTest extends TestCase
     {
         $user = User::factory()->create();
         $user->assignRole(Role::findOrCreate('admin', 'sanctum'));
-        $user->givePermissionTo(Permission::findOrCreate('reports.view', 'sanctum'));
+        \Tests\ReportAccess::grantPages($user);
         // Taking a FILE needs reports.export as well as reports.view — the
         // ?export= door used to bypass it (#384).
         $user->givePermissionTo(Permission::findOrCreate('reports.export', 'sanctum'));
@@ -146,7 +146,7 @@ class EngineCsvExportTest extends TestCase
         // reports.export — so the permission was bypassable with a query
         // parameter. Two roles sat on the wrong side of it.
         $viewer = User::factory()->create();
-        $viewer->givePermissionTo(Permission::findOrCreate('reports.view', 'sanctum'));
+        \Tests\ReportAccess::grantPages($viewer);
         app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($viewer);
 

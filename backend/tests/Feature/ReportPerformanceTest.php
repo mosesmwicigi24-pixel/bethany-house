@@ -63,7 +63,7 @@ class ReportPerformanceTest extends TestCase
         $sale($this->town, $this->ben, 9_999, 'KES', ['status' => 'pending', 'payment_status' => 'pending']); // a cart
 
         $u = User::factory()->create();
-        foreach (['reports.view', 'orders.view'] as $p) {
+        foreach ([...\Tests\ReportAccess::PAGES, 'orders.view'] as $p) {
             $u->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();

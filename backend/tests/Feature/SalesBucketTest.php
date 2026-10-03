@@ -155,7 +155,7 @@ class SalesBucketTest extends TestCase
 
         $viewer = User::factory()->create();
         $viewer->assignRole(Role::findOrCreate('admin', 'sanctum'));
-        $viewer->givePermissionTo(Permission::findOrCreate('reports.view', 'sanctum'));
+        \Tests\ReportAccess::grantPages($viewer);
 
         $res = $this->actingAs($viewer, 'sanctum')
             ->getJson('/api/v1/admin/reports/sales/ledger?start='

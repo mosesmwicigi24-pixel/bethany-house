@@ -114,7 +114,7 @@ class ReportDataQualityTest extends TestCase
 
     public function test_each_check_finds_exactly_what_was_planted(): void
     {
-        $this->actingWith(['reports.view', 'reports.financial', 'orders.view', 'customers.view', 'products.view', 'expenses.view']);
+        $this->actingWith([...\Tests\ReportAccess::PAGES, 'reports.financial', 'orders.view', 'customers.view', 'products.view', 'expenses.view']);
         $c = $this->checks();
 
         $this->assertSame(1, $c['anonymous_sales']['count']);
@@ -143,7 +143,7 @@ class ReportDataQualityTest extends TestCase
 
     public function test_the_uncosted_count_is_the_p_and_l_s_own_count(): void
     {
-        $this->actingWith(['reports.view', 'reports.financial']);
+        $this->actingWith([...\Tests\ReportAccess::PAGES, 'reports.financial']);
         $t  = now()->format('Y-m-d');
         $pl = $this->getJson("/api/v1/admin/reports/financial/profit-loss?start_date={$t}&end_date={$t}")->assertOk()->json();
         $c  = $this->checks();
@@ -156,7 +156,7 @@ class ReportDataQualityTest extends TestCase
 
     public function test_the_outlet_filter_narrows_what_it_should_and_nothing_else(): void
     {
-        $this->actingWith(['reports.view', 'reports.financial']);
+        $this->actingWith([...\Tests\ReportAccess::PAGES, 'reports.financial']);
         $c = $this->checks("&outlet_id={$this->b->id}");
 
         $this->assertSame(0, $c['anonymous_sales']['count']);
@@ -171,7 +171,7 @@ class ReportDataQualityTest extends TestCase
     {
         // A report reader with nothing else: figures and names, no contacts,
         // no links to screens they cannot open, no expense money.
-        $this->actingWith(['reports.view']);
+        $this->actingWith([...\Tests\ReportAccess::PAGES]);
         $c = $this->checks();
 
         $this->assertArrayNotHasKey('expenses_awaiting_approval', $c, 'expense money stays behind reports.financial');
@@ -180,7 +180,7 @@ class ReportDataQualityTest extends TestCase
         $this->assertNull($c['unrated_currency_sales']['fix']['to'], 'Settings → Currencies is super_admin only');
         $this->assertNull($c['payments_awaiting_approval']['fix']['to']);
 
-        $this->actingWith(['reports.view', 'orders.view', 'customers.view', 'products.view']);
+        $this->actingWith([...\Tests\ReportAccess::PAGES, 'orders.view', 'customers.view', 'products.view']);
         $c = $this->checks();
         $this->assertStringStartsWith('/sales/orders/', $c['anonymous_sales']['rows'][0]['links']['order']);
         $this->assertStringStartsWith('/catalogue/products/', $c['uncosted_lines']['rows'][0]['links']['product']);

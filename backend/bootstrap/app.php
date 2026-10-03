@@ -68,6 +68,10 @@ return Application::configure(basePath: dirname(__DIR__))
             'report.snapshot' => \App\Http\Middleware\ReadsOneSnapshot::class,
             // Customer phones and emails need customers.view (owner, cycle 9).
             'report.contacts' => \App\Http\Middleware\RedactsCustomerContacts::class,
+            // One permission per report page, and the export rule for that
+            // page (role hardening 3A) — see App\Support\ReportPages.
+            'report.page'   => \App\Http\Middleware\RequiresReportPage::class,
+            'report.export' => \App\Http\Middleware\RequiresReportExport::class,
             // The owner's accounts never work the till (role hardening 1B).
             // A route middleware, because Gate::before lets super_admin past
             // every permission — see the class docblock.

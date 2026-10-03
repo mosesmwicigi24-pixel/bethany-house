@@ -37,7 +37,7 @@ class CustomerRetentionTest extends TestCase
     {
         parent::setUp();
         $staff = User::factory()->create();
-        foreach (['reports.view', 'customers.view', 'customers.insights'] as $p) {
+        foreach ([...\Tests\ReportAccess::PAGES, 'customers.view', 'customers.insights'] as $p) {
             $staff->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();

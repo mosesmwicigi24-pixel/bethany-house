@@ -85,9 +85,9 @@ class MetricEngine
      * Build an engine for this caller.
      *
      * Reports are BUSINESS-WIDE (owner's decision, 2026-09-30). Reaching any
-     * of them already requires `reports.view`, held by four people, three of
-     * whom are admins; that permission is the access control, and the outlet
-     * is not a second one.
+     * of them already requires that page's permission (`reports.<page>`
+     * since Phase 3A; `reports.view` before it); that permission is the
+     * access control, and the outlet is not a second one.
      *
      * Until that decision this method scoped a non-admin to their assigned
      * outlets while ReportController, EnhancedReportController and
@@ -1272,7 +1272,7 @@ class MetricEngine
             'group' => 'sales', 'scope' => 'current', 'outlet' => true, 'severity' => 'low',
             'title'   => 'Carts unconfirmed for over 30 days',
             'affects' => 'The unconfirmed pipeline: these are counted as live leads. They are not sales on any page.',
-            'fix'     => ['label' => 'Confirm or cancel in Sales → Unconfirmed', 'to' => '/reports/sales?tab=unconfirmed', 'permission' => 'reports.view'],
+            'fix'     => ['label' => 'Confirm or cancel in Sales → Unconfirmed', 'to' => '/reports/sales?tab=unconfirmed', 'permission' => 'reports.sales'],
         ], (int) $agg->n, (float) $agg->v,
             (clone $stale)->selectRaw($orderRow)->orderByDesc(DB::raw($kes))->limit($limit)->get()->all());
 

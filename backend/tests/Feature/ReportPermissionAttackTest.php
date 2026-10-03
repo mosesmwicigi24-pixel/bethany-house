@@ -336,7 +336,7 @@ class ReportPermissionAttackTest extends TestCase
     public function test_a_customer_account_holding_every_report_permission_is_refused(string $method, string $route): void
     {
         $ids = self::seedReportFixture();
-        $this->actAs(['reports.view', 'reports.financial', 'reports.export', 'customers.view'], 'customer');
+        $this->actAs([...\Tests\ReportAccess::PAGES, 'reports.financial', 'reports.export', 'customers.view'], 'customer');
         $res = $this->json($method, self::uri($route, $ids), $method === 'GET' ? [] : ['name' => 'x']);
         $this->assertSame(403, $res->getStatusCode(), "{$method} {$route}: " . self::excerpt($res));
         $this->assertNoMarkers($res, self::PII_MARKERS, "{$method} {$route}");
@@ -376,7 +376,7 @@ class ReportPermissionAttackTest extends TestCase
     public function test_reports_view_only_gets_no_financials_and_no_customer_pii(string $route): void
     {
         $ids = self::seedReportFixture();
-        $this->actAs(['reports.view']);
+        $this->actAs([...\Tests\ReportAccess::PAGES]);
         $res    = $this->getJson(self::uri($route, $ids));
         $status = $res->getStatusCode();
 
@@ -445,7 +445,7 @@ class ReportPermissionAttackTest extends TestCase
     public function test_no_csv_without_reports_export(string $route, string $value): void
     {
         $ids = self::seedReportFixture();
-        $this->actAs(['reports.view', 'reports.financial', 'customers.view', 'customers.insights']);
+        $this->actAs([...\Tests\ReportAccess::PAGES, 'reports.financial', 'customers.view', 'customers.insights']);
         $res = $this->get(self::uri($route, $ids, 'export=' . $value), ['Accept' => 'application/json']);
 
         $this->assertLessThan(500, $res->getStatusCode(), "{$route}?export={$value}: " . self::excerpt($res));
@@ -472,7 +472,7 @@ class ReportPermissionAttackTest extends TestCase
     public function test_no_pdf_file_without_reports_export(string $route): void
     {
         $ids = self::seedReportFixture();
-        $this->actAs(['reports.view', 'reports.financial', 'customers.view', 'customers.insights']);
+        $this->actAs([...\Tests\ReportAccess::PAGES, 'reports.financial', 'customers.view', 'customers.insights']);
         $res = $this->get(self::uri($route, $ids), ['Accept' => 'application/json']);
 
         $this->assertLessThan(500, $res->getStatusCode(), "{$route}: " . self::excerpt($res));
@@ -491,7 +491,7 @@ class ReportPermissionAttackTest extends TestCase
     public function test_an_exporter_without_customer_access_gets_a_customers_pdf_without_contacts(): void
     {
         $ids = self::seedReportFixture();
-        $this->actAs(['reports.view', 'reports.export']);
+        $this->actAs([...\Tests\ReportAccess::PAGES, 'reports.export']);
         $res = $this->get(self::uri('pdf/customers', $ids));
         $this->assertSame(200, $res->getStatusCode());
 
@@ -521,7 +521,7 @@ class ReportPermissionAttackTest extends TestCase
     public function test_an_exporter_without_customer_access_gets_csvs_without_contacts(string $route, string $name): void
     {
         $ids = self::seedReportFixture();
-        $this->actAs(['reports.view', 'reports.export']);
+        $this->actAs([...\Tests\ReportAccess::PAGES, 'reports.export']);
         $res = $this->get(self::uri($route, $ids, 'export=csv'));
 
         $this->assertSame(200, $res->getStatusCode(), self::excerpt($res));
@@ -535,7 +535,7 @@ class ReportPermissionAttackTest extends TestCase
     public function test_positive_control_customer_csvs_carry_contacts_for_customer_staff(string $route, string $name): void
     {
         $ids = self::seedReportFixture();
-        $this->actAs(['reports.view', 'reports.export', 'customers.view', 'customers.insights']);
+        $this->actAs([...\Tests\ReportAccess::PAGES, 'reports.export', 'customers.view', 'customers.insights']);
         $body = self::body($this->get(self::uri($route, $ids, 'export=csv')));
 
         $found = array_filter(self::CONTACT_MARKERS, fn ($m) => str_contains($body, $m));
@@ -546,7 +546,7 @@ class ReportPermissionAttackTest extends TestCase
     public function test_supplier_contacts_stay_visible_to_report_viewers(): void
     {
         $ids = self::seedReportFixture();
-        $this->actAs(['reports.view']);
+        $this->actAs([...\Tests\ReportAccess::PAGES]);
         $res = $this->getJson(self::uri('purchase-orders', $ids))->assertOk();
 
         $this->assertStringContainsString('supplier.pii@example.test', self::body($res));
@@ -596,7 +596,7 @@ class ReportPermissionAttackTest extends TestCase
     public function test_the_expense_drill_cannot_be_reached_by_another_spelling(string $metric): void
     {
         self::seedReportFixture();
-        $this->actAs(['reports.view']);
+        $this->actAs([...\Tests\ReportAccess::PAGES]);
         $res = $this->getJson("/api/v1/admin/reports/drill/{$metric}?period=last_30");
 
         $this->assertLessThan(500, $res->getStatusCode(), self::excerpt($res));
@@ -613,7 +613,7 @@ class ReportPermissionAttackTest extends TestCase
     public function test_reports_view_only_cannot_write_customer_outreach(): void
     {
         self::seedReportFixture();
-        $this->actAs(['reports.view']);
+        $this->actAs([...\Tests\ReportAccess::PAGES]);
         $res = $this->postJson('/api/v1/admin/reports/win-back/outreach', [
             'phone' => '0711000111', 'name' => 'Zelda Piiname', 'channel' => 'call',
         ]);
@@ -632,7 +632,7 @@ class ReportPermissionAttackTest extends TestCase
     public function test_reports_export_without_financial_cannot_schedule_the_financial_report(): void
     {
         self::seedReportFixture();
-        $this->actAs(['reports.view', 'reports.export']);
+        $this->actAs([...\Tests\ReportAccess::PAGES, 'reports.export']);
         $res = $this->postJson('/api/v1/admin/reports/schedules', [
             'name' => 'leak', 'report_type' => 'financial', 'frequency' => 'daily',
             'recipients' => ['outside@example.test'], 'format' => 'csv',
@@ -673,7 +673,7 @@ class ReportPermissionAttackTest extends TestCase
     public function test_positive_control_full_user_sees_the_data(string $route, string $marker): void
     {
         $ids = self::seedReportFixture();
-        $this->actAs(['reports.view', 'reports.financial', 'reports.export', 'customers.view', 'customers.insights']);
+        $this->actAs([...\Tests\ReportAccess::PAGES, 'reports.financial', 'reports.export', 'customers.view', 'customers.insights']);
         $res = $this->getJson(self::uri($route, $ids))->assertOk();
         $this->assertStringContainsString($marker, (string) $res->getContent(), "{$route}: fixture did not produce {$marker}");
     }

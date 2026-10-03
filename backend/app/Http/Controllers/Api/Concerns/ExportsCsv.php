@@ -58,6 +58,12 @@ trait ExportsCsv
      * A permission named `reports.export` should therefore mean something. If
      * a role ought to be able to export, granting it `reports.export` is the
      * one-line answer, and then it is a decision rather than an accident.
+     *
+     * Since Phase 3A the rule is per page: the route's `report.page:<page>`
+     * names the page, and a file needs that page's export right —
+     * reports.export, or reports.export_supply on Inventory / Procurement
+     * (App\Support\ReportPages::canExport). A route that names no single
+     * page falls back to reports.export alone, the stricter of the two.
      */
     private function wantsExport(Request $request): bool
     {
@@ -65,8 +71,12 @@ trait ExportsCsv
             return false;
         }
 
+        $page = $request->attributes->get('report_page');
+
         abort_unless(
-            $request->user()?->can('reports.export'),
+            is_string($page)
+                ? \App\Support\ReportPages::canExport($request->user(), $page)
+                : (bool) $request->user()?->can(\App\Support\ReportPages::EXPORT),
             403,
             'Downloading a report requires the reports.export permission.',
         );

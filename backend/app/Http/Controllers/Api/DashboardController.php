@@ -106,8 +106,10 @@ class DashboardController extends Controller
     private function buildStats(Request $request): array
     {
         // today_sales used to be every paid order in the business, which is why
-        // it was put behind reports.view. That is still the right lock for a
-        // caller who would see the GROUP's takings — a tailor, say.
+        // it was put behind reports.view — since Phase 3A the Sales & Orders
+        // report (reports.sales), the page those takings come from. That is
+        // still the right lock for a caller who would see the GROUP's
+        // takings — a tailor, say.
         //
         // But Order now carries a viewer scope, so for a narrowed role the same
         // sum is their OWN takings, which is exactly what a cashier should see
@@ -118,7 +120,7 @@ class DashboardController extends Controller
         // view is already narrower than the whole business.
         $user        = $request->user();
         $scope       = DataScopeResolver::for($user, 'orders.view');
-        $maySeeMoney = ($user?->can('reports.view') ?? false) || $scope !== DataScope::All;
+        $maySeeMoney = ($user?->can('reports.sales') ?? false) || $scope !== DataScope::All;
 
         $stats = [
             // What the figures below are counted over, so the UI can say "your

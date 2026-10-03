@@ -139,7 +139,7 @@ class AccessControlHolesTest extends TestCase
 
     public function test_a_reports_holder_still_sees_group_revenue(): void
     {
-        $this->actingAsUserWith(['dashboard.view', 'reports.view']);
+        $this->actingAsUserWith(['dashboard.view', ...\Tests\ReportAccess::PAGES]);
 
         Order::factory()->create([
             'payment_status' => 'paid',

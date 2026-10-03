@@ -36,7 +36,7 @@ class ExecutiveDashboardTest extends TestCase
     {
         $user = User::factory()->create();
         $user->assignRole(Role::findOrCreate('sales_manager', 'sanctum'));
-        foreach (array_merge(['reports.view'], $extraPerms) as $perm) {
+        foreach (array_merge([...\Tests\ReportAccess::PAGES], $extraPerms) as $perm) {
             $user->givePermissionTo(Permission::findOrCreate($perm, 'sanctum'));
         }
         if ($assignedOutlet) {

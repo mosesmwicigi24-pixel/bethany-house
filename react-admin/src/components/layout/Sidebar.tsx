@@ -402,7 +402,9 @@ const NAV: NavGroup[] = [
                 label: "Storefront Insights",
                 href: "/insights",
                 icon: "countries",
-                permission: "reports.view",
+                // Visitors and buyers by country: the storefront's half of
+                // Customers & Neema (was reports.view; Phase 3A).
+                permission: "reports.customers",
             },
         ],
     },
@@ -437,20 +439,21 @@ const NAV: NavGroup[] = [
     {
         label: "Reports",
         items: [
-            { label: "Executive Overview",      href: "/reports",             icon: "reports",         permission: "reports.view" },
-            { label: "Sales & Orders",          href: "/reports/sales",       icon: "orders",          permission: "reports.view" },
-            { label: "Customers & Neema",       href: "/reports/customers",   icon: "customers",       permission: "reports.view" },
-            // reports.financial: what its data has always required.
+            // One permission per page (Role Hardening Plan §6, Phase 3A) — the
+            // same slug each page's API checks (report.page:<page>).
+            { label: "Executive Overview",      href: "/reports",             icon: "reports",         permission: "reports.executive" },
+            { label: "Sales & Orders",          href: "/reports/sales",       icon: "orders",          permission: "reports.sales" },
+            { label: "Customers & Neema",       href: "/reports/customers",   icon: "customers",       permission: "reports.customers" },
             { label: "Finance & Cash",          href: "/reports/finance",     icon: "expenses",        permission: "reports.financial" },
-            { label: "Production & Fulfilment", href: "/reports/production",  icon: "production",      permission: "reports.view" },
-            { label: "Inventory",               href: "/reports/inventory",   icon: "stock",           permission: "reports.view" },
-            { label: "Procurement & Suppliers", href: "/reports/procurement", icon: "purchase-orders", permission: "reports.view" },
-            { label: "Staff, Outlets & Performance", href: "/reports/performance", icon: "outlets", permission: "reports.view" },
-            // Signals reads /admin/intelligence/*, gated per card by these four
-            // (not reports.view, which none of its endpoints checks).
-            { label: "Signals",                 href: "/reports/signals",     icon: "intelligence",    anyOfPermissions: ["inventory.view", "production.view", "intelligence.view", "expenses.view"] },
-            { label: "Business Explorer",       href: "/reports/explorer",    icon: "layers",          permission: "reports.view" },
-            { label: "Audit & Data Quality",    href: "/reports/data-quality", icon: "qc",             permission: "reports.view" },
+            { label: "Production & Fulfilment", href: "/reports/production",  icon: "production",      permission: "reports.production" },
+            { label: "Inventory",               href: "/reports/inventory",   icon: "stock",           permission: "reports.inventory" },
+            { label: "Procurement & Suppliers", href: "/reports/procurement", icon: "purchase-orders", permission: "reports.procurement" },
+            { label: "Staff, Outlets & Performance", href: "/reports/performance", icon: "outlets", permission: "reports.performance" },
+            // Signals' feeds (/admin/intelligence/*) check reports.signals on
+            // top of each card's module permission.
+            { label: "Signals",                 href: "/reports/signals",     icon: "intelligence",    permission: "reports.signals" },
+            { label: "Business Explorer",       href: "/reports/explorer",    icon: "layers",          permission: "reports.explorer" },
+            { label: "Audit & Data Quality",    href: "/reports/data-quality", icon: "qc",             permission: "reports.data_quality" },
         ],
     },
 

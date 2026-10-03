@@ -10,6 +10,7 @@ import { reportsApi, type EngineRoomSummaries } from "@/api/reports";
 import { purchaseOrderApi } from "@/api/procurement";
 import { fmtKes } from "@/api/expenses";
 import { usePermissions } from "@/hooks/usePermissions";
+import { canExportReport, mayOpenReportLink, reportPageOfRoute, canViewReport } from "@/lib/reportPages";
 import { useToastStore } from "@/store/toast.store";
 import { Spinner } from "@/components/ui/Spinner";
 import { clsx } from "clsx";
@@ -75,6 +76,9 @@ function MetricCard({ label, value, sub, metric, to, money = false, downIsGood =
     to?: string; money?: boolean; downIsGood?: boolean; onOpen?: () => void;
 }) {
     const navigate = useNavigate();
+    // A link to a report page the viewer cannot open is not offered (Phase 3A).
+    const { can } = usePermissions();
+    if (to && !mayOpenReportLink(can, to)) to = undefined;
     const display = value ?? (money
         ? fmtKes(metric?.current ?? 0)
         : Number(metric?.current ?? 0).toLocaleString());
@@ -246,13 +250,14 @@ function daysUntil(date: string): number {
 }
 
 function EngineCard({ label, value, sub, to, zero = false }: {
-    label: string; value: string; sub: string; to: string; zero?: boolean;
+    label: string; value: string; sub: string; to?: string; zero?: boolean;
 }) {
     const navigate = useNavigate();
     return (
         <button
-            onClick={() => navigate(to)}
-            className="card card-body text-left transition-shadow hover:shadow-md cursor-pointer"
+            onClick={() => to && navigate(to)}
+            disabled={!to}
+            className={clsx("card card-body text-left transition-shadow", to && "hover:shadow-md cursor-pointer")}
         >
             {/* Labels say what the money is in plain words and are never cut
                 off — a truncated "MONEY ON TH…" told a manager nothing. */}
@@ -270,6 +275,11 @@ function EngineCard({ label, value, sub, to, zero = false }: {
 
 function EngineRoomStrip({ outlet }: { outlet?: string }) {
     const navigate = useNavigate();
+    // Each opportunity links to the report page behind it — offered only when
+    // the viewer may open that page (Phase 3A: finance reads this strip but
+    // not Customers & Neema).
+    const { can } = usePermissions();
+    const linkable = (to: string) => (mayOpenReportLink(can, to) ? to : undefined);
     // The page's outlet, like everything else on it: the attention items
     // followed the outlet filter while these stayed business-wide — one page,
     // two scopes, nothing saying so.
@@ -359,13 +369,15 @@ function EngineRoomStrip({ outlet }: { outlet?: string }) {
                         <>
                             {live.length > 0 && (
                                 <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-                                    {live.map((e) => <EngineCard key={e.label} label={e.label} value={e.value} sub={e.sub} to={e.to} />)}
+                                    {live.map((e) => <EngineCard key={e.label} label={e.label} value={e.value} sub={e.sub} to={linkable(e.to)} />)}
                                 </div>
                             )}
                             {quiet.length > 0 && (
                                 <p className="mt-2 text-2xs text-surface-400">
                                     Nothing waiting: {quiet.map((e, i) => (
-                                        <span key={e.label}>{i > 0 && " · "}<button onClick={() => navigate(e.to)} className="hover:text-brand-600 hover:underline">{e.label}</button></span>
+                                        <span key={e.label}>{i > 0 && " · "}{linkable(e.to)
+                                            ? <button onClick={() => navigate(e.to)} className="hover:text-brand-600 hover:underline">{e.label}</button>
+                                            : e.label}</span>
                                     ))}
                                 </p>
                             )}
@@ -829,14 +841,12 @@ const CATEGORIES: ReportCategory[] = [
 export default function ReportsPage() {
     const navigate = useNavigate();
     const { can } = usePermissions();
-    // Every /reports/* sub-page requires reports.view, already implied by
-    // reaching this page - except /reports/finance, which requires the
-    // more restricted reports.financial (see routes/api.php and
-    // SyncPermissions.php: outlet_manager and procurement_officer/manager
-    // deliberately get reports.view but not reports.financial). Filtering
-    // the tile here so it doesn't link to a page that will 403.
+    // One permission per report page (Phase 3A): a tile is shown only for
+    // a page the viewer holds — the same slug its route and API check — and
+    // says "CSV export" / "Schedulable" only when this viewer may take a file
+    // out of it.
     const visibleCategories = CATEGORIES.filter(
-        (cat) => cat.id !== "financial" || can("reports.financial"),
+        (cat) => canViewReport(can, reportPageOfRoute(cat.path)),
     );
 
     return (
@@ -871,7 +881,7 @@ export default function ReportsPage() {
                                     {cat.description}
                                 </p>
                                 <div className="flex items-center gap-3 mt-2 text-xs text-surface-400">
-                                    {cat.csv !== false && <span className="flex items-center gap-0.5">
+                                    {cat.csv !== false && canExportReport(can, reportPageOfRoute(cat.path)) && <span className="flex items-center gap-0.5">
                                         <svg
                                             className="w-3 h-3"
                                             fill="none"
@@ -887,7 +897,7 @@ export default function ReportsPage() {
                                         </svg>
                                         CSV export
                                     </span>}
-                                    {cat.schedulable !== false && <span className="flex items-center gap-0.5">
+                                    {cat.schedulable !== false && canExportReport(can, reportPageOfRoute(cat.path)) && <span className="flex items-center gap-0.5">
                                         <svg
                                             className="w-3 h-3"
                                             fill="none"

@@ -71,7 +71,7 @@ const NAV_SHORTCUTS: NavShortcut[] = [
     { label: "Production Orders",  href: "/production/orders",              icon: "production", keywords: ["manufacturing", "making"], permission: "production.view" },
     { label: "Work In Progress",   href: "/production/wip",                 icon: "wip",        keywords: ["wip", "in progress"], permission: "production.view" },
     { label: "Expenses",           href: "/expenses",                       icon: "expenses",   keywords: ["costs", "finance", "spending"], permission: "expenses.view" },
-    { label: "Reports",            href: "/reports",                        icon: "reports",    keywords: ["analytics", "statistics"], permission: "reports.view" },
+    { label: "Reports",            href: "/reports",                        icon: "reports",    keywords: ["analytics", "statistics"], permission: "reports.executive" },
     { label: "Approvals",          href: "/approvals",                      icon: "approvals",  keywords: ["pending", "review"], anyOfPermissions: ["procurement.approve", "inventory.approve", "payments.approve_international"] },
     { label: "Notifications",      href: "/notifications",                  icon: "notif",      keywords: ["alerts", "inbox"], permission: "notifications.view" },
     { label: "Users",              href: "/settings/users",                 icon: "users",      keywords: ["staff", "accounts", "team"], permission: "users.view" },

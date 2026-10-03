@@ -84,7 +84,7 @@ class PdfReportAlignmentTest extends TestCase
 
         $viewer = User::factory()->create();
         $viewer->assignRole(Role::findOrCreate('admin', 'sanctum'));
-        foreach (['reports.view', 'reports.financial'] as $p) {
+        foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial'] as $p) {
             $viewer->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
         $page = $this->actingAs($viewer, 'sanctum')
@@ -111,7 +111,7 @@ class PdfReportAlignmentTest extends TestCase
 
         $viewer = User::factory()->create();
         $viewer->assignRole(Role::findOrCreate('admin', 'sanctum'));
-        foreach (['reports.view', 'reports.financial'] as $p) {
+        foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial'] as $p) {
             $viewer->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
         $page = $this->actingAs($viewer, 'sanctum')
