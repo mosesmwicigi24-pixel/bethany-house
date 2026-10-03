@@ -22,6 +22,15 @@ export interface User {
   outlet?: Outlet
   roles?: Role[]
   permissions?: string[]
+  // Sign-in safety (Phase 4C) — sent with the signed-in user (login / me)
+  session_policy?: { idle_minutes: number; absolute_minutes: number; on_idle: 'sign_out' | 'pin_lock' } | null
+  terminal_pin_set?: boolean
+  two_factor_required?: boolean
+  recovery_codes_left?: number | null
+  // Account lock state (Users screen)
+  locked_at?: string | null
+  locked_until?: string | null
+  lock_reason?: string | null
 }
 
 export interface AuthState {
@@ -44,6 +53,12 @@ export interface LoginResponse {
   requires_2fa?: boolean
   user_id?: number
   challenge?: string
+  // Staged 2FA rollout: the role requires 2FA and the account has none yet
+  requires_2fa_setup?: boolean
+  setup_token?: string
+  // Shown once, after 2FA is switched on
+  recovery_codes?: string[]
+  recovery_codes_left?: number
 }
 
 // ─── RBAC ─────────────────────────────────────────────────────────────────────

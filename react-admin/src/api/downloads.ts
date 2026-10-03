@@ -1,4 +1,5 @@
 import { get, post, del, api } from "./client";
+import { waitForStepUp } from "@/store/security.store";
 
 // Download approval (App\Http\Middleware\DownloadGate on the server).
 // Every file a staff member takes needs the owner's approval — or a manager he
@@ -138,6 +139,24 @@ export const DOWNLOAD_HELD_EVENT = "download:held";
 
 export function announceHeld(body: HeldDownload): void {
     window.dispatchEvent(new CustomEvent<HeldDownload>(DOWNLOAD_HELD_EVENT, { detail: body }));
+}
+
+/**
+ * For fetch()-based requests to a step-up route (Phase 4C): when the server asks
+ * the person to confirm it is them, open the dialog and resolve true once they
+ * have — the caller sends the request again. False for any other response.
+ */
+export async function steppedUpFromFetch(res: Response): Promise<boolean> {
+    if (res.status !== 403) return false;
+    try {
+        const body = await res.clone().json();
+        if (body?.code === "step_up_required") {
+            return await waitForStepUp(body.method === "totp" ? "totp" : "password");
+        }
+    } catch {
+        /* not JSON — an ordinary refusal */
+    }
+    return false;
 }
 
 /** For fetch()-based downloads: true (and the dialog opens) when the gate held it. */

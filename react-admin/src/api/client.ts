@@ -5,6 +5,11 @@ import axios, {
     type InternalAxiosRequestConfig,
 } from "axios";
 import type { ApiError } from "@/types";
+import {
+    waitForPinUnlock,
+    waitForStepUp,
+    type StepUpMethod,
+} from "@/store/security.store";
 
 // ─── Token storage ────────────────────────────────────────────────────────────
 // Uses localStorage so the token persists across PWA restarts, tab closes,
@@ -19,6 +24,24 @@ export const tokenStorage = {
     set: (token: string) => localStorage.setItem(TOKEN_KEY, token),
     remove: () => localStorage.removeItem(TOKEN_KEY),
 };
+
+// ─── Activity (idle limits) ───────────────────────────────────────────────────
+// The server ends (or, for a clerk, PIN-locks) a session that has been idle
+// past its role's limit (Phase 4C). Screens poll in the background, which must
+// not count as the person being there: a request sent when nobody has touched
+// the screen for a while is marked as background and does not reset the clock.
+
+const BACKGROUND_AFTER_MS = 30_000;
+let lastInteraction = Date.now();
+
+if (typeof window !== "undefined") {
+    const touch = () => { lastInteraction = Date.now(); };
+    for (const ev of ["pointerdown", "keydown", "touchstart", "wheel"]) {
+        window.addEventListener(ev, touch, { passive: true, capture: true });
+    }
+}
+
+type RetryableConfig = InternalAxiosRequestConfig & { _securityRetries?: number };
 
 // ─── Client factory ───────────────────────────────────────────────────────────
 
@@ -39,6 +62,9 @@ function createApiClient(): AxiosInstance {
             const token = tokenStorage.get();
             if (token) {
                 config.headers.Authorization = `Bearer ${token}`;
+            }
+            if (Date.now() - lastInteraction > BACKGROUND_AFTER_MS) {
+                config.headers["X-Background-Request"] = "1";
             }
             // When the body is FormData, let the browser/Axios set Content-Type
             // automatically (it must include the multipart boundary). Removing the
@@ -65,6 +91,27 @@ function createApiClient(): AxiosInstance {
             }
 
             const { status, data } = error.response;
+            const config = error.config as RetryableConfig | undefined;
+            const retries = config?._securityRetries ?? 0;
+
+            // A clerk's idle session is held behind the terminal PIN. Wait for
+            // the PIN (PinLockOverlay), then send the same request again. The
+            // register and the sale on screen are untouched.
+            if (status === 423 && config && retries < 3) {
+                return readJson(data).then(async (body) => {
+                    if (body?.reason !== "pin_locked") {
+                        return Promise.reject({
+                            status,
+                            message: body?.message ?? "This account is locked.",
+                            errors: body?.errors ?? {},
+                            reason: body?.reason,
+                        } satisfies ApiError);
+                    }
+                    await waitForPinUnlock();
+                    config._securityRetries = retries + 1;
+                    return client.request(config);
+                });
+            }
 
             if (status === 401) {
                 tokenStorage.remove();
@@ -82,7 +129,23 @@ function createApiClient(): AxiosInstance {
                 // body says so. File downloads ask for a Blob, so the body may
                 // need reading first. Announce it (DownloadApprovalDialog opens)
                 // instead of flattening it into "no permission".
-                return readJson(data).then((body) => {
+                return readJson(data).then(async (body) => {
+                    // A privileged action needs the person to confirm it is
+                    // them (Phase 4C step-up). Ask (StepUpDialog), then send
+                    // the same request again; cancelling fails it quietly.
+                    if (body?.code === "step_up_required" && config && retries < 2) {
+                        const confirmed = await waitForStepUp((body.method ?? "password") as StepUpMethod);
+                        if (confirmed) {
+                            config._securityRetries = retries + 1;
+                            return client.request(config);
+                        }
+                        return Promise.reject({
+                            status,
+                            message: "Cancelled — the action needs you to confirm it’s you.",
+                            errors: {},
+                            reason: "step_up_cancelled",
+                        } satisfies ApiError);
+                    }
                     if (body?.code === "download_approval_required") {
                         window.dispatchEvent(new CustomEvent("download:held", { detail: body }));
                         return Promise.reject({

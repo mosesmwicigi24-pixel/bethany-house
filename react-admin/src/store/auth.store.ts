@@ -2,7 +2,8 @@ import { create } from "zustand";
 import { authApi } from "@/api/auth";
 import { tokenStorage } from "@/api/client";
 import { registerPush, unregisterPush } from "@/lib/pushRegistration";
-import type { User, LoginCredentials } from "@/types";
+import { resetSecurityPrompts } from "@/store/security.store";
+import type { User, LoginCredentials, LoginResponse } from "@/types";
 
 interface AuthStore {
     user: User | null;
@@ -12,9 +13,15 @@ interface AuthStore {
     // Actions
     login: (
         credentials: LoginCredentials,
-    ) => Promise<{ requires2fa: boolean; userId?: number }>;
+    ) => Promise<{ requires2fa: boolean; requires2faSetup?: boolean; userId?: number }>;
     logout: () => Promise<void>;
-    verify2fa: (userId: number, code: string) => Promise<void>;
+    verify2fa: (userId: number, code: string, useRecoveryCode?: boolean) => Promise<LoginResponse>;
+    /** Staged 2FA rollout: a secret + QR for the person setting 2FA up at sign-in. */
+    start2faSetup: (userId: number) => Promise<{ secret_key: string; qr_code_url: string }>;
+    /** Confirms the first code. Returns the session WITHOUT applying it, so the
+     *  recovery codes can be shown first; completeLogin() applies it. */
+    confirm2faSetup: (userId: number, code: string) => Promise<LoginResponse>;
+    completeLogin: (res: LoginResponse) => void;
     fetchMe: () => Promise<void>;
     setUser: (user: User) => void;
     clearAuth: () => void;
@@ -23,6 +30,8 @@ interface AuthStore {
 // The password step's one-time proof, held only until the code is entered.
 // Kept out of the store state so it never reaches persistence or devtools.
 let pending2faChallenge: string | null = null;
+// Same for the staged-rollout setup step's proof.
+let pending2faSetup: string | null = null;
 
 export const useAuthStore = create<AuthStore>((set, get) => ({
     user: null,
@@ -39,6 +48,12 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
                 pending2faChallenge = res.challenge ?? null;
                 set({ isLoading: false });
                 return { requires2fa: true, userId: res.user_id };
+            }
+
+            if (res.requires_2fa_setup && res.user_id) {
+                pending2faSetup = res.setup_token ?? null;
+                set({ isLoading: false });
+                return { requires2fa: false, requires2faSetup: true, userId: res.user_id };
             }
 
             tokenStorage.set(res.token);
@@ -59,25 +74,47 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         }
     },
 
-    verify2fa: async (userId, code) => {
+    verify2fa: async (userId, code, useRecoveryCode = false) => {
         set({ isLoading: true });
         try {
-            const res = await authApi.verify2fa(userId, code, pending2faChallenge ?? '');
+            const res = await authApi.verify2fa(userId, code, pending2faChallenge ?? '', useRecoveryCode);
             pending2faChallenge = null;
-            tokenStorage.set(res.token);
-            set({
-                user: res.user,
-                token: res.token,
-                isAuthenticated: true,
-                isLoading: false,
-            });
-
-            // Phase 2 - register push after 2FA login
-            registerPush();
+            get().completeLogin(res);
+            return res;
         } catch (err) {
             set({ isLoading: false });
             throw err;
         }
+    },
+
+    start2faSetup: async (userId) => {
+        return authApi.setup2fa(userId, pending2faSetup ?? '');
+    },
+
+    confirm2faSetup: async (userId, code) => {
+        set({ isLoading: true });
+        try {
+            const res = await authApi.confirm2faSetup(userId, pending2faSetup ?? '', code);
+            pending2faSetup = null;
+            set({ isLoading: false });
+            return res;
+        } catch (err) {
+            set({ isLoading: false });
+            throw err;
+        }
+    },
+
+    completeLogin: (res) => {
+        tokenStorage.set(res.token);
+        set({
+            user: res.user,
+            token: res.token,
+            isAuthenticated: true,
+            isLoading: false,
+        });
+
+        // Phase 2 - register push after login
+        registerPush();
     },
 
     logout: async () => {
@@ -120,6 +157,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
     clearAuth: () => {
         tokenStorage.remove();
+        // Nothing waits on a PIN or a step-up once signed out.
+        resetSecurityPrompts();
         set({
             user: null,
             token: null,

@@ -8,7 +8,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/setup/FormComponents";
 import { tokenStorage } from "@/api/client";
-import { heldFromFetch } from "@/api/downloads";
+import { heldFromFetch, steppedUpFromFetch } from "@/api/downloads";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -159,10 +159,12 @@ function BackupsTab({ pgDumpAvailable }: { pgDumpAvailable: boolean }) {
     const handleDownload = async (backup: DatabaseBackup) => {
         setDownloadingId(backup.id);
         try {
-            const token = tokenStorage.get() ?? "";
-            const res = await fetch(databaseApi.downloadBackupUrl(backup.id), {
-                headers: { Authorization: `Bearer ${token}` },
+            const fetchBackup = () => fetch(databaseApi.downloadBackupUrl(backup.id), {
+                headers: { Authorization: `Bearer ${tokenStorage.get() ?? ""}` },
             });
+            let res = await fetchBackup();
+            // A full backup is a bulk export: confirm it's you first (step-up).
+            if (await steppedUpFromFetch(res)) res = await fetchBackup();
             // A backup is a download like any other: the owner approves it.
             if (await heldFromFetch(res)) return;
             if (!res.ok) {
