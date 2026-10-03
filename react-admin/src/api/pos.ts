@@ -83,27 +83,38 @@ export interface CartItem {
     tax_rate: number;
 }
 
+/**
+ * A till as the POS screens read it. BLIND to its own operator until a
+ * manager has finalized it (Phase 4B): the server then leaves out expected
+ * cash, the variance and every sales total that adds up to them — they are
+ * absent, not zero — and sets `blind: true`.
+ */
 export interface CashRegister {
     id: number;
     outlet_id: number;
     opened_by: string | null;
     closed_by: string | null;
-    // Balances (map from DB: opening_balance, closing_balance, expected_cash)
     opening_cash: number;
+    /** Her own count, once submitted. Null while open. */
     closing_cash: number | null;
-    expected_cash: number;
-    // Sales breakdown
     transaction_count: number;
-    total_sales: number;
-    total_cash_sales: number;
-    total_card_sales: number;
-    total_mpesa_sales: number;
-    total_refunds: number;
-    variance: number | null;
-    status: "open" | "closed";
+    status: "open" | "counted" | "closed";
+    stage: "open" | "awaiting_verification" | "finalized" | "closed_unverified";
+    /** Opened before the till lifecycle existed. */
+    legacy: boolean;
+    blind: boolean;
     notes?: string | null;
     opened_at: string;
     closed_at?: string | null;
+    finalized_at?: string | null;
+    // Present only when not blind:
+    expected_cash?: number;
+    total_sales?: number;
+    total_cash_sales?: number;
+    total_card_sales?: number;
+    total_mpesa_sales?: number;
+    total_refunds?: number;
+    variance?: number | null;
 }
 
 export interface PosOrderItem {
@@ -256,7 +267,8 @@ export const posApi = {
         post<{ message: string; register: CashRegister }>("/v1/admin/pos/register/open", data),
 
     closeRegister: (data: { outlet_id: number; closing_cash: number; notes?: string; denomination_count?: Record<number, number> }) =>
-        post<{ message: string; register: CashRegister; variance: number }>(
+        // A blind count: the reply carries no expected figure and no variance.
+        post<{ message: string; register: CashRegister }>(
             "/v1/admin/pos/register/close",
             data,
         ),

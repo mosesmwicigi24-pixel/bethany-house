@@ -14,8 +14,13 @@
  *    If the server still returns requires_eod:true (backend safety net),
  *    onError fires onRequestEod() automatically.
  *
- * 3. ALL OTHER BEHAVIOUR IS UNCHANGED
- *    Open mode, variance indicator, notes field, outlet selector — identical.
+ * 3. BLIND COUNT (Phase 4B)
+ *    Closing is the first of two steps: the cashier counts the drawer and
+ *    submits what is there. She is never shown what it should hold — the
+ *    server does not send it (no expected cash, no variance, no sales totals)
+ *    and nothing here pre-fills or compares. The till moves to "awaiting
+ *    verification"; an outlet manager verifies and finalizes it on the Tills
+ *    page. The opening float is typed blind too: no previous count is shown.
  */
 
 import { useState } from "react";
@@ -52,9 +57,8 @@ export default function RegisterModal({
 }: Props) {
     const toast = useToastStore();
     const [outletId, setOutletId] = useState(defaultOutletId ?? outlets[0]?.id);
-    const [amount, setAmount] = useState<number>(
-        mode === "close" ? (register?.expected_cash ?? 0) : 0
-    );
+    // Never pre-filled: a count typed over a suggested figure is not a count.
+    const [amount, setAmount] = useState<number>(0);
     const [notes, setNotes] = useState("");
     // Optional physical denomination count (KES note/coin value → quantity).
     const [denoms, setDenoms] = useState<Record<number, number>>({});
@@ -78,14 +82,8 @@ export default function RegisterModal({
                 denomination_count: anyDenoms ? denoms : undefined,
             }),
         onSuccess: (res) => {
-            const variance = res.variance;
-            if (variance === 0) {
-                toast.success("Register closed. Cash balanced perfectly!");
-            } else if (variance > 0) {
-                toast.success(`Register closed. Cash surplus: KES ${variance.toFixed(2)}`);
-            } else {
-                toast.error(`Register closed. Cash shortage: KES ${Math.abs(variance).toFixed(2)}`);
-            }
+            // The reply carries no variance by design — the count is blind.
+            toast.success(res.message || "Count submitted. Your outlet manager will verify it.");
             onSuccess();
         },
         onError: (err: { message: string; requires_eod?: boolean }) => {
@@ -101,8 +99,6 @@ export default function RegisterModal({
     });
 
     const isPending = openMutation.isPending || closeMutation.isPending;
-    const expectedCash = register?.expected_cash ?? 0;
-    const variance = mode === "close" ? amount - expectedCash : null;
 
     const DENOMS = [1000, 500, 200, 100, 50, 40, 20, 10, 5, 1];
     const anyDenoms = Object.values(denoms).some((q) => q > 0);
@@ -126,8 +122,8 @@ export default function RegisterModal({
                     </h2>
                     <p className="text-sm text-surface-500 mt-0.5">
                         {mode === "open"
-                            ? "Enter the opening cash float to start the day."
-                            : "Count your cash and enter the closing amount."}
+                            ? "Count the cash in the drawer and enter it as your opening float."
+                            : "Count the drawer and enter exactly what is there. Your outlet manager verifies the count."}
                     </p>
                 </div>
 
@@ -197,39 +193,22 @@ export default function RegisterModal({
                         </div>
                     )}
 
-                    {/* Register info — close mode */}
+                    {/* Register info — close mode. Blind: float and transaction
+                        count only; the expected figure is never shown here. */}
                     {mode === "close" && register && (
                         <div className="bg-surface-50 rounded-xl p-3 space-y-1.5 text-xs text-surface-600">
                             <div className="flex justify-between">
                                 <span>Opening float</span>
                                 <span>KES {register.opening_cash.toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
                             </div>
-                            <div className="flex justify-between">
-                                <span>Cash sales</span>
-                                <span>KES {register.total_cash_sales.toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
-                            </div>
-                            <div className="flex justify-between">
-                                <span>Card sales</span>
-                                <span>KES {register.total_card_sales.toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
-                            </div>
-                            <div className="flex justify-between">
-                                <span>M-Pesa sales</span>
-                                <span>KES {register.total_mpesa_sales.toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
-                            </div>
-                            {register.total_refunds > 0 && (
-                                <div className="flex justify-between text-danger">
-                                    <span>Refunds</span>
-                                    <span>-KES {register.total_refunds.toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
-                                </div>
-                            )}
                             <div className="flex justify-between text-surface-500">
                                 <span>Transactions</span>
                                 <span>{register.transaction_count}</span>
                             </div>
-                            <div className="flex justify-between font-semibold text-surface-900 border-t border-surface-200 pt-1.5">
-                                <span>Expected cash in drawer</span>
-                                <span>KES {register.expected_cash.toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
-                            </div>
+                            <p className="text-2xs text-surface-500 pt-1.5 border-t border-surface-200">
+                                This is a blind count. Once you submit, the till takes no more sales and
+                                waits for your outlet manager to verify and finalize it.
+                            </p>
                         </div>
                     )}
 
@@ -238,7 +217,7 @@ export default function RegisterModal({
                         <>
                             <div>
                                 <label className="label">
-                                    {mode === "open" ? "Opening Cash Float" : "Actual Cash Count"}
+                                    {mode === "open" ? "Opening Cash Float (counted)" : "Cash Counted in Drawer"}
                                 </label>
                                 <div className="relative">
                                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-surface-500">
@@ -293,44 +272,6 @@ export default function RegisterModal({
                                 </div>
                             )}
 
-                            {/* Variance indicator */}
-                            {mode === "close" && variance !== null && (
-                                <div
-                                    className={clsx(
-                                        "rounded-xl p-3 flex items-center justify-between",
-                                        variance === 0
-                                            ? "bg-success-light"
-                                            : variance > 0
-                                                ? "bg-info-light"
-                                                : "bg-danger-light",
-                                    )}
-                                >
-                                    <span
-                                        className={clsx(
-                                            "text-sm font-medium",
-                                            variance === 0
-                                                ? "text-success-dark"
-                                                : variance > 0
-                                                    ? "text-info"
-                                                    : "text-danger",
-                                        )}
-                                    >
-                                        {variance === 0 ? "✓ Balanced" : variance > 0 ? "Surplus" : "Shortage"}
-                                    </span>
-                                    {variance !== 0 && (
-                                        <span
-                                            className={clsx(
-                                                "font-bold",
-                                                variance > 0 ? "text-info" : "text-danger",
-                                            )}
-                                        >
-                                            {variance > 0 ? "+" : ""}
-                                            KES {variance.toLocaleString("en-KE", { minimumFractionDigits: 2 })}
-                                        </span>
-                                    )}
-                                </div>
-                            )}
-
                             {/* Notes */}
                             <div>
                                 <label className="label">
@@ -375,7 +316,7 @@ export default function RegisterModal({
                             {isPending && (
                                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                             )}
-                            {mode === "open" ? "Open Register" : "Close Register"}
+                            {mode === "open" ? "Open Register" : "Submit Count"}
                         </button>
                     )}
                 </div>

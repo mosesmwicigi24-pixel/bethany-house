@@ -168,6 +168,14 @@ const NAV: NavGroup[] = [
                 permission: "receivables.view",
             },
             {
+                label: "Tills",
+                href: "/pos/tills",
+                icon: "eod-reports",
+                // Count, verify, reconcile, correct (Phase 4B). Same gate as
+                // the API's tills group; each step inside has its own key.
+                anyOfPermissions: ["pos.access", "pos.tills_view_all", "pos.reconcile", "pos.till_correction"],
+            },
+            {
                 label: "EoD Reports",
                 href: "/pos/eod-reports",
                 icon: "eod-reports",

@@ -170,6 +170,12 @@ class SyncPermissions extends Command
         // outlet manager. Not a till permission: finance reviews takings and
         // has no till, so the review routes stand outside pos.access.
         'pos.eod_review'       => ['Review EoD Reports',   'Read, acknowledge and discuss cashiers\' end-of-day reports', 'POS'],
+        // The till lifecycle (Phase 4B). Opening and the blind count are
+        // pos.open_register / pos.close_register; these are the steps after it.
+        'pos.till_verify'      => ['Verify & Finalize Tills', 'Verify a cashier\'s blind till count at your outlet and finalize it', 'POS'],
+        'pos.reconcile'        => ['Reconcile Tills',      'Record the next-day check of a finalized till against the payments ledger', 'POS'],
+        'pos.till_correction'  => ['Correct Finalized Tills', 'Open a linked correction against a finalized till (the original is never changed)', 'POS'],
+        'pos.tills_view_all'   => ['View All Tills',       'Read every outlet\'s till sessions, counts and variances', 'POS'],
 
         // ── Marketing & storefront ──────────────────────────────────────────
         // Split out of products.view, which is a READ permission on the
@@ -389,7 +395,9 @@ class SyncPermissions extends Command
             'marketing.*',
             'intelligence.*',
             // Sees the till and reviews its takings; does not operate it.
-            'pos.access', 'pos.eod_review',
+            // Reads every outlet's tills (Phase 4B); verifies, reconciles and
+            // corrects none of them.
+            'pos.access', 'pos.eod_review', 'pos.tills_view_all',
             // Every report page except Finance & Cash (plan §6: ADM "—"), and
             // files from them. Written out, not 'reports.*', so a future
             // report slug never reaches admin by expansion.
@@ -419,6 +427,9 @@ class SyncPermissions extends Command
             'pos.cash_management', 'pos.discount_override',
             // Reviewing the shop's end-of-day reports (was settings.view).
             'pos.eod_review',
+            // Verifies and finalizes the shop's till counts (Phase 4B) — at
+            // their own outlets, and never a count they made themselves.
+            'pos.till_verify',
             // Chasing what a customer still owes is a manager's job, not a
             // cashier's — the till key stopped carrying it.
             'receivables.view',
@@ -541,6 +552,9 @@ class SyncPermissions extends Command
             'receivables.view',
             // End-of-day reports: the takings finance reconciles against.
             'pos.eod_review',
+            // Tills (Phase 4B): reads all, reconciles, and is the only role that
+            // opens a correction against a finalized till.
+            'pos.tills_view_all', 'pos.reconcile', 'pos.till_correction',
             // Orders - view only (for payment context)
             'orders.view',
             // Cost figures (margins, COGS context), and since Phase 2 the
@@ -576,6 +590,8 @@ class SyncPermissions extends Command
             'payments.request_void', 'payments.request_reassign',
             'receivables.view',
             'pos.eod_review',
+            // The next-day independent check of every finalized till (Phase 4B).
+            'pos.tills_view_all', 'pos.reconcile',
             'expenses.view', 'expenses.create', 'expenses.edit', 'expenses.export',
             'procurement.view',
             'inventory.view',

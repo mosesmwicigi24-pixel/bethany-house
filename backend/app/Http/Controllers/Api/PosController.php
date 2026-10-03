@@ -337,7 +337,9 @@ class PosController extends Controller
         }
 
         return response()->json([
-            'register'          => $register ? $this->transformRegister($register) : null,
+            // Blind to its operator until finalized (Phase 4B): no expected
+            // cash, no variance, no totals that add up to them.
+            'register'          => $register ? $this->transformRegister($register, $user) : null,
             'has_open_register' => $hasOpen,
             'eod_submitted'     => $eodSubmitted,
         ]);
@@ -385,24 +387,38 @@ class PosController extends Controller
 
         DB::beginTransaction();
         try {
-            // Check: THIS USER must not already have an open register at this outlet
-            $existingForUser = CashRegister::where('outlet_id', $outletId)
-                ->where('opened_by', $user->id)
-                ->where('status', 'open')
-                ->lockForUpdate()
-                ->exists();
+            // One open till per person, across every outlet (Phase 4B). The
+            // user row is locked so two simultaneous opens cannot both pass the
+            // check — a lock on her registers locks nothing when she has none.
+            \App\Models\User::whereKey($user->id)->lockForUpdate()->first();
 
-            if ($existingForUser) {
+            $existing = CashRegister::where('opened_by', $user->id)
+                ->where('status', 'open')
+                ->with('outlet:id,name')
+                ->first();
+
+            if ($existing) {
                 DB::rollBack();
-                return response()->json(['message' => 'You already have an open cash register for this outlet.'], 422);
+                return response()->json([
+                    'message' => (int) $existing->outlet_id === $outletId
+                        ? 'You already have an open cash register for this outlet.'
+                        : 'You already have an open till at ' . ($existing->outlet?->name ?? 'another outlet')
+                          . '. Count and close it before opening another.',
+                ], 422);
             }
+
+            // The float is typed blind: the opener counts what is in the drawer
+            // and is never shown the last count. Any difference from it is
+            // logged on this till; the previous till is never touched.
+            $float = app(\App\Services\Tills\TillService::class)
+                ->compareFloat($outletId, (float) $validated['opening_cash']);
 
             $userName     = trim("{$user->first_name} {$user->last_name}") ?: $user->email;
             $registerName = $outlet->name . ' – ' . $userName . ' – ' . now()->format('d M Y');
 
             $register = CashRegister::create([
                 'outlet_id'         => $outletId,
-                'user_id'           => $user->id,   // column confirmed present in DB; not yet in CashRegister::$fillable - see model fix
+                'user_id'           => $user->id,   // the operator (fillable since Phase 4B; was silently dropped before)
                 'register_name'     => $registerName,
                 'opened_by'         => $user->id,
                 'opening_balance'   => $validated['opening_cash'],
@@ -419,9 +435,23 @@ class PosController extends Controller
                 'total_mpesa_sales' => 0,
                 'total_refunds'     => 0,
                 'transaction_count' => 0,
+                'lifecycle_version'       => CashRegister::LIFECYCLE_VERSION,
+                'previous_register_id'    => $float['previous_register_id'],
+                'float_vs_previous_close' => $float['float_vs_previous_close'],
             ]);
 
             DB::commit();
+
+            if ($float['float_vs_previous_close'] !== null && abs($float['float_vs_previous_close']) >= 0.005) {
+                ActivityLogService::log('till_float_difference', $register, [
+                    'register_id'          => $register->id,
+                    'outlet_id'            => $outletId,
+                    'opening_float'        => (float) $validated['opening_cash'],
+                    'previous_register_id' => $float['previous_register_id'],
+                    'previous_close'       => $float['previous_close'],
+                    'difference'           => $float['float_vs_previous_close'],
+                ], "Till #{$register->id} opened with a float that differs from the last count", $user);
+            }
 
             try {
                 ActivityLogService::log('register_opened', null, [
@@ -438,7 +468,7 @@ class PosController extends Controller
 
             return response()->json([
                 'message'  => 'Cash register opened successfully.',
-                'register' => $this->transformRegister($register->load('openedBy')),
+                'register' => $this->transformRegister($register->load('openedBy'), $user),
             ], 201);
 
         } catch (\Throwable $e) {
@@ -451,9 +481,18 @@ class PosController extends Controller
     /**
      * POST /admin/pos/register/close
      *
-     * USER-SCOPED: closes THIS user's register only.
-     * GUARD: requires EoD report to be submitted for today first.
-     * Returns 422 with requires_eod:true if not submitted — frontend opens EoD modal.
+     * Step one of a two-step close (Phase 4B): the operator submits a BLIND
+     * count of her drawer. The till moves to `counted` — it takes no more
+     * sales — and the server works out what it should hold from the drawer's
+     * own ledger and freezes that beside her count. She is told neither: no
+     * expected cash, no variance, not even the totals that add up to them.
+     * An outlet manager (never her) verifies and finalizes it next
+     * (TillController::finalize).
+     *
+     * Registers opened before the lifecycle existed close through exactly
+     * this path; they are not forced closed or rewritten.
+     *
+     * GUARD: requires today's EoD report first (422 requires_eod:true).
      */
     public function closeRegister(Request $request): JsonResponse
     {
@@ -505,39 +544,30 @@ class PosController extends Controller
             ))
             : (float) $validated['closing_cash'];
 
-        $variance = $countedCash - ($register->expected_cash ?? $register->opening_balance ?? 0);
-
-        // `variance` is not a column (nor fillable) — it was silently dropped.
-        // The discrepancy is the `cash_difference` accessor (actual − expected),
-        // valid once actual_cash is set below. $variance is kept for response/log.
-        $register->update([
-            'closed_by'          => $user->id,
-            'closing_balance'    => $countedCash,
-            'actual_cash'        => $countedCash,
-            'status'             => 'closed',
-            'closing_notes'      => $validated['notes'] ?? null,
-            'denomination_count' => $denominations,
-            'closed_at'          => now(),
-        ]);
+        $counted = app(\App\Services\Tills\TillService::class)->submitCount(
+            $register, $user, round($countedCash, 2), $denominations, $validated['notes'] ?? null,
+        );
 
         try {
+            // Kept for the existing activity feed. The figures are for the
+            // audit trail (super_admin only), never for the operator.
             ActivityLogService::log('register_closed', null, [
-                'register_id'      => $register->id,
-                'register_name'    => $register->register_name,
-                'outlet_id'        => $outletId,
-                'opening_balance'  => $register->opening_balance,
-                'closing_balance'  => $validated['closing_cash'],
-                'expected_cash'    => $register->expected_cash,
-                'variance'         => $variance,
-                'total_sales'      => $register->total_sales,
-                'transaction_count'=> $register->transaction_count,
+                'register_id'       => $counted->id,
+                'register_name'     => $counted->register_name,
+                'outlet_id'         => $outletId,
+                'opening_balance'   => $counted->opening_balance,
+                'closing_balance'   => $countedCash,
+                'expected_cash'     => $counted->expected_cash_at_count,
+                'variance'          => $counted->variance,
+                'total_sales'       => $counted->total_sales,
+                'transaction_count' => $counted->transaction_count,
+                'stage'             => 'counted',
             ]);
         } catch (\Exception) {}
 
         return response()->json([
-            'message'  => 'Cash register closed successfully.',
-            'register' => $this->transformRegister($register->fresh(['openedBy', 'closedBy'])),
-            'variance' => $variance,
+            'message'  => 'Count submitted. Your outlet manager will verify it and finalize the till.',
+            'register' => $this->transformRegister($counted->fresh(['openedBy', 'closedBy']), $user),
         ]);
     }
 
@@ -552,10 +582,21 @@ class PosController extends Controller
         // cashier could page through every shop's sessions by outlet_id.
         $this->authoriseOutletAccess($request->user(), (int) $validated['outlet_id']);
 
-        $sessions = CashRegister::with(['openedBy:id,first_name,last_name', 'closedBy:id,first_name,last_name'])
+        // Phase 4B: the same visibility as the tills list — a clerk sees her
+        // own tills (last 7 days, plus any still unfinished), an outlet manager
+        // the outlet's, finance and admin everything — and each row blind to
+        // its own operator until it is finalized. This used to return the raw
+        // rows, counted cash and variance included, to anyone at the outlet.
+        $viewer   = $request->user();
+        $sessions = \App\Services\Tills\TillVisibility::scope(CashRegister::query(), $viewer)
+            ->with(['openedBy:id,first_name,last_name', 'closedBy:id,first_name,last_name'])
             ->where('outlet_id', $validated['outlet_id'])
             ->latest('opened_at')
             ->paginate($validated['per_page'] ?? 15);
+
+        $sessions->setCollection(
+            $sessions->getCollection()->map(fn (CashRegister $r) => $this->transformRegister($r, $viewer)),
+        );
 
         return response()->json($sessions);
     }
@@ -2972,29 +3013,31 @@ class PosController extends Controller
         ];
     }
 
-    private function transformRegister(CashRegister $r): array
+    /**
+     * The till as the POS screens have always read it, plus its lifecycle
+     * stage. Blind to its own operator until finalized (Phase 4B): the
+     * expected figure, the variance and every sales total that adds up to
+     * them are left out entirely — not zeroed, absent — so nothing on the
+     * terminal can show or derive what the drawer "should" hold.
+     */
+    private function transformRegister(CashRegister $r, ?\App\Models\User $viewer = null): array
     {
         $openedByName = $r->openedBy
             ? trim($r->openedBy->first_name . ' ' . $r->openedBy->last_name) : null;
         $closedByName = $r->closedBy
             ? trim($r->closedBy->first_name . ' ' . $r->closedBy->last_name) : null;
 
-        return [
+        $base = [
             'id'                => $r->id,
             'outlet_id'         => $r->outlet_id,
             'opened_by'         => $openedByName,
             'closed_by'         => $closedByName,
             'opening_cash'      => (float) ($r->opening_balance ?? 0),
-            'closing_cash'      => $r->closing_balance !== null ? (float) $r->closing_balance : null,
-            'expected_cash'     => (float) ($r->expected_cash ?? $r->opening_balance ?? 0),
+            'closing_cash'      => $r->status !== 'open' && $r->closing_balance !== null ? (float) $r->closing_balance : null,
             'transaction_count' => (int) ($r->transaction_count ?? 0),
-            'total_sales'       => (float) ($r->total_sales ?? 0),
-            'total_cash_sales'  => (float) ($r->total_cash_sales ?? 0),
-            'total_card_sales'  => (float) ($r->total_card_sales ?? 0),
-            'total_mpesa_sales' => (float) ($r->total_mpesa_sales ?? 0),
-            'total_refunds'     => (float) ($r->total_refunds ?? 0),
-            'variance'          => $r->variance !== null ? (float) $r->variance : null,
             'status'            => $r->status,
+            'stage'             => \App\Services\Tills\TillPresenter::stage($r),
+            'legacy'            => $r->lifecycle_version === null,
             'notes'             => $r->opening_notes,
             'opened_at'         => $r->opened_at instanceof \Carbon\Carbon
                 ? $r->opened_at->toIso8601String()
@@ -3002,6 +3045,22 @@ class PosController extends Controller
             'closed_at'         => $r->closed_at instanceof \Carbon\Carbon
                 ? $r->closed_at->toIso8601String()
                 : (string) ($r->closed_at ?? ''),
+            'finalized_at'      => $r->finalized_at?->toIso8601String(),
+        ];
+
+        if (\App\Services\Tills\TillPresenter::isBlindFor($r, $viewer)) {
+            return $base + ['blind' => true];
+        }
+
+        return $base + [
+            'blind'             => false,
+            'expected_cash'     => (float) ($r->expected_cash_at_count ?? $r->expected_cash ?? $r->opening_balance ?? 0),
+            'total_sales'       => (float) ($r->total_sales ?? 0),
+            'total_cash_sales'  => (float) ($r->total_cash_sales ?? 0),
+            'total_card_sales'  => (float) ($r->total_card_sales ?? 0),
+            'total_mpesa_sales' => (float) ($r->total_mpesa_sales ?? 0),
+            'total_refunds'     => (float) ($r->total_refunds ?? 0),
+            'variance'          => $r->variance !== null ? (float) $r->variance : null,
         ];
     }
 

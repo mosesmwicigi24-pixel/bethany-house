@@ -292,6 +292,7 @@ class OrderLineEditingTest extends TestCase
         $res = $this->edit($order, [
             'items' => [['id' => $line->id, 'quantity' => 3, 'unit_price' => 1000]],
             'confirm_paid_change' => true,
+            'reason' => 'Customer took a third cassock',
         ]);
 
         $res->assertOk();
@@ -319,6 +320,7 @@ class OrderLineEditingTest extends TestCase
         $res = $this->edit($order, [
             'items' => [['id' => $line->id, 'quantity' => 1, 'unit_price' => 1000]],
             'confirm_paid_change' => true,
+            'reason' => 'Two cassocks were never collected',
         ]);
 
         $res->assertOk();
@@ -690,5 +692,73 @@ class OrderLineEditingTest extends TestCase
             ->assertJsonPath('reason', 'unknown_line');
 
         $this->assertDatabaseHas('order_items', ['id' => $otherLine->id, 'order_id' => $other->id]);
+    }
+
+    // ── Paid orders are corrected, never silently rewritten (Phase 4B) ───────
+
+    public function test_editing_a_paid_order_needs_a_reason(): void
+    {
+        $this->actAsEditor();
+        $shirt = $this->product('Cassock', 1000, 400);
+        [$order, $line] = $this->orderWithLine($shirt, 2, 1000, ['payment_status' => 'paid']);
+        Payment::factory()->create(['order_id' => $order->id, 'amount' => 2000, 'status' => 'paid']);
+
+        $this->edit($order, [
+            'items' => [['id' => $line->id, 'quantity' => 1]],
+            'confirm_paid_change' => true,
+        ])->assertStatus(422)->assertJsonPath('reason', 'reason_required');
+
+        $this->assertSame(2, (int) $line->fresh()->quantity);   // nothing moved
+        $this->assertSame(0, \App\Models\OrderCorrection::count());
+    }
+
+    public function test_editing_a_paid_order_leaves_a_correction_record_of_before_and_after(): void
+    {
+        $editor = $this->actAsEditor();
+        $shirt  = $this->product('Cassock', 1000, 400);
+        $stole  = $this->product('Stole', 500, 200);
+        [$order, $line] = $this->orderWithLine($shirt, 2, 1000, ['payment_status' => 'paid']);
+        Payment::factory()->create(['order_id' => $order->id, 'amount' => 2000, 'status' => 'paid']);
+
+        $this->edit($order, [
+            'items' => [
+                ['id' => $line->id, 'quantity' => 1, 'unit_price' => 1000],
+                ['product_id' => $stole->id, 'quantity' => 2],
+            ],
+            'confirm_paid_change' => true,
+            'reason' => 'Swapped one cassock for two stoles at the counter',
+        ])->assertOk();
+
+        $c = \App\Models\OrderCorrection::where('order_id', $order->id)->sole();
+        $this->assertSame($editor->id, (int) $c->actor_id);
+        $this->assertSame('line_edit', $c->kind);
+        $this->assertSame('Swapped one cassock for two stoles at the counter', $c->reason);
+        $this->assertEquals(2000, $c->amount_paid);
+        $this->assertEquals(2000, $c->old_total);
+        $this->assertEquals(2000, $c->new_total);
+
+        // Before: exactly what was sold. After: what it became.
+        $this->assertCount(1, $c->before['items']);
+        $this->assertSame(2, $c->before['items'][0]['quantity']);
+        $this->assertEquals(1000, $c->before['items'][0]['unit_price']);
+        $this->assertCount(2, $c->after['items']);
+        $this->assertSame('paid', $c->before['payment_status']);
+        $this->assertEqualsCanonicalizing([1, 2], array_column($c->after['items'], 'quantity'));
+
+        // The record is history: it does not change and is not deleted.
+        $this->expectException(\LogicException::class);
+        $c->update(['reason' => 'rewritten']);
+    }
+
+    public function test_an_unpaid_order_is_edited_as_before_with_no_correction_record(): void
+    {
+        $this->actAsEditor();
+        $shirt = $this->product('Cassock', 1000, 400);
+        [$order, $line] = $this->orderWithLine($shirt, 2, 1000);
+
+        $this->edit($order, ['items' => [['id' => $line->id, 'quantity' => 3]]])->assertOk();
+
+        $this->assertSame(3, (int) $line->fresh()->quantity);
+        $this->assertSame(0, \App\Models\OrderCorrection::count());
     }
 }

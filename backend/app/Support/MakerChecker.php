@@ -37,6 +37,9 @@ final class MakerChecker
         'payment.void' => 'You asked for this payment to be voided, so someone else must approve it.',
         'payment.reassign' => 'You asked for this payment to be moved, so someone else must approve it.',
         'imprest_topup.approve' => 'You asked for this imprest top-up, so someone else must approve it.',
+        'till.verify' => 'You counted this till, so another manager must verify it.',
+        'till.reconcile' => 'You counted or verified this till, so someone independent must reconcile it.',
+        'till.correct' => 'You counted this till, so someone else must correct it.',
     ];
 
     private const FALLBACK = 'You raised this, so someone else must approve it.';
