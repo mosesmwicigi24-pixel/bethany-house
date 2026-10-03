@@ -157,8 +157,10 @@ return new class extends Migration
             return;
         }
 
-        $locked = implode(', ', array_map(fn ($c) => "NEW.{$c}", self::LOCKED));
-        $old    = implode(', ', array_map(fn ($c) => "OLD.{$c}", self::LOCKED));
+        // json has no equality operator in Postgres; compare it as jsonb.
+        $col    = fn (string $row, string $c) => $c === 'denomination_count' ? "{$row}.{$c}::jsonb" : "{$row}.{$c}";
+        $locked = implode(', ', array_map(fn ($c) => $col('NEW', $c), self::LOCKED));
+        $old    = implode(', ', array_map(fn ($c) => $col('OLD', $c), self::LOCKED));
 
         DB::unprepared(<<<SQL
             CREATE OR REPLACE FUNCTION cash_register_finalized_lock() RETURNS trigger AS \$\$

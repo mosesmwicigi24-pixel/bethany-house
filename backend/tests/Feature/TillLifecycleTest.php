@@ -450,8 +450,45 @@ class TillLifecycleTest extends TestCase
             $this->assertTrue(true);
         }
 
-        $this->expectException(\Illuminate\Database\QueryException::class);
-        DB::table('cash_registers')->where('id', $r->id)->update(['expected_cash' => 1]);
+        // Underneath Eloquent: a raw write to its money is refused by the
+        // trigger, while a column that carries no money (notes) still moves.
+        DB::table('cash_registers')->where('id', $r->id)->update(['verification_notes' => 'Seen by the owner', 'updated_at' => now()]);
+        $this->assertSame('Seen by the owner', $r->fresh()->verification_notes);
+
+        try {
+            // In a savepoint, so the refused statement does not poison the test's transaction.
+            DB::transaction(fn () => DB::table('cash_registers')->where('id', $r->id)->update(['expected_cash' => 1]));
+            $this->fail('the database moved a finalized till');
+        } catch (\Illuminate\Database\QueryException $e) {
+            $this->assertStringContainsString('is finalized; its money fields cannot change', $e->getMessage());
+        }
+        $this->assertEquals(1000, $r->fresh()->expected_cash);
+    }
+
+    public function test_a_discrepancys_facts_are_fixed_and_only_its_workflow_moves(): void
+    {
+        $clerk   = $this->person('pos_clerk', $this->outlet);
+        $manager = $this->person('outlet_manager', $this->outlet);
+        $r       = $this->openTill($clerk, 1000);
+        $this->submitCount($clerk, $r, 700)->assertOk();
+        $this->finalize($manager, $r, ['variance_reason' => 'Short 300'])->assertOk();
+        $id = DB::table('till_discrepancies')->where('cash_register_id', $r->id)->value('id');
+
+        // Part 2's engine moves the workflow columns.
+        DB::table('till_discrepancies')->where('id', $id)->update(['approval_request_id' => 42, 'status' => 'approved']);
+        $this->assertSame(42, (int) DB::table('till_discrepancies')->where('id', $id)->value('approval_request_id'));
+
+        foreach ([
+            fn () => DB::table('till_discrepancies')->where('id', $id)->update(['amount' => 0]),
+            fn () => DB::table('till_discrepancies')->where('id', $id)->delete(),
+        ] as $attempt) {
+            try {
+                DB::transaction($attempt);   // savepoint: the refusal must not poison the test's transaction
+                $this->fail('a discrepancy\'s facts moved');
+            } catch (\Illuminate\Database\QueryException) {
+                $this->assertEquals(-300, DB::table('till_discrepancies')->where('id', $id)->value('amount'));
+            }
+        }
     }
 
     public function test_notes_on_an_unfinalized_till_can_still_be_amended_by_its_operator(): void
