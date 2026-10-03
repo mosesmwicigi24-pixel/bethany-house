@@ -548,6 +548,10 @@ class PosController extends Controller
             'per_page'  => 'nullable|integer|min:5|max:50',
         ]);
 
+        // Same outlet guard as every other till action: without it any
+        // cashier could page through every shop's sessions by outlet_id.
+        $this->authoriseOutletAccess($request->user(), (int) $validated['outlet_id']);
+
         $sessions = CashRegister::with(['openedBy:id,first_name,last_name', 'closedBy:id,first_name,last_name'])
             ->where('outlet_id', $validated['outlet_id'])
             ->latest('opened_at')
