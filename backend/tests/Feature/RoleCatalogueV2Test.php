@@ -183,10 +183,20 @@ class RoleCatalogueV2Test extends TestCase
         'accountant'      => ['payments.request_reassign', 'payments.request_void'],
     ];
 
+    /**
+     * Phase 3C (proposals) grants, added by permission:sync and by the
+     * 2026_10_03_530001 migration — likewise not this migration's.
+     */
+    private const P3C = [
+        'admin'               => ['products.edit_cost', 'settings.pricing_rate_propose'],
+        'procurement_manager' => ['products.edit_cost'],
+        'finance_manager'     => ['settings.financial_propose'],
+    ];
+
     /** @param array<string,list<string>> $shape */
     private static function withP3B(array $shape): array
     {
-        foreach (self::P3B as $role => $perms) {
+        foreach (array_merge_recursive(self::P3B, self::P3C) as $role => $perms) {
             $shape[$role] = array_values(array_unique(array_merge($shape[$role] ?? [], $perms)));
         }
 

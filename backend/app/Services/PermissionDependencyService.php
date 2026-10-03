@@ -137,6 +137,8 @@ class PermissionDependencyService
         'products.edit'   => ['products.view'],
         'products.delete' => ['products.view'],
         'products.import' => ['products.view', 'products.create'],
+        // Writing a cost means seeing one (Phase 3C).
+        'products.edit_cost' => ['products.view', 'products.view_cost'],
 
         // ── POS ──────────────────────────────────────────────────────────── 
         // All of these sit inside the permission:pos.access admin/pos

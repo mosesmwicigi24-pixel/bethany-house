@@ -139,45 +139,65 @@ class TaxRateController extends Controller
             'applies_to'   => 'sometimes|in:all,products,shipping',
             'is_default'   => 'sometimes|boolean',
             'is_active'    => 'sometimes|boolean',
+            // Phase 3C: when the rate change takes effect (now or later, never earlier).
+            'effective_from' => 'sometimes|nullable|date',
         ]);
+
+        // What a tax rate CHARGES — rate, active, default — is a proposal
+        // (Phase 3C, tax_rate_change): finance proposes, the super admin signs,
+        // effective-dated. Its name, code, country and kind are plain edits,
+        // and stay the super admin's (settings.edit).
+        $gated = array_intersect_key($validated, array_flip(['rate', 'is_active', 'is_default']));
+
+        $update = array_filter([
+            'name'         => $validated['name'] ?? null,
+            'code'         => $validated['code'] ?? null,
+            'country_code' => array_key_exists('country_code', $validated) ? $validated['country_code'] : null,
+            'tax_type'     => $validated['tax_type'] ?? $validated['type'] ?? null,
+            'type'         => $validated['type'] ?? $validated['tax_type'] ?? null,
+            'applies_to'   => $validated['applies_to'] ?? null,
+        ], fn ($v) => $v !== null);
+        // Only what actually changes counts as an edit (forms resend every field).
+        $update = array_filter($update, fn ($v, $k) => !property_exists($existing, $k) || (string) $existing->{$k} !== (string) $v, ARRAY_FILTER_USE_BOTH);
+        if ($update !== [] && !$request->user()->can('settings.edit')) {
+            return response()->json([
+                'message' => 'You can propose changes to what a tax rate charges (rate, active, default); its other details are the super admin\'s to edit.',
+                'code'    => 'NOT_A_SETTINGS_EDITOR',
+            ], 403);
+        }
 
         DB::beginTransaction();
         try {
-            if (isset($validated['is_default']) && $validated['is_default']) {
-                DB::table('tax_rates')->where('id', '!=', $id)
-                    ->update(['is_default' => false, 'updated_at' => now()]);
+            if ($update !== []) {
+                DB::table('tax_rates')->where('id', $id)->update($update + ['updated_at' => now()]);
             }
 
-            $update = array_filter([
-                'name'         => $validated['name'] ?? null,
-                'code'         => $validated['code'] ?? null,
-                'country_code' => array_key_exists('country_code', $validated) ? $validated['country_code'] : null,
-                'rate'         => $validated['rate'] ?? null,
-                'tax_type'     => $validated['tax_type'] ?? $validated['type'] ?? null,
-                'type'         => $validated['type'] ?? $validated['tax_type'] ?? null,
-                'applies_to'   => $validated['applies_to'] ?? null,
-                'is_default'   => isset($validated['is_default']) ? (bool) $validated['is_default'] : null,
-                'is_active'    => isset($validated['is_active']) ? (bool) $validated['is_active'] : null,
-            ], fn ($v) => $v !== null);
-
-            $update['updated_at'] = now();
-            DB::table('tax_rates')->where('id', $id)->update($update);
+            $proposals = app(\App\Services\Approvals\ProposalService::class);
+            $proposal  = $gated === [] ? null : $proposals->propose(
+                'tax_rate_change', (int) $id, $gated, $request->user(), $validated['effective_from'] ?? null,
+            );
 
             DB::commit();
             TaxCalculationService::invalidateGlobalCache();
 
-            try {
-                ActivityLogService::log('tax_rate_updated', null, [
-                    'tax_rate_id' => $id,
-                    'changes'     => array_keys(array_diff_key($update, ['updated_at' => 1])),
-                ]);
-            } catch (\Exception) {}
+            if ($update !== []) {
+                try {
+                    ActivityLogService::log('tax_rate_updated', null, [
+                        'tax_rate_id' => $id,
+                        'changes'     => array_keys($update),
+                    ]);
+                } catch (\Exception) {}
+            }
 
             return response()->json([
-                'message'  => 'Tax rate updated successfully',
+                'message'  => $proposal ? $proposals->message($proposal) : 'Tax rate updated successfully',
                 'tax_rate' => DB::table('tax_rates')->find($id),
-            ]);
+                'proposal' => $proposal ? $proposals->present($proposal->fresh('maker'), $request->user()) : null,
+            ], $proposal && $proposal->status !== \App\Models\ChangeProposal::APPLIED ? 202 : 200);
 
+        } catch (\Illuminate\Http\Exceptions\HttpResponseException|\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            throw $e;
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['message' => 'Failed to update tax rate', 'error' => $e->getMessage()], 500);
@@ -214,30 +234,21 @@ class TaxRateController extends Controller
 
     // ── PUT /admin/tax-rates/{id}/toggle ─────────────────────────────────────
 
-    public function toggleStatus($id)
+    public function toggleStatus(Request $request, $id)
     {
         $rate = DB::table('tax_rates')->find($id);
         if (!$rate) return response()->json(['message' => 'Not found'], 404);
 
-        DB::table('tax_rates')->where('id', $id)->update([
-            'is_active'  => !$rate->is_active,
-            'updated_at' => now(),
-        ]);
-
-        TaxCalculationService::invalidateGlobalCache();
-
-        try {
-            ActivityLogService::log('tax_rate_toggled', null, [
-                'tax_rate_id' => $id,
-                'name'        => $rate->name,
-                'is_active'   => !$rate->is_active,
-            ]);
-        } catch (\Exception) {}
+        // Switching a rate on or off changes what is charged: a tax_rate_change
+        // proposal like any other (Phase 3C). It takes effect when signed.
+        $proposals = app(\App\Services\Approvals\ProposalService::class);
+        $proposal  = $proposals->propose('tax_rate_change', (int) $id, ['is_active' => !$rate->is_active], $request->user());
 
         return response()->json([
-            'message'  => 'Status updated',
+            'message'  => $proposal ? $proposals->message($proposal) : 'Status updated',
             'tax_rate' => DB::table('tax_rates')->find($id),
-        ]);
+            'proposal' => $proposal ? $proposals->present($proposal->fresh('maker'), $request->user()) : null,
+        ], $proposal && $proposal->status !== \App\Models\ChangeProposal::APPLIED ? 202 : 200);
     }
 
     // ── POST /admin/products/{productId}/tax-rates  ───────────────────────────
