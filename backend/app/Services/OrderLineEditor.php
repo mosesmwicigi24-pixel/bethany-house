@@ -48,6 +48,11 @@ use Illuminate\Support\Facades\DB;
  *
  * The caller never sends a total. Subtotal, per-line tax, order tax, and the
  * order total are all derived here.
+ *
+ * A PAID order (money collected) is never silently rewritten (role hardening
+ * Phase 4B): its edit needs a reason, and leaves an immutable OrderCorrection
+ * with the lines and totals before and after, the actor and the reason,
+ * written in the same transaction. Unpaid orders are edited as before.
  */
 class OrderLineEditor
 {
@@ -75,6 +80,18 @@ class OrderLineEditor
         $this->guardProtectedLines($order, $keep, $removeIds);
         $this->guardConfirmations($order, $opts);
 
+        // Phase 4B: a paid order is never silently rewritten. Its edit is a
+        // correction — recorded below with what it was, what it became, who
+        // and why — so the why is not optional.
+        $paidBefore = round($order->totalPaid(), 2);
+        $isCorrection = $paidBefore > 0.01;
+        if ($isCorrection && trim((string) ($opts['reason'] ?? '')) === '') {
+            $this->refuse(
+                'This order has been paid for, so changing it is a correction. Say why — the reason is kept with the record of what it was.',
+                'reason_required',
+            );
+        }
+
         $before = [
             'subtotal'       => (float) $order->subtotal,
             'tax_amount'     => (float) $order->tax_amount,
@@ -83,7 +100,7 @@ class OrderLineEditor
             'items'          => $order->items->map(fn ($i) => $this->snapshotLine($i))->values()->all(),
         ];
 
-        return DB::transaction(function () use ($order, $keep, $add, $removeIds, $opts, $actor, $before) {
+        return DB::transaction(function () use ($order, $keep, $add, $removeIds, $opts, $actor, $before, $isCorrection, $paidBefore) {
             $taxInclusive = $this->taxInclusiveFor($order);
             $stockMode    = $this->stockMode($order);
 
@@ -221,6 +238,30 @@ class OrderLineEditor
             // difference. Only meaningful once the goods have actually left.
             if ($stockMode === 'committed') {
                 ProductSerialService::syncSoldForOrder($order->fresh(['items']));
+            }
+
+            // The correction record: the paid order's lines and totals as they
+            // were, and as they are now. Same transaction as the edit, so the
+            // one never exists without the other.
+            if ($isCorrection) {
+                \App\Models\OrderCorrection::create([
+                    'order_id'    => $order->id,
+                    'actor_id'    => $actor?->id,
+                    'kind'        => 'line_edit',
+                    'reason'      => trim((string) $opts['reason']),
+                    'amount_paid' => $paidBefore,
+                    'old_total'   => $before['total_amount'],
+                    'new_total'   => $newTotal,
+                    'before'      => $before,
+                    'after'       => [
+                        'subtotal'       => (float) $order->subtotal,
+                        'tax_amount'     => (float) $order->tax_amount,
+                        'total_amount'   => $newTotal,
+                        'payment_status' => $order->payment_status,
+                        'overpaid'       => $overpaid,
+                        'items'          => $order->items()->get()->map(fn ($i) => $this->snapshotLine($i))->values()->all(),
+                    ],
+                ]);
             }
 
             ActivityLogService::log('order_items_edited', $order, [
