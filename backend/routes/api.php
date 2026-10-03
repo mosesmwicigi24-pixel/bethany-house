@@ -892,21 +892,27 @@ Route::prefix('v1')->group(function () {
                 // part of this edit's uploaded files.
                 Route::get('checkout-config',           [SettingController::class, 'posCheckoutConfig']);
 
+                // Transacting endpoints carry owner.no_transact: the owner's
+                // accounts may watch the till but never work it (Phase 1B).
                 Route::post('register/open',            [PosController::class, 'openRegister'])
-                    ->middleware('permission:pos.open_register,sanctum');
+                    ->middleware(['permission:pos.open_register,sanctum', 'owner.no_transact']);
                 Route::post('register/close',           [PosController::class, 'closeRegister'])
-                    ->middleware('permission:pos.close_register,sanctum');
-                Route::post('sales',                    [PosController::class, 'createSale']);
-                Route::post('pending-order',            [PosController::class, 'createPendingOrder']);
-                Route::patch('pending-order/{id}',      [PosController::class, 'updatePendingOrder']);
-                Route::post('pending-order/{id}/pay',   [PosController::class, 'recordPosPay']);
+                    ->middleware(['permission:pos.close_register,sanctum', 'owner.no_transact']);
+                Route::post('sales',                    [PosController::class, 'createSale'])
+                    ->middleware('owner.no_transact');
+                Route::post('pending-order',            [PosController::class, 'createPendingOrder'])
+                    ->middleware('owner.no_transact');
+                Route::patch('pending-order/{id}',      [PosController::class, 'updatePendingOrder'])
+                    ->middleware('owner.no_transact');
+                Route::post('pending-order/{id}/pay',   [PosController::class, 'recordPosPay'])
+                    ->middleware('owner.no_transact');
                 Route::post('sales/{id}/void',          [PosController::class, 'voidSale'])
-                    ->middleware('permission:pos.void,sanctum');
+                    ->middleware(['permission:pos.void,sanctum', 'owner.no_transact']);
                 Route::post('sales/{id}/dispatch',      [PosController::class, 'authorizeDispatch'])
                     ->middleware('permission:orders.authorize_dispatch,sanctum');
                 Route::post('sales/{id}/email-receipt', [PosController::class, 'emailReceipt']);
                 Route::post('returns',                  [PosController::class, 'processReturn'])
-                    ->middleware('permission:pos.returns,sanctum');
+                    ->middleware(['permission:pos.returns,sanctum', 'owner.no_transact']);
             });
 
             // ── Inventory ────────────────────────────────────────────────────
@@ -1719,24 +1725,27 @@ Route::prefix('v1')->group(function () {
             Route::get('/products',                 [PosController::class, 'products']);
             Route::get('/products/search',          [PosController::class, 'searchProducts']);
             Route::get('/suggestions',              [PosController::class, 'suggestions']);
-            Route::post('/sales',                   [PosController::class, 'createSale']);
+            // owner.no_transact on every write that moves a sale, stock or
+            // the drawer, mirroring /admin/pos (Phase 1B).
+            Route::post('/sales',                   [PosController::class, 'createSale'])
+                ->middleware('owner.no_transact');
             Route::get('/sales/today',              [PosController::class, 'todaySales']);
             Route::post('/sales/{id}/receipt',      [PosController::class, 'printReceipt']);
             Route::post('/sales/{id}/return',       [PosController::class, 'processReturn'])
-                ->middleware('permission:pos.returns,sanctum');
+                ->middleware(['permission:pos.returns,sanctum', 'owner.no_transact']);
             Route::post('/cash-register/open',          [PosController::class, 'openRegister'])
-                ->middleware('permission:pos.open_register,sanctum');
+                ->middleware(['permission:pos.open_register,sanctum', 'owner.no_transact']);
             Route::post('/cash-register/close',         [PosController::class, 'closeRegister'])
-                ->middleware('permission:pos.close_register,sanctum');
+                ->middleware(['permission:pos.close_register,sanctum', 'owner.no_transact']);
             Route::get('/cash-register/status',         [PosController::class, 'registerStatus']);
             Route::get('/cash-register/transactions',   [PosController::class, 'cashTransactions']);
             Route::get('/cash-register/summary',        [PosController::class, 'cashSummary']);
             Route::post('/cash-register/deposit',       [PosController::class, 'cashDeposit'])
-                ->middleware('permission:pos.cash_management,sanctum');
+                ->middleware(['permission:pos.cash_management,sanctum', 'owner.no_transact']);
             Route::post('/cash-register/withdrawal',    [PosController::class, 'cashWithdrawal'])
-                ->middleware('permission:pos.cash_management,sanctum');
+                ->middleware(['permission:pos.cash_management,sanctum', 'owner.no_transact']);
             Route::post('/cash-register/adjustment',    [PosController::class, 'cashAdjustment'])
-                ->middleware('permission:pos.cash_management,sanctum');
+                ->middleware(['permission:pos.cash_management,sanctum', 'owner.no_transact']);
             Route::get('/cash-register/reconciliation', [PosController::class, 'reconciliation']);
         });
 

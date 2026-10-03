@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
+use App\Support\MakerChecker;
 
 class StockAdjustmentsController extends Controller
 {
@@ -150,11 +151,13 @@ class StockAdjustmentsController extends Controller
         $reasonConfig = self::REASON_CODES[$validated['reason_code']];
         $change       = $validated['quantity_change'];
 
-        // Super admins and admins bypass the approval workflow -
-        // they have authority to adjust stock directly.
-        $user         = auth()->user();
-        $isPrivileged = $user && $user->hasAnyRole(['super_admin', 'admin']);
-        $requiresApproval = $reasonConfig['requires_approval'] && !$isPrivileged;
+        // The reason code alone decides whether an adjustment waits for
+        // approval. Admins and super admins used to skip the wait and
+        // self-approve; the owner's plan ends that — whoever originates a
+        // stock event never approves it, whatever their role — so their
+        // corrections go pending like anyone else's (Phase 1B).
+        $user             = auth()->user();
+        $requiresApproval = $reasonConfig['requires_approval'];
 
         // Direction validation
         if ($reasonConfig['direction'] === 'decrease' && $change > 0) {
@@ -195,10 +198,11 @@ class StockAdjustmentsController extends Controller
                 'reason_code'       => $validated['reason_code'],
                 'status'            => $requiresApproval ? 'pending_approval' : 'approved',
                 'created_by'        => $user->id,
-                // Self-approve when privileged role bypasses workflow
+                // A reason that needs no approval applies at once, recorded
+                // against the person who made it.
                 'approved_by'       => $requiresApproval ? null : $user->id,
                 'approved_at'       => $requiresApproval ? null : now(),
-                'approval_notes'    => $requiresApproval ? null : ($isPrivileged ? 'Auto-approved: admin role' : null),
+                'approval_notes'    => null,
             ]);
 
             // Apply immediately if no approval needed
@@ -251,7 +255,8 @@ class StockAdjustmentsController extends Controller
                     'approvedBy:id,first_name,last_name,email',
                 ])),
                 'requires_approval' => $requiresApproval,
-                'auto_approved'     => !$requiresApproval && $isPrivileged && $reasonConfig['requires_approval'],
+                // Kept for older clients; no role skips approval any more.
+                'auto_approved'     => false,
             ], 201);
 
         } catch (\Exception $e) {
@@ -269,6 +274,10 @@ class StockAdjustmentsController extends Controller
     {
         $transaction = InventoryTransaction::where('status', 'pending_approval')->findOrFail($id);
         $item        = $transaction->inventoryItem;
+
+        MakerChecker::assertNotMaker(
+            $request->user(), 'stock_adjustment.approve', $transaction, $transaction->created_by,
+        );
 
         // Re-check stock for decreases
         if ($transaction->quantity_change < 0) {

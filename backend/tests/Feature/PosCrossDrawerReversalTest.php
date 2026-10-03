@@ -10,6 +10,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
+use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
@@ -23,10 +24,20 @@ class PosCrossDrawerReversalTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function actingAsSuperAdmin(): User
+    /**
+     * The voiding actor. This was a super_admin until role hardening 1B: the
+     * owner's accounts no longer transact at the till (owner.no_transact
+     * refuses them a void), so an admin holding the till's void key does it.
+     * What these tests pin — which drawer a void reverses — is unchanged.
+     */
+    private function actingAsVoidingAdmin(): User
     {
         $user = User::factory()->create();
-        $user->assignRole(Role::findOrCreate('super_admin', 'sanctum'));
+        $user->assignRole(Role::findOrCreate('admin', 'sanctum'));
+        $user->givePermissionTo(
+            Permission::findOrCreate('pos.access', 'sanctum'),
+            Permission::findOrCreate('pos.void', 'sanctum'),
+        );
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 
@@ -49,7 +60,7 @@ class PosCrossDrawerReversalTest extends TestCase
 
     public function test_void_reverses_the_originating_open_drawer_not_the_current_one(): void
     {
-        $user   = $this->actingAsSuperAdmin();
+        $user   = $this->actingAsVoidingAdmin();
         $outlet = Outlet::factory()->create();
 
         // Register A — took the sale, opened by a DIFFERENT cashier, still open.
@@ -82,7 +93,7 @@ class PosCrossDrawerReversalTest extends TestCase
 
     public function test_void_falls_back_to_current_drawer_when_the_originating_shift_is_closed(): void
     {
-        $user   = $this->actingAsSuperAdmin();
+        $user   = $this->actingAsVoidingAdmin();
         $outlet = Outlet::factory()->create();
 
         // Register A — took the sale but its shift is already CLOSED.

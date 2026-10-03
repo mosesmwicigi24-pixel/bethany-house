@@ -9,6 +9,7 @@ use App\Services\ActivityLogService;
 use App\Services\IntelligenceService;
 use App\Services\NotificationService;
 use App\Services\Reporting\MetricEngine;
+use App\Support\MakerChecker;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\{DB, Storage};
 use Carbon\Carbon;
@@ -488,12 +489,12 @@ class ExpenseController extends Controller
         if ($expense->status !== 'pending_approval') {
             return response()->json(['message' => 'Only pending expenses can be approved.'], 422);
         }
-        // Owner decision 2026-09-22: cash out of the imprest is approved by
-        // someone other than the person who recorded it.
-        if ($expense->isImprest()
-            && ((int) $expense->created_by === (int) $user->id || (int) $expense->submitted_by === (int) $user->id)) {
-            return response()->json(['message' => 'You recorded this imprest expense — someone else must approve it.'], 403);
-        }
+        // Owner decision 2026-09-22 made imprest cash approved by someone
+        // other than the person who recorded it; Phase 1B extends that to
+        // every expense: neither the recorder nor the submitter approves it.
+        MakerChecker::assertNotMaker(
+            $user, 'expense.approve', $expense, $expense->created_by, $expense->submitted_by,
+        );
 
         $validated = $request->validate([
             'comments' => 'nullable|string|max:1000',

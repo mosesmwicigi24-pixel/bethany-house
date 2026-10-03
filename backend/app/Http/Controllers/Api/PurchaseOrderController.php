@@ -19,6 +19,7 @@ use App\Models\ProductVariant;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
 use App\Services\ProductSerialService;
+use App\Support\MakerChecker;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -492,8 +493,22 @@ class PurchaseOrderController extends Controller
 
         $updateData = ['status' => $validated['status']];
 
-        // Set approved_at when approving
-        if ($validated['status'] === 'approved') {
+        // This endpoint can move a PO to any status, so it is a second door
+        // to approval: setting 'approved', or jumping a PO that was never
+        // approved straight to ordered/received, IS approving it. Either way
+        // the raiser and submitter may not do it (maker ≠ checker), and the
+        // approval is recorded against whoever did. Moving an already
+        // approved PO along (approved → ordered) is not a second approval;
+        // reviving a cancelled one into an approved state is.
+        $preApproval   = in_array($oldStatus, ['draft', 'pending_approval', 'cancelled'], true);
+        $postApproval  = in_array($validated['status'], ['approved', 'ordered', 'partially_received', 'received'], true);
+        $approvesNow   = $validated['status'] === 'approved' || ($preApproval && $postApproval);
+
+        if ($approvesNow) {
+            MakerChecker::assertNotMaker(
+                $request->user(), 'purchase_order.approve', $purchaseOrder,
+                $purchaseOrder->created_by, $purchaseOrder->submitted_by,
+            );
             $updateData['approved_by'] = $request->user()->id;
             $updateData['approved_at'] = now();
         }
@@ -549,6 +564,12 @@ class PurchaseOrderController extends Controller
         if (!in_array($purchaseOrder->status, ['approved', 'ordered', 'partially_received'])) {
             return response()->json(['message' => 'Purchase order must be approved or ordered before receiving.'], 422);
         }
+
+        // Whoever approved the order does not also sign for the goods.
+        MakerChecker::assertNotMaker(
+            $request->user(), 'purchase_order.receive', $purchaseOrder,
+            $purchaseOrder->approved_by,
+        );
 
         DB::beginTransaction();
         try {
@@ -855,6 +876,12 @@ class PurchaseOrderController extends Controller
             return response()->json(['message' => 'You do not have permission to approve purchase orders.'], 403);
         }
 
+        // Holding procurement.approve is not enough: not on your own PO.
+        MakerChecker::assertNotMaker(
+            $user, 'purchase_order.approve', $purchaseOrder,
+            $purchaseOrder->created_by, $purchaseOrder->submitted_by,
+        );
+
         $purchaseOrder->update([
             'status'      => 'approved',
             'approved_by' => $user->id,
@@ -988,6 +1015,8 @@ class PurchaseOrderController extends Controller
         }
 
         $return = PurchaseReturn::where('status', 'pending')->findOrFail($id);
+
+        MakerChecker::assertNotMaker($user, 'purchase_return.approve', $return, $return->created_by);
 
         $return->update([
             'status'      => 'approved',
