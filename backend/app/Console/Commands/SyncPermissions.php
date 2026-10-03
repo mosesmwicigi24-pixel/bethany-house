@@ -284,6 +284,12 @@ class SyncPermissions extends Command
         // them, so 'own' resolves through assigned_to on a task and through
         // either relationship on a production order.
         'tailor'    => 'own',
+        // Phase 4A (plan §8): a shop manager runs ONE shop. Orders, payments,
+        // stock, production raised there and its customers — the outlet_user
+        // pivot decides which shops. Reports are NOT narrowed by this: the
+        // owner kept them business-wide (2026-10-03), and the reports route
+        // groups say so with the report.business_wide middleware.
+        'outlet_manager' => 'outlet',
     ];
 
     /**

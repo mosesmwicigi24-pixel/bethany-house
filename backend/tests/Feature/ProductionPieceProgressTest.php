@@ -33,7 +33,11 @@ class ProductionPieceProgressTest extends TestCase
     private function actingAsTailor(): User
     {
         $user = User::factory()->create();
-        $user->assignRole(Role::findOrCreate('tailor', 'sanctum'));
+        // The tailor role grants production.view, as the catalogue's does; a
+        // role granting nothing now resolves to no tasks at all (Phase 4A).
+        $tailor = Role::findOrCreate('tailor', 'sanctum');
+        $tailor->givePermissionTo(Permission::findOrCreate('production.view', 'sanctum'));
+        $user->assignRole($tailor);
         $user->givePermissionTo(Permission::findOrCreate('production.worker', 'sanctum'));
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);

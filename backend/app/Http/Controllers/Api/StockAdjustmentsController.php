@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\InventoryItem;
 use App\Models\InventoryTransaction;
+use App\Services\DataScopeResolver;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Services\NotificationService;
@@ -37,11 +38,28 @@ class StockAdjustmentsController extends Controller
     // Paginated list of all adjustments with filters.
     // =========================================================================
 
+    /**
+     * Adjustments this caller may see (Phase 4A): an adjustment belongs to the
+     * outlet of the stock row it moved. Bounded callers (outlet manager,
+     * cashier) see their outlets'; another outlet's id answers 404.
+     */
+    private function scoped()
+    {
+        $query = InventoryTransaction::query();
+        $ids   = DataScopeResolver::outletIdsForUnowned(request()->user(), 'inventory.view');
+        if ($ids !== null) {
+            $query->whereIn('inventory_transactions.inventory_item_id',
+                DB::table('inventory_items')->select('id')->whereIn('outlet_id', $ids));
+        }
+
+        return $query;
+    }
+
     public function index(Request $request)
     {
         $perPage = min((int) $request->get('per_page', 25), 100);
 
-        $query = InventoryTransaction::with([
+        $query = $this->scoped()->with([
             'inventoryItem.product:id,sku',
             'inventoryItem.product.translations' => fn ($q) => $q->where('language_code', 'en')->select('product_id', 'name'),
             'inventoryItem.product.images'       => fn ($q) => $q->where('is_primary', true)->select('product_id', 'image_url'),
@@ -85,7 +103,7 @@ class StockAdjustmentsController extends Controller
 
         // Stats - count all adjustment transactions regardless of status
         $adjustmentTypes = array_keys(self::REASON_CODES);
-        $baseQuery = fn () => InventoryTransaction::whereIn('transaction_type', $adjustmentTypes);
+        $baseQuery = fn () => $this->scoped()->whereIn('transaction_type', $adjustmentTypes);
 
         $stats = [
             'total'            => $baseQuery()->count(),
@@ -120,7 +138,7 @@ class StockAdjustmentsController extends Controller
 
     public function show($id)
     {
-        $adjustment = InventoryTransaction::with([
+        $adjustment = $this->scoped()->with([
             'inventoryItem.product.translations',
             'inventoryItem.product.images' => fn ($q) => $q->where('is_primary', true),
             'inventoryItem.variant',
@@ -147,7 +165,10 @@ class StockAdjustmentsController extends Controller
             'reference_number'  => 'nullable|string|max:100',
         ]);
 
-        $item         = InventoryItem::findOrFail($validated['inventory_item_id']);
+        // A stock row at an outlet outside the caller's scope is absent.
+        $item         = InventoryItem::query()
+            ->tap(fn ($q) => DataScopeResolver::boundToOutlets($q, $request->user(), 'inventory.view', 'inventory_items.outlet_id'))
+            ->findOrFail($validated['inventory_item_id']);
         $reasonConfig = self::REASON_CODES[$validated['reason_code']];
         $change       = $validated['quantity_change'];
 
@@ -272,7 +293,7 @@ class StockAdjustmentsController extends Controller
 
     public function approve(Request $request, $id)
     {
-        $transaction = InventoryTransaction::where('status', 'pending_approval')->findOrFail($id);
+        $transaction = $this->scoped()->where('status', 'pending_approval')->findOrFail($id);
         $item        = $transaction->inventoryItem;
 
         MakerChecker::assertNotMaker(
@@ -346,7 +367,7 @@ class StockAdjustmentsController extends Controller
     {
         $request->validate(['reason' => 'required|string|max:500']);
 
-        $transaction = InventoryTransaction::where('status', 'pending_approval')->findOrFail($id);
+        $transaction = $this->scoped()->where('status', 'pending_approval')->findOrFail($id);
 
         $transaction->update([
             'status'          => 'rejected',
@@ -370,7 +391,7 @@ class StockAdjustmentsController extends Controller
 
     public function auditLog($id)
     {
-        InventoryTransaction::findOrFail($id); // 404 guard
+        $this->scoped()->findOrFail($id); // 404 guard — scope included
 
         $logs = DB::table('activity_log as al')
             ->leftJoin('users as u', 'u.id', '=', 'al.causer_id')
@@ -405,7 +426,7 @@ class StockAdjustmentsController extends Controller
 
     public function pending()
     {
-        $items = InventoryTransaction::with([
+        $items = $this->scoped()->with([
             'inventoryItem.product.translations' => fn ($q) => $q->where('language_code', 'en'),
             'inventoryItem.outlet:id,name',
             'inventoryItem.variant:id,variant_name',
@@ -429,7 +450,7 @@ class StockAdjustmentsController extends Controller
 
     public function reverse(Request $request, $id)
     {
-        $original = InventoryTransaction::with(['inventoryItem'])
+        $original = $this->scoped()->with(['inventoryItem'])
             ->where('status', 'approved')
             ->whereNotNull('quantity_change')
             ->findOrFail($id);

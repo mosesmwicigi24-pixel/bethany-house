@@ -89,7 +89,7 @@ class GlobalSearchPermissionTest extends TestCase
             'a tailor holds none of orders/customers/procurement/products.view');
     }
 
-    public function test_a_cashier_sees_her_own_orders_and_the_customer_picker_but_not_procurement(): void
+    public function test_a_cashier_sees_her_own_orders_but_not_the_customer_book_or_procurement(): void
     {
         $clerk = $this->actAs('pos_clerk');
         [$mine, $theirs] = $this->world($clerk);
@@ -99,7 +99,10 @@ class GlobalSearchPermissionTest extends TestCase
         $orderIds = collect($byType['order'] ?? [])->pluck('id')->all();
         $this->assertContains($mine->id, $orderIds);
         $this->assertNotContains($theirs->id, $orderIds, 'own-scope: another clerk\'s sale must not appear');
-        $this->assertArrayHasKey('customer', $byType);
+        // Phase 4A: a cashier's customers are record-specific — the customer
+        // on her open sale. The palette does not browse the customer book;
+        // the till finds people through the masked POS autocomplete.
+        $this->assertArrayNotHasKey('customer', $byType);
         $this->assertArrayHasKey('product', $byType);
         $this->assertArrayNotHasKey('supplier', $byType);
         $this->assertArrayNotHasKey('purchase_order', $byType);

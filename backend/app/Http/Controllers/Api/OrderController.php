@@ -95,7 +95,14 @@ class OrderController extends Controller
         // clock the timestamps were written with.
         $ageDays = "EXTRACT(epoch FROM ((now() AT TIME ZONE 'Africa/Nairobi') - orders.created_at)) / 86400.0";
 
-        $base = Order::query()
+        // Phase 4A: the queue is the SHOP's worklist, not the caller's own
+        // sales — a cashier works the pending orders of the outlet she is
+        // assigned to, an outlet manager those of their outlets (plan §8).
+        // The queue has no owner, so Own resolves to the assigned outlets.
+        $bounded = \App\Services\DataScopeResolver::outletIdsForUnowned($request->user(), 'orders.view');
+
+        $base = Order::withoutViewerScope()
+            ->when($bounded !== null, fn ($q) => $q->whereIn('orders.outlet_id', $bounded))
             ->whereRaw("LOWER(orders.status) = 'pending'")
             ->whereRaw("LOWER(COALESCE(orders.payment_status, '')) NOT IN ('paid', 'partial', 'deposit')");
 
@@ -2328,7 +2335,7 @@ class OrderController extends Controller
 
         // Same outlet rule as everywhere else that touches money (#266/#268):
         // unrestricted for admins, otherwise only the caller's own outlets.
-        $this->authoriseOutletScopeFor($request->user(), $order->outlet_id);
+        $this->authoriseOutletScopeFor($request->user(), $order->outlet_id, 'orders.view');
 
         $result = app(\App\Services\OrderLineEditor::class)->apply(
             $order,

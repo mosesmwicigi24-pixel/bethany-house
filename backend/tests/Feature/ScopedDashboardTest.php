@@ -74,14 +74,16 @@ class ScopedDashboardTest extends TestCase
 
     public function test_a_tailor_still_gets_no_revenue_figure(): void
     {
-        // Unscoped for orders and holds no reports.view, so today_sales would
-        // be the whole business — exactly what the gate exists to stop.
+        // Holds neither orders.view nor reports.view; the group's takings are
+        // exactly what the gate exists to withhold.
         $this->actAs('tailor');
         $this->paidSaleBy(User::factory()->create(), 90000);
 
         $stats = $this->getJson('/api/v1/admin/dashboard')->assertOk()->json('stats');
 
-        $this->assertSame('all', $stats['scope']);
+        // Phase 4A: no role of the tailor's grants orders.view, so the
+        // resolver answers None (it used to answer All).
+        $this->assertSame('none', $stats['scope']);
         $this->assertArrayNotHasKey('today_sales', $stats);
     }
 

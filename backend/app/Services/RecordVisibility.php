@@ -67,7 +67,7 @@ final class RecordVisibility
                 && $modelClass::whereKey($id)->exists(),
 
             InventoryTransfer::class => $user->can('inventory.view')
-                && InventoryTransfer::whereKey($id)->exists(),
+                && InventoryTransfer::visibleTo($user)->whereKey($id)->exists(),
 
             OrderReturn::class => $user->can('orders.manage_returns')
                 && self::orderReturnVisible($id),

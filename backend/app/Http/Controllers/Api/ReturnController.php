@@ -260,6 +260,8 @@ class ReturnController extends Controller
     {
         $query = DB::table('order_returns')
             ->join('orders', 'order_returns.order_id', '=', 'orders.id')
+            // Phase 4A: a return is visible exactly when its order is.
+            ->whereIn('order_returns.order_id', \App\Models\Order::query()->select('orders.id'))
             ->join('customers', 'order_returns.customer_id', '=', 'customers.id')
             ->join('users', 'customers.user_id', '=', 'users.id')
             ->select(
@@ -317,6 +319,7 @@ class ReturnController extends Controller
             ->join('customers', 'order_returns.customer_id', '=', 'customers.id')
             ->join('users', 'customers.user_id', '=', 'users.id')
             ->where('order_returns.id', $id)
+            ->whereIn('order_returns.order_id', \App\Models\Order::query()->select('orders.id'))
             ->select(
                 'order_returns.*',
                 'orders.order_number',
@@ -361,7 +364,9 @@ class ReturnController extends Controller
             'notes' => 'nullable|string|max:1000',
         ]);
 
-        $return = DB::table('order_returns')->find($id);
+        $return = DB::table('order_returns')
+            ->whereIn('order_id', \App\Models\Order::query()->select('orders.id'))
+            ->find($id);
 
         if (!$return) {
             return response()->json(['message' => 'Return not found'], 404);
@@ -407,7 +412,9 @@ class ReturnController extends Controller
             'notes' => 'nullable|string|max:1000',
         ]);
 
-        $return = DB::table('order_returns')->find($id);
+        $return = DB::table('order_returns')
+            ->whereIn('order_id', \App\Models\Order::query()->select('orders.id'))
+            ->find($id);
 
         if (!$return) {
             return response()->json(['message' => 'Return not found'], 404);
@@ -462,7 +469,9 @@ class ReturnController extends Controller
             'reason' => 'required|string|max:1000',
         ]);
 
-        $return = DB::table('order_returns')->find($id);
+        $return = DB::table('order_returns')
+            ->whereIn('order_id', \App\Models\Order::query()->select('orders.id'))
+            ->find($id);
 
         if (!$return) {
             return response()->json(['message' => 'Return not found'], 404);
@@ -520,7 +529,9 @@ class ReturnController extends Controller
             'notes' => 'nullable|string',
         ]);
 
-        $return = DB::table('order_returns')->find($id);
+        $return = DB::table('order_returns')
+            ->whereIn('order_id', \App\Models\Order::query()->select('orders.id'))
+            ->find($id);
 
         if (!$return) {
             return response()->json(['message' => 'Return not found'], 404);

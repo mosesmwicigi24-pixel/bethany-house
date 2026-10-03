@@ -23,7 +23,10 @@ class LowStockAlertsController extends Controller
 
         // ── Finished goods low stock ──────────────────────────────────────────
         if (in_array($type, ['all', 'products'])) {
-            $items = InventoryItem::with([
+            $items = InventoryItem::query()
+            // Phase 4A: a bounded manager is alerted about their own shops.
+            ->tap(fn ($q) => \App\Services\DataScopeResolver::boundToOutlets($q, $request->user(), 'inventory.view', 'inventory_items.outlet_id'))
+            ->with([
                 'product:id,sku,low_stock_threshold,status',
                 'product.translations' => fn ($q) => $q->where('language_code', 'en')->select('product_id', 'name'),
                 'product.images'       => fn ($q) => $q->where('is_primary', true)->select('product_id', 'image_url'),
@@ -139,7 +142,9 @@ class LowStockAlertsController extends Controller
             'reorder_quantity' => 'nullable|integer|min:0',
         ]);
 
-        $item = InventoryItem::findOrFail($id);
+        $item = InventoryItem::query()
+            ->tap(fn ($q) => \App\Services\DataScopeResolver::boundToOutlets($q, $request->user(), 'inventory.view', 'inventory_items.outlet_id'))
+            ->findOrFail($id);
         $item->update([
             'reorder_point'    => $request->reorder_point,
             'reorder_quantity' => $request->reorder_quantity ?? $item->reorder_quantity,

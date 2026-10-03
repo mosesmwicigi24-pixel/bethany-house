@@ -383,13 +383,15 @@ Route::prefix('v1')->group(function () {
         // need reports.signals on top of their module's view. The preflight,
         // tailor-workload, geography and channel feeds serve other screens
         // (production order form, production board, Customers & Neema) and
-        // keep their module gate alone.
+        // keep their module gate alone. The four Signals feeds carry
+        // report.business_wide like every other report page (Phase 4A): a
+        // report is business-wide for whoever may read it.
         Route::middleware(['auth:sanctum', 'throttle:admin-api', 'ensure.staff'])->prefix('admin/intelligence')->group(function () {
             Route::middleware('permission:inventory.view,sanctum')->group(function () {
                 Route::get('/reorder-suggestions',           [IntelligenceController::class, 'reorderSuggestions'])
-                    ->middleware('report.page:signals');
+                    ->middleware(['report.page:signals', 'report.business_wide']);
                 Route::get('/material-shortages',            [IntelligenceController::class, 'materialShortages'])
-                    ->middleware('report.page:signals');
+                    ->middleware(['report.page:signals', 'report.business_wide']);
                 Route::post('/material-shortages/preflight', [IntelligenceController::class, 'materialShortagesPreflight']);
             });
             Route::post('/auto-reorder/{itemId}', [IntelligenceController::class, 'triggerAutoReorder'])
@@ -397,13 +399,13 @@ Route::prefix('v1')->group(function () {
             Route::get('/tailor-workload', [IntelligenceController::class, 'tailorWorkload'])
                 ->middleware('permission:production.view,sanctum');
             Route::get('/churn-risk', [IntelligenceController::class, 'churnRisk'])
-                ->middleware(['permission:intelligence.view,sanctum', 'report.page:signals']);
+                ->middleware(['permission:intelligence.view,sanctum', 'report.page:signals', 'report.business_wide']);
             Route::get('/customer-geography', [IntelligenceController::class, 'customerGeography'])
                 ->middleware('permission:intelligence.view,sanctum');
             Route::get('/channel-engagement', [IntelligenceController::class, 'channelEngagement'])
                 ->middleware('permission:intelligence.view,sanctum');
             Route::get('/budget-warnings', [IntelligenceController::class, 'budgetWarnings'])
-                ->middleware(['permission:expenses.view,sanctum', 'report.page:signals']);
+                ->middleware(['permission:expenses.view,sanctum', 'report.page:signals', 'report.business_wide']);
             // smart-tasks and entity-previews stay open to all authenticated
             // staff: smart-tasks is a personal to-do aggregation scoped to the
             // current user, and entity-previews only returns data for
@@ -640,7 +642,7 @@ Route::prefix('v1')->group(function () {
             // Storefront Insights: visitors and online buyers by country — the
             // storefront's half of the customer picture, so it follows the
             // Customers & Neema report (was reports.view; role hardening 3A).
-            Route::middleware('report.page:customers')->prefix('analytics')->group(function () {
+            Route::middleware(['report.page:customers', 'report.business_wide'])->prefix('analytics')->group(function () {
                 Route::get('/overview', [\App\Http\Controllers\Api\AnalyticsController::class, 'overview']);
             });
 
@@ -1400,7 +1402,7 @@ Route::prefix('v1')->group(function () {
             // report.window: one date contract for the whole section — a
             // caller using the other page's spelling got a different window
             // back, silently (D4). See NormalisesReportWindow.
-            $reportPage = fn (string $page) => ["report.page:{$page}", 'report.window', 'report.snapshot', 'report.contacts'];
+            $reportPage = fn (string $page) => ["report.page:{$page}", 'report.business_wide', 'report.window', 'report.snapshot', 'report.contacts'];
 
             // Shared by every page: the outlet filter, and the schedule list
             // (filtered to the pages the caller can open). Drills inherit the
@@ -1645,7 +1647,7 @@ Route::prefix('v1')->group(function () {
             // (report.page) and that page's export right (report.export):
             // reports.export, or reports.export_supply for Inventory and
             // Procurement.
-            $reportPdf = fn (string $page) => ["report.page:{$page}", 'report.export', 'report.window', 'report.snapshot'];
+            $reportPdf = fn (string $page) => ["report.page:{$page}", 'report.export', 'report.business_wide', 'report.window', 'report.snapshot'];
             Route::prefix('reports/pdf')->name('reports.pdf.')->group(function () use ($reportPdf) {
                 Route::get('/sales',        [ReportPdfController::class, 'sales'])       ->middleware($reportPdf('sales'))      ->name('sales');
                 Route::get('/financial',    [ReportPdfController::class, 'financial'])   ->middleware($reportPdf('financial'))  ->name('financial');

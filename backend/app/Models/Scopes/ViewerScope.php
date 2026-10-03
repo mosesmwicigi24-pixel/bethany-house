@@ -35,16 +35,17 @@ class ViewerScope implements Scope
         // Below here a user is guaranteed: the resolver returns All when there
         // is no session, so background work is never narrowed.
         match ($scope) {
+            // A staff member none of whose roles grants the capability.
+            DataScope::None => $builder->whereRaw('1 = 0'),
             DataScope::Own => $builder->where(
                 $builder->getModel()->getTable() . '.' . $model->ownerColumn(),
                 $user->id,
             ),
-            DataScope::Outlet => $builder->whereIn(
-                $builder->getModel()->getTable() . '.' . $model->outletColumn(),
-                // An EMPTY assignment means nothing, never everything — the
-                // same rule the POS outlet guard had inverted.
-                $user->outlets()->pluck('outlets.id')->all(),
-            ),
+            // An EMPTY assignment means nothing, never everything — the
+            // same rule the POS outlet guard had inverted. The model decides
+            // HOW a row belongs to an outlet (a task belongs through its
+            // production order).
+            DataScope::Outlet => $model->constrainToOutlets($builder, DataScopeResolver::outletIds($user)),
             default => null,
         };
     }

@@ -660,20 +660,25 @@ class OrderLineEditingTest extends TestCase
 
     public function test_an_outlet_scoped_manager_cannot_edit_another_outlets_order(): void
     {
+        // Phase 4A: the outlet boundary is the role's data_scope, resolved
+        // among the roles that grant orders.view — so the role grants it.
         $user = User::factory()->create();
-        $user->assignRole(Role::findOrCreate('outlet_manager', 'sanctum'));
-        $user->outlets()->attach(Outlet::factory()->create()->id);
+        $role = Role::findOrCreate('outlet_manager', 'sanctum');
         foreach (['orders.view', 'orders.edit', 'orders.edit_items', 'products.view'] as $p) {
-            $user->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
+            $role->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
+        \Illuminate\Support\Facades\DB::table('roles')->where('id', $role->id)->update(['data_scope' => 'outlet']);
+        $user->assignRole($role);
+        $user->outlets()->attach(Outlet::factory()->create()->id);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 
         $shirt = $this->product('Cassock', 1000, 400);
         [$order, $line] = $this->orderWithLine($shirt, 2, 1000);   // a DIFFERENT outlet
 
+        // Another outlet's order is absent to this manager (404), not refused.
         $this->edit($order, ['items' => [['id' => $line->id, 'quantity' => 9]]])
-            ->assertStatus(403);
+            ->assertStatus(404);
 
         $this->assertSame(2, (int) $line->fresh()->quantity);
     }

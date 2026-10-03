@@ -31,7 +31,7 @@ class ExpenseController extends Controller
     /** 403 unless this expense belongs to an outlet the caller is assigned to. */
     private function authoriseExpenseAccess(Expense $expense, User $user): void
     {
-        $this->authoriseOutletScopeFor($user, $expense->outlet_id);
+        $this->authoriseOutletScopeFor($user, $expense->outlet_id, 'expenses.view');
     }
 
     /** Fetch an expense and authorise it in one step. */
@@ -97,7 +97,7 @@ class ExpenseController extends Controller
         // Role-scoped access: outlet managers see only expenses for the outlets
         // they are assigned to. One definition, shared with every other method
         // on this controller — see assignedOutletIdsOrNull().
-        $assignedOutletIds = $this->assignedOutletIdsOrNull($request->user());
+        $assignedOutletIds = $this->assignedOutletIdsOrNull($request->user(), 'expenses.view');
         if ($assignedOutletIds !== null) {
             $query->whereIn('outlet_id', $assignedOutletIds);
         }
@@ -228,7 +228,7 @@ class ExpenseController extends Controller
         // outlets. (Omitting outlet_id books it to head office, as before.)
         if (isset($validated['outlet_id'])) {
             $this->authoriseOutletScope(
-                $this->assignedOutletIdsOrNull($request->user()),
+                $this->assignedOutletIdsOrNull($request->user(), 'expenses.view'),
                 (int) $validated['outlet_id'],
             );
         }
@@ -375,7 +375,7 @@ class ExpenseController extends Controller
         // Re-check on the way out too: a scoped manager must not move an
         // expense into an outlet they aren't assigned to.
         if (array_key_exists('outlet_id', $validated)) {
-            $this->authoriseOutletScopeFor($request->user(), $validated['outlet_id']);
+            $this->authoriseOutletScopeFor($request->user(), $validated['outlet_id'], 'expenses.view');
         }
 
         DB::beginTransaction();
@@ -735,7 +735,7 @@ class ExpenseController extends Controller
     {
         // The category list itself is reference data, but the spend figures
         // hung off it are money — scope them to the caller's outlets.
-        $scope = $this->assignedOutletIdsOrNull($request->user());
+        $scope = $this->assignedOutletIdsOrNull($request->user(), 'expenses.view');
 
         $categories = ExpenseCategory::with('children')
             ->whereNull('parent_id')
@@ -810,7 +810,7 @@ class ExpenseController extends Controller
         // actual-vs-budget figures derived from them) for their own outlets
         // only. Group-wide budgets — outlet_id NULL — are not theirs to see,
         // exactly as head-office expenses are excluded from index().
-        $scope = $this->assignedOutletIdsOrNull($request->user());
+        $scope = $this->assignedOutletIdsOrNull($request->user(), 'expenses.view');
         if (isset($validated['outlet_id'])) {
             $this->authoriseOutletScope($scope, (int) $validated['outlet_id']);
         }
@@ -846,7 +846,7 @@ class ExpenseController extends Controller
 
         if (isset($validated['outlet_id'])) {
             $this->authoriseOutletScope(
-                $this->assignedOutletIdsOrNull($request->user()),
+                $this->assignedOutletIdsOrNull($request->user(), 'expenses.view'),
                 (int) $validated['outlet_id'],
             );
         }
@@ -872,7 +872,7 @@ class ExpenseController extends Controller
     public function updateBudget(Request $request, int $id)
     {
         $budget = ExpenseBudget::findOrFail($id);
-        $this->authoriseOutletScopeFor($request->user(), $budget->outlet_id);
+        $this->authoriseOutletScopeFor($request->user(), $budget->outlet_id, 'expenses.view');
 
         $validated = $request->validate([
             'budgeted_amount' => 'required|numeric|min:0',
@@ -914,7 +914,7 @@ class ExpenseController extends Controller
         // Every figure below is money. A scoped manager gets their outlets'
         // numbers, never the group's; an explicit outlet_id may narrow that
         // scope but can never escape it (403, as MetricEngine::for does).
-        $scope = $this->assignedOutletIdsOrNull($request->user());
+        $scope = $this->assignedOutletIdsOrNull($request->user(), 'expenses.view');
         if ($outletId !== null) {
             $this->authoriseOutletScope($scope, (int) $outletId);
         }

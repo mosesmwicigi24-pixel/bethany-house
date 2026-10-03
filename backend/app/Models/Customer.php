@@ -98,6 +98,54 @@ class Customer extends Model
     /**
      * Scopes
      */
+    /**
+     * Customers this staff member may open (Phase 4A, plan §8).
+     *
+     *   All     every customer
+     *   Outlet  (outlet manager) a customer with an order or a production
+     *           order at one of their outlets, or first taken on there
+     *           (created_outlet_id). Orders link through customer_id, and
+     *           through user_id for web accounts — the same two arms the
+     *           customer profile counts history by.
+     *   Own     (cashier) record-specific: the customer on a sale of HERS that
+     *           is still open — in progress, or with money still owed. The
+     *           till finds other people through the masked autocomplete
+     *           (PosController::searchCustomers), never through this list.
+     *   None    nobody.
+     *
+     * Customer is deliberately NOT a Restricted model: storefront checkout,
+     * merges, Neema and the webhooks read customers outside any staff view,
+     * and a global scope would narrow them silently.
+     */
+    public function scopeVisibleTo($query, ?\App\Models\User $user, string $permission = 'customers.view')
+    {
+        $scope = \App\Services\DataScopeResolver::for($user, $permission);
+
+        return match ($scope) {
+            \App\Enums\DataScope::All    => $query,
+            \App\Enums\DataScope::None   => $query->whereRaw('1 = 0'),
+            \App\Enums\DataScope::Outlet => $query->where(function ($q) use ($user) {
+                $outlets = \App\Services\DataScopeResolver::outletIds($user);
+                $q->whereIn('customers.created_outlet_id', $outlets)
+                  ->orWhereExists(fn ($o) => $o->selectRaw('1')->from('orders')
+                      ->whereIn('orders.outlet_id', $outlets)
+                      ->where(fn ($w) => $w->whereColumn('orders.customer_id', 'customers.id')
+                          ->orWhere(fn ($u) => $u->whereNotNull('customers.user_id')
+                              ->whereColumn('orders.user_id', 'customers.user_id'))))
+                  ->orWhereExists(fn ($p) => $p->selectRaw('1')->from('production_orders')
+                      ->whereIn('production_orders.outlet_id', $outlets)
+                      ->whereColumn('production_orders.customer_id', 'customers.id'));
+            }),
+            \App\Enums\DataScope::Own    => $query->whereExists(fn ($o) => $o->selectRaw('1')->from('orders')
+                ->whereColumn('orders.customer_id', 'customers.id')
+                ->where('orders.created_by', $user->id)
+                ->whereNotIn('orders.status', \App\Models\Order::DEAD_STATUSES)
+                ->where(fn ($w) => $w->where('orders.status', 'pending')
+                    ->orWhereNull('orders.payment_status')
+                    ->orWhereNotIn('orders.payment_status', ['paid']))),
+        };
+    }
+
     public function scopeActive($query)
     {
         return $query->where('status', 'active');

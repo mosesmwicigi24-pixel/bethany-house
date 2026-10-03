@@ -36,8 +36,18 @@ class ExpenseOutletScopingTest extends TestCase
         foreach ($permissions as $p) {
             $user->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
+        // Phase 4A: the outlet boundary is the ROLE's data_scope (the
+        // catalogue's ROLE_SCOPES), resolved among the roles that grant the
+        // capability — no longer the role's name. So the fixture role grants
+        // what the user holds and carries the catalogue's scope.
         foreach ($roles as $r) {
-            $user->assignRole(Role::findOrCreate($r, 'sanctum'));
+            $role = Role::findOrCreate($r, 'sanctum');
+            foreach ($permissions as $p) {
+                $role->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
+            }
+            \Illuminate\Support\Facades\DB::table('roles')->where('id', $role->id)
+                ->update(['data_scope' => \App\Console\Commands\SyncPermissions::ROLE_SCOPES[$r] ?? 'all']);
+            $user->assignRole($role);
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
@@ -129,7 +139,7 @@ class ExpenseOutletScopingTest extends TestCase
             ->assertJsonPath('expense.reference_number', 'EXP-A');
 
         // Another outlet's expense does not — the list already hid it.
-        $this->getJson("/api/v1/admin/expenses/{$ours->id}")->assertForbidden();
+        $this->getJson("/api/v1/admin/expenses/{$ours->id}")->assertNotFound();
     }
 
     public function test_outlet_manager_cannot_show_a_head_office_expense(): void
@@ -157,7 +167,7 @@ class ExpenseOutletScopingTest extends TestCase
 
         // outlet_id NULL is outside an outlet manager's scope, exactly as it
         // is excluded from their list query.
-        $this->getJson("/api/v1/admin/expenses/{$headOffice->id}")->assertForbidden();
+        $this->getJson("/api/v1/admin/expenses/{$headOffice->id}")->assertNotFound();
     }
 
     public function test_outlet_manager_cannot_download_a_receipt_from_an_unassigned_outlet(): void
@@ -175,7 +185,7 @@ class ExpenseOutletScopingTest extends TestCase
         // Neither has a receipt attached: in scope that is a 404 ("no receipt"),
         // out of scope it must stop at the scope check instead.
         $this->getJson("/api/v1/admin/expenses/{$mine->id}/receipt")->assertNotFound();
-        $this->getJson("/api/v1/admin/expenses/{$ours->id}/receipt")->assertForbidden();
+        $this->getJson("/api/v1/admin/expenses/{$ours->id}/receipt")->assertNotFound();
     }
 
     // ── mutations — worse than reading ────────────────────────────────────────
@@ -196,10 +206,10 @@ class ExpenseOutletScopingTest extends TestCase
         $theirs = $this->makeExpense('EXP-B', $cat->id, $outletB->id, $manager->id, 'draft');
 
         $this->putJson("/api/v1/admin/expenses/{$theirs->id}", ['title' => 'Hijacked'])
-            ->assertForbidden();
-        $this->postJson("/api/v1/admin/expenses/{$theirs->id}/cancel")->assertForbidden();
-        $this->postJson("/api/v1/admin/expenses/{$theirs->id}/submit")->assertForbidden();
-        $this->deleteJson("/api/v1/admin/expenses/{$theirs->id}")->assertForbidden();
+            ->assertNotFound();
+        $this->postJson("/api/v1/admin/expenses/{$theirs->id}/cancel")->assertNotFound();
+        $this->postJson("/api/v1/admin/expenses/{$theirs->id}/submit")->assertNotFound();
+        $this->deleteJson("/api/v1/admin/expenses/{$theirs->id}")->assertNotFound();
 
         $this->assertSame('draft', $theirs->fresh()->status);
         $this->assertSame('EXP-B expense', $theirs->fresh()->title);
@@ -395,7 +405,7 @@ class ExpenseOutletScopingTest extends TestCase
         $this->assertSame(0, (int) $list->json('expenses.total'));
         $this->assertSame(0, (int) $list->json('stats.total_count'));
 
-        $this->getJson("/api/v1/admin/expenses/{$expense->id}")->assertForbidden();
+        $this->getJson("/api/v1/admin/expenses/{$expense->id}")->assertNotFound();
 
         $summary = $this->getJson('/api/v1/admin/expenses/summary?' . self::PERIOD)->assertOk();
         $this->assertSame(0.0, (float) $summary->json('totals.total_amount'));

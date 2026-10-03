@@ -130,7 +130,8 @@ class GlobalSearchController extends Controller
 
     private function searchCustomers(string $q): array
     {
-        $rows = Customer::where(function ($w) use ($q) {
+        // Phase 4A: the caller's customers only, bounded before matching.
+        $rows = Customer::visibleTo(request()->user())->where(function ($w) use ($q) {
                 $w->where('first_name',  'ILIKE', "%{$q}%")
                   ->orWhere('last_name',  'ILIKE', "%{$q}%")
                   ->orWhere('email',      'ILIKE', "%{$q}%")

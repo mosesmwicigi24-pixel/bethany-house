@@ -40,6 +40,29 @@ class CustomerController extends Controller
         'email', 'phone', 'company', 'customer_type', 'status', 'created_at',
     ];
 
+    /**
+     * The outlet a new customer is taken on at: the outlet the request names,
+     * if the caller may act there; otherwise the caller's primary (or only)
+     * assigned outlet; otherwise none (head office).
+     */
+    private function originOutlet(Request $request): ?int
+    {
+        $user = $request->user();
+        if (!$user) {
+            return null;
+        }
+
+        $named = $request->integer('outlet_id') ?: null;
+        if ($named && \App\Services\DataScopeResolver::allowsOutlet($user, 'customers.view', $named)
+            && \App\Models\Outlet::whereKey($named)->exists()) {
+            return $named;
+        }
+
+        $assigned = $user->outlets()->orderByDesc('outlet_user.is_primary')->orderBy('outlets.id')->value('outlets.id');
+
+        return $assigned ? (int) $assigned : null;
+    }
+
     private function callerHasInsights(Request $request): bool
     {
         return (bool) $request->user()?->can('customers.insights');
@@ -67,7 +90,9 @@ class CustomerController extends Controller
     public function index(Request $request)
     {
         $rich  = $this->callerHasInsights($request);
-        $query = Customer::with($rich ? ['user', 'addresses'] : ['user']);
+        // Phase 4A: scoped BEFORE any search or filter — a manager's search
+        // matches inside their outlets' customers, never across the business.
+        $query = Customer::visibleTo($request->user())->with($rich ? ['user', 'addresses'] : ['user']);
 
         // Search by name, email, or phone.
         // Handles both customers with a linked User and phone-only walk-in
@@ -139,7 +164,7 @@ class CustomerController extends Controller
         // Without insights the profile is the picker view: identity and
         // contact only — no addresses, no spend history, no credit figures.
         if (!$this->callerHasInsights($request)) {
-            $customer = Customer::with('user')->findOrFail($id);
+            $customer = Customer::visibleTo($request->user())->with('user')->findOrFail($id);
 
             return response()->json([
                 'customer' => $this->liteCustomer($customer),
@@ -147,7 +172,7 @@ class CustomerController extends Controller
             ]);
         }
 
-        $customer = Customer::with(['user', 'addresses'])->findOrFail($id);
+        $customer = Customer::visibleTo($request->user())->with(['user', 'addresses'])->findOrFail($id);
 
         // A customer's orders are the ones placed AS that customer. That is
         // customer_id — restored 2026-09-25, after mass assignment had been
@@ -281,6 +306,9 @@ class CustomerController extends Controller
                 'status'             => 'active',
                 'notes'              => $validated['notes'] ?? null,
             ]);
+            // Where this customer was taken on — so the outlet manager who
+            // adds them, before any sale, can still open them (Phase 4A).
+            $customer->forceFill(['created_outlet_id' => $this->originOutlet($request)])->save();
 
             DB::commit();
 
@@ -314,7 +342,7 @@ class CustomerController extends Controller
      */
     public function update(Request $request, $id)
     {
-        $customer = Customer::with('user')->findOrFail($id);
+        $customer = Customer::visibleTo($request->user())->with('user')->findOrFail($id);
 
         $validated = $request->validate([
             'first_name'         => 'sometimes|string|max:255',
@@ -388,7 +416,7 @@ class CustomerController extends Controller
      */
     public function destroy($id)
     {
-        $customer = Customer::with('user')->findOrFail($id);
+        $customer = Customer::visibleTo(request()->user())->with('user')->findOrFail($id);
 
         // Check if customer has orders
         if ($customer->orders()->exists()) {
@@ -440,7 +468,7 @@ class CustomerController extends Controller
             'status' => 'required|in:active,inactive,suspended',
         ]);
 
-        $customer = Customer::with('user')->findOrFail($id);
+        $customer = Customer::visibleTo($request->user())->with('user')->findOrFail($id);
         $oldStatus = $customer->user->status ?? null;
         $customer->user->update(['status' => $validated['status']]);
 
@@ -482,7 +510,7 @@ class CustomerController extends Controller
 
     public function customerOrders($id)
     {
-        $customer = Customer::findOrFail($id);
+        $customer = Customer::visibleTo(request()->user())->findOrFail($id);
 
         $orders = Order::with(['items', 'payments'])
             ->where('user_id', $customer->user_id)
@@ -766,6 +794,9 @@ class CustomerController extends Controller
                 'preferred_language' => 'en',
                 'preferred_currency' => 'KES',
             ]);
+            // Where this customer was taken on — so the outlet manager who
+            // adds them, before any sale, can still open them (Phase 4A).
+            $customer->forceFill(['created_outlet_id' => $this->originOutlet($request)])->save();
 
             DB::commit();
 
@@ -811,7 +842,7 @@ class CustomerController extends Controller
 
     public function inviteToPortal(Request $request, $id)
     {
-        $customer = Customer::findOrFail($id);
+        $customer = Customer::visibleTo($request->user())->findOrFail($id);
 
         if (empty($customer->email)) {
             return response()->json([

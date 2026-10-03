@@ -23,7 +23,7 @@ class StockTransfersController extends Controller
     {
         $perPage = min((int) $request->get('per_page', 25), 100);
 
-        $query = InventoryTransfer::with([
+        $query = InventoryTransfer::visibleTo($request->user())->with([
             'fromOutlet:id,name,code',
             'toOutlet:id,name,code',
             'items.product:id,sku',
@@ -42,11 +42,11 @@ class StockTransfersController extends Controller
 
         $stats = [
             'total'      => InventoryTransfer::count(),
-            'pending'    => InventoryTransfer::where('status', 'pending')->count(),
-            'approved'   => InventoryTransfer::where('status', 'approved')->count(),
-            'in_transit' => InventoryTransfer::where('status', 'in_transit')->count(),
-            'completed'  => InventoryTransfer::where('status', 'completed')->count(),
-            'cancelled'  => InventoryTransfer::where('status', 'cancelled')->count(),
+            'pending'    => InventoryTransfer::visibleTo($request->user())->where('status', 'pending')->count(),
+            'approved'   => InventoryTransfer::visibleTo($request->user())->where('status', 'approved')->count(),
+            'in_transit' => InventoryTransfer::visibleTo($request->user())->where('status', 'in_transit')->count(),
+            'completed'  => InventoryTransfer::visibleTo($request->user())->where('status', 'completed')->count(),
+            'cancelled'  => InventoryTransfer::visibleTo($request->user())->where('status', 'cancelled')->count(),
         ];
 
         return response()->json([
@@ -68,7 +68,7 @@ class StockTransfersController extends Controller
 
     public function show($id)
     {
-        $transfer = InventoryTransfer::with([
+        $transfer = InventoryTransfer::visibleTo(request()->user())->with([
             'fromOutlet:id,name,code',
             'toOutlet:id,name,code',
             'items.product:id,sku',
@@ -106,6 +106,16 @@ class StockTransfersController extends Controller
             'items.*.product_variant_id' => ['nullable', 'integer', \Illuminate\Validation\Rule::exists(\App\Models\ProductVariant::class, 'id')],
             'items.*.quantity_requested' => 'required|integer|min:1',
         ]);
+
+        // A bounded manager moves stock into or out of their own shop — one
+        // side of the transfer must be theirs, or they could raise one they
+        // can then never see.
+        $user = $request->user();
+        abort_unless(
+            \App\Services\DataScopeResolver::allowsOutlet($user, 'inventory.view', (int) $validated['from_outlet_id'])
+                || \App\Services\DataScopeResolver::allowsOutlet($user, 'inventory.view', (int) $validated['to_outlet_id']),
+            403, 'You do not have access to this outlet.',
+        );
 
         DB::beginTransaction();
         try {
@@ -198,7 +208,7 @@ class StockTransfersController extends Controller
 
     public function approve($id)
     {
-        $transfer = InventoryTransfer::where('status', 'pending')->findOrFail($id);
+        $transfer = InventoryTransfer::visibleTo(request()->user())->where('status', 'pending')->findOrFail($id);
 
         // Whoever raised the transfer does not approve it. requested_by is
         // checked as well because store() writes it wherever the table has
@@ -222,7 +232,7 @@ class StockTransfersController extends Controller
 
     public function dispatch(Request $request, $id)
     {
-        $transfer = InventoryTransfer::with('items')->where('status', 'approved')->findOrFail($id);
+        $transfer = InventoryTransfer::visibleTo($request->user())->with('items')->where('status', 'approved')->findOrFail($id);
 
         $validated = $request->validate([
             'items'                            => 'required|array',
@@ -293,7 +303,7 @@ class StockTransfersController extends Controller
 
     public function receive($id)
     {
-        $transfer = InventoryTransfer::with('items')->where('status', 'in_transit')->findOrFail($id);
+        $transfer = InventoryTransfer::visibleTo(request()->user())->with('items')->where('status', 'in_transit')->findOrFail($id);
 
         DB::beginTransaction();
         try {
@@ -362,7 +372,7 @@ class StockTransfersController extends Controller
     public function cancel(Request $request, $id)
     {
         $request->validate(['reason' => 'nullable|string|max:500']);
-        $transfer = InventoryTransfer::whereIn('status', ['pending', 'approved'])->findOrFail($id);
+        $transfer = InventoryTransfer::visibleTo($request->user())->whereIn('status', ['pending', 'approved'])->findOrFail($id);
 
         $transfer->update([
             'status' => 'cancelled',
@@ -383,7 +393,7 @@ class StockTransfersController extends Controller
 
     public function auditLog($id)
     {
-        $transfer = InventoryTransfer::findOrFail($id);
+        $transfer = InventoryTransfer::visibleTo(request()->user())->findOrFail($id);
 
         $logs = DB::table('activity_log as al')
             ->leftJoin('users as u', 'u.id', '=', 'al.causer_id')

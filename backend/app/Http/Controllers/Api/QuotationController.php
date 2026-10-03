@@ -45,6 +45,33 @@ class QuotationController extends Controller
         return response()->json($query->paginate(min((int) $request->integer('per_page', 25), 100)));
     }
 
+    /**
+     * Phase 4A: a quotation's outlet is a write naming an outlet. An
+     * outlet-bounded manager raises quotations at their own shops only, and
+     * one raised with no outlet lands at their primary shop — a head-office
+     * (null-outlet) quotation would vanish from the manager who wrote it.
+     */
+    private function outletInScope(Request $request, ?int $outletId): ?int
+    {
+        $user  = $request->user();
+        $scope = \App\Services\DataScopeResolver::for($user, 'quotations.view');
+        if ($scope !== \App\Enums\DataScope::Outlet) {
+            return $outletId;
+        }
+
+        if ($outletId === null) {
+            $outletId = $user->outlets()->orderByDesc('outlet_user.is_primary')->orderBy('outlets.id')->value('outlets.id');
+            $outletId = $outletId ? (int) $outletId : null;
+        }
+
+        abort_unless(
+            \App\Services\DataScopeResolver::allowsOutlet($user, 'quotations.view', $outletId),
+            403, 'You do not have access to this outlet.',
+        );
+
+        return $outletId;
+    }
+
     public function show(int $id): JsonResponse
     {
         $quotation = Quotation::with(['items', 'documents', 'convertedOrder:id,order_number,status,payment_status'])
@@ -56,6 +83,7 @@ class QuotationController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $this->validatePayload($request);
+        $validated['outlet_id'] = $this->outletInScope($request, $validated['outlet_id'] ?? null);
 
         $quotation = DB::transaction(function () use ($validated, $request) {
             $quotation = Quotation::create([
@@ -96,6 +124,9 @@ class QuotationController extends Controller
         }
 
         $validated = $this->validatePayload($request, $quotation->customer_phone);
+        if (array_key_exists('outlet_id', $validated) && $validated['outlet_id'] !== null) {
+            $validated['outlet_id'] = $this->outletInScope($request, (int) $validated['outlet_id']);
+        }
 
         DB::transaction(function () use ($quotation, $validated) {
             $quotation->update([
