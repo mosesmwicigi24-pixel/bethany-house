@@ -49,12 +49,12 @@ class ProductCostVisibilityTest extends TestCase
         $product = Product::factory()->create();
         ProductPrice::create([
             'product_id' => $product->id, 'product_variant_id' => null,
-            'currency_code' => 'KES', 'regular_price' => 5000, 'cost_price' => 3100,
+            'currency_code' => 'KES', 'regular_price' => 5000, 'cost_price' => 3187.43,
         ]);
         $variant = ProductVariant::factory()->create(['product_id' => $product->id]);
         ProductPrice::create([
             'product_id' => $product->id, 'product_variant_id' => $variant->id,
-            'currency_code' => 'KES', 'regular_price' => 5200, 'cost_price' => 3300,
+            'currency_code' => 'KES', 'regular_price' => 5200, 'cost_price' => 3291.67,
         ]);
 
         return $product;
@@ -104,8 +104,10 @@ class ProductCostVisibilityTest extends TestCase
         $this->assertSame(5000.0, (float) $res->json('product.prices.0.regular_price'),
             'the selling price is still there — only the cost goes');
         $this->assertStringNotContainsString('cost_price', $res->getContent());
-        $this->assertStringNotContainsString('3100', $res->getContent());
-        $this->assertStringNotContainsString('3300', $res->getContent());
+        // Costs with decimals: a random SKU or UUID can never contain one (it
+        // once failed on a generated "VAR-73100" when the cost was 3100).
+        $this->assertStringNotContainsString('3187.43', $res->getContent());
+        $this->assertStringNotContainsString('3291.67', $res->getContent());
     }
 
     public function test_procurement_still_reads_the_cost(): void
@@ -115,8 +117,8 @@ class ProductCostVisibilityTest extends TestCase
 
         $res = $this->getJson("/api/v1/admin/products/{$product->id}")->assertOk();
 
-        $this->assertSame(3100.0, (float) $res->json('product.prices.0.cost_price'));
-        $this->assertSame(3300.0, (float) $res->json('product.variants.0.prices.0.cost_price'));
+        $this->assertSame(3187.43, (float) $res->json('product.prices.0.cost_price'));
+        $this->assertSame(3291.67, (float) $res->json('product.variants.0.prices.0.cost_price'));
     }
 
     public function test_admin_still_reads_the_cost(): void
@@ -126,7 +128,7 @@ class ProductCostVisibilityTest extends TestCase
 
         $this->getJson("/api/v1/admin/products/{$product->id}")
             ->assertOk()
-            ->assertJsonPath('product.prices.0.cost_price', fn ($v) => (float) $v === 3100.0);
+            ->assertJsonPath('product.prices.0.cost_price', fn ($v) => (float) $v === 3187.43);
     }
 
     public function test_the_list_carries_no_cost_for_anyone_to_strip(): void
@@ -196,7 +198,7 @@ class ProductCostVisibilityTest extends TestCase
 
         $row = ProductPrice::where('product_id', $product->id)->whereNull('product_variant_id')->first();
         $this->assertSame(5500.0, (float) $row->regular_price);
-        $this->assertSame(3100.0, (float) $row->cost_price, 'cost survives a cost-blind save');
+        $this->assertSame(3187.43, (float) $row->cost_price, 'cost survives a cost-blind save');
     }
 
     // ── The migration makes it live without waiting for permission:sync ──────

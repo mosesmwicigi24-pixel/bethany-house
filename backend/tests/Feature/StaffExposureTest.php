@@ -94,16 +94,16 @@ class StaffExposureTest extends TestCase
         ProductTranslation::create(['product_id' => $product->id, 'language_code' => 'en', 'name' => 'Chasuble']);
         $variant = ProductVariant::create(['product_id' => $product->id, 'sku' => 'SKU-C1', 'variant_name' => 'M',
             'attributes' => ['size' => 'M'], 'is_active' => true]);
-        ProductPrice::create(['product_id' => $product->id, 'currency_code' => 'KES', 'regular_price' => 10000, 'cost_price' => 3517]);
+        ProductPrice::create(['product_id' => $product->id, 'currency_code' => 'KES', 'regular_price' => 10000, 'cost_price' => 3517.29]);
         ProductPrice::create(['product_id' => $product->id, 'product_variant_id' => $variant->id, 'currency_code' => 'KES',
-            'regular_price' => 10000, 'cost_price' => 3517]);
+            'regular_price' => 10000, 'cost_price' => 3517.29]);
 
         // Signed out, as anyone on the internet.
         foreach (['/api/v1/products', "/api/v1/products/{$product->slug}", '/api/v1/products/featured',
                   '/api/v1/products/new-arrivals', "/api/v1/products/{$product->id}/variants"] as $url) {
             $res = $this->getJson($url)->assertOk();
             $this->assertStringNotContainsString('cost_price', $res->getContent(), "{$url} carries cost_price");
-            $this->assertStringNotContainsString('3517', $res->getContent(), "{$url} carries the cost figure");
+            $this->assertStringNotContainsString('3517.29', $res->getContent(), "{$url} carries the cost figure");
         }
         $this->assertStringContainsString('10000', $this->getJson("/api/v1/products/{$product->slug}")->getContent(), 'the selling price still shows');
 
