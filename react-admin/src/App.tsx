@@ -895,7 +895,7 @@ export default function App() {
                         <Route
                             path="/approvals"
                             element={
-                                <ProtectedRoute anyOf={["procurement.approve", "inventory.approve", "payments.approve_international"]}>
+                                <ProtectedRoute anyOf={["procurement.approve", "inventory.approve", "expenses.approve", "approvals.finance_sign", "payments.void", "payments.reassign", "payments.approve_international", "payments.request_void", "payments.request_reassign", "procurement.create", "inventory.adjust", "inventory.transfer", "expenses.create"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <ApprovalsPage />
                                 </Suspense>

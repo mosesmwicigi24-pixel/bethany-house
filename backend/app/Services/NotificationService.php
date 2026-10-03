@@ -687,6 +687,50 @@ class NotificationService
     /**
      * Fired when a stock adjustment requires admin approval.
      */
+    /**
+     * Phase 3B approval engine: a request is waiting for these people's band.
+     *
+     * @param  Collection<int, User>  $users
+     */
+    public static function approvalWaiting(Collection $users, int $requestId, string $title, ?float $amountKes): void
+    {
+        self::send(
+            $users,
+            new InAppNotification(
+                title:     "Waiting for your approval: {$title}",
+                body:      $amountKes !== null ? 'KES ' . number_format($amountKes, 2) . '. Open your Approvals inbox to sign or reject it.' : 'Open your Approvals inbox to sign or reject it.',
+                actionUrl: '/approvals',
+                icon:      'approval',
+                data:      ['approval_request_id' => $requestId],
+            )
+        );
+    }
+
+    /** Phase 3B approval engine: tell the maker how their submission ended. */
+    public static function approvalDecided(int $makerId, int $requestId, string $title, string $status, ?string $reason): void
+    {
+        $maker = self::user($makerId);
+        if (!$maker) {
+            return;
+        }
+        $words = match ($status) {
+            'approved' => 'approved',
+            'rejected' => 'rejected',
+            'expired'  => 'not decided within 72 hours and came back to you',
+            default    => $status,
+        };
+        self::send(
+            $maker,
+            new InAppNotification(
+                title:     ucfirst("{$title} — {$words}"),
+                body:      $reason ? "Reason: {$reason}" : null,
+                actionUrl: '/approvals?tab=mine',
+                icon:      'approval',
+                data:      ['approval_request_id' => $requestId, 'status' => $status],
+            )
+        );
+    }
+
     public static function stockAdjustmentPendingApproval(
         int $adjustmentId,
         string $productName,

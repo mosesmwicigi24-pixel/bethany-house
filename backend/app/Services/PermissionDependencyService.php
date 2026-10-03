@@ -81,6 +81,8 @@ class PermissionDependencyService
         'payments.approve_international' => ['payments.view'],
         'payments.void'                  => ['payments.view'],
         'payments.reassign'              => ['payments.view'],
+        'payments.request_void'          => ['payments.view'],
+        'payments.request_reassign'      => ['payments.view'],
         'payments.transactions'          => ['payments.view'],
         // Recording a payment happens at POST /orders/{id}/payments, nested
         // inside permission:orders.view, not the payments module itself.

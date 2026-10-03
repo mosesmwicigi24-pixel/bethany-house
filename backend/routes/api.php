@@ -509,6 +509,25 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{uuid}/archive',           [DownloadRequestController::class, 'archive'])->whereUuid('uuid');
             });
 
+            // ── Approvals inbox (Phase 3B engine) ────────────────────────────
+            // One queue for every approval: what the caller can sign now, and
+            // what they submitted. Who may sign each band is the engine's
+            // decision (band key, maker ≠ checker, one signature per person) —
+            // not route middleware, which super_admin's Gate::before would pass.
+            // Thresholds: readable by staff, changed by the super admin alone
+            // (checked in the controller, on the role).
+            Route::prefix('approvals')->group(function () {
+                Route::get('/inbox',                [\App\Http\Controllers\Api\ApprovalController::class, 'inbox']);
+                Route::get('/mine',                 [\App\Http\Controllers\Api\ApprovalController::class, 'mine']);
+                Route::get('/thresholds',           [\App\Http\Controllers\Api\ApprovalController::class, 'thresholds']);
+                Route::put('/thresholds/{event}',   [\App\Http\Controllers\Api\ApprovalController::class, 'updateThresholds'])
+                    ->where('event', '[a-z_]+');
+                Route::get('/{id}',                 [\App\Http\Controllers\Api\ApprovalController::class, 'show'])->whereNumber('id');
+                Route::post('/{id}/sign',           [\App\Http\Controllers\Api\ApprovalController::class, 'sign'])->whereNumber('id');
+                Route::post('/{id}/reject',         [\App\Http\Controllers\Api\ApprovalController::class, 'reject'])->whereNumber('id');
+                Route::post('/{id}/resubmit',       [\App\Http\Controllers\Api\ApprovalController::class, 'resubmit'])->whereNumber('id');
+            });
+
             // ── Trash / Recycle Bin (super_admin only) ────────────────────────
             // BUGFIX: this group previously had no role/permission middleware
             // at all - only auth:sanctum from the outer wrapper - despite the
@@ -1282,10 +1301,19 @@ Route::prefix('v1')->group(function () {
                     });
                     Route::post('/{id}/refund',    [PaymentController::class, 'refundTransaction'])
                         ->middleware('permission:orders.refund,sanctum');
+                    // Phase 3B: voiding or moving a payment is a REQUEST that
+                    // finance executes when the approval engine has its
+                    // signatures (≤ KES 50,000 finance; above, + super admin).
+                    // The old endpoints still answer — for the keys that could
+                    // act directly before — but they now ask, not act.
                     Route::post('/{id}/void',      [PaymentController::class, 'voidPayment'])
                         ->middleware('permission:payments.void,sanctum');
                     Route::post('/{id}/reassign',  [PaymentController::class, 'reassignPayment'])
                         ->middleware('permission:payments.reassign,sanctum');
+                    Route::post('/{id}/void-request',     [PaymentController::class, 'voidPayment'])
+                        ->middleware('permission:payments.request_void|payments.void,sanctum');
+                    Route::post('/{id}/reassign-request', [PaymentController::class, 'reassignPayment'])
+                        ->middleware('permission:payments.request_reassign|payments.reassign,sanctum');
                 });
 
                 Route::prefix('payments')->group(function () {

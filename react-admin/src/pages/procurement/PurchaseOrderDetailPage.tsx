@@ -300,14 +300,16 @@ export default function PurchaseOrderDetailPage() {
     const actionMutation = useMutation({
         mutationFn: ({ action, notes }: { action: string; notes?: string }) =>
             post<any>(`/v1/admin/purchase-orders/${id}/${action}`, notes ? { notes, reason: notes } : {}),
-        onSuccess: (_, { action }) => {
+        onSuccess: (res, { action }) => {
             const labels: Record<string, string> = {
                 submit:  "PO submitted for approval",
                 approve: "PO approved",
                 reject:  "PO rejected and returned to draft",
                 cancel:  "PO cancelled",
             };
-            toast.success(labels[action] ?? "Action completed");
+            // Approval is signed band by band (Phase 3B): the server says
+            // whether this signature approved the PO or it waits for the next.
+            toast.success(action === "approve" && res?.message ? res.message : (labels[action] ?? "Action completed"));
             refresh();
         },
         onError: (e: any) => toast.error(e?.message ?? "Action failed"),

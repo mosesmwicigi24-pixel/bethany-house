@@ -318,6 +318,23 @@ class MakerCheckerTest extends TestCase
         ]);
     }
 
+    /**
+     * Since Phase 3B an adjustment is valued at |qty| × the product's KES
+     * book cost; a product with no cost cannot be valued and needs every
+     * band. The tests about who may approve give the product a cost, so the
+     * adjustment sits in the procurement manager's band alone.
+     */
+    private function costedItem(int $onHand = 10, float $cost = 100): InventoryItem
+    {
+        $item = InventoryItem::factory()->create(['quantity_on_hand' => $onHand]);
+        DB::table('product_prices')->insert([
+            'product_id' => $item->product_id, 'currency_code' => 'KES', 'regular_price' => $cost * 2,
+            'cost_price' => $cost, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        return $item;
+    }
+
     public function test_whoever_raised_an_adjustment_cannot_approve_it(): void
     {
         $maker = $this->user('outlet_manager', 'procurement_manager');   // holds inventory.adjust AND inventory.approve
@@ -332,7 +349,7 @@ class MakerCheckerTest extends TestCase
 
     public function test_someone_else_can_approve_the_adjustment(): void
     {
-        $item = InventoryItem::factory()->create(['quantity_on_hand' => 10]);
+        $item = $this->costedItem();
         $id   = $this->raiseAdjustment($this->user('outlet_manager'), $item)->assertCreated()->json('adjustment.id');
 
         Sanctum::actingAs($this->user('procurement_manager'));
@@ -367,9 +384,10 @@ class MakerCheckerTest extends TestCase
 
     public function test_reasons_that_never_needed_approval_still_apply_directly_for_admins(): void
     {
-        // The reason-code rule itself is unchanged: 'damaged' applies at once.
+        // 'damaged' still applies at once — within the procurement band's
+        // value (Phase 3B): 2 × KES 100 is well under KES 10,000.
         $admin = $this->user('admin', 'outlet_manager');
-        $item  = InventoryItem::factory()->create(['quantity_on_hand' => 10]);
+        $item  = $this->costedItem();
 
         $this->raiseAdjustment($admin, $item, 'damaged', -2)
             ->assertCreated()

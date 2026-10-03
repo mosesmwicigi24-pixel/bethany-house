@@ -13,6 +13,8 @@ class ImprestTopupRequest extends Model
     public const RECEIVED  = 'received';
     public const DECLINED  = 'declined';
     public const CANCELLED = 'cancelled';
+    /** No approval decision within 72 hours (Phase 3B); ask again if still needed. */
+    public const EXPIRED   = 'expired';
 
     protected $guarded = ['id'];
 

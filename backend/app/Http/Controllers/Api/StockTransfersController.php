@@ -11,7 +11,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
-use App\Support\MakerChecker;
 
 class StockTransfersController extends Controller
 {
@@ -135,6 +134,11 @@ class StockTransfersController extends Controller
                 ]);
             }
 
+            // Into the approval engine: the procurement manager approves an
+            // inter-outlet transfer (no value band) — never its raiser (3B).
+            app(\App\Services\Approvals\ApprovalEngine::class)
+                ->submit('stock_transfer', $transfer, auth()->user());
+
             DB::commit();
 
             // ── Audit log ─────────────────────────────────────────────────────
@@ -178,6 +182,9 @@ class StockTransfersController extends Controller
                 'transfer' => $formatted,
             ], 201);
 
+        } catch (\Illuminate\Http\Exceptions\HttpResponseException $e) {
+            DB::rollBack();
+            throw $e;
         } catch (\Illuminate\Validation\ValidationException $e) {
             DB::rollBack();
             return response()->json(['message' => 'Validation failed.', 'errors' => $e->errors()], 422);
@@ -196,23 +203,25 @@ class StockTransfersController extends Controller
     // PUT /api/v1/admin/inventory/transfers/{id}/approve
     // =========================================================================
 
-    public function approve($id)
+    public function approve(Request $request, $id)
     {
         $transfer = InventoryTransfer::where('status', 'pending')->findOrFail($id);
 
-        // Whoever raised the transfer does not approve it. requested_by is
-        // checked as well because store() writes it wherever the table has
-        // that column; where it doesn't, it reads as null and is ignored.
-        MakerChecker::assertNotMaker(
-            auth()->user(), 'stock_transfer.approve', $transfer,
-            $transfer->created_by, $transfer->requested_by,
+        // Since Phase 3B this SIGNS the transfer's approval. The engine refuses
+        // whoever raised it (created_by / requested_by — maker ≠ checker) and
+        // checks the caller holds the procurement band.
+        $engine   = app(\App\Services\Approvals\ApprovalEngine::class);
+        $approval = $engine->sign(
+            $engine->openOrAdopt('stock_transfer', $transfer), $request->user(),
+            \App\Models\ApprovalSignature::APPROVED, $request->get('notes'), $transfer->id,
         );
-        $cols = \Illuminate\Support\Facades\Schema::getColumnListing('inventory_transfers');
-        $updateData = ['status' => 'approved'];
-        if (in_array('approved_by', $cols)) $updateData['approved_by'] = auth()->id();
-        if (in_array('approved_at', $cols)) $updateData['approved_at'] = now();
-        $transfer->update($updateData);
-        return response()->json(['message' => "Transfer {$transfer->transfer_number} approved."]);
+
+        return response()->json([
+            'message'  => $approval->status === \App\Models\ApprovalRequest::APPROVED
+                ? "Transfer {$transfer->transfer_number} approved."
+                : "Signed. Transfer {$transfer->transfer_number} now waits for the next band.",
+            'approval' => $engine->present($approval->load(['signatures', 'maker']), $request->user()),
+        ]);
     }
 
     // =========================================================================
@@ -362,12 +371,15 @@ class StockTransfersController extends Controller
     public function cancel(Request $request, $id)
     {
         $request->validate(['reason' => 'nullable|string|max:500']);
-        $transfer = InventoryTransfer::whereIn('status', ['pending', 'approved'])->findOrFail($id);
+        $transfer = InventoryTransfer::whereIn('status', ['pending', 'approved', 'rejected', 'returned'])->findOrFail($id);
 
         $transfer->update([
             'status' => 'cancelled',
             'notes'  => trim(($transfer->notes ?? '') . "\n[Cancelled: " . ($request->reason ?? 'No reason given') . "]"),
         ]);
+        app(\App\Services\Approvals\ApprovalEngine::class)->cancelOpen(
+            'stock_transfer', $transfer, $request->user(), 'Transfer cancelled: ' . ($request->reason ?? 'no reason given'),
+        );
 
         ActivityLogService::log('transfer_cancelled', $transfer, [
             'reason'       => $request->reason ?? 'No reason given',
