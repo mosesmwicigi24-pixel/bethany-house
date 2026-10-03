@@ -60,6 +60,16 @@ class SyncPermissions extends Command
         'payments.transactions'            => ['View Payment Transactions',     'View the full payment transaction ledger and analytics', 'Payments'],
         'payments.void'                    => ['Void Payments',                 'Void a payment applied to the wrong order',              'Payments'],
         'payments.reassign'                => ['Reassign Payments',             'Move a payment from one order to another',               'Payments'],
+        // Phase 3B: the accountant ASKS; finance executes on approval.
+        'payments.request_void'            => ['Request Payment Void',          'Ask for a payment applied to the wrong order to be voided; finance executes it on approval', 'Payments'],
+        'payments.request_reassign'        => ['Request Payment Reassign',      'Ask for a payment to be moved to another order; finance executes it on approval',           'Payments'],
+
+        // ── Approvals (Phase 3B engine) ─────────────────────────────────────
+        // The band keys the threshold table names that no module key covers.
+        // super_sign is granted to no role: super_admin reaches it through
+        // Gate::before (see ROLE_PERMISSIONS and $wildcardExcluded).
+        'approvals.finance_sign'           => ['Sign Approvals (Finance Band)', 'Sign the finance band of a purchase order or stock adjustment above the procurement band', 'Approvals'],
+        'approvals.super_sign'             => ['Sign Approvals (Top Band)',     'Sign the top band of any approval (super admin only)',                                      'Approvals'],
 
         // ── Production ──────────────────────────────────────────────────────
         'production.view'                  => ['View Production',               'View production orders and schedule',                'Production'],
@@ -496,6 +506,9 @@ class SyncPermissions extends Command
             // Payments - full approval authority + view transactions ledger
             'payments.view', 'payments.approve_international', 'payments.transactions',
             'payments.void', 'payments.reassign',
+            // Finance's signature on purchase-order and stock-adjustment bands
+            // above the procurement manager's (Phase 3B approval engine).
+            'approvals.finance_sign',
             // Expenses - the checker. Approves, budgets, exports; never creates,
             // edits or deletes the records it approves (plan §3.4).
             'expenses.view', 'expenses.approve', 'expenses.export', 'expenses.budgets',
@@ -539,6 +552,8 @@ class SyncPermissions extends Command
             '@self', '@workspace',
             'orders.view',
             'payments.view', 'payments.transactions',
+            // Asks for a void or a move; finance executes it once signed (3B).
+            'payments.request_void', 'payments.request_reassign',
             'receivables.view',
             'pos.eod_review',
             'expenses.view', 'expenses.create', 'expenses.edit', 'expenses.export',
@@ -711,6 +726,10 @@ class SyncPermissions extends Command
                 // today; listed so a future 'bom.*' or 'setup.*' cannot either.
                 'bom.edit',
                 'setup.technical',
+                // The approval engine's top band is the owner's alone; a
+                // future 'approvals.*' must never hand it to a role.
+                'approvals.super_sign',
+                'approvals.finance_sign',
             ];
 
             // Resolve "@bundle" references first, so wildcard expansion and

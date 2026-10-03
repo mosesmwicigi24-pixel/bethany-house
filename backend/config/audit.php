@@ -113,6 +113,10 @@ return [
         \App\Models\Inventory::class,
         \App\Models\InventoryItem::class,
         \App\Models\InventoryTransfer::class,
+        // Approvals (Phase 3B engine)
+        \App\Models\ApprovalThreshold::class,
+        \App\Models\ApprovalRequest::class,
+        \App\Models\ApprovalSignature::class,
         \App\Models\InventoryTransferItem::class,
         \App\Models\PurchaseOrder::class,
         \App\Models\PurchaseOrderItem::class,
