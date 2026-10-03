@@ -26,6 +26,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { clsx } from "clsx";
 import { get } from "@/api/client";
+import { usePermissions } from "@/hooks/usePermissions";
+import { gateAllows, type NavGate } from "@/lib/navGate";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,7 +44,7 @@ export interface SearchResult {
     meta?: string;
 }
 
-interface NavShortcut {
+interface NavShortcut extends NavGate {
     label: string;
     href: string;
     icon: string;
@@ -52,25 +54,28 @@ interface NavShortcut {
 // ─── Navigation shortcuts ─────────────────────────────────────────────────────
 // These are always available and filterable by label/keyword
 
+// Each entry carries the same gate as its Sidebar item and its route guard
+// (lib/navGate; `npm run check:nav` enforces it), so the palette never offers
+// a page the user would be refused.
 const NAV_SHORTCUTS: NavShortcut[] = [
-    { label: "Dashboard",          href: "/dashboard",                      icon: "dashboard",  keywords: ["home", "overview"] },
-    { label: "POS",                href: "/pos",                            icon: "pos",        keywords: ["point of sale", "register", "cashier"] },
-    { label: "Products",           href: "/catalogue/products",             icon: "products",   keywords: ["catalog", "catalogue", "items"] },
-    { label: "Orders",             href: "/sales/orders",                   icon: "orders",     keywords: ["sales", "customer orders"] },
-    { label: "Customers",          href: "/sales/customers",                icon: "customers",  keywords: ["clients"] },
-    { label: "Shipments",          href: "/sales/shipments",                icon: "shipments",  keywords: ["delivery", "dispatch", "tracking"] },
-    { label: "Stock Levels",       href: "/inventory/stock-levels",         icon: "stock",      keywords: ["inventory", "warehouse"] },
-    { label: "Low Stock Alerts",   href: "/inventory/low-stock",            icon: "alerts",     keywords: ["reorder", "out of stock"] },
-    { label: "Purchase Orders",    href: "/procurement/purchase-orders",    icon: "purchase",   keywords: ["po", "procurement", "buying"] },
-    { label: "Suppliers",          href: "/procurement/suppliers",          icon: "suppliers",  keywords: ["vendors"] },
-    { label: "Production Orders",  href: "/production/orders",              icon: "production", keywords: ["manufacturing", "making"] },
-    { label: "Work In Progress",   href: "/production/wip",                 icon: "wip",        keywords: ["wip", "in progress"] },
-    { label: "Expenses",           href: "/expenses",                       icon: "expenses",   keywords: ["costs", "finance", "spending"] },
-    { label: "Reports",            href: "/reports",                        icon: "reports",    keywords: ["analytics", "statistics"] },
-    { label: "Approvals",          href: "/approvals",                      icon: "approvals",  keywords: ["pending", "review"] },
-    { label: "Notifications",      href: "/notifications",                  icon: "notif",      keywords: ["alerts", "inbox"] },
-    { label: "Users",              href: "/settings/users",                 icon: "users",      keywords: ["staff", "accounts", "team"] },
-    { label: "Settings",           href: "/settings/business",              icon: "settings",   keywords: ["configuration", "setup"] },
+    { label: "Dashboard",          href: "/dashboard",                      icon: "dashboard",  keywords: ["home", "overview"], permission: "dashboard.view" },
+    { label: "POS",                href: "/pos",                            icon: "pos",        keywords: ["point of sale", "register", "cashier"], permission: "pos.access" },
+    { label: "Products",           href: "/catalogue/products",             icon: "products",   keywords: ["catalog", "catalogue", "items"], permission: "products.view" },
+    { label: "Orders",             href: "/sales/orders",                   icon: "orders",     keywords: ["sales", "customer orders"], permission: "orders.view" },
+    { label: "Customers",          href: "/sales/customers",                icon: "customers",  keywords: ["clients"], permission: "customers.view" },
+    { label: "Shipments",          href: "/sales/shipments",                icon: "shipments",  keywords: ["delivery", "dispatch", "tracking"], permission: "shipment.view" },
+    { label: "Stock Levels",       href: "/inventory/stock-levels",         icon: "stock",      keywords: ["inventory", "warehouse"], permission: "inventory.view" },
+    { label: "Low Stock Alerts",   href: "/inventory/low-stock",            icon: "alerts",     keywords: ["reorder", "out of stock"], permission: "inventory.view" },
+    { label: "Purchase Orders",    href: "/procurement/purchase-orders",    icon: "purchase",   keywords: ["po", "procurement", "buying"], permission: "procurement.view" },
+    { label: "Suppliers",          href: "/procurement/suppliers",          icon: "suppliers",  keywords: ["vendors"], permission: "procurement.view" },
+    { label: "Production Orders",  href: "/production/orders",              icon: "production", keywords: ["manufacturing", "making"], permission: "production.view" },
+    { label: "Work In Progress",   href: "/production/wip",                 icon: "wip",        keywords: ["wip", "in progress"], permission: "production.view" },
+    { label: "Expenses",           href: "/expenses",                       icon: "expenses",   keywords: ["costs", "finance", "spending"], permission: "expenses.view" },
+    { label: "Reports",            href: "/reports",                        icon: "reports",    keywords: ["analytics", "statistics"], permission: "reports.view" },
+    { label: "Approvals",          href: "/approvals",                      icon: "approvals",  keywords: ["pending", "review"], anyOfPermissions: ["procurement.approve", "inventory.approve", "payments.approve_international"] },
+    { label: "Notifications",      href: "/notifications",                  icon: "notif",      keywords: ["alerts", "inbox"], permission: "notifications.view" },
+    { label: "Users",              href: "/settings/users",                 icon: "users",      keywords: ["staff", "accounts", "team"], permission: "users.view" },
+    { label: "Settings",           href: "/settings/business",              icon: "settings",   keywords: ["configuration", "setup"], permission: "settings.view" },
 ];
 
 // ─── Recent pages (localStorage) ─────────────────────────────────────────────
@@ -194,6 +199,9 @@ function ResultItem({
 
 export function CommandPalette() {
     const navigate = useNavigate();
+    const { can, isSuperAdmin } = usePermissions();
+    // Only the shortcuts this user may open — same rule as Sidebar and routes.
+    const shortcuts = NAV_SHORTCUTS.filter((n) => gateAllows(n, { can, isSuperAdmin }));
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState("");
     const [results, setResults] = useState<SearchResult[]>([]);
@@ -256,7 +264,7 @@ export function CommandPalette() {
 
     // Filtered nav shortcuts
     const filteredNav = query.trim()
-        ? NAV_SHORTCUTS.filter((n) => {
+        ? shortcuts.filter((n) => {
             const q = query.toLowerCase();
             return n.label.toLowerCase().includes(q) || n.keywords.some((k) => k.includes(q));
           }).slice(0, 5)
@@ -265,7 +273,7 @@ export function CommandPalette() {
     // Recent pages (when no query)
     const recentHrefs = getRecent();
     const recentNav = !query.trim()
-        ? NAV_SHORTCUTS.filter((n) => recentHrefs.includes(n.href))
+        ? shortcuts.filter((n) => recentHrefs.includes(n.href))
               .sort((a, b) => recentHrefs.indexOf(a.href) - recentHrefs.indexOf(b.href))
               .slice(0, 5)
         : [];
@@ -277,7 +285,7 @@ export function CommandPalette() {
     if (!query.trim()) {
         // Show recents + popular nav
         recentNav.forEach((n) => allItems.push({ item: n, group: "recent" }));
-        NAV_SHORTCUTS.slice(0, 6).forEach((n) => {
+        shortcuts.slice(0, 6).forEach((n) => {
             if (!recentHrefs.includes(n.href)) allItems.push({ item: n, group: "jump" });
         });
     } else {
@@ -367,7 +375,7 @@ export function CommandPalette() {
                                 </>
                             )}
                             <GroupHeader label="Jump to" />
-                            {NAV_SHORTCUTS.filter((n) => !recentHrefs.includes(n.href)).slice(0, 6).map((n, i) => {
+                            {shortcuts.filter((n) => !recentHrefs.includes(n.href)).slice(0, 6).map((n, i) => {
                                 const idx = recentNav.length + i;
                                 return <ResultItem key={n.href} result={n} isActive={idx === activeIndex} onSelect={() => selectItem(n)} />;
                             })}

@@ -6,6 +6,7 @@ import { get } from "@/api/client";
 import { useAuthStore } from "@/store/auth.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import type { NavGroup } from "@/types";
+import { gateAllows } from "@/lib/navGate";
 
 // ─── Role name formatter ───────────────────────────────────────────────────────
 function formatRoleName(raw: string): string {
@@ -32,13 +33,16 @@ const NAV: NavGroup[] = [
                 label: "Dashboard",
                 href: "/dashboard",
                 icon: "dashboard",
+                permission: "dashboard.view",
             },
             {
                 label: "Approvals",
                 href: "/approvals",
                 icon: "approvals",
-                // Visible to anyone who can approve procurement OR international payments
-                anyOfPermissions: ["procurement.view", "payments.approve_international"],
+                // Only actionable queues: the page's three approval actions.
+                // procurement.view used to open it to every buyer and to
+                // finance's non-approvers, and then the page guard refused them.
+                anyOfPermissions: ["procurement.approve", "inventory.approve", "payments.approve_international"],
             },
             {
                 label: "Notifications",
@@ -50,6 +54,9 @@ const NAV: NavGroup[] = [
                 label: "Messages",
                 href: "/comms",
                 icon: "messages",
+                // Deliberately ungated: /admin/channels checks no permission
+                // (every staff account messages; threads are as private as
+                // their record). A slug here would be one the API never checks.
             },
         ],
     },
@@ -143,9 +150,12 @@ const NAV: NavGroup[] = [
                 label: "Customers",
                 href: "/sales/customers",
                 icon: "customers",
-                // The DIRECTORY — addresses, credit, spend. A till clerk
-                // holds customers.view for the POS picker, not this page.
-                permission: "customers.insights",
+                // customers.view — what the list API checks. The profile's
+                // addresses, credit and spend stay behind customers.insights
+                // on the API, so a clerk opening this sees no more than her
+                // POS picker already returns; finance (customers.view since
+                // Phase 2, no insights) needs the page to read accounts.
+                permission: "customers.view",
             },
             {
                 label: "Balances",
@@ -167,7 +177,9 @@ const NAV: NavGroup[] = [
                 label: "EoD Settings",
                 href: "/pos/eod-settings",
                 icon: "eod-settings",
-                permission: "settings.edit",
+                // The settings API sits inside the till group (pos.access)
+                // and saving is settings.edit.
+                allOfPermissions: ["pos.access", "settings.edit"],
             },
         ],
     },
@@ -211,8 +223,9 @@ const NAV: NavGroup[] = [
                 label: "Calendar",
                 href: "/production/calendar",
                 icon: "calendar",
-                // Visible to production team AND sales staff who raise orders
-                anyOfPermissions: ["production.view", "production.raise_order"],
+                // /admin/production/schedule is production.view, which every
+                // raise_order holder also has (PermissionDependencyService).
+                permission: "production.view",
             },
             {
                 label: "Bill of Materials",
@@ -290,7 +303,9 @@ const NAV: NavGroup[] = [
                 label: "Goods Receipt",
                 href: "/procurement/goods-receipt",
                 icon: "grn",
-                permission: "procurement.receive",
+                // The GRN list is procurement.view; receiving is checked on
+                // the action, not the page.
+                permission: "procurement.view",
             },
             {
                 label: "Purchase Returns",
@@ -330,10 +345,9 @@ const NAV: NavGroup[] = [
                 label: "Analytics",
                 href: "/expenses/analytics",
                 icon: "reports",
-                // Spend analytics is management reporting: a clerk with
-                // expenses.view records her own costs, she doesn't chart
-                // the company's.
-                permission: "reports.view",
+                // /admin/expenses/summary is expenses.view. (Clerks no
+                // longer hold expenses at all since Phase 2.)
+                permission: "expenses.view",
             },
         ],
     },
@@ -432,7 +446,9 @@ const NAV: NavGroup[] = [
             { label: "Inventory",               href: "/reports/inventory",   icon: "stock",           permission: "reports.view" },
             { label: "Procurement & Suppliers", href: "/reports/procurement", icon: "purchase-orders", permission: "reports.view" },
             { label: "Staff, Outlets & Performance", href: "/reports/performance", icon: "outlets", permission: "reports.view" },
-            { label: "Signals",                 href: "/reports/signals",     icon: "intelligence",    permission: "reports.view" },
+            // Signals reads /admin/intelligence/*, gated per card by these four
+            // (not reports.view, which none of its endpoints checks).
+            { label: "Signals",                 href: "/reports/signals",     icon: "intelligence",    anyOfPermissions: ["inventory.view", "production.view", "intelligence.view", "expenses.view"] },
             { label: "Business Explorer",       href: "/reports/explorer",    icon: "layers",          permission: "reports.view" },
             { label: "Audit & Data Quality",    href: "/reports/data-quality", icon: "qc",             permission: "reports.view" },
         ],
@@ -482,11 +498,14 @@ const NAV: NavGroup[] = [
                 permission: "users.view",
             },
             // Localisation cluster
+            // Countries, Languages and Shipping are technical reference data:
+            // the platform head edits them with setup.technical; settings.view
+            // still reads them (Phase 2).
             {
                 label: "Countries",
                 href: "/settings/countries",
                 icon: "countries",
-                permission: "settings.view",
+                anyOfPermissions: ["settings.view", "setup.technical"],
             },
             {
                 label: "Currencies",
@@ -498,7 +517,7 @@ const NAV: NavGroup[] = [
                 label: "Languages",
                 href: "/settings/languages",
                 icon: "languages",
-                permission: "settings.view",
+                anyOfPermissions: ["settings.view", "setup.technical"],
             },
             // Transactional config cluster
             {
@@ -517,7 +536,7 @@ const NAV: NavGroup[] = [
                 label: "Shipping",
                 href: "/settings/shipping",
                 icon: "shipping",
-                permission: "settings.view",
+                anyOfPermissions: ["settings.view", "setup.technical"],
             },
             // Production configuration (moved from Production group)
             {
@@ -557,7 +576,8 @@ const NAV: NavGroup[] = [
                 label: "Database Management",
                 href: "/settings/database",
                 icon: "database",
-                permission: "settings.manage_database",
+                // The API is role:super_admin (and settings.manage_database).
+                superAdminOnly: true,
             },
         ],
     },
@@ -1144,15 +1164,9 @@ export function Sidebar({ collapsed }: SidebarProps) {
             {/* Nav */}
             <nav className="flex-1 overflow-y-auto py-3 no-scrollbar">
                 {NAV.map((group) => {
-                    // Filter items by permission
-                    const visibleItems = group.items.filter((item) => {
-                        if (isSuperAdmin) return true;
-                        if (item.superAdminOnly) return false;
-                        if (item.anyOfPermissions?.length) {
-                            return item.anyOfPermissions.some((p) => can(p));
-                        }
-                        return !item.permission || can(item.permission);
-                    });
+                    // Filter items by permission — the same rule the route
+                    // guards and the command palette apply (lib/navGate).
+                    const visibleItems = group.items.filter((item) => gateAllows(item, { can, isSuperAdmin }));
                     if (!visibleItems.length) return null;
 
                     const isExpanded = expandedGroups[group.label];
