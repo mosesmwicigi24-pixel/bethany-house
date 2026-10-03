@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\DB;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
@@ -41,10 +42,24 @@ return new class extends Migration
 
     public function down(): void
     {
-        Permission::where('name', 'products.view_cost')
-            ->where('guard_name', 'sanctum')
-            ->first()?->delete();
+        $this->dropPermission('products.view_cost');
 
         app(PermissionRegistrar::class)->forgetCachedPermissions();
+    }
+
+    /**
+     * Remove a permission and every grant of it at the table level.
+     * Permission::delete() fires Spatie's detach of the guard's user model,
+     * which cannot resolve a model for the sanctum guard and throws.
+     */
+    private function dropPermission(string $name): void
+    {
+        $tables = config('permission.table_names');
+        $id = DB::table($tables['permissions'])->where('name', $name)->where('guard_name', 'sanctum')->value('id');
+        if ($id) {
+            DB::table($tables['role_has_permissions'])->where('permission_id', $id)->delete();
+            DB::table($tables['model_has_permissions'])->where('permission_id', $id)->delete();
+            DB::table($tables['permissions'])->where('id', $id)->delete();
+        }
     }
 };

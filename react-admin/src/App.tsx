@@ -684,7 +684,9 @@ export default function App() {
                         <Route
                             path="/pos/eod-reports"
                             element={
-                                <ProtectedRoute permission="pos.access">
+                                // pos.eod_review, matching the API: finance
+                                // reviews takings without holding a till.
+                                <ProtectedRoute permission="pos.eod_review">
                                 <Suspense fallback={<PageLoader />}>
                                     <EodReportsPage />
                                 </Suspense>

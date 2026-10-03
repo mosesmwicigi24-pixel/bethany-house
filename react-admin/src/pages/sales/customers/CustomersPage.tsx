@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { clsx } from "clsx";
 import { customersApi } from "@/api/customers";
-import { currenciesApi, languagesApi } from "@/api/setup";
+import { get } from "@/api/client";
 import type {
     Customer,
     CustomerFormData,
@@ -82,14 +82,17 @@ function CustomerFormModal({
     const isEdit = !!customer;
 
     // ── Load languages + currencies from DB ───────────────────────────────────
+    // The public, active-only lists (the storefront's). The Setup management
+    // endpoints need settings.view, which the people adding customers — outlet
+    // managers — do not hold.
     const { data: langsData } = useQuery({
-        queryKey: ["languages-list"],
-        queryFn: () => languagesApi.list(),
+        queryKey: ["public-languages"],
+        queryFn: () => get<{ data: any[] }>("/v1/settings/languages"),
         staleTime: 5 * 60 * 1000,
     });
     const { data: cxData } = useQuery({
-        queryKey: ["currencies-list"],
-        queryFn: () => currenciesApi.list(),
+        queryKey: ["public-currencies"],
+        queryFn: () => get<{ data: any[] }>("/v1/settings/currencies"),
         staleTime: 5 * 60 * 1000,
     });
     const languages = langsData?.data ?? [];

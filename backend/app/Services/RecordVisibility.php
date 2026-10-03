@@ -30,7 +30,7 @@ use Illuminate\Support\Facades\DB;
  *   InventoryTransfer   inventory.view (the inventory route group)
  *   OrderReturn         orders.manage_returns (the /admin/returns group — no
  *                       other route shows a return), and its order visible
- *   EoD report          the EoD review gate (the eod-admin routes), or the
+ *   EoD report          pos.eod_review (the eod-admin routes), or the
  *                       report's own author
  *
  * The permission check always comes first: DataScopeResolver answers "all"
@@ -108,6 +108,6 @@ final class RecordVisibility
             return false;
         }
 
-        return (int) $authorId === (int) $user->id || $user->can('settings.view');
+        return (int) $authorId === (int) $user->id || $user->can('pos.eod_review');
     }
 }

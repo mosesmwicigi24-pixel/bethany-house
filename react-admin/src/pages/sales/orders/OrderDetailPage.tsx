@@ -4,10 +4,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { ordersApi } from "@/api/orders";
 import { get, post } from "@/api/client";
-import type { Order, OrderStatus, OrderPayment } from "@/api/orders";
+import type { Order, OrderStatus, OrderPayment, OrderShippingMethod } from "@/api/orders";
 import { productsApi, type ProductListItem } from "@/api/products";
-import { shippingApi, paymentMethodsApi } from "@/api/setup";
-import type { ShippingMethod, PaymentMethodSetup } from "@/types/setup";
+import { paymentMethodsApi } from "@/api/setup";
+import type { PaymentMethodSetup } from "@/types/setup";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
@@ -785,12 +785,14 @@ function SetShippingFeeModal({ order, onClose, onDone }: {
     const [note, setNote]      = useState(order.shipping_fee_note ?? "");
     const [mode, setMode]      = useState<"pick" | "custom">("pick");
 
+    // Orders-side endpoint (orders.set_shipping_fee), active methods only. The
+    // Setup endpoint this used to call needed settings.view.
     const { data: methodsData, isLoading: loadingMethods } = useQuery({
-        queryKey: ["shipping-methods"],
-        queryFn:  () => shippingApi.methods(),
+        queryKey: ["order-shipping-methods"],
+        queryFn:  () => ordersApi.shippingMethods(),
         staleTime: 5 * 60_000,
     });
-    const methods: ShippingMethod[] = methodsData ?? [];
+    const methods: OrderShippingMethod[] = methodsData?.data ?? [];
 
     const selectedMethod = methods.find((m) => m.id === selectedMethodId) ?? null;
     const effectiveAmount = mode === "pick" && selectedMethod
@@ -1308,10 +1310,12 @@ function AddPaymentModal({ order, onClose, onDone }: {
     const [paystackInit, setPaystackInit]     = useState(false);
     const [paystackError, setPaystackError]   = useState("");
 
-    // Fetch active configured payment methods from the database
+    // Active payment methods for this order's currency — the checkout-facing
+    // list POS uses. Not paymentMethodsApi.list(): that is Setup
+    // (settings.view), which the people recording payments do not hold.
     const { data: methodsData, isLoading: methodsLoading } = useQuery({
-        queryKey: ["payment-methods"],
-        queryFn:  () => paymentMethodsApi.list(),
+        queryKey: ["payment-methods-available", order.currency_code],
+        queryFn:  () => paymentMethodsApi.availableForSale(order.currency_code),
         staleTime: 60_000,
     });
 

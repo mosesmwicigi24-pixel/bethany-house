@@ -814,9 +814,9 @@ class ChannelController extends Controller
         // ── EoD reports ───────────────────────────────────────────────────────
         // So a day's report can be quoted into a channel and discussed where
         // people already are, instead of only on a page nobody visits. Gated on
-        // settings.view, matching the report endpoints themselves — you can only
+        // pos.eod_review, matching the report endpoints themselves — you can only
         // tag what you could already open.
-        if (in_array('eod_report', $types) && $user->can('settings.view')) {
+        if (in_array('eod_report', $types) && $user->can('pos.eod_review')) {
             $query = \Illuminate\Support\Facades\DB::table('cash_register_eod_reports as r')
                 ->join('users as u',   'u.id', '=', 'r.user_id')
                 ->join('outlets as o', 'o.id', '=', 'r.outlet_id')

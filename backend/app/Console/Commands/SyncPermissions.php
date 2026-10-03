@@ -141,6 +141,12 @@ class SyncPermissions extends Command
         'pos.close_register'   => ['Close Cash Register',  'Close and reconcile a cash register',         'POS'],
         'pos.returns'          => ['Process Returns',      'Process item returns at POS',                 'POS'],
         'pos.cash_management'  => ['POS Cash Management',  'Perform cash deposits, withdrawals and adjustments on a register', 'POS'],
+        // Reading every cashier's end-of-day report, acknowledging it and
+        // answering in its thread. Was settings.view, which made reviewing
+        // takings the same key as reading Setup — and handed Setup to every
+        // outlet manager. Not a till permission: finance reviews takings and
+        // has no till, so the review routes stand outside pos.access.
+        'pos.eod_review'       => ['Review EoD Reports',   'Read, acknowledge and discuss cashiers\' end-of-day reports', 'POS'],
 
         // ── Marketing & storefront ──────────────────────────────────────────
         // Split out of products.view, which is a READ permission on the
@@ -332,6 +338,8 @@ class SyncPermissions extends Command
             // Beyond a cashier at the same till. discount_override makes this
             // role the escalation target when a cashier hits the 5% ceiling.
             'pos.cash_management', 'pos.discount_override',
+            // Reviewing the shop's end-of-day reports (was settings.view).
+            'pos.eod_review',
             // Chasing what a customer still owes is a manager's job, not a
             // cashier's — the till key stopped carrying it.
             'receivables.view',
@@ -438,6 +446,8 @@ class SyncPermissions extends Command
             // Reports - all reports including financial
             'reports.view', 'reports.export', 'reports.financial',
             'receivables.view',
+            // End-of-day reports: the takings finance reconciles against.
+            'pos.eod_review',
             // Orders - view only (for payment context)
             'orders.view',
             // Cost figures (margins, COGS context). Deliberately NOT given

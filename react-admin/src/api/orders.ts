@@ -1,5 +1,17 @@
 import { get, post, put, patch, del } from "./client";
 
+/** A shipping method as the order editor's picker sees it (active only). */
+export interface OrderShippingMethod {
+    id: number;
+    name: string;
+    description?: string | null;
+    delivery_time?: string | null;
+    cost_type: "flat_rate" | "free" | "percentage";
+    flat_rate: number;
+    min_order_amount?: number | null;
+    zone_name?: string | null;
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type OrderChannel = "online" | "pos";
@@ -354,6 +366,14 @@ export const ordersApi = {
             `/v1/admin/orders/${id}/payments`,
             data,
         ),
+
+    /**
+     * Active shipping methods for the Set Shipping picker. Gated by
+     * orders.set_shipping_fee — NOT the Setup endpoint /v1/admin/shipping/methods
+     * (settings.view), which is what used to hand Setup to every outlet manager.
+     */
+    shippingMethods: () =>
+        get<{ data: OrderShippingMethod[] }>("/v1/admin/orders/shipping-methods"),
 
     /** Manually set or update the shipping fee before payment */
     setShippingFee: (

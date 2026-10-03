@@ -159,7 +159,9 @@ const NAV: NavGroup[] = [
                 label: "EoD Reports",
                 href: "/pos/eod-reports",
                 icon: "eod-reports",
-                permission: "settings.view",
+                // Its own key since Phase 1C — was settings.view, which tied
+                // reviewing takings to reading Setup. Finance holds it too.
+                permission: "pos.eod_review",
             },
             {
                 label: "EoD Settings",
@@ -455,7 +457,10 @@ const NAV: NavGroup[] = [
                 label: "Outlets",
                 href: "/settings/outlets",
                 icon: "outlets",
-                permission: "settings.view",
+                // The page and its API are outlets.view (outlet managers hold
+                // outlets.view/edit). settings.view here hid it from them once
+                // they left Setup, while the route itself still let them in.
+                permission: "outlets.view",
             },
             {
                 label: "Attendance",

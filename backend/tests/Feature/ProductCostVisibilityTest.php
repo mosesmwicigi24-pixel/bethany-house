@@ -218,4 +218,16 @@ class ProductCostVisibilityTest extends TestCase
             $this->assertFalse(Role::findByName($role, 'sanctum')->hasPermissionTo('products.view_cost'), $role);
         }
     }
+
+    public function test_the_migration_rolls_back_cleanly(): void
+    {
+        $migration = require database_path('migrations/2026_10_03_300001_add_products_view_cost_permission.php');
+        $migration->down();
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        $this->assertNull(Permission::where('name', 'products.view_cost')->first());
+
+        $migration->up();
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        $this->assertTrue(Role::findByName('procurement_officer', 'sanctum')->hasPermissionTo('products.view_cost'));
+    }
 }
