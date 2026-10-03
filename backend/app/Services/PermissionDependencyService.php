@@ -148,6 +148,10 @@ class PermissionDependencyService
         'pos.close_register'  => ['pos.access'],
         'pos.returns'         => ['pos.access'],
         'pos.cash_management' => ['pos.access'],
+        // Verifying is done from the till screens (Phase 4B). Reconciling,
+        // correcting and reading all tills are back-office keys and stand
+        // outside pos.access, like pos.eod_review.
+        'pos.till_verify'     => ['pos.access'],
 
         // ── Reports ──────────────────────────────────────────────────────── 
         // Each report page stands alone (Phase 3A): there is no section-wide

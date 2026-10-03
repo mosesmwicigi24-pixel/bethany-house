@@ -173,6 +173,29 @@ class RoleCatalogueV2Test extends TestCase
         return require database_path('migrations/' . self::MIGRATION_3A);
     }
 
+    /**
+     * Grants added by later phases on top of the Phase 2 catalogue. This
+     * migration does not give them (their own migrations do), but
+     * permission:sync — which runs after it on every container start — does.
+     * Phase 4B (till lifecycle): 2026_10_03_440002_till_lifecycle_permissions.
+     */
+    private const LATER = [
+        'admin'           => ['pos.tills_view_all'],
+        'accountant'      => ['pos.reconcile', 'pos.tills_view_all'],
+        'finance_manager' => ['pos.reconcile', 'pos.till_correction', 'pos.tills_view_all'],
+        'outlet_manager'  => ['pos.till_verify'],
+    ];
+
+    /** @return array<string,array<int,string>> $shape plus what later phases' sync adds. */
+    private static function withLater(array $shape): array
+    {
+        foreach (self::LATER as $role => $perms) {
+            $shape[$role] = array_values(array_unique(array_merge($shape[$role] ?? [], $perms)));
+        }
+
+        return $shape;
+    }
+
     /** Production's system_admin / accountant held the legacy vocabulary (2026-10-02 read). */
     private const LEGACY = [
         'system_admin' => ['assign roles', 'create users', 'manage settings', 'edit orders', 'create products'],
@@ -355,7 +378,7 @@ class RoleCatalogueV2Test extends TestCase
 
     public function test_every_role_matches_the_spec_exactly_after_sync(): void
     {
-        $this->assertRolesAre($this->spec(), 'after permission:sync on a fresh database');
+        $this->assertRolesAre(self::withLater($this->spec()), 'after permission:sync on a fresh database');
 
         $roles = Role::where('guard_name', 'sanctum')->orderBy('name')->pluck('name')->all();
         $expected = array_keys(self::SPEC);
@@ -376,7 +399,7 @@ class RoleCatalogueV2Test extends TestCase
         $this->assertRolesAre($this->spec(), 'after the 3A migration, before sync');
 
         Artisan::call('permission:sync');
-        $this->assertRolesAre($this->spec(), 'after the migrations and permission:sync');
+        $this->assertRolesAre(self::withLater($this->spec()), 'after the migrations and permission:sync');
     }
 
     public function test_sync_twice_after_the_migration_changes_nothing(): void
@@ -414,13 +437,18 @@ class RoleCatalogueV2Test extends TestCase
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 
         // Sync's additions made after up() are part of the new code, so they
-        // are not the migration's to undo — but sync adds nothing the
-        // migration did not already grant (previous test), so the shape is
-        // exactly BEFORE.
-        $this->assertRolesAre(self::BEFORE, 'after down()');
+        // are not the migration's to undo. Of Phase 2's own grants sync adds
+        // nothing the migration did not already give (previous test), so the
+        // shape is exactly BEFORE plus the later phases' grants.
+        $this->assertRolesAre(self::withLater(self::BEFORE), 'after down()');
         $this->assertNull(Permission::where('name', 'bom.edit')->first());
         $this->assertNull(Permission::where('name', 'setup.technical')->first());
-        $this->assertFalse(Schema::hasTable('role_grant_changes'));
+        // Its own log rows are gone; the table goes with them unless a later
+        // migration in the same style still has rows in it.
+        $this->assertFalse(
+            Schema::hasTable('role_grant_changes')
+            && DB::table('role_grant_changes')->where('migration', '2026_10_03_300003_role_catalogue_v2')->exists(),
+        );
     }
 
     public function test_the_migration_never_touches_direct_user_grants(): void

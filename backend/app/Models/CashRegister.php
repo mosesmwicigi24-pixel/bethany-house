@@ -32,7 +32,36 @@ class CashRegister extends Model
         'opening_notes',
         'closing_notes',
         'denomination_count',
+        // Phase 4B till lifecycle
+        'user_id',
+        'lifecycle_version',
+        'previous_register_id',
+        'float_vs_previous_close',
+        'expected_cash_at_count',
+        'expected_cash_running_at_count',
+        'variance',
+        'variance_class',
+        'variance_reason',
+        'verified_by',
+        'finalized_at',
+        'verification_notes',
     ];
+
+    /**
+     * What a finalized till may never change (Phase 4B: "batch locked").
+     * Mirrors the database trigger in 2026_10_03_440001_till_lifecycle.
+     */
+    public const LOCKED_FIELDS = [
+        'outlet_id', 'status', 'currency_code',
+        'opening_balance', 'closing_balance', 'expected_cash', 'actual_cash',
+        'total_sales', 'total_cash_sales', 'total_card_sales', 'total_mpesa_sales', 'total_refunds',
+        'transaction_count', 'denomination_count', 'opened_at', 'closed_at',
+        'lifecycle_version', 'expected_cash_at_count', 'expected_cash_running_at_count',
+        'variance', 'variance_class', 'variance_reason', 'finalized_at',
+    ];
+
+    /** The current lifecycle. NULL on a row means it was opened before the lifecycle existed. */
+    public const LIFECYCLE_VERSION = 1;
 
     protected $casts = [
         'opening_balance' => 'decimal:2',
@@ -48,6 +77,11 @@ class CashRegister extends Model
         'opened_at' => 'datetime',
         'closed_at' => 'datetime',
         'denomination_count' => 'array',
+        'float_vs_previous_close'        => 'decimal:2',
+        'expected_cash_at_count'         => 'decimal:2',
+        'expected_cash_running_at_count' => 'decimal:2',
+        'variance'                       => 'decimal:2',
+        'finalized_at'                   => 'datetime',
     ];
 
     protected $appends = ['cash_difference'];
@@ -55,6 +89,18 @@ class CashRegister extends Model
     protected static function boot()
     {
         parent::boot();
+
+        // A finalized till is a locked batch: refuse before the database has to.
+        static::updating(function (CashRegister $register) {
+            if ($register->getOriginal('finalized_at') !== null && $register->isDirty(self::LOCKED_FIELDS)) {
+                throw new \App\Exceptions\TillFinalizedException();
+            }
+        });
+        static::deleting(function (CashRegister $register) {
+            if ($register->getOriginal('finalized_at') !== null) {
+                throw new \App\Exceptions\TillFinalizedException('A finalized till is part of the record and cannot be deleted.');
+            }
+        });
 
         static::creating(function ($register) {
             if (empty($register->register_number)) {
@@ -133,6 +179,18 @@ class CashRegister extends Model
     public function isClosed()
     {
         return $this->status === 'closed';
+    }
+
+    /** Counted and verified by someone other than the operator; its money is locked. */
+    public function isFinalized(): bool
+    {
+        return $this->finalized_at !== null;
+    }
+
+    /** The operator has submitted her blind count; awaiting an outlet manager. */
+    public function isCounted(): bool
+    {
+        return $this->status === 'counted';
     }
 
     public function open($openingBalance, $userId, $notes = null)

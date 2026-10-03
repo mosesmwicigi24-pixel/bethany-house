@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\{
     InventoryController,
     OutletController,
     PosController,
+    TillController,
     ProductionController,
     ProductSerialController,
     PurchaseOrderController,
@@ -872,6 +873,23 @@ Route::prefix('v1')->group(function () {
                 Route::get('eod-admin/{id}',              [PosController::class, 'adminGetEodReport']);
                 Route::post('eod-admin/{id}/acknowledge', [PosController::class, 'acknowledgeEodReport']);
             });
+
+            // Till lifecycle back office (Phase 4B). Outside pos.access for the
+            // same reason as EoD review: the accountant and finance reconcile
+            // and correct tills without holding one. Who sees which till is
+            // TillVisibility, inside the controller; each step carries its key.
+            Route::middleware('permission:pos.access|pos.tills_view_all|pos.reconcile|pos.till_correction,sanctum')
+                ->prefix('pos/tills')->group(function () {
+                    Route::get('/',                  [TillController::class, 'index']);
+                    Route::get('{id}',               [TillController::class, 'show'])->whereNumber('id');
+                    Route::patch('{id}',             [TillController::class, 'update'])->whereNumber('id');
+                    Route::post('{id}/finalize',     [TillController::class, 'finalize'])->whereNumber('id')
+                        ->middleware('permission:pos.till_verify,sanctum');
+                    Route::post('{id}/reconcile',    [TillController::class, 'reconcile'])->whereNumber('id')
+                        ->middleware('permission:pos.reconcile,sanctum');
+                    Route::post('{id}/corrections',  [TillController::class, 'storeCorrection'])->whereNumber('id')
+                        ->middleware('permission:pos.till_correction,sanctum');
+                });
 
             Route::middleware('permission:pos.access,sanctum')->prefix('pos')->group(function () {
                 Route::get('outlets',                   [PosController::class, 'outlets']);

@@ -34,6 +34,9 @@ final class MakerChecker
         'stock_transfer.approve' => 'You raised this stock transfer, so someone else must approve it.',
         'expense.approve' => 'You recorded or submitted this expense, so someone else must approve it.',
         'payment.approve' => 'You recorded this payment, so someone else must approve it.',
+        'till.verify' => 'You counted this till, so another manager must verify it.',
+        'till.reconcile' => 'You counted or verified this till, so someone independent must reconcile it.',
+        'till.correct' => 'You counted this till, so someone else must correct it.',
     ];
 
     private const FALLBACK = 'You raised this, so someone else must approve it.';
