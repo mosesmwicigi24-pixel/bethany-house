@@ -582,14 +582,18 @@ function ApprovalTimeline({ approvals }: { approvals: any[] }) {
                                 ? "bg-success"
                                 : a.action === "rejected"
                                   ? "bg-danger"
-                                  : "bg-info",
+                                  : a.action === "changes_requested"
+                                    ? "bg-brand-500"
+                                    : "bg-info",
                         )}
                     >
                         {a.action === "approved"
                             ? "✓"
                             : a.action === "rejected"
                               ? "✕"
-                              : "?"}
+                              : a.action === "changes_requested"
+                                ? "↩"
+                                : "?"}
                     </div>
                     {/* Content */}
                     <div className="flex-1 min-w-0">
@@ -604,10 +608,12 @@ function ApprovalTimeline({ approvals }: { approvals: any[] }) {
                                         ? "bg-success-light text-success"
                                         : a.action === "rejected"
                                           ? "bg-danger-light text-danger"
-                                          : "bg-info-light text-info",
+                                          : a.action === "changes_requested"
+                                            ? "bg-brand-50 text-brand-700"
+                                            : "bg-info-light text-info",
                                 )}
                             >
-                                {a.action}
+                                {a.action === "changes_requested" ? "changes requested" : a.action}
                             </span>
                             {a.step > 1 && (
                                 <span className="text-xs text-surface-400">
@@ -643,6 +649,8 @@ export default function ExpenseDetailPage() {
 
     const [editOpen, setEditOpen] = useState(false);
     const [rejectOpen, setRejectOpen] = useState(false);
+    const [changesOpen, setChangesOpen] = useState(false);
+    const [changesNote, setChangesNote] = useState("");
     const [markPaidOpen, setMarkPaidOpen] = useState(false);
     const [receiptPreviewOpen, setReceiptPreviewOpen] = useState(false);
     const [receiptBlob, setReceiptBlob] = useState<{
@@ -741,8 +749,9 @@ export default function ExpenseDetailPage() {
     // DELETE /{id} -> expenses.delete; POST /{id}/submit -> expenses.create).
     const canCreate = can("expenses.create");
     const canEditExpense = can("expenses.edit");
+    // 'changes_requested': an approver sent it back to be edited and resubmitted.
     const isEditable =
-        ["draft", "rejected"].includes(expense.status) && canEditExpense;
+        ["draft", "rejected", "changes_requested"].includes(expense.status) && canEditExpense;
     const isDeletable =
         ["draft", "rejected", "cancelled"].includes(expense.status) &&
         can("expenses.delete");
@@ -757,6 +766,13 @@ export default function ExpenseDetailPage() {
         !!me && (idOf(expense.created_by) === me.id || idOf(expense.submitted_by) === me.id);
     const canApprove = can("expenses.approve");
     const canApproveThis = canApprove && !recordedByMe;
+    // The approver's latest note when it was sent back for changes.
+    const changesRequest =
+        expense.status === "changes_requested"
+            ? [...(expense.approvals ?? [])]
+                  .filter((a: any) => a.action === "changes_requested")
+                  .sort((a: any, b: any) => (a.acted_at < b.acted_at ? 1 : -1))[0]
+            : undefined;
     const paymentMethod =
         PAYMENT_METHODS.find((m) => m.value === expense.payment_method)
             ?.label ?? expense.payment_method;
@@ -793,7 +809,7 @@ export default function ExpenseDetailPage() {
                     <StatusBadge status={expense.status} />
                     <PdfDownloadButton type="expenses" id={expense.id} label="Download PDF" />
 
-                    {expense.status === "draft" && canCreate && (
+                    {["draft", "changes_requested"].includes(expense.status) && canCreate && (
                         <button
                             className="btn-primary"
                             disabled={busy}
@@ -804,7 +820,7 @@ export default function ExpenseDetailPage() {
                                 )
                             }
                         >
-                            Submit for Approval
+                            {expense.status === "changes_requested" ? "Resubmit for Approval" : "Submit for Approval"}
                         </button>
                     )}
 
@@ -825,6 +841,16 @@ export default function ExpenseDetailPage() {
                                 }
                             >
                                 ✓ Approve
+                            </button>
+                            <button
+                                className="btn-ghost"
+                                disabled={busy}
+                                onClick={() => {
+                                    setChangesNote("");
+                                    setChangesOpen(true);
+                                }}
+                            >
+                                ↩ Request changes
                             </button>
                             <button
                                 className="btn-danger"
@@ -893,6 +919,25 @@ export default function ExpenseDetailPage() {
                     )}
                 </div>
             </div>
+
+            {/* ── Sent back for changes ── */}
+            {expense.status === "changes_requested" && (
+                <div className="flex gap-3 p-4 bg-brand-50 border border-brand-200 rounded-xl">
+                    <span className="text-brand-700 font-bold shrink-0" aria-hidden>↩</span>
+                    <div>
+                        <p className="text-sm font-semibold text-brand-800">Changes requested</p>
+                        {changesRequest?.comments && (
+                            <p className="text-sm text-brand-800/80 mt-0.5">{changesRequest.comments}</p>
+                        )}
+                        <p className="text-xs text-brand-800/60 mt-1">
+                            {changesRequest?.approver
+                                ? `by ${changesRequest.approver.first_name} ${changesRequest.approver.last_name} · ${dayjs(changesRequest.acted_at).format("DD MMM YYYY")} · `
+                                : ""}
+                            Edit it, then resubmit it for approval.
+                        </p>
+                    </div>
+                </div>
+            )}
 
             {/* ── Rejection banner ── */}
             {expense.status === "rejected" && expense.rejection_reason && (
@@ -1584,6 +1629,43 @@ export default function ExpenseDetailPage() {
                         }}
                     >
                         Confirm Rejection
+                    </button>
+                </div>
+            </Modal>
+
+            <Modal
+                open={changesOpen}
+                onClose={() => setChangesOpen(false)}
+                title="Request Changes"
+                size="sm"
+            >
+                <p className="text-sm text-surface-600 mb-3">
+                    Say what needs to change. It goes back to the person who raised it, who edits it and submits it again.
+                </p>
+                <textarea
+                    className="input w-full resize-none"
+                    rows={4}
+                    maxLength={1000}
+                    value={changesNote}
+                    onChange={(e) => setChangesNote(e.target.value)}
+                    placeholder="e.g. Attach the receipt, or use the Transport category"
+                />
+                <div className="flex justify-end gap-3 mt-4">
+                    <button className="btn-ghost" onClick={() => setChangesOpen(false)}>
+                        Cancel
+                    </button>
+                    <button
+                        className="btn-primary"
+                        disabled={!changesNote.trim() || busy}
+                        onClick={() => {
+                            setChangesOpen(false);
+                            doAction(
+                                () => expensesApi.requestChanges(expense.id, changesNote.trim()),
+                                "Sent back for changes.",
+                            );
+                        }}
+                    >
+                        Send Back
                     </button>
                 </div>
             </Modal>
