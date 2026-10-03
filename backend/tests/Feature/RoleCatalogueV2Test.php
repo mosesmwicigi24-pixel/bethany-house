@@ -208,6 +208,9 @@ class RoleCatalogueV2Test extends TestCase
         'outlet_manager' => [
             // 4B part 1 (2026_10_03_440002): verifies a clerk's blind count.
             'pos.till_verify',
+            // 4B part 2 (2026_10_03_860002): the band key for till voids and
+            // refunds — a key no clerk holds.
+            'pos.approve_reversal',
         ],
         'procurement_manager' => [
             // 3C (2026_10_03_530001): proposes cost changes.

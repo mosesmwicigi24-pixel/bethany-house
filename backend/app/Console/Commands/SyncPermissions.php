@@ -163,6 +163,10 @@ class SyncPermissions extends Command
         'pos.open_register'    => ['Open Cash Register',   'Open a new cash register session',            'POS'],
         'pos.close_register'   => ['Close Cash Register',  'Close and reconcile a cash register',         'POS'],
         'pos.returns'          => ['Process Returns',      'Process item returns at POS',                 'POS'],
+        // Phase 4B part 2: pos.void / pos.returns now only ASK; this signs the
+        // outlet manager's band of a till void (≤ 20,000) or refund (≤ 5,000).
+        // A key no clerk holds, so one clerk can never sign another's void.
+        'pos.approve_reversal' => ['Approve Till Voids & Refunds', 'Sign the outlet manager\'s band of a till void or refund, on the till with a PIN or from the Approvals inbox', 'POS'],
         'pos.cash_management'  => ['POS Cash Management',  'Perform cash deposits, withdrawals and adjustments on a register', 'POS'],
         // Reading every cashier's end-of-day report, acknowledging it and
         // answering in its thread. Was settings.view, which made reviewing
@@ -425,6 +429,8 @@ class SyncPermissions extends Command
             // Beyond a cashier at the same till. discount_override makes this
             // role the escalation target when a cashier hits the 5% ceiling.
             'pos.cash_management', 'pos.discount_override',
+            // The first signature on a till void or refund (Phase 4B part 2).
+            'pos.approve_reversal',
             // Reviewing the shop's end-of-day reports (was settings.view).
             'pos.eod_review',
             // Verifies and finalizes the shop's till counts (Phase 4B) — at

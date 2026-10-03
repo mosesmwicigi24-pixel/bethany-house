@@ -24,6 +24,8 @@ use App\Services\OrderTotals;
 use App\Services\PosDiscountPolicy;
 use App\Services\PosInventoryService;
 use App\Services\TaxCalculationService;
+use App\Services\Approvals\ApprovalEngine;
+use App\Services\Pos\TillReversals;
 use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -1414,6 +1416,13 @@ class PosController extends Controller
         return response()->json(['sale' => $this->transformSaleOrder($order)]);
     }
 
+    /**
+     * Ask for a sale to be voided (Phase 4B part 2). Nobody voids directly any
+     * more: this raises a pos_void request on the approval engine, and the
+     * sale is voided only when its last band signs — the outlet manager's PIN
+     * on this till, or the Approvals inbox (App\Services\Pos\TillReversals).
+     * Refused once the sale's till is closed: a refund is the route then.
+     */
     public function voidSale(Request $request, int $id): JsonResponse
     {
         $validated = $request->validate(['reason' => 'required|string|max:500']);
@@ -1421,102 +1430,13 @@ class PosController extends Controller
         $order = $this->findPosSaleForAction($id);
         $this->authoriseOutletAccess($request->user(), $order->outlet_id);
 
-        if ($order->status === 'voided') {
-            return response()->json(['message' => 'Order is already voided.'], 422);
-        }
+        $approval = app(TillReversals::class)->requestVoid($order, $validated['reason'], $request->user());
 
-        DB::beginTransaction();
-        try {
-            $order->update([
-                'status'      => 'voided',
-                'customer_notes' => ($order->customer_notes ? $order->customer_notes . ' | ' : '') . "Void: {$validated['reason']}",
-            ]);
-
-            // Capture what the sale ACTUALLY collected, by method, BEFORE voiding
-            // the payment rows — so the register is reversed by the real cash
-            // taken, not the order total (fixes the drift where a deposit/partial/
-            // split cash sale was over-debited on void).
-            $cashCodes = DB::table('payment_methods')->where('type', 'cash')
-                ->pluck('code')->push('cash')->map(fn ($c) => strtolower($c))->unique();
-            $vCash = $vCard = $vMpesa = $vTotal = 0.0;
-            foreach ($order->payments()->where('status', 'paid')->get() as $p) {
-                $amt = (float) $p->amount;
-                $vTotal += $amt;
-                $m = strtolower($p->payment_method);
-                if ($cashCodes->contains($m))                    { $vCash  += $amt; }
-                elseif (in_array($m, ['card', 'card_paystack']))  { $vCard  += $amt; }
-                elseif (in_array($m, ['mpesa', 'm-pesa']))        { $vMpesa += $amt; }
-            }
-
-            // MON-1: POS void previously left payment rows as 'paid'. Void the
-            // settled payments and reconcile payment_status so voided sales stop
-            // counting as collected.
-            $order->payments()
-                ->whereNotIn('status', ['voided', 'refunded'])
-                ->update(['status' => 'voided', 'updated_at' => now()]);
-            $order->syncPaymentStatus();
-
-            // Return this sale's stock: restore the physical count if it had been
-            // committed (paid), otherwise just release the reservation. Idempotent.
-            PosInventoryService::unwindForOrder($order, $request->user()->id);
-
-            // Return this sale's serialized units to the shelf.
-            ProductSerialService::releaseForOrder($order);
-
-            // Reverse the register by what the sale ACTUALLY collected (drawer row
-            // locked), keyed on the real payments rather than the order's
-            // payment_method label, and ledger the true cash delta.
-            if ($vTotal > 0) {
-                // D8: reverse against the drawer that ACTUALLY took the sale
-                // (from the ledger); if that shift is closed, the acting cashier's
-                // current drawer — not blindly "my latest open register".
-                $register = $this->resolveDrawerForReversal($order->id, $request->user(), $order->outlet_id);
-                if ($register) {
-                    DB::table('cash_registers')->where('id', $register->id)->update([
-                        'total_sales'       => DB::raw('GREATEST(0, total_sales - ' . $vTotal . ')'),
-                        'total_cash_sales'  => DB::raw('GREATEST(0, total_cash_sales - ' . $vCash . ')'),
-                        'total_card_sales'  => DB::raw('GREATEST(0, total_card_sales - ' . $vCard . ')'),
-                        'total_mpesa_sales' => DB::raw('GREATEST(0, total_mpesa_sales - ' . $vMpesa . ')'),
-                        'transaction_count' => DB::raw('GREATEST(0, transaction_count - 1)'),
-                        'expected_cash'     => DB::raw('GREATEST(0, expected_cash - ' . $vCash . ')'),
-                        'updated_at'        => now(),
-                    ]);
-
-                    // MON-3: ledger the cash reversal (only the cash actually moved).
-                    if ($vCash > 0) {
-                        $this->recordCashLedger(
-                            $register,
-                            'void',
-                            'cash',
-                            $vCash,
-                            max(0, (float) $register->expected_cash - $vCash),
-                            $order->id,
-                            $request->user()->id,
-                            'POS void',
-                        );
-                    }
-                }
-            }
-
-            DB::commit();
-
-            try {
-                ActivityLogService::log('pos_sale_voided', $order, [
-                    'order_number'   => $order->order_number,
-                    'outlet_id'      => $order->outlet_id,
-                    'total_amount'   => $order->total_amount,
-                    'reason'         => $validated['reason'],
-                    'payment_method' => $order->payment_method,
-                ]);
-            } catch (\Exception) {}
-
-            return response()->json(['message' => 'Sale voided successfully.']);
-
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            Log::error('POS void failed', ['error' => $e->getMessage()]);
-            return response()->json(['message' => 'Failed to void sale.'], 500);
-        }
+        return response()->json([
+            'message'  => 'Void requested. It needs an approver\'s signature before the sale is voided.',
+            'approval' => app(ApprovalEngine::class)->present($approval->load(['signatures.signer', 'maker']), $request->user()),
+            'pending'  => app(TillReversals::class)->pendingForOrder($order->id),
+        ], 202);
     }
 
     public function emailReceipt(Request $request, int $id): JsonResponse
@@ -1587,6 +1507,13 @@ class PosController extends Controller
 
     // --- Returns --------------------------------------------------------------
 
+    /**
+     * Ask for a refund (POS return) (Phase 4B part 2). Prices the lines as the
+     * till always has and raises a pos_refund request; nothing moves — no
+     * stock, no cash, no order_returns row — until the last band signs, and
+     * then the refund is written as a NEW transaction, never an edit of the
+     * sale (App\Services\Pos\TillReversals::executeRefund).
+     */
     public function processReturn(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -1606,156 +1533,15 @@ class PosController extends Controller
 
         $this->authoriseOutletAccess($request->user(), $order->outlet_id);
 
-        DB::beginTransaction();
-        try {
-            $refundTotal = 0;
-            $returnItems = [];
+        [$refund, $approval] = app(TillReversals::class)->requestRefund($order, $validated, $request->user());
 
-            foreach ($validated['items'] as $req) {
-                $orderItem = $order->items->firstWhere('product_variant_id', $req['variant_id']);
-
-                if (!$orderItem) {
-                    DB::rollBack();
-                    return response()->json(['message' => "Variant #{$req['variant_id']} not found in this order."], 422);
-                }
-
-                // Check how much has already been returned for this item
-                $alreadyReturned = DB::table('return_items')
-                    ->whereIn('return_id', fn ($q) => $q->select('id')->from('order_returns')->where('order_id', $order->id))
-                    ->where('order_item_id', $orderItem->id)
-                    ->sum('quantity');
-
-                $maxReturnable = $orderItem->quantity - $alreadyReturned;
-                if ($req['quantity'] > $maxReturnable) {
-                    DB::rollBack();
-                    return response()->json([
-                        'message' => "Cannot return {$req['quantity']} - only {$maxReturnable} returnable for this item.",
-                    ], 422);
-                }
-
-                $lineRefund   = $orderItem->unit_price * $req['quantity'];
-                $refundTotal += $lineRefund;
-
-                $returnItems[] = [
-                    'order_item_id' => $orderItem->id,
-                    'quantity'      => $req['quantity'],
-                    'reason'        => $validated['reason'],
-                    'restock'       => true,
-                ];
-
-                // Restore inventory
-                $inventory = InventoryItem::where('product_variant_id', $req['variant_id'])
-                    ->where('outlet_id', $order->outlet_id)
-                    ->first();
-                $inventory?->adjustQuantity(
-                    $req['quantity'],
-                    'return',
-                    Order::class,
-                    $order->id,
-                    $request->user()->id
-                );
-
-                // Bring the returned units' serials back to stock too, so the
-                // per-unit ledger tracks the physical restock (previously a return
-                // restocked quantity_on_hand but left the serials sold/dispatched,
-                // widening the serial-vs-count gap on every return).
-                ProductSerialService::returnUnitsForOrder(
-                    $order,
-                    (int) $orderItem->product_id,
-                    (int) $req['quantity'],
-                );
-            }
-
-            // Bound the refund to what was ACTUALLY collected on this order, net
-            // of prior refunds. The line total above is unit_price × qty, which
-            // ignores discounts and tax and could pay out more than the customer
-            // ever paid — this cap closes that cash leak.
-            $collected    = (float) $order->payments()->where('status', 'paid')->sum('amount');
-            $priorRefunds = (float) DB::table('order_returns')
-                ->where('order_id', $order->id)->where('status', 'completed')->sum('refund_amount');
-            $refundTotal  = min($refundTotal, max(0, $collected - $priorRefunds));
-
-            // Create return record
-            $orderReturn = OrderReturn::create([
-                'order_id'      => $order->id,
-                'status'        => 'completed',
-                'return_reason' => $validated['reason'],
-                'refund_amount' => round($refundTotal, 2),
-                'refund_method' => $validated['refund_method'],
-                'created_by'    => $request->user()->id,
-                'approved_by'   => $request->user()->id,
-                'approved_at'   => now(),
-                'refunded_at'   => now(),
-            ]);
-
-            // Create return_items rows
-            foreach ($returnItems as $ri) {
-                DB::table('return_items')->insert([
-                    'return_id'     => $orderReturn->id,
-                    'order_item_id' => $ri['order_item_id'],
-                    'quantity'      => $ri['quantity'],
-                    'reason'        => $ri['reason'],
-                    'restock'       => $ri['restock'],
-                    'created_at'    => now(),
-                ]);
-            }
-
-            // Deduct the cash refund from the drawer that took the sale (D8) — or,
-            // if that shift is closed, the acting cashier's current drawer (the
-            // cash is paid out of the till in front of them). Drawer locked.
-            if ($validated['refund_method'] === 'cash' && $refundTotal > 0) {
-                $register = $this->resolveDrawerForReversal($order->id, $request->user(), $order->outlet_id);
-                if ($register) {
-                    // Reject rather than silently clamp if the drawer can't cover it.
-                    if ($refundTotal > (float) $register->expected_cash) {
-                        DB::rollBack();
-                        return response()->json(['message' => 'Insufficient cash in the register to make this refund.'], 422);
-                    }
-                    DB::table('cash_registers')->where('id', $register->id)->update([
-                        'total_refunds' => DB::raw('total_refunds + ' . $refundTotal),
-                        'expected_cash' => DB::raw('GREATEST(0, expected_cash - ' . $refundTotal . ')'),
-                        'updated_at'    => now(),
-                    ]);
-
-                    // MON-3: ledger the cash refund.
-                    $this->recordCashLedger(
-                        $register,
-                        'refund',
-                        'cash',
-                        (float) $refundTotal,
-                        max(0, (float) $register->expected_cash - (float) $refundTotal),
-                        $order->id,
-                        $request->user()->id,
-                        'POS return',
-                    );
-                }
-            }
-
-            DB::commit();
-
-            try {
-                ActivityLogService::log('pos_return_processed', $order, [
-                    'return_id'     => $orderReturn->id,
-                    'return_number' => $orderReturn->return_number,
-                    'outlet_id'     => $order->outlet_id,
-                    'refund_amount' => round($refundTotal, 2),
-                    'refund_method' => $validated['refund_method'],
-                    'reason'        => $validated['reason'],
-                    'items_count'   => count($validated['items']),
-                ]);
-            } catch (\Exception) {}
-
-            return response()->json([
-                'message'       => 'Return processed successfully.',
-                'return_number' => $orderReturn->return_number,
-                'refund_amount' => $refundTotal,
-            ]);
-
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            Log::error('POS return failed', ['error' => $e->getMessage()]);
-            return response()->json(['message' => 'Failed to process return.'], 500);
-        }
+        return response()->json([
+            'message'           => 'Refund requested. It needs an approver\'s signature before the refund is made.',
+            'refund_request_id' => $refund->id,
+            'refund_amount'     => (float) $refund->refund_amount,
+            'approval'          => app(ApprovalEngine::class)->present($approval->load(['signatures.signer', 'maker']), $request->user()),
+            'pending'           => app(TillReversals::class)->pendingForOrder($order->id),
+        ], 202);
     }
 
     public function returns(Request $request): JsonResponse
@@ -2761,40 +2547,6 @@ class PosController extends Controller
      * register only carried running aggregate totals with no auditable trail.
      * `balance_after` is the drawer's expected_cash after this movement.
      */
-    /**
-     * D8: resolve which drawer a void/refund for this order should hit. Prefer
-     * the register that ACTUALLY recorded the sale (from the cash ledger), so a
-     * void/refund by a different cashier reverses the right till. If that shift
-     * is already closed, fall back to the acting cashier's current open drawer —
-     * the cash is paid out of the till in front of them. Returned register is
-     * locked for update; null when no suitable open drawer exists.
-     */
-    private function resolveDrawerForReversal(int $orderId, $user, int $outletId): ?CashRegister
-    {
-        $originId = DB::table('cash_register_transactions')
-            ->where('order_id', $orderId)
-            ->where('transaction_type', 'sale')
-            ->orderBy('id')
-            ->value('cash_register_id');
-
-        if ($originId) {
-            $origin = CashRegister::whereKey($originId)
-                ->where('status', 'open')
-                ->lockForUpdate()
-                ->first();
-            if ($origin) {
-                return $origin;
-            }
-        }
-
-        return CashRegister::where('outlet_id', $outletId)
-            ->where('opened_by', $user->id)
-            ->where('status', 'open')
-            ->latest('opened_at')
-            ->lockForUpdate()
-            ->first();
-    }
-
     private function recordCashLedger(
         CashRegister $register,
         string $type,
@@ -4577,6 +4329,9 @@ class PosController extends Controller
             'status'              => $order->status,
             'notes'               => $order->notes,
             'created_at'          => $order->created_at->toIso8601String(),
+            // Phase 4B part 2: void / refund requests on this sale still
+            // waiting for a signature, so the till shows them as pending.
+            'pending_reversals'   => app(TillReversals::class)->pendingForOrder($order->id),
         ];
     }
 }

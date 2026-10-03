@@ -60,6 +60,9 @@ final class ApprovalEngine
             Handlers\ImprestTopupHandler::class,
             Handlers\PaymentVoidHandler::class,
             Handlers\PaymentReassignHandler::class,
+            // Phase 4B part 2: till voids and refunds.
+            Handlers\PosVoidHandler::class,
+            Handlers\PosRefundHandler::class,
         ] as $class) {
             $handler = app($class);
             $this->handlers[$handler->event()] = $handler;

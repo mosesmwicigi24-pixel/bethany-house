@@ -24,6 +24,8 @@ final class ThresholdRepository
     public const EVENTS = [
         'purchase_order', 'stock_adjustment', 'serialized_write_off', 'expense',
         'imprest_topup', 'payment_void', 'payment_reassign', 'stock_transfer',
+        // Phase 4B part 2: till voids and refunds.
+        'pos_void', 'pos_refund',
     ];
 
     /**

@@ -1029,6 +1029,17 @@ Route::prefix('v1')->group(function () {
                 Route::post('sales/{id}/email-receipt', [PosController::class, 'emailReceipt']);
                 Route::post('returns',                  [PosController::class, 'processReturn'])
                     ->middleware(['permission:pos.returns,sanctum', 'owner.no_transact']);
+
+                // Phase 4B part 2: a void or a return above is only a REQUEST.
+                // The approver signs here, on this till, with their own PIN
+                // (or from the Approvals inbox). No owner.no_transact: the
+                // owner may APPROVE at a till, never ring.
+                Route::get('sales/{id}/reversals',      [\App\Http\Controllers\Api\PosTillApprovalController::class, 'forSale'])
+                    ->whereNumber('id');
+                Route::get('approvals/{id}/approvers',  [\App\Http\Controllers\Api\PosTillApprovalController::class, 'approvers'])
+                    ->whereNumber('id');
+                Route::post('approvals/{id}/pin-sign',  [\App\Http\Controllers\Api\PosTillApprovalController::class, 'pinSign'])
+                    ->whereNumber('id')->middleware('throttle:30,1');
             });
 
             // ── Inventory ────────────────────────────────────────────────────
