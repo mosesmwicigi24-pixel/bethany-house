@@ -71,7 +71,7 @@ class ExpenseController extends Controller
     public function index(Request $request)
     {
         $validated = $request->validate([
-            'status'      => 'nullable|in:draft,pending_approval,approved,rejected,paid,cancelled',
+            'status'      => 'nullable|in:draft,pending_approval,changes_requested,approved,rejected,paid,cancelled',
             'category_id' => 'nullable|exists:expense_categories,id',
             'outlet_id'   => 'nullable|exists:outlets,id',
             'start_date'  => 'nullable|date',
@@ -344,8 +344,9 @@ class ExpenseController extends Controller
     {
         $expense = $this->findScopedExpense($id, $request->user());
 
-        if (!in_array($expense->status, ['draft', 'rejected'])) {
-            return response()->json(['message' => 'Only draft or rejected expenses can be edited.'], 422);
+        // 'changes_requested': a signer sent it back to be edited (requestChanges).
+        if (!in_array($expense->status, ['draft', 'rejected', 'changes_requested'])) {
+            return response()->json(['message' => 'Only draft, rejected or sent-back expenses can be edited.'], 422);
         }
 
         $validated = $request->validate([
@@ -451,8 +452,10 @@ class ExpenseController extends Controller
 
         // A rejected expense comes back only as a new approval version,
         // linked to the rejected one (Phase 3B) — so it may be submitted again.
-        if (!in_array($expense->status, ['draft', 'rejected'], true)) {
-            return response()->json(['message' => 'Only draft or rejected expenses can be submitted.'], 422);
+        // Sent back for changes (requestChanges) is resubmitted the same way:
+        // its request was withdrawn, so this submission is the next version.
+        if (!in_array($expense->status, ['draft', 'rejected', 'changes_requested'], true)) {
+            return response()->json(['message' => 'Only draft, rejected or sent-back expenses can be submitted.'], 422);
         }
 
         DB::beginTransaction();
@@ -491,32 +494,21 @@ class ExpenseController extends Controller
      */
     public function approve(int $id, Request $request)
     {
-        $user    = $request->user();
-        $expense = $this->findScopedExpense($id, $user);
-
-        if ($expense->status !== 'pending_approval') {
-            return response()->json(['message' => 'Only pending expenses can be approved.'], 422);
-        }
+        $user = $request->user();
+        // Not-pending is answered before the comment is validated, as it always was.
+        $this->pendingOrFail($this->findScopedExpense($id, $user), 'approved');
 
         $validated = $request->validate([
             'comments' => 'nullable|string|max:1000',
         ]);
 
-        // Since Phase 3B this SIGNS the band the expense is waiting on
-        // (finance ≤ KES 50,000; above, then the super admin). The engine
-        // refuses the recorder and the submitter (maker ≠ checker — owner
-        // decision 2026-09-22 for imprest cash, Phase 1B for every expense)
-        // and approves the expense (ExpenseHandler) only on the last band.
-        $engine   = app(\App\Services\Approvals\ApprovalEngine::class);
-        $approval = $engine->sign(
-            $engine->openOrAdopt('expense', $expense), $user,
-            \App\Models\ApprovalSignature::APPROVED, $validated['comments'] ?? null, $expense->id,
-        );
-        $done = $approval->status === \App\Models\ApprovalRequest::APPROVED;
+        [$expense, $approval] = $this->performApprove($id, $user, $validated['comments'] ?? null);
+        $engine = app(\App\Services\Approvals\ApprovalEngine::class);
+        $done   = $approval->status === \App\Models\ApprovalRequest::APPROVED;
 
         return response()->json([
             'message'  => $done ? 'Expense approved.' : 'Signed. The expense now waits for the next band.',
-            'expense'  => $expense->fresh(),
+            'expense'  => $expense,
             'approval' => $engine->present($approval->load(['signatures', 'maker']), $user),
         ]);
     }
@@ -526,26 +518,40 @@ class ExpenseController extends Controller
      */
     public function reject(int $id, Request $request)
     {
-        $user    = $request->user();
-        $expense = $this->findScopedExpense($id, $user);
-
-        if ($expense->status !== 'pending_approval') {
-            return response()->json(['message' => 'Only pending expenses can be rejected.'], 422);
-        }
+        $user = $request->user();
+        $this->pendingOrFail($this->findScopedExpense($id, $user), 'rejected');
 
         $validated = $request->validate([
             'reason' => 'required|string|max:1000',
         ]);
 
-        // A decision at the band the expense waits on; ExpenseHandler records
-        // the rejection, tells the submitter and flags imprest cash.
-        $engine = app(\App\Services\Approvals\ApprovalEngine::class);
-        $engine->sign(
-            $engine->openOrAdopt('expense', $expense), $user,
-            \App\Models\ApprovalSignature::REJECTED, $validated['reason'], $expense->id,
-        );
+        $expense = $this->performReject($id, $user, $validated['reason']);
 
-        return response()->json(['message' => 'Expense rejected.', 'expense' => $expense->fresh()]);
+        return response()->json(['message' => 'Expense rejected.', 'expense' => $expense]);
+    }
+
+    /**
+     * POST /api/v1/admin/expenses/{id}/request-changes
+     *
+     * Send a pending expense back to whoever recorded/submitted it, with a
+     * note (owner request 2026-10-03, "request an edit"). It leaves approval —
+     * the open engine request is withdrawn — and becomes 'changes_requested';
+     * the maker edits it and submits it again, which is a new approval
+     * version linked to the withdrawn one. Whoever may reject it now may do
+     * this (ApprovalEngine::requestChanges).
+     */
+    public function requestChanges(int $id, Request $request)
+    {
+        $user = $request->user();
+        $this->pendingOrFail($this->findScopedExpense($id, $user), 'sent back for changes');
+
+        $validated = $request->validate([
+            'reason' => 'required|string|max:1000',
+        ]);
+
+        $expense = $this->performRequestChanges($id, $user, $validated['reason']);
+
+        return response()->json(['message' => 'Sent back for changes.', 'expense' => $expense]);
     }
 
     /**
@@ -553,15 +559,11 @@ class ExpenseController extends Controller
      */
     public function markPaid(int $id, Request $request)
     {
-        $user    = $request->user();
-        $expense = $this->findScopedExpense($id, $user);
+        $user = $request->user();
+        $this->findScopedExpense($id, $user);
 
         if (!$user->can('expenses.approve')) {
             return response()->json(['message' => 'Forbidden. You do not have permission to mark expenses as paid.'], 403);
-        }
-
-        if ($expense->status !== 'approved') {
-            return response()->json(['message' => 'Only approved expenses can be marked as paid.'], 422);
         }
 
         $validated = $request->validate([
@@ -569,20 +571,297 @@ class ExpenseController extends Controller
             'payment_method'    => 'nullable|in:cash,bank_transfer,mpesa,card,cheque,other',
         ]);
 
+        $expense = $this->performMarkPaid($id, $user, $validated['payment_reference'] ?? null, $validated['payment_method'] ?? null);
+
+        return response()->json(['message' => 'Expense marked as paid.', 'expense' => $expense]);
+    }
+
+    // ── The single-item actions, shared by their own routes and by bulk() ──
+    //
+    // Each loads the expense through the caller's scope (another outlet's is
+    // a 404), checks its state, and does exactly what its route has always
+    // done. A refusal is thrown (HttpResponseException with a code, or the
+    // engine's own), never returned, so bulk() can report it per item.
+
+    /** 422 NOT_PENDING unless the expense is waiting for approval. */
+    private function pendingOrFail(Expense $expense, string $verb): Expense
+    {
+        if ($expense->status !== 'pending_approval') {
+            $this->refuse(422, 'NOT_PENDING', match ($verb) {
+                'approved' => 'Only pending expenses can be approved.',
+                'rejected' => 'Only pending expenses can be rejected.',
+                default    => 'Only pending expenses can be sent back for changes.',
+            });
+        }
+
+        return $expense;
+    }
+
+    private function refuse(int $status, string $code, string $message): never
+    {
+        throw new \Illuminate\Http\Exceptions\HttpResponseException(
+            response()->json(['message' => $message, 'code' => $code], $status));
+    }
+
+    /** @return array{0: Expense, 1: \App\Models\ApprovalRequest} */
+    private function performApprove(int $id, User $user, ?string $comments): array
+    {
+        $expense = $this->pendingOrFail($this->findScopedExpense($id, $user), 'approved');
+
+        // Since Phase 3B this SIGNS the band the expense is waiting on
+        // (finance ≤ KES 50,000; above, then the super admin). The engine
+        // refuses the recorder and the submitter (maker ≠ checker — owner
+        // decision 2026-09-22 for imprest cash, Phase 1B for every expense)
+        // and approves the expense (ExpenseHandler) only on the last band.
+        $engine   = app(\App\Services\Approvals\ApprovalEngine::class);
+        $approval = $engine->sign(
+            $engine->openOrAdopt('expense', $expense), $user,
+            \App\Models\ApprovalSignature::APPROVED, $comments, $expense->id,
+        );
+
+        return [$expense->fresh(), $approval];
+    }
+
+    private function performReject(int $id, User $user, string $reason): Expense
+    {
+        $expense = $this->pendingOrFail($this->findScopedExpense($id, $user), 'rejected');
+
+        // A decision at the band the expense waits on; ExpenseHandler records
+        // the rejection, tells the submitter and flags imprest cash.
+        $engine = app(\App\Services\Approvals\ApprovalEngine::class);
+        $engine->sign(
+            $engine->openOrAdopt('expense', $expense), $user,
+            \App\Models\ApprovalSignature::REJECTED, $reason, $expense->id,
+        );
+
+        return $expense->fresh();
+    }
+
+    private function performRequestChanges(int $id, User $user, string $note): Expense
+    {
+        $expense = $this->pendingOrFail($this->findScopedExpense($id, $user), 'sent back for changes');
+
+        $engine = app(\App\Services\Approvals\ApprovalEngine::class);
+        $engine->requestChanges($engine->openOrAdopt('expense', $expense), $user, $note, $expense->id);
+
+        return $expense->fresh();
+    }
+
+    private function performMarkPaid(int $id, User $user, ?string $paymentReference, ?string $paymentMethod): Expense
+    {
+        $expense = $this->findScopedExpense($id, $user);
+
+        if ($expense->status !== 'approved') {
+            $this->refuse(422, 'NOT_APPROVED', 'Only approved expenses can be marked as paid.');
+        }
+
         $expense->update([
             'status'            => 'paid',
             'paid_by'           => $user->id,
             'paid_at'           => now(),
-            'payment_reference' => $validated['payment_reference'] ?? $expense->payment_reference,
-            'payment_method'    => $validated['payment_method']    ?? $expense->payment_method,
+            'payment_reference' => $paymentReference ?? $expense->payment_reference,
+            'payment_method'    => $paymentMethod    ?? $expense->payment_method,
         ]);
 
         $this->activityLog->log('expense_paid', $expense, [
-            'payment_reference' => $validated['payment_reference'] ?? $expense->payment_reference,
-            'payment_method'    => $validated['payment_method']    ?? $expense->payment_method,
+            'payment_reference' => $paymentReference ?? $expense->payment_reference,
+            'payment_method'    => $paymentMethod    ?? $expense->payment_method,
         ], null, $user);
 
-        return response()->json(['message' => 'Expense marked as paid.', 'expense' => $expense->fresh()]);
+        return $expense->fresh();
+    }
+
+    // =========================================================================
+    // BULK ACTIONS
+    // =========================================================================
+
+    /**
+     * POST /api/v1/admin/expenses/bulk
+     * { ids: int[1..100], action: approve|reject|request_changes|mark_paid, reason?: string }
+     *
+     * Owner request 2026-10-03: select one or several expenses and apply one
+     * action. Each id goes through exactly the path its single-item route
+     * takes (performApprove / performReject / performRequestChanges /
+     * performMarkPaid), so every rule still applies to every item — the
+     * engine's bands, maker ≠ checker, the outlet boundary. Never
+     * all-or-nothing: each item succeeds or is refused on its own, and is
+     * reported in the order asked. An item the caller cannot see is reported
+     * "not found" exactly like an id that does not exist — no reference, no
+     * status, nothing leaked. The route carries the single actions' gate
+     * (expenses.approve).
+     */
+    public function bulk(Request $request)
+    {
+        $validated = $request->validate([
+            'ids'    => 'required|array|min:1|max:100',
+            'ids.*'  => 'required|integer|min:1',
+            'action' => 'required|in:approve,reject,request_changes,mark_paid',
+            'reason' => 'nullable|string|max:1000|required_if:action,reject,request_changes',
+        ]);
+
+        $user   = $request->user();
+        $action = $validated['action'];
+        $reason = isset($validated['reason']) ? trim($validated['reason']) : null;
+        $ids    = array_values(array_unique(array_map('intval', $validated['ids'])));
+
+        $results = [];
+        foreach ($ids as $id) {
+            $results[] = $this->bulkOne($action, $id, $user, $reason ?: null);
+        }
+
+        $ok = count(array_filter($results, fn ($r) => $r['ok']));
+        $byCode = [];
+        foreach ($results as $r) {
+            $byCode[$r['code']] = ($byCode[$r['code']] ?? 0) + 1;
+        }
+
+        $this->activityLog->log('expense_bulk_action', null, [
+            'action'    => $action,
+            'requested' => count($ids),
+            'succeeded' => $ok,
+            'failed'    => count($ids) - $ok,
+            'by_code'   => $byCode,
+            'ids'       => $ids,
+        ], 'Bulk ' . str_replace('_', ' ', $action) . " on " . count($ids) . " expense(s): {$ok} done", $user);
+
+        return response()->json([
+            'action'  => $action,
+            'results' => $results,
+            'summary' => [
+                'requested' => count($ids),
+                'succeeded' => $ok,
+                'failed'    => count($ids) - $ok,
+                'by_code'   => $byCode,
+            ],
+        ]);
+    }
+
+    /** One item of a bulk action: the single-item path, its outcome in plain words. */
+    private function bulkOne(string $action, int $id, User $user, ?string $reason): array
+    {
+        $row = fn (bool $ok, string $code, string $message, ?Expense $e = null) => [
+            'id'           => $id,
+            'reference'    => $e?->reference_number,
+            'ok'           => $ok,
+            'status_after' => $e?->status,
+            'code'         => $code,
+            'message'      => $message,
+        ];
+        $notFound = fn () => $row(false, 'NOT_FOUND', 'Not found, or not one you can act on.');
+
+        try {
+            switch ($action) {
+                case 'approve':
+                    [$expense, $approval] = $this->performApprove($id, $user, $reason);
+                    if ($approval->status === \App\Models\ApprovalRequest::APPROVED) {
+                        return $row(true, 'APPROVED', 'Approved.', $expense);
+                    }
+
+                    return $row(true, 'SIGNED_AWAITING_NEXT_BAND',
+                        'Signed your band. It now waits for ' . $this->bandWho($approval) . '.', $expense);
+
+                case 'reject':
+                    if ($reason === null) {
+                        return $row(false, 'REASON_REQUIRED', 'Say why it is rejected.', $this->visibleExpense($id));
+                    }
+
+                    return $row(true, 'REJECTED', 'Rejected and sent back to the person who raised it.',
+                        $this->performReject($id, $user, $reason));
+
+                case 'request_changes':
+                    if ($reason === null) {
+                        return $row(false, 'REASON_REQUIRED', 'Say what needs to change.', $this->visibleExpense($id));
+                    }
+
+                    return $row(true, 'CHANGES_REQUESTED', 'Sent back to the person who raised it, with your note.',
+                        $this->performRequestChanges($id, $user, $reason));
+
+                case 'mark_paid':
+                    return $row(true, 'PAID', 'Marked as paid.', $this->performMarkPaid($id, $user, null, null));
+            }
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
+            return $notFound();
+        } catch (\Illuminate\Http\Exceptions\HttpResponseException $e) {
+            $status = $e->getResponse()->getStatusCode();
+            $body   = json_decode((string) $e->getResponse()->getContent(), true) ?: [];
+            $code   = (string) ($body['code'] ?? 'REFUSED');
+            // Out of the caller's outlets (engine or controller): the same
+            // "not found" as a missing id.
+            if ($status === 404 || in_array($code, ['APPROVABLE_OUT_OF_SCOPE', 'APPROVABLE_MISSING'], true)) {
+                return $notFound();
+            }
+            $expense = $this->visibleExpense($id);
+
+            return $row(false, $code, $this->plainRefusal($code, (string) ($body['message'] ?? 'Refused.'), $expense), $expense);
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+            // abort(403/404) from the outlet-scope check: not theirs to see.
+            if (in_array($e->getStatusCode(), [403, 404], true)) {
+                return $notFound();
+            }
+            report($e);
+
+            return $row(false, 'ERROR', 'This one could not be completed. Try it on its own.', $this->visibleExpense($id));
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $expense = $this->visibleExpense($id);
+
+            return $row(false, 'INVALID', collect($e->errors())->flatten()->first() ?? 'This one could not be completed.', $expense);
+        } catch (\Throwable $e) {
+            // Never the exception's own text: it can carry SQL or hosts.
+            report($e);
+
+            return $row(false, 'ERROR', 'This one could not be completed. Try it on its own.', $this->visibleExpense($id));
+        }
+
+        return $notFound();   // unreachable: the action is validated
+    }
+
+    /** The expense as the caller sees it (for a refused row's status), or null. */
+    private function visibleExpense(int $id): ?Expense
+    {
+        return Expense::find($id);
+    }
+
+    /** Who a request is waiting on now, in words. */
+    private function bandWho(\App\Models\ApprovalRequest $approval): string
+    {
+        try {
+            [$target] = app(\App\Services\Approvals\ApprovalEngine::class)->effectiveBand($approval->fresh());
+
+            return self::bandLabel($target['permission']);
+        } catch (\Throwable) {
+            return 'the next approver';
+        }
+    }
+
+    private static function bandLabel(string $permission): string
+    {
+        return match ($permission) {
+            'expenses.approve'                                         => 'finance',
+            \App\Services\Approvals\ApprovalEngine::SUPER_PERMISSION   => 'the owner (super admin)',
+            default                                                    => 'the next approver',
+        };
+    }
+
+    /** An engine refusal, said the way the person at the list needs to hear it. */
+    private function plainRefusal(string $code, string $message, ?Expense $expense): string
+    {
+        $engine = app(\App\Services\Approvals\ApprovalEngine::class);
+        $open   = $expense ? $engine->openRequest('expense', $expense) : null;
+
+        return match ($code) {
+            'SELF_APPROVAL'  => 'You recorded or submitted this, so someone else must approve it.',
+            'NOT_YOUR_BAND'  => $open
+                ? 'Not your approval to give yet — it is waiting for ' . $this->bandWho($open) . '.'
+                : 'This is waiting for a signature you do not hold.',
+            'ALREADY_SIGNED' => 'You already signed an earlier band of this one; the next band needs someone else.',
+            'NOT_PENDING'    => $expense
+                ? 'It is ' . str_replace('_', ' ', $expense->status) . ', not waiting for approval.'
+                : $message,
+            'NOT_APPROVED'   => $expense
+                ? 'Only an approved expense can be marked as paid — this one is ' . str_replace('_', ' ', $expense->status) . '.'
+                : $message,
+            default          => $message,
+        };
     }
 
     /**

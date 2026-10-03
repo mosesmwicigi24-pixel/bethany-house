@@ -146,6 +146,36 @@ final class ExpenseHandler extends ApprovalHandler
         app(ImprestService::class)->flagForResolution($e, $signer, 'rejected');
     }
 
+    public function supportsChangeRequests(): bool
+    {
+        return true;
+    }
+
+    /**
+     * Back to its maker with a note — not refused (owner request 2026-10-03).
+     * The expense becomes 'changes_requested': editable and submittable like a
+     * draft, and never spend (MetricEngine counts approved + paid only).
+     * Imprest cash is NOT flagged for return: nothing was refused, the maker
+     * is fixing the record (its amount stays locked by update()).
+     */
+    public function onChangesRequested(ApprovalRequest $request, Model $e, User $by, string $note): void
+    {
+        $e->update(['status' => 'changes_requested']);
+
+        ExpenseApproval::create([
+            'expense_id'  => $e->id,
+            'approver_id' => $by->id,
+            'action'      => 'changes_requested',
+            'comments'    => $note,
+            'acted_at'    => now(),
+            'step'        => (int) $request->current_band,
+        ]);
+
+        ActivityLogService::log('expense_changes_requested', $e, [
+            'note' => $note, 'approval_request_id' => $request->id, 'version' => $request->version,
+        ], "Changes requested on expense {$e->reference_number}: {$note}", $by);
+    }
+
     public function onExpired(ApprovalRequest $request, Model $e): void
     {
         if ($e->status === 'pending_approval') {
@@ -156,8 +186,8 @@ final class ExpenseHandler extends ApprovalHandler
 
     public function reopen(Model $e, User $maker): void
     {
-        if (!in_array($e->status, ['draft', 'rejected'], true)) {
-            throw ValidationException::withMessages(['status' => 'Only a draft or rejected expense can be resubmitted.']);
+        if (!in_array($e->status, ['draft', 'rejected', 'changes_requested'], true)) {
+            throw ValidationException::withMessages(['status' => 'Only a draft, rejected or sent-back expense can be resubmitted.']);
         }
         $e->update(['status' => 'pending_approval', 'submitted_by' => $maker->id, 'submitted_at' => now()]);
     }

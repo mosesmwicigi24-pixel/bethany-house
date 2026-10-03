@@ -315,33 +315,8 @@ final class ApprovalEngine
             $this->fail(422, 'REASON_REQUIRED', 'Say why it is rejected.');
         }
 
-        if ($approvableId !== null && (int) $approvableId !== (int) $request->approvable_id) {
-            $this->auditMismatch($request, $signer, 'approvable_id', $approvableId);
-            $this->fail(422, 'APPROVAL_MISMATCH', 'This approval belongs to a different record. Reload and try again.');
-        }
-        if ($version !== null && (int) $version !== (int) $request->version) {
-            $this->auditMismatch($request, $signer, 'version', $version);
-            $this->fail(422, 'APPROVAL_VERSION_MISMATCH', 'This record has been resubmitted since you opened it. Reload and sign the current version.');
-        }
-
-        if (!$request->isPending()) {
-            $this->fail(409, 'APPROVAL_DECIDED', "This request is already {$request->status}.");
-        }
-        if ($request->expires_at->isPast()) {
-            $this->expire($request);
-            $this->fail(422, 'APPROVAL_EXPIRED', 'This request waited more than 72 hours and went back to the person who raised it.');
-        }
-
         $handler = $this->handler($request->event);
-        $record  = $handler->find((int) $request->approvable_id);
-        if (!$record) {
-            $this->fail(404, 'APPROVABLE_MISSING', 'The record this approval is for no longer exists.');
-        }
-        // Phase 4A: a signer bounded to outlets never reaches another outlet's
-        // record through the inbox either — absent to them, as on its own route.
-        if (!$this->withinScope($signer, $request, $record)) {
-            $this->fail(404, 'APPROVABLE_OUT_OF_SCOPE', 'This record is not at an outlet you are assigned to.');
-        }
+        $record  = $this->decidableRecord($request, $signer, $approvableId, $version);
 
         // Maker ≠ checker first: a maker is refused as a maker (SELF_APPROVAL),
         // whatever band they might also hold. Before any write, so the audit
@@ -438,6 +413,113 @@ final class ApprovalEngine
             $this->notifySigners($finished);
         } else {
             $this->notifyMaker($finished);
+        }
+
+        return $finished;
+    }
+
+    /**
+     * The checks every decision on a request makes before anything is
+     * written: bound to the record and version the signer was shown, still
+     * pending and in time, the record still there and inside the signer's
+     * outlets. Returns the record.
+     */
+    private function decidableRecord(ApprovalRequest $request, User $signer, ?int $approvableId, ?int $version): Model
+    {
+        if ($approvableId !== null && (int) $approvableId !== (int) $request->approvable_id) {
+            $this->auditMismatch($request, $signer, 'approvable_id', $approvableId);
+            $this->fail(422, 'APPROVAL_MISMATCH', 'This approval belongs to a different record. Reload and try again.');
+        }
+        if ($version !== null && (int) $version !== (int) $request->version) {
+            $this->auditMismatch($request, $signer, 'version', $version);
+            $this->fail(422, 'APPROVAL_VERSION_MISMATCH', 'This record has been resubmitted since you opened it. Reload and sign the current version.');
+        }
+
+        if (!$request->isPending()) {
+            $this->fail(409, 'APPROVAL_DECIDED', "This request is already {$request->status}.");
+        }
+        if ($request->expires_at->isPast()) {
+            $this->expire($request);
+            $this->fail(422, 'APPROVAL_EXPIRED', 'This request waited more than 72 hours and went back to the person who raised it.');
+        }
+
+        $record = $this->handler($request->event)->find((int) $request->approvable_id);
+        if (!$record) {
+            $this->fail(404, 'APPROVABLE_MISSING', 'The record this approval is for no longer exists.');
+        }
+        // Phase 4A: a signer bounded to outlets never reaches another outlet's
+        // record through the inbox either — absent to them, as on its own route.
+        if (!$this->withinScope($signer, $request, $record)) {
+            $this->fail(404, 'APPROVABLE_OUT_OF_SCOPE', 'This record is not at an outlet you are assigned to.');
+        }
+
+        return $record;
+    }
+
+    /**
+     * Send a pending request back to its maker for changes — not a rejection
+     * (owner request 2026-10-03, "request an edit").
+     *
+     * Whoever may reject the request now may do this: the holder of the band
+     * it waits on, or the owner at any band (a request for changes spends no
+     * signature, exactly like his veto). The request is WITHDRAWN (cancelled,
+     * with the note as its reason) rather than rejected, so the record is not
+     * marked refused — and, like a rejection, its next submission is a new
+     * version linked to this one (submit() links any non-pending previous
+     * request), bound to a fresh fingerprint of the edited record. Signatures
+     * already given on this version do not carry over.
+     */
+    public function requestChanges(ApprovalRequest $request, User $by, string $note, ?int $approvableId = null, ?int $version = null): ApprovalRequest
+    {
+        $note = trim($note);
+        if ($note === '') {
+            $this->fail(422, 'REASON_REQUIRED', 'Say what needs to change.');
+        }
+        $handler = $this->handler($request->event);
+        if (!$handler->supportsChangeRequests()) {
+            $this->fail(422, 'CHANGES_NOT_SUPPORTED', 'This kind of record cannot be sent back for changes. Reject it instead.');
+        }
+
+        $record = $this->decidableRecord($request, $by, $approvableId, $version);
+
+        [$target] = $this->effectiveBand($request, $record);
+        if (!$by->hasRole('super_admin', 'sanctum') && !$this->canSignBand($by, $request, $target)) {
+            $this->fail(403, 'NOT_YOUR_BAND', 'This is waiting for a signature you do not hold.');
+        }
+
+        $finished = DB::transaction(function () use ($request, $by, $note, $handler) {
+            /** @var ApprovalRequest $locked */
+            $locked = ApprovalRequest::whereKey($request->id)->lockForUpdate()->first();
+            if (!$locked->isPending() || (int) $locked->current_band !== (int) $request->current_band) {
+                $this->fail(409, 'APPROVAL_DECIDED', 'Someone else acted on this request first. Reload it.');
+            }
+            $locked->update([
+                'status'          => ApprovalRequest::CANCELLED,
+                'rejected_reason' => "Changes requested: {$note}",
+                'decided_at'      => now(),
+                'decided_by'      => $by->id,
+            ]);
+            $handler->onChangesRequested($locked, $handler->find((int) $locked->approvable_id), $by, $note);
+
+            return $locked;
+        });
+        $finished->refresh();
+
+        ActivityLogService::log('approval_changes_requested', $record, [
+            'approval_request_id' => $finished->id,
+            'event'               => $finished->event,
+            'version'             => $finished->version,
+            'band'                => (int) $request->current_band,
+            'note'                => $note,
+        ], "Changes requested on {$finished->event} v{$finished->version}: {$note}", $by);
+
+        try {
+            $summary = $handler->summary($record->fresh() ?? $record, $finished->payload);
+            $makers  = array_values(array_diff($this->makerIdsOf($finished, $record), [(int) $by->id]));
+            NotificationService::changesRequested($makers, $finished->id, $summary['title'] ?? $finished->event, $note, $by, $summary['link'] ?? null);
+        } catch (\Throwable $e) {
+            // A notification never blocks the decision; the record's status is the source of truth.
+            report($e);
         }
 
         return $finished;
