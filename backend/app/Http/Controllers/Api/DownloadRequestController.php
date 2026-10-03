@@ -250,7 +250,9 @@ class DownloadRequestController extends Controller
 
         $dr = DownloadRequest::where('uuid', $uuid)->firstOrFail();
         if (!$this->policy->mayDecide($approver, $dr)) {
-            return response()->json(['message' => 'You cannot decide your own download request.'], 403);
+            return response()->json(['message' => $dr->user_id === $approver->id
+                ? 'You cannot decide your own download request.'
+                : 'An export of more than ' . \App\Support\ContactExport::BULK_CONTACTS_ROWS . " customers' contacts is decided by a super admin."], 403);
         }
         if ($dr->status !== DownloadRequest::PENDING) {
             return response()->json(['message' => "This request is already {$dr->status}."], 422);

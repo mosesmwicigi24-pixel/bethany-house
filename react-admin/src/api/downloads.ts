@@ -16,7 +16,7 @@ export interface DownloadRequest {
     path: string;
     payload: Record<string, unknown> | null;
     label: string;
-    category: "gated" | "never_attach" | "exempt";
+    category: "gated" | "never_attach" | "exempt" | "bulk_contacts";
     reason: string | null;
     status: DownloadStatus;
     auto_approved: boolean;

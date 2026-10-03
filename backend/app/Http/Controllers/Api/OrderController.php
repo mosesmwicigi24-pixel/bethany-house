@@ -162,15 +162,16 @@ class OrderController extends Controller
         ]);
     }
 
-    public function index(Request $request)
+    /**
+     * The orders screen's query: the viewer scope (Order is Restricted — a
+     * global scope bounds every query to what the caller may see), then the
+     * screen's filters INSIDE that scope, then its sort. index() pages it;
+     * exportCsv() writes it out. One builder, so the export can never hold a
+     * row the screen would not show (Phase 4A export parity).
+     */
+    private function screenQuery(Request $request)
     {
-        $query = Order::with(['user', 'items', 'outlet', 'creator:id,first_name,last_name'])
-            // The Quoted Sales page shows which quotation an order was born
-            // from; one scalar sub-select beats N lookups from the client.
-            ->select('orders.*')
-            ->addSelect(['quotation_number' => \App\Models\Quotation::select('quote_number')
-                ->whereColumn('converted_order_id', 'orders.id')
-                ->limit(1)]);
+        $query = Order::query();
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
@@ -178,6 +179,7 @@ class OrderController extends Controller
 
         $this->applyChannelFilter($query, $request);
 
+        // A filter inside scope, never a grant: another outlet's id yields nothing.
         if ($request->has('outlet_id')) {
             $query->where('outlet_id', $request->outlet_id);
         }
@@ -207,7 +209,22 @@ class OrderController extends Controller
             self::SORTABLE_COLUMNS,
             'created_at'
         );
-        $query->orderBy($sortBy, $sortOrder);
+        // Ties broken by id so a page boundary and the export agree on order.
+        $query->orderBy($sortBy, $sortOrder)->orderBy('orders.id', $sortOrder);
+
+        return $query;
+    }
+
+    public function index(Request $request)
+    {
+        $query = $this->screenQuery($request)
+            ->with(['user', 'items', 'outlet', 'creator:id,first_name,last_name'])
+            // The Quoted Sales page shows which quotation an order was born
+            // from; one scalar sub-select beats N lookups from the client.
+            ->select('orders.*')
+            ->addSelect(['quotation_number' => \App\Models\Quotation::select('quote_number')
+                ->whereColumn('converted_order_id', 'orders.id')
+                ->limit(1)]);
 
         $perPage = $request->get('per_page', 20);
         $orders  = $query->paginate($perPage);
@@ -225,53 +242,19 @@ class OrderController extends Controller
     /**
      * Export orders to CSV (Admin)
      *
-     * Mirrors the exact same filters as index() (status, channel, outlet_id,
-     * start_date, end_date, search) so the export always matches what's
-     * currently on screen. Capped at 10,000 rows to keep memory bounded -
-     * narrower date/status filters should be used for larger exports.
+     * The screen's own query (screenQuery) — same scope, same filters, same
+     * order — so the export is what is on screen; the contacts.mask route
+     * middleware masks its CSV by the same rule as the screen's JSON. Capped
+     * at ContactExport::rowCap() rows (X-Export-Truncated says when the cap
+     * cut it); more than 200 rows of unmasked contacts is a bulk-contacts
+     * download, decided by a super admin (ContactExport::classify).
      */
     public function exportCsv(Request $request)
     {
-        $query = Order::with(['outlet', 'items', 'creator:id,first_name,last_name']);
-
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
-        }
-
-        $this->applyChannelFilter($query, $request);
-
-        if ($request->has('outlet_id')) {
-            $query->where('outlet_id', $request->outlet_id);
-        }
-
-        if ($request->has('start_date')) {
-            $query->whereDate('created_at', '>=', $request->start_date);
-        }
-
-        if ($request->has('end_date')) {
-            $query->whereDate('created_at', '<=', $request->end_date);
-        }
-
-        if ($request->has('search')) {
-            $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('order_number', 'ILIKE', "%{$search}%")
-                  ->orWhere('customer_first_name', 'ILIKE', "%{$search}%")
-                  ->orWhere('customer_last_name',  'ILIKE', "%{$search}%")
-                  ->orWhere('customer_email',      'ILIKE', "%{$search}%")
-                  ->orWhere('customer_phone',      'ILIKE', "%{$search}%");
-            });
-        }
-
-        [$sortBy, $sortOrder] = SortResolver::resolve(
-            $request->get('sort_by'),
-            $request->get('sort_order', 'desc'),
-            self::SORTABLE_COLUMNS,
-            'created_at'
+        [$orders, $truncated] = \App\Support\ContactExport::rows(
+            $this->screenQuery($request)->with(['outlet', 'items', 'creator:id,first_name,last_name'])
         );
-        $query->orderBy($sortBy, $sortOrder);
-
-        $orders = $query->limit(10000)->get();
+        \App\Support\ContactExport::classify($request, $orders->count(), 'orders.view');
 
         $headers = [
             'Order Number',
@@ -315,7 +298,9 @@ class OrderController extends Controller
             ];
         });
 
-        return $this->csvResponse($headers, $rows, 'orders');
+        return \App\Support\ContactExport::annotate(
+            $this->csvResponse($headers, $rows, 'orders'), $orders->count(), $truncated,
+        );
     }
 
     /**
