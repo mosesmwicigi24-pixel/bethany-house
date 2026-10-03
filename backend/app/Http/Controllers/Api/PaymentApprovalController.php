@@ -59,6 +59,7 @@ class PaymentApprovalController extends Controller
         // every pending payment in the group, with the customer names and
         // amounts attached.
         $this->constrainToViewer($query, $request->user(), 'o');
+        $this->requireOrderVisibility($query, $request->user());
 
         if ($request->filled('search')) {
             $s = $request->search;
@@ -117,6 +118,7 @@ class PaymentApprovalController extends Controller
             ->where('p.requires_approval', true)
             ->where('p.approval_status', 'pending_review');
         $this->constrainToViewer($totalQuery, $request->user(), 'o');
+        $this->requireOrderVisibility($totalQuery, $request->user());
         $total = $totalQuery->count();
 
         return response()->json([
@@ -128,6 +130,19 @@ class PaymentApprovalController extends Controller
             ],
             'pending_count' => $total,
         ]);
+    }
+
+    /**
+     * constrainToViewer narrows by the caller's data scope — but the scope
+     * resolver answers "all" when NO role grants orders.view, so a role with
+     * payments.view and no orders.view at all (procurement) would see every
+     * pending payment. Without orders.view the inbox is empty.
+     */
+    private function requireOrderVisibility(\Illuminate\Database\Query\Builder $query, $user): void
+    {
+        if (!$user || !$user->can('orders.view')) {
+            $query->whereRaw('1 = 0');
+        }
     }
 
     // =========================================================================
@@ -436,6 +451,15 @@ class PaymentApprovalController extends Controller
     public function serveProof($id)
     {
         $payment = Payment::findOrFail($id);
+
+        // A proof is a customer's bank slip or M-Pesa screenshot. It is
+        // served only to someone who could open the order it pays for —
+        // payments.view alone reaches every cashier and both procurement
+        // roles. 404, so a guessed id says nothing.
+        if (!$payment->order_id
+            || !\App\Services\RecordVisibility::canView(request()->user(), \App\Models\Order::class, (int) $payment->order_id)) {
+            return response()->json(['message' => 'Not found.'], 404);
+        }
 
         if (!$payment->proof_of_payment_path) {
             return response()->json(['message' => 'No proof of payment on file.'], 404);
