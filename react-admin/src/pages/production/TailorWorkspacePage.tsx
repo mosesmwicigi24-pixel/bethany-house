@@ -60,7 +60,7 @@ interface MyTask {
             translations?: { name: string }[];
             images?: { image_url: string }[];
         };
-        customer?: { first_name: string; last_name: string } | null;
+        customer?: { first_name: string; last_name?: string } | null;
         /** Colourway batches — quantities sum to the order quantity. */
         batches?: { id: number; label: string; quantity: number; attributes?: Record<string, string> | null }[];
         material_allocations?: {
@@ -109,7 +109,8 @@ function getCustomerName(task: MyTask) {
     const label = (task.production_order as { customer_label?: string | null }).customer_label;
     if (label) return label;
     const c = task.production_order.customer;
-    return c ? `${c.first_name} ${c.last_name}`.trim() : null;
+    // last_name is absent for roles without customers.view (first name only).
+    return c ? [c.first_name, c.last_name].filter(Boolean).join(" ").trim() || null : null;
 }
 
 // Status priority for picking the "active task" within an order group.

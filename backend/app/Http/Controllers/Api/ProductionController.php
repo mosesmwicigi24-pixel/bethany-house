@@ -23,6 +23,7 @@ use App\Services\NotificationService;
 use App\Services\ActivityLogService;
 use App\Services\IntelligenceService;
 use App\Services\ProductSerialService;
+use App\Support\ProductionPayload;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -112,7 +113,8 @@ class ProductionController extends Controller
         $orders = $query->paginate((int) $request->get('per_page', 20));
 
         return response()->json([
-            'data'  => $this->transformList($orders->items()),
+            // Contacts and cost per viewer — see ProductionPayload.
+            'data'  => ProductionPayload::forViewer($this->transformList($orders->items()), $request->user()),
             'meta'  => [
                 'current_page' => $orders->currentPage(),
                 'last_page'    => $orders->lastPage(),
@@ -169,7 +171,9 @@ class ProductionController extends Controller
         $data['completion_percentage'] = $this->calcCompletion($order);
         $data['current_stage'] = $this->getCurrentStage($order);
 
-        return response()->json(['order' => $data]);
+        // A tailor opens this for their own job: no customer contacts without
+        // customers.view, no BOM or material cost without products.view_cost.
+        return response()->json(['order' => ProductionPayload::forViewer($data, request()->user())]);
     }
 
     // =========================================================================
@@ -279,7 +283,7 @@ class ProductionController extends Controller
 
             return response()->json([
                 'message'  => 'Production order created successfully.',
-                'order'    => $order->load(['tasks.stage', 'materialAllocations.material']),
+                'order'    => ProductionPayload::forViewer($order->load(['tasks.stage', 'materialAllocations.material']), $request->user()),
                 'warnings' => array_merge(
                     $bomWarnings,
                     !empty($shortages) ? ['Some materials are insufficient. Review and allocate before starting.'] : []
@@ -680,7 +684,7 @@ class ProductionController extends Controller
 
             return response()->json([
                 'message' => 'Materials issued successfully.',
-                'order'   => $order->fresh(['materialAllocations.material']),
+                'order'   => ProductionPayload::forViewer($order->fresh(['materialAllocations.material']), $request->user()),
             ]);
 
         } catch (\Exception $e) {
@@ -1018,7 +1022,7 @@ class ProductionController extends Controller
         if ($request->filled('tailor_id'))  $query->where('assigned_to', $request->tailor_id);
         if ($request->filled('stage_id'))   $query->where('production_stage_id', $request->stage_id);
 
-        return response()->json($query->orderByDesc('created_at')->paginate(50));
+        return response()->json(ProductionPayload::forViewer($query->orderByDesc('created_at')->paginate(50), $request->user()));
     }
 
     // =========================================================================
@@ -1095,13 +1099,14 @@ class ProductionController extends Controller
 
         if ($includeCompleted) {
             // For the history view, keep the DB sort as-is (completed tasks are already at the bottom)
-            return response()->json($tasks);
+            return response()->json(ProductionPayload::forViewer($tasks, $request->user()));
         }
 
         // Intelligence #9 — sort active tasks by deadline-miss risk score
         $sorted = IntelligenceService::smartTaskSort($tasks->toArray());
 
-        return response()->json($sorted);
+        // The tailor's own job cards: first name, no contacts, no cost.
+        return response()->json(ProductionPayload::forViewer($sorted, $request->user()));
     }
 
     // =========================================================================
@@ -1675,7 +1680,8 @@ class ProductionController extends Controller
             'stage:id,name,slug,description',
         ])->findOrFail($id);
 
-        return response()->json($task);
+        // materialAllocations.material is loaded whole, unit_cost included.
+        return response()->json(ProductionPayload::forViewer($task, request()->user()));
     }
 
     // =========================================================================
@@ -2217,7 +2223,11 @@ class ProductionController extends Controller
                     'product_name'              => $o->product?->translations?->first()?->name
                                                     ?? $o->product?->sku,
                     'quantity'                  => $o->quantity,
-                    'customer_name'             => $o->customer_label,
+                    // A first name for anyone without customers.view — the
+                    // board is open to the whole floor.
+                    'customer_name'             => request()->user()?->can('customers.view')
+                        ? $o->customer_label
+                        : ProductionPayload::firstNameOf($o->customer_label),
                     'created_by_name'           => $o->createdBy
                         ? trim("{$o->createdBy->first_name} {$o->createdBy->last_name}")
                         : null,
