@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Artisan;
 use Spatie\Permission\Models\Permission;
+use App\Support\ServerError;
 
 class PermissionController extends Controller
 {
@@ -160,9 +161,7 @@ class PermissionController extends Controller
                 'permissions_count' => $count,
             ]);
         } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Sync failed: ' . $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Sync failed.');
         }
     }
 }

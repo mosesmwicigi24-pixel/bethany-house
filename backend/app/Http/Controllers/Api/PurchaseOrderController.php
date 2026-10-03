@@ -22,6 +22,7 @@ use App\Services\ProductSerialService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use App\Support\ServerError;
 
 class PurchaseOrderController extends Controller
 {
@@ -230,10 +231,7 @@ class PurchaseOrderController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to create purchase order.',
-                'error'   => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to create purchase order.');
         }
     }
 
@@ -390,10 +388,7 @@ class PurchaseOrderController extends Controller
             DB::commit();
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to create draft purchase order(s) from suggestions.',
-                'error'   => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to create draft purchase order(s) from suggestions.');
         }
 
         foreach ($created as $purchaseOrder) {
@@ -649,10 +644,7 @@ class PurchaseOrderController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to receive items.',
-                'error'   => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to receive items.');
         }
     }
 
@@ -780,10 +772,7 @@ class PurchaseOrderController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to process return.',
-                'error'   => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to process return.');
         }
     }
 
@@ -1085,10 +1074,7 @@ class PurchaseOrderController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to delete purchase order.',
-                'error'   => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to delete purchase order.');
         }
     }
 

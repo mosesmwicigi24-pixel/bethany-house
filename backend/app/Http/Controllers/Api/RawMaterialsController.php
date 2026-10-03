@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use App\Support\SortResolver;
+use App\Support\ServerError;
 
 class RawMaterialsController extends Controller
 {
@@ -322,7 +323,7 @@ class RawMaterialsController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to receive stock.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to receive stock.');
         }
     }
 
@@ -397,7 +398,7 @@ class RawMaterialsController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Adjustment failed.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Adjustment failed.');
         }
     }
 

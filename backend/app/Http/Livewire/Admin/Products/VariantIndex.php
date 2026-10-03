@@ -12,6 +12,7 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
+use App\Support\ServerError;
 
 class VariantIndex extends Component
 {
@@ -234,7 +235,7 @@ class VariantIndex extends Component
 
         } catch (\Exception $e) {
             DB::rollBack();
-            $this->flash('Bulk action failed: ' . $e->getMessage(), 'error');
+            $this->flash(ServerError::message($e, 'Bulk action failed.'), 'error');
         }
 
         $this->clearSelected();

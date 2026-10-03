@@ -10,6 +10,7 @@ use App\Models\Coupon;
 use App\Services\TaxCalculationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Support\ServerError;
 
 class CartController extends Controller
 {
@@ -385,10 +386,7 @@ class CartController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to sync cart',
-                'error' => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to sync cart');
         }
     }
 }

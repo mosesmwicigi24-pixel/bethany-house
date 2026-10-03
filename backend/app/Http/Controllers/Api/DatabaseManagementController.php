@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Services\DatabaseManagementService;
 use App\Services\ActivityLogService;
+use App\Support\ServerError;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -47,7 +48,7 @@ class DatabaseManagementController extends Controller
         try {
             return response()->json($this->service->databaseStats());
         } catch (\Throwable $e) {
-            return response()->json(['message' => 'Failed to load database stats.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to load database stats.');
         }
     }
 
@@ -152,7 +153,7 @@ class DatabaseManagementController extends Controller
         } catch (\InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Throwable $e) {
-            return response()->json(['message' => 'Failed to clear transaction data.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to clear transaction data.');
         }
     }
 
@@ -201,9 +202,15 @@ class DatabaseManagementController extends Controller
             $backup = $this->service->createBackup('manual', 'user', $request->user(), $request->input('disk'));
             return response()->json(['message' => 'Backup created successfully.', 'backup' => $backup], 201);
         } catch (\RuntimeException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
+            // Only "pg_dump is not available" is written for the reader. A dump
+            // that ran and failed carries pg_dump's own stderr — host, role and
+            // database names — and a storage error carries server paths.
+            if (!DatabaseManagementService::isPgDumpAvailable()) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+            return ServerError::respond($e, 'Backup failed.', status: 422);
         } catch (\Throwable $e) {
-            return response()->json(['message' => 'Backup failed.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Backup failed.');
         }
     }
 
@@ -225,7 +232,7 @@ class DatabaseManagementController extends Controller
         } catch (\InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 404);
         } catch (\Throwable $e) {
-            return response()->json(['message' => 'Failed to prepare backup download.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to prepare backup download.');
         }
     }
 
@@ -259,7 +266,7 @@ class DatabaseManagementController extends Controller
         } catch (\InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Throwable $e) {
-            return response()->json(['message' => 'Restore failed.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Restore failed.');
         }
     }
 
@@ -274,7 +281,7 @@ class DatabaseManagementController extends Controller
         } catch (\InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 404);
         } catch (\Throwable $e) {
-            return response()->json(['message' => 'Failed to delete backup.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to delete backup.');
         }
     }
 
@@ -451,7 +458,7 @@ class DatabaseManagementController extends Controller
 
             return response()->json(['message' => 'Successfully connected to the configured S3 destination.', 'ok' => true]);
         } catch (\Throwable $e) {
-            return response()->json(['message' => 'Could not connect: ' . $e->getMessage(), 'ok' => false], 422);
+            return ServerError::respond($e, 'Could not connect to the configured S3 destination.', status: 422, extra: ['ok' => false]);
         }
     }
 
@@ -499,7 +506,7 @@ class DatabaseManagementController extends Controller
                 'safety_backup'    => ['id' => $backup->id, 'filename' => $backup->filename],
             ]);
         } catch (\Throwable $e) {
-            return response()->json(['message' => 'Data wipe failed.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Data wipe failed.');
         }
     }
 }

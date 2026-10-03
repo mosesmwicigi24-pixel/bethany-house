@@ -30,6 +30,7 @@ use App\Support\SortResolver;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use App\Support\ServerError;
 
 class OrderController extends Controller
 {
@@ -783,10 +784,7 @@ class OrderController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to create order',
-                'error'   => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to create order');
         }
     }
 
@@ -1003,10 +1001,7 @@ class OrderController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to cancel order',
-                'error'   => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to cancel order');
         }
     }
 
@@ -1162,10 +1157,7 @@ class OrderController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to void order.',
-                'error'   => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to void order.');
         }
     }
 
@@ -1245,10 +1237,7 @@ class OrderController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to process refund',
-                'error'   => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to process refund');
         }
     }
 
@@ -1478,7 +1467,7 @@ class OrderController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to record payment.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to record payment.');
         }
     }
 
@@ -2148,7 +2137,7 @@ class OrderController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to update currency: ' . $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to update currency.');
         }
 
         // ── Audit log ─────────────────────────────────────────────────────────

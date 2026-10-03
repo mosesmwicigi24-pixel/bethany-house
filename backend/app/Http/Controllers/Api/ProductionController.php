@@ -25,6 +25,7 @@ use App\Services\IntelligenceService;
 use App\Services\ProductSerialService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Support\ServerError;
 
 class ProductionController extends Controller
 {
@@ -288,7 +289,7 @@ class ProductionController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to create production order.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to create production order.');
         }
     }
 
@@ -505,7 +506,7 @@ class ProductionController extends Controller
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Assignment failed.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Assignment failed.');
         }
     }
 
@@ -590,7 +591,7 @@ class ProductionController extends Controller
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to update stage.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to update stage.');
         }
     }
 
@@ -685,7 +686,7 @@ class ProductionController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to issue materials.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to issue materials.');
         }
     }
 
@@ -778,7 +779,7 @@ class ProductionController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to record QC.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to record QC.');
         }
     }
 
@@ -879,7 +880,7 @@ class ProductionController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to complete production order.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to complete production order.');
         }
     }
 
@@ -1316,7 +1317,7 @@ class ProductionController extends Controller
             DB::commit();
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to record progress.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to record progress.');
         }
 
         try {
@@ -1497,7 +1498,7 @@ class ProductionController extends Controller
             DB::commit();
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to record progress.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to record progress.');
         }
 
         try {
@@ -1656,7 +1657,7 @@ class ProductionController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to update task.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to update task.');
         }
     }
 
@@ -2158,7 +2159,7 @@ class ProductionController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to confirm order.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to confirm order.');
         }
     }
 

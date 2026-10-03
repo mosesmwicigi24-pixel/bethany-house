@@ -10,6 +10,7 @@ use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
+use App\Support\ServerError;
 
 class ProductIndex extends Component
 {
@@ -202,7 +203,7 @@ class ProductIndex extends Component
             $this->flash(count($ids) . ' products updated.');
         } catch (\Exception $e) {
             DB::rollBack();
-            $this->flash('Action failed: ' . $e->getMessage(), 'error');
+            $this->flash(ServerError::message($e, 'Action failed.'), 'error');
         }
 
         $this->selected    = [];

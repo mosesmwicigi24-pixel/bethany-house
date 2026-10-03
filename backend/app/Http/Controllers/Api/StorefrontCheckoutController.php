@@ -19,6 +19,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
+use App\Support\ServerError;
 
 /**
  * Guest checkout bridge for the customer-facing storefront.
@@ -361,10 +362,7 @@ class StorefrontCheckoutController extends Controller
             DB::commit();
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to create order',
-                'error'   => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to create order');
         }
 
         try {
