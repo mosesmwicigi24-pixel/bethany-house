@@ -1,5 +1,6 @@
 // src/api/expenses.ts
-import { get, post, put, del, api } from '@/api/client'
+import { get, post, put, del } from '@/api/client'
+import { fetchSignedFile } from '@/api/signedFiles'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -198,14 +199,13 @@ export const expensesApi = {
     return post<{ message: string; receipt_path: string }>(`${BASE}/${id}/receipt`, form)
   },
 
-  // Fetches the receipt through the authenticated Axios client and returns
-  // a blob URL safe to use in <img src> or <iframe src>.
+  // The receipt endpoint issues a fresh signed link (≤5 min, 4D) after the
+  // outlet-scope check; returns a blob URL safe for <img src> / <iframe src>.
   fetchReceiptBlob: async (id: number): Promise<{ url: string; mimeType: string }> => {
-    const response = await api.get(`${BASE}/${id}/receipt`, { responseType: 'blob' })
-    const blob = response.data as Blob
+    const file = await fetchSignedFile(`/api${BASE}/${id}/receipt`)
     return {
-      url:      URL.createObjectURL(blob),
-      mimeType: blob.type,
+      url:      URL.createObjectURL(file.blob),
+      mimeType: file.contentType,
     }
   },
 

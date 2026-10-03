@@ -712,19 +712,15 @@ class ExpenseController extends Controller
             return response()->json(['message' => 'No receipt attached.'], 404);
         }
 
-        $fullPath = Storage::disk('private')->path($expense->receipt_path);
-
-        if (!file_exists($fullPath)) {
+        if (!Storage::disk('private')->exists($expense->receipt_path)) {
             return response()->json(['message' => 'Receipt file not found.'], 404);
         }
 
-        $mimeType = mime_content_type($fullPath) ?: 'application/octet-stream';
-        $filename = basename($expense->receipt_path);
-
-        return response()->file($fullPath, [
-            'Content-Type'        => $mimeType,
-            'Content-Disposition' => 'inline; filename="' . $filename . '"',
-        ]);
+        // A signed link valid ≤5 minutes (4D), issued after the outlet-scope
+        // check above; SignedFileController streams it and records the
+        // exempt download for the owner's digest.
+        return \App\Support\SignedFiles::issue($request, 'files.expense-receipt',
+            ['expense' => $expense->id], basename($expense->receipt_path));
     }
 
     // =========================================================================

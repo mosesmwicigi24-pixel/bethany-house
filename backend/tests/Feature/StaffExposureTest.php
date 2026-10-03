@@ -42,11 +42,18 @@ class StaffExposureTest extends TestCase
         Storage::disk('local')->put('channel-attachments/2026/10/9f1c-photo.jpg', 'chat photo');
         Storage::disk('local')->put('payment-proofs/proof-123.pdf', 'a customer payment proof');
         Storage::disk('local')->put('download-archive/export.csv', 'archived export');
-        $this->staff();   // any signed-in staff member — the route checks nothing more
+        $me = $this->staff();
 
         $serve = fn (string $path) => $this->get('/api/v1/admin/channels/attachments/serve?path=' . urlencode($path));
 
-        $serve('channel-attachments/2026/10/9f1c-photo.jpg')->assertOk()->assertSee('chat photo');
+        // 4D: the file is issued as a short signed link to members of a
+        // conversation that carries it.
+        $channel = \App\Models\Channel::create(['type' => 'space', 'name' => 'QC', 'is_private' => true]);
+        \Illuminate\Support\Facades\DB::table('channel_members')->insert(['channel_id' => $channel->id, 'user_id' => $me->id, 'created_at' => now(), 'updated_at' => now()]);
+        \App\Models\ChannelMessage::create(['channel_id' => $channel->id, 'user_id' => $me->id, 'type' => 'text',
+            'body' => '![p](/api/v1/admin/channels/attachments/serve?path=channel-attachments%2F2026%2F10%2F9f1c-photo.jpg)']);
+        $link = $serve('channel-attachments/2026/10/9f1c-photo.jpg')->assertOk()->json('url');
+        $this->get($link)->assertOk()->assertSee('chat photo');
 
         foreach ([
             'channel-attachments/../payment-proofs/proof-123.pdf',

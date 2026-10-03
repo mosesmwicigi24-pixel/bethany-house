@@ -468,8 +468,8 @@ class PaymentApprovalController extends Controller
     // =========================================================================
     // GET /admin/payments/{id}/proof
     //
-    // Returns a short-lived signed URL to download the proof file.
-    // Only accessible to admin users - enforced via route middleware.
+    // Issues a signed link to the proof, valid ≤5 minutes (App\Support\SignedFiles),
+    // after the order-visibility check below.
     // =========================================================================
 
     public function serveProof($id)
@@ -493,17 +493,10 @@ class PaymentApprovalController extends Controller
             return response()->json(['message' => 'Proof file not found on storage.'], 404);
         }
 
-        // Always stream the raw file bytes so the frontend can load them
-        // directly as a blob URL - works with any storage driver and avoids
-        // the JSON-wrapping / signed-URL approach that breaks image rendering.
-        $content  = Storage::disk('local')->get($payment->proof_of_payment_path);
-        $mime     = Storage::disk('local')->mimeType($payment->proof_of_payment_path) ?: 'application/octet-stream';
-        $filename = basename($payment->proof_of_payment_path);
-
-        return response($content, 200)
-            ->header('Content-Type',        $mime)
-            ->header('Content-Disposition', 'inline; filename="' . $filename . '"')
-            ->header('Cache-Control',       'private, max-age=300');
+        // A signed link valid ≤5 minutes, not the bytes (4D): the check above
+        // is the issuer's whole job; the file route trusts only the signature.
+        return \App\Support\SignedFiles::issue(request(), 'files.payment-proof',
+            ['payment' => $payment->id], basename($payment->proof_of_payment_path));
     }
 
     // =========================================================================

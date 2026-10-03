@@ -126,6 +126,18 @@ Route::prefix('v1')->group(function () {
         Route::post('/{token}/paystack-verify', [PublicPaymentController::class, 'verifyPaystack']);
     });
 
+    // ═══ SIGNED ATTACHMENT LINKS (role hardening 4D) ═════════════════════════
+    // Issued for ≤5 minutes by the console's attachment endpoints AFTER their
+    // parent-record check (App\Support\SignedFiles). The signature is the only
+    // check here — an unsigned, altered or expired link is a 403.
+    Route::prefix('files')->middleware(['signed:relative', 'throttle:120,1'])->group(function () {
+        $files = \App\Http\Controllers\Api\SignedFileController::class;
+        Route::get('/payment-proofs/{payment}',         [$files, 'paymentProof'])->whereNumber('payment')->name('files.payment-proof');
+        Route::get('/shipment-attachments/{attachment}', [$files, 'shipmentAttachment'])->whereNumber('attachment')->name('files.shipment-attachment');
+        Route::get('/expense-receipts/{expense}',        [$files, 'expenseReceipt'])->whereNumber('expense')->name('files.expense-receipt');
+        Route::get('/channel-attachments',               [$files, 'channelAttachment'])->name('files.channel-attachment');
+    });
+
     // ═══ PUBLIC ORDER PAGE (no auth) ═════════════════════════════════════════
     // /order/{public_token} — the customer's own view of ONE order: the receipt
     // when it is paid, the checkout when it is not. Keyed on the order's durable

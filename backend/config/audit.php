@@ -86,6 +86,13 @@ return [
         ],
     ],
 
+    // Attachments (payment proofs, shipment papers, chat files, expense
+    // receipts) are handed out as signed links for this many minutes —
+    // App\Support\SignedFiles clamps it to 1..5 whatever the environment says.
+    'attachments' => [
+        'signed_url_minutes' => (int) env('AUDIT_ATTACHMENT_LINK_MINUTES', 5),
+    ],
+
     // activity_log is never pruned. Business records are kept five years for
     // KRA (Tax Procedures Act s.23); the trail that explains them is kept as
     // long. logs:purge-old refuses to touch it.
@@ -236,6 +243,7 @@ return [
             'PosController@printReceipt',
             'PosController@emailReceipt',
             'ExpenseController@downloadReceipt',
+            'SignedFileController@expenseReceipt',
             'ProductController@exportTemplate',
         ],
 
@@ -247,6 +255,11 @@ return [
             'PaymentApprovalController@serveProof',
             'ShipmentController@serveShipmentAttachment',
             'ShipmentController@serveTrackingAttachment',
+            // The signed-link ends of the four above (4D): the decision and the
+            // request-log entry happen when the link is issued.
+            'SignedFileController@paymentProof',
+            'SignedFileController@shipmentAttachment',
+            'SignedFileController@channelAttachment',
             // The owner opening a file already recorded (and logged as such) —
             // not a new download, and not archived a second time.
             'DownloadRequestController@archive',
