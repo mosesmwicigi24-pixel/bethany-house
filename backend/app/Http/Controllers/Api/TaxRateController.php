@@ -158,6 +158,11 @@ class TaxRateController extends Controller
             'applies_to'   => $validated['applies_to'] ?? null,
         ], fn ($v) => $v !== null);
         // Only what actually changes counts as an edit (forms resend every field).
+        // The form sends `type`, which the old code mirrored into tax_type; an
+        // older row's tax_type ('vat') must not read as an edit when type is unchanged.
+        if (!array_key_exists('tax_type', $validated) && isset($update['type']) && (string) ($existing->type ?? '') === (string) $update['type']) {
+            unset($update['tax_type']);
+        }
         $update = array_filter($update, fn ($v, $k) => !property_exists($existing, $k) || (string) $existing->{$k} !== (string) $v, ARRAY_FILTER_USE_BOTH);
         if ($update !== [] && !$request->user()->can('settings.edit')) {
             return response()->json([

@@ -41,7 +41,8 @@ final class PriceRowWriter
             ->where('currency_code', $price['currency_code'])
             ->first();
 
-        $costWritable = $this->proposals->holds($user, 'products.edit_cost');
+        // Literal ->can(): permission:audit finds enforcement by scanning for it.
+        $costWritable = $user->can('products.edit_cost');
 
         if (!$row) {
             ProductPrice::create([

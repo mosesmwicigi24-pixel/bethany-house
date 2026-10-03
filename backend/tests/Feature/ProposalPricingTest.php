@@ -442,6 +442,35 @@ class ProposalPricingTest extends TestCase
         ])->assertCreated();
     }
 
+    public function test_a_cost_blind_maker_proposes_a_material_cost_without_seeing_any_cost(): void
+    {
+        // The outlet manager edits materials (inventory.adjust) but may not see cost (1C field rule).
+        $m = Material::create(['code' => 'MAT-' . uniqid(), 'name' => 'Linen', 'unit_of_measure' => 'm', 'unit_cost' => 400]);
+        Sanctum::actingAs($this->om);
+        $this->putJson("/api/v1/admin/inventory/materials/{$m->id}", ['unit_cost' => 600])->assertOk();
+
+        $res = $this->getJson("/api/v1/admin/proposals?subject_type=material&subject_ids={$m->id}&status=open")->assertOk();
+        $this->assertSame('•••', $res->json('data.0.changes.0.old_display'), 'the old cost is not shown to a cost-blind maker');
+        $this->assertNull($res->json('data.0.changes.0.old'));
+        $this->assertNull($res->json('data.0.measure'));
+
+        Sanctum::actingAs($this->fm);
+        $this->getJson("/api/v1/admin/proposals?subject_type=material&subject_ids={$m->id}")->assertOk()
+            ->assertJsonPath('data.0.changes.0.old_display', 'KES 400.00');
+    }
+
+    public function test_proposals_are_listed_only_to_those_who_may_see_the_event(): void
+    {
+        $row = $this->priced(1000, 800);
+        $this->savePrice($this->admin, $row, ['regular_price' => 1250])->assertOk();
+
+        $clerk = $this->user('pos_clerk');
+        Sanctum::actingAs($clerk);
+        $this->getJson("/api/v1/admin/proposals?subject_type=product_price&subject_ids={$row->id}")->assertOk()->assertJsonPath('count', 0);
+        $id = $this->latest('selling_price_change')->id;
+        $this->getJson("/api/v1/admin/proposals/{$id}")->assertForbidden();
+    }
+
     // ── customer credit (deposit terms) ──────────────────────────────────────
 
     private function order(float $total, ?int $customerId = null, string $currency = 'KES'): Order

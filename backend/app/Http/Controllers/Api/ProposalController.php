@@ -15,7 +15,7 @@ use Illuminate\Http\Request;
  * only after the required signatures. Signing happens in the Approvals inbox
  * (ApprovalController); these routes propose, preview, list and withdraw.
  *
- *   GET  /admin/proposals?event=&subject_type=&subject_id=&status=open|all&mine=1
+ *   GET  /admin/proposals?event=&subject_type=&subject_id=|subject_ids=1,2&status=open|all&mine=1
  *   POST /admin/proposals            {event, subject_id, changes:{field:value}, effective_from?, note?}
  *   POST /admin/proposals/preview    same body → straight through, or who must sign
  *   GET  /admin/proposals/{id}
@@ -37,6 +37,8 @@ class ProposalController extends Controller
             'event'        => 'nullable|string|max:64',
             'subject_type' => 'nullable|string|max:40',
             'subject_id'   => 'nullable|integer',
+            // Several subjects at once (a product's price rows): "12,13,14".
+            'subject_ids'  => 'nullable|string|max:2000',
             'status'       => 'nullable|in:open,all',
             'mine'         => 'nullable|boolean',
             'limit'        => 'nullable|integer|min:1|max:200',
@@ -52,6 +54,8 @@ class ProposalController extends Controller
             ->whereIn('event', $visible)
             ->when(!empty($data['subject_type']), fn ($q) => $q->where('subject_type', $data['subject_type']))
             ->when(isset($data['subject_id']), fn ($q) => $q->where('subject_id', (int) $data['subject_id']))
+            ->when(!empty($data['subject_ids']), fn ($q) => $q->whereIn('subject_id',
+                array_values(array_filter(array_map('intval', explode(',', $data['subject_ids']))))))
             ->when(($data['status'] ?? 'all') === 'open', fn ($q) => $q->whereIn('status', ChangeProposal::OPEN))
             ->when(!empty($data['mine']), fn ($q) => $q->where('maker_id', $user->id))
             ->orderByDesc('id')

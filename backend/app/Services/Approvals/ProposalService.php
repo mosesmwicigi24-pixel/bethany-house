@@ -43,7 +43,24 @@ final class ProposalService
         'inventory.approve'      => 'Procurement manager',
     ];
 
+    /**
+     * Events whose figures are cost (or are judged against cost): their values
+     * and measure lines are need-to-know (products.view_cost, the 1C field rule).
+     */
+    public const COST_EVENTS = ['product_cost_change', 'supplier_cost_change'];
+    public const COST_JUDGED_EVENTS = ['selling_price_change'];
+
     public function __construct(private ApprovalEngine $engine) {}
+
+    /** May this viewer see the cost figures this event carries? */
+    private function seesCost(?User $viewer, string $event): bool
+    {
+        if (!in_array($event, array_merge(self::COST_EVENTS, self::COST_JUDGED_EVENTS), true)) {
+            return true;
+        }
+
+        return $viewer !== null && \App\Support\CostVisibility::allows($viewer);
+    }
 
     public function handler(string $event): ProposalHandler
     {
@@ -155,22 +172,24 @@ final class ProposalService
             return ['changes' => $p->changeset, 'direct' => false, 'needs' => [], 'allowed' => false,
                 'message' => "You cannot propose a {$h->title()} change."];
         }
-        $open = $this->openFor($event, $h->subjectType(), $subjectId);
-        if ($this->qualifiesDirect($h, $p, $maker)) {
-            return ['changes' => $p->changeset, 'measures' => $p->measures, 'direct' => true, 'needs' => [],
-                'open' => $open ? $this->present($open, $maker) : null,
-                'message' => 'Within your band: this applies at once.'];
-        }
+        $open     = $this->openFor($event, $h->subjectType(), $subjectId);
+        $direct   = $this->qualifiesDirect($h, $p, $maker);
+        $needs    = $direct ? [] : $this->needs($h, $p);
+        // Cost and below-cost figures are need-to-know (judged on them, shown only to cost viewers).
+        $measures = $this->seesCost($maker, $event) ? $p->measures : array_intersect_key($p->measures ?? [], array_flip(['unit']));
 
-        $needs = $this->needs($h, $p);
+        $changes = $this->seesCost($maker, $event) || !in_array($event, self::COST_EVENTS, true)
+            ? $p->changeset
+            : array_map(fn ($c) => ['old' => null, 'new' => $c['new'] ?? null], $p->changeset);
 
         return [
-            'changes'  => $p->changeset,
-            'measures' => $p->measures,
-            'direct'   => false,
+            'changes'  => $changes,
+            'measures' => $measures,
+            'direct'   => $direct,
             'needs'    => $needs,
             'open'     => $open ? $this->present($open, $maker) : null,
-            'message'  => 'This change needs approval from ' . implode(', then ', $needs) . '.',
+            'message'  => $direct ? 'Within your band: this applies at once.'
+                : 'This change needs approval from ' . implode(', then ', $needs) . '.',
         ];
     }
 
@@ -348,6 +367,9 @@ final class ProposalService
         $name    = fn (?User $u) => $u ? (trim("{$u->first_name} {$u->last_name}") ?: $u->email) : null;
         $label   = fn (array $b) => self::BAND_LABELS[$b['permission']] ?? $b['permission'];
 
+        $seesCost = $this->seesCost($viewer, $p->event);
+        $hideValues = !$seesCost && in_array($p->event, self::COST_EVENTS, true);
+
         $awaiting = null;
         if ($request && $request->isPending()) {
             [$target] = $this->engine->effectiveBand($request, $p);
@@ -362,7 +384,10 @@ final class ProposalService
             'subject_type'   => $p->subject_type,
             'subject_id'     => $p->subject_id,
             'subject_label'  => $p->subject_label,
-            'changes'        => collect($p->changeset)->map(fn ($c, $field) => [
+            'changes'        => collect($p->changeset)->map(fn ($c, $field) => $hideValues ? [
+                'field' => $field, 'label' => $h?->fields()[$field] ?? $field,
+                'old' => null, 'new' => null, 'old_display' => '•••', 'new_display' => '•••',
+            ] : [
                 'field' => $field,
                 'label' => $h?->fields()[$field] ?? $field,
                 'old'   => $c['old'] ?? null,
@@ -370,7 +395,8 @@ final class ProposalService
                 'old_display' => $h ? $h->formatValue($field, $c['old'] ?? null, $p) : (string) ($c['old'] ?? ''),
                 'new_display' => $h ? $h->formatValue($field, $c['new'] ?? null, $p) : (string) ($c['new'] ?? ''),
             ])->values(),
-            'measure'        => $h?->measureLine($p),
+            // The measure line names the cost; a cost-blind viewer does not get it.
+            'measure'        => $seesCost ? $h?->measureLine($p) : null,
             'unit'           => $h?->unit(),
             'effective_from' => $p->effective_from?->toIso8601String(),
             'status'         => $p->status,
