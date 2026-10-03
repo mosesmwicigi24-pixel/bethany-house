@@ -21,6 +21,15 @@ class NotificationRoutingTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        // Roles as the catalogue grants them: money notifications are re-checked
+        // against payments.view (4D), so a bare role with no grants is not
+        // a finance role any more.
+        \Illuminate\Support\Facades\Artisan::call('permission:sync');
+    }
+
     private function userWithRole(string $role): User
     {
         $user = User::factory()->create(['status' => 'active']);

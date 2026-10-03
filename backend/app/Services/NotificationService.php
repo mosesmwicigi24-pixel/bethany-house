@@ -230,6 +230,23 @@ class NotificationService
         }
     }
 
+    /**
+     * Field rights on the payload (4D): recipients are picked by role NAME,
+     * but what a payload may carry is decided by PERMISSION. A role the owner
+     * has edited down (an admin without payments.view) must not keep receiving
+     * the figures its screens no longer show.
+     */
+    private static function holding(Collection $users, string $permission): Collection
+    {
+        return $users->filter(function (User $u) use ($permission) {
+            try {
+                return $u->can($permission);
+            } catch (\Throwable) {
+                return false;
+            }
+        })->values();
+    }
+
     // ── Order notifications ───────────────────────────────────────────────────
 
     /**
@@ -312,6 +329,13 @@ class NotificationService
      */
     public static function leadCaptured(int $leadId, string $who, string $intent): void
     {
+        // A name is a summary; a phone or an email is a customer contact, and
+        // this goes to lock screens and through Expo/Web Push (4D). The lead id
+        // opens the record, where contact rights apply.
+        if (preg_match('/\d{5,}|@/', preg_replace('/[\s()+\-.]/', '', $who))) {
+            $who = 'a new contact';
+        }
+
         self::send(
             self::resolve(self::OWNERS),
             new \App\Notifications\LeadCapturedNotification($leadId, $who, $intent)
@@ -333,7 +357,7 @@ class NotificationService
         string $method
     ): void {
         self::send(
-            self::resolve(self::FINANCE),
+            self::holding(self::resolve(self::FINANCE), 'payments.view'),
             new PaymentReceivedNotification(
                 $paymentId, $paymentNumber, $orderId, $orderNumber, $amount, $currency, $method
             )
@@ -353,7 +377,7 @@ class NotificationService
         string $countryCode
     ): void {
         self::send(
-            self::resolve(self::FINANCE),
+            self::holding(self::resolve(self::FINANCE), 'payments.view'),
             new PaymentApprovalRequiredNotification(
                 $paymentId, $paymentNumber, $orderId, $orderNumber, $amount, $currency, $countryCode
             )
@@ -371,7 +395,7 @@ class NotificationService
         int $orderId
     ): void {
         self::send(
-            self::resolve(self::FINANCE),
+            self::holding(self::resolve(self::FINANCE), 'payments.view'),
             new PaymentApprovalRequiredNotification(
                 $paymentId, $paymentNumber, $orderId, $orderNumber, 0, '', ''
             )
@@ -566,16 +590,19 @@ class NotificationService
         float $totalAmount,
         string $currency = 'KES'
     ): void {
-        self::send(
-            self::resolve(self::PROCUREMENT),
-            new InAppNotification(
-                title:     "Purchase Order {$poNumber} created",
-                body:      "New PO to {$supplierName} for {$currency} " . number_format($totalAmount, 2),
-                actionUrl: "/procurement/purchase-orders/{$purchaseOrderId}",
-                icon:      'orders',
-                data:      ['purchase_order_id' => $purchaseOrderId],
-            )
+        // A PO total is supplier cost: only products.view_cost holders see it.
+        $recipients = self::resolve(self::PROCUREMENT);
+        $withCost   = self::holding($recipients, 'products.view_cost');
+        $notice = fn (?string $amount) => new InAppNotification(
+            title:     "Purchase Order {$poNumber} created",
+            body:      "New PO to {$supplierName}" . ($amount !== null ? " for {$amount}" : ''),
+            actionUrl: "/procurement/purchase-orders/{$purchaseOrderId}",
+            icon:      'orders',
+            data:      ['purchase_order_id' => $purchaseOrderId],
         );
+
+        self::send($withCost, $notice("{$currency} " . number_format($totalAmount, 2)));
+        self::send($recipients->whereNotIn('id', $withCost->pluck('id'))->values(), $notice(null));
     }
 
     /**
@@ -870,7 +897,13 @@ class NotificationService
         string $actionUrl,
         int    $messageId
     ): void {
-        $user = self::user($userId);
+        // A mention is not an invitation (4D): someone named in a message who is
+        // not in the conversation must not receive its preview.
+        $channelId = DB::table('channel_messages')->where('id', $messageId)->value('channel_id');
+        $isMember  = $channelId && DB::table('channel_members')
+            ->where('channel_id', $channelId)->where('user_id', $userId)->exists();
+
+        $user = $isMember ? self::user($userId) : null;
         if ($user) {
             self::send($user, new InAppNotification(
                 title:     "{$posterName} mentioned you in #{$channelName}",
