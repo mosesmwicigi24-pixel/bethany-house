@@ -42,6 +42,14 @@ class PosRefundHandler extends ApprovalHandler
         return array_values(array_filter([$r->requested_by]));
     }
 
+    /** The refunded sale's outlet. */
+    public function outletScope(Model $r): ?array
+    {
+        $outletId = Order::withoutViewerScope()->whereKey($r->order_id)->value('outlet_id');
+
+        return ['orders.view', [$outletId === null ? null : (int) $outletId]];
+    }
+
     public function fingerprint(Model $r, ?array $payload = null): array
     {
         return [

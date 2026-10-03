@@ -369,6 +369,25 @@ class PosTillApprovalsTest extends TestCase
         $this->assertNotContains($this->clerk->id, $ids);
     }
 
+    public function test_an_outlet_manager_of_another_outlet_cannot_sign_from_the_inbox_either(): void
+    {
+        // Phase 4A bounds an outlet manager to their outlets; the Approvals
+        // inbox (Phase 3B) must honour that as the till does.
+        $order = $this->sale(1500);
+        $id = $this->requestVoid($order)->assertStatus(202)->json('approval.id');
+
+        $elsewhere = $this->user(['outlet_manager'], Outlet::factory()->create());
+        $this->as($elsewhere);
+        $this->assertFalse(collect($this->getJson('/api/v1/admin/approvals/inbox')->assertOk()->json('data'))->contains('id', $id));
+        $this->getJson("/api/v1/admin/approvals/{$id}")->assertForbidden();
+        $this->inboxSign($elsewhere, ApprovalRequest::find($id))->assertNotFound()->assertJsonPath('code', 'APPROVABLE_OUT_OF_SCOPE');
+        $this->assertSame('confirmed', $order->fresh()->status);
+
+        // This outlet's manager still signs it from the inbox.
+        $this->inboxSign($this->om, ApprovalRequest::find($id))->assertOk()->assertJsonPath('request.status', 'approved');
+        $this->assertSame('voided', $order->fresh()->status);
+    }
+
     // ── till close ───────────────────────────────────────────────────────────
 
     public function test_a_void_is_refused_after_the_till_is_closed(): void

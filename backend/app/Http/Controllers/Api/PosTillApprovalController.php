@@ -106,7 +106,7 @@ class PosTillApprovalController extends Controller
 
         if (!$this->mayApproveAtOutlet($approver, (int) $order->outlet_id)) {
             return response()->json([
-                'message' => 'This approver is not assigned to this outlet. They can sign from their Approvals inbox if their band allows.',
+                'message' => 'This approver is not assigned to this outlet. They can sign from their Approvals inbox if their band and outlets allow.',
                 'code'    => 'APPROVER_NOT_AT_OUTLET',
             ], 403);
         }

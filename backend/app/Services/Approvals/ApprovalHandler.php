@@ -88,4 +88,18 @@ abstract class ApprovalHandler
      * record cannot come back (e.g. it has since been cancelled).
      */
     abstract public function reopen(Model $record, User $maker): void;
+
+    /**
+     * Where the record sits, for a signer bounded to outlets (Phase 4A data
+     * scope): [the capability that governs reading it, the outlet ids it
+     * belongs to]. A record at several outlets (a transfer) is in scope when
+     * ANY of them is the signer's; a null id is head office, which a bounded
+     * signer does not reach. null = not an outlet-bound record.
+     *
+     * @return array{0: string, 1: list<int|null>}|null
+     */
+    public function outletScope(Model $record): ?array
+    {
+        return null;
+    }
 }

@@ -36,6 +36,12 @@ class PosVoidHandler extends ApprovalHandler
         return "order:{$o->id}";
     }
 
+    /** The sale's outlet. */
+    public function outletScope(Model $o): ?array
+    {
+        return ['orders.view', [$o->outlet_id === null ? null : (int) $o->outlet_id]];
+    }
+
     /** Only the requester: the engine records them as the maker. */
     public function makerIds(Model $o): array
     {

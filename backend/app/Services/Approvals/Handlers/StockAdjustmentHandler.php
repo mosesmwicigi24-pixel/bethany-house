@@ -50,6 +50,14 @@ final class StockAdjustmentHandler extends ApprovalHandler
         return [$t->created_by];
     }
 
+    /** The outlet of the stock row it moves (as StockAdjustmentsController::scoped()). */
+    public function outletScope(Model $t): ?array
+    {
+        $outletId = \Illuminate\Support\Facades\DB::table('inventory_items')->where('id', $t->inventory_item_id)->value('outlet_id');
+
+        return ['inventory.view', [$outletId === null ? null : (int) $outletId]];
+    }
+
     public function fingerprint(Model $t, ?array $payload = null): array
     {
         return [

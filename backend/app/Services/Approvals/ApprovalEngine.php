@@ -6,6 +6,7 @@ use App\Models\ApprovalRequest;
 use App\Models\ApprovalSignature;
 use App\Models\User;
 use App\Services\ActivityLogService;
+use App\Services\DataScopeResolver;
 use App\Services\NotificationService;
 use App\Support\MakerChecker;
 use App\Support\ReportingCurrency;
@@ -336,6 +337,11 @@ final class ApprovalEngine
         if (!$record) {
             $this->fail(404, 'APPROVABLE_MISSING', 'The record this approval is for no longer exists.');
         }
+        // Phase 4A: a signer bounded to outlets never reaches another outlet's
+        // record through the inbox either — absent to them, as on its own route.
+        if (!$this->withinScope($signer, $request, $record)) {
+            $this->fail(404, 'APPROVABLE_OUT_OF_SCOPE', 'This record is not at an outlet you are assigned to.');
+        }
 
         // Maker ≠ checker first: a maker is refused as a maker (SELF_APPROVAL),
         // whatever band they might also hold. Before any write, so the audit
@@ -544,7 +550,7 @@ final class ApprovalEngine
             return false;
         }
         $record = $this->handler($request->event)->find((int) $request->approvable_id);
-        if (!$record) {
+        if (!$record || !$this->withinScope($user, $request, $record)) {
             return false;
         }
         if (in_array((int) $user->id, $this->makerIdsOf($request, $record), true)
@@ -554,6 +560,30 @@ final class ApprovalEngine
         [$target] = $this->effectiveBand($request, $record);
 
         return $this->canSignBand($user, $request, $target);
+    }
+
+    /**
+     * Phase 4A on the engine: Phase 3B's inbox and sign route reach records by
+     * request id, so without this an outlet manager holding a band key
+     * (inventory.approve, pos.approve_reversal) would list and sign another
+     * outlet's adjustment, transfer or till reversal — the records 4A bounds
+     * on their own routes. Unbounded signers (super admin, finance,
+     * procurement) are unaffected; a record that is not outlet-bound is
+     * always in scope.
+     */
+    public function withinScope(User $user, ApprovalRequest $request, Model $record): bool
+    {
+        $scope = $this->handler($request->event)->outletScope($record);
+        if ($scope === null) {
+            return true;
+        }
+        [$permission, $outletIds] = $scope;
+        $allowed = DataScopeResolver::outletIdsForUnowned($user, $permission);
+        if ($allowed === null) {
+            return true;
+        }
+
+        return array_intersect(array_filter($outletIds, fn ($id) => $id !== null), $allowed) !== [];
     }
 
     // ── cancelling, expiring, resubmitting ──────────────────────────────────

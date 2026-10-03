@@ -201,6 +201,37 @@ class ApprovalFlowsTest extends TestCase
         $this->assertSame(2, $this->latest('stock_adjustment', $id)->version);
     }
 
+    public function test_an_outlet_manager_lists_and_signs_only_their_own_outlets_requests(): void
+    {
+        // Phase 3B's inbox reaches records by request id; Phase 4A bounds an
+        // outlet manager to their outlets. Combined, the inbox must not hand
+        // one shop's manager another shop's adjustment to sign. The outlet
+        // manager role holds no adjustment band today; the owner may give it
+        // one (roles are his to set), and the boundary must hold when he does.
+        $role = Role::findByName('outlet_manager', 'sanctum');
+        $role->givePermissionTo('inventory.approve');
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        $item = $this->item(100);
+        $id   = $this->adjust($this->outletManager, $item, 'correction', 5)->assertCreated()->json('adjustment.id');
+        $r    = $this->latest('stock_adjustment', $id);
+        $this->assertSame(['inventory.approve'], array_column($r->bands, 'permission'));
+
+        $here = $this->user('outlet_manager');
+        $here->outlets()->attach($item->outlet_id);
+        $elsewhere = $this->user('outlet_manager');
+        $elsewhere->outlets()->attach(Outlet::factory()->create()->id);
+
+        $this->assertNotContains($r->id, $this->inboxIds($elsewhere));
+        $this->getJson("/api/v1/admin/approvals/{$r->id}")->assertForbidden();
+        $this->sign($elsewhere, $r)->assertNotFound()->assertJsonPath('code', 'APPROVABLE_OUT_OF_SCOPE');
+        $this->assertSame(1000, (int) $item->fresh()->quantity_on_hand);
+        $this->assertSame(0, $r->fresh()->signatures()->count());
+
+        $this->assertContains($r->id, $this->inboxIds($here));
+        $this->sign($here, $r)->assertOk()->assertJsonPath('request.status', 'approved');
+        $this->assertSame(1005, (int) $item->fresh()->quantity_on_hand);
+    }
+
     // ── stock transfers ─────────────────────────────────────────────────────
 
     public function test_a_transfer_waits_for_the_procurement_manager(): void

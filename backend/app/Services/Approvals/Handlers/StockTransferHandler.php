@@ -33,6 +33,15 @@ final class StockTransferHandler extends ApprovalHandler
         return [$t->created_by, $t->getAttribute('requested_by')];
     }
 
+    /** Either side (as InventoryTransfer::scopeVisibleTo()). */
+    public function outletScope(Model $t): ?array
+    {
+        return ['inventory.view', [
+            $t->from_outlet_id === null ? null : (int) $t->from_outlet_id,
+            $t->to_outlet_id === null ? null : (int) $t->to_outlet_id,
+        ]];
+    }
+
     public function adoptedMaker(Model $t): ?int
     {
         $id = $t->getAttribute('requested_by') ?: $t->created_by;
