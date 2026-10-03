@@ -44,6 +44,8 @@ import type { ApiError } from "@/types";
 import type { ProductTaxRate } from "@/api/products";
 import { clsx } from "clsx";
 import { RecordHistory } from "@/components/audit/AuditParts";
+import { PendingChanges, PROPOSALS_QUERY_KEY } from "@/components/approvals/PendingChanges";
+import { proposeChange, waitsForApproval } from "@/api/proposals";
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -1475,8 +1477,10 @@ function EditVariantModal({
                     cost_price: p.cost_price ?? null,
                 })),
             }),
-        onSuccess: () => {
-            toast.success("Variant updated.");
+        onSuccess: (res) => {
+            // Phase 3C: a price change past the maker's band waits for approval.
+            if (waitsForApproval(res)) toast.info(res.message);
+            else toast.success("Variant updated.");
             onSaved();
             onClose();
         },
@@ -2450,6 +2454,76 @@ function FeaturesTab({ features, onChange }: { features: Feature[]; onChange: (f
     );
 }
 
+// ── Cost proposals (Phase 3C) ────────────────────────────────────────────────
+// The procurement manager owns cost but not the catalogue (products.edit_cost
+// without products.edit), so the product form is read-only for them. This is
+// their one write: a KES cost per price row, proposed — at once within 5%,
+// otherwise it waits for finance (and the super admin above 25%).
+function CostProposalPanel({ product }: { product: { id: number; prices?: { id?: number; currency_code: string; cost_price: number | null; product_variant_id: number | null }[]; variants?: { id: number; variant_name: string; prices?: { id?: number; currency_code: string; cost_price: number | null; product_variant_id: number | null }[] }[] } }) {
+    const toast = useToastStore();
+    const qc = useQueryClient();
+    const rows = [
+        ...(product.prices ?? []).filter((p) => p.currency_code === "KES" && p.id).map((p) => ({ id: Number(p.id), label: "Product", cost: p.cost_price })),
+        ...(product.variants ?? []).flatMap((v) => (v.prices ?? [])
+            .filter((p) => p.currency_code === "KES" && p.id)
+            .map((p) => ({ id: Number(p.id), label: v.variant_name, cost: p.cost_price }))),
+    ];
+    const [values, setValues] = useState<Record<number, string>>({});
+
+    const propose = useMutation({
+        mutationFn: (row: { id: number; value: string }) =>
+            proposeChange({ event: "product_cost_change", subject_id: row.id, changes: { cost_price: row.value === "" ? null : Number(row.value) } }),
+        onSuccess: (res) => {
+            if (res.proposal && res.proposal.status !== "applied") toast.info(res.message);
+            else toast.success(res.message);
+            qc.invalidateQueries({ queryKey: [PROPOSALS_QUERY_KEY] });
+            qc.invalidateQueries({ queryKey: ["product", String(product.id)] });
+            setValues({});
+        },
+        onError: (e: ApiError) => toast.error(e.message),
+    });
+
+    if (rows.length === 0) {
+        return <p className="text-xs text-surface-500">This product has no KES price row yet, so it has nowhere to keep a cost.</p>;
+    }
+
+    return (
+        <div className="rounded-xl border border-line bg-surface-50/50 p-4 space-y-3">
+            <div>
+                <h4 className="text-sm font-semibold text-surface-800">Cost (KES)</h4>
+                <p className="text-xs text-surface-400 mt-0.5">
+                    Within 5% of the cost 24 hours ago it applies at once; more needs approval from finance
+                    (and the super admin above 25%).
+                </p>
+            </div>
+            {rows.map((r) => (
+                <div key={r.id} className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                    <label className="flex-1 min-w-0">
+                        <span className="label">{r.label} — now {r.cost == null ? "no cost" : `KES ${Number(r.cost).toLocaleString("en-KE", { minimumFractionDigits: 2 })}`}</span>
+                        <input
+                            className="input"
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={values[r.id] ?? ""}
+                            placeholder={r.cost == null ? "" : String(r.cost)}
+                            onChange={(e) => setValues((v) => ({ ...v, [r.id]: e.target.value }))}
+                        />
+                    </label>
+                    <button
+                        type="button"
+                        className="btn-secondary btn-sm shrink-0"
+                        disabled={propose.isPending || (values[r.id] ?? "") === ""}
+                        onClick={() => propose.mutate({ id: r.id, value: values[r.id] ?? "" })}
+                    >
+                        Propose cost
+                    </button>
+                </div>
+            ))}
+        </div>
+    );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function ProductFormPage() {
@@ -2824,7 +2898,11 @@ export default function ProductFormPage() {
             return res;
         },
         onSuccess: (res) => {
-            toast.success(isEditing ? "Product saved." : "Product created.");
+            // Phase 3C: a price or cost change past the maker's band waits for
+            // approval — the live price stays, and the message says who signs.
+            if (waitsForApproval(res)) toast.info(res.message);
+            else toast.success(isEditing ? "Product saved." : "Product created.");
+            qc.invalidateQueries({ queryKey: [PROPOSALS_QUERY_KEY] });
             qc.invalidateQueries({ queryKey: ["products"] });
             if (!isEditing)
                 navigate(`/catalogue/products/${res.product.id}`, {
@@ -3728,6 +3806,28 @@ export default function ProductFormPage() {
                                         taxInclusive={taxInclusive}
                                     />
                                 </div>
+
+                                {/* ── Changes waiting for approval (Phase 3C) ───── */}
+                                {product && (
+                                    <PendingChanges
+                                        subjectType="product_price"
+                                        subjectIds={[
+                                            ...(product.prices ?? []).map((p) => Number(p.id)),
+                                            ...(product.variants ?? []).flatMap((v) => (v.prices ?? []).map((p) => Number(p.id))),
+                                        ]}
+                                    />
+                                )}
+                                {isEditing && (
+                                    <p className="text-2xs text-surface-500">
+                                        A price change of more than 10%, or one that sells below cost, needs
+                                        approval from finance (and the super admin when more than 20% below
+                                        cost). A cost change of more than 5% needs finance (and the super admin
+                                        above 25%). Until then the current figure stays.
+                                    </p>
+                                )}
+                                {product && can("products.edit_cost") && !can("products.edit") && (
+                                    <CostProposalPanel product={product} />
+                                )}
 
                                 {/* Auto-calculates non-base currency prices — renders nothing visible */}
                                 {/* ── Currency prices ──────────────────────────── */}

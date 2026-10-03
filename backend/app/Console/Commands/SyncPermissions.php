@@ -148,6 +148,11 @@ class SyncPermissions extends Command
         // admin, finance and procurement (super_admin via Gate::before).
         // Admin inherits it through products.*.
         'products.view_cost'   => ['View Product Cost',     'See cost prices, material unit costs and BOM costs', 'Catalogue'],
+        // Writing the KES cost price (Phase 3C). Applies at once within the
+        // cost band (5%); beyond it the change waits for finance (and the
+        // super admin past 25%) as a product_cost_change proposal. The
+        // procurement manager is the cost maker; admin keeps it via products.*.
+        'products.edit_cost'   => ['Edit Product Cost',     'Change a product\'s KES cost price; above the cost band it waits for finance (and the super admin above that)', 'Catalogue'],
 
         // ── POS ─────────────────────────────────────────────────────────────
         'pos.access'           => ['POS Access',           'Use the point-of-sale terminal',              'POS'],
@@ -241,6 +246,14 @@ class SyncPermissions extends Command
         // which the platform head must never touch (plan §3.2). Not settings.*,
         // so admin's settings grants cannot carry it.
         'setup.technical'           => ['Technical Setup',           'Read and edit countries, languages, shipping zones and shipping methods', 'Settings'],
+
+        // Proposals (Phase 3C). Finance PROPOSES a tax-rate, reporting-FX or
+        // payment-settlement change and the super admin signs it; admin
+        // proposes a customer pricing rate and finance signs it. Each also
+        // opens its screens read-only. Not settings.edit: nothing here writes
+        // a value directly.
+        'settings.financial_propose'    => ['Propose Financial Settings', 'Propose tax-rate, reporting exchange-rate and payment settlement changes; the super admin signs them', 'Settings'],
+        'settings.pricing_rate_propose' => ['Propose Pricing Rate',     'Propose a change to a currency\'s customer-facing pricing rate; finance signs it', 'Settings'],
 
         // ── Users & Roles ────────────────────────────────────────────────────
         'users.view'           => ['View Users',           'List and view system users',                  'Users & Roles'],
@@ -387,6 +400,8 @@ class SyncPermissions extends Command
             'expenses.view',
             'outlets.view',
             'settings.view',
+            // Proposes a customer pricing rate; finance signs it (Phase 3C).
+            'settings.pricing_rate_propose',
             'users.view', 'roles.view',
             'attendance.view_team',
         ],
@@ -492,6 +507,8 @@ class SyncPermissions extends Command
             'products.view',
             'production.view_bom',
             'products.view_cost',
+            // The cost maker: within 5% at once, beyond it a proposal (3C).
+            'products.edit_cost',
             'bom.edit',
             'payments.view',
             // Plan §6: production, stock and supplier pages; files from the
@@ -509,6 +526,9 @@ class SyncPermissions extends Command
             // Finance's signature on purchase-order and stock-adjustment bands
             // above the procurement manager's (Phase 3B approval engine).
             'approvals.finance_sign',
+            // Proposes tax-rate, reporting-FX and settlement changes; the super
+            // admin signs them (Phase 3C).
+            'settings.financial_propose',
             // Expenses - the checker. Approves, budgets, exports; never creates,
             // edits or deletes the records it approves (plan §3.4).
             'expenses.view', 'expenses.approve', 'expenses.export', 'expenses.budgets',
@@ -730,6 +750,9 @@ class SyncPermissions extends Command
                 // future 'approvals.*' must never hand it to a role.
                 'approvals.super_sign',
                 'approvals.finance_sign',
+                // Finance's proposal key must never reach another role through
+                // a future 'settings.*' (Phase 3C).
+                'settings.financial_propose',
             ];
 
             // Resolve "@bundle" references first, so wildcard expansion and

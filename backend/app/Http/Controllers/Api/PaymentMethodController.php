@@ -164,44 +164,74 @@ class PaymentMethodController extends Controller
             'is_default'           => 'sometimes|boolean',
             'requires_approval'    => 'sometimes|boolean',
             'sort_order'           => 'nullable|integer|min:0',
+            // Phase 3C: when a settlement change takes effect (now or later).
+            'effective_from'       => 'sometimes|nullable|date',
         ]);
 
         $update = ['updated_at' => now()];
 
-        foreach (['name', 'description', 'type', 'provider', 'icon', 'is_active', 'is_default', 'requires_approval'] as $col) {
-            if (array_key_exists($col, $validated)) {
+        // requires_approval — whether a payment by this method counts at once or
+        // waits for review — is a payment_settlement_change proposal (Phase 3C):
+        // finance proposes, the super admin signs, effective-dated. The rest is
+        // a plain edit and stays the super admin's (settings.edit).
+        foreach (['name', 'description', 'type', 'provider', 'icon', 'is_active', 'is_default'] as $col) {
+            if (array_key_exists($col, $validated)
+                && (string) (is_bool($validated[$col]) ? (int) $validated[$col] : $validated[$col]) !== (string) (is_bool($method->{$col} ?? null) ? (int) $method->{$col} : ($method->{$col} ?? ''))) {
                 $update[$col] = $validated[$col];
             }
         }
 
-        if (isset($validated['supported_currencies'])) {
+        if (isset($validated['supported_currencies'])
+            && $validated['supported_currencies'] !== (json_decode($method->supported_currencies ?? 'null', true) ?? null)) {
             $update['supported_currencies'] = json_encode($validated['supported_currencies']);
         }
 
-        if (isset($validated['sort_order'])) {
+        if (isset($validated['sort_order']) && (int) $validated['sort_order'] !== (int) ($method->sort_order ?? -1)) {
             $update['sort_order']    = $validated['sort_order'];
             $update['display_order'] = $validated['sort_order'];
         }
 
-        // If setting as default, clear others first
-        if (!empty($validated['is_default'])) {
-            DB::table('payment_methods')->where('id', '!=', $id)->update(['is_default' => false]);
+        $plainChanged = count($update) > 1;
+        if ($plainChanged && !$request->user()->can('settings.edit')) {
+            return response()->json([
+                'message' => 'You can propose a change to whether payments by this method wait for review; its other details are the super admin\'s to edit.',
+                'code'    => 'NOT_A_SETTINGS_EDITOR',
+            ], 403);
         }
 
-        DB::table('payment_methods')->where('id', $id)->update($update);
+        $proposals = app(\App\Services\Approvals\ProposalService::class);
+        $proposal  = DB::transaction(function () use ($validated, $id, $update, $plainChanged, $proposals, $request) {
+            // If setting as default, clear others first
+            if (!empty($update['is_default'])) {
+                DB::table('payment_methods')->where('id', '!=', $id)->update(['is_default' => false]);
+            }
+            if ($plainChanged) {
+                DB::table('payment_methods')->where('id', $id)->update($update);
+            }
 
-        try {
-            ActivityLogService::log('payment_method_updated', null, [
-                'method_id' => $id,
-                'code'      => $method->code,
-                'changes'   => array_keys(array_diff_key($update, ['updated_at' => 1])),
-            ]);
-        } catch (\Exception) {}
+            return array_key_exists('requires_approval', $validated)
+                ? $proposals->propose('payment_settlement_change', (int) $id, ['requires_approval' => $validated['requires_approval']],
+                    $request->user(), $validated['effective_from'] ?? null)
+                : null;
+        });
+
+        if ($plainChanged) {
+            try {
+                ActivityLogService::log('payment_method_updated', null, [
+                    'method_id' => $id,
+                    'code'      => $method->code,
+                    'changes'   => array_keys(array_diff_key($update, ['updated_at' => 1])),
+                ]);
+            } catch (\Exception) {}
+        }
+
+        $waiting = $proposal && $proposal->status !== \App\Models\ChangeProposal::APPLIED;
 
         return response()->json([
-            'message'        => 'Payment method updated successfully.',
+            'message'        => $proposal ? $proposals->message($proposal) : 'Payment method updated successfully.',
             'payment_method' => $this->format(DB::table('payment_methods')->find($id)),
-        ]);
+            'proposal'       => $proposal ? $proposals->present($proposal->fresh('maker'), $request->user()) : null,
+        ], $waiting ? 202 : 200);
     }
 
     /**

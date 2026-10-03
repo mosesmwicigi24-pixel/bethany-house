@@ -1,4 +1,5 @@
 import { get, post, put, del } from "./client";
+import type { Proposal } from "@/api/proposals";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -107,7 +108,8 @@ export const rawMaterialsApi = {
             is_active: boolean;
         }>,
     ) =>
-        put<{ message: string; material: RawMaterial }>(
+        // Phase 3C: a unit-cost change past 5% comes back as a waiting proposal.
+        put<{ message: string; material: RawMaterial; proposal?: Proposal | null }>(
             `/v1/admin/inventory/materials/${id}`,
             data,
         ),
@@ -130,7 +132,7 @@ export const rawMaterialsApi = {
             reference?: string;
         },
     ) =>
-        post<{ message: string; inventory: MaterialInventoryRecord }>(
+        post<{ message: string; inventory: MaterialInventoryRecord; proposal?: Proposal | null }>(
             `/v1/admin/inventory/materials/${id}/receive`,
             data,
         ),

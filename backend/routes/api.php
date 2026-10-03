@@ -528,6 +528,22 @@ Route::prefix('v1')->group(function () {
                 Route::post('/{id}/resubmit',       [\App\Http\Controllers\Api\ApprovalController::class, 'resubmit'])->whereNumber('id');
             });
 
+            // ── Proposals (Phase 3C) ─────────────────────────────────────────
+            // Changes to money-relevant values (prices, costs, tax, FX,
+            // settlement, credit) that apply only once signed. Who may propose
+            // each is the event's maker keys, checked in ProposalService; the
+            // signing is the Approvals inbox above.
+            Route::prefix('proposals')->group(function () {
+                Route::get('/',                   [\App\Http\Controllers\Api\ProposalController::class, 'index']);
+                Route::post('/',                  [\App\Http\Controllers\Api\ProposalController::class, 'store']);
+                Route::post('/preview',           [\App\Http\Controllers\Api\ProposalController::class, 'preview']);
+                Route::get('/thresholds',         [\App\Http\Controllers\Api\ProposalController::class, 'thresholds']);
+                Route::put('/thresholds/{event}', [\App\Http\Controllers\Api\ProposalController::class, 'updateThresholds'])
+                    ->where('event', '[a-z_]+');
+                Route::get('/{id}',               [\App\Http\Controllers\Api\ProposalController::class, 'show'])->whereNumber('id');
+                Route::post('/{id}/withdraw',     [\App\Http\Controllers\Api\ProposalController::class, 'withdraw'])->whereNumber('id');
+            });
+
             // ── Trash / Recycle Bin (super_admin only) ────────────────────────
             // BUGFIX: this group previously had no role/permission middleware
             // at all - only auth:sanctum from the outer wrapper - despite the
@@ -1341,17 +1357,20 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Tax rates ─────────────────────────────────────────────────────
-            Route::middleware('permission:settings.view,sanctum')->prefix('tax-rates')->group(function () {
+            // Phase 3C: finance (settings.financial_propose) reads tax rates and
+            // PROPOSES what one charges; the controller sends rate / active /
+            // default through a tax_rate_change proposal the super admin signs.
+            Route::middleware('permission:settings.view|settings.financial_propose,sanctum')->prefix('tax-rates')->group(function () {
                 Route::get('/',            [TaxRateController::class, 'index']);
                 Route::get('/{id}',        [TaxRateController::class, 'show']);
                 Route::post('/',           [TaxRateController::class, 'store'])
                     ->middleware(['permission:settings.edit,sanctum', 'step.up']);
                 Route::put('/{id}',        [TaxRateController::class, 'update'])
-                    ->middleware(['permission:settings.edit,sanctum', 'step.up']);
+                    ->middleware(['permission:settings.edit|settings.financial_propose,sanctum', 'step.up']);
                 Route::delete('/{id}',     [TaxRateController::class, 'destroy'])
                     ->middleware(['permission:settings.edit,sanctum', 'step.up']);
                 Route::put('/{id}/toggle', [TaxRateController::class, 'toggleStatus'])
-                    ->middleware(['permission:settings.edit,sanctum', 'step.up']);
+                    ->middleware(['permission:settings.edit|settings.financial_propose,sanctum', 'step.up']);
             });
 
             // ── Shipping ──────────────────────────────────────────────────────
@@ -1779,17 +1798,25 @@ Route::prefix('v1')->group(function () {
                 });
             });
 
-            Route::middleware('permission:settings.view,sanctum')->prefix('currencies-management')->group(function () {
+            // Phase 3C: the two rates are proposals. Finance proposes a reporting
+            // rate (the super admin signs), admin a pricing rate (finance signs);
+            // both may read the screen and reach the two rate-writing routes,
+            // where the controller sends each rate through its proposal and
+            // keeps every other field the super admin's (settings.edit).
+            Route::middleware('permission:settings.view|settings.financial_propose|settings.pricing_rate_propose,sanctum')->prefix('currencies-management')->group(function () {
                 Route::get('/',                 [CurrencyController::class, 'index']);
                 Route::get('/{id}',             [CurrencyController::class, 'show']);
 
+                Route::middleware(['permission:settings.edit|settings.financial_propose|settings.pricing_rate_propose,sanctum', 'step.up'])->group(function () {
+                    Route::put('/{id}',             [CurrencyController::class, 'update']);
+                    Route::put('/{id}/rates',       [CurrencyController::class, 'updateRates']);
+                });
+
                 Route::middleware(['permission:settings.edit,sanctum', 'step.up'])->group(function () {
                     Route::post('/',                [CurrencyController::class, 'store']);
-                    Route::put('/{id}',             [CurrencyController::class, 'update']);
                     Route::delete('/{id}',          [CurrencyController::class, 'destroy']);
                     Route::put('/{id}/toggle',      [CurrencyController::class, 'toggleStatus']);
                     Route::put('/{id}/set-default', [CurrencyController::class, 'setDefault']);
-                    Route::put('/{id}/rates',       [CurrencyController::class, 'updateRates']);
                     Route::post('/sync-rates',      [CurrencyController::class, 'syncRates']);
                 });
             });
@@ -1806,13 +1833,18 @@ Route::prefix('v1')->group(function () {
                 });
             });
 
-            Route::middleware('permission:settings.view,sanctum')->prefix('payment-methods-management')->group(function () {
+            // Phase 3C: finance reads payment methods and proposes settlement
+            // changes (requires_approval); the controller sends that field
+            // through a proposal the super admin signs and keeps every other
+            // field the super admin's (settings.edit).
+            Route::middleware('permission:settings.view|settings.financial_propose,sanctum')->prefix('payment-methods-management')->group(function () {
                 Route::get('/',            [PaymentMethodController::class, 'index']);
                 Route::get('/{id}',        [PaymentMethodController::class, 'show']);
+                Route::put('/{id}',        [PaymentMethodController::class, 'update'])
+                    ->middleware(['permission:settings.edit|settings.financial_propose,sanctum', 'step.up']);
 
                 Route::middleware(['permission:settings.edit,sanctum', 'step.up'])->group(function () {
                     Route::post('/',           [PaymentMethodController::class, 'store']);
-                    Route::put('/{id}',        [PaymentMethodController::class, 'update']);
                     Route::delete('/{id}',     [PaymentMethodController::class, 'destroy']);
                     Route::put('/{id}/toggle', [PaymentMethodController::class, 'toggleStatus']);
                     Route::put('/{id}/config', [PaymentMethodController::class, 'updateConfig']);

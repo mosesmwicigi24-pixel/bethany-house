@@ -24,6 +24,8 @@ import {
 import { get } from "@/api/client";
 import type { ApiError } from "@/types";
 import { clsx } from "clsx";
+import { PendingChanges, NeedsApprovalHint, PROPOSALS_QUERY_KEY } from "@/components/approvals/PendingChanges";
+import { waitsForApproval } from "@/api/proposals";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -163,6 +165,7 @@ function MaterialFormModal({
     onSaved: () => void;
 }) {
     const toast = useToastStore();
+    const qc = useQueryClient();
     const [codeManual, setCodeManual] = useState(false);
 
     const form = useForm<MaterialForm>({
@@ -238,8 +241,11 @@ function MaterialFormModal({
                 ? rawMaterialsApi.update(editing.id, payload)
                 : rawMaterialsApi.create(payload);
         },
-        onSuccess: () => {
-            toast.success(editing ? "Material updated." : "Material created.");
+        onSuccess: (res) => {
+            // Phase 3C: a cost change past 5% waits for finance; the message says so.
+            if (waitsForApproval(res)) toast.info(res.message);
+            else toast.success(editing ? "Material updated." : "Material created.");
+            qc.invalidateQueries({ queryKey: [PROPOSALS_QUERY_KEY] });
             onSaved();
             onClose();
         },
@@ -373,7 +379,14 @@ function MaterialFormModal({
                             min="0"
                             {...register("unit_cost")}
                         />
+                        {editing && (
+                            <NeedsApprovalHint>
+                                Within 5% of the cost 24 hours ago it applies at once; more needs
+                                approval from finance (and the super admin above 25%).
+                            </NeedsApprovalHint>
+                        )}
                     </Field>
+                    {editing && <PendingChanges subjectType="material" subjectIds={[editing.id]} />}
 
                     <Field
                         label="Reorder Point"
@@ -449,9 +462,11 @@ function ReceiveModal({
                 reference: reference || undefined,
             }),
         onSuccess: (res) => {
-            toast.success(res.message);
+            if (res.proposal && res.proposal.status !== "applied") toast.info(res.message);
+            else toast.success(res.message);
             qc.invalidateQueries({ queryKey: ["materials"] });
             qc.invalidateQueries({ queryKey: ["material", material.id] });
+            qc.invalidateQueries({ queryKey: [PROPOSALS_QUERY_KEY] });
             onClose();
         },
         onError: (err: ApiError) => toast.error(err.message),

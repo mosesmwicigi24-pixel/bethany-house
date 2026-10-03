@@ -68,7 +68,9 @@ interface ApprovalItem {
     expires_at: string | null;
     decided_at: string | null;
     created_at: string | null;
-    summary: { title: string; reference?: string; link?: string; lines?: string[] } | null;
+    // unit (Phase 3C proposals): what amount means — "percent" and "none"
+    // are not money, so the KES amount line is not shown for them.
+    summary: { title: string; reference?: string; link?: string; lines?: string[]; unit?: "percent" | "kes" | "none" } | null;
     can_sign: boolean;
     can_resubmit: boolean;
 }
@@ -82,6 +84,15 @@ const EVENT_LABELS: Record<string, string> = {
     imprest_topup:        "Imprest top-up",
     payment_void:         "Payment void",
     payment_reassign:     "Payment move",
+    // Phase 3C proposals: the new value applies only once signed.
+    selling_price_change:       "Selling price",
+    product_cost_change:        "Product cost",
+    supplier_cost_change:       "Supplier cost",
+    tax_rate_change:            "Tax rate",
+    reporting_fx_change:        "Reporting rate",
+    customer_pricing_fx_change: "Pricing rate",
+    payment_settlement_change:  "Payment settlement",
+    customer_credit:            "Customer credit",
 };
 
 /** Who a band's key belongs to, in words. */
@@ -242,7 +253,8 @@ function BandTrail({ item }: { item: ApprovalItem }) {
 
 function RequestCard({ item, actions }: { item: ApprovalItem; actions?: ReactNode }) {
     const navigate = useNavigate();
-    const amountLine = item.amount !== null && item.currency_code
+    const notMoney = item.summary?.unit === "percent" || item.summary?.unit === "none";
+    const amountLine = !notMoney && item.amount !== null && item.currency_code
         ? `${item.currency_code} ${item.amount.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
         : null;
 
@@ -272,7 +284,7 @@ function RequestCard({ item, actions }: { item: ApprovalItem; actions?: ReactNod
                                 Value unknown — every band required
                             </span>
                         )}
-                        {item.basis_kes !== null && item.amount_kes !== null && item.basis_kes > item.amount_kes && (
+                        {!notMoney && item.basis_kes !== null && item.amount_kes !== null && item.basis_kes > item.amount_kes && (
                             <span className="text-warning-dark" title="The band is judged on the same maker's submissions to the same counterparty in the last 24 hours">
                                 24h total: {kes(item.basis_kes)}
                             </span>

@@ -1705,22 +1705,26 @@ class OrderController extends Controller
             return response()->json(['message' => 'Deposit amount must be less than the order total.'], 422);
         }
 
-        $order->update([
+        // Deposit terms extend credit (Phase 3C, customer_credit): the balance
+        // left on credit applies at once within the maker's band (KES 20,000),
+        // otherwise it waits for finance (and the super admin above 200,000)
+        // with the order's terms untouched. The proposal writes the
+        // deposit_terms_set entry the timeline reads when it applies.
+        $proposals = app(\App\Services\Approvals\ProposalService::class);
+        $proposal  = $proposals->propose('customer_credit', $order->id, [
             'deposit_amount'   => $validated['deposit_amount'],
             'balance_due_date' => $validated['balance_due_date'] ?? null,
-        ]);
+        ], $request->user());
 
-        ActivityLogService::log('deposit_terms_set', $order, [
-            'deposit_amount'   => $validated['deposit_amount'],
-            'balance_due_date' => $validated['balance_due_date'] ?? null,
-            'order_total'      => $order->total_amount,
-        ]);
+        $fresh   = $order->fresh();
+        $waiting = $proposal && $proposal->status !== \App\Models\ChangeProposal::APPLIED;
 
         return response()->json([
-            'message'          => 'Deposit terms set.',
-            'deposit_amount'   => $order->fresh()->deposit_amount,
-            'balance_due_date' => $order->fresh()->balance_due_date,
-        ]);
+            'message'          => $waiting ? $proposals->message($proposal) : 'Deposit terms set.',
+            'deposit_amount'   => $fresh->deposit_amount,
+            'balance_due_date' => $fresh->balance_due_date,
+            'proposal'         => $proposal ? $proposals->present($proposal->fresh('maker'), $request->user()) : null,
+        ], $waiting ? 202 : 200);
     }
 
     // =========================================================================

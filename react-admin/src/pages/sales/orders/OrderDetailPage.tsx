@@ -22,6 +22,7 @@ import { subscribeToChannel, getEcho } from "@/lib/echo";
 import { neemaChatUrl, neemaCallsUrl, chatChannelLabel } from "@/lib/neema";
 import { useAuthStore } from "@/store/auth.store";
 import { RecordHistory } from "@/components/audit/AuditParts";
+import { PendingChanges, NeedsApprovalHint, PROPOSALS_QUERY_KEY } from "@/components/approvals/PendingChanges";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -1184,6 +1185,7 @@ function SetDepositModal({ order, onClose, onDone }: {
     order: Order; onClose: () => void; onDone: () => void;
 }) {
     const toast = useToastStore();
+    const qc = useQueryClient();
     const [depositAmount, setDepositAmount] = useState(
         order.deposit_amount ?? Math.round(order.total_amount * 0.5 * 100) / 100
     );
@@ -1194,7 +1196,13 @@ function SetDepositModal({ order, onClose, onDone }: {
             deposit_amount: depositAmount,
             balance_due_date: balanceDueDate || undefined,
         }),
-        onSuccess: () => { toast.success("Deposit terms saved"); onDone(); onClose(); },
+        onSuccess: (res) => {
+            // Phase 3C: credit past the maker's band waits for finance; the terms stay until signed.
+            if (res.proposal && res.proposal.status !== "applied") toast.info(res.message);
+            else toast.success("Deposit terms saved");
+            qc.invalidateQueries({ queryKey: [PROPOSALS_QUERY_KEY] });
+            onDone(); onClose();
+        },
         onError:   (e: ApiError) => toast.error(e.message),
     });
 
@@ -1210,6 +1218,12 @@ function SetDepositModal({ order, onClose, onDone }: {
                 <p className="text-xs text-surface-500">
                     The customer will pay this deposit now and settle the balance later.
                 </p>
+                <NeedsApprovalHint>
+                    The balance left on credit is what is approved: up to KES 20,000 (with the same
+                    customer&apos;s other credit today) applies at once; more needs finance, and above
+                    KES 200,000 the super admin too.
+                </NeedsApprovalHint>
+                <PendingChanges subjectType="order" subjectIds={[order.id]} />
                 <div>
                     <label className="label">Minimum Deposit ({cc})</label>
                     <input type="number" min={0.01} step={0.01}
@@ -4638,6 +4652,7 @@ export default function OrderDetailPage() {
                                     {canAddPayment && <button onClick={() => setShowPaymentModal(true)} className="mt-2 text-xs text-brand-500 hover:underline font-semibold">Record first payment →</button>}
                                 </div>
                             )}
+                            <PendingChanges subjectType="order" subjectIds={[order.id]} className="mt-3" />
                             {outstanding > 0 && !order.deposit_amount && order.payment_status === "pending" && (
                                 <div className="mt-3 flex justify-end">
                                     <button onClick={() => setShowDepositModal(true)}

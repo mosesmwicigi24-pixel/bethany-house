@@ -85,3 +85,10 @@ Schedule::command(\App\Console\Commands\SweepAbandonedInterestCarts::class)
 Schedule::command(\App\Console\Commands\ExpireApprovalRequests::class)
     ->hourly()
     ->withoutOverlapping();
+
+// ── Scheduled proposals — every minute ──────────────────────────────────────
+// A signed tax-rate, reporting-FX or settlement change takes effect at its
+// effective_from, never before (Phase 3C). Manual run: php artisan proposals:apply-due
+Schedule::command(\App\Console\Commands\ApplyDueProposals::class)
+    ->everyMinute()
+    ->withoutOverlapping();

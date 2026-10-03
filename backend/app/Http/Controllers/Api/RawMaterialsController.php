@@ -200,18 +200,34 @@ class RawMaterialsController extends Controller
             'is_active'       => 'sometimes|boolean',
         ]);
 
-        $material->update($validated);
+        // The unit cost — what we pay the supplier — is a supplier_cost_change
+        // proposal (Phase 3C): at once within 5%, otherwise it waits for finance
+        // (and the super admin past 25%) and the material keeps its cost.
+        $plain    = array_diff_key($validated, ['unit_cost' => true]);
+        $service  = app(\App\Services\Approvals\ProposalService::class);
+        $proposal = DB::transaction(function () use ($material, $plain, $validated, $service, $request) {
+            if ($plain !== []) {
+                $material->update($plain);
+            }
+
+            return array_key_exists('unit_cost', $validated)
+                ? $service->propose('supplier_cost_change', $material->id, ['unit_cost' => $validated['unit_cost']], $request->user())
+                : null;
+        });
 
         try {
             ActivityLogService::log('raw_material_updated', null, [
                 'material_id' => $material->id,
                 'code'        => $material->code,
-                'changes'     => array_keys($validated),
+                'changes'     => array_keys($plain),
             ]);
         } catch (\Exception) {}
 
+        $waiting = $proposal && $proposal->status !== \App\Models\ChangeProposal::APPLIED;
+
         return response()->json([
-            'message'  => 'Material updated.',
+            'proposal' => $proposal ? $service->present($proposal->fresh('maker'), $request->user()) : null,
+            'message'  => $waiting ? 'Material updated. ' . $service->message($proposal) : 'Material updated.',
             'material' => $this->formatMaterial(
                 $material->fresh()->load(['inventory.outlet'])
                     ->loadSum('inventory as total_stock', 'quantity_on_hand')
@@ -296,9 +312,15 @@ class RawMaterialsController extends Controller
                 'created_by'            => auth()->id(),
             ]);
 
-            if (!empty($validated['unit_cost'])) {
-                $material->update(['unit_cost' => $validated['unit_cost']]);
-            }
+            // The receipt records what was paid (above). Moving the material's
+            // own cost to it is a supplier_cost_change proposal (Phase 3C): at
+            // once within 5%, otherwise it waits and the cost stays. A cost
+            // change already waiting is left to its signers — a receipt never
+            // fails because of one.
+            $service  = app(\App\Services\Approvals\ProposalService::class);
+            $proposal = !empty($validated['unit_cost']) && !$service->openFor('supplier_cost_change', 'material', $material->id)
+                ? $service->propose('supplier_cost_change', $material->id, ['unit_cost' => $validated['unit_cost']], $request->user())
+                : null;
 
             DB::commit();
 
@@ -315,11 +337,18 @@ class RawMaterialsController extends Controller
                 ]);
             } catch (\Exception) {}
 
+            $waiting = $proposal && $proposal->status !== \App\Models\ChangeProposal::APPLIED;
+
             return response()->json([
-                'message'  => "Received {$validated['quantity']} {$material->unit_of_measure} of {$material->name}.",
+                'message'  => "Received {$validated['quantity']} {$material->unit_of_measure} of {$material->name}."
+                    . ($waiting ? ' ' . app(\App\Services\Approvals\ProposalService::class)->message($proposal) : ''),
                 'inventory' => $this->formatInventoryRecord($inv->fresh()->load('outlet')),
+                'proposal'  => $proposal ? app(\App\Services\Approvals\ProposalService::class)->present($proposal->fresh('maker'), $request->user()) : null,
             ], 201);
 
+        } catch (\Illuminate\Http\Exceptions\HttpResponseException|\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            throw $e;
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['message' => 'Failed to receive stock.', 'error' => $e->getMessage()], 500);

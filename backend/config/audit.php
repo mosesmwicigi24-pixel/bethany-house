@@ -117,6 +117,8 @@ return [
         \App\Models\ApprovalThreshold::class,
         \App\Models\ApprovalRequest::class,
         \App\Models\ApprovalSignature::class,
+        // Proposals (Phase 3C)
+        \App\Models\ChangeProposal::class,
         \App\Models\InventoryTransferItem::class,
         \App\Models\PurchaseOrder::class,
         \App\Models\PurchaseOrderItem::class,

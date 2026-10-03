@@ -44,7 +44,7 @@ const NAV: NavGroup[] = [
                 // and "My submissions" for everyone who raises something that
                 // needs approval. Same list as the App.tsx route guard and the
                 // command palette. The server decides what each person can sign.
-                anyOfPermissions: ["procurement.approve", "inventory.approve", "expenses.approve", "approvals.finance_sign", "payments.void", "payments.reassign", "payments.approve_international", "payments.request_void", "payments.request_reassign", "procurement.create", "inventory.adjust", "inventory.transfer", "expenses.create"],
+                anyOfPermissions: ["procurement.approve", "inventory.approve", "expenses.approve", "approvals.finance_sign", "payments.void", "payments.reassign", "payments.approve_international", "payments.request_void", "payments.request_reassign", "procurement.create", "inventory.adjust", "inventory.transfer", "expenses.create", "products.edit", "products.edit_cost", "orders.set_deposit", "settings.financial_propose", "settings.pricing_rate_propose"],
             },
             {
                 label: "Notifications",
@@ -516,7 +516,8 @@ const NAV: NavGroup[] = [
                 label: "Currencies",
                 href: "/settings/currencies",
                 icon: "currencies",
-                permission: "settings.view",
+                // Phase 3C: finance and admin read it to propose rate changes.
+                anyOfPermissions: ["settings.view", "settings.financial_propose", "settings.pricing_rate_propose"],
             },
             {
                 label: "Languages",
@@ -529,13 +530,15 @@ const NAV: NavGroup[] = [
                 label: "Tax Rates",
                 href: "/settings/taxes",
                 icon: "taxes",
-                permission: "settings.view",
+                // Phase 3C: finance reads it to propose rate changes.
+                anyOfPermissions: ["settings.view", "settings.financial_propose"],
             },
             {
                 label: "Payment Methods",
                 href: "/settings/payment-methods",
                 icon: "payments-setup",
-                permission: "settings.view",
+                // Phase 3C: finance reads it to propose settlement changes.
+                anyOfPermissions: ["settings.view", "settings.financial_propose"],
             },
             {
                 label: "Shipping",
