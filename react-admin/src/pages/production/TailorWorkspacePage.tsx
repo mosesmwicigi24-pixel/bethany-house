@@ -369,7 +369,7 @@ function PauseButton({ onPause, disabled }: { onPause: () => void; disabled: boo
             }}
             disabled={disabled}
             aria-label="Pause this stage"
-            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-warning-light text-warning-dark border border-warning text-[11px] font-bold active:bg-warning/20 transition-colors disabled:opacity-50"
+            className="flex items-center justify-center gap-1.5 min-h-12 px-4 rounded-xl bg-warning-light text-warning-dark border border-warning text-sm font-bold active:bg-warning/20 transition-colors disabled:opacity-50"
         >
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5" />
@@ -1214,7 +1214,7 @@ function FocusCard({
                                                     onAction(task, "start");
                                                 }}
                                                 disabled={isActing}
-                                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-brand-500 text-white text-[11px] font-bold active:bg-brand-600 transition-colors disabled:opacity-50"
+                                                className="flex items-center justify-center gap-1.5 min-h-12 px-4 rounded-xl bg-brand-500 text-white text-sm font-bold active:bg-brand-600 transition-colors disabled:opacity-50"
                                             >
                                                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
@@ -1282,7 +1282,7 @@ function FocusCard({
                                                             <button key={step}
                                                                 onClick={() => onProgress(task, Math.min(cap, done + step), batch?.id)}
                                                                 disabled={isActing || done >= cap}
-                                                                className="px-1.5 py-1 rounded-md bg-brand-50 border border-brand-200 text-brand-700 text-[11px] font-bold active:bg-brand-100 transition-colors disabled:opacity-40">
+                                                                className="min-h-12 min-w-12 px-3 rounded-xl bg-brand-50 border border-brand-200 text-brand-700 text-sm font-bold active:bg-brand-100 transition-colors disabled:opacity-40">
                                                                 +{step}
                                                             </button>
                                                         ))}
@@ -1290,7 +1290,7 @@ function FocusCard({
                                                             onClick={() => onProgress(task, Math.max(0, done - 1), batch?.id)}
                                                             disabled={isActing || done <= 0}
                                                             title="Correct the count down by one"
-                                                            className="px-1.5 py-1 rounded-md bg-surface-100 border border-surface-200 text-surface-500 text-[11px] font-bold active:bg-surface-200 transition-colors disabled:opacity-40">
+                                                            className="min-h-12 min-w-12 px-3 rounded-xl bg-surface-100 border border-surface-200 text-surface-500 text-sm font-bold active:bg-surface-200 transition-colors disabled:opacity-40">
                                                             −1
                                                         </button>
                                                     </div>
@@ -1304,7 +1304,7 @@ function FocusCard({
                                                     onAction(task, "complete");
                                                 }}
                                                 disabled={isActing}
-                                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-success text-white text-[11px] font-bold active:bg-success-700 transition-colors disabled:opacity-50"
+                                                className="flex items-center justify-center gap-1.5 min-h-12 px-4 rounded-xl bg-success text-white text-sm font-bold active:bg-success-700 transition-colors disabled:opacity-50"
                                             >
                                                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
@@ -1334,7 +1334,7 @@ function FocusCard({
                 <div className="flex border-t border-line">
                     <button
                         onClick={onNoteOpen}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-semibold text-surface-500 active:bg-surface-50 transition-colors border-r border-line"
+                        className="flex-1 flex items-center justify-center gap-1.5 min-h-12 text-xs font-semibold text-surface-500 active:bg-surface-50 transition-colors border-r border-line"
                     >
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
@@ -1343,7 +1343,7 @@ function FocusCard({
                     </button>
                     <button
                         onClick={onSpecsOpen}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-semibold text-surface-500 active:bg-surface-50 transition-colors"
+                        className="flex-1 flex items-center justify-center gap-1.5 min-h-12 text-xs font-semibold text-surface-500 active:bg-surface-50 transition-colors"
                     >
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" />
@@ -1614,7 +1614,7 @@ function QueueOrderGroup({
                                                 onQuickAction(task, "start");
                                             }}
                                             disabled={isActing}
-                                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-brand-500 text-white text-xs font-bold active:bg-brand-600 transition-colors disabled:opacity-50"
+                                            className="flex items-center justify-center gap-1.5 min-h-12 px-4 rounded-xl bg-brand-500 text-white text-sm font-bold active:bg-brand-600 transition-colors disabled:opacity-50"
                                         >
                                             {task.status === "paused"
                                                 ? "Resume"
@@ -1637,7 +1637,7 @@ function QueueOrderGroup({
                                                 onQuickAction(task, "complete");
                                             }}
                                             disabled={isActing}
-                                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-success text-white text-xs font-bold active:bg-success-700 transition-colors disabled:opacity-50"
+                                            className="flex items-center justify-center gap-1.5 min-h-12 px-4 rounded-xl bg-success text-white text-sm font-bold active:bg-success-700 transition-colors disabled:opacity-50"
                                         >
                                             Mark done
                                         </button>
@@ -1940,8 +1940,12 @@ export default function TailorWorkspacePage() {
                 )}
 
                 {/* ── FOCUS TAB ─────────────────────────────────────────── */}
+                {/* One job at a time reads best as a workbench card, not a
+                    banner: on a landscape tablet (Tab S9 Ultra ≈ 1480px) the card
+                    stretched so far that each measurement's value sat a hand-span
+                    from its name. Capped and centred; phones are unaffected. */}
                 {!showCompletion && activeTab === "focus" && (
-                    <div className="p-4 space-y-4">
+                    <div className="p-4 space-y-4 w-full max-w-3xl mx-auto">
                         {focusedGroup ? (
                             <>
                                 {/* Order position indicator */}
@@ -1959,8 +1963,10 @@ export default function TailorWorkspacePage() {
                                                         setFocusIndex(i)
                                                     }
                                                     aria-label={`Order ${i + 1}`}
+                                                    // A 44px-tall hit area around a small dot.
                                                     style={{
-                                                        padding: "6px 3px",
+                                                        padding: "18px 6px",
+                                                        margin: "-12px 0",
                                                         background: "none",
                                                         border: "none",
                                                         cursor: "pointer",

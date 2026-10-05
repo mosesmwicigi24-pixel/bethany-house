@@ -149,7 +149,8 @@ const fmtDateTime = (d?: string | null) =>
 // Shared geometry for the detail-page action row. Defined once so the width
 // budget in the comment above that row stays true — a one-off `px-3` on a
 // single button is what pushed it onto a second line before.
-const ACT_BTN = "flex items-center gap-1 bg-white border border-surface-200 rounded-lg px-2.5 h-[30px] sm:h-9 " +
+// 44px on a phone (one-handed, on the floor); the compact 36px from sm up.
+const ACT_BTN = "flex items-center gap-1 bg-white border border-surface-200 rounded-lg px-2.5 h-11 sm:h-9 " +
     "text-[11px] sm:text-xs font-semibold text-surface-700 hover:border-brand-300 hover:text-brand-600 transition-colors";
 const MENU_ITEM = "w-full text-left px-3.5 py-2.5 text-xs font-semibold text-surface-700 hover:bg-surface-50 transition-colors";
 const fmtNum = (n: number) => n.toLocaleString("en-KE", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
@@ -1118,7 +1119,7 @@ function StagesPipeline({
                                 {workOpen && canUnlock && !isDone && !task.started_at && (
                                     <button type="button"
                                         onClick={() => onUnlock(task.id, !task.concurrent_allowed)}
-                                        className="ml-auto text-2xs font-semibold text-surface-400 hover:text-brand-600 underline decoration-dotted underline-offset-2 transition-colors"
+                                        className="ml-auto -my-3 py-3 pl-3 text-2xs font-semibold text-surface-400 hover:text-brand-600 underline decoration-dotted underline-offset-2 transition-colors"
                                         title={task.concurrent_allowed
                                             ? "Re-lock this stage to sequential order"
                                             : "Let this stage run in parallel with earlier stages"}>
@@ -2201,7 +2202,7 @@ export default function ProductionOrderDetailPage() {
         <div className="max-w-6xl mx-auto">
             {/* Back */}
             <button onClick={() => navigate("/production/orders")}
-                className="flex items-center gap-1.5 text-xs text-surface-500 hover:text-surface-800 mb-4 transition-colors">
+                className="flex items-center gap-1.5 min-h-11 -my-2.5 pr-3 text-xs text-surface-500 hover:text-surface-800 mb-1.5 transition-colors">
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
                 </svg>
@@ -2339,7 +2340,7 @@ export default function ProductionOrderDetailPage() {
                                 [&>*]:shrink-0">
                     {canConfirm && (
                         <button onClick={() => confirmMutation.mutate()} disabled={confirmMutation.isPending}
-                            className="bg-brand-500 text-white rounded-full px-3 sm:px-4 h-[30px] sm:h-9 text-[11px] sm:text-xs font-bold hover:bg-brand-600 active:bg-brand-700 transition-colors flex items-center gap-1">
+                            className="bg-brand-500 text-white rounded-full px-3 sm:px-4 h-11 sm:h-9 text-[11px] sm:text-xs font-bold hover:bg-brand-600 active:bg-brand-700 transition-colors flex items-center gap-1">
                             {confirmMutation.isPending ? "Confirming…" : <>✓ Confirm<span className="hidden sm:inline">&nbsp;Order</span></>}
                         </button>
                     )}
@@ -2355,13 +2356,13 @@ export default function ProductionOrderDetailPage() {
                     )}
                     {canQC && (
                         <button onClick={() => setModal("qc")}
-                            className="bg-accent-600 text-white border border-accent-600 rounded-lg px-2.5 h-[30px] sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-accent-700 transition-colors flex items-center gap-1">
+                            className="bg-accent-600 text-white border border-accent-600 rounded-lg px-2.5 h-11 sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-accent-700 transition-colors flex items-center gap-1">
                             <span className="hidden sm:inline">🔍 Quality Check</span><span className="sm:hidden">QC</span>
                         </button>
                     )}
                     {canComplete && (
                         <button onClick={() => setModal("complete")}
-                            className="bg-success-700 text-white border border-success-600 rounded-lg px-2.5 h-[30px] sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-success-700 transition-colors flex items-center gap-1">
+                            className="bg-success-700 text-white border border-success-600 rounded-lg px-2.5 h-11 sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-success-700 transition-colors flex items-center gap-1">
                             <span className="hidden sm:inline">✅ Complete &amp; Stock</span><span className="sm:hidden">Complete</span>
                         </button>
                     )}
@@ -2370,7 +2371,7 @@ export default function ProductionOrderDetailPage() {
                         neighbours and the row visibly ragged. min-h is reset
                         alongside the height. */}
                     <PdfDownloadButton type="production-orders" id={order.id} label="PDF"
-                        className="!rounded-lg !px-2.5 !h-[30px] !min-h-[30px] sm:!h-9 sm:!min-h-[36px] !text-[11px] sm:!text-xs" />
+                        className="!rounded-lg !px-2.5 !h-11 !min-h-11 sm:!h-9 sm:!min-h-[36px] !text-[11px] sm:!text-xs" />
                     {/* Costing shows profit and margins: reports.financial, as
                         the server now requires (cycle 9) — and it is a page of
                         the Production report, so reports.production too
@@ -2401,7 +2402,7 @@ export default function ProductionOrderDetailPage() {
                                 aria-haspopup="menu"
                                 aria-expanded={menuOpen}
                                 aria-label="More actions"
-                                className={clsx("w-[30px] h-[30px] sm:w-9 sm:h-9 rounded-lg border flex items-center justify-center transition-colors",
+                                className={clsx("w-11 h-11 sm:w-9 sm:h-9 rounded-lg border flex items-center justify-center transition-colors",
                                     menuOpen ? "bg-surface-100 border-surface-300 text-surface-900"
                                              : "bg-white border-surface-200 text-surface-600 hover:border-surface-300 hover:text-surface-900")}
                             >
@@ -2461,11 +2462,18 @@ export default function ProductionOrderDetailPage() {
                         <div className="flex border-b border-line overflow-x-auto no-scrollbar gap-0 -mb-px">
                             {tabs.map(t => (
                                 <button key={t.key} onClick={() => setTab(t.key as any)}
-                                    className={clsx("px-2 sm:px-4 py-2 sm:py-2.5 text-[11.5px] sm:text-xs font-semibold border-b-2 transition-all whitespace-nowrap",
+                                    className={clsx("px-2.5 sm:px-4 min-h-12 sm:min-h-0 py-2 sm:py-2.5 text-xs font-semibold border-b-2 transition-all whitespace-nowrap",
                                         tab === t.key ? "border-brand-500 text-brand-600" : "border-transparent text-surface-500 hover:text-surface-700")}>
                                     <span className="hidden sm:inline">{t.icon} </span>{t.label}
                                 </button>
                             ))}
+                            {/* Scroll hint on phones: a fade pinned to the right edge
+                                while more tabs sit off-screen. It is the row's last
+                                item, so once scrolled to the end it rests beyond the
+                                last tab instead of covering it — and with no overflow
+                                it fades over empty card. */}
+                            <span aria-hidden="true"
+                                className="sm:hidden sticky right-0 shrink-0 w-8 pointer-events-none bg-gradient-to-l from-white to-transparent" />
                         </div>
 
                         {tab === "stages"    && <StagesPipeline
