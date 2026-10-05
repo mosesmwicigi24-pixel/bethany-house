@@ -3,6 +3,7 @@ import { Navigate } from "react-router-dom";
 import { useAuthStore } from "@/store/auth.store";
 import { useHomePath } from "@/hooks/useHomePath";
 import { Spinner } from "@/components/ui/Spinner";
+import { StartupProblem } from "@/components/auth/StartupProblem";
 
 /**
  * Sends "/" and unknown addresses to the user's own home page (lib/homePath)
@@ -12,7 +13,7 @@ import { Spinner } from "@/components/ui/Spinner";
  * on an empty permission list would send everyone to their profile.
  */
 export function HomeRedirect() {
-    const { isAuthenticated, user, fetchMe } = useAuthStore();
+    const { isAuthenticated, user, fetchMe, startupError } = useAuthStore();
     const home = useHomePath();
 
     useEffect(() => {
@@ -20,6 +21,8 @@ export function HomeRedirect() {
     }, [isAuthenticated, user, fetchMe]);
 
     if (!isAuthenticated) return <Navigate to="/login" replace />;
+
+    if (!user && startupError) return <StartupProblem />;
 
     if (!user) {
         return (
