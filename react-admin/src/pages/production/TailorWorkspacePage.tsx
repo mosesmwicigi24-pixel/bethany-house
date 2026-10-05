@@ -19,6 +19,8 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
+import { PriorityBadge, DueBadge, daysUntil } from "@/components/production/productionUi";
+import { businessToday } from "@/lib/businessDate";
 import { get, put, post } from "@/api/client";
 import { useToastStore } from "@/store/toast.store";
 import { Spinner } from "@/components/ui/Spinner";
@@ -96,8 +98,6 @@ type TabId = "focus" | "queue";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const daysUntil = (d: string) =>
-    Math.ceil((new Date(d).getTime() - Date.now()) / 86_400_000);
 
 function getProductName(task: MyTask) {
     return (
@@ -285,59 +285,8 @@ function useElapsedTimer(task: MyTask | null): string | null {
 
 // ── Badges ────────────────────────────────────────────────────────────────────
 
-function PriorityBadge({ priority }: { priority: string }) {
-    const cfgs: Record<string, string> = {
-        urgent: "bg-danger-light text-danger border border-danger/30",
-        high: "bg-warning-light text-warning-dark border border-warning/30",
-        normal: "bg-brand-50 text-brand-700 border border-brand-200",
-        low: "bg-surface-100 text-surface-500 border border-surface-200",
-    };
-    const labels: Record<string, string> = {
-        urgent: "🔴 Urgent",
-        high: "🟠 High",
-        normal: "Normal",
-        low: "Low",
-    };
-    return (
-        <span
-            className={clsx(
-                "text-2xs font-bold px-2 py-0.5 rounded-full uppercase tracking-wide",
-                cfgs[priority] ?? cfgs.normal
-            )}
-        >
-            {labels[priority] ?? priority}
-        </span>
-    );
-}
-
-function DueBadge({ date }: { date: string }) {
-    const d = daysUntil(date);
-    if (d < 0)
-        return (
-            <span className="text-2xs font-semibold text-danger">
-                Overdue {Math.abs(d)}d
-            </span>
-        );
-    if (d === 0)
-        return (
-            <span className="text-2xs font-semibold text-warning-dark">
-                Due today
-            </span>
-        );
-    if (d <= 2)
-        return (
-            <span className="text-2xs font-semibold text-warning-dark">
-                Due in {d}d
-            </span>
-        );
-    return (
-        <span className="text-2xs text-surface-400">
-            {new Date(date).toLocaleDateString("en-KE", {
-                dateStyle: "medium",
-            })}
-        </span>
-    );
-}
+// Priority and due badges: the shared Production design language
+// (components/production/productionUi) — the same words on every surface.
 
 // ── Right drawer ──────────────────────────────────────────────────────────────
 
@@ -761,7 +710,7 @@ function CompletionScreen({
                     </svg>
                 </div>
                 <p className="text-xl font-bold text-surface-900">
-                    Task complete!
+                    Stage done!
                 </p>
                 <p className="text-xs text-surface-400 mt-1">
                     {getProductName(completedTask)} ·{" "}
@@ -1347,7 +1296,7 @@ function FocusCard({
                                                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                                                 </svg>
-                                                Done
+                                                Mark done
                                             </button>
                                         )}
                                     </div>
@@ -1404,12 +1353,11 @@ function FocusCard({
 // a floor supervisor does.
 
 function DeliveryWeekStrip({ groups }: { groups: OrderGroup[] }) {
-    const days = Array.from({ length: 7 }, (_, i) => {
-        const d = new Date();
-        d.setDate(d.getDate() + i);
-        return d;
-    });
-    const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+    // Seven days from TODAY ON THE BUSINESS CALENDAR (Africa/Nairobi), not the
+    // device's: a tablet left on another zone used to file an order under the
+    // wrong day. Each order sits on the day `daysUntil` says it is due.
+    const [by, bm, bd] = businessToday().split("-").map(Number);
+    const days = Array.from({ length: 7 }, (_, i) => new Date(Date.UTC(by, bm - 1, bd + i, 12)));
     const open = groups.filter((g) => g.completedCount < g.totalCount);
     const overdue = open.filter((g) => daysUntil(g.dueDate) < 0).length;
 
@@ -1425,7 +1373,7 @@ function DeliveryWeekStrip({ groups }: { groups: OrderGroup[] }) {
             </div>
             <div className="grid grid-cols-7 gap-1">
                 {days.map((d, i) => {
-                    const due = open.filter((g) => g.dueDate && sameDay(new Date(g.dueDate), d));
+                    const due = open.filter((g) => g.dueDate && daysUntil(g.dueDate) === i);
                     const isToday = i === 0;
                     return (
                         <div key={i} className={clsx(
@@ -1433,10 +1381,10 @@ function DeliveryWeekStrip({ groups }: { groups: OrderGroup[] }) {
                             isToday ? "border-brand-300 bg-brand-50" : "border-line bg-surface-50",
                         )}>
                             <p className="text-2xs text-surface-400 leading-none">
-                                {d.toLocaleDateString("en-KE", { weekday: "short" })}
+                                {d.toLocaleDateString("en-KE", { weekday: "short", timeZone: "UTC" })}
                             </p>
                             <p className={clsx("text-xs font-bold mt-0.5", isToday ? "text-brand-700" : "text-surface-700")}>
-                                {d.getDate()}
+                                {d.getUTCDate()}
                             </p>
                             <div className="flex justify-center gap-0.5 mt-1 min-h-[6px]">
                                 {due.slice(0, 3).map((g) => (
@@ -1678,7 +1626,7 @@ function QueueOrderGroup({
                                             disabled={isActing}
                                             className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-success text-white text-xs font-bold active:bg-success-700 transition-colors disabled:opacity-50"
                                         >
-                                            Done
+                                            Mark done
                                         </button>
                                     )}
                                     {isDone && task.completed_at && (
@@ -1791,7 +1739,7 @@ export default function TailorWorkspacePage() {
                 navigator.vibrate?.([50, 30, 100, 30, 200]);
             } else {
                 toast.success(
-                    vars.action === "pause" ? "Task paused" : "Task started!"
+                    vars.action === "pause" ? "Stage paused" : "Stage started"
                 );
                 if (vars.action === "start") navigator.vibrate?.(40);
             }

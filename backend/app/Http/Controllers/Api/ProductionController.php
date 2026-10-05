@@ -148,6 +148,10 @@ class ProductionController extends Controller
             'pending'     => $visible()->where('status', 'pending')->count(),
             'in_progress' => $visible()->where('status', 'in_progress')->count(),
             'qc_pending'  => $visible()->where('status', 'qc_pending')->count(),
+            // The QC screen's tiles read these, whichever tab is open — they
+            // used to count only the rows loaded for the current tab.
+            'qc_passed'   => $visible()->where('status', 'qc_passed')->count(),
+            'qc_failed'   => $visible()->where('status', 'qc_failed')->count(),
             'completed'   => $visible()->where('status', 'completed')->count(),
             'overdue'     => $visible()->where('due_date', '<', now())
                                 ->whereNotIn('status', ['completed', 'cancelled', 'draft'])->count(),
@@ -211,7 +215,11 @@ class ProductionController extends Controller
         $data['product_image'] = $order->product->images->first()?->image_url;
         $data['bom']  = $bom?->toArray();
         $data['material_requirements'] = $materialRequirements;
-        $data['completion_percentage'] = $this->calcCompletion($order);
+        // One progress figure on every surface (Production UI Cycle 1): the
+        // whole pipeline's pieces, not this viewer's stages or a stage count.
+        $progress = \App\Support\OrderProgress::for([$order])[$order->id] ?? null;
+        $data['progress'] = $progress;
+        $data['completion_percentage'] = $progress['percent'] ?? 0;
         $data['current_stage'] = $this->getCurrentStage($order);
 
         // A tailor opens this for their own job: no customer contacts without
@@ -1312,33 +1320,12 @@ class ProductionController extends Controller
         // ── Whole-order progress ─────────────────────────────────────────────
         // A tailor's checklist holds only her own stages, so "2/2 done" could
         // show on an order that was far from finished. Send the ORDER's
-        // progress as two numbers — never the other benches' tasks, stages or
-        // people. Same arithmetic as the order page: a satisfied stage has
-        // passed every piece; percent = pieces passed across stages ÷
-        // (quantity × stages); finished = pieces through the last stage.
-        $pipelines = ProductionTask::withoutViewerScope()
-            ->whereIn('production_order_id', $orderIds)
-            ->whereNotNull('sequence')
-            ->get(['production_order_id', 'sequence', 'status', 'quantity_done'])
-            ->groupBy('production_order_id');
-
-        $tasks->each(function ($task) use ($pipelines) {
-            $order = $task->productionOrder;
-            if (! $order) {
-                return;
-            }
-            $qty    = max(1, (int) ($order->quantity ?? 1));
-            $stages = $pipelines[$task->production_order_id] ?? collect();
-            $passed = fn ($t) => in_array($t->status, ProductionTask::SATISFIED_STATUSES, true)
-                ? $qty
-                : min((int) $t->quantity_done, $qty);
-
-            $order->setAttribute('progress', $stages->isEmpty() ? null : [
-                'percent'  => (int) floor($stages->sum($passed) * 100 / ($qty * $stages->count())),
-                'finished' => $passed($stages->sortBy('sequence')->last()),
-                'stages'   => $stages->count(),
-            ]);
-        });
+        // progress as numbers — never the other benches' tasks, stages or
+        // people — from the one formula every surface uses (OrderProgress).
+        $progress = \App\Support\OrderProgress::for($tasks->pluck('productionOrder'));
+        $tasks->each(fn ($task) => $task->productionOrder?->setAttribute(
+            'progress', $progress[$task->production_order_id] ?? null,
+        ));
 
         if ($includeCompleted) {
             // For the history view, keep the DB sort as-is (completed tasks are already at the bottom)
@@ -2211,13 +2198,6 @@ class ProductionController extends Controller
         })->toArray();
     }
 
-    private function calcCompletion(ProductionOrder $order): int
-    {
-        $tasks = $order->tasks ?? collect();
-        if ($tasks->isEmpty()) return 0;
-        return (int) round($tasks->where('status', 'completed')->count() / $tasks->count() * 100);
-    }
-
     private function getCurrentStage(ProductionOrder $order): ?string
     {
         return $order->tasks
@@ -2228,10 +2208,13 @@ class ProductionController extends Controller
 
     private function transformList(array $items): array
     {
-        return array_map(function ($o) {
+        $progress = \App\Support\OrderProgress::for($items);
+
+        return array_map(function ($o) use ($progress) {
             $data = $o->toArray();
             $data['product_name'] = $o->product->translations->first()?->name ?? $o->product->sku;
-            $data['completion_percentage'] = $this->calcCompletion($o);
+            $data['progress'] = $progress[$o->id] ?? null;
+            $data['completion_percentage'] = $progress[$o->id]['percent'] ?? 0;
             $data['current_stage'] = $this->getCurrentStage($o);
             return $data;
         }, $items);
@@ -2557,11 +2540,10 @@ class ProductionController extends Controller
 
         // Every active order with a due date — including the overdue ones. A
         // promise made while blind to the backlog is the worst promise.
+        $progress = \App\Support\OrderProgress::for($active);
         $upcoming = $active
             ->whereNotNull('due_date')
-            ->map(function ($o) {
-                $total = $o->tasks->count();
-                $done  = $o->tasks->where('status', 'completed')->count();
+            ->map(function ($o) use ($progress) {
 
                 return [
                     'order_number'              => $o->order_number,
@@ -2580,9 +2562,8 @@ class ProductionController extends Controller
                     'created_by_name'           => $o->createdBy
                         ? trim("{$o->createdBy->first_name} {$o->createdBy->last_name}")
                         : null,
-                    'completion_percentage'     => $total > 0
-                        ? (int) round($done / $total * 100)
-                        : 0,
+                    // The one progress figure (OrderProgress), not a stage count.
+                    'completion_percentage'     => $progress[$o->id]['percent'] ?? 0,
                 ];
             });
 

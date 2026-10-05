@@ -25,3 +25,24 @@ export function toBusinessDateInput(value: string | null | undefined): string {
     const d = new Date(value);
     return Number.isNaN(d.getTime()) ? "" : ymd.format(d);
 }
+
+/** Today's "YYYY-MM-DD" on the business calendar, whatever the device's zone. */
+export function businessToday(): string {
+    return ymd.format(new Date());
+}
+
+/**
+ * Whole calendar days from today to `value` on the business calendar:
+ * 0 = due today, 1 = tomorrow, -3 = three days ago. Counts calendar days, not
+ * 24-hour spans, so an order due tomorrow reads "1" at 08:00 and at 23:00
+ * alike. NaN for empty or unparseable input.
+ */
+export function businessDaysUntil(value: string | null | undefined): number {
+    const target = toBusinessDateInput(value);
+    if (!target) return NaN;
+    const toDay = (ymdStr: string) => {
+        const [y, m, d] = ymdStr.split("-").map(Number);
+        return Date.UTC(y, m - 1, d) / 86_400_000;
+    };
+    return Math.round(toDay(target) - toDay(businessToday()));
+}

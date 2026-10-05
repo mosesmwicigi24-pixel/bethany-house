@@ -10,6 +10,7 @@ import { reportsApi } from "@/api/reports";
 import { useAuthStore } from "@/store/auth.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useIsFloorWorker } from "@/hooks/useHomePath";
+import { dueInfo, DUE_TONE_CLS } from "@/components/production/productionUi";
 import { clsx } from "clsx";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -419,12 +420,13 @@ function TailorHome({ stats, isLoading, can }: {
         { label: "Calendar",      href: "/production/calendar",   icon: <ClockIcon /> },
     ];
 
+    // The shared Production due wording and thresholds (productionUi), on the
+    // business calendar — the same words as My Tasks and the order page.
     const dueChip = (t: any) => {
-        if (!t.production_order?.due_date) return null;
-        const days = Math.ceil((new Date(t.production_order.due_date).getTime() - Date.now()) / 86_400_000);
-        if (days < 0)  return <span className="text-2xs font-bold text-danger bg-danger-light rounded-full px-2 py-0.5">Overdue {-days}d</span>;
-        if (days === 0) return <span className="text-2xs font-bold text-warning-dark bg-warning-light rounded-full px-2 py-0.5">Due today</span>;
-        return <span className="text-2xs font-semibold text-surface-500 bg-surface-100 rounded-full px-2 py-0.5">Due in {days}d</span>;
+        const due = dueInfo(t.production_order?.due_date);
+        if (due.tone === "none") return null;
+        const pill = { overdue: "bg-danger-light", today: "bg-warning-light", soon: "bg-warning-light", later: "bg-surface-100", none: "" }[due.tone];
+        return <span className={clsx("text-2xs font-bold rounded-full px-2 py-0.5 whitespace-nowrap", pill, DUE_TONE_CLS[due.tone])}>{due.label}</span>;
     };
 
     return (

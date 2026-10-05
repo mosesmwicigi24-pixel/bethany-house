@@ -2,6 +2,11 @@ import React, { useState, useMemo, useCallback, useEffect, Fragment } from "reac
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { clsx } from "clsx";
+import {
+    ORDER_STATUS, orderStatus, StatusBadge, PriorityBadge, DueBadge, ProgressBar,
+    dueInfo, DUE_TONE_CLS, fmtDueDate, isCustomerJob, jobFor,
+} from "@/components/production/productionUi";
+import { toBusinessDateInput } from "@/lib/businessDate";
 import { get, post, put } from "@/api/client";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToastStore } from "@/store/toast.store";
@@ -172,24 +177,9 @@ interface QCRecord {
 // CONSTANTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const STATUS_CFG: Record<string, { label: string; bg: string; text: string; dot: string }> = {
-    draft:       { label: "Draft",       bg: "bg-surface-50",      text: "text-surface-400",   dot: "bg-surface-300"  },
-    pending:     { label: "Pending",     bg: "bg-surface-100",     text: "text-surface-600",   dot: "bg-surface-400"  },
-    in_progress: { label: "In Progress", bg: "bg-amber-light",     text: "text-amber-dark",    dot: "bg-amber"        },
-    on_hold:     { label: "On Hold",     bg: "bg-warning-light",   text: "text-warning-dark",  dot: "bg-warning"      },
-    qc_pending:  { label: "QC Pending",  bg: "bg-accent-50",       text: "text-accent-700",    dot: "bg-accent-500"   },
-    qc_passed:   { label: "QC Passed",   bg: "bg-success-light",   text: "text-success-dark",  dot: "bg-success-vivid" },
-    qc_failed:   { label: "QC Failed",   bg: "bg-danger-light",    text: "text-danger",        dot: "bg-danger"       },
-    completed:   { label: "Completed",   bg: "bg-success-light",   text: "text-success-dark",  dot: "bg-success-vivid" },
-    cancelled:   { label: "Cancelled",   bg: "bg-surface-100",     text: "text-surface-400",   dot: "bg-surface-300"  },
-};
-
-const PRIORITY_CFG: Record<string, { label: string; cls: string }> = {
-    low:    { label: "Low",    cls: "text-surface-400 bg-surface-50 border-surface-200"   },
-    normal: { label: "Normal", cls: "text-brand-600 bg-brand-50 border-brand-200"         },
-    high:   { label: "High",   cls: "text-warning-dark bg-warning-light border-warning/30" },
-    urgent: { label: "Urgent", cls: "text-danger bg-danger-light border-danger/30"        },
-};
+// Status, priority, due and progress come from the shared Production design
+// language (components/production/productionUi) — one vocabulary everywhere.
+const STATUS_CFG = ORDER_STATUS;
 
 const STAGE_ICONS: Record<string, string> = {
     cutting:      "cut",
@@ -219,7 +209,6 @@ const DEFECT_TYPES = [
 ];
 
 const fmtNum = (n: number, dp = 0) => n.toLocaleString("en-KE", { minimumFractionDigits: dp, maximumFractionDigits: dp > 0 ? dp : 3 });
-const daysUntil = (d: string) => Math.ceil((new Date(d).getTime() - Date.now()) / 86_400_000);
 
 /**
  * Parse a "key:value, key:value" string into a Record<string,string>.
@@ -342,27 +331,14 @@ function ProductPicker({
 // SHARED UI ATOMS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function StatusBadge({ status }: { status: string }) {
-    const c = STATUS_CFG[status] ?? { label: status, bg: "bg-surface-100", text: "text-surface-500", dot: "bg-surface-400" };
-    return (
-        <span className={clsx("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-2xs font-semibold", c.bg, c.text)}>
-            <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", c.dot)} />
-            {c.label}
-        </span>
-    );
-}
-
 // "25 Jul" — the WIP card shows a started -> due span in a 260px column, so the
 // medium format ("25 Jul 2026") would wrap. Year is omitted deliberately: a job
 // on the floor is always within weeks of now.
 function shortDate(d?: string | null) {
-    if (!d) return "—";
-    return new Date(d).toLocaleDateString("en-KE", { day: "numeric", month: "short" });
-}
-
-function PriorityBadge({ priority }: { priority: string }) {
-    const c = PRIORITY_CFG[priority] ?? { label: priority, cls: "text-surface-400 bg-surface-50 border-surface-200" };
-    return <span className={clsx("text-2xs font-bold px-1.5 py-0.5 rounded border uppercase tracking-wide", c.cls)}>{c.label}</span>;
+    const ymd = toBusinessDateInput(d);
+    if (!ymd) return "—";
+    const [y, m, day] = ymd.split("-").map(Number);
+    return new Date(Date.UTC(y, m - 1, day, 9)).toLocaleDateString("en-KE", { timeZone: "Africa/Nairobi", day: "numeric", month: "short" });
 }
 
 function OrderTypePill({ isCustomer }: { isCustomer: boolean }) {
@@ -375,23 +351,6 @@ function OrderTypePill({ isCustomer }: { isCustomer: boolean }) {
             <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0h-1.5m1.5 0h1.5" /></svg>
             Production Order
           </span>;
-}
-
-function ProgressBar({ pct, colorClass = "bg-brand-500" }: { pct: number; colorClass?: string }) {
-    return (
-        <div className="h-1.5 bg-surface-100 rounded-full overflow-hidden">
-            <div className={clsx("h-full rounded-full transition-all duration-500", colorClass)}
-                style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} />
-        </div>
-    );
-}
-
-function DueBadge({ date }: { date: string }) {
-    const d = daysUntil(date);
-    if (d < 0)  return <span className="text-2xs font-medium text-danger">Overdue {Math.abs(d)}d</span>;
-    if (d === 0) return <span className="text-2xs font-medium text-warning-dark">Due today</span>;
-    if (d <= 2)  return <span className="text-2xs font-medium text-warning-dark">Due in {d}d</span>;
-    return <span className="text-2xs text-surface-400">{new Date(date).toLocaleDateString("en-KE", { dateStyle: "medium" })}</span>;
 }
 
 function SectionHead({ title }: { title: string }) {
@@ -1012,7 +971,7 @@ function IssueMaterialsModal({ order, onClose, onSaved }: { order: ProductionOrd
                                     onChange={e => setQtys(p => ({ ...p, [a.id]: e.target.value }))}
                                     className="col-span-2 input text-right text-xs py-1.5 disabled:opacity-40" />
                             </div>
-                            <ProgressBar pct={pct} colorClass={pct >= 100 ? "bg-success" : "bg-brand-500"} />
+                            <ProgressBar pct={pct} />
                         </div>
                     );
                 })}
@@ -1043,7 +1002,7 @@ function QCModal({ order, onClose, onDone }: { order: ProductionOrder; onClose: 
     const mutation = useMutation({
         mutationFn: () => post(`/v1/admin/production-orders/${order.id}/qc`, form),
         onSuccess: () => {
-            toast.success(form.passed ? "QC Passed!" : "QC Failed - order on hold");
+            toast.success(form.passed ? "QC passed" : "QC failed — recorded on the order");
             onDone(); onClose();
         },
         onError: (e: ApiError) => toast.error(e.message),
@@ -1371,8 +1330,8 @@ function OrderDetail({ orderId, onClose, onUpdated }: { orderId: number; onClose
         mutationFn: ({ taskId, action }: { taskId: number; action: "start" | "complete" | "pause" }) =>
             put(`/v1/tailor/tasks/${taskId}/status`, { action }),
         onSuccess: (_, vars) => {
-            const msg = vars.action === "complete" ? "Stage marked complete!" :
-                        vars.action === "pause"    ? "Stage paused" : "Stage started!";
+            const msg = vars.action === "complete" ? "Stage done" :
+                        vars.action === "pause"    ? "Stage paused" : "Stage started";
             toast.success(msg);
             refresh();
         },
@@ -1381,7 +1340,7 @@ function OrderDetail({ orderId, onClose, onUpdated }: { orderId: number; onClose
 
     const cancelMut = useMutation({
         mutationFn: () => post(`/v1/admin/production-orders/${orderId}/cancel`, {}),
-        onSuccess: () => { toast.success("Order cancelled"); refresh(); },
+        onSuccess: () => { toast.success("Production order cancelled"); refresh(); },
         onError: (e: ApiError) => toast.error(e.message),
     });
 
@@ -1656,7 +1615,7 @@ aria-label="Close">
                                                 {fmtNum(a.quantity_allocated)}/{fmtNum(a.quantity_required)} {a.material.unit_of_measure}
                                             </span>
                                         </div>
-                                        <ProgressBar pct={pct} colorClass={pct >= 100 ? "bg-success" : "bg-brand-500"} />
+                                        <ProgressBar pct={pct} />
                                     </div>
                                 );
                             })}
@@ -1922,9 +1881,9 @@ function ProductionOrdersTab() {
                                 </p>
                                 <div className="card divide-y divide-line">
                                     {group.items.map((o) => {
-                                        const days = daysUntil(o.due_date);
-                                        const cfg = STATUS_CFG[o.status] ?? STATUS_CFG.draft;
-                                        const late = days < 0;
+                                        const due = dueInfo(o.due_date);
+                                        const cfg = orderStatus(o.status);
+                                        const late = due.tone === "overdue";
                                         return (
                                             <div key={o.id} className="relative flex items-stretch">
                                                 {/* Status as a left accent read peripherally: you see the
@@ -1945,7 +1904,7 @@ function ProductionOrdersTab() {
                                                     {/* 1 — who it is for, and its state */}
                                                     <div className="flex items-center gap-2">
                                                         <p className="flex-1 min-w-0 font-bold text-surface-900 text-[14.5px] leading-snug truncate">
-                                                            {o.customer_label ?? (o.customer_order_id ? 'Name missing' : 'For stock')}
+                                                            {jobFor(o)}
                                                         </p>
                                                         <span className={clsx('shrink-0 text-2xs font-bold px-2 py-0.5 rounded-full', cfg.bg, cfg.text)}>
                                                             {cfg.label}
@@ -1966,10 +1925,10 @@ function ProductionOrdersTab() {
                                                             <span className="text-2xs text-surface-400 shrink-0">x{o.quantity}</span>
                                                         )}
                                                         <span className={clsx(
-                                                            'ml-auto shrink-0 text-[11.5px] tabular-nums font-bold',
-                                                            late ? 'text-danger' : days <= 2 ? 'text-amber-dark' : 'text-surface-500',
+                                                            'ml-auto shrink-0 text-2xs tabular-nums font-bold',
+                                                            DUE_TONE_CLS[due.tone],
                                                         )}>
-                                                            {late ? `${Math.abs(days)}d late` : days === 0 ? 'Due today' : `${days}d left`}
+                                                            {due.label}
                                                         </span>
                                                     </div>
                                                 </button>
@@ -2024,10 +1983,10 @@ function ProductionOrdersTab() {
                                     <Fragment key={group.key}>
                                         <DateGroupHeaderRow label={group.label} colSpan={10} />
                                         {group.items.map(o => {
-                                    const days = daysUntil(o.due_date);
+                                    const due = dueInfo(o.due_date);
                                     // Must agree with the resolved customer name, or the TYPE pill can read
                                     // "For Stock" on a row that names a real person.
-                                    const isCustomer = o.is_customer_order ?? !!(o.customer_order_id || o.customer_id);
+                                    const isCustomer = isCustomerJob(o);
                                     return (
                                         <tr key={o.id} onClick={() => navigate(`/production/orders/${o.id}`)}
                                             className="cursor-pointer hover:bg-surface-50 transition-colors">
@@ -2061,15 +2020,15 @@ function ProductionOrdersTab() {
                                                 )}
                                             </td>
                                             <td className="px-3 py-3 text-surface-600 tabular-nums">{o.quantity}</td>
-                                            <td className="px-3 py-3 hidden md:table-cell"><PriorityBadge priority={o.priority} /></td>
+                                            <td className="px-3 py-3 hidden md:table-cell"><PriorityBadge priority={o.priority} showNormal /></td>
                                             <td className="px-3 py-3"><StatusBadge status={o.status} /></td>
                                             <td className="px-3 py-3 w-28 hidden md:table-cell">
                                                 <ProgressBar pct={o.completion_percentage} />
                                                 <p className="text-2xs text-surface-400 mt-0.5 tabular-nums">{o.completion_percentage}%</p>
                                             </td>
-                                            <td className={clsx("px-3 py-3 text-xs font-medium hidden sm:table-cell",
-                                                days < 0 ? "text-danger" : days <= 2 ? "text-warning-dark" : "text-surface-400")}>
-                                                {days < 0 ? `${Math.abs(days)}d ago` : days === 0 ? "Today" : `${days}d`}
+                                            <td className={clsx("px-3 py-3 text-xs font-semibold whitespace-nowrap hidden sm:table-cell", DUE_TONE_CLS[due.tone])}
+                                                title={fmtDueDate(o.due_date)}>
+                                                {due.label}
                                             </td>
                                             <td className="px-3 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                                                 <button
@@ -2247,12 +2206,8 @@ function WIPTab({
 
     // ── Group into pipeline columns ──────────────────────────────────────────
     const cols = [
-        { key: "in_progress", label: "In Progress" },
-        { key: "on_hold",     label: "On Hold" },
-        { key: "qc_pending",  label: "QC Check" },
-        { key: "qc_passed",   label: "QC Passed" },
-        { key: "qc_failed",   label: "QC Failed" },
-    ];
+        "in_progress", "on_hold", "qc_pending", "qc_passed", "qc_failed",
+    ].map(key => ({ key, label: orderStatus(key).label }));
 
     const byStatus = useMemo(() => {
         const m: Record<string, ProductionOrder[]> = {};
@@ -2312,8 +2267,7 @@ function WIPTab({
                                         {colOrders.map(o => {
                                             // Must agree with the resolved customer name, or the TYPE pill can read
                                     // "For Stock" on a row that names a real person.
-                                    const isCustomer = o.is_customer_order ?? !!(o.customer_order_id || o.customer_id);
-                                            const days = daysUntil(o.due_date);
+                                    const isCustomer = isCustomerJob(o);
                                             return (
                                                 <div key={o.id} onClick={() => setSelectedId(o.id === selectedId ? null : o.id)}
                                                     className={clsx("card p-3 cursor-pointer hover:shadow-md transition-all active:scale-[0.98]",
@@ -2330,14 +2284,12 @@ function WIPTab({
 
                                                     {/* 1 — customer, 2 — garment + SKU */}
                                                     <p className="text-xs font-semibold text-surface-900 truncate"
-                                                       title={(o.customer_label ?? o.product_name) || undefined}>
-                                                        {o.customer_label ?? o.product_name}
+                                                       title={jobFor(o)}>
+                                                        {jobFor(o)}
                                                     </p>
                                                     <p className="text-2xs text-surface-500 truncate"
                                                        title={`${o.product_name}${o.product?.sku ? ` · ${o.product.sku}` : ""}`}>
-                                                        {o.customer_label
-                                                            ? o.product_name
-                                                            : (isCustomer ? "Name missing" : "For stock")}
+                                                        {o.product_name}
                                                         {o.product?.sku && (
                                                             <span className="font-mono text-surface-400"> · {o.product.sku}</span>
                                                         )}
@@ -2390,8 +2342,8 @@ function WIPTab({
                                                         <span className="text-surface-400 truncate">
                                                             {o.started_at ? shortDate(o.started_at) : "not started"} → {shortDate(o.due_date)}
                                                         </span>
-                                                        <span className={clsx("shrink-0", days < 0 ? "text-danger font-bold" : days <= 2 ? "text-amber-dark font-semibold" : "text-surface-400")}>
-                                                            {days < 0 ? `${Math.abs(days)}d overdue` : days === 0 ? "Today" : `${days}d`}
+                                                        <span className={clsx("shrink-0 font-semibold", DUE_TONE_CLS[dueInfo(o.due_date).tone])} title={fmtDueDate(o.due_date)}>
+                                                            {dueInfo(o.due_date).label}
                                                         </span>
                                                     </div>
                                                     <div className="flex justify-end mt-2">
@@ -2951,10 +2903,12 @@ function QualityControlTab() {
     });
 
     const orders: ProductionOrder[] = data?.data ?? [];
+    // Whole-floor counts from the server, whichever tab is open (they used to
+    // count only the current tab's rows, so "QC Passed" read 0 on Awaiting).
     const stats = {
-        pending: orders.filter(o => o.status === "qc_pending").length,
-        passed:  orders.filter(o => o.status === "qc_passed").length,
-        failed:  orders.filter(o => o.status === "qc_failed").length,
+        pending: data?.stats?.qc_pending ?? 0,
+        passed:  data?.stats?.qc_passed ?? 0,
+        failed:  data?.stats?.qc_failed ?? 0,
     };
 
     return (
@@ -3008,8 +2962,7 @@ function QualityControlTab() {
                         {orders.map(o => {
                             // Must agree with the resolved customer name, or the TYPE pill can read
                                     // "For Stock" on a row that names a real person.
-                                    const isCustomer = o.is_customer_order ?? !!(o.customer_order_id || o.customer_id);
-                            const days = daysUntil(o.due_date);
+                                    const isCustomer = isCustomerJob(o);
                             return (
                                 <div key={o.id} onClick={() => setSelectedId(o.id === selectedId ? null : o.id)}
                                     className={clsx("card p-4 cursor-pointer hover:shadow-md transition-all",
@@ -3026,9 +2979,7 @@ function QualityControlTab() {
                                             <div className="flex gap-4 mt-1 text-xs text-surface-500">
                                                 <span>Qty: <strong className="text-surface-900">{o.quantity}</strong></span>
                                                 {/* The inspector passing or failing a garment should know who it is for. */}
-                                                {o.customer_label
-                                                    ? <span className="font-semibold text-surface-800 truncate max-w-[14rem]" title={o.customer_label}>{o.customer_label}</span>
-                                                    : isCustomer && <span className="text-warning-dark">Name missing</span>}
+                                                <span className={clsx("font-semibold truncate max-w-[14rem]", o.customer_label ? "text-surface-800" : "text-surface-500")} title={jobFor(o)}>{jobFor(o)}</span>
                                                 {isCustomer && o.customer_order && (
                                                     <span className="text-info-600">{o.customer_order.order_number}</span>
                                                 )}
