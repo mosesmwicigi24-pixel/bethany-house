@@ -185,13 +185,21 @@ class DashboardController extends Controller
                 ->count();
         } catch (\Exception) {}
 
-        // Phase 4 - production queue
+        // Phase 4 - production queue. Counted over the orders this viewer can
+        // SEE (ProductionOrder::visibleTo, the rule the Production Orders list
+        // uses): the whole floor for those who run it, their outlets for an
+        // outlet manager, their own work for a tailor. These were raw
+        // shop-wide counts, so a tailor's Home read "3 active, 2 overdue"
+        // beside a list with 2 and 1 (Tailor View Cycle 2, F5/B26).
         try {
-            $stats['production_draft']       = DB::table('production_orders')->where('status', 'draft')->count();
-            $stats['production_queue']       = DB::table('production_orders')->where('status', 'pending')->count();
-            $stats['production_in_progress'] = DB::table('production_orders')->where('status', 'in_progress')->count();
-            $stats['production_qc_pending']  = DB::table('production_orders')->where('status', 'qc_pending')->count();
-            $stats['production_overdue']     = DB::table('production_orders')
+            $user    = $request->user();
+            $visible = fn () => \App\Models\ProductionOrder::query()->visibleTo($user);
+
+            $stats['production_draft']       = $visible()->where('status', 'draft')->count();
+            $stats['production_queue']       = $visible()->where('status', 'pending')->count();
+            $stats['production_in_progress'] = $visible()->where('status', 'in_progress')->count();
+            $stats['production_qc_pending']  = $visible()->where('status', 'qc_pending')->count();
+            $stats['production_overdue']     = $visible()
                 ->where('due_date', '<', now())
                 ->whereNotIn('status', ['completed', 'cancelled', 'draft'])
                 ->count();
@@ -289,19 +297,11 @@ class DashboardController extends Controller
         // Overdue production orders — admins, managers, and tailors
         if ($isAdmin || $isManager || $isTailor) {
             try {
-                $overdueQuery = DB::table('production_orders')
+                // The same orders the Overdue tile counts (buildStats), so the
+                // banner and the tile can never disagree.
+                $overdueQuery = \App\Models\ProductionOrder::query()->visibleTo($user)
                     ->where('due_date', '<', now())
                     ->whereNotIn('status', ['completed', 'cancelled', 'draft']);
-
-                // Tailors only see orders they are assigned to
-                if ($isTailor && !$isAdmin) {
-                    $overdueQuery->whereExists(function ($q) use ($user) {
-                        $q->select(DB::raw(1))
-                          ->from('production_tasks')
-                          ->whereColumn('production_tasks.production_order_id', 'production_orders.id')
-                          ->where('production_tasks.assigned_to', $user->id);
-                    });
-                }
 
                 $n = $overdueQuery->count();
                 if ($n > 0) $alerts[] = [
