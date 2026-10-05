@@ -209,6 +209,22 @@ class User extends Authenticatable
         return $this->isSystem() || $this->isStaff();
     }
 
+    /**
+     * A named machine integration (config security.service_accounts) — exact
+     * email, active only. Lets it past the /admin/* staff gate and nothing
+     * else: canAccessAdmin() (console sign-in, 2FA, session limits) is
+     * deliberately untouched, and its roles/permissions still decide every
+     * route it may call.
+     */
+    public function isServiceAccount(): bool
+    {
+        $email = strtolower(trim((string) $this->email));
+
+        return $email !== ''
+            && $this->isActive()
+            && in_array($email, (array) config('security.service_accounts', []), true);
+    }
+
     public function isActive(): bool
     {
         return $this->status === 'active';
