@@ -25,6 +25,7 @@ use App\Services\NotificationService;
 use App\Services\ActivityLogService;
 use App\Services\IntelligenceService;
 use App\Services\ProductSerialService;
+use App\Support\MakerChecker;
 use App\Support\ProductionPayload;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -787,11 +788,28 @@ class ProductionController extends Controller
             'images'          => 'nullable|array',
         ]);
 
-        $order = ProductionOrder::findOrFail($id);
+        // Only an order the inspector could open (audit B12: any submit_qc
+        // holder could inspect any order by id). 404, as the order's own route.
+        $order = ProductionOrder::visibleTo($request->user())->findOrFail($id);
 
         if ($order->status !== 'qc_pending') {
             return response()->json(['message' => 'Order must be at QC pending stage.'], 422);
         }
+
+        // The person who sewed it does not pass it (owner's Policy 4): nobody
+        // assigned a stage on this order may record its QC — managers and the
+        // owner included. Before the transaction: the refusal is logged and
+        // must not roll back with it.
+        MakerChecker::assertNotMaker(
+            $request->user(),
+            'production_qc.submit',
+            $order,
+            ...ProductionTask::withoutViewerScope()
+                ->where('production_order_id', $order->id)
+                ->whereNotNull('assigned_to')
+                ->pluck('assigned_to')
+                ->all(),
+        );
 
         DB::beginTransaction();
         try {

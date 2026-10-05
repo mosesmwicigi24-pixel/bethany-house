@@ -41,6 +41,7 @@ final class MakerChecker
         'till.verify' => 'You counted this till, so another manager must verify it.',
         'till.reconcile' => 'You counted or verified this till, so someone independent must reconcile it.',
         'till.correct' => 'You counted this till, so someone else must correct it.',
+        'production_qc.submit' => 'You worked on this order, so someone else must inspect it.',
     ];
 
     private const FALLBACK = 'You raised this, so someone else must approve it.';

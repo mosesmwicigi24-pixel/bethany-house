@@ -367,8 +367,11 @@ class SyncPermissions extends Command
         'take_payment'    => ['payments.view', 'payments.record', 'payments.upload_proof'],
         'walkin_customer' => ['customers.view', 'customers.create', 'customers.create_without_email'],
 
-        // The shop floor: a worker's own tasks and the QC they submit on them.
-        'shop_floor'      => ['production.view', 'production.worker', 'production.submit_qc'],
+        // The shop floor: a worker's own tasks. Final QC is NOT here: the
+        // person who sewed it does not pass it (owner's Policy 4, 2026-10-05).
+        // Outlet managers and admin inspect; ProductionController::qualityCheck
+        // refuses anyone who worked a stage on the order, whatever their role.
+        'shop_floor'      => ['production.view', 'production.worker'],
 
         // Stock, and buying it. The APPROVE keys are not in these bundles: the
         // person who moves stock or raises a PO is the maker, and approving is

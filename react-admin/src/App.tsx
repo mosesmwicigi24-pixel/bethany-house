@@ -5,6 +5,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import { RequireAuth } from "@/components/auth/RequireAuth";
+import { HomeRedirect } from "@/components/auth/HomeRedirect";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ToastContainer } from "@/components/ui/Toast";
 import { SecurityPrompts } from "@/components/security/SecurityPrompts";
@@ -414,10 +415,7 @@ export default function App() {
                     <Routes>
                         {/* Public */}
                         <Route path="/login" element={<LoginPage />} />
-                        <Route
-                            path="/"
-                            element={<Navigate to="/dashboard" replace />}
-                        />
+                        <Route path="/" element={<HomeRedirect />} />
 
                         {/* Protected - all wrapped in AdminLayout */}
                         <Route
@@ -1429,11 +1427,8 @@ export default function App() {
                                 <Navigate to="/settings/business" replace />
                             }
                         />
-                        {/* Catch-all → dashboard */}
-                        <Route
-                            path="*"
-                            element={<Navigate to="/dashboard" replace />}
-                        />
+                        {/* Catch-all → the user's own home page (lib/homePath) */}
+                        <Route path="*" element={<HomeRedirect />} />
                     </Route>
                 </Routes>
 

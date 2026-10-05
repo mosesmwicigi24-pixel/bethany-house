@@ -21,7 +21,7 @@ function formatRoleName(raw: string): string {
 // PermissionGate is used by pages; Sidebar uses can() inline for nav filtering
 
 // ─── Navigation definition ────────────────────────────────────────────────────
-const NAV: NavGroup[] = [
+export const NAV: NavGroup[] = [
     // ── Workspace ────────────────────────────────────────────────────────────
     // Personal / at-a-glance items. Dashboard is the true "overview"; Approvals
     // sits here because it spans procurement AND payment workflows and needs
