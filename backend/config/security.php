@@ -18,6 +18,26 @@
 return [
 
     /*
+    | Service accounts — machine integrations that call the staff API with a
+    | long-lived token (Neema, the WhatsApp sales agent, creates pending orders
+    | through /api/v1/admin/pos/*). They are NOT staff: they cannot sign in to
+    | the console (canAccessAdmin() is unchanged), are not subject to staff
+    | session limits, and reach only what their roles and permissions allow.
+    | They pass the /admin/* staff gate (App\Http\Middleware\EnsureStaff) by
+    | exact email, and only while active. Server environment only — never the
+    | database — so no account can list itself. Comma-separated.
+    |
+    | Why: the staff gate (#332, 2026-08-22) refused Neema's account (user_type
+    | customer) on every /admin/* route; no order was created from 2026-08-24
+    | until this was named (2026-10-05).
+    */
+    'service_accounts' => array_values(array_filter(array_map(
+        fn ($e) => strtolower(trim($e)),
+        explode(',', (string) env('SERVICE_ACCOUNT_EMAILS', 'neema-bot@bethanyhouse.co.ke'))
+    ))),
+
+
+    /*
     | Per-role session limits, in minutes, enforced on every bearer request
     | (App\Services\Auth\SessionPolicy, called from the Sanctum token check in
     | AuthServiceProvider). A person holding several roles gets the strictest
