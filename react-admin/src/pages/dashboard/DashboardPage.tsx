@@ -9,6 +9,7 @@ import { get } from "@/api/client";
 import { reportsApi } from "@/api/reports";
 import { useAuthStore } from "@/store/auth.store";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useIsFloorWorker } from "@/hooks/useHomePath";
 import { clsx } from "clsx";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -590,8 +591,8 @@ function ProductionSummaryCard({ stats, loading }: { stats?: DashboardStats; loa
 
 // ── Role-aware greeting subtitle ──────────────────────────────────────────────
 
-function roleSubtitle(roles: string[]): string {
-    if (roles.includes("tailor"))               return "Check your assigned tasks and stay on top of your production work.";
+function roleSubtitle(roles: string[], floorWorker: boolean): string {
+    if (floorWorker)                            return "Check your assigned tasks and stay on top of your production work.";
     if (roles.includes("pos_clerk"))            return "Open a register and start serving customers.";
     if (roles.includes("procurement_officer"))  return "Manage purchase orders, suppliers, and incoming stock.";
     if (roles.includes("outlet_manager"))       return "Here's what's happening at your outlet today.";
@@ -601,9 +602,9 @@ function roleSubtitle(roles: string[]): string {
 // ── Role-aware stat grid ───────────────────────────────────────────────────────
 
 function RoleStatGrid({
-    stats, isLoading, roles, can, isAdmin, fmtCurrency, kpis, kpiLoading,
+    stats, isLoading, roles, floorWorker, can, isAdmin, fmtCurrency, kpis, kpiLoading,
 }: {
-    stats?: DashboardStats; isLoading: boolean; roles: string[];
+    stats?: DashboardStats; isLoading: boolean; roles: string[]; floorWorker: boolean;
     can: (p: string) => boolean; isAdmin: boolean; fmtCurrency: (n?: number) => string;
     kpis: any; kpiLoading: boolean;
 }) {
@@ -627,8 +628,10 @@ function RoleStatGrid({
         );
     }
 
-    // ── Tailor view — the full worker home, not just a stat grid ─────────────
-    if (roles.includes("tailor")) {
+    // ── Floor worker — the full worker home, not just a stat grid. Decided by
+    // permission (lib/homePath isFloorWorker), the same rule as the landing
+    // page, not by the role name "tailor". ───────────────────────────────────
+    if (floorWorker) {
         return <TailorHome stats={stats} isLoading={isLoading} can={can} />;
     }
 
@@ -755,6 +758,7 @@ export default function DashboardPage() {
 
     // Derive roles from the auth store user
     const roles: string[] = user?.roles?.map((r: { name: string }) => r.name) ?? [];
+    const floorWorker = useIsFloorWorker();
 
     const [period, setPeriod] = useState<typeof PERIODS[number]>(PERIODS[1]); // 7 days default
 
@@ -772,7 +776,7 @@ export default function DashboardPage() {
     // reports.sales (Phase 3A) — without it the row could only fail. That
     // covers anyone the reports engine would refuse, the system admin among
     // them (4D).
-    const hideFinancials = !can("reports.sales")
+    const hideFinancials = !can("reports.sales") || floorWorker
         || roles.some(r => ["tailor", "procurement_officer"].includes(r));
 
     // Rich KPIs + revenue trend from the reporting engine
@@ -815,7 +819,7 @@ export default function DashboardPage() {
     const fmtCurrency = (n?: number) =>
         n !== undefined ? `KES ${n.toLocaleString("en-KE", { minimumFractionDigits: 0 })}` : "—";
 
-    const quickActions = useQuickActions(stats, roles, can);
+    const quickActions = useQuickActions(stats, roles, can, floorWorker);
 
     return (
         <div className="animate-fade-in space-y-4 sm:space-y-6">
@@ -823,7 +827,7 @@ export default function DashboardPage() {
             <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div>
                     <h1 className="page-title">{greeting}, {user?.first_name ?? "there"}</h1>
-                    <p className="page-subtitle">{roleSubtitle(roles)}</p>
+                    <p className="page-subtitle">{roleSubtitle(roles, floorWorker)}</p>
                 </div>
     {!hideFinancials && (
                     <div className="flex items-center gap-1 bg-surface-100 rounded-xl p-1">
@@ -882,20 +886,20 @@ export default function DashboardPage() {
             {/* Role-aware stat grid */}
             <RoleStatGrid
                 stats={stats} isLoading={isLoading}
-                roles={roles} can={can} isAdmin={isAdmin}
+                roles={roles} floorWorker={floorWorker} can={can} isAdmin={isAdmin}
                 fmtCurrency={fmtCurrency}
                 kpis={kpis} kpiLoading={kpiLoading}
             />
 
             {/* Production queue — shown for admin and users with production access (not the tailor-only view which has its own tasks UI) */}
-            {(can('production.view') || isAdmin) && !roles.includes("tailor") && (
+            {(can('production.view') || isAdmin) && !floorWorker && (
                 <ProductionSummaryCard stats={stats} loading={isLoading} />
             )}
 
             {/* Quick actions first — the operational launchpad now sits where the
                 activity feed used to, full-width as a tappable grid. Tailors have
                 their own icon grid in the hero, so they skip this one. */}
-            {!roles.includes("tailor") && <QuickActionsPanel actions={quickActions} />}
+            {!floorWorker && <QuickActionsPanel actions={quickActions} />}
 
             {/* Recent activity LAST — informational, not operational. Full width. */}
             <div className="card overflow-hidden">
@@ -984,9 +988,10 @@ function useQuickActions(
     stats: DashboardStats | undefined,
     roles: string[],
     can: (p: string) => boolean,
+    floorWorker: boolean,
 ): QuickAction[] {
-    // ── Tailor ───────────────────────────────────────────────────────────────
-    if (roles.includes("tailor")) {
+    // ── Floor worker ─────────────────────────────────────────────────────────
+    if (floorWorker) {
         return [
             { label: "My Tasks",          href: "/production/my-tasks", icon: "tasks",   highlight: true },
             { label: "Messages",          href: "/comms",               icon: "message"  },

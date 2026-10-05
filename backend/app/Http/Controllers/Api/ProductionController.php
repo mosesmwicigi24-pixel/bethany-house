@@ -139,14 +139,17 @@ class ProductionController extends Controller
             ? $request->get('sort_by') : 'created_at';
         $query->orderBy($sortBy, $request->get('sort_order', 'desc'));
 
-        // Stats alongside list
+        // Stats alongside list — over the same orders the list may show
+        // (visibleTo), not the whole shop: a tailor's tiles read "3 in
+        // progress" above a list of 2 (Tailor View Cycle 2, F5/B26).
+        $visible = fn () => ProductionOrder::query()->visibleTo($request->user());
         $stats = [
-            'draft'       => ProductionOrder::where('status', 'draft')->count(),
-            'pending'     => ProductionOrder::where('status', 'pending')->count(),
-            'in_progress' => ProductionOrder::where('status', 'in_progress')->count(),
-            'qc_pending'  => ProductionOrder::where('status', 'qc_pending')->count(),
-            'completed'   => ProductionOrder::where('status', 'completed')->count(),
-            'overdue'     => ProductionOrder::where('due_date', '<', now())
+            'draft'       => $visible()->where('status', 'draft')->count(),
+            'pending'     => $visible()->where('status', 'pending')->count(),
+            'in_progress' => $visible()->where('status', 'in_progress')->count(),
+            'qc_pending'  => $visible()->where('status', 'qc_pending')->count(),
+            'completed'   => $visible()->where('status', 'completed')->count(),
+            'overdue'     => $visible()->where('due_date', '<', now())
                                 ->whereNotIn('status', ['completed', 'cancelled', 'draft'])->count(),
         ];
 
@@ -1245,7 +1248,14 @@ class ProductionController extends Controller
             // View specs) — it was never selected, so the drawer never showed it.
             'stage:id,name,slug,description',
         ])
-        ->where('assigned_to', $request->user()->id);
+        ->where('assigned_to', $request->user()->id)
+        // Open work on a cancelled or completed order is not work: cancel
+        // never closes the order's tasks, so they sat in the tailor's queue
+        // for good and every tap was refused (Tailor View Cycle 2, C2-B8).
+        // Finished tasks on such orders stay visible in the history view.
+        ->where(fn ($q) => $q
+            ->whereNotIn('status', ['pending', 'in_progress', 'paused'])
+            ->orWhereHas('productionOrder', fn ($o) => $o->whereNotIn('status', ['cancelled', 'completed'])));
 
         if ($includeCompleted) {
             // All tasks: active statuses first, then completed, then failed
