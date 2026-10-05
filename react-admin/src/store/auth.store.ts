@@ -3,13 +3,21 @@ import { authApi } from "@/api/auth";
 import { tokenStorage } from "@/api/client";
 import { registerPush, unregisterPush } from "@/lib/pushRegistration";
 import { resetSecurityPrompts } from "@/store/security.store";
-import type { User, LoginCredentials, LoginResponse } from "@/types";
+import type { User, LoginCredentials, LoginResponse, ApiError } from "@/types";
+
+/**
+ * Why the signed-in user could not be loaded at start-up, when the session
+ * itself was never refused: no connection, or the server failed or was busy.
+ * The token is kept — only the server can end a session (401/403).
+ */
+export type StartupError = "offline" | "server";
 
 interface AuthStore {
     user: User | null;
     token: string | null;
     isAuthenticated: boolean;
     isLoading: boolean;
+    startupError: StartupError | null;
     // Actions
     login: (
         credentials: LoginCredentials,
@@ -38,6 +46,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     token: tokenStorage.get(),
     isAuthenticated: !!tokenStorage.get(),
     isLoading: false,
+    startupError: null,
 
     login: async (credentials) => {
         set({ isLoading: true });
@@ -139,17 +148,33 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     fetchMe: async () => {
         const token = tokenStorage.get();
         if (!token) return;
+        // RequireAuth and HomeRedirect can both ask on the same render.
+        if (get().isLoading) return;
 
+        // startupError stays until an attempt succeeds, so a retry shows
+        // "trying again" on the problem screen rather than a blank spinner.
         set({ isLoading: true });
         try {
             const { user } = await authApi.me();
-            set({ user, isAuthenticated: true, isLoading: false });
+            set({ user, isAuthenticated: true, isLoading: false, startupError: null });
 
             // Phase 2 - re-register on page refresh in case the subscription
             // row was cleared from the DB (e.g. after db:fresh in dev)
             registerPush();
-        } catch {
-            get().clearAuth();
+        } catch (err) {
+            const status = (err as ApiError | undefined)?.status;
+            // Only the server can end a session: 401 (token gone, expired or
+            // idle-ended — SessionPolicy) or 403 (no longer active staff —
+            // EnsureStaff). No connection, a 5xx or a 429 says nothing about
+            // the session, so the token stays and the person can try again
+            // instead of retyping their password on a shop-floor tablet.
+            if (status === 401 || status === 403) {
+                get().clearAuth();
+                return;
+            }
+            const offline = status === undefined
+                && typeof navigator !== "undefined" && navigator.onLine === false;
+            set({ isLoading: false, startupError: offline ? "offline" : "server" });
         }
     },
 
@@ -164,6 +189,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
             token: null,
             isAuthenticated: false,
             isLoading: false,
+            startupError: null,
         });
     },
 }));
