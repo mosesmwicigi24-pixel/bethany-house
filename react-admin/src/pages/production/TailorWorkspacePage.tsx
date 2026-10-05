@@ -1135,15 +1135,13 @@ function FocusCard({
             <div className="card overflow-hidden">
                 {/* Progress header */}
                 <div className="px-3 pt-3 pb-2">
-                    <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-2xs font-bold text-surface-400 uppercase tracking-widest">
-                            Your stages · {group.completedCount}/{group.totalCount} done
+                    <div className="flex items-baseline justify-between gap-2 mb-1.5">
+                        <span className="text-2xs font-bold text-surface-400 uppercase tracking-widest whitespace-nowrap">
+                            Your stages
                         </span>
-                        {orderProgress && (
-                            <span className="text-2xs font-semibold text-surface-600">
-                                Whole order {orderProgress.percent}% · {orderProgress.finished}/{group.quantity} finished
-                            </span>
-                        )}
+                        <span className="text-2xs font-semibold text-surface-500 whitespace-nowrap">
+                            {group.completedCount}/{group.totalCount} done
+                        </span>
                     </div>
                     {/* Progress bar: the WHOLE order (every bench), not just
                         this tailor's stages — "2/2 done" could show on an
@@ -1160,6 +1158,11 @@ function FocusCard({
                             }}
                         />
                     </div>
+                    {orderProgress && (
+                        <p className="mt-1.5 text-2xs font-semibold text-surface-600">
+                            Whole order {orderProgress.percent}% · {orderProgress.finished}/{group.quantity} finished
+                        </p>
+                    )}
                 </div>
 
                 {/* Task rows */}
@@ -1473,8 +1476,12 @@ function QueueOrderGroup({
         daysUntil(group.dueDate) < 0 && !allDone;
     const isFocusedOrder = focusedOrderId === group.orderId;
 
-    const progressPct =
-        group.totalCount > 0
+    // Same measure as the Focus header: the whole order across every bench,
+    // so "0/1" never reads as "nothing done" on an order half sewn by others.
+    const orderProgress = (group.activeTask ?? group.tasks[0])?.production_order.progress ?? null;
+    const progressPct = orderProgress
+        ? orderProgress.percent
+        : group.totalCount > 0
             ? (group.completedCount / group.totalCount) * 100
             : 0;
 
@@ -1544,7 +1551,9 @@ function QueueOrderGroup({
                             />
                         </div>
                         <span className="text-2xs text-surface-400 shrink-0">
-                            {group.completedCount}/{group.totalCount}
+                            {orderProgress
+                                ? `${orderProgress.percent}%`
+                                : `${group.completedCount}/${group.totalCount}`}
                         </span>
                     </div>
                 </div>
