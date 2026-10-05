@@ -898,6 +898,31 @@ class ProductionController extends Controller
                 return response()->json(['message' => 'Order must pass quality check before completion.'], 422);
             }
 
+            // And every stage must actually be finished. qc_passed normally
+            // implies it, but a status is only a label: anything that set it
+            // directly (the legacy Livewire screens can set any status) would
+            // otherwise put unfinished garments into stock. The whole
+            // pipeline, not the caller's view of it.
+            $openStages = ProductionTask::withoutViewerScope()
+                ->where('production_order_id', $order->id)
+                ->whereNotIn('status', ProductionTask::SATISFIED_STATUSES)
+                ->with('stage:id,name')
+                ->orderBy('sequence')
+                ->get();
+            if ($openStages->isNotEmpty()) {
+                DB::rollBack();
+                $names = $openStages->map(fn ($t) => $t->stage?->name ?? "task #{$t->id}")->implode(', ');
+                return response()->json([
+                    'message'     => "Cannot add to stock: these stages are not finished - {$names}.",
+                    'code'        => 'STAGES_NOT_FINISHED',
+                    'open_stages' => $openStages->map(fn ($t) => [
+                        'task_id' => $t->id,
+                        'stage'   => $t->stage?->name,
+                        'status'  => $t->status,
+                    ])->values(),
+                ], 422);
+            }
+
             $qty       = $validated['final_quantity'] ?? $order->quantity;
             $variantId = $order->product_variant_id
                 ?? $order->product->variants()->first()?->id;

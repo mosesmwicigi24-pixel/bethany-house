@@ -358,6 +358,50 @@ class TailorFloorSafetyTest extends TestCase
         $this->assertSame('completed', $po->fresh()->status);
     }
 
+    public function test_complete_refuses_while_any_stage_is_unfinished_even_if_status_says_passed(): void
+    {
+        // A status set directly (legacy screens can set any status) must not
+        // put unfinished garments into stock.
+        $product = Product::factory()->create();
+        ProductVariant::factory()->create(['product_id' => $product->id]);
+        $po = ProductionOrder::create([
+            'order_number' => 'PRD-T-OPENSTAGE', 'product_id' => $product->id,
+            'status' => 'qc_passed', 'quantity' => 2,
+        ]);
+        $t = $this->tailor();
+        $this->task($po, $this->stage('cut-s', 'Cutting', 1), $t, 1, 'completed', 2);
+        $this->task($po, $this->stage('stitch-s', 'Stitching', 2), $t, 2, 'in_progress', 1);
+        Sanctum::actingAs($this->manager());
+
+        $this->postJson("/api/v1/admin/production-orders/{$po->id}/complete")
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'STAGES_NOT_FINISHED')
+            ->assertJsonPath('open_stages.0.stage', 'Stitching');
+
+        $this->assertSame('qc_passed', $po->fresh()->status);
+        $this->assertSame(0, DB::table('inventory_transactions')
+            ->where('reference_type', ProductionOrder::class)->where('reference_id', $po->id)->count());
+    }
+
+    public function test_complete_accepts_when_every_stage_is_finished(): void
+    {
+        $product = Product::factory()->create();
+        ProductVariant::factory()->create(['product_id' => $product->id]);
+        $po = ProductionOrder::create([
+            'order_number' => 'PRD-T-ALLDONE', 'product_id' => $product->id,
+            'status' => 'qc_passed', 'quantity' => 2,
+        ]);
+        $t = $this->tailor();
+        $this->task($po, $this->stage('cut-d', 'Cutting', 1), $t, 1, 'completed', 2);
+        $this->task($po, $this->stage('stitch-d', 'Stitching', 2), $t, 2, 'completed', 2);
+        Sanctum::actingAs($this->manager());
+
+        $this->postJson("/api/v1/admin/production-orders/{$po->id}/complete")->assertOk();
+        $this->assertSame('completed', $po->fresh()->status);
+        $this->assertEquals(2, DB::table('inventory_transactions')
+            ->where('reference_type', ProductionOrder::class)->where('reference_id', $po->id)->sum('quantity_change'));
+    }
+
     public function test_a_completed_order_cannot_be_walked_back_through_qc_to_stock_again(): void
     {
         // The B2 route to double stock: correction → re-count → QC → complete.
