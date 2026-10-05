@@ -296,11 +296,45 @@ async function replayQueuedTaskUpdates(): Promise<void> {
                 },
                 body: JSON.stringify(item.body),
             });
-            if (res.ok) await db.delete("task-updates", item.id);
+            if (res.ok) {
+                await db.delete("task-updates", item.id);
+            } else if (isFinalRefusal(res.status)) {
+                // The server said no (stage still blocked, order sent to QC,
+                // task moved to someone else, sign-in expired). Replaying the
+                // same request can only get the same answer, so retrying it
+                // forever just kept it stuck in the queue. Drop it and tell
+                // the open My Tasks page why.
+                await db.delete("task-updates", item.id);
+                await notifyClients({
+                    type: "task-update-refused",
+                    message: await refusalMessage(res),
+                });
+            }
+            // 5xx, 408, 429: transient — retry on next sync.
         } catch {
-            // Retry on next sync
+            // Network failure — retry on next sync
         }
     }
+}
+
+/** A 4xx other than timeout/rate-limit: the same request will never succeed. */
+function isFinalRefusal(status: number): boolean {
+    return status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
+async function refusalMessage(res: Response): Promise<string> {
+    try {
+        const body = await res.json();
+        if (body?.message) return `An offline update was not saved: ${body.message}`;
+    } catch {
+        // Not JSON — fall through
+    }
+    return "An offline update was not saved - please check the task and try again.";
+}
+
+async function notifyClients(message: { type: string; message: string }): Promise<void> {
+    const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const client of clients) client.postMessage(message);
 }
 
 async function replayQueuedPosSales(): Promise<void> {

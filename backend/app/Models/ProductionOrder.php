@@ -9,6 +9,24 @@ class ProductionOrder extends Model
 {
     use HasFactory;
 
+    /**
+     * The only statuses in which the floor may change an order's work:
+     * piece counts, task status, assignment, stage unlocks, materials, notes.
+     *
+     * Everything else is frozen. A draft has no confirmed work yet; once the
+     * last stage hands the order to QC its counts are the evidence the
+     * inspector is judging, so they stop moving; after QC, completion or
+     * cancellation they are history. Before this list existed, one repeated
+     * tap on a completed order sent it back to qc_pending, and completing it
+     * again put the same garments into stock a second time (audit B2).
+     */
+    public const FLOOR_WORK_STATUSES = ['pending', 'in_progress', 'on_hold'];
+
+    public function acceptsFloorWork(): bool
+    {
+        return in_array($this->status, self::FLOOR_WORK_STATUSES, true);
+    }
+
     protected $fillable = [
         'order_number',
         'is_customer_order',

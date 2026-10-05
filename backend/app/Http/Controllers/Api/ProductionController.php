@@ -19,6 +19,8 @@ use App\Models\ProductionAutoAssigneeRule;
 use App\Models\ProductionOrderApproval;
 use App\Models\ProductionOrderAssignee;
 use App\Models\User;
+use App\Services\ChannelPosting;
+use App\Services\ContextChannels;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
 use App\Services\IntelligenceService;
@@ -29,6 +31,40 @@ use Illuminate\Support\Facades\DB;
 
 class ProductionController extends Controller
 {
+    /**
+     * 422 unless the order still accepts floor work (pending, in_progress,
+     * on_hold — ProductionOrder::FLOOR_WORK_STATUSES). One refusal for every
+     * endpoint that changes an order's work, managers included: a closed
+     * order is history, whoever is asking.
+     */
+    private function floorWorkRefusal(?ProductionOrder $order): ?\Illuminate\Http\JsonResponse
+    {
+        if ($order && $order->acceptsFloorWork()) {
+            return null;
+        }
+
+        $message = match ($order?->status) {
+            'draft'      => 'This order has not been confirmed yet - there is no work to record on it.',
+            'qc_pending' => 'This order is with Quality Control - its counts are locked while it is inspected.',
+            'qc_failed'  => 'This order failed Quality Control - a manager must decide what happens next.',
+            'qc_passed', 'completed' => 'This order is finished - its work can no longer be changed.',
+            'cancelled'  => 'This order was cancelled - its work can no longer be changed.',
+            default      => 'This order can no longer be changed.',
+        };
+
+        return response()->json([
+            'message'      => $message,
+            'code'         => 'ORDER_CLOSED_FOR_FLOOR_WORK',
+            'order_status' => $order?->status,
+        ], 422);
+    }
+
+    /** The order row, locked until the open transaction ends. */
+    private function lockOrder(int $orderId): ?ProductionOrder
+    {
+        return ProductionOrder::whereKey($orderId)->lockForUpdate()->first();
+    }
+
     // =========================================================================
     // GET /admin/production-orders
     // =========================================================================
@@ -446,16 +482,30 @@ class ProductionController extends Controller
 
         $order = ProductionOrder::with('tasks')->findOrFail($id);
 
+        if ($refusal = $this->floorWorkRefusal($order)) {
+            return $refusal;
+        }
+
         DB::beginTransaction();
         try {
+            // Re-read the order under a row lock: the status checked above can
+            // move (QC submitted, order completed) while this request is in flight.
+            if ($refusal = $this->floorWorkRefusal($this->lockOrder($order->id))) {
+                DB::rollBack();
+                return $refusal;
+            }
+
             foreach ($validated['assignments'] as $a) {
                 $task = $order->tasks->firstWhere('id', $a['task_id']);
                 if (!$task) continue;
 
+                // Handing a task to someone keeps its state. It used to reset
+                // to 'pending', so re-assigning a half-stitched stage threw away
+                // its in-progress/completed status while the piece count stayed
+                // (audit B10).
                 $task->update([
                     'assigned_to'     => $a['tailor_id'],
                     'estimated_hours' => $a['estimated_hours'] ?? $task->estimated_hours,
-                    'status'          => 'pending',
                 ]);
             }
 
@@ -500,6 +550,9 @@ class ProductionController extends Controller
                     $orderChannel->members()->syncWithoutDetaching($toAdd);
                 }
 
+                // Whoever lost their last task on this job leaves its thread.
+                ContextChannels::pruneProductionOrder($order->id);
+
             } catch (\Exception) {}
 
             return response()->json([
@@ -534,8 +587,18 @@ class ProductionController extends Controller
             return response()->json(['message' => 'Task not found on this production order.'], 404);
         }
 
+        if ($refusal = $this->floorWorkRefusal($order)) {
+            return $refusal;
+        }
+
         DB::beginTransaction();
         try {
+            // Re-read the order under a row lock: the status checked above can
+            // move (QC submitted, order completed) while this request is in flight.
+            if ($refusal = $this->floorWorkRefusal($this->lockOrder($order->id))) {
+                DB::rollBack();
+                return $refusal;
+            }
             switch ($validated['action']) {
                 case 'start':
                     $task->start();
@@ -549,8 +612,11 @@ class ProductionController extends Controller
                     if ($validated['notes'] ?? null) $task->update(['notes' => $validated['notes']]);
 
                     // Check if all tasks done
-                    $order->refresh();
-                    $allDone = $order->tasks->every(fn ($t) => $t->status === 'completed');
+                    // The whole pipeline, not the caller's view of it.
+                    $allDone = ProductionTask::withoutViewerScope()
+                        ->where('production_order_id', $order->id)
+                        ->where('status', '!=', 'completed')
+                        ->doesntExist();
                     if ($allDone) {
                         $order->update(['status' => 'qc_pending']);
                     }
@@ -613,8 +679,19 @@ class ProductionController extends Controller
 
         $order = ProductionOrder::findOrFail($id);
 
+        if ($refusal = $this->floorWorkRefusal($order)) {
+            return $refusal;
+        }
+
         DB::beginTransaction();
         try {
+            // Re-read the order under a row lock: the status checked above can
+            // move (QC submitted, order completed) while this request is in flight.
+            if ($refusal = $this->floorWorkRefusal($this->lockOrder($order->id))) {
+                DB::rollBack();
+                return $refusal;
+            }
+
             foreach ($validated['allocations'] as $entry) {
                 $allocation = MaterialAllocation::with('material.inventory')->findOrFail($entry['allocation_id']);
 
@@ -718,6 +795,12 @@ class ProductionController extends Controller
 
         DB::beginTransaction();
         try {
+            // Two inspectors submitting together must not both record a result.
+            if ($this->lockOrder($order->id)?->status !== 'qc_pending') {
+                DB::rollBack();
+                return response()->json(['message' => 'Order must be at QC pending stage.'], 422);
+            }
+
             $newStatus = $validated['passed'] ? 'qc_passed' : 'qc_failed';
 
             $order->update([
@@ -806,6 +889,40 @@ class ProductionController extends Controller
 
         DB::beginTransaction();
         try {
+            // Finished goods enter stock exactly once. The check above ran
+            // outside any lock, so a double-click could pass it twice and post
+            // two stock-ins; the second request now waits here, then sees
+            // 'completed' and stops.
+            if ($this->lockOrder($order->id)?->status !== 'qc_passed') {
+                DB::rollBack();
+                return response()->json(['message' => 'Order must pass quality check before completion.'], 422);
+            }
+
+            // And every stage must actually be finished. qc_passed normally
+            // implies it, but a status is only a label: anything that set it
+            // directly (the legacy Livewire screens can set any status) would
+            // otherwise put unfinished garments into stock. The whole
+            // pipeline, not the caller's view of it.
+            $openStages = ProductionTask::withoutViewerScope()
+                ->where('production_order_id', $order->id)
+                ->whereNotIn('status', ProductionTask::SATISFIED_STATUSES)
+                ->with('stage:id,name')
+                ->orderBy('sequence')
+                ->get();
+            if ($openStages->isNotEmpty()) {
+                DB::rollBack();
+                $names = $openStages->map(fn ($t) => $t->stage?->name ?? "task #{$t->id}")->implode(', ');
+                return response()->json([
+                    'message'     => "Cannot add to stock: these stages are not finished - {$names}.",
+                    'code'        => 'STAGES_NOT_FINISHED',
+                    'open_stages' => $openStages->map(fn ($t) => [
+                        'task_id' => $t->id,
+                        'stage'   => $t->stage?->name,
+                        'status'  => $t->status,
+                    ])->values(),
+                ], 422);
+            }
+
             $qty       = $validated['final_quantity'] ?? $order->quantity;
             $variantId = $order->product_variant_id
                 ?? $order->product->variants()->first()?->id;
@@ -1074,7 +1191,12 @@ class ProductionController extends Controller
         // after tapping Start. One query for all unfinished predecessor tasks
         // across every order on this list — not a per-task lookup.
         $orderIds = $tasks->pluck('production_order_id')->unique()->values();
-        $openSiblings = ProductionTask::whereIn('production_order_id', $orderIds)
+        // Unscoped for the same reason as ProductionTask::blockingTask, which
+        // this mirrors: the predecessors belong to other benches, so read
+        // through the viewer scope this found none and the padlock never
+        // rendered. Only the stage NAME reaches the response (#301).
+        $openSiblings = ProductionTask::withoutViewerScope()
+            ->whereIn('production_order_id', $orderIds)
             ->whereNotNull('sequence')
             ->whereNotIn('status', ProductionTask::SATISFIED_STATUSES)
             ->with('stage:id,name')
@@ -1218,6 +1340,10 @@ class ProductionController extends Controller
 
         $order = $task->productionOrder;
 
+        if ($refusal = $this->floorWorkRefusal($order)) {
+            return $refusal;
+        }
+
         // ── Batched orders count per colourway ───────────────────────────────
         // The tailor's number applies to ONE batch (10 blue, 10 green…); the
         // task's own quantity_done becomes the SUM of its batch rows, so every
@@ -1239,7 +1365,11 @@ class ProductionController extends Controller
             return response()->json(['message' => "This order has {$qty} pieces - you cannot record more than that."], 422);
         }
 
-        $siblings = ProductionTask::where('production_order_id', $order->id)
+        // The whole pipeline: the stages before and after mine sit on other
+        // benches, and the viewer scope would hide them from a tailor - the
+        // ceiling then fell to the order quantity and the floor to zero.
+        $siblings = ProductionTask::withoutViewerScope()
+            ->where('production_order_id', $order->id)
             ->where('id', '!=', $task->id)
             ->whereNotNull('sequence')
             ->with('stage:id,name')
@@ -1291,6 +1421,12 @@ class ProductionController extends Controller
 
         DB::beginTransaction();
         try {
+            // Re-read the order under a row lock: the status checked above can
+            // move (QC submitted, order completed) while this request is in flight.
+            if ($refusal = $this->floorWorkRefusal($this->lockOrder($order->id))) {
+                DB::rollBack();
+                return $refusal;
+            }
             $update = ['quantity_done' => $newQd];
 
             if ($newQd > 0 && in_array($task->status, ['pending', 'paused'])) {
@@ -1313,10 +1449,14 @@ class ProductionController extends Controller
 
             $task->update($update);
 
-            $allDone = ProductionTask::where('production_order_id', $order->id)
+            // Every stage, not just the caller's: a tailor finishing her own
+            // stages used to send the whole order to QC. The order is locked
+            // and still open (checked above), so this is the one hand-off.
+            $allDone = ProductionTask::withoutViewerScope()
+                ->where('production_order_id', $order->id)
                 ->where('status', '!=', 'completed')
                 ->doesntExist();
-            if ($allDone && $order->status !== 'qc_pending') {
+            if ($allDone) {
                 $order->update(['status' => 'qc_pending']);
             }
 
@@ -1412,7 +1552,11 @@ class ProductionController extends Controller
             ], 422);
         }
 
-        $siblings = ProductionTask::where('production_order_id', $order->id)
+        // The whole pipeline: the stages before and after mine sit on other
+        // benches, and the viewer scope would hide them from a tailor - the
+        // ceiling then fell to the order quantity and the floor to zero.
+        $siblings = ProductionTask::withoutViewerScope()
+            ->where('production_order_id', $order->id)
             ->where('id', '!=', $task->id)
             ->whereNotNull('sequence')
             ->with([
@@ -1465,6 +1609,12 @@ class ProductionController extends Controller
 
         DB::beginTransaction();
         try {
+            // Re-read the order under a row lock: the status checked above can
+            // move (QC submitted, order completed) while this request is in flight.
+            if ($refusal = $this->floorWorkRefusal($this->lockOrder($order->id))) {
+                DB::rollBack();
+                return $refusal;
+            }
             $row = ProductionTaskBatchProgress::firstOrCreate(
                 ['production_task_id' => $task->id, 'production_order_batch_id' => $batch->id],
                 ['quantity_done' => 0],
@@ -1494,10 +1644,14 @@ class ProductionController extends Controller
 
             $task->update($update);
 
-            $allDone = ProductionTask::where('production_order_id', $order->id)
+            // Every stage, not just the caller's: a tailor finishing her own
+            // stages used to send the whole order to QC. The order is locked
+            // and still open (checked above), so this is the one hand-off.
+            $allDone = ProductionTask::withoutViewerScope()
+                ->where('production_order_id', $order->id)
                 ->where('status', '!=', 'completed')
                 ->doesntExist();
-            if ($allDone && $order->status !== 'qc_pending') {
+            if ($allDone) {
                 $order->update(['status' => 'qc_pending']);
             }
 
@@ -1546,7 +1700,11 @@ class ProductionController extends Controller
         ]);
         $allow = $validated['allow'] ?? true;
 
-        $task = ProductionTask::with(['stage:id,name', 'productionOrder:id,order_number'])->findOrFail($id);
+        $task = ProductionTask::with(['stage:id,name', 'productionOrder:id,order_number,status'])->findOrFail($id);
+
+        if ($refusal = $this->floorWorkRefusal($task->productionOrder)) {
+            return $refusal;
+        }
 
         if (!$allow && $task->started_at) {
             return response()->json(['message' => 'This stage has already started; it can no longer be re-locked.'], 422);
@@ -1593,6 +1751,10 @@ class ProductionController extends Controller
             return response()->json(['message' => 'You are not assigned to this task.'], 403);
         }
 
+        if ($refusal = $this->floorWorkRefusal($task->productionOrder)) {
+            return $refusal;
+        }
+
         // ── Stage gate ───────────────────────────────────────────────────────
         // Stages run in sequence: you cannot start (or complete a never-started)
         // task while an earlier stage is unfinished. The escape hatch is explicit:
@@ -1617,6 +1779,11 @@ class ProductionController extends Controller
 
         DB::beginTransaction();
         try {
+            if ($refusal = $this->floorWorkRefusal($this->lockOrder($task->production_order_id))) {
+                DB::rollBack();
+                return $refusal;
+            }
+
             switch ($validated['action']) {
                 case 'start':
                     $task->start();
@@ -1631,7 +1798,8 @@ class ProductionController extends Controller
                     if ($validated['notes'] ?? null) $task->update(['notes' => $validated['notes']]);
 
                     // Check all tasks done
-                    $allDone = ProductionTask::where('production_order_id', $task->production_order_id)
+                    $allDone = ProductionTask::withoutViewerScope()
+                        ->where('production_order_id', $task->production_order_id)
                         ->where('status', '!=', 'completed')
                         ->doesntExist();
 
@@ -1810,30 +1978,54 @@ class ProductionController extends Controller
     }
 
     // =========================================================================
-    // POST /tailor/tasks/{id}/note  /  /admin/production-orders/{id}/note
+    // POST /tailor/tasks/{id}/note
+    //
+    // A tailor's note goes into the order's thread as an ordinary message, so
+    // the whole team reads it where they already talk about the job. It used
+    // to write to a production_notes table that was never created, looked the
+    // TASK id up as an ORDER id, and failed on every save (audit F1/B7).
     // =========================================================================
 
     public function addTaskNote(Request $request, $id)
     {
         $validated = $request->validate(['note' => 'required|string|max:1000']);
 
-        ProductionOrder::findOrFail($id);
+        $task = ProductionTask::with(['stage:id,name', 'productionOrder'])->findOrFail($id);
+        $user = $request->user();
 
-        DB::table('production_notes')->insertOrIgnore([
-            'production_order_id' => $id,
-            'user_id'             => $request->user()->id,
-            'note'                => $validated['note'],
-            'created_at'          => now(),
-        ]);
+        if ($task->assigned_to !== $user->id && !$user->can('production.manage_assignees')) {
+            return response()->json(['message' => 'You are not assigned to this task.'], 403);
+        }
+
+        $order = $task->productionOrder;
+        if ($refusal = $this->floorWorkRefusal($order)) {
+            return $refusal;
+        }
+
+        $channel = Channel::findOrCreateContext('production_order', $order->id, 'PRD · ' . $order->order_number, $user->id);
+        $channel->members()->syncWithoutDetaching([$user->id => ['role' => 'member']]);
+
+        $stage   = $task->stage?->name;
+        $message = ChannelPosting::post(
+            $channel,
+            $user,
+            ($stage ? "📝 {$stage} note: " : '📝 Note: ') . $validated['note'],
+        );
 
         try {
-            ActivityLogService::log('production_note_added', null, [
-                'production_order_id' => $id,
-                'note_preview'        => mb_substr($validated['note'], 0, 80),
+            ActivityLogService::log('production_note_added', $order, [
+                'task_id'      => $task->id,
+                'stage'        => $stage,
+                'channel_id'   => $channel->id,
+                'message_id'   => $message->id,
+                'note_preview' => mb_substr($validated['note'], 0, 80),
             ]);
         } catch (\Exception) {}
 
-        return response()->json(['message' => 'Note added.']);
+        return response()->json([
+            'message'    => 'Note added to the order chat.',
+            'channel_id' => $channel->id,
+        ], 201);
     }
 
     // =========================================================================
@@ -1933,35 +2125,64 @@ class ProductionController extends Controller
             'notes'                => 'nullable|string',
         ]);
 
+        if ($refusal = $this->floorWorkRefusal(ProductionOrder::find($validated['production_order_id']))) {
+            return $refusal;
+        }
+
         $task = ProductionTask::create($validated + ['status' => 'pending']);
         return response()->json(['task' => $task->load(['stage', 'assignedTo:id,first_name,last_name'])], 201);
     }
 
     public function updateTaskDetails(Request $request, $id)
     {
-        $task = ProductionTask::findOrFail($id);
+        $task = ProductionTask::with('productionOrder')->findOrFail($id);
+
+        if ($refusal = $this->floorWorkRefusal($task->productionOrder)) {
+            return $refusal;
+        }
+
+        $previousAssignee = $task->assigned_to;
         $task->update($request->validate([
             'assigned_to'     => 'nullable|exists:users,id',
             'estimated_hours' => 'nullable|numeric|min:0',
             'notes'           => 'nullable|string',
         ]));
+
+        if ($task->assigned_to !== $previousAssignee) {
+            ContextChannels::pruneProductionOrder($task->production_order_id);
+        }
+
         return response()->json(['task' => $task->fresh(['stage', 'assignedTo:id,first_name,last_name'])]);
     }
 
     public function deleteTask($id)
     {
-        $task = ProductionTask::findOrFail($id);
+        $task = ProductionTask::with('productionOrder')->findOrFail($id);
+
+        if ($refusal = $this->floorWorkRefusal($task->productionOrder)) {
+            return $refusal;
+        }
+
         if ($task->status !== 'pending') return response()->json(['message' => 'Only pending tasks can be deleted.'], 422);
         $task->delete();
+        ContextChannels::pruneProductionOrder($task->production_order_id);
         return response()->json(['message' => 'Task deleted.']);
     }
 
     public function reassignTask(Request $request, $id)
     {
-        $task = ProductionTask::findOrFail($id);
+        $task = ProductionTask::with('productionOrder')->findOrFail($id);
+
+        if ($refusal = $this->floorWorkRefusal($task->productionOrder)) {
+            return $refusal;
+        }
+
         $previousAssignee = $task->assigned_to;
         $newAssignee = $request->validate(['tailor_id' => 'required|exists:users,id'])['tailor_id'];
         $task->update(['assigned_to' => $newAssignee]);
+
+        // The previous tailor leaves the job's thread with the job.
+        ContextChannels::pruneProductionOrder($task->production_order_id);
 
         try {
             ActivityLogService::log('production_task_reassigned', null, [
