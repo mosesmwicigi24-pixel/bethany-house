@@ -4,7 +4,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import {
-    ORDER_STATUS, PRIORITY, StatusBadge, PriorityBadge, ProgressBar, dueInfo, DUE_TONE_CLS, fmtDueDate,
+    ORDER_STATUS, PRIORITY, StatusBadge, PriorityBadge, ProgressBar, dueInfo, DUE_TONE_CLS, fmtDueDate, stageLabel,
     isCustomerJob, jobFor, type OrderProgressData,
 } from "@/components/production/productionUi";
 import { get, post, put, del } from "@/api/client";
@@ -2163,7 +2163,7 @@ export default function ProductionOrderDetailPage() {
         (a.sequence ?? a.stage?.sort_order ?? 0) - (b.sequence ?? b.stage?.sort_order ?? 0));
     const allocations = order.material_allocations ?? [];
     const isCustomer  = isCustomerJob(order);
-    const due         = dueInfo(order.due_date);
+    const due         = dueInfo(order.due_date, order.status);
     // Whose job this is — the question the floor asks first, so it belongs in
     // the header rather than a card further down the page.
     // The server-resolved name every surface shows (customer_label), with the
@@ -2313,15 +2313,17 @@ export default function ProductionOrderDetailPage() {
                                 due.tone === "later" ? "text-surface-900" : DUE_TONE_CLS[due.tone])}>
                                 {due.label}
                             </p>
+                            {/* A closed order's label already IS the date — say "due"
+                                underneath instead of printing it twice. */}
                             <p className="text-surface-500 text-2xs font-bold uppercase tracking-wide mt-1 leading-tight">
-                                {fmtDueDate(order.due_date)}
+                                {due.tone === "none" ? "due" : fmtDueDate(order.due_date)}
                             </p>
                         </div>
                     </div>
 
                     <div className="mt-3">
                         <div className="flex justify-between text-2xs text-surface-500 mb-1.5">
-                            <span>{order.current_stage ?? "Not started"}</span>
+                            <span>{stageLabel(order.current_stage, order.completion_percentage, order.status)}</span>
                             <span className="font-bold">{order.completion_percentage}% complete</span>
                         </div>
                         <ProgressBar pct={Math.max(order.completion_percentage, 2)} done={order.completion_percentage >= 100} />

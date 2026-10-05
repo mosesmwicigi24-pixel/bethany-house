@@ -12,9 +12,9 @@ A cycle is never re-run. A later cycle revisits an area only for a genuine highe
 
 | # | Theme | Status |
 |---|---|---|
-| 1 | UI/UX coherence | Closed (this PR) |
-| 2 | Information hierarchy | Next |
-| 3 | Shop-floor workflow | |
+| 1 | UI/UX coherence | Closed |
+| 2 | Information hierarchy | Closed |
+| 3 | Shop-floor workflow | Next |
 | 4 | Interaction quality | |
 | 5 | Apparel-production intelligence | |
 | 6 | Mobile / tablet excellence | |
@@ -24,6 +24,67 @@ A cycle is never re-run. A later cycle revisits an area only for a genuine highe
 | 10 | A full working day (tailor + production manager) | |
 
 ---
+
+## Cycle 2 — Information hierarchy (closed)
+
+**The question for every screen:** is the most important thing for this person the first thing they see?
+
+**Inspection.** The whole route was captured again for a tailor (Mary) and the admin (Grace), at 390px, 1024px and 1366px:
+- Tailor Home, My Tasks, Production Orders, Order Detail (live and cancelled), WIP, Calendar.
+
+What the pass found, beyond the four items Cycle 1 recorded:
+- **Tailor Home:** one overdue order was announced three times (red banner, Overdue tile, the task's chip). The banner and four tiles pushed her task list below the fold.
+- **Closed orders still counted down.** A cancelled order read "Due in 3d"; a completed one could read "Overdue".
+- **Where an order is:** an order with Cutting done and Stitching *paused* read "Not started" on the board and the order page. The server looked only for an in-progress or pending stage.
+- **Calendar:**
+  - day cells showed "20…", the clipped order number, which names nothing;
+  - the stage panel read "Stage 1 / 2 / 3";
+  - the panel left paused work out;
+  - like WIP, it opened a manager on their own (empty) diary.
+- **Stock jobs** led every card with "For stock", so a run of stock work read the same line six times.
+- **Orders stat tiles:** six across on a phone ran the labels together ("PendingIn Progress").
+
+### What changed
+
+- **Managers open on the whole floor.** WIP and the Calendar default to everyone for anyone who runs the floor; a tailor still opens on her own work. The rule is the existing `isFloorWorker` helper, so there is no new role test. Where a manager can't browse staff, the static pill reads "All orders", not their name.
+- **Tailor Home puts the work first:**
+  - My Tasks comes before the stat strip;
+  - the duplicate overdue banner is gone for floor workers (it was their only alert);
+  - the generic subtitle is hidden on phones;
+  - a task's due and in-progress chips stack, so the garment name keeps its width.
+- **Closed orders don't count down.** `dueInfo(date, status)` gives a completed or cancelled order its plain date ("8 Oct 2026") with no urgency. Every surface passes the status: list cards and table, WIP, the order drawer, Order Detail, Calendar and Tailor Home. Order Detail's due tile then reads "8 Oct 2026 · DUE" instead of the date twice.
+- **Where an order is, truthfully.** `ProductionController::getCurrentStage`: the stage being worked, else the earliest stage by sequence that isn't satisfied (pending, paused or sent back). It was "the first pending task in load order".
+  - `stageLabel()` in `productionUi` shows "All stages done" when nothing is open and "Cancelled" on a cancelled order. It is used on the WIP card, the drawer and Order Detail.
+  - A paused stage's pip on the WIP card is amber.
+- **Calendar:**
+  - the schedule feed adds `stage_names` beside `by_stage` (same id → count shape) and counts paused stages as open work;
+  - day cells show the garment, with the order number on hover;
+  - the title uses the compact heading.
+- **Production pages** use the compact `.page-title-sm` heading. The descriptive subtitle is hidden on phones.
+- **Job identity:** a customer job leads with the customer and a stock job with the garment ("Clergy Cassock / For stock"), on the order cards and WIP.
+- **Orders stat tiles:** two rows of three on a phone, one row from `sm`.
+- **Tablet orders:** cards below `xl` (1280px). Beside the sidebar a 1024px tablet left about 730px, and the table wrapped order numbers onto three lines and clipped Status. The table's order number no longer wraps.
+- **Title bar:** an order page reads "Production Order", not "#6". This is scoped to `/production/orders/{id}`, so other modules' crumbs are unchanged.
+
+### Tests
+
+- `ProductionStageLineTest` (new), with its fixture written out:
+  - paused-stage order → "Stitching";
+  - stages created out of sequence → the earliest by sequence;
+  - all done → null, with the list and the order page agreeing;
+  - the calendar panel counts Cutting 1 · Stitching 2 (paused included) · Finishing 1, by name.
+  Both tests fail on the previous controller.
+- `OrderProgressEverywhereTest`, `TailorFloorSafetyTest` and `ProductionCountsFollowVisibilityTest` pass unchanged.
+- Frontend: `tsc` is clean and `vite build` passes. Before/after captures were taken at 390, 1024 and 1366px.
+
+### Recorded for later cycles (non-blocking)
+
+| Cycle | Finding |
+|---|---|
+| 9 | A stock job's second line reads "For stock · SKU-…" on WIP; the SKU belongs to the garment line above. |
+| 4 | A cancelled order's stages still offer "Ready", "3 waiting" and "Allow parallel". |
+| 4 | Order Detail's six tabs still crowd a phone (left from Cycle 1's list; hierarchy work did not need them). |
+| 9 | `ProgressBar` at 0% draws a red dot, its minimum width, on a cancelled order. |
 
 ## Cycle 1 — UI/UX coherence (closed)
 

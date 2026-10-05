@@ -81,6 +81,18 @@ export function PriorityBadge({ priority: p, showNormal = false }: { priority?: 
     return <span className={clsx("inline-flex text-2xs font-bold px-1.5 py-0.5 rounded border uppercase tracking-wide whitespace-nowrap", c.cls)}>{c.label}</span>;
 }
 
+// ── Where an order is ────────────────────────────────────────────────────────
+
+/**
+ * The stage line on a card: the server's current stage, else done / not
+ * started. A cancelled order is at no stage, whatever its tasks say.
+ */
+export function stageLabel(currentStage?: string | null, percent?: number | null, status?: string | null): string {
+    if (status === "cancelled") return "Cancelled";
+    if (currentStage) return currentStage;
+    return (percent ?? 0) >= 100 ? "All stages done" : "Not started";
+}
+
 // ── Due dates (business calendar, Africa/Nairobi) ────────────────────────────
 
 /** Calendar days until the date on the business calendar (0 = today, negative = overdue). */
@@ -98,10 +110,18 @@ export function fmtDueDate(date?: string | null): string {
 
 export type DueTone = "overdue" | "today" | "soon" | "later" | "none";
 
-/** The one wording for a due date: "Overdue 3d" · "Due today" · "Due in 2d". */
-export function dueInfo(date?: string | null): { label: string; tone: DueTone; days: number } {
+/** Orders whose due date no longer drives work: nothing is late or "due" once closed. */
+const CLOSED_STATUSES = new Set(["completed", "cancelled"]);
+
+/**
+ * The one wording for a due date: "Overdue 3d" · "Due today" · "Due in 2d".
+ * Pass the order's status: a completed or cancelled order shows its plain date
+ * ("11 Oct 2026") with no urgency, so a closed job never reads as overdue.
+ */
+export function dueInfo(date?: string | null, status?: string | null): { label: string; tone: DueTone; days: number } {
     const days = daysUntil(date);
     if (Number.isNaN(days)) return { label: "No due date", tone: "none", days };
+    if (status && CLOSED_STATUSES.has(status)) return { label: fmtDueDate(date), tone: "none", days };
     if (days < 0)   return { label: `Overdue ${Math.abs(days)}d`, tone: "overdue", days };
     if (days === 0) return { label: "Due today", tone: "today", days };
     return { label: `Due in ${days}d`, tone: days <= 2 ? "soon" : "later", days };
@@ -115,8 +135,8 @@ export const DUE_TONE_CLS: Record<DueTone, string> = {
     none:    "text-surface-400",
 };
 
-export function DueBadge({ date, className }: { date?: string | null; className?: string }) {
-    const d = dueInfo(date);
+export function DueBadge({ date, status, className }: { date?: string | null; status?: string | null; className?: string }) {
+    const d = dueInfo(date, status);
     if (d.tone === "none") return null;
     return (
         <span title={fmtDueDate(date)} className={clsx("text-2xs font-semibold whitespace-nowrap", DUE_TONE_CLS[d.tone], className)}>

@@ -116,15 +116,23 @@ const REPORT_PAGE_LABELS: Record<string, string> = {
     'data-quality': 'Audit & Data Quality',
 }
 
+// A record id under these paths gets a word, not "#6": on a phone the last
+// crumb IS the top-bar title, and a database id names nothing for the floor.
+// (The page itself carries the order number.)
+const ID_LABEL_BY_PARENT: Record<string, string> = {
+    '/production/orders': 'Production Order',
+}
+
 function buildBreadcrumbs(pathname: string) {
     const segments = pathname.replace(/^\//, '').split('/')
     const crumbs: { label: string; href?: string }[] = []
     let path = ''
 
     for (const seg of segments) {
+        const parent = path
         path += `/${seg}`
         if (/^\d+$/.test(seg)) {
-            crumbs.push({ label: '#' + seg })
+            crumbs.push({ label: ID_LABEL_BY_PARENT[parent] ?? '#' + seg })
             continue
         }
         // Report pages are named for the question they answer (reports

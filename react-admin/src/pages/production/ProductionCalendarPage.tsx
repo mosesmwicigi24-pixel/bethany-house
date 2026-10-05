@@ -29,6 +29,7 @@ import { ORDER_STATUS, PRIORITY, orderStatus, dueInfo, DUE_TONE_CLS, fmtDueDate 
 import { businessToday, toBusinessDateInput } from "@/lib/businessDate";
 import { get } from "@/api/client";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useIsFloorWorker } from "@/hooks/useHomePath";
 import { useAuthStore } from "@/store/auth.store";
 import { Spinner } from "@/components/ui/Spinner";
 
@@ -38,7 +39,8 @@ interface ScheduleResponse {
     active_count: number;
     upcoming_orders: UpcomingOrder[];
     earliest_free_slot: string;         // ISO date string
-    by_stage: Record<string, number>;   // stage_id → pending task count
+    by_stage: Record<string, number>;   // stage_id → open task count
+    stage_names?: Record<string, string | null>; // stage_id → stage name
 }
 
 interface UpcomingOrder {
@@ -235,7 +237,7 @@ function OrderPill({
 /** Summary row used in the "Upcoming" sidebar panel */
 function UpcomingRow({ order, isSales }: { order: ProductionOrder; isSales: boolean }) {
     const navigate = useNavigate();
-    const due = dueInfo(order.due_date);
+    const due = dueInfo(order.due_date, order.status);
     return (
         <div
             className={clsx(
@@ -358,13 +360,17 @@ function MonthGrid({
                                     {orders.slice(0, 2).map(o => (
                                         <div
                                             key={o.id}
+                                            title={`${o.order_number} · ${o.product_name}`}
                                             className={clsx(
                                                 "text-2xs px-1 py-0.5 rounded border-l-2 truncate leading-tight",
                                                 STATUS_COLORS[o.status] ?? "bg-surface-100 text-surface-500",
                                                 PRIORITY_BORDER[o.priority] ?? "border-l-surface-300",
                                             )}
                                         >
-                                            <span className="font-mono">{o.order_number.replace(/^[A-Z]+-/, "")}</span>
+                                            {/* The garment, not the number: a day cell is ~45px wide
+                                                and "PRD-20261005-0005" clipped to "20…", which names
+                                                nothing. The full number is on hover and in the day panel. */}
+                                            {o.product_name}
                                         </div>
                                     ))}
                                     {orders.length > 2 && (
@@ -712,11 +718,16 @@ export default function ProductionCalendarPage() {
     const currentUser   = useAuthStore(s => s.user);
     const canViewUsers  = can("users.view");
 
-    // Workers default to "mine". Admins/managers with production.view pre-select
-    // themselves so they see their own tasks immediately, but can switch to any user.
+    // Workers default to "mine"; tailors (production.view + worker) to
+    // themselves. Whoever runs the floor opens on everyone and can narrow to
+    // one person — opening a manager on their own (usually empty) diary hid
+    // the whole workshop behind a filter.
     const isWorker = !canViewFull && !canRaiseOrder && can("production.worker");
+    const floorWorker = useIsFloorWorker();
     const [selectedUserId, setSelectedUserId] = useState<"all" | "mine" | string>(
-        isWorker ? "mine" : isSales ? "all" : currentUserId ? String(currentUserId) : "all"
+        // A floor worker opens on their own work; anyone who runs the floor
+        // opens on the whole calendar (their own diary is one pick away).
+        isWorker ? "mine" : floorWorker && currentUserId ? String(currentUserId) : "all"
     );
 
     // ── Data fetching ────────────────────────────────────────────────────────
@@ -922,7 +933,7 @@ export default function ProductionCalendarPage() {
             {/* ── Page header ────────────────────────────────────────────── */}
             <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div>
-                    <h1 className="page-title">
+                    <h1 className="page-title-sm">
                         {isSales ? "Workshop Availability" : "Production Calendar"}
                     </h1>
                     <p className="page-subtitle">
@@ -1003,7 +1014,9 @@ export default function ProductionCalendarPage() {
                                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/>
                                 </svg>
-                                {`${currentUser.first_name} ${(currentUser as any).last_name ?? ""}`.trim()}
+                                {selectedUserId === "all"
+                                    ? "All orders"
+                                    : `${currentUser.first_name} ${(currentUser as any).last_name ?? ""}`.trim()}
                             </div>
                         )}
 
@@ -1282,7 +1295,7 @@ export default function ProductionCalendarPage() {
                             }
                         } else if (scheduleData) {
                             for (const [stageId, count] of Object.entries(scheduleData.by_stage)) {
-                                byStage[stageId] = { name: `Stage ${stageId}`, count: count as number };
+                                byStage[stageId] = { name: scheduleData.stage_names?.[stageId] ?? `Stage ${stageId}`, count: count as number };
                             }
                         }
 
