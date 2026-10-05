@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\OrderReturn;
 use App\Models\Product;
+use App\Models\ProductionOrder;
 use App\Models\ProductVariant;
 use App\Models\InventoryItem;
 use App\Models\InventoryTransaction;
@@ -20,6 +21,7 @@ use App\Models\PaymentMethod;
 use App\Services\ActivityLogService;
 use App\Services\CurrencyPricing;
 use App\Services\ProductSerialService;
+use App\Services\MtoFulfilment;
 use App\Services\OrderTotals;
 use App\Services\PosDiscountPolicy;
 use App\Services\PosInventoryService;
@@ -1518,6 +1520,9 @@ class PosController extends Controller
             ]);
 
             ProductSerialService::dispatchForOrder($order);
+
+            // Made-to-order garments held for this customer leave stock now.
+            MtoFulfilment::collectForOrder($order, $request->user()->id);
 
             DB::commit();
         } catch (\Throwable $e) {
@@ -3800,8 +3805,9 @@ class PosController extends Controller
                 'created_by'          => $user->id,
             ]);
 
+            $mtoLines = [];
             foreach ($itemsData as $item) {
-                OrderItem::create([
+                $createdLine = OrderItem::create([
                     'order_id'           => $order->id,
                     'product_id'         => $item['product_id'] ?: ($item['variant']?->product_id),
                     'product_variant_id' => $item['variant_id'],
@@ -3834,6 +3840,9 @@ class PosController extends Controller
                         ? $item['inventory']->id
                         : null,
                 ]);
+                if ($item['is_mto'] ?? false) {
+                    $mtoLines[] = $createdLine;
+                }
                 // MTO lines have no inventory — the item is made to order. Others
                 // RESERVE stock (physical count stays put until the sale is paid).
                 if (!($item['is_mto'] ?? false) && $item['inventory']) {
@@ -3848,7 +3857,7 @@ class PosController extends Controller
                 while (DB::table('production_orders')->where('order_number', $prodNum)->exists()) {
                     $prodNum = 'PO-' . date('ymd') . '-' . strtoupper(Str::random(5));
                 }
-                DB::table('production_orders')->insert([
+                $productionOrderId = DB::table('production_orders')->insertGetId([
                     'order_number'       => $prodNum,
                     'product_id'         => $pi['product_id'],
                     'product_variant_id' => $pi['variant_id'] ?? null,
@@ -3871,6 +3880,19 @@ class PosController extends Controller
                     'updated_at'         => now(),
                 ]);
                 $raisedProductionOrders[] = $prodNum;
+
+                // Link the job to the made-to-order line it is for, so the
+                // finished garment can be held for this customer (MtoFulfilment).
+                // Jobs and lines come from the same cart in the same order, so
+                // each job takes the next unlinked made-to-order line of its
+                // product — two gowns for two people pair up one to one.
+                $job  = ProductionOrder::find($productionOrderId);
+                $line = collect($mtoLines)->first(fn ($l) => $l->production_order_id === null
+                    && (int) $l->product_id === (int) $pi['product_id']
+                    && (empty($pi['variant_id']) || (int) $l->product_variant_id === (int) $pi['variant_id']));
+                if ($line) {
+                    MtoFulfilment::link($job, $line);
+                }
             }
 
             DB::commit();

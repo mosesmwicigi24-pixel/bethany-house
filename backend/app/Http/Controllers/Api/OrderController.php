@@ -22,6 +22,7 @@ use App\Services\TaxCalculationService;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
 use App\Services\PosInventoryService;
+use App\Services\MtoFulfilment;
 use App\Services\ReceiptService;
 use Illuminate\Support\Facades\Log;
 use App\Services\IntelligenceService;
@@ -907,23 +908,32 @@ class OrderController extends Controller
 
         $oldStatus = $order->status;
 
-        $order->update([
-            'status'          => $newStatus,
-            'tracking_number' => $validated['tracking_number'] ?? $order->tracking_number,
-            'cancelled_at'    => $newStatus === 'cancelled'
-                ? ($order->cancelled_at ?? now())
-                : $order->cancelled_at,
-        ]);
+        // The status and the stock it moves change together, or not at all.
+        DB::transaction(function () use ($order, $newStatus, $validated, $request) {
+            $order->update([
+                'status'          => $newStatus,
+                'tracking_number' => $validated['tracking_number'] ?? $order->tracking_number,
+                'cancelled_at'    => $newStatus === 'cancelled'
+                    ? ($order->cancelled_at ?? now())
+                    : $order->cancelled_at,
+            ]);
 
-        // Cancelling from the admin status dropdown is the third door onto the
-        // same order as cancelOrder() and voidOrder() — and the only one that
-        // used to return no stock at all, silently stranding whatever the order
-        // had drawn. Idempotent and flag-guarded, so it neither double-restores
-        // an order a cancel/void/reap already unwound nor invents stock for one
-        // that never drew any.
-        if ($newStatus === 'cancelled') {
-            PosInventoryService::unwindForOrder($order, $request->user()->id);
-        }
+            // Cancelling from the admin status dropdown is the third door onto the
+            // same order as cancelOrder() and voidOrder() — and the only one that
+            // used to return no stock at all, silently stranding whatever the order
+            // had drawn. Idempotent and flag-guarded, so it neither double-restores
+            // an order a cancel/void/reap already unwound nor invents stock for one
+            // that never drew any.
+            if ($newStatus === 'cancelled') {
+                PosInventoryService::unwindForOrder($order, $request->user()->id);
+            }
+
+            // Completed is the customer taking the order (owner decision 1):
+            // made-to-order garments held for them leave stock now.
+            if ($newStatus === 'completed') {
+                MtoFulfilment::collectForOrder($order, $request->user()->id);
+            }
+        });
 
         DB::table('order_status_history')->insert([
             'order_id'    => $order->id,

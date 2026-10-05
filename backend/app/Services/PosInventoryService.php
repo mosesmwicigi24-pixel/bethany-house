@@ -120,6 +120,12 @@ class PosInventoryService
      */
     public static function unwindForOrder(Order $order, ?int $userId = null): void
     {
+        // Made-to-order garments held for (or handed to) this customer — tracked
+        // per production order in the ledger, idempotent on its own, and
+        // independent of this order's line flags (a guest storefront order
+        // reserves nothing but can still have a garment held for it).
+        MtoFulfilment::releaseForOrder($order, $userId);
+
         if ($order->stock_unwound_at) {
             return;
         }

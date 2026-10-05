@@ -198,18 +198,25 @@ class ProductSerialService
     {
         $order->loadMissing('items');
 
-        // Desired sold quantity per serialized product (skip MTO lines).
+        // Desired sold quantity per serialized product (skip lines whose
+        // garment is being made for this customer — see madeForThisOrder).
         $desired = [];
         foreach ($order->items as $item) {
-            if (!$item->product_id || self::isMto($item)) {
+            if (!$item->product_id || self::isMto($item) || self::madeForThisOrder($item)) {
                 continue;
             }
             $desired[$item->product_id] = ($desired[$item->product_id] ?? 0) + (int) $item->quantity;
         }
 
-        // Currently sold-to-this-order, grouped by product.
+        // Currently sold-to-this-order, grouped by product — excluding the
+        // garments produced FOR this order (MtoFulfilment holds them sold to
+        // it); those are not shelf picks and must never be released as surplus.
+        $ownJobs = \App\Models\ProductionOrder::where('customer_order_id', $order->id)->pluck('id')->all();
         $current = ProductSerial::where('order_id', $order->id)
             ->where('status', ProductSerial::SOLD)
+            ->when($ownJobs, fn ($q) => $q->where(
+                fn ($qq) => $qq->whereNull('production_order_id')->orWhereNotIn('production_order_id', $ownJobs),
+            ))
             ->get()
             ->groupBy('product_id');
 
@@ -380,5 +387,18 @@ class ProductSerialService
     private static function isMto(object $item): bool
     {
         return str_starts_with((string) ($item->notes ?? ''), '__MTO__');
+    }
+
+    /**
+     * A line whose garment is being made for this customer and never drew from
+     * a shelf: linked to a production job, with no stock row pinned. Online-shop
+     * made-to-order lines are exactly this (they carry "Measurements: …", not
+     * the POS __MTO__ prefix), and claiming a shelf serial for them used to mark
+     * some other unit — another customer's finished garment, or shop stock —
+     * as sold to this order.
+     */
+    private static function madeForThisOrder(object $item): bool
+    {
+        return !empty($item->production_order_id) && empty($item->inventory_item_id);
     }
 }

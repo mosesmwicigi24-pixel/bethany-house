@@ -10,6 +10,7 @@ use App\Models\MaterialAllocation;
 use App\Models\MaterialInventory;
 use App\Models\Product;
 use App\Models\Channel;
+use App\Models\Order;
 use App\Models\ProductionOrder;
 use App\Models\ProductionOrderBatch;
 use App\Models\ProductionTaskBatchProgress;
@@ -21,11 +22,13 @@ use App\Models\ProductionOrderAssignee;
 use App\Models\User;
 use App\Services\ChannelPosting;
 use App\Services\ContextChannels;
+use App\Services\MtoFulfilment;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
 use App\Services\IntelligenceService;
 use App\Services\ProductSerialService;
 use App\Support\MakerChecker;
+use App\Support\OrderStatusMachine;
 use App\Support\ProductionPayload;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -905,6 +908,24 @@ class ProductionController extends Controller
             return response()->json(['message' => 'Order must pass quality check before completion.'], 422);
         }
 
+        // A customer's garment is held for them at completion and leaves stock
+        // when they collect (MtoFulfilment). That needs the order line it was
+        // made for; a job that cannot be matched to exactly one line is refused
+        // rather than held against a guess.
+        $isCustomerJob = MtoFulfilment::isCustomerJob($order);
+        $saleLine      = null;
+        $sale          = null;
+        if ($isCustomerJob) {
+            [$saleLine, $lineRefusal] = MtoFulfilment::resolveLine($order);
+            if (! $saleLine) {
+                return response()->json([
+                    'message' => "Cannot complete {$order->order_number}: {$lineRefusal}",
+                    'code'    => 'MTO_LINE_UNRESOLVED',
+                ], 422);
+            }
+            $sale = Order::find($order->customer_order_id);
+        }
+
         DB::beginTransaction();
         try {
             // Finished goods enter stock exactly once. The check above ran
@@ -943,7 +964,16 @@ class ProductionController extends Controller
 
             $qty       = $validated['final_quantity'] ?? $order->quantity;
             $variantId = $order->product_variant_id
+                ?? $saleLine?->product_variant_id
                 ?? $order->product->variants()->first()?->id;
+
+            // Where it is stocked. A customer's garment waits at the outlet the
+            // order was taken at (owner decision 2) — the request's choice does
+            // not apply to it. A stock job goes where staff pick, else its own
+            // target / raising outlet, else the warehouse row.
+            $stockOutletId = $isCustomerJob
+                ? MtoFulfilment::holdOutletId($order, $sale)
+                : ($validated['outlet_id'] ?? $order->target_outlet_id ?? $order->outlet_id);
 
             if (!$variantId) {
                 DB::rollBack();
@@ -955,7 +985,7 @@ class ProductionController extends Controller
                 [
                     'product_id'         => $order->product_id,
                     'product_variant_id' => $variantId,
-                    'outlet_id'          => $validated['outlet_id'] ?? null,
+                    'outlet_id'          => $stockOutletId,
                 ],
                 ['quantity_on_hand' => 0, 'quantity_reserved' => 0, 'reorder_point' => 0]
             );
@@ -973,7 +1003,7 @@ class ProductionController extends Controller
             ProductSerialService::stockFromProductionOrder(
                 $order,
                 $inventoryItem->id,
-                $validated['outlet_id'] ?? null,
+                $stockOutletId,
                 $qty,
             );
 
@@ -983,12 +1013,29 @@ class ProductionController extends Controller
                 'quantity'     => $qty,
             ]);
 
-            // Update linked order if any
-            if ($order->customer_order_id) {
-                DB::table('orders')
-                    ->where('id', $order->customer_order_id)
-                    ->whereNotIn('status', ['completed', 'cancelled'])
-                    ->update(['status' => 'processing']);
+            if ($isCustomerJob) {
+                MtoFulfilment::link($order, $saleLine);
+                // Held for the customer; handed straight over if their order is
+                // already complete.
+                MtoFulfilment::hold($order, $inventoryItem, (int) $qty, $request->user()->id);
+            }
+
+            // Move the customer's order on to processing — only forward, through
+            // the same legal transitions as everywhere else (OrderStatusMachine)
+            // and with a status-history row. It used to be a raw UPDATE that
+            // pulled shipped, delivered, voided or refunded orders back.
+            if ($sale && in_array($sale->status, ['pending', 'confirmed'], true)
+                && OrderStatusMachine::canTransition($sale->status, 'processing')) {
+                $from = $sale->status;
+                $sale->update(['status' => 'processing']);
+                DB::table('order_status_history')->insert([
+                    'order_id'    => $sale->id,
+                    'from_status' => $from,
+                    'to_status'   => 'processing',
+                    'created_by'  => $request->user()->id,
+                    'notes'       => "Production order {$order->order_number} completed.",
+                    'created_at'  => now(),
+                ]);
             }
 
             DB::commit();
@@ -999,7 +1046,8 @@ class ProductionController extends Controller
                 ActivityLogService::log('production_completed', $order, [
                     'quantity'    => $qty,
                     'variant_id'  => $variantId,
-                    'outlet_id'   => $validated['outlet_id'] ?? null,
+                    'outlet_id'   => $stockOutletId,
+                    'held_for'    => $sale?->order_number,
                     'product_name'=> $productName,
                 ], "Production order {$order->order_number} completed - {$qty}x {$productName} added to inventory");
 
@@ -1012,7 +1060,9 @@ class ProductionController extends Controller
             } catch (\Exception) {}
 
             return response()->json([
-                'message' => "Production order {$order->order_number} completed. {$qty} unit(s) added to inventory.",
+                'message' => $sale
+                    ? "Production order {$order->order_number} completed. {$qty} unit(s) held for {$sale->order_number} until the customer collects."
+                    : "Production order {$order->order_number} completed. {$qty} unit(s) added to inventory.",
                 'order'   => $order->fresh(),
             ]);
 

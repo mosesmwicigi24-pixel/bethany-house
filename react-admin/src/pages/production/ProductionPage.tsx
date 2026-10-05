@@ -1134,6 +1134,9 @@ function CompleteModal({ order, onClose, onDone }: { order: ProductionOrder; onC
     const toast = useToastStore();
     const [outletId, setOutletId] = useState(order.outlet?.name ? "" : "");
     const [finalQty, setFinalQty] = useState(String(order.quantity));
+    // A customer's garment is held for them at the outlet their order was taken
+    // at, until they collect — the server decides where, not this picker.
+    const forCustomer = order.is_customer_order !== false && !!order.customer_order_id;
 
     const { data: outletsData } = useQuery({
         queryKey: ["outlets-list"],
@@ -1147,7 +1150,7 @@ function CompleteModal({ order, onClose, onDone }: { order: ProductionOrder; onC
             outlet_id: outletId ? Number(outletId) : undefined,
             final_quantity: Number(finalQty),
         }),
-        onSuccess: () => { toast.success(`${finalQty} unit(s) added to inventory`); onDone(); onClose(); },
+        onSuccess: (res: any) => { toast.success(res?.message ?? `${finalQty} unit(s) added to inventory`); onDone(); onClose(); },
         onError: (e: ApiError) => toast.error(e.message),
     });
 
@@ -1156,7 +1159,9 @@ function CompleteModal({ order, onClose, onDone }: { order: ProductionOrder; onC
             <div className="p-5 space-y-4">
                 <div className="bg-success-light border border-success/20 rounded-xl p-4">
                     <p className="text-sm font-semibold text-success-dark">Ready for inventory</p>
-                    <p className="text-xs text-success-dark/70 mt-0.5">QC has passed. Finished goods will be added to the selected location.</p>
+                    <p className="text-xs text-success-dark/70 mt-0.5">{forCustomer
+                        ? "QC has passed. The garment goes into stock held for this customer, at the outlet their order was taken at, and leaves stock when they collect."
+                        : "QC has passed. Finished goods will be added to the selected location."}</p>
                 </div>
                 <div>
                     <label className="label">Final Quantity Produced</label>
@@ -1164,13 +1169,15 @@ function CompleteModal({ order, onClose, onDone }: { order: ProductionOrder; onC
                         onChange={e => setFinalQty(e.target.value)} className="input" />
                     <p className="text-2xs text-surface-400 mt-1">Production target was {order.quantity} unit(s)</p>
                 </div>
-                <div>
-                    <label className="label">Add to Outlet / Location</label>
-                    <select value={outletId} onChange={e => setOutletId(e.target.value)} className="input">
-                        <option value="">Main Warehouse (default)</option>
-                        {outlets.map((o: any) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                    </select>
-                </div>
+                {!forCustomer && (
+                    <div>
+                        <label className="label">Add to Outlet / Location</label>
+                        <select value={outletId} onChange={e => setOutletId(e.target.value)} className="input">
+                            <option value="">Its own outlet, else the warehouse (default)</option>
+                            {outlets.map((o: any) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                        </select>
+                    </div>
+                )}
                 <div className="flex gap-3">
                     <button onClick={onClose} className="btn-secondary flex-1">Cancel</button>
                     <button onClick={() => mutation.mutate()} disabled={mutation.isPending}
