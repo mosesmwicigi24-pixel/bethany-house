@@ -4,10 +4,11 @@ import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { clsx } from "clsx";
 import {
     ORDER_STATUS, orderStatus, StatusBadge, PriorityBadge, DueBadge, ProgressBar,
-    dueInfo, DUE_TONE_CLS, fmtDueDate, isCustomerJob, jobFor,
+    dueInfo, DUE_TONE_CLS, fmtDueDate, isCustomerJob, jobFor, stageLabel,
 } from "@/components/production/productionUi";
 import { toBusinessDateInput } from "@/lib/businessDate";
 import { get, post, put } from "@/api/client";
+import { useIsFloorWorker } from "@/hooks/useHomePath";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToastStore } from "@/store/toast.store";
 import { useAuthStore } from "@/store/auth.store";
@@ -1372,7 +1373,7 @@ function OrderDetail({ orderId, onClose, onUpdated }: { orderId: number; onClose
                         <h2 className="font-bold text-base text-surface-900 truncate">{order.product_name}</h2>
                         <div className="flex items-center gap-3 mt-0.5 text-xs text-surface-500">
                             <span>Qty: <strong>{order.quantity}</strong></span>
-                            <DueBadge date={order.due_date} />
+                            <DueBadge date={order.due_date} status={order.status} />
                         </div>
                     </div>
                     <button onClick={onClose} className="btn-ghost btn-icon btn-sm shrink-0"
@@ -1384,7 +1385,7 @@ aria-label="Close">
                 {/* Progress */}
                 <div className="mt-3">
                     <div className="flex justify-between text-2xs text-surface-400 mb-1">
-                        <span>{order.current_stage ?? "Not started"}</span>
+                        <span>{stageLabel(order.current_stage, order.completion_percentage, order.status)}</span>
                         <span>{order.completion_percentage}%</span>
                     </div>
                     <ProgressBar pct={order.completion_percentage} />
@@ -1798,10 +1799,10 @@ function ProductionOrdersTab() {
     return (
         <div className="flex flex-col gap-4 min-h-0 flex-1">
             {/* Stats */}
-            {/* Always one row of six — on the phone the cards tighten into a
-                compact stat strip (centered, small label, bold number) instead
-                of stacking. Tapping a tile still filters by that status. */}
-            <div className="grid grid-cols-6 gap-1 sm:gap-2">
+            {/* Six tiles: two rows of three on the phone, where six across ran
+                the labels into each other ("PendingIn Progress"); one row from
+                sm up. Tapping a tile still filters by that status. */}
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 sm:gap-2">
                 {/* Each state carries its own soft tint, so the row reads as a
                     status spectrum at a glance instead of six identical white
                     chips — the reference app's use of colour as information. */}
@@ -1818,7 +1819,7 @@ function ProductionOrdersTab() {
                             tint,
                             filters.status === key ? "ring-2 ring-brand-500 ring-offset-1" : "hover:brightness-95")}>
                         <p className={clsx("text-[15px] sm:text-2xl font-extrabold tabular-nums sm:mt-0.5", color)}>{stats[key] ?? 0}</p>
-                        <p className={clsx("text-2xs truncate leading-tight sm:order-first font-semibold", color, "opacity-70")}>{label}</p>
+                        <p className={clsx("text-2xs truncate max-w-full leading-tight sm:order-first font-semibold", color, "opacity-70")}>{label}</p>
                     </button>
                 ))}
             </div>
@@ -1863,9 +1864,11 @@ function ProductionOrdersTab() {
 
             {/* Phone: a card list. A 9-column table on a 430px screen scrolls
                 sideways and wraps the order number onto three lines — the
-                reference app never puts a table on a handset. Desktop keeps the
-                table, where the columns genuinely fit. */}
-            <div className="md:hidden flex-1 min-h-0 overflow-auto -mx-3 px-3">
+                reference app never puts a table on a handset. Tablets get the
+                cards too: beside the sidebar a 1024px tablet leaves ~730px, and
+                the table wrapped order numbers again and clipped Status. The
+                table starts at xl, where the columns genuinely fit. */}
+            <div className="xl:hidden flex-1 min-h-0 overflow-auto -mx-3 px-3">
                 {isLoading ? (
                     <div className="flex justify-center py-16"><Spinner size="lg" /></div>
                 ) : orderGroups.length === 0 ? (
@@ -1881,7 +1884,7 @@ function ProductionOrdersTab() {
                                 </p>
                                 <div className="card divide-y divide-line">
                                     {group.items.map((o) => {
-                                        const due = dueInfo(o.due_date);
+                                        const due = dueInfo(o.due_date, o.status);
                                         const cfg = orderStatus(o.status);
                                         const late = due.tone === "overdue";
                                         return (
@@ -1901,19 +1904,21 @@ function ProductionOrdersTab() {
                                                     onClick={() => navigate(`/production/orders/${o.id}`)}
                                                     className="flex-1 min-w-0 text-left pl-4 pr-2 py-3 active:bg-surface-50 transition-colors"
                                                 >
-                                                    {/* 1 — who it is for, and its state */}
+                                                    {/* 1 — the job's name, and its state. A customer job leads
+                                                        with the customer; a stock job leads with the garment,
+                                                        so a run of stock work doesn't read "For stock" ×N. */}
                                                     <div className="flex items-center gap-2">
                                                         <p className="flex-1 min-w-0 font-bold text-surface-900 text-[14.5px] leading-snug truncate">
-                                                            {jobFor(o)}
+                                                            {isCustomerJob(o) ? jobFor(o) : o.product_name}
                                                         </p>
                                                         <span className={clsx('shrink-0 text-2xs font-bold px-2 py-0.5 rounded-full', cfg.bg, cfg.text)}>
                                                             {cfg.label}
                                                         </span>
                                                     </div>
 
-                                                    {/* 2 — what is being made */}
+                                                    {/* 2 — the other half: what is being made, or who it's for */}
                                                     <p className="mt-0.5 text-[13px] font-medium text-surface-600 truncate">
-                                                        {o.product_name}
+                                                        {isCustomerJob(o) ? o.product_name : jobFor(o)}
                                                     </p>
 
                                                     {/* 3 — job reference and the clock */}
@@ -1966,7 +1971,7 @@ function ProductionOrdersTab() {
             </div>
 
             {/* Desktop table */}
-            <div className="hidden md:flex flex-1 min-h-0 overflow-auto card">
+            <div className="hidden xl:flex flex-1 min-h-0 overflow-auto card">
                     {isLoading ? (
                         <div className="flex justify-center py-16 w-full"><Spinner size="lg" /></div>
                     ) : (
@@ -1983,7 +1988,7 @@ function ProductionOrdersTab() {
                                     <Fragment key={group.key}>
                                         <DateGroupHeaderRow label={group.label} colSpan={10} />
                                         {group.items.map(o => {
-                                    const due = dueInfo(o.due_date);
+                                    const due = dueInfo(o.due_date, o.status);
                                     // Must agree with the resolved customer name, or the TYPE pill can read
                                     // "For Stock" on a row that names a real person.
                                     const isCustomer = isCustomerJob(o);
@@ -1991,7 +1996,7 @@ function ProductionOrdersTab() {
                                         <tr key={o.id} onClick={() => navigate(`/production/orders/${o.id}`)}
                                             className="cursor-pointer hover:bg-surface-50 transition-colors">
                                             <td className="px-3 py-3">
-                                                <span className="font-mono text-xs font-bold text-brand-600">{o.order_number}</span>
+                                                <span className="font-mono text-xs font-bold text-brand-600 whitespace-nowrap">{o.order_number}</span>
                                             </td>
                                             <td className="px-3 py-3 hidden md:table-cell">
                                                 <OrderTypePill isCustomer={isCustomer} />
@@ -2284,12 +2289,12 @@ function WIPTab({
 
                                                     {/* 1 — customer, 2 — garment + SKU */}
                                                     <p className="text-xs font-semibold text-surface-900 truncate"
-                                                       title={jobFor(o)}>
-                                                        {jobFor(o)}
+                                                       title={isCustomer ? jobFor(o) : o.product_name}>
+                                                        {isCustomer ? jobFor(o) : o.product_name}
                                                     </p>
                                                     <p className="text-2xs text-surface-500 truncate"
-                                                       title={`${o.product_name}${o.product?.sku ? ` · ${o.product.sku}` : ""}`}>
-                                                        {o.product_name}
+                                                       title={`${isCustomer ? o.product_name : jobFor(o)}${o.product?.sku ? ` · ${o.product.sku}` : ""}`}>
+                                                        {isCustomer ? o.product_name : jobFor(o)}
                                                         {o.product?.sku && (
                                                             <span className="font-mono text-surface-400"> · {o.product.sku}</span>
                                                         )}
@@ -2325,6 +2330,7 @@ function WIPTab({
                                                                     t.status === "completed"   ? "bg-success" :
                                                                     t.status === "in_progress" ? "bg-brand-500 animate-pulse" :
                                                                     t.status === "failed"      ? "bg-danger" :
+                                                                    t.status === "paused"      ? "bg-warning" :
                                                                     "bg-surface-100")} />
                                                         ))}
                                                     </div>
@@ -2332,7 +2338,7 @@ function WIPTab({
                                                     {/* 7 — level of progress: the stage it is sitting in right now */}
                                                     <p className="text-2xs font-medium text-surface-700 flex items-center gap-1 truncate">
                                                         <StageIcon slug={(o.current_stage ?? "").toLowerCase().replace(" ", "_")} className="w-3 h-3 shrink-0" />
-                                                        {o.current_stage ?? "Not started"}
+                                                        {stageLabel(o.current_stage, o.completion_percentage, o.status)}
                                                     </p>
 
                                                     {/* 8 — started → due, with the countdown that was already here
@@ -2342,8 +2348,8 @@ function WIPTab({
                                                         <span className="text-surface-400 truncate">
                                                             {o.started_at ? shortDate(o.started_at) : "not started"} → {shortDate(o.due_date)}
                                                         </span>
-                                                        <span className={clsx("shrink-0 font-semibold", DUE_TONE_CLS[dueInfo(o.due_date).tone])} title={fmtDueDate(o.due_date)}>
-                                                            {dueInfo(o.due_date).label}
+                                                        <span className={clsx("shrink-0 font-semibold", DUE_TONE_CLS[dueInfo(o.due_date, o.status).tone])} title={fmtDueDate(o.due_date)}>
+                                                            {dueInfo(o.due_date, o.status).label}
                                                         </span>
                                                     </div>
                                                     <div className="flex justify-end mt-2">
@@ -2983,7 +2989,7 @@ function QualityControlTab() {
                                                 {isCustomer && o.customer_order && (
                                                     <span className="text-info-600">{o.customer_order.order_number}</span>
                                                 )}
-                                                <DueBadge date={o.due_date} />
+                                                <DueBadge date={o.due_date} status={o.status} />
                                             </div>
                                         </div>
 
@@ -3043,11 +3049,14 @@ function PageShell({ title, subtitle, children, headerRight }: {
         <div className="flex flex-col h-full animate-fade-in" style={{ height: "calc(100vh - 112px)" }}>
             <div className="shrink-0 mb-4">
                 {/* On desktop, title and headerRight sit on the same row.
-                    On mobile, headerRight drops below the subtitle. */}
+                    On mobile, headerRight drops below the title. These are
+                    working lists, so the heading is the compact one and the
+                    descriptive subtitle is left off phones — the work starts
+                    above the fold. */}
                 <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                     <div>
-                        <h1 className="page-title">{title}</h1>
-                        <p className="page-subtitle">{subtitle}</p>
+                        <h1 className="page-title-sm">{title}</h1>
+                        <p className="page-subtitle hidden sm:block">{subtitle}</p>
                     </div>
                     {headerRight && (
                         <div className="shrink-0">{headerRight}</div>
@@ -3074,14 +3083,15 @@ export function ProductionWIPPage() {
     const canViewFull = can("production.view");
     const isWorker    = !canViewFull && can("production.worker");
 
-    // Pre-select the logged-in user so they immediately see their own tasks.
-    // Workers are always locked to "mine"; admins/managers default to themselves
-    // but can switch to any user via the dropdown.
+    // Workers are locked to "mine"; tailors open on themselves. Whoever runs
+    // the floor opens on the whole board and can narrow to one person —
+    // opening a manager on their own assignments showed an empty board.
     const currentUserId = useAuthStore(s => s.user?.id ?? null);
     const canViewUsers  = can("users.view");
+    const floorWorker   = useIsFloorWorker();
 
     const [selectedUserId, setSelectedUserId] = useState<"all" | "mine" | string>(
-        isWorker ? "mine" : currentUserId ? String(currentUserId) : "all"
+        isWorker ? "mine" : floorWorker && currentUserId ? String(currentUserId) : "all"
     );
 
     // Fetch production users for the dropdown (admin only, requires users.view)
@@ -3157,7 +3167,7 @@ export function ProductionWIPPage() {
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/>
                     </svg>
-                    {currentUserName}
+                    {selectedUserId === "all" ? "All orders" : currentUserName}
                 </div>
             )}
 

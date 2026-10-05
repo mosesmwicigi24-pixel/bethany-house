@@ -2198,12 +2198,25 @@ class ProductionController extends Controller
         })->toArray();
     }
 
+    /**
+     * The stage an order is at: the one being worked, else the earliest stage
+     * (by sequence) not yet satisfied — pending, paused or sent back alike.
+     * Looking only for 'in_progress' then 'pending' read a half-made order
+     * whose open stage was paused as "Not started". Null once every stage is
+     * satisfied.
+     */
     private function getCurrentStage(ProductionOrder $order): ?string
     {
-        return $order->tasks
-            ?->firstWhere('status', 'in_progress')
-            ?->stage?->name
-            ?? $order->tasks?->firstWhere('status', 'pending')?->stage?->name;
+        $tasks = $order->tasks;
+        if (! $tasks) return null;
+
+        $current = $tasks->firstWhere('status', 'in_progress')
+            ?? $tasks
+                ->reject(fn ($t) => in_array($t->status, ProductionTask::SATISFIED_STATUSES, true))
+                ->sortBy(fn ($t) => [$t->sequence ?? 0, $t->id])
+                ->first();
+
+        return $current?->stage?->name;
     }
 
     private function transformList(array $items): array
@@ -2532,11 +2545,18 @@ class ProductionController extends Controller
             ->orderBy('due_date')
             ->get();
 
-        $byStage = $active
+        // Open work per stage. A paused stage is still open work on that
+        // bench — leaving it out undercounted the queue.
+        $openTasks = $active
             ->flatMap(fn ($o) => $o->tasks)
-            ->whereIn('status', ['pending', 'in_progress'])
+            ->whereIn('status', ['pending', 'in_progress', 'paused']);
+        $byStage = $openTasks
             ->groupBy('production_stage_id')
             ->map(fn ($tasks) => $tasks->count());
+        // The stage's name for each key above, so the board reads "Stitching",
+        // not "Stage 2". Kept beside by_stage so its shape stays id => count.
+        $stageNames = $openTasks
+            ->mapWithKeys(fn ($t) => [$t->production_stage_id => $t->stage?->name]);
 
         // Every active order with a due date — including the overdue ones. A
         // promise made while blind to the backlog is the worst promise.
@@ -2574,6 +2594,7 @@ class ProductionController extends Controller
         return response()->json([
             'active_count'   => $active->count(),
             'by_stage'       => $byStage,
+            'stage_names'    => $stageNames,
             'upcoming_orders'=> $upcoming->values(),
             'earliest_free_slot' => $earliestFree,
         ]);

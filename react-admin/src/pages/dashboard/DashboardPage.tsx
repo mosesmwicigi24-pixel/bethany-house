@@ -423,7 +423,7 @@ function TailorHome({ stats, isLoading, can }: {
     // The shared Production due wording and thresholds (productionUi), on the
     // business calendar — the same words as My Tasks and the order page.
     const dueChip = (t: any) => {
-        const due = dueInfo(t.production_order?.due_date);
+        const due = dueInfo(t.production_order?.due_date, t.production_order?.status);
         if (due.tone === "none") return null;
         const pill = { overdue: "bg-danger-light", today: "bg-warning-light", soon: "bg-warning-light", later: "bg-surface-100", none: "" }[due.tone];
         return <span className={clsx("text-2xs font-bold rounded-full px-2 py-0.5 whitespace-nowrap", pill, DUE_TONE_CLS[due.tone])}>{due.label}</span>;
@@ -431,16 +431,6 @@ function TailorHome({ stats, isLoading, can }: {
 
     return (
         <div className="space-y-4">
-            {/* Compact stat strip — numbers at a glance, no vertical sprawl */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                <TailorStatTile label="Active"   value={stats?.production_in_progress} tone="text-brand-600"  href="/production/my-tasks" loading={isLoading} />
-                <TailorStatTile label="In queue" value={stats?.production_queue}       tone="text-info"       href="/production/my-tasks" loading={isLoading} />
-                <TailorStatTile label="Overdue"  value={stats?.production_overdue}     tone="text-danger"     href="/production/my-tasks" loading={isLoading} />
-                {isQc
-                    ? <TailorStatTile label="QC pending" value={stats?.production_qc_pending} tone="text-accent-600" href="/production/qc" loading={isLoading} />
-                    : <TailorStatTile label="Alerts"     value={stats?.unread_notifications}  tone="text-warning-dark" href="/notifications" loading={isLoading} />}
-            </div>
-
             {/* THE HERO — what to work on next */}
             <div className="card overflow-hidden">
                 <div className="card-header flex items-center justify-between">
@@ -471,7 +461,7 @@ function TailorHome({ stats, isLoading, can }: {
                                     {t.blocked_by_stage ? ` · 🔒 waiting on ${t.blocked_by_stage}` : ""}
                                 </p>
                             </div>
-                            <div className="shrink-0 flex items-center gap-2">
+                            <div className="shrink-0 flex flex-col sm:flex-row items-end sm:items-center gap-1 sm:gap-2">
                                 {dueChip(t)}
                                 {t.status === "in_progress" && (
                                     <span className="text-2xs font-bold text-brand-600 bg-brand-50 border border-brand-200 rounded-full px-2 py-0.5">In progress</span>
@@ -480,6 +470,16 @@ function TailorHome({ stats, isLoading, can }: {
                         </Link>
                     ))}
                 </div>
+            </div>
+
+            {/* Compact stat strip — numbers at a glance, after the work itself */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <TailorStatTile label="Active"   value={stats?.production_in_progress} tone="text-brand-600"  href="/production/my-tasks" loading={isLoading} />
+                <TailorStatTile label="In queue" value={stats?.production_queue}       tone="text-info"       href="/production/my-tasks" loading={isLoading} />
+                <TailorStatTile label="Overdue"  value={stats?.production_overdue}     tone="text-danger"     href="/production/my-tasks" loading={isLoading} />
+                {isQc
+                    ? <TailorStatTile label="QC pending" value={stats?.production_qc_pending} tone="text-accent-600" href="/production/qc" loading={isLoading} />
+                    : <TailorStatTile label="Alerts"     value={stats?.unread_notifications}  tone="text-warning-dark" href="/notifications" loading={isLoading} />}
             </div>
 
             {/* Quick actions — icons with a name, one row, not furniture */}
@@ -829,7 +829,7 @@ export default function DashboardPage() {
             <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div>
                     <h1 className="page-title">{greeting}, {user?.first_name ?? "there"}</h1>
-                    <p className="page-subtitle">{roleSubtitle(roles, floorWorker)}</p>
+                    <p className={clsx("page-subtitle", floorWorker && "hidden sm:block")}>{roleSubtitle(roles, floorWorker)}</p>
                 </div>
     {!hideFinancials && (
                     <div className="flex items-center gap-1 bg-surface-100 rounded-xl p-1">
@@ -849,8 +849,11 @@ export default function DashboardPage() {
                 )}
             </div>
 
-            {/* Alert bar */}
-            <AlertBar alerts={alerts} />
+            {/* Alert bar. Not on a floor worker's home: their one alert is
+                "N production orders overdue", which the Overdue tile and each
+                task's due chip already say — three signals for one fact
+                pushed their tasks below the fold. */}
+            {!floorWorker && <AlertBar alerts={alerts} />}
 
             {/* Revenue row: sparkline + channel split + cash today
                  Hidden for roles that have no business seeing financials:
