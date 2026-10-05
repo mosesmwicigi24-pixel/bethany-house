@@ -43,6 +43,8 @@ interface MyTask {
     notes?: string | null;
     /** Name of the unfinished earlier stage gating this one (null = free to start). */
     blocked_by_stage?: string | null;
+    /** Position of this stage in the order's pipeline (snapshot at confirmation). */
+    sequence?: number | null;
     stage: { id: number; name: string; slug: string; description?: string };
     production_order: {
         id: number;
@@ -51,6 +53,8 @@ interface MyTask {
         due_date: string;
         status: string;
         quantity: number;
+        /** The WHOLE order's progress (every bench), as numbers only. */
+        progress?: { percent: number; finished: number; stages: number } | null;
         specifications?: Record<string, string> | null;
         measurements?: Record<string, string> | null;
         customer_preferences?: Record<string, string> | null;
@@ -135,18 +139,24 @@ function groupTasksByOrder(tasks: MyTask[]): OrderGroup[] {
     const groups: OrderGroup[] = [];
     for (const [orderId, orderTasks] of map) {
         const rep = orderTasks[0];
+        // The checklist reads in the order the garment is made — Cutting before
+        // Finishing — not by status. Unsequenced (older) tasks go last.
         const sorted = [...orderTasks].sort(
             (a, b) =>
-                (TASK_STATUS_PRIORITY[a.status] ?? 99) -
-                (TASK_STATUS_PRIORITY[b.status] ?? 99)
+                (a.sequence ?? Number.MAX_SAFE_INTEGER) - (b.sequence ?? Number.MAX_SAFE_INTEGER) ||
+                (TASK_STATUS_PRIORITY[a.status] ?? 99) - (TASK_STATUS_PRIORITY[b.status] ?? 99) ||
+                a.id - b.id
         );
+        // The stage to work on: one already under way, else the first that is
+        // free to start — a stage still waiting on another bench is not
+        // "active" just because it is pending.
+        const open = (t: MyTask) => t.status === "pending" || t.status === "paused";
+        const blocked = (t: MyTask) => !!t.blocked_by_stage && !t.started_at;
         const activeTask =
-            sorted.find(
-                (t) =>
-                    t.status === "in_progress" ||
-                    t.status === "paused" ||
-                    t.status === "pending"
-            ) ?? null;
+            sorted.find((t) => t.status === "in_progress") ??
+            sorted.find((t) => open(t) && !blocked(t)) ??
+            sorted.find(open) ??
+            null;
         const completedCount = orderTasks.filter(
             (t) => t.status === "completed"
         ).length;
@@ -167,21 +177,19 @@ function groupTasksByOrder(tasks: MyTask[]): OrderGroup[] {
         });
     }
 
-    // Sort groups: fully-done last; within active groups, the one with an
-    // in_progress task comes first, then by due date.
-    return groups.sort((a, b) => {
-        const aDone = a.completedCount === a.totalCount;
-        const bDone = b.completedCount === b.totalCount;
-        if (aDone !== bDone) return aDone ? 1 : -1;
-        const aActive =
-            a.activeTask?.status === "in_progress" ? 0 : 1;
-        const bActive =
-            b.activeTask?.status === "in_progress" ? 0 : 1;
-        if (aActive !== bActive) return aActive - bActive;
-        return (
-            new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
-        );
-    });
+    // Keep the server's order — it ranks by risk of missing the deadline
+    // (Intelligence #9), and re-sorting here by due date threw that away, so
+    // Tailor Home's #1 was not the Focus #1. Only fully-done orders move last.
+    // (Map preserves first-seen order, i.e. the server's.)
+    return groups
+        .map((g, i) => ({ g, i }))
+        .sort((a, b) => {
+            const aDone = a.g.completedCount === a.g.totalCount;
+            const bDone = b.g.completedCount === b.g.totalCount;
+            if (aDone !== bDone) return aDone ? 1 : -1;
+            return a.i - b.i;
+        })
+        .map(({ g }) => g);
 }
 
 // ── Offline queue helper ───────────────────────────────────────────────────────
@@ -391,6 +399,30 @@ function RightDrawer({
                 </div>
             </div>
         </div>
+    );
+}
+
+// ── Pause ─────────────────────────────────────────────────────────────────────
+// A tailor stopping for a break, the end of a shift or missing materials can
+// say so: the stage shows as paused (amber) until Resume. The server already
+// supported it; My Tasks had no button.
+
+function PauseButton({ onPause, disabled }: { onPause: () => void; disabled: boolean }) {
+    return (
+        <button
+            onClick={() => {
+                navigator.vibrate?.(30);
+                onPause();
+            }}
+            disabled={disabled}
+            aria-label="Pause this stage"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-warning-light text-warning-dark border border-warning text-[11px] font-bold active:bg-warning/20 transition-colors disabled:opacity-50"
+        >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5" />
+            </svg>
+            Pause
+        </button>
     );
 }
 
@@ -910,6 +942,7 @@ function FocusCard({
 
     const elapsed = useElapsedTimer(group.activeTask);
     const order = group.activeTask?.production_order ?? null;
+    const orderProgress = (group.activeTask ?? group.tasks[0])?.production_order.progress ?? null;
     const isOverdue =
         daysUntil(group.dueDate) < 0 &&
         group.completedCount < group.totalCount;
@@ -1102,25 +1135,34 @@ function FocusCard({
             <div className="card overflow-hidden">
                 {/* Progress header */}
                 <div className="px-3 pt-3 pb-2">
-                    <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-2xs font-bold text-surface-400 uppercase tracking-widest">
-                            Stages
+                    <div className="flex items-baseline justify-between gap-2 mb-1.5">
+                        <span className="text-2xs font-bold text-surface-400 uppercase tracking-widest whitespace-nowrap">
+                            Your stages
                         </span>
-                        <span className="text-2xs font-semibold text-surface-500">
+                        <span className="text-2xs font-semibold text-surface-500 whitespace-nowrap">
                             {group.completedCount}/{group.totalCount} done
                         </span>
                     </div>
-                    {/* Progress bar */}
+                    {/* Progress bar: the WHOLE order (every bench), not just
+                        this tailor's stages — "2/2 done" could show on an
+                        order that was far from finished. */}
                     <div className="h-1 w-full bg-surface-100 rounded-full overflow-hidden">
                         <div
                             className="h-full bg-brand-500 rounded-full transition-all duration-500"
                             style={{
-                                width: `${group.totalCount > 0
-                                    ? (group.completedCount / group.totalCount) * 100
-                                    : 0}%`,
+                                width: `${orderProgress
+                                    ? orderProgress.percent
+                                    : group.totalCount > 0
+                                        ? (group.completedCount / group.totalCount) * 100
+                                        : 0}%`,
                             }}
                         />
                     </div>
+                    {orderProgress && (
+                        <p className="mt-1.5 text-2xs font-semibold text-surface-600">
+                            Whole order {orderProgress.percent}% · {orderProgress.finished}/{group.quantity} finished
+                        </p>
+                    )}
                 </div>
 
                 {/* Task rows */}
@@ -1220,7 +1262,13 @@ function FocusCard({
                                                     : "Start"}
                                             </button>
                                         )}
-                                        {(order?.quantity ?? 1) > 1 && (task.status === "in_progress" || task.status === "pending" || task.status === "paused") && (() => {
+                                        {isInProgress && (
+                                            <PauseButton
+                                                disabled={isActing}
+                                                onPause={() => onAction(task, "pause")}
+                                            />
+                                        )}
+                                        {(order?.quantity ?? 1) > 1 && !isBlocked && (task.status === "in_progress" || task.status === "pending" || task.status === "paused") && (() => {
                                             // Batched orders count per colourway: pick a batch
                                             // chip, then the same +1/+5/+10 apply to it. The
                                             // task total stays derived — blue + green = overall.
@@ -1428,8 +1476,12 @@ function QueueOrderGroup({
         daysUntil(group.dueDate) < 0 && !allDone;
     const isFocusedOrder = focusedOrderId === group.orderId;
 
-    const progressPct =
-        group.totalCount > 0
+    // Same measure as the Focus header: the whole order across every bench,
+    // so "0/1" never reads as "nothing done" on an order half sewn by others.
+    const orderProgress = (group.activeTask ?? group.tasks[0])?.production_order.progress ?? null;
+    const progressPct = orderProgress
+        ? orderProgress.percent
+        : group.totalCount > 0
             ? (group.completedCount / group.totalCount) * 100
             : 0;
 
@@ -1499,7 +1551,9 @@ function QueueOrderGroup({
                             />
                         </div>
                         <span className="text-2xs text-surface-400 shrink-0">
-                            {group.completedCount}/{group.totalCount}
+                            {orderProgress
+                                ? `${orderProgress.percent}%`
+                                : `${group.completedCount}/${group.totalCount}`}
                         </span>
                     </div>
                 </div>
@@ -1606,7 +1660,16 @@ function QueueOrderGroup({
                                                 : "Start"}
                                         </button>
                                     )}
-                                    {canComplete && (
+                                    {isInProgress && (
+                                        <PauseButton
+                                            disabled={isActing}
+                                            onPause={() => onQuickAction(task, "pause")}
+                                        />
+                                    )}
+                                    {/* Done only for a single garment, as on Focus: a
+                                        multi-piece stage finishes itself when its last
+                                        piece is counted. */}
+                                    {canComplete && group.quantity === 1 && (
                                         <button
                                             onClick={() => {
                                                 navigator.vibrate?.([40, 30, 80]);
@@ -1806,7 +1869,12 @@ export default function TailorWorkspacePage() {
         setShowCompletion(false);
         setCompletedTask(null);
         focusGroup(group);
-        if (group.activeTask) handleAction(group.activeTask, "start");
+        // Only start what is free to start; a stage still waiting on another
+        // bench just gets focused, with its padlock showing why.
+        const next = group.activeTask;
+        if (next && next.status !== "in_progress" && !(next.blocked_by_stage && !next.started_at)) {
+            handleAction(next, "start");
+        }
     };
 
     const handleBackToQueue = () => {
@@ -1818,12 +1886,15 @@ export default function TailorWorkspacePage() {
     // Next group after completion: first group (excluding completed order) that
     // still has a pending/paused task
     const completedOrderId = completedTask?.production_order.id;
+    // Prefer work that is free to start now — including this tailor's next
+    // stage on the order just finished — over a stage still waiting.
+    const startable = (g: OrderGroup) =>
+        !!g.activeTask && !(g.activeTask.blocked_by_stage && !g.activeTask.started_at);
     const nextGroupAfterCompletion =
-        activeGroups.find(
-            (g) =>
-                g.orderId !== completedOrderId &&
-                g.activeTask !== null
-        ) ?? null;
+        activeGroups.find((g) => g.orderId !== completedOrderId && startable(g)) ??
+        activeGroups.find((g) => g.orderId === completedOrderId && startable(g)) ??
+        activeGroups.find((g) => g.orderId !== completedOrderId && g.activeTask !== null) ??
+        null;
 
     // ── Loading ───────────────────────────────────────────────────────────────
 
