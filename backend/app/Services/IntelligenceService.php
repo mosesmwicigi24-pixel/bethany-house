@@ -470,6 +470,10 @@ class IntelligenceService
                     'created_by'         => $order->created_by ?? $order->user_id,
                 ]);
 
+                // The line knows its job too (it locks while in production, and
+                // the finished garment is held against it — MtoFulfilment).
+                \App\Services\MtoFulfilment::link($prodOrder, $item);
+
                 DB::commit();
                 $created[] = $prodOrder->id;
 
