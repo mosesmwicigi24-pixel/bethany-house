@@ -13,6 +13,7 @@ use App\Notifications\LowStockAlertNotification;
 use App\Notifications\ProductionAssignedNotification;
 use App\Notifications\ProductionStageCompletedNotification;
 use App\Notifications\ProductionOverdueNotification;
+use App\Notifications\ProductionCancelledNotification;
 use App\Notifications\ShipmentStatusChangedNotification;
 use App\Notifications\UserWelcomeNotification;
 use App\Notifications\InAppNotification;
@@ -552,6 +553,23 @@ class NotificationService
         self::send(
             self::resolve(self::OWNERS, null, $assignedUserIds),
             new ProductionOverdueNotification($productionOrderId, $orderNumber, $productName, $dueDate)
+        );
+    }
+
+    /**
+     * Fired when a production order is cancelled: tells the tailors holding its
+     * stages to stop work on it.
+     */
+    public static function productionCancelled(
+        int $productionOrderId,
+        string $orderNumber,
+        string $productName,
+        array $assignedUserIds,
+        ?string $reason = null
+    ): void {
+        self::send(
+            self::resolve([], null, $assignedUserIds),
+            new ProductionCancelledNotification($productionOrderId, $orderNumber, $productName, $reason)
         );
     }
 

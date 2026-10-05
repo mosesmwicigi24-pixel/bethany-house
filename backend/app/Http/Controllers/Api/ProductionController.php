@@ -1106,17 +1106,25 @@ class ProductionController extends Controller
         } catch (\Exception) {}
 
         try {
-            // Notify any assigned users via the overdue channel (reuses existing assignee logic)
-            $assignedIds = \App\Models\ProductionTask::where('production_order_id', $order->id)
+            // Tell the tailors holding its stages to stop. This used to call
+            // productionOverdue() with too few arguments: an ArgumentCountError
+            // (an Error, not an Exception) escaped this catch and turned every
+            // cancel of an assigned order into a 500 after it had been saved.
+            // Pipeline-wide, so read past the viewer's own-task scope.
+            $assignedIds = \App\Models\ProductionTask::withoutViewerScope()
+                ->where('production_order_id', $order->id)
                 ->whereNotNull('assigned_to')
                 ->pluck('assigned_to')
                 ->unique()
                 ->values()
                 ->toArray();
 
-            foreach ($assignedIds as $userId) {
-                NotificationService::productionOverdue($order->id, $order->order_number, $userId);
-            }
+            $productName = $order->product?->translations->firstWhere('language_code', 'en')?->name
+                ?? $order->product?->sku ?? "Production #{$order->order_number}";
+
+            NotificationService::productionCancelled(
+                $order->id, $order->order_number, $productName, $assignedIds, $reason ?: null
+            );
         } catch (\Exception) {}
 
         return response()->json(['message' => 'Production order cancelled.']);
