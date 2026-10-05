@@ -9,6 +9,8 @@ use App\Models\User;
 use App\Events\ChannelMessageSent;
 use App\Events\ChannelReactionUpdated;
 use App\Events\ChannelReadUpdated;
+use App\Services\ChannelPosting;
+use App\Services\ContextChannels;
 use App\Services\NotificationService;
 use App\Services\IntelligenceService;
 use Illuminate\Http\Request;
@@ -50,7 +52,19 @@ class ChannelController extends Controller
                 'lastMessage.user:id,first_name,last_name',
             ])
             ->orderByDesc('last_activity_at')
-            ->get()
+            ->get();
+
+        // An order thread is listed only while its order is visible to you:
+        // the row carries the last message's text, so a membership that
+        // outlived the work it was for must not keep showing it.
+        $visibleOrders = ContextChannels::visibleProductionOrderIds(
+            $user,
+            $channels->where('context_type', 'production_order')->pluck('context_id')->filter()->map(fn ($id) => (int) $id)->all(),
+        );
+
+        $channels = $channels
+            ->reject(fn ($channel) => $channel->context_type === 'production_order'
+                && ! in_array((int) $channel->context_id, $visibleOrders, true))
             ->filter(function ($channel) use ($user) {
                 // Only order/production-order context channels can be
                 // dismissed — DMs and manually-created Spaces are unaffected,
@@ -199,6 +213,13 @@ class ChannelController extends Controller
             return response()->json(['message' => 'Cannot add members to a DM.'], 422);
         }
 
+        $newMember = User::findOrFail($validated['user_id']);
+        if (! ContextChannels::mayAddMember($newMember, $channel)) {
+            return response()->json([
+                'message' => "{$newMember->first_name} cannot see this order, so cannot join its thread.",
+            ], 422);
+        }
+
         $channel->members()->syncWithoutDetaching([
             $validated['user_id'] => ['role' => $validated['role'] ?? 'member'],
         ]);
@@ -281,69 +302,12 @@ class ChannelController extends Controller
             'reply_to_id' => 'sometimes|nullable|integer|exists:channel_messages,id',
         ]);
 
-        $mentionedIds   = ChannelMessage::parseMentions($validated['body']);
-        $linkedEntities = ChannelMessage::parseLinkedEntities($validated['body']);
-
-        $message = ChannelMessage::create([
-            'channel_id'     => $channel->id,
-            'user_id'        => $request->user()->id,
-            'reply_to_id'    => $validated['reply_to_id'] ?? null,
-            'type'           => 'text',
-            'body'           => $validated['body'],
-            'mentions'       => $mentionedIds,
-            'linked_entities' => $linkedEntities ?: null,
-        ]);
-
-        // Update channel last activity
-        $channel->update([
-            'last_message_id'  => $message->id,
-            'last_activity_at' => now(),
-        ]);
-
-        $message->load('user:id,first_name,last_name', 'replyTo.user:id,first_name,last_name');
-
-        // Broadcast to channel members via Reverb (real-time).
-        // Wrapped in try/catch - if Reverb is unreachable the message is
-        // still saved to DB and clients receive it on their next poll.
-        try {
-            broadcast(new ChannelMessageSent($message));
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::warning('Reverb broadcast failed: ' . $e->getMessage());
-        }
-
-        // ── Notify @mentioned users + offline members ─────────────────────────
-        try {
-            $poster     = $request->user();
-            $posterName = trim("{$poster->first_name} {$poster->last_name}");
-            $channelName = $channel->name ?? 'a conversation';
-            $preview    = mb_substr(strip_tags($validated['body']), 0, 100);
-
-            $notified = collect($mentionedIds);
-
-            foreach ($mentionedIds as $uid) {
-                if ($uid === $poster->id) continue;
-                NotificationService::channelMention(
-                    $uid, $posterName, $channelName, $preview,
-                    "/comms/{$channel->id}", $message->id
-                );
-            }
-
-            // Notify other channel members who weren't mentioned
-            $memberIds = DB::table('channel_members')
-                ->where('channel_id', $channel->id)
-                ->where('user_id', '!=', $poster->id)
-                ->whereNotIn('user_id', $notified->toArray())
-                ->pluck('user_id');
-
-            foreach ($memberIds as $uid) {
-                NotificationService::channelMessage(
-                    $uid, $posterName, $channelName, $preview,
-                    "/comms/{$channel->id}", $message->id
-                );
-            }
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::warning('Channel notification failed: ' . $e->getMessage());
-        }
+        $message = ChannelPosting::post(
+            $channel,
+            $request->user(),
+            $validated['body'],
+            $validated['reply_to_id'] ?? null,
+        );
 
         return response()->json(['message' => $this->formatMessage($message)], 201);
     }
@@ -637,6 +601,13 @@ class ChannelController extends Controller
         $type = $validated['context_type'];
         $id   = (int) $validated['context_id'];
 
+        // Opening a record's thread joins it, so the caller must be able to
+        // open the record itself. 404, not 403: same answer as the record's
+        // own route, so the id's existence is not disclosed either.
+        if (! ContextChannels::mayJoin($user, $type, $id)) {
+            return response()->json(['message' => 'Not found.'], 404);
+        }
+
         // Build a rich name and description so the sidebar item has enough context
         // without the user having to open the channel.
         $name        = '';
@@ -711,6 +682,16 @@ class ChannelController extends Controller
 
         if (!$isMember) {
             abort(403, 'You are not a member of this channel.');
+        }
+
+        // A record's thread is open only while the record is (ContextChannels).
+        // Membership granted before that rule, or kept after a task moved to
+        // someone else, does not outlive the visibility it stood for.
+        if ($channel->context_type === 'production_order') {
+            $user = User::find($userId);
+            if (! $user || ! ContextChannels::mayUse($user, $channel)) {
+                abort(403, 'You no longer have access to this order.');
+            }
         }
 
         return $channel;

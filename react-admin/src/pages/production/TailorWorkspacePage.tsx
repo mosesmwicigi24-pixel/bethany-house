@@ -16,7 +16,7 @@
  * COMPLETION FLOW, NOTE/SPECS DRAWERS, OFFLINE QUEUE — unchanged.
  */
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { get, put, post } from "@/api/client";
@@ -394,6 +394,69 @@ function RightDrawer({
     );
 }
 
+// ── Piece counts ──────────────────────────────────────────────────────────────
+// A tap shows at once and is never lost. The server takes an ABSOLUTE count,
+// so the screen keeps one "wanted" number per stage (and batch) and sends the
+// latest one; taps made while a send is in flight fold into the next send.
+// Before this, each tap sent "server value + step" from a number that had not
+// refreshed yet, so two quick +1s were recorded as one (audit F2).
+
+const countKey = (taskId: number, batchId?: number) => `${taskId}:${batchId ?? 0}`;
+
+function usePieceCounts(onRefused: (message: string) => void) {
+    const qc = useQueryClient();
+    const [overlay, setOverlay] = useState<Record<string, number>>({});
+    const wanted = useRef<Record<string, number>>({});
+    const sending = useRef<Set<string>>(new Set());
+
+    const forget = (key: string) => {
+        delete wanted.current[key];
+        setOverlay((o) => {
+            const { [key]: _gone, ...rest } = o;
+            return rest;
+        });
+    };
+
+    const flush = async (key: string, taskId: number, batchId?: number) => {
+        sending.current.add(key);
+        try {
+            let sent: number | undefined;
+            while (wanted.current[key] !== undefined && wanted.current[key] !== sent) {
+                sent = wanted.current[key];
+                await post(`/v1/tailor/tasks/${taskId}/progress`, { quantity_done: sent, batch_id: batchId });
+                // Refresh before letting go of the shown number, so the card
+                // never flashes back to the stale count.
+                if (wanted.current[key] === sent) {
+                    await qc.invalidateQueries({ queryKey: ["my-tasks"] });
+                }
+            }
+            forget(key);
+        } catch (e: any) {
+            // Refused (gate, ceiling, order closed) or failed: show the
+            // server's own reason and fall back to the true count.
+            forget(key);
+            onRefused(e?.message ?? "Could not record progress");
+            qc.invalidateQueries({ queryKey: ["my-tasks"] });
+        } finally {
+            sending.current.delete(key);
+        }
+    };
+
+    const record = (task: MyTask, next: number, batchId?: number) => {
+        const key = countKey(task.id, batchId);
+        wanted.current[key] = next;
+        setOverlay((o) => ({ ...o, [key]: next }));
+        navigator.vibrate?.(30);
+        if (!sending.current.has(key)) void flush(key, task.id, batchId);
+    };
+
+    /** The count to show: the tailor's latest tap, else the server's. */
+    const shown = (taskId: number, batchId: number | undefined, server: number) =>
+        overlay[countKey(taskId, batchId)] ?? server;
+
+    return { record, shown };
+}
+
 // ── Note drawer ───────────────────────────────────────────────────────────────
 
 function NoteDrawer({
@@ -415,16 +478,15 @@ function NoteDrawer({
         if (!text.trim()) return;
         setSaving(true);
         try {
-            await post(
-                `/v1/production-orders/${task.production_order.id}/note`,
-                { note: text.trim() }
-            );
-            toast.success("Note saved");
+            // Lands in the order's chat thread, where the team already talks
+            // about this job (the old route did not exist).
+            await post(`/v1/tailor/tasks/${task.id}/note`, { note: text.trim() });
+            toast.success("Note added to the order chat");
             setText("");
             onSaved();
             onClose();
-        } catch {
-            toast.error("Failed to save note");
+        } catch (e: any) {
+            toast.error(e?.message ?? "Failed to save note");
         } finally {
             setSaving(false);
         }
@@ -434,11 +496,12 @@ function NoteDrawer({
         <RightDrawer open={open} onClose={onClose} title="Add note">
             <div className="p-4 space-y-3">
                 <p className="text-xs text-surface-500">
-                    Note will be attached to{" "}
+                    Posted to the chat for{" "}
                     <span className="font-semibold text-surface-700">
                         {task.production_order.order_number}
                     </span>
-                    .
+                    {task.stage?.name ? ` as a ${task.stage.name} note` : ""}, so
+                    everyone on this order sees it.
                 </p>
                 <textarea
                     className="input resize-none w-full"
@@ -827,6 +890,7 @@ function FocusCard({
     group,
     onAction,
     onProgress,
+    countOf,
     isActing,
     onNoteOpen,
     onSpecsOpen,
@@ -834,6 +898,8 @@ function FocusCard({
     group: OrderGroup;
     onAction: (task: MyTask, action: "start" | "complete" | "pause") => void;
     onProgress: (task: MyTask, quantityDone: number, batchId?: number) => void;
+    /** Shown count: the tailor's latest tap while it is being saved, else the server's. */
+    countOf: (taskId: number, batchId: number | undefined, server: number) => number;
     isActing: boolean;
     onNoteOpen: () => void;
     onSpecsOpen: () => void;
@@ -1159,15 +1225,18 @@ function FocusCard({
                                             // chip, then the same +1/+5/+10 apply to it. The
                                             // task total stays derived — blue + green = overall.
                                             const batches = order?.batches ?? [];
-                                            const doneOf = (bid: number) =>
+                                            const serverDoneOf = (bid: number) =>
                                                 task.batch_progress?.find((r) => r.production_order_batch_id === bid)?.quantity_done ?? 0;
+                                            const doneOf = (bid: number) => countOf(task.id, bid, serverDoneOf(bid));
                                             const batch = batches.length
                                                 ? (batches.find((b) => b.id === activeBatchId)
                                                     ?? batches.find((b) => doneOf(b.id) < b.quantity)
                                                     ?? batches[0])
                                                 : null;
                                             const cap  = batch ? batch.quantity : order!.quantity;
-                                            const done = batch ? doneOf(batch.id) : (task.quantity_done ?? 0);
+                                            const done = batch ? doneOf(batch.id) : countOf(task.id, undefined, task.quantity_done ?? 0);
+                                            // Overall = server total + this batch's unsaved taps.
+                                            const overall = (task.quantity_done ?? 0) + (batch ? done - serverDoneOf(batch.id) : 0);
                                             return (
                                                 <div className="space-y-1.5">
                                                     {batches.length > 0 && (
@@ -1195,7 +1264,7 @@ function FocusCard({
                                                             {done}<span className="text-surface-400 font-medium">/{cap}</span>
                                                             {batch && (
                                                                 <span className="text-2xs text-surface-400 font-medium ml-1.5">
-                                                                    overall {task.quantity_done ?? 0}/{order!.quantity}
+                                                                    overall {overall}/{order!.quantity}
                                                                 </span>
                                                             )}
                                                         </span>
@@ -1686,22 +1755,23 @@ export default function TailorWorkspacePage() {
     // Piece progress: absolute cumulative count, server-validated against the
     // pipeline (ceiling: earlier stages; floor: later stages). The 422 message
     // names the colliding stage, so surface it verbatim.
-    const progressMutation = useMutation({
-        mutationFn: ({ taskId, quantityDone, batchId }: { taskId: number; quantityDone: number; batchId?: number }) =>
-            post(`/v1/tailor/tasks/${taskId}/progress`, { quantity_done: quantityDone, batch_id: batchId }),
-        onSuccess: () => {
-            qc.invalidateQueries({ queryKey: ["my-tasks"] });
-        },
-        onError: (e: any) => toast.error(e?.message ?? "Could not record progress"),
-    });
+    const pieceCounts = usePieceCounts((message) => toast.error(message));
 
-    const handleProgress = useCallback(
-        (task: MyTask, quantityDone: number, batchId?: number) => {
-            navigator.vibrate?.(30);
-            progressMutation.mutate({ taskId: task.id, quantityDone, batchId });
-        },
-        [progressMutation]
-    );
+    // The service worker drops an offline update the server refused and says
+    // why — show it, and refresh so the card shows the true state.
+    useEffect(() => {
+        const sw = navigator.serviceWorker;
+        if (!sw) return;
+        const onMessage = (event: MessageEvent) => {
+            if (event.data?.type === "task-update-refused") {
+                toast.error(event.data.message);
+                qc.invalidateQueries({ queryKey: ["my-tasks"] });
+            }
+        };
+        sw.addEventListener("message", onMessage);
+        return () => sw.removeEventListener("message", onMessage);
+    }, [qc, toast]);
+    const handleProgress = pieceCounts.record;
 
     const handleAction = useCallback(
         (task: MyTask, action: "start" | "complete" | "pause") => {
@@ -1883,6 +1953,7 @@ export default function TailorWorkspacePage() {
                                     group={focusedGroup}
                                     onAction={handleAction}
                                     onProgress={handleProgress}
+                                    countOf={pieceCounts.shown}
                                     isActing={mutation.isPending}
                                     onNoteOpen={() => setNoteDrawerOpen(true)}
                                     onSpecsOpen={() =>
