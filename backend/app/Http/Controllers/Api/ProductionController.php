@@ -1233,7 +1233,9 @@ class ProductionController extends Controller
             // appended customer_label) shows nothing for a genuine customer job.
             'productionOrder.customerOrder:id,order_number,customer_id,customer_first_name,customer_last_name,customer_phone',
             'productionOrder.customerOrder.customer:id,first_name,last_name,phone',
-            'stage:id,name,slug',
+            // description = the stage's standing instructions ("Stage notes" in
+            // View specs) — it was never selected, so the drawer never showed it.
+            'stage:id,name,slug,description',
         ])
         ->where('assigned_to', $request->user()->id);
 
@@ -1287,6 +1289,37 @@ class ProductionController extends Controller
                 if ($minPassed > (int) $task->quantity_done) $blocker = null;
             }
             $task->setAttribute('blocked_by_stage', $blocker?->stage?->name);
+        });
+
+        // ── Whole-order progress ─────────────────────────────────────────────
+        // A tailor's checklist holds only her own stages, so "2/2 done" could
+        // show on an order that was far from finished. Send the ORDER's
+        // progress as two numbers — never the other benches' tasks, stages or
+        // people. Same arithmetic as the order page: a satisfied stage has
+        // passed every piece; percent = pieces passed across stages ÷
+        // (quantity × stages); finished = pieces through the last stage.
+        $pipelines = ProductionTask::withoutViewerScope()
+            ->whereIn('production_order_id', $orderIds)
+            ->whereNotNull('sequence')
+            ->get(['production_order_id', 'sequence', 'status', 'quantity_done'])
+            ->groupBy('production_order_id');
+
+        $tasks->each(function ($task) use ($pipelines) {
+            $order = $task->productionOrder;
+            if (! $order) {
+                return;
+            }
+            $qty    = max(1, (int) ($order->quantity ?? 1));
+            $stages = $pipelines[$task->production_order_id] ?? collect();
+            $passed = fn ($t) => in_array($t->status, ProductionTask::SATISFIED_STATUSES, true)
+                ? $qty
+                : min((int) $t->quantity_done, $qty);
+
+            $order->setAttribute('progress', $stages->isEmpty() ? null : [
+                'percent'  => (int) floor($stages->sum($passed) * 100 / ($qty * $stages->count())),
+                'finished' => $passed($stages->sortBy('sequence')->last()),
+                'stages'   => $stages->count(),
+            ]);
         });
 
         if ($includeCompleted) {
