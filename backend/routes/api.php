@@ -1521,6 +1521,13 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:expenses.approve,sanctum');
                 Route::post('/{id}/mark-paid', [ExpenseController::class, 'markPaid'])
                     ->middleware('permission:expenses.approve,sanctum');
+                // Back to its maker with a note; whoever may reject it now may do this.
+                Route::post('/{id}/request-changes', [ExpenseController::class, 'requestChanges'])
+                    ->whereNumber('id')->middleware('permission:expenses.approve,sanctum');
+                // Approve / reject / request changes / mark paid on up to 100 at
+                // once; each item runs its single action's own path and rules.
+                Route::post('/bulk',           [ExpenseController::class, 'bulk'])
+                    ->middleware('permission:expenses.approve,sanctum');
                 Route::post('/{id}/receipt',   [ExpenseController::class, 'uploadReceipt'])
                     ->middleware('permission:expenses.create,sanctum');
             });
