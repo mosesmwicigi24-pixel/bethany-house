@@ -429,8 +429,11 @@ Route::prefix('v1')->group(function () {
             });
             Route::post('/auto-reorder/{itemId}', [IntelligenceController::class, 'triggerAutoReorder'])
                 ->middleware('permission:procurement.create,sanctum');
+            // Every tailor by name, with their load: for the people who assign
+            // the work (Tailor View Cycle 2). Under a tailor's own-task scope
+            // the figures also read 0 for everyone else.
             Route::get('/tailor-workload', [IntelligenceController::class, 'tailorWorkload'])
-                ->middleware('permission:production.view,sanctum');
+                ->middleware('permission:production.manage_assignees,sanctum');
             Route::get('/churn-risk', [IntelligenceController::class, 'churnRisk'])
                 ->middleware(['permission:intelligence.view,sanctum', 'report.page:signals', 'report.business_wide']);
             Route::get('/customer-geography', [IntelligenceController::class, 'customerGeography'])

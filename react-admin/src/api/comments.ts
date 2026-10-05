@@ -34,7 +34,8 @@ export interface Comment {
 export interface MentionUser {
     id:       number;
     name:     string;
-    email:    string;
+    /** Only for viewers who may list staff accounts (users.view). */
+    email?:   string;
     initials: string;
 }
 

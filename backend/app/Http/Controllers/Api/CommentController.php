@@ -222,22 +222,27 @@ class CommentController extends Controller
     public function users(Request $request)
     {
         $q = $request->get('q', '');
+        // Colleagues' emails — shown, and searchable — only for a viewer who
+        // may list staff accounts; everyone else finds people by name
+        // (Tailor View Cycle 2). Searching by email would otherwise confirm an
+        // address it does not show.
+        $withEmail = \App\Support\StaffContacts::mayReadEmail($request->user());
 
         $users = User::where('status', 'active')
-            ->where(function ($query) use ($q) {
+            ->where(function ($query) use ($q, $withEmail) {
                 $query->where('first_name', 'ilike', "%{$q}%")
-                      ->orWhere('last_name', 'ilike', "%{$q}%")
-                      ->orWhere('email', 'ilike', "%{$q}%");
+                      ->orWhere('last_name', 'ilike', "%{$q}%");
+                if ($withEmail) $query->orWhere('email', 'ilike', "%{$q}%");
             })
             ->whereHas('roles')         // only staff, not customers
             ->limit(10)
             ->get(['id', 'first_name', 'last_name', 'email'])
-            ->map(fn ($u) => [
+            ->map(fn ($u) => array_filter([
                 'id'      => $u->id,
                 'name'    => trim("{$u->first_name} {$u->last_name}"),
-                'email'   => $u->email,
+                'email'   => $withEmail ? $u->email : null,
                 'initials'=> strtoupper(substr($u->first_name, 0, 1) . substr($u->last_name, 0, 1)),
-            ]);
+            ], fn ($v) => $v !== null));
 
         return response()->json(['users' => $users]);
     }

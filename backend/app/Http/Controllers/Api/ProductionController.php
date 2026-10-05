@@ -2032,6 +2032,10 @@ class ProductionController extends Controller
         }
 
         // ── 2. Activity log entries referencing this task ─────────────────────
+        // A nameless actor falls back to their email only for a viewer who may
+        // read staff emails; a tailor sees "Staff member" (Tailor View Cycle 2).
+        $nameless = \App\Support\StaffContacts::mayReadEmail(request()->user()) ? "u.email, 'System'" : "CASE WHEN u.id IS NULL THEN 'System' ELSE 'Staff member' END";
+
         // The logger stores task_id inside the JSON `properties` column.
         $logs = DB::table('activity_log as al')
             ->leftJoin('users as u', 'u.id', '=', 'al.causer_id')
@@ -2043,7 +2047,7 @@ class ProductionController extends Controller
                 'al.action',
                 'al.properties',
                 'al.created_at',
-                DB::raw("COALESCE(NULLIF(TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')), ''), u.email, 'System') as actor_name")
+                DB::raw("COALESCE(NULLIF(TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')), ''), {$nameless}) as actor_name")
             )
             ->get();
 
@@ -2153,7 +2157,10 @@ class ProductionController extends Controller
 
     public function allocations(Request $request)
     {
-        $q = MaterialAllocation::with(['productionOrder:id,order_number', 'material:id,name,code,unit_of_measure']);
+        // Only the allocations of orders this viewer may see (visibleTo): a
+        // tailor listed every order's materials (Tailor View Cycle 2, C2-C5).
+        $q = MaterialAllocation::with(['productionOrder:id,order_number', 'material:id,name,code,unit_of_measure'])
+            ->whereIn('production_order_id', ProductionOrder::query()->visibleTo($request->user())->select('production_orders.id'));
         if ($request->filled('production_order_id')) $q->where('production_order_id', $request->production_order_id);
         return response()->json($q->paginate(50));
     }
@@ -2640,6 +2647,7 @@ class ProductionController extends Controller
         $assignees = ProductionOrderAssignee::with('user:id,first_name,last_name,email')
             ->where('production_order_id', $id)
             ->get();
+        \App\Support\StaffContacts::hideEmailsFrom(request()->user(), $assignees->pluck('user'));
 
         return response()->json($assignees);
     }
@@ -2710,11 +2718,14 @@ class ProductionController extends Controller
 
     public function autoAssignees()
     {
-        return response()->json(
-            ProductionAutoAssigneeRule::with('user:id,first_name,last_name,email', 'outlet:id,name')
-                ->orderBy('id')
-                ->get()
-        );
+        $rules = ProductionAutoAssigneeRule::with('user:id,first_name,last_name,email', 'outlet:id,name')
+            ->orderBy('id')
+            ->get();
+        // Names for everyone with production.view; emails only for those who
+        // may list staff accounts (Tailor View Cycle 2).
+        \App\Support\StaffContacts::hideEmailsFrom(request()->user(), $rules->pluck('user'));
+
+        return response()->json($rules);
     }
 
     public function createAutoAssignee(Request $request)

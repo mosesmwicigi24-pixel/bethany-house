@@ -1250,7 +1250,7 @@ function ThreadMentionPopup({ query, onSelect }: { query: string; onSelect: (u: 
                     </div>
                     <div className="min-w-0">
                         <p className="text-xs font-semibold text-surface-800 truncate">{u.name}</p>
-                        <p className="text-2xs text-surface-400 truncate">{u.email}</p>
+                        {u.email && <p className="text-2xs text-surface-400 truncate">{u.email}</p>}
                     </div>
                 </button>
             ))}
