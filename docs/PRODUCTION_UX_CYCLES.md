@@ -15,8 +15,8 @@ A cycle is never re-run. A later cycle revisits an area only for a genuine highe
 | 1 | UI/UX coherence | Closed |
 | 2 | Information hierarchy | Closed |
 | 3 | Shop-floor workflow | Closed (rework path proposed, awaiting approval) |
-| 4 | Interaction quality | Next |
-| 5 | Apparel-production intelligence | |
+| 4 | Interaction quality | Closed |
+| 5 | Apparel-production intelligence | Next |
 | 6 | Mobile / tablet excellence | |
 | 7 | Offline and recovery | |
 | 8 | Accessibility / privacy / trust | |
@@ -24,6 +24,58 @@ A cycle is never re-run. A later cycle revisits an area only for a genuine highe
 | 10 | A full working day (tailor + production manager) | |
 
 ---
+
+## Cycle 4 — Interaction quality (closed)
+
+**The question:** does every control do what it says, look the same wherever it appears, and only appear when it can work?
+
+**Inspection.** I walked My Tasks (Focus and Queue), the order drawer on Production Orders / WIP, and Order Detail, on a live order, a cancelled order and an order in QC. I compared what each screen offers with what the server will accept.
+
+**What the pass found:**
+- **"Your stages 0/1 done" after finishing a stage.** The Active list held only open tasks, so the checklist never counted her finished ones (recorded in Cycle 1).
+- **A cancelled order still looked workable.** Its stages read "Ready" and "3 waiting", with the manager's "Allow parallel" link. The server refuses all of it (`ProductionOrder::FLOOR_WORK_STATUSES`).
+- **Two copies of the stage buttons in two styles.** Order Detail and the order drawer each had their own Start / Mark done / Pause. The drawer's:
+  - showed even on a closed order or a stage waiting on another bench;
+  - printed the raw status ("in_progress") beside the stage name;
+  - used a grey Pause where My Tasks uses amber.
+- The Queue header counted orders that only wait on QC as work (recorded in Cycle 3).
+
+### What changed
+
+- **The checklist counts.** My Tasks asks for `include_order_context=true`: her open tasks plus her finished stages on every order still in motion (in work, in QC or back from it).
+  - Focus and Queue build each order from all her stages, so the checklist reads "Your stages 1/2 done", with the finished stage ticked.
+  - Only open stages are ranked by deadline risk; finished ones follow. Focus's order matches Home's.
+  - The Cycle 3 name `include_awaiting_qc` is still accepted, from a cached console.
+  - An order where she has nothing left to do leaves Active, so the header counts open work only.
+- **Closed orders read as history.** `acceptsFloorWork()` in `productionUi` mirrors the server's floor-work statuses. On Order Detail, a closed order's stages show "Stopped" (cancelled) or "Not done", with:
+  - no Ready;
+  - no pile warning;
+  - no "Allow parallel";
+  - no distribution chips on a cancelled order;
+  - no buttons.
+- **One set of stage buttons.** `StageActions` in `productionUi`: Start/Resume (brand), Mark done (green), Pause (amber, as on My Tasks), at a 36px height.
+  - Order Detail and the order drawer both use it. It renders nothing for someone who is not on the stage, on a closed order, or on a blocked stage.
+  - The drawer shows the stage's `StatusBadge` instead of the raw status.
+
+### Tests
+
+- `MyTasksOrderContextTest` (new). The risk-score fixture is written out in the docblock:
+  - her finished stage arrives with its order (A: completed + in progress), and a cancelled order's does not;
+  - Home's list stays open work;
+  - Focus ranks orders exactly as Home does, so a finished 20-hour stage cannot lift its order;
+  - the Cycle 3 flag still works.
+  The first and last tests fail on the previous code. The middle two are guards that pass on both.
+- `QcResultReachesMakersTest`, `TailorMyTasksPayloadTest` and `TailorFloorSafetyTest` pass unchanged.
+- Visual check at 390px:
+  - Focus reads "Your stages 1/2 done", with Stitching ticked and Finishing ready to start;
+  - the cancelled order's stages read "Stopped" with nothing to tap.
+
+### Recorded for later cycles (non-blocking)
+
+| Cycle | Finding |
+|---|---|
+| 6 | With six tabs (Stages, Batches, Materials, Specs, Notes, Audit), Order Detail's tab bar scrolls sideways on a phone with no hint that more tabs exist. |
+| 6 | My Tasks' floor buttons are larger than `StageActions` (same colours, different size); the 48px target applies to both. |
 
 ## Cycle 3 — Shop-floor workflow (closed)
 
