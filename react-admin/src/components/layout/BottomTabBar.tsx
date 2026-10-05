@@ -1,6 +1,8 @@
 import { Link, useLocation } from 'react-router-dom'
 import { clsx } from 'clsx'
 import { usePermissions } from '@/hooks/usePermissions'
+import { useHomePath, useIsFloorWorker } from '@/hooks/useHomePath'
+import { MY_TASKS_PATH } from '@/lib/homePath'
 import { useVisualViewport } from '@/lib/useVisualViewport'
 
 /*
@@ -28,6 +30,8 @@ import { useVisualViewport } from '@/lib/useVisualViewport'
  */
 
 interface Tab {
+    /** Tabs whose target depends on who is signed in (see visibleTabs). */
+    kind?: 'home' | 'production'
     label: string
     href: string
     /** Route prefixes that should light this tab up. */
@@ -38,6 +42,7 @@ interface Tab {
 
 const TABS: Tab[] = [
     {
+        kind: 'home',
         label: 'Home',
         href: '/dashboard',
         match: ['/dashboard'],
@@ -59,6 +64,7 @@ const TABS: Tab[] = [
         ),
     },
     {
+        kind: 'production',
         label: 'Production',
         href: '/production/orders',
         match: ['/production'],
@@ -92,12 +98,33 @@ const MORE_ICON = (
     </>
 )
 
+/**
+ * Home follows the user's own home page (lib/homePath) instead of a fixed
+ * /dashboard some roles cannot open. A floor worker's home IS My Tasks, so
+ * their Home tab becomes "My Tasks" and the Production tab — which would
+ * open the same screen — is dropped rather than shown twice.
+ */
+function visibleTabs(can: (p: string) => boolean, home: string, floorWorker: boolean): Tab[] {
+    return TABS.flatMap((t): Tab[] => {
+        if (t.permission && !can(t.permission)) return []
+        if (t.kind === 'home') {
+            return floorWorker
+                ? [{ ...t, label: 'My Tasks', href: MY_TASKS_PATH, match: [MY_TASKS_PATH] }]
+                : [{ ...t, href: home, match: [home] }]
+        }
+        if (t.kind === 'production' && floorWorker) return []
+        return [t]
+    })
+}
+
 export function BottomTabBar({ onOpenMenu }: { onOpenMenu: () => void }) {
     const { pathname } = useLocation()
     const { can } = usePermissions()
     const { keyboardOpen } = useVisualViewport()
+    const home = useHomePath()
+    const floorWorker = useIsFloorWorker()
 
-    const visible = TABS.filter((t) => !t.permission || can(t.permission))
+    const visible = visibleTabs(can, home, floorWorker)
 
     // With the keyboard up the shell is only ~400px tall, and this bar was
     // spending 56px of it plus the home-indicator inset sitting directly over

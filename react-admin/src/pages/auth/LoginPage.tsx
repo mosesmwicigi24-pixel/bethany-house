@@ -12,6 +12,7 @@ import { QrCode } from "@/components/security/QrCode";
 import { RecoveryCodes } from "@/components/security/RecoveryCodes";
 import type { ApiError, LoginResponse } from "@/types";
 
+
 // ─── Schemas ──────────────────────────────────────────────────────────────────
 
 const loginSchema = z.object({
@@ -175,8 +176,11 @@ export default function LoginPage() {
     const nextParam = new URLSearchParams(location.search).get("next");
     const safeNext =
         nextParam && /^\/(?!\/)/.test(nextParam) ? nextParam : null;
+    // No destination asked for → "/", which HomeRedirect resolves to the
+    // user's own home page once their permissions are loaded (lib/homePath).
+    // Not computed here: before sign-in there are no permissions to decide by.
     const from =
-        (location.state as { from?: Location })?.from?.pathname ?? safeNext ?? "/dashboard";
+        (location.state as { from?: Location })?.from?.pathname ?? safeNext ?? "/";
 
     // ── Handle reset link from email (?token=...&email=...) ──────────────────
     // Laravel's password reset email links to APP_URL — configure APP_URL to

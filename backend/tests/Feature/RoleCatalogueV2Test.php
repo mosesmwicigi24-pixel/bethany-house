@@ -225,6 +225,26 @@ class RoleCatalogueV2Test extends TestCase
      * @param array<string,list<string>> $shape
      * @return array<string,list<string>> $shape plus what later phases' migrations and sync add.
      */
+    /**
+     * Grants a LATER phase took away by its own migration. permission:sync
+     * only adds, so these matter only where the catalogue alone builds a role:
+     * a fresh database. (The later migration's own up/down is tested next to
+     * it, e.g. TailorQcSegregationTest.)
+     */
+    private const LATER_REVOKES = [
+        // Tailoring PR 2 (2026_10_05_100001): the person who sewed it does not pass it.
+        'tailor' => ['production.submit_qc'],
+    ];
+
+    private static function withoutLaterRevokes(array $shape): array
+    {
+        foreach (self::LATER_REVOKES as $role => $perms) {
+            $shape[$role] = array_values(array_diff($shape[$role] ?? [], $perms));
+        }
+
+        return $shape;
+    }
+
     private static function withLater(array $shape): array
     {
         foreach (self::LATER_GRANTS as $role => $perms) {
@@ -424,7 +444,10 @@ class RoleCatalogueV2Test extends TestCase
 
     public function test_every_role_matches_the_spec_exactly_after_sync(): void
     {
-        $this->assertRolesAre(self::withLater($this->spec()), 'after permission:sync on a fresh database');
+        $this->assertRolesAre(
+            self::withoutLaterRevokes(self::withLater($this->spec())),
+            'after permission:sync on a fresh database',
+        );
 
         $roles = Role::where('guard_name', 'sanctum')->orderBy('name')->pluck('name')->all();
         $expected = array_keys(self::SPEC);

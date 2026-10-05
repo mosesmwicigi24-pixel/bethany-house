@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { usePermissions } from "@/hooks/usePermissions";
 import { gateAllows } from "@/lib/navGate";
+import { useHomePath } from "@/hooks/useHomePath";
 
 interface ProtectedRouteProps {
     /** Single permission required */
@@ -64,6 +65,9 @@ export function ProtectedRoute({
 }
 
 function AccessDenied() {
+    // Back to a page this user CAN open. It used to link to /dashboard, which
+    // for a role without the dashboard was this same locked screen again.
+    const home = useHomePath();
     return (
         <div className="flex flex-col items-center justify-center text-center px-6 py-24 min-h-[60vh]">
             <div className="w-20 h-20 rounded-2xl bg-warning-light text-warning-dark flex items-center justify-center mb-4">
@@ -89,8 +93,8 @@ function AccessDenied() {
                 think this is a mistake, ask an admin to check your account's
                 role and permissions.
             </p>
-            <Link to="/dashboard" className="mt-5 btn btn-secondary btn-sm">
-                Back to dashboard
+            <Link to={home} className="mt-5 btn btn-secondary btn-sm">
+                Go to my home page
             </Link>
         </div>
     );
