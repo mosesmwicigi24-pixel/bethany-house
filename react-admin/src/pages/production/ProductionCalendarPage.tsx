@@ -25,6 +25,8 @@ import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { clsx } from "clsx";
+import { ORDER_STATUS, PRIORITY, orderStatus, dueInfo, DUE_TONE_CLS, fmtDueDate } from "@/components/production/productionUi";
+import { businessToday, toBusinessDateInput } from "@/lib/businessDate";
 import { get } from "@/api/client";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useAuthStore } from "@/store/auth.store";
@@ -117,30 +119,14 @@ function taskToOrder(t: CalendarTask): ProductionOrder {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const STATUS_COLORS: Record<string, string> = {
-    pending:     "bg-surface-200 text-surface-600",
-    in_progress: "bg-brand-500/20 text-brand-700",
-    on_hold:     "bg-warning-light text-warning-dark",
-    qc_pending:  "bg-accent-50 text-accent-700",
-    qc_passed:   "bg-success-light text-success",
-    qc_failed:   "bg-danger-light text-danger",
-};
-
-const STATUS_DOT: Record<string, string> = {
-    pending:     "bg-surface-400",
-    in_progress: "bg-brand-500",
-    on_hold:     "bg-warning",
-    qc_pending:  "bg-accent-500",
-    qc_passed:   "bg-success",
-    qc_failed:   "bg-danger",
-};
-
-const PRIORITY_BORDER: Record<string, string> = {
-    urgent: "border-l-danger",
-    high:   "border-l-warning",
-    normal: "border-l-brand-400",
-    low:    "border-l-surface-300",
-};
+// Status colours and priority edges: the shared Production design language
+// (components/production/productionUi), so the calendar matches every surface.
+const STATUS_COLORS: Record<string, string> = Object.fromEntries(
+    Object.entries(ORDER_STATUS).map(([k, v]) => [k, `${v.bg} ${v.text}`]));
+const STATUS_DOT: Record<string, string> = Object.fromEntries(
+    Object.entries(ORDER_STATUS).map(([k, v]) => [k, v.dot]));
+const PRIORITY_BORDER: Record<string, string> = Object.fromEntries(
+    Object.entries(PRIORITY).map(([k, v]) => [k, v.border]));
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS   = [
@@ -150,9 +136,18 @@ const MONTHS   = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * The calendar day a grid cell stands for, from its own local fields.
+ * toISOString() converted local midnight to UTC, so in Nairobi every cell was
+ * keyed to the day before and "today" sat on tomorrow's cell.
+ */
 function isoDate(d: Date) {
-    return d.toISOString().slice(0, 10);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
+
+/** A due date as its business-calendar day ("YYYY-MM-DD"), never a UTC slice. */
+const dueKey = (iso?: string | null) => toBusinessDateInput(iso);
 
 function addDays(d: Date, n: number) {
     const r = new Date(d);
@@ -187,13 +182,7 @@ function capacityLabel(count: number): { label: string; cls: string } {
     return              { label: "Busy",    cls: "text-danger font-semibold" };
 }
 
-function fmtDate(iso: string) {
-    return new Date(iso).toLocaleDateString("en-KE", { dateStyle: "medium" });
-}
-
-function daysFromNow(iso: string) {
-    return Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000);
-}
+const fmtDate = (iso: string) => fmtDueDate(iso);
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -246,8 +235,7 @@ function OrderPill({
 /** Summary row used in the "Upcoming" sidebar panel */
 function UpcomingRow({ order, isSales }: { order: ProductionOrder; isSales: boolean }) {
     const navigate = useNavigate();
-    const d = daysFromNow(order.due_date);
-    const overdue = d < 0;
+    const due = dueInfo(order.due_date);
     return (
         <div
             className={clsx(
@@ -262,16 +250,12 @@ function UpcomingRow({ order, isSales }: { order: ProductionOrder; isSales: bool
                 <p className={clsx("text-xs text-surface-600 truncate", isSales && "font-medium")}>{order.product_name}</p>
                 {(order.customer_name || order.created_by_name) && (
                     <p className="text-2xs text-surface-500 truncate">
-                        {order.customer_name ?? "Stock"}
+                        {order.customer_name ?? "For stock"}
                         {order.created_by_name ? ` · raised by ${order.created_by_name}` : ""}
                     </p>
                 )}
-                <p className={clsx("text-2xs mt-0.5", overdue ? "text-danger font-semibold" : "text-surface-400")}>
-                    {overdue
-                        ? `Overdue by ${Math.abs(d)}d`
-                        : d === 0
-                        ? "Due today"
-                        : `Due in ${d}d - ${fmtDate(order.due_date)}`}
+                <p className={clsx("text-2xs mt-0.5 font-semibold", DUE_TONE_CLS[due.tone])}>
+                    {due.label}{due.tone === "later" ? ` · ${fmtDueDate(order.due_date)}` : ""}
                 </p>
             </div>
             <div className="shrink-0">
@@ -630,13 +614,13 @@ function DayPanel({
                                             <div className="flex items-center gap-2 flex-wrap">
                                                 <span className="font-mono text-xs font-bold text-surface-900">{o.order_number}</span>
                                                 <span className={clsx("text-2xs px-2 py-0.5 rounded-full font-medium", STATUS_COLORS[o.status] ?? "bg-surface-100 text-surface-600")}>
-                                                    {o.status.replace("_", " ")}
+                                                    {orderStatus(o.status).label}
                                                 </span>
                                             </div>
                                             {o.product_name && <p className="text-xs text-surface-600 mt-0.5 truncate">{o.product_name}</p>}
                                             {(o.customer_name || o.created_by_name) && (
                                                 <p className="text-2xs text-surface-500 truncate">
-                                                    {o.customer_name ?? "Stock"}
+                                                    {o.customer_name ?? "For stock"}
                                                     {o.created_by_name ? ` · raised by ${o.created_by_name}` : ""}
                                                 </p>
                                             )}
@@ -669,7 +653,7 @@ function DayPanel({
                                             <div className="flex items-center gap-2 flex-wrap">
                                                 <span className="font-mono text-sm font-bold text-surface-900">{o.order_number}</span>
                                                 <span className={clsx("text-2xs px-2 py-0.5 rounded-full font-medium", cfg)}>
-                                                    {o.status.replace("_", " ")}
+                                                    {orderStatus(o.status).label}
                                                 </span>
                                                 {o.customer_order_id && (
                                                     <span className="text-2xs px-2 py-0.5 rounded-full bg-accent-50 text-accent-700 font-medium">MTO</span>
@@ -718,7 +702,7 @@ export default function ProductionCalendarPage() {
     const isSales = canRaiseOrder && !isCoordinator;
     const fullBoard = canViewFull && !isSales;
 
-    const today = isoDate(new Date());
+    const today = businessToday();
     const [viewMode, setViewMode] = useState<ViewMode>("month");
     const [cursor, setCursor] = useState(new Date()); // month/week navigation anchor
     const [selectedDay, setSelectedDay] = useState<string | null>(null);
@@ -822,7 +806,7 @@ export default function ProductionCalendarPage() {
         if (selectedUserId !== "all") {
             // Worker own view OR admin filtered to a specific user — use task data
             for (const t of userTasks) {
-                const key = t.production_order.due_date?.slice(0, 10);
+                const key = dueKey(t.production_order.due_date);
                 if (!key) continue;
                 if (!map.has(key)) map.set(key, []);
                 // De-duplicate by production_order.id (multiple tasks per order)
@@ -833,7 +817,7 @@ export default function ProductionCalendarPage() {
             }
         } else if (fullBoard) {
             for (const o of orders) {
-                const key = o.due_date?.slice(0, 10);
+                const key = dueKey(o.due_date);
                 if (!key) continue;
                 if (!map.has(key)) map.set(key, []);
                 map.get(key)!.push(o);
@@ -841,7 +825,7 @@ export default function ProductionCalendarPage() {
         } else {
             // Sales view — the whole floor from the lean schedule feed
             for (const o of scheduleOrders) {
-                const key = o.due_date?.slice(0, 10);
+                const key = dueKey(o.due_date);
                 if (!key) continue;
                 if (!map.has(key)) map.set(key, []);
                 map.get(key)!.push(o);
@@ -857,7 +841,7 @@ export default function ProductionCalendarPage() {
         if (!fullBoard) return map;
         for (const o of orders) {
             for (const [type, date] of [["fitting", o.fitting_date], ["collection", o.collection_date]] as const) {
-                const key = date?.slice(0, 10);
+                const key = dueKey(date);
                 if (!key) continue;
                 if (!map.has(key)) map.set(key, []);
                 map.get(key)!.push({ type, order: o });
@@ -895,7 +879,8 @@ export default function ProductionCalendarPage() {
 
     // Upcoming orders for sidebar (next 14 days)
     const upcoming = useMemo(() => {
-        const cutoff = isoDate(addDays(new Date(), 14));
+        const [ty, tm, td] = today.split("-").map(Number);
+        const cutoff = isoDate(new Date(ty, tm - 1, td + 14));
 
         const source: ProductionOrder[] = selectedUserId !== "all"
             ? userTasks.map(taskToOrder)
@@ -907,7 +892,8 @@ export default function ProductionCalendarPage() {
             .filter(o => {
                 if (seen.has(o.id)) return false;
                 seen.add(o.id);
-                return o.due_date >= today && o.due_date <= cutoff;
+                const due = dueKey(o.due_date);
+                return !!due && due >= today && due <= cutoff;
             })
             .sort((a, b) => a.due_date.localeCompare(b.due_date));
     }, [orders, scheduleOrders, userTasks, today, fullBoard, selectedUserId]);
@@ -921,7 +907,8 @@ export default function ProductionCalendarPage() {
         return source.filter(o => {
             if (seen.has(o.id)) return false;
             seen.add(o.id);
-            return o.due_date < today && !["completed","cancelled"].includes(o.status);
+            const due = dueKey(o.due_date);
+            return !!due && due < today && !["completed","cancelled"].includes(o.status);
         }).length;
     }, [orders, scheduleOrders, userTasks, today, fullBoard, selectedUserId]);
 

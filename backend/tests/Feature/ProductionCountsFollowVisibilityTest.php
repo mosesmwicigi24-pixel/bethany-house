@@ -150,7 +150,7 @@ class ProductionCountsFollowVisibilityTest extends TestCase
         $s = $this->listStats($this->mary);
 
         $this->assertEqualsCanonicalizing(['PRD-CNT-A', 'PRD-CNT-B', 'PRD-CNT-C'], $rows->pluck('order_number')->all());
-        $this->assertSame(['draft' => 0, 'pending' => 1, 'in_progress' => 2, 'qc_pending' => 0, 'completed' => 0, 'overdue' => 1], $s);
+        $this->assertSame(['draft' => 0, 'pending' => 1, 'in_progress' => 2, 'qc_pending' => 0, 'qc_passed' => 0, 'qc_failed' => 0, 'completed' => 0, 'overdue' => 1], $s);
     }
 
     public function test_someone_who_runs_the_floor_still_sees_the_whole_shop(): void
@@ -163,7 +163,7 @@ class ProductionCountsFollowVisibilityTest extends TestCase
         $this->assertSame(2, $s['production_overdue'], 'C, E');
         $this->assertSame(1, $s['production_draft'], 'G');
 
-        $this->assertSame(['draft' => 1, 'pending' => 2, 'in_progress' => 3, 'qc_pending' => 0, 'completed' => 0, 'overdue' => 2], $this->listStats($admin));
+        $this->assertSame(['draft' => 1, 'pending' => 2, 'in_progress' => 3, 'qc_pending' => 0, 'qc_passed' => 0, 'qc_failed' => 0, 'completed' => 0, 'overdue' => 2], $this->listStats($admin));
         $this->assertSame('2 production orders are overdue', $this->overdueBanner($admin));
     }
 
@@ -179,7 +179,7 @@ class ProductionCountsFollowVisibilityTest extends TestCase
         $this->assertSame(0, $s['production_overdue'], 'both overdue orders are Shop B');
         $this->assertSame(1, $s['production_draft'], 'G');
 
-        $this->assertSame(['draft' => 1, 'pending' => 2, 'in_progress' => 1, 'qc_pending' => 0, 'completed' => 0, 'overdue' => 0], $this->listStats($manager));
+        $this->assertSame(['draft' => 1, 'pending' => 2, 'in_progress' => 1, 'qc_pending' => 0, 'qc_passed' => 0, 'qc_failed' => 0, 'completed' => 0, 'overdue' => 0], $this->listStats($manager));
     }
 
     public function test_open_tasks_on_a_cancelled_order_leave_my_tasks(): void

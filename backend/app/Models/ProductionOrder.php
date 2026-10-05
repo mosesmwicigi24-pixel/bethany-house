@@ -375,13 +375,8 @@ class ProductionOrder extends Model
         // passed it. A 50-piece order with 10 through all 8 stages reads 20%,
         // not 0% — the old task-count version only moved when a whole stage
         // finished. For quantity-1 orders the two formulas agree.
-        $tasks = $this->tasks()->get(['status', 'quantity_done']);
-        if ($tasks->isEmpty()) {
-            return 0;
-        }
-        $qty = max(1, (int) $this->quantity);
-        $sum = $tasks->sum(fn ($t) => $t->effectivePassed($qty));
-
-        return (int) round($sum / ($qty * $tasks->count()) * 100);
+        // One definition for every surface (App\Support\OrderProgress), read
+        // past the viewer's own-task scope.
+        return \App\Support\OrderProgress::for([$this])[$this->id]['percent'] ?? 0;
     }
 }

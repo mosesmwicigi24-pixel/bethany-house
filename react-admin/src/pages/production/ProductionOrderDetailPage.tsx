@@ -3,6 +3,10 @@ import { toBusinessDateInput } from "@/lib/businessDate";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
+import {
+    ORDER_STATUS, PRIORITY, StatusBadge, PriorityBadge, ProgressBar, dueInfo, DUE_TONE_CLS, fmtDueDate,
+    isCustomerJob, jobFor, type OrderProgressData,
+} from "@/components/production/productionUi";
 import { get, post, put, del } from "@/api/client";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -43,6 +47,10 @@ interface ProductionOrder {
     completed_at?: string;
     confirmed_at?: string;
     completion_percentage: number;
+    /** The one whole-pipeline progress figure (backend OrderProgress). */
+    progress?: OrderProgressData | null;
+    /** Server-resolved customer name (first name only without customers.view). */
+    customer_label?: string | null;
     current_stage?: string;
     notes?: string;
     customer_order_id?: number | null;
@@ -114,24 +122,10 @@ interface AuditEntry {
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const STATUS_CFG: Record<string, { label: string; color: string; bg: string; dot: string }> = {
-    draft:       { label: "Draft",        color: "text-surface-600",  bg: "bg-surface-100", dot: "bg-surface-400" },
-    pending:     { label: "Pending",      color: "text-amber-700",    bg: "bg-amber-50",    dot: "bg-amber-500" },
-    in_progress: { label: "In Progress",  color: "text-brand-700",    bg: "bg-brand-50",    dot: "bg-brand-500" },
-    on_hold:     { label: "On Hold",      color: "text-warning-800",  bg: "bg-warning-100", dot: "bg-warning-600" },
-    qc_pending:  { label: "QC Pending",   color: "text-accent-700",   bg: "bg-accent-50",   dot: "bg-accent-500" },
-    qc_passed:   { label: "QC Passed",    color: "text-success-700",  bg: "bg-success-50",  dot: "bg-success-500" },
-    qc_failed:   { label: "QC Failed",    color: "text-danger-700",      bg: "bg-danger-50",      dot: "bg-danger-500" },
-    completed:   { label: "Completed",    color: "text-success-700",  bg: "bg-success-100", dot: "bg-success-600" },
-    cancelled:   { label: "Cancelled",    color: "text-surface-500",  bg: "bg-surface-100", dot: "bg-surface-400" },
-};
-
-const PRIORITY_CFG: Record<string, { label: string; color: string; bg: string; cls: string }> = {
-    low:    { label: "Low",    color: "text-surface-500",  bg: "bg-surface-100", cls: "text-surface-400 bg-surface-50 border-surface-200" },
-    normal: { label: "Normal", color: "text-info-700",     bg: "bg-info-50",     cls: "text-brand-600 bg-brand-50 border-brand-200" },
-    high:   { label: "High",   color: "text-brand-700",   bg: "bg-brand-50",   cls: "text-warning-dark bg-warning-light border-warning/30" },
-    urgent: { label: "Urgent", color: "text-danger-700",      bg: "bg-danger-50",      cls: "text-danger bg-danger-light border-danger/30" },
-};
+// Status, priority, due wording and progress: the shared Production design
+// language (components/production/productionUi).
+const STATUS_CFG = ORDER_STATUS;
+const PRIORITY_CFG = PRIORITY;
 
 const STAGE_ICONS: Record<string, string> = {
     cutting: "cut", stitching: "needle", sewing: "needle",
@@ -151,7 +145,6 @@ const fmtDate = (d?: string | null) =>
     d ? new Date(d).toLocaleDateString("en-KE", { day: "2-digit", month: "short", year: "numeric" }) : "-";
 const fmtDateTime = (d?: string | null) =>
     d ? new Date(d).toLocaleString("en-KE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
-const daysUntil = (d: string) => Math.ceil((new Date(d).getTime() - Date.now()) / 86_400_000);
 
 // Shared geometry for the detail-page action row. Defined once so the width
 // budget in the comment above that row stays true — a one-off `px-3` on a
@@ -177,15 +170,6 @@ const batchPassed = (task: Task, batch: OrderBatch): number =>
         : Math.min(batch.quantity, task.batch_progress?.find(r => r.production_order_batch_id === batch.id)?.quantity_done ?? 0);
 
 // ── Shared UI atoms ───────────────────────────────────────────────────────────
-
-function ProgressBar({ pct, colorClass = "bg-brand-500" }: { pct: number; colorClass?: string }) {
-    return (
-        <div className="h-1.5 bg-surface-100 rounded-full overflow-hidden">
-            <div className={clsx("h-full rounded-full transition-all duration-500", colorClass)}
-                style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} />
-        </div>
-    );
-}
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
     return <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2">{children}</p>;
@@ -679,7 +663,7 @@ function IssueMaterialsModal({ order, onClose, onSaved }: { order: ProductionOrd
                                     onChange={e => setQtys(p => ({ ...p, [a.id]: e.target.value }))}
                                     className="col-span-2 input text-right text-xs py-1.5 disabled:opacity-40" />
                             </div>
-                            <ProgressBar pct={pct} colorClass={pct >= 100 ? "bg-success-500" : "bg-brand-500"} />
+                            <ProgressBar pct={pct} />
                         </div>
                     );
                 })}
@@ -703,7 +687,7 @@ function QCModal({ order, onClose, onDone }: { order: ProductionOrder; onClose: 
     const [form, setForm] = useState({ passed: true, passed_quantity: order.quantity, failed_quantity: 0, notes: "", defect_types: [] as string[] });
     const mutation = useMutation({
         mutationFn: () => post(`/v1/admin/production-orders/${order.id}/qc`, form),
-        onSuccess: () => { toast.success(form.passed ? "QC Passed!" : "QC Failed - order on hold"); onDone(); onClose(); },
+        onSuccess: () => { toast.success(form.passed ? "QC passed" : "QC failed — recorded on the order"); onDone(); onClose(); },
         onError: (e: ApiError) => toast.error(e.message),
     });
     const toggleDefect = (d: string) => setForm(p => ({ ...p, defect_types: p.defect_types.includes(d) ? p.defect_types.filter(x => x !== d) : [...p.defect_types, d] }));
@@ -885,6 +869,7 @@ function StageTiming({ task }: { task: Task }) {
 function StagesPipeline({
     tasks,
     orderQuantity = 1,
+    totalStages,
     batches = [],
     currentUserId,
     onTaskAction,
@@ -894,6 +879,8 @@ function StagesPipeline({
 }: {
     tasks: Task[];
     orderQuantity?: number;
+    /** All stages on the order (server); a tailor's payload may hold fewer. */
+    totalStages?: number;
     batches?: OrderBatch[];
     currentUserId: number | null;
     onTaskAction: (taskId: number, action: "start" | "complete" | "pause") => void;
@@ -918,7 +905,11 @@ function StagesPipeline({
     // finished = passed(last). Only meaningful for batch orders.
     const seq = [...tasks].filter(t => t.sequence != null).sort((a, b) => (a.sequence! - b.sequence!));
     const eff = (t: Task) => GATE_SATISFIED.includes((t.status ?? "").toLowerCase()) ? orderQuantity : Math.min(t.quantity_done ?? 0, orderQuantity);
-    const distribution = orderQuantity > 1 && seq.length > 0 ? {
+    // Only when every stage is on the page: a tailor's payload holds just her
+    // own, and chips derived from part of a pipeline read "6 finished" on an
+    // order that has finished nothing.
+    const wholePipeline = totalStages == null || seq.length >= totalStages;
+    const distribution = wholePipeline && orderQuantity > 1 && seq.length > 0 ? {
         notStarted: orderQuantity - eff(seq[0]),
         finished:   eff(seq[seq.length - 1]),
         held: seq.map((t, i) => ({
@@ -1850,9 +1841,9 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                                 <p className="text-sm font-bold text-surface-900 truncate">{batch.label}</p>
                                 <p className="text-2xs text-surface-400 mt-0.5">
                                     <span className="font-semibold text-surface-600 tabular-nums">{batch.quantity} pcs</span>
-                                    {" · "}<span className={clsx("font-semibold uppercase", priorityCfg.color)}>{priorityCfg.label}</span>
+                                    {order.priority !== "normal" && <>{" · "}<PriorityBadge priority={order.priority} /></>}
                                     {batch.created_at && <> · Created {fmtDate(batch.created_at)}</>}
-                                    {" · "}Due {fmtDate(order.due_date)}
+                                    {" · "}Due {fmtDueDate(order.due_date)}
                                 </p>
                             </div>
                             <span className={clsx("shrink-0 text-2xs font-semibold px-2 py-0.5 rounded-full",
@@ -2097,8 +2088,8 @@ export default function ProductionOrderDetailPage() {
         mutationFn: ({ taskId, action }: { taskId: number; action: "start" | "complete" | "pause" }) =>
             put(`/v1/tailor/tasks/${taskId}/status`, { action }),
         onSuccess: (_, vars) => {
-            const msg = vars.action === "complete" ? "Stage marked complete!" :
-                        vars.action === "pause"    ? "Stage paused" : "Stage started!";
+            const msg = vars.action === "complete" ? "Stage done" :
+                        vars.action === "pause"    ? "Stage paused" : "Stage started";
             toast.success(msg);
             refresh();
         },
@@ -2139,7 +2130,7 @@ export default function ProductionOrderDetailPage() {
     const cancelMutation = useMutation({
         mutationFn: (reason: string) => post(`/v1/admin/production-orders/${id}/cancel`, { reason }),
         onSuccess: () => {
-            toast.success("Production order cancelled.");
+            toast.success("Production order cancelled");
             setShowCancelConfirm(false);
             setCancelReason("");
             refresh();
@@ -2171,17 +2162,22 @@ export default function ProductionOrderDetailPage() {
     const sortedTasks = [...(order.tasks ?? [])].sort((a, b) =>
         (a.sequence ?? a.stage?.sort_order ?? 0) - (b.sequence ?? b.stage?.sort_order ?? 0));
     const allocations = order.material_allocations ?? [];
-    const isCustomer  = !!order.customer_order_id;
-    const days        = daysUntil(order.due_date);
+    const isCustomer  = isCustomerJob(order);
+    const due         = dueInfo(order.due_date);
     // Whose job this is — the question the floor asks first, so it belongs in
     // the header rather than a card further down the page.
-    const customerName = [order.customer_order?.customer_first_name, order.customer_order?.customer_last_name]
-        .filter(Boolean).join(" ").trim() || null;
+    // The server-resolved name every surface shows (customer_label), with the
+    // sale's snapshot as a fallback for an older payload.
+    const customerName = order.customer_label?.trim()
+        || [order.customer_order?.customer_first_name, order.customer_order?.customer_last_name]
+            .filter(Boolean).join(" ").trim() || null;
     // Finished = pieces past the LAST stage — the same arithmetic the pipeline
     // runs on, surfaced as a headline number.
     const seqTasks = sortedTasks.filter(t => t.sequence != null);
     const lastSeq  = seqTasks[seqTasks.length - 1];
-    const finishedPieces = lastSeq
+    // The server's whole-pipeline figure first (OrderProgress) — a tailor's
+    // payload holds only her own stages, so recomputing here undercounted.
+    const finishedPieces = order.progress ? order.progress.finished : lastSeq
         ? (GATE_SATISFIED.includes((lastSeq.status ?? "").toLowerCase())
             ? order.quantity
             : Math.min(lastSeq.quantity_done ?? 0, order.quantity))
@@ -2277,13 +2273,11 @@ export default function ProductionOrderDetailPage() {
                         {customerName ?? order.product_name}
                     </h1>
                     <p className="mt-0.5 text-sm sm:text-base font-semibold text-surface-600 truncate">
-                        {customerName ? order.product_name : (isCustomer ? "Customer order" : "For stock")}
+                        {customerName ? order.product_name : jobFor(order)}
                     </p>
 
                     <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                        <span className={clsx("px-2 py-0.5 rounded-full text-2xs font-bold", statusCfg.bg, statusCfg.color)}>
-                            {statusCfg.label}
-                        </span>
+                        <StatusBadge status={order.status} />
                         {/* Priority earns a chip only when it is NOT normal — a loud
                             "NORMAL" badge is the least actionable thing on the page. */}
                         {order.priority !== "normal" && (
@@ -2315,12 +2309,12 @@ export default function ProductionOrderDetailPage() {
                             <p className="text-surface-500 text-2xs font-bold uppercase tracking-wide mt-1 leading-tight">finished</p>
                         </div>
                         <div className="px-2.5 py-2">
-                            <p className={clsx("font-extrabold tabular-nums text-[17px] sm:text-xl leading-none",
-                                days < 0 ? "text-danger" : days <= 2 ? "text-amber-dark" : "text-surface-900")}>
-                                {days < 0 ? `${Math.abs(days)}d` : days === 0 ? "Today" : `${days}d`}
+                            <p className={clsx("font-extrabold tabular-nums text-[15px] sm:text-xl leading-none whitespace-nowrap",
+                                due.tone === "later" ? "text-surface-900" : DUE_TONE_CLS[due.tone])}>
+                                {due.label}
                             </p>
                             <p className="text-surface-500 text-2xs font-bold uppercase tracking-wide mt-1 leading-tight">
-                                {days < 0 ? "overdue" : "until due"} · {fmtDate(order.due_date)}
+                                {fmtDueDate(order.due_date)}
                             </p>
                         </div>
                     </div>
@@ -2330,11 +2324,7 @@ export default function ProductionOrderDetailPage() {
                             <span>{order.current_stage ?? "Not started"}</span>
                             <span className="font-bold">{order.completion_percentage}% complete</span>
                         </div>
-                        <div className="w-full h-1.5 bg-surface-100 rounded-full overflow-hidden">
-                            <div className={clsx("h-full rounded-full transition-all",
-                                order.completion_percentage >= 100 ? "bg-success-vivid" : "bg-amber")}
-                                style={{ width: `${Math.max(order.completion_percentage, 2)}%` }} />
-                        </div>
+                        <ProgressBar pct={Math.max(order.completion_percentage, 2)} done={order.completion_percentage >= 100} />
                     </div>
 
                     {/* References and provenance. Was surface-400 on white — 2.55:1,
@@ -2508,6 +2498,7 @@ export default function ProductionOrderDetailPage() {
                         {tab === "stages"    && <StagesPipeline
                             tasks={sortedTasks}
                             orderQuantity={order.quantity}
+                            totalStages={order.progress?.stages}
                             batches={order.batches ?? []}
                             currentUserId={currentUserId}
                             onTaskAction={(taskId, action) => taskMutation.mutate({ taskId, action })}
@@ -2555,7 +2546,7 @@ export default function ProductionOrderDetailPage() {
                                                         <td className="px-3 py-2.5 text-right tabular-nums text-surface-600">{a.quantity_used}</td>
                                                         <td className="px-3 py-2.5">
                                                             <div className="flex items-center gap-2">
-                                                                <div className="w-16"><ProgressBar pct={pct} colorClass={pct >= 100 ? "bg-success-500" : "bg-amber-400"} /></div>
+                                                                <div className="w-16"><ProgressBar pct={pct} /></div>
                                                                 <span className={clsx("text-2xs font-semibold", pct >= 100 ? "text-success-600" : "text-amber-600")}>{Math.round(pct)}%</span>
                                                             </div>
                                                         </td>
@@ -2621,7 +2612,7 @@ export default function ProductionOrderDetailPage() {
                                             t.status === "failed" ? "bg-danger-500" : "bg-surface-200")} />
                                 ))}
                             </div>
-                            <ProgressBar pct={order.completion_percentage} colorClass={order.status === "completed" ? "bg-success-500" : "bg-brand-500"} />
+                            <ProgressBar pct={order.completion_percentage} done={order.status === "completed"} />
                             <p className="text-2xs text-surface-400 mt-1 text-right">{order.completion_percentage}%</p>
                         </div>
 
@@ -2664,10 +2655,10 @@ export default function ProductionOrderDetailPage() {
                                 <>
                                     <SectionLabel>Key Dates</SectionLabel>
                                     {(order as any).fitting_date && (
-                                        <InfoRow label="Fitting" value={<span className="font-semibold text-accent-700">{fmtDate((order as any).fitting_date)}</span>} />
+                                        <InfoRow label="Fitting" value={<span className="font-semibold text-accent-700">{fmtDueDate((order as any).fitting_date)}</span>} />
                                     )}
                                     {(order as any).collection_date && (
-                                        <InfoRow label="Collection" value={<span className="font-semibold text-success-700">{fmtDate((order as any).collection_date)}</span>} />
+                                        <InfoRow label="Collection" value={<span className="font-semibold text-success-700">{fmtDueDate((order as any).collection_date)}</span>} />
                                     )}
                                     {order.started_at && <InfoRow label="Started" value={fmtDate(order.started_at)} />}
                                     {order.completed_at && <InfoRow label="Completed" value={fmtDate(order.completed_at)} />}
