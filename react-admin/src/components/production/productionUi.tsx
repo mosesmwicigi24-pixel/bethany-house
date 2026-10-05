@@ -14,6 +14,7 @@
  *   or on hold · accent = with QC · success = passed / done · danger = failed
  */
 import { clsx } from "clsx";
+import type { ReactNode } from "react";
 import { businessDaysUntil, toBusinessDateInput } from "@/lib/businessDate";
 
 // ── Status ───────────────────────────────────────────────────────────────────
@@ -79,6 +80,65 @@ export function PriorityBadge({ priority: p, showNormal = false }: { priority?: 
     if (!showNormal && (p ?? "normal") === "normal") return null;
     const c = priority(p);
     return <span className={clsx("inline-flex text-2xs font-bold px-1.5 py-0.5 rounded border uppercase tracking-wide whitespace-nowrap", c.cls)}>{c.label}</span>;
+}
+
+// ── Whether the floor can work on an order ───────────────────────────────────
+
+/**
+ * Mirrors ProductionOrder::FLOOR_WORK_STATUSES on the server, which refuses
+ * every floor action outside these. Screens hide the actions to match, so a
+ * closed order never offers a button that can only fail.
+ */
+export const FLOOR_WORK_STATUSES = ["pending", "in_progress", "on_hold"] as const;
+export const acceptsFloorWork = (status?: string | null) =>
+    !!status && (FLOOR_WORK_STATUSES as readonly string[]).includes(status);
+
+// ── Stage actions: one set of buttons wherever a stage is worked ─────────────
+
+export type StageAction = "start" | "complete" | "pause";
+
+const ICON: Record<StageAction | "resume", ReactNode> = {
+    start:    <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />,
+    resume:   <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />,
+    complete: <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />,
+    pause:    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5" />,
+};
+
+/**
+ * Start / Resume · Mark done · Pause for one stage — the same words, colours
+ * and order on the order page and the order drawer (My Tasks keeps its larger
+ * floor buttons, in the same colours). Renders nothing when the person may not
+ * act: not their stage, a closed order, or a stage still waiting on another.
+ */
+export function StageActions({ status, canAct, blocked = false, pending = false, onAction }: {
+    status: string;
+    canAct: boolean;
+    blocked?: boolean;
+    pending?: boolean;
+    onAction: (action: StageAction) => void;
+}) {
+    if (!canAct) return null;
+    const buttons: { action: StageAction; label: string; icon: ReactNode; cls: string }[] = [];
+    if ((status === "pending" || status === "paused") && !blocked) {
+        buttons.push({ action: "start", label: status === "paused" ? "Resume" : "Start",
+            icon: ICON[status === "paused" ? "resume" : "start"], cls: "bg-brand-500 text-white hover:bg-brand-600" });
+    }
+    if (status === "in_progress") {
+        buttons.push({ action: "complete", label: "Mark done", icon: ICON.complete, cls: "bg-success-700 text-white hover:bg-success-dark" });
+        buttons.push({ action: "pause", label: "Pause", icon: ICON.pause, cls: "bg-warning-light text-warning-dark border border-warning/40 hover:brightness-95" });
+    }
+    if (!buttons.length) return null;
+    return (
+        <div className="flex items-center gap-2 mt-2.5">
+            {buttons.map(b => (
+                <button key={b.action} type="button" onClick={() => onAction(b.action)} disabled={pending}
+                    className={clsx("flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50", b.cls)}>
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>{b.icon}</svg>
+                    {b.label}
+                </button>
+            ))}
+        </div>
+    );
 }
 
 // ── Where an order is ────────────────────────────────────────────────────────

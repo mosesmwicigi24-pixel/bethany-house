@@ -1687,19 +1687,22 @@ export default function TailorWorkspacePage() {
             get<MyTask[]>(
                 queueFilter === "all"
                     ? "/v1/tailor/tasks?include_completed=true"
-                    : "/v1/tailor/tasks?include_awaiting_qc=true"
+                    : "/v1/tailor/tasks?include_order_context=true"
             ),
         staleTime: 20_000,
         refetchInterval: 30_000,
     });
 
     // Groups used in the Focus tab: only orders that have at least one active task
-    const activeGroups = useMemo(() => {
-        const activeTasks = rawTasks.filter(
-            (t) => t.status !== "completed" && t.status !== "failed"
-        );
-        return groupTasksByOrder(activeTasks);
-    }, [rawTasks]);
+    // Orders she still has a stage to work on. Built from ALL her tasks on
+    // those orders (the server sends her finished stages with them), so the
+    // checklist can read "Your stages 1/2 done" — filtering finished tasks out
+    // first made every order read 0/N.
+    const activeGroups = useMemo(
+        () => groupTasksByOrder(rawTasks).filter((g) =>
+            g.tasks.some((t) => t.status !== "completed" && t.status !== "failed")),
+        [rawTasks]
+    );
 
     // Groups used in the Queue tab: all tasks grouped
     const allGroups = useMemo(

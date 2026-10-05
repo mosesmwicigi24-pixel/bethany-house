@@ -4,7 +4,7 @@ import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { clsx } from "clsx";
 import {
     ORDER_STATUS, orderStatus, StatusBadge, PriorityBadge, DueBadge, ProgressBar,
-    dueInfo, DUE_TONE_CLS, fmtDueDate, isCustomerJob, jobFor, stageLabel,
+    dueInfo, DUE_TONE_CLS, fmtDueDate, isCustomerJob, jobFor, stageLabel, acceptsFloorWork, StageActions,
 } from "@/components/production/productionUi";
 import { toBusinessDateInput } from "@/lib/businessDate";
 import { get, post, put } from "@/api/client";
@@ -1482,9 +1482,6 @@ aria-label="Close">
                                 : task.assigned_to;
                             const isMyTask = currentUserId !== null && assignedId === currentUserId &&
                                 !["completed", "failed", "cancelled"].includes(task.status);
-                            const canStart    = isMyTask && (task.status === "pending" || task.status === "paused");
-                            const canComplete = isMyTask && task.status === "in_progress";
-                            const canPause    = isMyTask && task.status === "in_progress";
 
                             return (
                                 <div key={task.id}
@@ -1510,11 +1507,7 @@ aria-label="Close">
                                                         My task
                                                     </span>
                                                 )}
-                                                <span className={clsx("text-2xs font-semibold",
-                                                    done ? "text-success" : active ? "text-brand-600" :
-                                                    failed ? "text-danger" : "text-surface-400")}>
-                                                    {task.status}
-                                                </span>
+                                                <StatusBadge status={task.status} kind="task" />
                                             </div>
                                         </div>
                                         {(() => {
@@ -1532,46 +1525,13 @@ aria-label="Close">
                                         })()}
                                         {task.notes && <p className="text-2xs text-surface-400 mt-1 italic">{task.notes}</p>}
 
-                                        {isMyTask && (
-                                            <div className="flex items-center gap-1.5 mt-2.5">
-                                                {canStart && (
-                                                    <button
-                                                        onClick={() => taskMutation.mutate({ taskId: task.id, action: "start" })}
-                                                        disabled={taskMutation.isPending}
-                                                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-brand-500 text-white text-xs font-semibold hover:bg-brand-600 transition-colors disabled:opacity-50"
-                                                    >
-                                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
-                                                        </svg>
-                                                        {task.status === "paused" ? "Resume" : "Start"}
-                                                    </button>
-                                                )}
-                                                {canComplete && (
-                                                    <button
-                                                        onClick={() => taskMutation.mutate({ taskId: task.id, action: "complete" })}
-                                                        disabled={taskMutation.isPending}
-                                                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-success text-white text-xs font-semibold hover:bg-success-700 transition-colors disabled:opacity-50"
-                                                    >
-                                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                                                        </svg>
-                                                        Mark done
-                                                    </button>
-                                                )}
-                                                {canPause && (
-                                                    <button
-                                                        onClick={() => taskMutation.mutate({ taskId: task.id, action: "pause" })}
-                                                        disabled={taskMutation.isPending}
-                                                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-100 text-surface-600 text-xs font-semibold hover:bg-surface-200 transition-colors disabled:opacity-50"
-                                                    >
-                                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5" />
-                                                        </svg>
-                                                        Pause
-                                                    </button>
-                                                )}
-                                            </div>
-                                        )}
+                                        <StageActions
+                                            status={task.status}
+                                            canAct={isMyTask && acceptsFloorWork(order.status)}
+                                            blocked={!!(task as any).blocked_by_stage && !task.started_at}
+                                            pending={taskMutation.isPending}
+                                            onAction={(action) => taskMutation.mutate({ taskId: task.id, action })}
+                                        />
                                     </div>
                                 </div>
                             );

@@ -4,7 +4,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import {
-    ORDER_STATUS, PRIORITY, StatusBadge, PriorityBadge, ProgressBar, dueInfo, DUE_TONE_CLS, fmtDueDate, stageLabel,
+    ORDER_STATUS, PRIORITY, StatusBadge, PriorityBadge, ProgressBar, dueInfo, DUE_TONE_CLS, fmtDueDate, stageLabel, acceptsFloorWork, StageActions,
     isCustomerJob, jobFor, type OrderProgressData,
 } from "@/components/production/productionUi";
 import { get, post, put, del } from "@/api/client";
@@ -876,6 +876,7 @@ function StagesPipeline({
     taskActionPending,
     canUnlock,
     onUnlock,
+    orderStatus,
 }: {
     tasks: Task[];
     orderQuantity?: number;
@@ -888,7 +889,12 @@ function StagesPipeline({
     /** production.manage_assignees — the manager who may allow parallel stages */
     canUnlock: boolean;
     onUnlock: (taskId: number, allow: boolean) => void;
+    /** The order's status: a closed order shows its stages as history, with no actions. */
+    orderStatus: string;
 }) {
+    // Cancelled, in QC or finished: the server refuses floor work, so nothing
+    // here may look actionable — no Ready, no pile warnings, no buttons.
+    const workOpen = acceptsFloorWork(orderStatus);
     if (!tasks.length) return (
         <div className="text-center py-12 text-surface-400">
             <svg className="w-10 h-10 mx-auto mb-2 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
@@ -931,7 +937,7 @@ function StagesPipeline({
 
     return (
         <div className="space-y-2">
-            {distribution && (
+            {distribution && orderStatus !== "cancelled" && (
                 <div className="flex flex-wrap items-center gap-1.5 px-1 pb-1">
                     <span className="text-2xs font-bold px-2 py-1 rounded-full bg-success-50 text-success-700 border border-success-200">
                         ✓ {distribution.finished} finished
@@ -977,9 +983,6 @@ function StagesPipeline({
                 }
                 const isBlocked = !!blocker && !isDone && !isActive;
 
-                const canStart    = isMyTask && !isBlocked && (task.status === "pending" || task.status === "paused");
-                const canComplete = isMyTask && task.status === "in_progress";
-                const canPause    = isMyTask && task.status === "in_progress";
 
                 const statusColor = isDone && !isFailed
                     ? "bg-success-50 border-success-200"
@@ -1062,7 +1065,7 @@ function StagesPipeline({
                                             {eff(task)}/{orderQuantity}
                                         </span>
                                     )}
-                                    {bottleneckId === task.id && !isDone && (
+                                    {workOpen && bottleneckId === task.id && !isDone && (
                                         <span className="text-2xs font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200"
                                             title="Largest pile in the pipeline is waiting on this bench">
                                             ⚠ {maxHeld} waiting
@@ -1080,6 +1083,10 @@ function StagesPipeline({
                                         <span className="text-2xs font-semibold px-2 py-0.5 rounded-full bg-success-100 text-success-700">✓ Done</span>
                                     ) : isFailed || task.status === "cancelled" ? (
                                         <span className={clsx("text-2xs font-semibold px-2 py-0.5 rounded-full", badgeColor)}>{badgeLabel}</span>
+                                    ) : !workOpen ? (
+                                        <span className="text-2xs font-semibold px-2 py-0.5 rounded-full bg-surface-100 text-surface-500">
+                                            {orderStatus === "cancelled" ? "Stopped" : "Not done"}
+                                        </span>
                                     ) : isActive ? (
                                         <span className="text-2xs font-semibold px-2 py-0.5 rounded-full bg-brand-100 text-brand-700">In progress</span>
                                     ) : isBlocked ? (
@@ -1108,7 +1115,7 @@ function StagesPipeline({
                                     <span className="text-surface-500 italic text-2xs">Unassigned</span>
                                 )}
                                 {isMyTask && <span className="text-2xs font-bold text-brand-600">(you)</span>}
-                                {canUnlock && !isDone && !task.started_at && (
+                                {workOpen && canUnlock && !isDone && !task.started_at && (
                                     <button type="button"
                                         onClick={() => onUnlock(task.id, !task.concurrent_allowed)}
                                         className="ml-auto text-2xs font-semibold text-surface-400 hover:text-brand-600 underline decoration-dotted underline-offset-2 transition-colors"
@@ -1148,47 +1155,15 @@ function StagesPipeline({
                                 </p>
                             )}
 
-                            {/* Inline actions — only rendered for the current user's assigned tasks */}
-                            {isMyTask && (
-                                <div className="flex items-center gap-2 mt-3">
-                                    {canStart && (
-                                        <button
-                                            onClick={() => onTaskAction(task.id, "start")}
-                                            disabled={taskActionPending}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-500 text-white text-xs font-semibold hover:bg-brand-600 transition-colors disabled:opacity-50"
-                                        >
-                                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
-                                            </svg>
-                                            {task.status === "paused" ? "Resume" : "Start"}
-                                        </button>
-                                    )}
-                                    {canComplete && (
-                                        <button
-                                            onClick={() => onTaskAction(task.id, "complete")}
-                                            disabled={taskActionPending}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-success-700 text-white text-xs font-semibold hover:bg-success-700 transition-colors disabled:opacity-50"
-                                        >
-                                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                                            </svg>
-                                            Mark done
-                                        </button>
-                                    )}
-                                    {canPause && (
-                                        <button
-                                            onClick={() => onTaskAction(task.id, "pause")}
-                                            disabled={taskActionPending}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-100 text-surface-600 text-xs font-semibold hover:bg-surface-200 transition-colors disabled:opacity-50"
-                                        >
-                                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5" />
-                                            </svg>
-                                            Pause
-                                        </button>
-                                    )}
-                                </div>
-                            )}
+                            {/* Inline actions — the shared Production buttons, only for
+                                the viewer's own stage on an order that still takes work. */}
+                            <StageActions
+                                status={task.status}
+                                canAct={isMyTask && workOpen}
+                                blocked={isBlocked}
+                                pending={taskActionPending}
+                                onAction={(action) => onTaskAction(task.id, action)}
+                            />
                         </div>
                     </div>
                 );
@@ -2507,6 +2482,7 @@ export default function ProductionOrderDetailPage() {
                             taskActionPending={taskMutation.isPending}
                             canUnlock={can("production.manage_assignees")}
                             onUnlock={(taskId, allow) => unlockMutation.mutate({ taskId, allow })}
+                            orderStatus={order.status}
                         />}
                         {tab === "batches" && <BatchesSection
                             order={order}

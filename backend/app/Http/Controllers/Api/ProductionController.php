@@ -1254,7 +1254,12 @@ class ProductionController extends Controller
     public function myTasks(Request $request)
     {
         $includeCompleted = filter_var($request->query('include_completed', false), FILTER_VALIDATE_BOOLEAN);
-        $includeAwaitingQc = filter_var($request->query('include_awaiting_qc', false), FILTER_VALIDATE_BOOLEAN);
+        // My Tasks' view of an order: her open work plus her finished stages on
+        // every order still in motion, so "Your stages 1/2 done" can count and
+        // an order in or back from QC keeps its lane. include_awaiting_qc is
+        // the Cycle 3 name, still accepted from a cached console.
+        $includeOrderContext = filter_var($request->query('include_order_context', false), FILTER_VALIDATE_BOOLEAN)
+            || filter_var($request->query('include_awaiting_qc', false), FILTER_VALIDATE_BOOLEAN);
 
         $query = ProductionTask::with([
             'batchProgress',
@@ -1291,14 +1296,15 @@ class ProductionController extends Controller
                 WHEN status = 'completed'   THEN 3
                 ELSE 4
             END");
-        } elseif ($includeAwaitingQc) {
+        } elseif ($includeOrderContext) {
             // My Tasks' Active queue: open work, plus her finished stages on
-            // orders still waiting on — or sent back from — inspection, so the
-            // outcome stays in front of her (its own lane) rather than only
-            // under "All". Opt-in: Home's top-four list must stay open work.
+            // orders not yet finished — in work, in QC or sent back from it.
+            // Opt-in: Home's top-four list must stay open work only.
             $query->where(fn ($q) => $q
                 ->whereIn('status', ['pending', 'in_progress', 'paused'])
-                ->orWhereHas('productionOrder', fn ($o) => $o->whereIn('status', ['qc_pending', 'qc_failed'])));
+                ->orWhereHas('productionOrder', fn ($o) => $o->whereIn('status', [
+                    ...ProductionOrder::FLOOR_WORK_STATUSES, 'qc_pending', 'qc_failed',
+                ])));
         } else {
             // Active only — exclude completed/failed so Intelligence sort works on the right set
             $query->whereIn('status', ['pending', 'in_progress', 'paused']);
@@ -1357,8 +1363,12 @@ class ProductionController extends Controller
             return response()->json(ProductionPayload::forViewer($tasks, $request->user()));
         }
 
-        // Intelligence #9 — sort active tasks by deadline-miss risk score
-        $sorted = IntelligenceService::smartTaskSort($tasks->toArray());
+        // Intelligence #9 — sort active tasks by deadline-miss risk score.
+        // Only open tasks are ranked: finished stages sent for context go
+        // after them, so they cannot lift an order above where Home ranks it
+        // (Home's #1 must stay Focus's #1).
+        [$open, $finished] = $tasks->partition(fn ($t) => in_array($t->status, ['pending', 'in_progress', 'paused'], true));
+        $sorted = array_merge(IntelligenceService::smartTaskSort($open->values()->toArray()), $finished->values()->toArray());
 
         // The tailor's own job cards: first name, no contacts, no cost.
         return response()->json(ProductionPayload::forViewer($sorted, $request->user()));
