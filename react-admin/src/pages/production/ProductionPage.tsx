@@ -2143,7 +2143,7 @@ function WIPTab({
     const { data, isLoading: ordersLoading } = useQuery({
         queryKey: ["production-orders-wip"],
         queryFn: () => get<any>("/v1/admin/production-orders", {
-            params: { status: "in_progress,on_hold,qc_pending,qc_passed,qc_failed", per_page: "100" },
+            params: { status: "pending,in_progress,on_hold,qc_pending,qc_passed,qc_failed", per_page: "100" },
         }),
         enabled: canViewFull && selectedUserId === "all",
         staleTime: 0,
@@ -2181,7 +2181,7 @@ function WIPTab({
         queryKey: ["production-orders-wip-filtered", Array.from(filteredOrderIds ?? []).sort().join(",")],
         queryFn: () => get<any>("/v1/admin/production-orders", {
             params: {
-                status: "in_progress,on_hold,qc_pending,qc_passed,qc_failed",
+                status: "pending,in_progress,on_hold,qc_pending,qc_passed,qc_failed",
                 per_page: "100",
             },
         }),
@@ -2210,8 +2210,11 @@ function WIPTab({
     }, [selectedUserId, productionUsers]);
 
     // ── Group into pipeline columns ──────────────────────────────────────────
+    // Pending leads: a confirmed, assigned order nobody has started yet is the
+    // floor's next work. Without this column, newly assigned jobs were
+    // invisible on the board until someone pressed Start.
     const cols = [
-        "in_progress", "on_hold", "qc_pending", "qc_passed", "qc_failed",
+        "pending", "in_progress", "on_hold", "qc_pending", "qc_passed", "qc_failed",
     ].map(key => ({ key, label: orderStatus(key).label }));
 
     const byStatus = useMemo(() => {
