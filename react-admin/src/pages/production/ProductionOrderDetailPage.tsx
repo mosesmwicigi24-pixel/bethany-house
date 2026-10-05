@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
+import { toBusinessDateInput } from "@/lib/businessDate";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
@@ -227,9 +228,9 @@ function EditOrderModal({ order, onClose, onSaved, canReduce = false }: { order:
 
     const [quantity, setQuantity] = useState(String(order.quantity));
     const [priority, setPriority] = useState(order.priority ?? "normal");
-    const [dueDate, setDueDate]   = useState((order.due_date ?? "").slice(0, 10));
-    const [fittingDate, setFittingDate]       = useState(((order as any).fitting_date ?? "").slice(0, 10));
-    const [collectionDate, setCollectionDate] = useState(((order as any).collection_date ?? "").slice(0, 10));
+    const [dueDate, setDueDate]   = useState(toBusinessDateInput(order.due_date));
+    const [fittingDate, setFittingDate]       = useState(toBusinessDateInput((order as any).fitting_date));
+    const [collectionDate, setCollectionDate] = useState(toBusinessDateInput((order as any).collection_date));
     const [notes, setNotes]       = useState((order as any).notes ?? "");
     // Measurements are editable at any stage (the garment isn't cut yet, or is
     // being re-measured) — only the QUANTITY is structural and locked. Kept as
