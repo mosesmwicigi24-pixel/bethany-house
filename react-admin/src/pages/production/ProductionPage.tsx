@@ -1904,7 +1904,7 @@ function ProductionOrdersTab() {
                                                         rel="noopener noreferrer"
                                                         onClick={(e) => e.stopPropagation()}
                                                         aria-label={`Call ${o.customer_label ?? 'customer'} on ${o.customer_contact}`}
-                                                        className="shrink-0 self-center mr-3 w-9 h-9 rounded-full bg-surface-100
+                                                        className="shrink-0 self-center mr-2 w-11 h-11 rounded-full bg-surface-100
                                                                    flex items-center justify-center text-surface-600
                                                                    active:bg-surface-200 transition-colors"
                                                     >

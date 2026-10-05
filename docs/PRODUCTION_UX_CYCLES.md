@@ -17,13 +17,65 @@ A cycle is never re-run. A later cycle revisits an area only for a genuine highe
 | 3 | Shop-floor workflow | Closed (rework path proposed, awaiting approval) |
 | 4 | Interaction quality | Closed |
 | 5 | Apparel-production intelligence | Closed |
-| 6 | Mobile / tablet excellence | Next |
-| 7 | Offline and recovery | |
+| 6 | Mobile / tablet excellence | Closed |
+| 7 | Offline and recovery | Next |
 | 8 | Accessibility / privacy / trust | |
 | 9 | Visual polish and performance | |
 | 10 | A full working day (tailor + production manager) | |
 
 ---
+
+## Cycle 6 — Mobile / tablet excellence (closed)
+
+**The question:** can a tailor work one-handed on a phone, and read the job at arm's length on the shop tablet?
+
+**Inspection.** I measured every visible control on My Tasks, Order Detail and Production Orders at 390px with Playwright, against a 48px floor target (44px minimum). I also captured the screens at the Tab S9 Ultra's landscape width (≈1480px).
+
+**What the pass found (before):**
+- **My Tasks**, the floor's busiest screen:
+  - Start/Resume, Pause and Mark done were 32px tall, in 11px type;
+  - the piece counters (+1 / +5 / +10 / −1) were about 26px;
+  - Add note and View specs were 40px;
+  - the order pager dots were 16px.
+- **Order Detail on a phone:**
+  - the action bar (Assign, Materials, PDF, ⋮) was 30px;
+  - the tabs were 42px;
+  - the back link was 16px tall;
+  - "Allow parallel" was a 16px text link;
+  - the stage buttons (`StageActions`) were 32px.
+- **Production Orders:** the card's call button was 36px.
+- **Tablet landscape:** the Focus card stretched about 1,200px wide, so each measurement's value sat a hand-span from its name, and Start drifted to the far right.
+- **Order Detail tabs** scrolled sideways with no hint (recorded in Cycle 4).
+
+### What changed
+
+- **48px floor controls on My Tasks.** Start/Resume, Pause, Mark done, the piece counters (48×48) and Add note / View specs are all at least 48px, with 14px type. The pager dots get a 44px hit area around the same dot.
+- **`StageActions`** (Order Detail and the order drawer) is 48px.
+- **Order Detail on a phone:**
+  - the action bar is 44px (still 36px from `sm`);
+  - the tabs are 48px;
+  - the back link and "Allow parallel" get 44px hit areas without moving the layout.
+- **The tab bar shows a scroll hint.** A sticky right-edge fade on phones signals that more tabs sit off-screen. As the row's last item, it rests beyond the last tab once scrolled to the end.
+- **The call button** on order cards is 44px.
+- **The Focus column is capped at a readable width** (`max-w-3xl`, centred) on large screens; phones are unchanged.
+
+### Tests
+
+Re-measured at 390px. The only controls still under 44px are:
+- the sales-order number, an inline text link;
+- Clear and New Order on the Production Orders filter row, at 40px;
+- "Allow parallel" at 40px.
+
+`tsc --noEmit` is clean. Captures at 390px and 1480px confirm:
+- the counters read at arm's length;
+- the Focus card sits as a centred column on the tablet;
+- the Order Detail tab bar fades at the right edge.
+
+### Recorded for later cycles (non-blocking)
+
+| Cycle | Finding |
+|---|---|
+| 9 | The Production Orders filter row (Clear 40px, New Order 40px) and the `btn` component sizes are shared app-wide, so they were left for a whole-app pass. |
 
 ## Cycle 5 — Apparel-production intelligence (closed)
 

@@ -179,7 +179,7 @@ export function StageActions({ status, canAct, blocked = false, pending = false,
         <div className="flex items-center gap-2 mt-2.5">
             {buttons.map(b => (
                 <button key={b.action} type="button" onClick={() => onAction(b.action)} disabled={pending}
-                    className={clsx("flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50", b.cls)}>
+                    className={clsx("flex items-center justify-center gap-1.5 min-h-12 px-4 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50", b.cls)}>
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>{b.icon}</svg>
                     {b.label}
                 </button>
