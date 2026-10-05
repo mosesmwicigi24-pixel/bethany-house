@@ -4,7 +4,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import {
-    ORDER_STATUS, PRIORITY, StatusBadge, PriorityBadge, ProgressBar, dueInfo, DUE_TONE_CLS, fmtDueDate, stageLabel, acceptsFloorWork, StageActions,
+    ORDER_STATUS, PRIORITY, StatusBadge, PriorityBadge, ProgressBar, dueInfo, DUE_TONE_CLS, fmtDueDate, stageLabel, acceptsFloorWork, StageActions, measurementRank,
     isCustomerJob, jobFor, type OrderProgressData,
 } from "@/components/production/productionUi";
 import { get, post, put, del } from "@/api/client";
@@ -1728,14 +1728,10 @@ function AuditTrail({ orderId }: { orderId: number }) {
 
 // ── Key-value grid for specs / measurements ───────────────────────────────────
 
-// Tailoring reads top-down: the shop measures in this order, so every order
-// displays in this order — regardless of the sequence the keys were typed in.
-const MEASUREMENT_ORDER = ["neck", "shoulders", "sleeves", "wrist", "chest", "stomach", "waist", "hip", "shirt_length", "full_length"];
+// Tailoring reads top-down: every order displays in the clergy sheet's order
+// (measurementRank, shared with My Tasks and View specs in productionUi),
+// regardless of the sequence the keys were typed in.
 const normKey = (k: string) => k.toLowerCase().trim().replace(/[\s-]+/g, "_");
-const measurementRank = (k: string) => {
-    const i = MEASUREMENT_ORDER.indexOf(normKey(k));
-    return i === -1 ? MEASUREMENT_ORDER.length : i;
-};
 
 // Three measurements per row: a tape-measure card, not a ledger. Each cell is
 // name-over-value so the eye sweeps left-to-right exactly the way the shop

@@ -16,14 +16,54 @@ A cycle is never re-run. A later cycle revisits an area only for a genuine highe
 | 2 | Information hierarchy | Closed |
 | 3 | Shop-floor workflow | Closed (rework path proposed, awaiting approval) |
 | 4 | Interaction quality | Closed |
-| 5 | Apparel-production intelligence | Next |
-| 6 | Mobile / tablet excellence | |
+| 5 | Apparel-production intelligence | Closed |
+| 6 | Mobile / tablet excellence | Next |
 | 7 | Offline and recovery | |
 | 8 | Accessibility / privacy / trust | |
 | 9 | Visual polish and performance | |
 | 10 | A full working day (tailor + production manager) | |
 
 ---
+
+## Cycle 5 — Apparel-production intelligence (closed)
+
+**The question:** does each screen read a garment the way a tailor does? That means measurements in the shop's order, materials with what is actually there, and gender as part of who the garment is for.
+
+**Inspection.** Measurements, specs and materials were traced through My Tasks (the Focus card and the View specs drawer), Order Detail and the new-order form, on a men's cassock order.
+
+**What the pass found:**
+- **Measurements came in whatever order they were typed.**
+  - The Focus card read Neck, Chest, Sleeves, Shoulders.
+  - View specs showed them unsorted, with Gender as a measurement tile.
+  - Only Order Detail sorted them, and its list (F14) was missing Arm Hole, Upper Arm, Bodice and Blouse Length.
+  - It also spelled "hip" where the ladies' sheet says "Hips".
+- **Two copies of the clergy sheets.** The new-order form and the product form each held their own.
+- **View specs hid shortfalls.** Its materials list showed only the *required* quantity, under the heading "Materials allocated", so a job short of cloth read as fully supplied. The Focus card already showed "allocated / required · short".
+
+### What changed
+
+- **One measurement order.** `CLERGY_SHEETS` (men and ladies) and `orderMeasurements()` live in `productionUi`.
+  - The two sheets are merged top of the body down: Neck, Shoulders, Sleeves, Wrist, Arm Hole, Upper Arm, Chest/Bodice, Stomach, Waist, Hips, Shirt/Blouse Length, Full Length.
+  - Custom fields follow, in the order they were typed.
+  - Older spellings map onto the sheet: hip → Hips, sleeve length → Sleeves.
+  - Gender is pulled out of the list.
+  - The Focus card, View specs ("Measurements · Men") and Order Detail all use it, and the new-order form reads its sheets from it.
+- **View specs shows what is there.** Each material reads `allocated/required unit`, amber with "· short" when short, matching the Focus card.
+
+### Tests
+
+These are screen-only changes; the console has no unit-test runner.
+- `tsc --noEmit` and `vite build` are clean.
+- Visual check at 390px, on the cassock (typed as Neck, Chest, Sleeves, Shoulders, Full Length):
+  - the Focus card and View specs both read Neck, Shoulders, Sleeves, Chest, Full Length;
+  - the gender sits in the heading.
+
+### Recorded for later cycles (non-blocking)
+
+| Cycle | Finding |
+|---|---|
+| — | The catalogue's product form still has its own copy of the clergy sheets (`ProductFormPage`). It is outside Production, so it was left alone. |
+| Owner | QC can't pass part of an order (say 9 of 10). This depends on the rework decision proposed in Cycle 3. |
 
 ## Cycle 4 — Interaction quality (closed)
 
