@@ -4,7 +4,7 @@ import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { clsx } from "clsx";
 import {
     ORDER_STATUS, orderStatus, StatusBadge, PriorityBadge, DueBadge, ProgressBar,
-    dueInfo, DUE_TONE_CLS, fmtDueDate, isCustomerJob, jobFor, stageLabel, acceptsFloorWork, StageActions,
+    dueInfo, DUE_TONE_CLS, fmtDueDate, isCustomerJob, jobFor, stageLabel, acceptsFloorWork, StageActions, CLERGY_SHEETS,
 } from "@/components/production/productionUi";
 import { toBusinessDateInput } from "@/lib/businessDate";
 import { get, post, put } from "@/api/client";
@@ -232,16 +232,11 @@ function productLabel(p: any): string {
     return p?.en_translation?.name ? `${p.en_translation.name} — ${p.sku}` : (p?.sku ?? "—");
 }
 
-/** Standard clergy tailoring measurement sheets, by gender (all in inches). */
+/** Standard clergy tailoring measurement sheets, by gender (all in inches) —
+ *  the one list (productionUi) that also orders measurements on every screen. */
 const MEASUREMENT_SETS: Record<"men" | "ladies", { name: string; unit: string }[]> = {
-    men: [
-        "Neck", "Shoulders", "Sleeves", "Wrist", "Arm Hole", "Upper Arm",
-        "Chest", "Stomach", "Shirt Length", "Full Length",
-    ].map(name => ({ name, unit: "Inches" })),
-    ladies: [
-        "Neck", "Shoulders", "Sleeves", "Wrist", "Arm Hole", "Upper Arm",
-        "Bodice", "Waist", "Hips", "Blouse Length", "Full Length",
-    ].map(name => ({ name, unit: "Inches" })),
+    men:    CLERGY_SHEETS.men.map(name => ({ name, unit: "Inches" })),
+    ladies: CLERGY_SHEETS.ladies.map(name => ({ name, unit: "Inches" })),
 };
 
 /**

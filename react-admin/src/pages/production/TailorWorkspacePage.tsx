@@ -19,7 +19,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
-import { PriorityBadge, DueBadge, daysUntil } from "@/components/production/productionUi";
+import { PriorityBadge, DueBadge, daysUntil, orderMeasurements } from "@/components/production/productionUi";
 import { businessToday } from "@/lib/businessDate";
 import { get, put, post } from "@/api/client";
 import { useToastStore } from "@/store/toast.store";
@@ -529,8 +529,10 @@ function SpecsDrawer({
     onClose: () => void;
 }) {
     const order = task.production_order;
-    const hasMeasurements =
-        order.measurements && Object.keys(order.measurements).length > 0;
+    // Same order as the Focus card: the clergy sheet's, gender as a line of
+    // its own rather than a tile.
+    const { gender, body: measurementRows } = orderMeasurements(order.measurements);
+    const hasMeasurements = measurementRows.length > 0;
     const hasSpecs =
         order.specifications && Object.keys(order.specifications).length > 0;
     const hasPrefs =
@@ -567,10 +569,10 @@ function SpecsDrawer({
                 {hasMeasurements && (
                     <div>
                         <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2">
-                            Measurements
+                            Measurements{gender ? ` · ${gender}` : ""}
                         </p>
                         <div className="grid grid-cols-2 gap-2">
-                            {Object.entries(order.measurements!).map(
+                            {measurementRows.map(
                                 ([k, v]) => (
                                     <div
                                         key={k}
@@ -642,23 +644,32 @@ function SpecsDrawer({
                 {hasMaterials && (
                     <div>
                         <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2">
-                            Materials allocated
+                            Materials
                         </p>
+                        {/* Allocated / required, as on the Focus card — the
+                            drawer showed only "required", so a short job read
+                            as fully supplied. */}
                         <div className="card p-3 space-y-2">
-                            {order.material_allocations!.map((a, i) => (
-                                <div
-                                    key={i}
-                                    className="flex justify-between gap-2 border-b border-surface-50 last:border-0 pb-2 last:pb-0"
-                                >
-                                    <span className="text-xs text-surface-500">
-                                        {a.material.name}
-                                    </span>
-                                    <span className="text-xs font-semibold text-surface-900">
-                                        {a.quantity_required}{" "}
-                                        {a.material.unit_of_measure}
-                                    </span>
-                                </div>
-                            ))}
+                            {order.material_allocations!.map((a, i) => {
+                                const req   = Number(a.quantity_required ?? 0);
+                                const alloc = Number(a.quantity_allocated ?? 0);
+                                const short = req > alloc;
+                                return (
+                                    <div
+                                        key={i}
+                                        className="flex justify-between gap-2 border-b border-surface-50 last:border-0 pb-2 last:pb-0"
+                                    >
+                                        <span className="text-xs text-surface-500">
+                                            {a.material.name}
+                                        </span>
+                                        <span className={clsx("text-xs font-semibold tabular-nums",
+                                            short ? "text-amber-700" : "text-surface-900")}>
+                                            {alloc}/{req} {a.material.unit_of_measure}
+                                            {short && " · short"}
+                                        </span>
+                                    </div>
+                                );
+                            })}
                         </div>
                     </div>
                 )}
@@ -919,11 +930,9 @@ function FocusCard({
     // Gender is an identity fact, not a body measurement — it belongs beside the
     // garment name, and repeating it as a measurement tile wasted a slot in the
     // grid. Pulled out here and excluded from the list below.
-    const genderEntry = Object.entries(order?.measurements ?? {}).find(
-        ([k, v]) => k.toLowerCase().replace(/[^a-z]/g, "") === "gender" && v);
-    const gender = genderEntry?.[1];
-    const bodyMeasurements = Object.entries(order?.measurements ?? {}).filter(
-        ([k]) => k.toLowerCase().replace(/[^a-z]/g, "") !== "gender");
+    // In the clergy sheet's order (Neck, Shoulders, Sleeves, …), as the shop
+    // measures — not the order the keys happened to be typed in.
+    const { gender, body: bodyMeasurements } = orderMeasurements(order?.measurements);
     const hasMeasurements = bodyMeasurements.length > 0;
 
     // The rest of the drawer's content, ready for the inline sections below.

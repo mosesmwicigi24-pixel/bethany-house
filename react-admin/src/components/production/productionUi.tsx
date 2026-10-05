@@ -82,6 +82,53 @@ export function PriorityBadge({ priority: p, showNormal = false }: { priority?: 
     return <span className={clsx("inline-flex text-2xs font-bold px-1.5 py-0.5 rounded border uppercase tracking-wide whitespace-nowrap", c.cls)}>{c.label}</span>;
 }
 
+// ── Measurements: read in the order the shop measures ───────────────────────
+
+/** The standard clergy measurement sheets, by gender, in measuring order (inches). */
+export const CLERGY_SHEETS: Record<"men" | "ladies", string[]> = {
+    men: ["Neck", "Shoulders", "Sleeves", "Wrist", "Arm Hole", "Upper Arm",
+        "Chest", "Stomach", "Shirt Length", "Full Length"],
+    ladies: ["Neck", "Shoulders", "Sleeves", "Wrist", "Arm Hole", "Upper Arm",
+        "Bodice", "Waist", "Hips", "Blouse Length", "Full Length"],
+};
+
+// Both sheets merged, top of the body down: the order every screen shows.
+const MEASUREMENT_ORDER = ["neck", "shoulders", "sleeves", "wrist", "arm_hole", "upper_arm",
+    "chest", "bodice", "stomach", "waist", "hips", "shirt_length", "blouse_length", "full_length"];
+// Spellings seen on older orders and other forms.
+const MEASUREMENT_ALIAS: Record<string, string> = {
+    hip: "hips", shoulder: "shoulders", sleeve: "sleeves", armhole: "arm_hole",
+    sleeve_length: "sleeves", shoulder_width: "shoulders", length: "full_length",
+};
+const normMeasurementKey = (k: string) => {
+    const n = k.toLowerCase().trim().replace(/[\s-]+/g, "_");
+    return MEASUREMENT_ALIAS[n] ?? n;
+};
+export const measurementRank = (k: string) => {
+    const i = MEASUREMENT_ORDER.indexOf(normMeasurementKey(k));
+    return i === -1 ? MEASUREMENT_ORDER.length : i;
+};
+const isGenderKey = (k: string) => k.toLowerCase().replace(/[^a-z]/g, "") === "gender";
+
+/**
+ * An order's measurements as the tailor reads them: the sheet's order
+ * (custom fields after, in the order typed), empty values dropped, and
+ * gender pulled out — it is who the garment is for, not a body measurement.
+ */
+export function orderMeasurements(record?: Record<string, string | number | null> | null): {
+    gender: string | null;
+    body: [string, string][];
+} {
+    const entries = Object.entries(record ?? {}).filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== "");
+    const gender = entries.find(([k]) => isGenderKey(k))?.[1];
+    const body = entries
+        .filter(([k]) => !isGenderKey(k))
+        .map(([k, v], i) => ({ k, v: String(v), i }))
+        .sort((a, b) => (measurementRank(a.k) - measurementRank(b.k)) || (a.i - b.i))
+        .map(({ k, v }) => [k, v] as [string, string]);
+    return { gender: gender != null ? String(gender) : null, body };
+}
+
 // ── Whether the floor can work on an order ───────────────────────────────────
 
 /**
