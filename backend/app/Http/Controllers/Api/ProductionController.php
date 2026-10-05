@@ -814,15 +814,21 @@ class ProductionController extends Controller
         // assigned a stage on this order may record its QC — managers and the
         // owner included. Before the transaction: the refusal is logged and
         // must not roll back with it.
+        // Everyone who holds a stage on the order: refused as inspectors here,
+        // told the outcome below.
+        $makerIds = ProductionTask::withoutViewerScope()
+            ->where('production_order_id', $order->id)
+            ->whereNotNull('assigned_to')
+            ->pluck('assigned_to')
+            ->unique()
+            ->values()
+            ->all();
+
         MakerChecker::assertNotMaker(
             $request->user(),
             'production_qc.submit',
             $order,
-            ...ProductionTask::withoutViewerScope()
-                ->where('production_order_id', $order->id)
-                ->whereNotNull('assigned_to')
-                ->pluck('assigned_to')
-                ->all(),
+            ...$makerIds,
         );
 
         DB::beginTransaction();
@@ -888,10 +894,20 @@ class ProductionController extends Controller
                         $validated['notes'] ?? ''
                     );
                 }
+                // The people who made it hear the result too — before, a
+                // failed garment just sat in the tailor's "Completed" lane.
+                NotificationService::productionQcResultForMakers(
+                    $order->id,
+                    $order->order_number,
+                    $productName,
+                    (bool) $validated['passed'],
+                    $makerIds,
+                    $validated['notes'] ?? null,
+                );
             } catch (\Exception) {}
 
             return response()->json([
-                'message' => $validated['passed'] ? 'QC passed. Ready to complete.' : 'QC failed. Order placed on hold.',
+                'message' => $validated['passed'] ? 'QC passed. Ready to complete.' : 'QC failed. A manager will decide the rework.',
                 'order'   => $order->fresh(),
             ]);
 
@@ -1238,6 +1254,7 @@ class ProductionController extends Controller
     public function myTasks(Request $request)
     {
         $includeCompleted = filter_var($request->query('include_completed', false), FILTER_VALIDATE_BOOLEAN);
+        $includeAwaitingQc = filter_var($request->query('include_awaiting_qc', false), FILTER_VALIDATE_BOOLEAN);
 
         $query = ProductionTask::with([
             'batchProgress',
@@ -1274,6 +1291,14 @@ class ProductionController extends Controller
                 WHEN status = 'completed'   THEN 3
                 ELSE 4
             END");
+        } elseif ($includeAwaitingQc) {
+            // My Tasks' Active queue: open work, plus her finished stages on
+            // orders still waiting on — or sent back from — inspection, so the
+            // outcome stays in front of her (its own lane) rather than only
+            // under "All". Opt-in: Home's top-four list must stay open work.
+            $query->where(fn ($q) => $q
+                ->whereIn('status', ['pending', 'in_progress', 'paused'])
+                ->orWhereHas('productionOrder', fn ($o) => $o->whereIn('status', ['qc_pending', 'qc_failed'])));
         } else {
             // Active only — exclude completed/failed so Intelligence sort works on the right set
             $query->whereIn('status', ['pending', 'in_progress', 'paused']);

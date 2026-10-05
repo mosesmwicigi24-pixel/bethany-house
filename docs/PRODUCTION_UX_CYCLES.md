@@ -14,8 +14,8 @@ A cycle is never re-run. A later cycle revisits an area only for a genuine highe
 |---|---|---|
 | 1 | UI/UX coherence | Closed |
 | 2 | Information hierarchy | Closed |
-| 3 | Shop-floor workflow | Next |
-| 4 | Interaction quality | |
+| 3 | Shop-floor workflow | Closed (rework path proposed, awaiting approval) |
+| 4 | Interaction quality | Next |
 | 5 | Apparel-production intelligence | |
 | 6 | Mobile / tablet excellence | |
 | 7 | Offline and recovery | |
@@ -24,6 +24,54 @@ A cycle is never re-run. A later cycle revisits an area only for a genuine highe
 | 10 | A full working day (tailor + production manager) | |
 
 ---
+
+## Cycle 3 — Shop-floor workflow (closed)
+
+**The question:** does the work flow on the floor without anyone getting stuck or left in the dark?
+
+**Inspection.** The route was traced from assignment to stock: confirm → assign → start → count → hand-off to QC → QC result → complete. Each step was followed through the server (`ProductionController`, `NotificationService`) and the tailor's and manager's screens.
+
+**What the pass found:**
+- **A failed QC is a dead end.** No route moves an order out of `qc_failed`. Floor work is refused ("a manager must decide what happens next"), but there is no screen or endpoint for that decision. This is ST-2 in `SYSTEM_AUDIT_AND_ROADMAP.md`.
+- **The tailor never hears the result.** The QC notice goes to owners and managers only. Her stages on the order are all done, so a failed order sat in her **Completed** lane, and only under "All", never under "Active".
+- **New work was invisible on the WIP board.** It showed in progress → QC, but not *pending*: a confirmed, assigned job nobody had started appeared nowhere until someone pressed Start.
+- The QC endpoint answered "QC failed. Order placed on hold." Nothing is put on hold; the order goes to `qc_failed`.
+
+### What changed
+
+- **The makers hear the QC result.** `NotificationService::productionQcResultForMakers` tells every assignee of a stage on the order, pass or fail. A fail includes the inspector's notes. It opens My Tasks. Managers keep their own notice; the inspector is not sent the bench notice.
+- **A failed order stays in front of the tailor.**
+  - My Tasks' Active queue asks for `include_awaiting_qc=true`, which adds her finished stages on orders in `qc_pending` or `qc_failed`. The flag is opt-in, so Home's top-four list stays open work.
+  - A new **Failed QC** lane, second after In progress, says "Your manager will decide the rework — nothing to do yet".
+  - "Ready for QC" now shows under Active too.
+- **WIP leads with Pending**, so newly assigned work is visible before anyone starts it.
+- The QC failure response reads "QC failed. A manager will decide the rework."
+
+### Tests
+
+- `QcResultReachesMakersTest` (new), on a fixture of one QC order with a cutter and a stitcher, a third tailor not on it, and an admin inspector:
+  - a fail tells both makers once, with the order number, the notes and the My Tasks link; the bystander and the inspector get no bench notice;
+  - a pass tells the makers too;
+  - the failed order's finished stage is in her Active queue with the flag, and absent from Home's list without it.
+  All three fail on the previous code.
+- `TailorQcSegregationTest`, `TailorMyTasksPayloadTest` and `TailorFloorSafetyTest` pass unchanged.
+
+### Proposed, not built — the rework path (needs the owner's approval)
+
+Leaving `qc_failed` changes stage state and piece counts, which feed completion and the stock-in. Under CLAUDE.md §1 that is a consequential change, so it is proposed with a decision audit, not built.
+
+The shape proposed:
+- a manager action, **"Send back for rework"**, from `qc_failed` to `in_progress`;
+- the manager picks the stages to redo and how many pieces;
+- the order re-enters QC through the existing all-stages-done hand-off;
+- the failed QC record stays as history.
+
+### Recorded for later cycles (non-blocking)
+
+| Cycle | Finding |
+|---|---|
+| 4 | The Queue header counts "3 orders · 3 tasks" including orders that only wait on QC. It should count open work. |
+| 5 | QC records `passed_quantity` / `failed_quantity`, but a fail fails the whole order. A partial pass (9 of 10) has no path. |
 
 ## Cycle 2 — Information hierarchy (closed)
 

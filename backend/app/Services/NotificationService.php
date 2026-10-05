@@ -931,6 +931,37 @@ class NotificationService
     }
 
     /**
+     * The QC result, told to the people who made the garment (every assignee
+     * of a stage on the order). Managers get their own notice above; this one
+     * is worded for the bench and opens My Tasks, where a failed order now
+     * sits in its own "Failed QC" lane.
+     */
+    public static function productionQcResultForMakers(
+        int $productionOrderId,
+        string $orderNumber,
+        string $productName,
+        bool $passed,
+        array $makerIds,
+        ?string $notes = null
+    ): void {
+        if (! $makerIds) return;
+
+        self::send(
+            self::resolve([], null, $makerIds),
+            new InAppNotification(
+                title:     $passed ? "QC passed: {$productName}" : "QC failed: {$productName}",
+                body:      $passed
+                    ? "{$orderNumber} passed inspection."
+                    : "{$orderNumber} did not pass inspection. Your manager will decide the rework."
+                        . ($notes ? " Inspector's notes: {$notes}" : ''),
+                actionUrl: '/production/my-tasks',
+                icon:      'production',
+                data:      ['production_order_id' => $productionOrderId],
+            )
+        );
+    }
+
+    /**
      * Fired when a production order fails quality control.
      */
     public static function productionQcFailed(

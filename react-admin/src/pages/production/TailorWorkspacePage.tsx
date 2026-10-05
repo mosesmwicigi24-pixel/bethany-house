@@ -199,10 +199,13 @@ function groupTasksByOrder(tasks: MyTask[]): OrderGroup[] {
 // one lane, and the lanes are ordered the way work actually flows. "What should
 // I work on next?" is answered by the first non-empty lane.
 
-type WorkflowState = "in_progress" | "ready" | "waiting" | "qc" | "done";
+type WorkflowState = "in_progress" | "qc_failed" | "ready" | "waiting" | "qc" | "done";
 
 const WORKFLOW_SECTIONS: { id: WorkflowState; label: string; tone: string; hint: string }[] = [
     { id: "in_progress", label: "In progress",       tone: "text-brand-700 bg-brand-50 border-brand-200",     hint: "Pick up where you left off" },
+    // Second, not buried in Completed: a garment she finished came back from
+    // inspection. Nothing to tap yet; her manager decides the rework.
+    { id: "qc_failed",   label: "Failed QC",         tone: "text-danger bg-danger-light border-danger/30",     hint: "Your manager will decide the rework — nothing to do yet" },
     { id: "ready",       label: "Ready to start",    tone: "text-success-700 bg-success-50 border-success-200", hint: "Nothing is blocking these" },
     { id: "waiting",     label: "Waiting",           tone: "text-amber-700 bg-amber-50 border-amber-200",     hint: "Blocked by an earlier stage or missing materials" },
     { id: "qc",          label: "Ready for QC",      tone: "text-accent-700 bg-accent-50 border-accent-200",  hint: "Your part is done — awaiting quality check" },
@@ -220,6 +223,7 @@ function materialShortfalls(group: OrderGroup) {
 function workflowStateOf(group: OrderGroup): WorkflowState {
     const orderStatus = group.tasks[0]?.production_order?.status;
     if (orderStatus === "qc_pending") return "qc";
+    if (orderStatus === "qc_failed") return "qc_failed";
     if (group.completedCount === group.totalCount && group.totalCount > 0) return "done";
     if (group.tasks.some((t) => t.status === "in_progress" || t.status === "paused")) return "in_progress";
 
@@ -1683,7 +1687,7 @@ export default function TailorWorkspacePage() {
             get<MyTask[]>(
                 queueFilter === "all"
                     ? "/v1/tailor/tasks?include_completed=true"
-                    : "/v1/tailor/tasks"
+                    : "/v1/tailor/tasks?include_awaiting_qc=true"
             ),
         staleTime: 20_000,
         refetchInterval: 30_000,
@@ -1703,7 +1707,16 @@ export default function TailorWorkspacePage() {
         [rawTasks]
     );
 
-    const queueGroups = queueFilter === "all" ? allGroups : activeGroups;
+    // An order waiting on, or sent back from, inspection holds none of her
+    // open tasks — yet its outcome is hers to know. Keep it in the Active
+    // queue (its own lane) instead of only under "All".
+    const queueGroups = useMemo(() => {
+        if (queueFilter === "all") return allGroups;
+        const awaitingOutcome = allGroups.filter((g) =>
+            ["qc_pending", "qc_failed"].includes(g.tasks[0]?.production_order?.status ?? "")
+            && !activeGroups.some((a) => a.orderId === g.orderId));
+        return [...activeGroups, ...awaitingOutcome];
+    }, [queueFilter, allGroups, activeGroups]);
 
     const clampedFocusIndex = Math.min(
         focusIndex,
