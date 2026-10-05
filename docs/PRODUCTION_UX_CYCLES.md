@@ -18,12 +18,61 @@ A cycle is never re-run. A later cycle revisits an area only for a genuine highe
 | 4 | Interaction quality | Closed |
 | 5 | Apparel-production intelligence | Closed |
 | 6 | Mobile / tablet excellence | Closed |
-| 7 | Offline and recovery | Next |
-| 8 | Accessibility / privacy / trust | |
+| 7 | Offline and recovery | Closed |
+| 8 | Accessibility / privacy / trust | Next |
 | 9 | Visual polish and performance | |
 | 10 | A full working day (tailor + production manager) | |
 
 ---
+
+## Cycle 7 — Offline and recovery (closed)
+
+**The question:** when the shop's Wi-Fi drops mid-job, does the tailor lose nothing, and does the work catch up by itself?
+
+**Inspection.** I traced the offline path from tap to server:
+- the page's queue (`TailorWorkspacePage`);
+- the service worker's replay and caches (`sw.ts`);
+- the app's boot (`auth.store`).
+
+I then ran it for real. A production build of the console was served with its service worker. In a fresh browser profile I loaded My Tasks online, then blocked the API at the network layer, tapped, reloaded and reconnected.
+
+**What the pass found (before):**
+- **The queue broke on a fresh device.** The page opened the offline database without creating its store, and only the service worker created it. On a new phone, the first offline tap threw instead of queueing.
+- **Piece taps weren't queued at all.** An offline +1 was refused with "Network error" and the count fell back. Only Start/Pause/Done went to the queue, and the worker replayed everything as a PUT.
+- **Replay relied on Background Sync only.** Browsers without it (iOS Safari among them) kept the queue until some later visit.
+- **My Tasks wasn't cached.** The worker cached `/api/v1/(admin|tailor)/production…`, but the tailor's list is `/api/v1/tailor/tasks`.
+- **An offline reload stopped at "Can't reach Bethany House".** The signed-in user (`/auth/me`) wasn't cached, so no screen could open.
+
+### What changed
+
+- **One offline queue for the page** (`lib/offlineQueue.ts`).
+  - It creates the stores itself, in the same database the worker uses.
+  - Each item records its URL, method and body.
+  - A piece count is queued under a per-stage key, so only the latest absolute count is sent.
+  - Network failures are told apart from refusals: a request with no HTTP status is a network failure.
+- **Piece taps survive offline.** The count stays on screen and is queued. A notice says once per offline spell that counts are saved on this device. When the worker reports the sync, the screen refreshes to the server's counts.
+- **Replay works without Background Sync.**
+  - The page asks the worker to replay on load, on every enqueue and whenever the connection returns.
+  - The worker runs one replay at a time and sends each item with its own method.
+  - It tells the page "N offline updates have synced".
+  - Refusals are still dropped with the server's reason, as before.
+- **My Tasks and the session open offline.** Network-first caches cover `/api/v1/tailor/tasks` and `/api/v1/admin/auth/me`, each for a working day. Both are deleted on sign-out, so a shared tablet doesn't hand one tailor's list or session to the next.
+
+### Tests
+
+The test ran in a real browser against a production build. It used a fresh profile, API calls blocked at the network layer (service-worker traffic included), and the local database:
+- **Offline:** two taps on +1 left one queued item (count 2); the database was untouched (pending, 0).
+- **Offline reload:** My Tasks opened with the order on screen, not "Can't reach".
+- **Back online:** the queue drained by itself, and the database read in progress with 2 pieces. The card read 2/10, and the whole order went from 67% to 73% with 2/10 finished.
+
+`tsc --noEmit` and `vite build`, including the service worker, are clean.
+
+### Recorded for later cycles (non-blocking)
+
+| Cycle | Finding |
+|---|---|
+| 9 | Offline, two banners stack: the app's "You're offline – some features may be unavailable" and My Tasks' "Offline – updates will sync". One is enough. |
+| 8 | Sign-out clears the cached session and task list, but an unsynced queue stays on the device by design, so work is not lost. Who may replay it after a different sign-in is a Cycle 8 trust question: the queued item carries the first tailor's token. |
 
 ## Cycle 6 — Mobile / tablet excellence (closed)
 
