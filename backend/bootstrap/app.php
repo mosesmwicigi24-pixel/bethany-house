@@ -153,6 +153,21 @@ return Application::configure(basePath: dirname(__DIR__))
             ->withoutOverlapping();
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        // A record that is not there — usually because someone deleted it
+        // while another tab still had it open. The bare Laravel text ("No
+        // query results for model [App\\Models\\Product] 130") told nobody
+        // anything (owner, 2026-10-06). Same 404, words a person can act on:
+        // when it was deleted and where to restore it, or that it is gone.
+        $exceptions->render(function (\Symfony\Component\HttpKernel\Exception\NotFoundHttpException $e, \Illuminate\Http\Request $request) {
+            $missing = $e->getPrevious();
+            if (! $missing instanceof \Illuminate\Database\Eloquent\ModelNotFoundException
+                || ! ($request->expectsJson() || $request->is('api/*'))) {
+                return null;
+            }
+
+            return \App\Support\MissingRecordMessage::response($missing);
+        });
+
         // SQLSTATE 57014 = a query cancelled by statement_timeout — the ceiling
         // ReadsOneSnapshot puts on a report (cycle 9). It is not a server fault
         // to be hidden behind "Server Error": it is an answer the reader can
