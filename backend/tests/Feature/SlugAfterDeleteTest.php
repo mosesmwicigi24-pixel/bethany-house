@@ -47,6 +47,8 @@ class SlugAfterDeleteTest extends TestCase
             'sku'          => 'VES-PC-0023',
             'product_type' => 'simple',
             'status'       => 'draft',
+            'brand'        => 'BETHANY HOUSE',
+            'tax_class'    => 'standard',      // the console always sends it (the column is NOT NULL)
             'translations' => [['language_code' => 'en', 'name' => 'Pectoral Cross',
                                 'description' => 'Pectoral Cross']],
             'prices'       => [['currency_code' => 'KES', 'regular_price' => 4000]],
