@@ -481,6 +481,8 @@ class ProductController extends Controller
             throw $e;
         } catch (\Exception $e) {
             DB::rollBack();
+            \Illuminate\Support\Facades\Log::error('product create failed', ['user_id' => $request->user()?->id, 'exception' => $e]);
+
             return response()->json(['message' => 'Failed to create product.', 'error' => $e->getMessage()], 500);
         }
     }
@@ -1353,7 +1355,7 @@ class ProductController extends Controller
         $i        = 1;
 
         while (
-            Product::where('slug', $slug)
+            Product::withTrashed()->where('slug', $slug)
                 ->when($excludeId, fn ($q) => $q->where('id', '!=', $excludeId))
                 ->exists()
         ) {

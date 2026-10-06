@@ -274,7 +274,7 @@ class CategoryIndex extends Component
         $slug = Str::slug($name);
         $base = $slug;
         $i    = 1;
-        while (Category::where('slug', $slug)
+        while (Category::withTrashed()->where('slug', $slug)
             ->when($ignoreId, fn ($q) => $q->where('id', '!=', $ignoreId))
             ->exists()) {
             $slug = "{$base}-{$i}";
