@@ -220,6 +220,16 @@ class RoleController extends Controller
 
         $role = Role::findOrFail($id);
 
+        // The super admin holds every permission through Gate::before — the
+        // Roles screen shows it all ticked and locked (owner, 2026-10-07).
+        // Writing a list here would only make the record disagree with that.
+        if ($role->name === 'super_admin') {
+            return response()->json([
+                'message' => 'The Super Admin holds every permission, including any added later. It cannot be restricted.',
+                'reason'  => 'super_admin_holds_all',
+            ], 422);
+        }
+
         $requestedIds = array_map('intval', $validated['permissions']);
         $finalIds     = $this->expandWithDependencies($requestedIds);
         $autoAddedIds = array_diff($finalIds, $requestedIds);
