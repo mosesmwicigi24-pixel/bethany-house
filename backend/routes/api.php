@@ -1280,6 +1280,8 @@ Route::prefix('v1')->group(function () {
                         ->middleware('permission:production.manage_assignees,sanctum');
                     Route::post('/{id}/qc',               [ProductionController::class, 'qualityCheck'])
                         ->middleware('permission:production.submit_qc,sanctum');
+                    Route::post('/{id}/rework',           [ProductionController::class, 'rework'])
+                        ->middleware('permission:production.submit_qc,sanctum');
                     Route::post('/{id}/complete',         [ProductionController::class, 'complete'])
                         ->middleware('permission:production.approve_qc,sanctum');
                     Route::delete('/{id}',                [ProductionController::class, 'destroy'])

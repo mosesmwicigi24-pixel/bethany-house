@@ -459,6 +459,136 @@ function BatchesModal({ order, onClose, onSaved }: { order: ProductionOrder; onC
 
 // ── Assign Tasks Modal ────────────────────────────────────────────────────────
 
+// ── Send back for rework (owner's rule, 7 Oct 2026) ─────────────────────────
+// The QC manager chooses where in the process a failed order goes back (the
+// Buttons stage, say), how many pieces that stage redoes, and who redoes it.
+// The server reopens only those stages; the order returns to QC by itself when
+// they are done again, and nothing is stocked before it passes.
+function ReworkModal({ order, onClose, onSaved }: { order: ProductionOrder; onClose: () => void; onSaved: () => void }) {
+    const toast = useToastStore();
+    const qc = useQueryClient();
+    const [picked, setPicked] = useState<Record<number, { pieces: string; assignee: string }>>({});
+    const [reason, setReason] = useState("");
+
+    const { data: tailorsData } = useQuery({
+        queryKey: ["staff-users-list"],
+        queryFn: () => get<any>("/v1/admin/users", { params: { exclude_type: "customer", per_page: "100" } }),
+        staleTime: 60_000,
+        retry: false,
+    });
+    const tailors = tailorsData?.data ?? [];
+
+    const qty = Math.max(1, order.quantity ?? 1);
+    // A colourway order counts each stage per batch, so "redo 2" cannot say
+    // which colourway: the server redoes the whole stage there.
+    const wholeStageOnly = (order.batches?.length ?? 0) > 0;
+    const stages = [...(order.tasks ?? [])].sort(
+        (a, b) => (a.sequence ?? a.stage?.sort_order ?? 0) - (b.sequence ?? b.stage?.sort_order ?? 0));
+
+    const toggle = (id: number) => setPicked(p => {
+        const next = { ...p };
+        if (next[id]) delete next[id]; else next[id] = { pieces: String(qty), assignee: "" };
+        return next;
+    });
+    const edit = (id: number, patch: Partial<{ pieces: string; assignee: string }>) =>
+        setPicked(p => ({ ...p, [id]: { ...p[id], ...patch } }));
+
+    const ids = Object.keys(picked).map(Number);
+    const piecesOk = wholeStageOnly || ids.every(id => {
+        const n = Number(picked[id].pieces);
+        return Number.isInteger(n) && n >= 1 && n <= qty;
+    });
+    const ready = ids.length > 0 && reason.trim().length > 0 && piecesOk;
+
+    const mutation = useMutation({
+        mutationFn: () => post(`/v1/admin/production-orders/${order.id}/rework`, {
+            reason: reason.trim(),
+            stages: ids.map(id => ({
+                task_id: id,
+                ...(wholeStageOnly ? {} : { pieces: Number(picked[id].pieces) }),
+                ...(picked[id].assignee ? { assigned_to: Number(picked[id].assignee) } : {}),
+            })),
+        }),
+        onSuccess: () => {
+            toast.success("Sent back for rework — the tailors have been told");
+            qc.invalidateQueries({ queryKey: ["production-order", order.id] });
+            onSaved(); onClose();
+        },
+        onError: (e: ApiError) => toast.error(e.message),
+    });
+
+    return (
+        <Modal open title={`Send back for rework — ${order.order_number}`} onClose={onClose} size="lg">
+            <div className="p-5 space-y-4">
+                <p className="text-xs text-surface-500">
+                    Tick the stage(s) the order goes back to. Only those stages reopen; when they are
+                    done again the order returns to Quality Control. Nothing is added to stock until it passes.
+                </p>
+
+                <div className="space-y-2">
+                    {stages.map(t => {
+                        const on = !!picked[t.id];
+                        const current = resolveAssignee(t);
+                        return (
+                            <div key={t.id} className={clsx("rounded-xl border p-3", on ? "border-brand-300 bg-brand-50/50" : "border-line")}>
+                                <label className="flex items-center gap-3 min-h-11 cursor-pointer">
+                                    <input type="checkbox" checked={on} onChange={() => toggle(t.id)}
+                                        className="w-5 h-5 rounded border-surface-300 text-brand-600 focus:ring-brand-400" />
+                                    <span className="flex-1 min-w-0">
+                                        <span className="block text-sm font-semibold text-surface-900">{t.stage?.name ?? `Stage ${t.production_stage_id}`}</span>
+                                        <span className="block text-2xs text-surface-500">
+                                            {current ? `${current.first_name} ${current.last_name}` : "Unassigned"}
+                                        </span>
+                                    </span>
+                                </label>
+                                {on && (
+                                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 pl-8">
+                                        {wholeStageOnly ? (
+                                            <p className="text-2xs text-surface-500 self-center">Colourway order: the whole stage is redone.</p>
+                                        ) : (
+                                            <label className="text-2xs font-semibold text-surface-600">
+                                                Pieces to redo (of {qty})
+                                                <input type="number" inputMode="numeric" min={1} max={qty}
+                                                    value={picked[t.id].pieces}
+                                                    onChange={e => edit(t.id, { pieces: e.target.value })}
+                                                    className="input mt-1 text-sm" />
+                                            </label>
+                                        )}
+                                        <label className="text-2xs font-semibold text-surface-600">
+                                            Who redoes it
+                                            <select value={picked[t.id].assignee}
+                                                onChange={e => edit(t.id, { assignee: e.target.value })}
+                                                className="input mt-1 text-sm">
+                                                <option value="">{current ? `Same tailor (${current.first_name})` : "Keep as is"}</option>
+                                                {tailors.map((u: any) => <option key={u.id} value={u.id}>{u.first_name} {u.last_name}</option>)}
+                                            </select>
+                                        </label>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+
+                <label className="block text-xs font-semibold text-surface-700">
+                    Reason (the tailors see this)
+                    <textarea value={reason} onChange={e => setReason(e.target.value)} rows={2}
+                        placeholder="e.g. Loose buttons on two cassocks"
+                        className="input mt-1 text-sm" />
+                </label>
+
+                <div className="flex justify-end gap-2 pt-1">
+                    <button type="button" onClick={onClose} className="btn-ghost min-h-11">Cancel</button>
+                    <button type="button" onClick={() => mutation.mutate()} disabled={!ready || mutation.isPending}
+                        className="min-h-11 px-4 rounded-xl bg-brand-600 text-white text-sm font-bold hover:bg-brand-700 disabled:opacity-40 transition-colors">
+                        {mutation.isPending ? "Sending…" : "Send back for rework"}
+                    </button>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
 function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onClose: () => void; onSaved: () => void }) {
     const toast = useToastStore();
     const qc = useQueryClient();
@@ -2011,7 +2141,7 @@ export default function ProductionOrderDetailPage() {
     const toast = useToastStore();
     const qc = useQueryClient();
     const [tab, setTab] = useState<"stages" | "batches" | "materials" | "specs" | "activity" | "audit">("stages");
-    const [modal, setModal] = useState<"assign" | "materials" | "qc" | "complete" | "edit" | "batches" | null>(null);
+    const [modal, setModal] = useState<"assign" | "materials" | "qc" | "complete" | "edit" | "batches" | "rework" | null>(null);
     const [showCancelConfirm, setShowCancelConfirm] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [cancelReason, setCancelReason] = useState("");
@@ -2174,6 +2304,8 @@ export default function ProductionOrderDetailPage() {
     const canMaterials= ["pending", "in_progress"].includes(order.status) && canManageAssignees;
     const canQC       = order.status === "qc_pending" && canSubmitQcPerm;
     const canComplete = order.status === "qc_passed" && canApproveQcPerm;
+    // The way out of a failed QC: the QC manager sends it back to chosen stages.
+    const canRework   = order.status === "qc_failed" && canSubmitQcPerm;
     const canCancel   = ["draft", "pending"].includes(order.status) && canConfirmOrderPerm;
     // Same permission that raises orders; the backend refuses completed/cancelled,
     // and only drafts may change quantity (serials + materials were sized from it).
@@ -2358,6 +2490,12 @@ export default function ProductionOrderDetailPage() {
                         <button onClick={() => setModal("qc")}
                             className="bg-accent-600 text-white border border-accent-600 rounded-lg px-2.5 h-11 sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-accent-700 transition-colors flex items-center gap-1">
                             <span className="hidden sm:inline">🔍 Quality Check</span><span className="sm:hidden">QC</span>
+                        </button>
+                    )}
+                    {canRework && (
+                        <button onClick={() => setModal("rework")}
+                            className="bg-danger text-white border border-danger rounded-lg px-2.5 h-11 sm:h-9 text-[11px] sm:text-xs font-semibold hover:brightness-95 transition-colors flex items-center gap-1">
+                            <span className="hidden sm:inline">↩ Send back for rework</span><span className="sm:hidden">Rework</span>
                         </button>
                     )}
                     {canComplete && (
@@ -2655,6 +2793,7 @@ export default function ProductionOrderDetailPage() {
             {modal === "edit"      && <EditOrderModal order={order} onClose={() => setModal(null)} onSaved={refresh} canReduce={can("production.delete_order")} />}
             {modal === "batches"   && <BatchesModal order={order} onClose={() => setModal(null)} onSaved={refresh} />}
             {modal === "assign"    && <AssignModal order={order} onClose={() => setModal(null)} onSaved={refresh} />}
+            {modal === "rework"    && <ReworkModal order={order} onClose={() => setModal(null)} onSaved={refresh} />}
             {modal === "materials" && <IssueMaterialsModal order={order} onClose={() => setModal(null)} onSaved={refresh} />}
             {modal === "qc"        && <QCModal order={order} onClose={() => setModal(null)} onDone={refresh} />}
             {modal === "complete"  && <CompleteModal order={order} onClose={() => setModal(null)} onDone={refresh} />}

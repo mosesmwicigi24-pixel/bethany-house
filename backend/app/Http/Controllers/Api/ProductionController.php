@@ -918,6 +918,144 @@ class ProductionController extends Controller
     }
 
     // =========================================================================
+    // POST /admin/production-orders/{id}/rework
+    // Send a QC-failed order back into production
+    // =========================================================================
+
+    /**
+     * The way out of qc_failed (audit ST-2). The QC manager chooses where in
+     * the process the order goes back — say the Buttons stage — how many
+     * pieces that stage must redo, and who redoes it (the same tailor or
+     * someone else). Owner's decisions, 7 Oct 2026.
+     *
+     * Each chosen stage is reopened: pending, its count lowered by the pieces
+     * to redo, its finish time cleared. The order returns to in_progress and
+     * re-enters QC through the existing all-stages-done hand-off, so nothing
+     * is stocked until it passes inspection again. The failed QC record stays
+     * as history. A partly passed order is NOT split (stock 9, redo 1): the
+     * whole order is reworked and stocked together after the re-inspection.
+     *
+     * On a colourway (batch) order a stage's count is the sum of its batch
+     * counts, so "redo 2 pieces" cannot say which colourway: there the chosen
+     * stage is redone in full.
+     */
+    public function rework(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'reason'               => 'required|string|max:2000',
+            'stages'               => 'required|array|min:1',
+            'stages.*.task_id'     => 'required|integer|distinct',
+            'stages.*.pieces'      => 'nullable|integer|min:1',
+            'stages.*.assigned_to' => 'nullable|integer|exists:users,id',
+        ]);
+
+        $order = ProductionOrder::visibleTo($request->user())->findOrFail($id);
+
+        if ($order->status !== 'qc_failed') {
+            return response()->json(['message' => 'Only an order that failed Quality Control can be sent back for rework.'], 422);
+        }
+
+        $qty   = max(1, (int) $order->quantity);
+        $tasks = ProductionTask::withoutViewerScope()
+            ->where('production_order_id', $order->id)
+            ->get()
+            ->keyBy('id');
+
+        foreach ($validated['stages'] as $i => $s) {
+            if (! $tasks->has($s['task_id'])) {
+                return response()->json(['message' => 'That stage is not part of this order.', 'errors' => ["stages.{$i}.task_id" => ['Not a stage of this order.']]], 422);
+            }
+            if (isset($s['pieces']) && $s['pieces'] > $qty) {
+                return response()->json(['message' => "Cannot redo more than the order's {$qty} pieces.", 'errors' => ["stages.{$i}.pieces" => ["At most {$qty}."]]], 422);
+            }
+        }
+
+        $hasBatches = ProductionOrderBatch::where('production_order_id', $order->id)->exists();
+        $reopened   = [];
+
+        DB::beginTransaction();
+        try {
+            // Two managers deciding at once must not both reopen the order.
+            if ($this->lockOrder($order->id)?->status !== 'qc_failed') {
+                DB::rollBack();
+                return response()->json(['message' => 'Only an order that failed Quality Control can be sent back for rework.'], 422);
+            }
+
+            foreach ($validated['stages'] as $s) {
+                $task   = $tasks[$s['task_id']];
+                $pieces = $hasBatches ? $qty : (int) ($s['pieces'] ?? $qty);
+                $before = ['status' => $task->status, 'quantity_done' => (int) $task->quantity_done, 'assigned_to' => $task->assigned_to];
+
+                if ($hasBatches) {
+                    ProductionTaskBatchProgress::where('production_task_id', $task->id)->update(['quantity_done' => 0]);
+                }
+
+                $task->update([
+                    'status'        => 'pending',
+                    'quantity_done' => max(0, min((int) $task->quantity_done, $qty) - $pieces),
+                    'completed_at'  => null,
+                    'assigned_to'   => $s['assigned_to'] ?? $task->assigned_to,
+                ]);
+
+                $reopened[] = [
+                    'task_id'     => $task->id,
+                    'stage'       => $task->stage?->name,
+                    'pieces'      => $pieces,
+                    'assigned_to' => $task->assigned_to,
+                    'before'      => $before,
+                ];
+            }
+
+            $order->update([
+                'status' => 'in_progress',
+                'notes'  => trim(($order->notes ? $order->notes . "\n\n" : '') . 'Rework: ' . $validated['reason']),
+            ]);
+
+            DB::commit();
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Could not send the order back for rework.', 'error' => $e->getMessage()], 500);
+        }
+
+        // Record and tell — after the commit, never able to undo it.
+        try {
+            ActivityLogService::log('production_rework', $order, [
+                'order_number' => $order->order_number,
+                'reason'       => $validated['reason'],
+                'stages'       => $reopened,
+            ]);
+        } catch (\Throwable) {}
+
+        try {
+            $productName = $order->product?->translations?->firstWhere('language_code', 'en')?->name
+                ?? $order->product?->sku ?? "Production #{$order->order_number}";
+            NotificationService::productionReworkAssigned(
+                $order->id,
+                $order->order_number,
+                $productName,
+                collect($reopened)->map(fn ($r) => ['user_id' => $r['assigned_to'], 'stage' => $r['stage'], 'pieces' => $r['pieces']])->all(),
+                $validated['reason'],
+            );
+
+            // A newly chosen tailor joins the order's chat; whoever lost their
+            // last stage on it leaves (the same rule as assigning).
+            $orderChannel = Channel::where('context_type', 'production_order')->where('context_id', $order->id)->first();
+            if ($orderChannel) {
+                $orderChannel->members()->syncWithoutDetaching(
+                    collect($reopened)->pluck('assigned_to')->filter()->unique()
+                        ->mapWithKeys(fn ($uid) => [$uid => ['role' => 'member']])->toArray()
+                );
+            }
+            ContextChannels::pruneProductionOrder($order->id);
+        } catch (\Throwable) {}
+
+        return response()->json([
+            'message' => 'Order sent back for rework.',
+            'order'   => $order->fresh(['tasks.stage', 'tasks.assignedTo:id,first_name,last_name']),
+        ]);
+    }
+
+    // =========================================================================
     // POST /admin/production-orders/{id}/complete
     // Mark complete and move to finished goods inventory
     // =========================================================================

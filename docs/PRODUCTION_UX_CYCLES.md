@@ -14,7 +14,7 @@ A cycle is never re-run. A later cycle revisits an area only for a genuine highe
 |---|---|---|
 | 1 | UI/UX coherence | Closed |
 | 2 | Information hierarchy | Closed |
-| 3 | Shop-floor workflow | Closed (rework path proposed, awaiting approval) |
+| 3 | Shop-floor workflow | Closed (rework path built after the owner's approval) |
 | 4 | Interaction quality | Closed |
 | 5 | Apparel-production intelligence | Closed |
 | 6 | Mobile / tablet excellence | Closed |
@@ -249,22 +249,60 @@ These are screen-only changes; the console has no unit-test runner.
   All three fail on the previous code.
 - `TailorQcSegregationTest`, `TailorMyTasksPayloadTest` and `TailorFloorSafetyTest` pass unchanged.
 
-### Proposed, not built — the rework path (needs the owner's approval)
+### The rework path (built after the owner's approval, 7 Oct 2026)
 
-Leaving `qc_failed` changes stage state and piece counts, which feed completion and the stock-in. Under CLAUDE.md §1 that is a consequential change, so it is proposed with a decision audit, not built.
+The owner decided three things:
+- the QC manager chooses where the order goes back to (for example, only the Buttons stage);
+- the manager can give the redo to the same tailor or to a different one;
+- for a partly passed order, "make best decision".
 
-The shape proposed:
-- a manager action, **"Send back for rework"**, from `qc_failed` to `in_progress`;
-- the manager picks the stages to redo and how many pieces;
-- the order re-enters QC through the existing all-stages-done hand-off;
-- the failed QC record stays as history.
+**What was built:**
+- A **"Send back for rework"** action on Order Detail. It shows only on a `qc_failed` order, and only to users who can submit QC (`production.submit_qc`).
+  - Route: `POST /v1/admin/production-orders/{id}/rework`.
+- The manager ticks one or more stages. For each ticked stage they set:
+  - how many pieces to redo (the default is the whole stage);
+  - who redoes it (the default is the same tailor).
+- A reason is required. It is appended to the order notes as "Rework: …", and the tailors see it.
+- Only the ticked stages reopen.
+  - A reopened stage goes back to `pending`, with its count reduced by the pieces to redo.
+  - The other stages stay completed.
+- The order moves from `qc_failed` to `in_progress`.
+  - When every stage is done again, it returns to `qc_pending` through the existing hand-off.
+  - The failed QC record stays as history.
+- Whoever redoes a stage is notified ("Rework: …"), and the job appears in their My Tasks.
+  - The order chat membership follows the new assignment.
+  - The send-back is written to the activity log (`production_rework`).
+- Server-side checks:
+  - the order must still be `qc_failed`, re-checked under the order's row lock, so a second send-back is refused;
+  - each stage must belong to the order;
+  - pieces cannot exceed the order quantity.
+
+**Decisions taken under "make best decision":**
+- **No split.** A partly passed order is not split into "stock 9, rework 1".
+  - The whole order waits and is stocked together after it passes the re-inspection.
+  - Splitting creates a second stock-in path, which is an inventory change. It needs its own decision audit and is deferred.
+- **Colourway (batch) orders redo the whole stage.** Batch progress is tracked per colourway, and a piece count alone cannot say which colourway's pieces failed.
+  - Their batch progress rows for the reopened stage are reset.
+  - Per-colourway rework is deferred.
+- **`started_at` is kept on a reopened stage.** It is history.
+  - The order of stages is still enforced, because the server gate (`blockingTask`) works from piece counts.
+
+**Tests:**
+- `ProductionReworkTest` (4 tests) covers:
+  - partial redo with reassignment;
+  - same-tailor redo back to QC;
+  - whole-stage reset;
+  - refusals: a tailor, too many pieces, another order's stage, and a second send-back.
+- All four fail on the code before the change.
+- Checked by hand on the local stack (phone and tablet): order PRD-…-0004, Stitching sent back for 1 of 2 pieces to John. The database showed the stage `pending` at 1/2, assigned to John, and the order `in_progress`.
 
 ### Recorded for later cycles (non-blocking)
 
 | Cycle | Finding |
 |---|---|
 | 4 | The Queue header counts "3 orders · 3 tasks" including orders that only wait on QC. It should count open work. |
-| 5 | QC records `passed_quantity` / `failed_quantity`, but a fail fails the whole order. A partial pass (9 of 10) has no path. |
+| 5 | QC records `passed_quantity` / `failed_quantity`, but a fail fails the whole order. A partial pass (9 of 10) has no path. The rework path now redoes only the failed pieces; splitting stock is deferred (see above). |
+| 9 | A reopened stage's "in stage" clock counts from its first entry, not from the send-back. |
 
 ## Cycle 2 — Information hierarchy (closed)
 
