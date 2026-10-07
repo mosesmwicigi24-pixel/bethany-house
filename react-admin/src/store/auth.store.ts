@@ -136,6 +136,14 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
             // Non-critical — always continue to clear auth
         }
 
+        // A shared tablet: the next person must not open the last one's
+        // session or task list from the offline cache (sw.ts).
+        try {
+            await Promise.all([caches.delete("api-my-tasks"), caches.delete("api-session")]);
+        } catch {
+            // No Cache Storage (private mode, old browser) — nothing cached.
+        }
+
         try {
             await authApi.logout();
         } catch {

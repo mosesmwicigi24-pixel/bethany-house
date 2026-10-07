@@ -26,7 +26,7 @@ import { useToastStore } from "@/store/toast.store";
 import { Spinner } from "@/components/ui/Spinner";
 import { PullRefreshIndicator } from "@/components/pwa/PullRefreshIndicator";
 import { usePullToRefresh } from "@/lib/usePullToRefresh";
-import { tokenStorage } from "@/api/client";
+import { enqueueOffline, isNetworkFailure, requestReplay } from "@/lib/offlineQueue";
 import type { ApiError } from "@/types";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -236,35 +236,6 @@ function workflowStateOf(group: OrderGroup): WorkflowState {
     return "ready";
 }
 
-async function queueOfflineTaskUpdate(
-    taskId: number,
-    action: string,
-    body: object
-): Promise<void> {
-    return new Promise((resolve, reject) => {
-        const req = indexedDB.open("bh-offline-queue", 1);
-        req.onsuccess = () => {
-            const db = req.result;
-            const tx = db.transaction("task-updates", "readwrite");
-            tx.objectStore("task-updates").add({
-                url: `/api/v1/tailor/tasks/${taskId}/status`,
-                token: tokenStorage.get() ?? "",
-                body,
-            });
-            tx.oncomplete = () => {
-                resolve();
-                navigator.serviceWorker?.ready.then((reg) => {
-                    (reg as any).sync
-                        ?.register("task-status-update")
-                        .catch(() => {});
-                });
-            };
-            tx.onerror = () => reject(tx.error);
-        };
-        req.onerror = () => reject(req.error);
-    });
-}
-
 // ── Elapsed timer hook ────────────────────────────────────────────────────────
 
 function useElapsedTimer(task: MyTask | null): string | null {
@@ -388,7 +359,7 @@ function PauseButton({ onPause, disabled }: { onPause: () => void; disabled: boo
 
 const countKey = (taskId: number, batchId?: number) => `${taskId}:${batchId ?? 0}`;
 
-function usePieceCounts(onRefused: (message: string) => void) {
+function usePieceCounts(onRefused: (message: string) => void, onQueued: () => void) {
     const qc = useQueryClient();
     const [overlay, setOverlay] = useState<Record<string, number>>({});
     const wanted = useRef<Record<string, number>>({});
@@ -417,6 +388,23 @@ function usePieceCounts(onRefused: (message: string) => void) {
             }
             forget(key);
         } catch (e: any) {
+            if (isNetworkFailure(e) && wanted.current[key] !== undefined) {
+                // No connection: the count is kept on this device and sent
+                // when it comes back. The number stays on screen meanwhile
+                // (the overlay is cleared once the worker reports the sync).
+                try {
+                    await enqueueOffline({
+                        url: `/api/v1/tailor/tasks/${taskId}/progress`,
+                        method: "POST",
+                        body: { quantity_done: wanted.current[key], batch_id: batchId },
+                        dedupeKey: `progress:${key}`,
+                    });
+                    onQueued();
+                    return;
+                } catch {
+                    // Could not even store it: fall through to the refusal.
+                }
+            }
             // Refused (gate, ceiling, order closed) or failed: show the
             // server's own reason and fall back to the true count.
             forget(key);
@@ -439,7 +427,14 @@ function usePieceCounts(onRefused: (message: string) => void) {
     const shown = (taskId: number, batchId: number | undefined, server: number) =>
         overlay[countKey(taskId, batchId)] ?? server;
 
-    return { record, shown };
+    /** After an offline sync: let the refreshed server counts show again. */
+    const clearSettled = () => {
+        for (const key of Object.keys(wanted.current)) {
+            if (!sending.current.has(key)) forget(key);
+        }
+    };
+
+    return { record, shown, clearSettled };
 }
 
 // ── Note drawer ───────────────────────────────────────────────────────────────
@@ -1771,10 +1766,12 @@ export default function TailorWorkspacePage() {
             qc.invalidateQueries({ queryKey: ["my-tasks"] });
         },
         onError: async (e: ApiError, vars) => {
-            if (!isOnline || e.message?.includes("Network")) {
+            if (!isOnline || isNetworkFailure(e)) {
                 try {
-                    await queueOfflineTaskUpdate(vars.taskId, vars.action, {
-                        action: vars.action,
+                    await enqueueOffline({
+                        url: `/api/v1/tailor/tasks/${vars.taskId}/status`,
+                        method: "PUT",
+                        body: { action: vars.action },
                     });
                     toast.info(
                         "You're offline – update queued and will sync when reconnected."
@@ -1791,7 +1788,16 @@ export default function TailorWorkspacePage() {
     // Piece progress: absolute cumulative count, server-validated against the
     // pipeline (ceiling: earlier stages; floor: later stages). The 422 message
     // names the colliding stage, so surface it verbatim.
-    const pieceCounts = usePieceCounts((message) => toast.error(message));
+    // Say it once per offline spell, not on every tap.
+    const toldQueued = useRef(0);
+    const pieceCounts = usePieceCounts(
+        (message) => toast.error(message),
+        () => {
+            if (Date.now() - toldQueued.current < 60_000) return;
+            toldQueued.current = Date.now();
+            toast.info("You're offline – counts are saved on this device and will sync when you reconnect.");
+        },
+    );
 
     // The service worker drops an offline update the server refused and says
     // why — show it, and refresh so the card shows the true state.
@@ -1803,9 +1809,20 @@ export default function TailorWorkspacePage() {
                 toast.error(event.data.message);
                 qc.invalidateQueries({ queryKey: ["my-tasks"] });
             }
+            if (event.data?.type === "task-updates-synced") {
+                toast.success(event.data.message);
+                qc.invalidateQueries({ queryKey: ["my-tasks"] }).then(() => pieceCounts.clearSettled());
+            }
         };
         sw.addEventListener("message", onMessage);
-        return () => sw.removeEventListener("message", onMessage);
+        // Back online: replay whatever waited, even where the browser has no
+        // Background Sync to do it.
+        window.addEventListener("online", requestReplay);
+        requestReplay();
+        return () => {
+            sw.removeEventListener("message", onMessage);
+            window.removeEventListener("online", requestReplay);
+        };
     }, [qc, toast]);
     const handleProgress = pieceCounts.record;
 
