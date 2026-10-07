@@ -344,7 +344,14 @@ async function replayOnce(): Promise<void> {
                 },
                 body: JSON.stringify(item.body),
             });
-            if (res.ok) {
+            // A queued sign-out (offlineQueue.ts) revokes the token once the
+            // updates before it are in. It is not the tailor's work, so it is
+            // neither counted nor reported; a refusal means the token is
+            // already gone, which is the goal.
+            const isSignOut = item.url === "/api/v1/admin/auth/logout";
+            if (isSignOut && (res.ok || isFinalRefusal(res.status))) {
+                await db.delete("task-updates", item.id);
+            } else if (res.ok) {
                 await db.delete("task-updates", item.id);
                 synced++;
             } else if (isFinalRefusal(res.status)) {

@@ -661,13 +661,13 @@ export function Topbar({
                                 )}
                             >
                                 <div className="w-7 h-7 rounded-full bg-brand-500/15 flex items-center justify-center">
-                                    <span className="text-brand-600 text-xs font-semibold">
+                                    <span className="text-brand-700 text-xs font-semibold">
                                         {user?.first_name?.[0]}{user?.last_name?.[0]}
                                     </span>
                                 </div>
                                 <div className="hidden sm:flex flex-col items-start leading-tight">
                                     <span className="text-sm font-medium text-surface-700">{fullName}</span>
-                                    {roleName && <span className="text-2xs text-surface-400">{roleName}</span>}
+                                    {roleName && <span className="text-2xs text-surface-500">{roleName}</span>}
                                 </div>
                                 <svg
                                     className={clsx("w-4 h-4 text-surface-400 transition-transform hidden sm:block", userMenuOpen && "rotate-180")}

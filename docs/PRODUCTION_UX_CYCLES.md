@@ -19,11 +19,90 @@ A cycle is never re-run. A later cycle revisits an area only for a genuine highe
 | 5 | Apparel-production intelligence | Closed |
 | 6 | Mobile / tablet excellence | Closed |
 | 7 | Offline and recovery | Closed |
-| 8 | Accessibility / privacy / trust | Next |
-| 9 | Visual polish and performance | |
+| 8 | Accessibility / privacy / trust | Closed |
+| 9 | Visual polish and performance | Next |
 | 10 | A full working day (tailor + production manager) | |
 
 ---
+
+## Cycle 8 — Accessibility, privacy and trust (closed)
+
+**The question:** can every person on the floor read the screens, see only what is theirs, and trust that a QC pass came from someone who did not make the piece?
+
+**Inspection.** Taken from earlier cycles' records and re-checked on today's code:
+- **QC loophole 1.** The own-work rule (Policy 4) checked only who holds a stage *now*. Someone moved off a stage they had sewn, a manager who counted pieces for a tailor, or an order-level assignee could pass the order's QC.
+- **QC loophole 2.** A second sign-off route (`POST /production-orders/{id}/approvals`) could record a `qc_passed` sign-off on any order: one the signer could not open, one still waiting for QC, or one they had made. No screen calls it.
+- **Calendar.** The schedule feed gave tailors every active job on the floor, with customer first names. It exists so clerks can promise dates, which a tailor does not do.
+- **Shared tablets.** A tailor who signed out with updates still waiting either had her token revoked, so her waiting work failed on replay and was lost, or (offline) left a live token on the tablet indefinitely.
+- **Contrast.** axe found 127 contrast failures across seven production screens, plus four dropdowns with no accessible name.
+
+The owner approved the policies on 5 Oct 2026: count everyone who worked on the order; give the second route the same checks; show tailors only their own jobs.
+
+### What changed
+
+**Who counts as having worked on an order** (`App\Support\OrderMakers`):
+- current and past stage holders. Past holders are read from the audit trail's record of every change to `assigned_to`, whichever screen made it (the task edit form writes no event of its own), and from the older reassign, assign and rework events for history before 21 Sep 2026;
+- anyone who **raised** a stage's piece count, or started, paused or finished a stage;
+- order-level assignees.
+
+Lowering a count is not making: that is the rework send-back, so the manager who sent an order back can still inspect the redo. Assigning a stage is not making either.
+
+QC (`/qc`) refuses all of them through `MakerChecker`, and the refusal is logged as before. Whoever holds a stage now is still the one told the result.
+
+**The second sign-off route:**
+- reaches only orders the signer can open (`visibleTo`), else 404;
+- a `qc_passed` sign-off needs the order at `qc_passed` or `completed`, and a `qc_failed` one needs `qc_failed`, else 422;
+- a QC sign-off by anyone who worked on the order is refused (403 SELF_APPROVAL);
+- other gates, such as `dispatched`, are unchanged.
+
+**Calendar:**
+- A floor worker (shop-floor access, and nothing that assigns, confirms or raises orders) gets only her own jobs from the schedule feed.
+- Managers and order-raisers keep the whole board.
+- Her calendar no longer shows "Earliest free slot", a date-promising figure that means nothing for one person's jobs.
+
+**Shared tablets:**
+- When a tailor signs out with her own updates still waiting, the sign-out joins the offline queue behind them.
+- The service worker replays her updates under her own token first, then revokes it.
+- She is told: "Signed out. Your 1 waiting update will sync under your name when the tablet is online."
+- Another tailor's waiting work on the same tablet neither holds up nor counts toward her sign-out.
+
+**Contrast:**
+- Small text in the production screens moved from `surface-400` (3.1:1) to `surface-500`, and orange text from `brand-600` to `brand-700`.
+- **App-wide:** the secondary-text token `surface-500` is one shade darker (`#70786d` → `#646b61`). It cleared AA on white but not on the tinted card fills it sits on (4.0–4.4:1); it now clears every fill (≥ 4.5:1). This affects every screen and is easy to revert.
+- Red text on red-tinted badges uses `danger-700`.
+- Status tiles lost their 70% opacity labels.
+- Past calendar days are muted by a fill instead of 60% opacity, which had faded the overdue jobs that sit on them.
+- The top bar's initials and role label were fixed, as was one shared tab style (`StatusTabs`).
+- Four dropdowns gained labels ("Filter by type / priority / status", "Show work for").
+
+### Tests
+
+- `ProductionQcTrustTest` (9 tests). 8 fail on the previous code; the ninth (the rework sender can inspect the redo) guards against this change going too far. They cover:
+  - piece-counting manager refused;
+  - holder moved off by the edit form refused, while the planner who moved them is not;
+  - holder moved off by the reassign action refused;
+  - order-level assignee refused;
+  - the rework sender allowed;
+  - sign-off must match the QC result;
+  - maker refused on the second route, though a `dispatched` sign-off still works;
+  - second route 404 outside the signer's outlet;
+  - a tailor's calendar shows only her job while an admin's shows both.
+- Related suites: 126 passed (QC, rework, maker-checker, clerk access, redaction, visibility, progress, My Tasks, floor safety, role hardening).
+- **Shared tablet, in a real browser on a production build with service-worker traffic blocked:**
+  - Mary tapped +1 offline and signed out. The queue then held `[progress, logout]`.
+  - John signed in and the tablet came back online. The queue drained, the count went 2 → 3 under Mary's name in the activity log, and Mary's token went from alive to revoked.
+  - John's screen showed nothing of Mary's.
+- **axe (WCAG 2 A/AA) on My Tasks, Calendar (tailor and admin), Production Orders, Order Detail, WIP and QC:** 127 contrast failures + 4 unnamed dropdowns before; 5 after. All 5 are the brand-orange buttons (below). Each page was confirmed to have loaded, not the "Can't reach" screen.
+- `tsc --noEmit` and `vite build` are clean.
+
+### Recorded for later cycles (non-blocking)
+
+| Cycle | Finding |
+|---|---|
+| Owner | White text on the brand orange (`brand-500`, 3.5:1) fails AA for normal-size text on every primary button. The palette notes record it as an owner-chosen match to the reference app. Changing it is a brand decision. |
+| 9 | Contrast was fixed in the production screens and shared chrome only. Other modules still use `surface-400` and `brand-600` for small text. |
+| 9 | After a shared-tablet handover, the worker's "Your offline update has synced" toast can reach the next person signed in. It names no one, but "Your" is wrong for them. |
+| 9 | Six quick page loads by one admin still hit the rate limit and show "Can't reach" (recorded in Cycle 1). It also interrupted this cycle's own accessibility run. |
 
 ## Cycle 7 — Offline and recovery (closed)
 

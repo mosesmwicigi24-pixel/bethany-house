@@ -276,11 +276,11 @@ function ProductPicker({
     return (
         <div className="relative">
             <div className={clsx("flex items-center gap-2 input py-0", focused && "ring-2 ring-brand-300 border-brand-400")}>
-                <svg className="w-4 h-4 text-surface-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="w-4 h-4 text-surface-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
                 <input
-                    className="flex-1 py-2 bg-transparent outline-none text-sm placeholder:text-surface-400"
+                    className="flex-1 py-2 bg-transparent outline-none text-sm placeholder:text-surface-500"
                     placeholder={selected ? productLabel(selected) : "Search product by name or SKU…"}
                     value={focused ? query : (selected ? productLabel(selected) : "")}
                     onFocus={() => { setFocused(true); setOpen(true); }}
@@ -289,18 +289,18 @@ function ProductPicker({
                 />
                 {selected && !focused && (
                     <button type="button" onMouseDown={() => { onChange(""); setQuery(""); }}
-                        className="text-surface-400 hover:text-danger text-sm shrink-0" title="Clear">✕</button>
+                        className="text-surface-500 hover:text-danger text-sm shrink-0" title="Clear">✕</button>
                 )}
             </div>
 
             {open && (
                 <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-surface-200 rounded-xl shadow-lg overflow-hidden max-h-72 overflow-y-auto">
                     {filtered.length === 0 ? (
-                        <p className="text-sm text-surface-400 text-center py-4">No products found.</p>
+                        <p className="text-sm text-surface-500 text-center py-4">No products found.</p>
                     ) : (
                         filtered.map(g => (
                             <div key={g.name}>
-                                <p className="px-3 pt-2 pb-1 text-2xs font-semibold uppercase tracking-wide text-surface-400 bg-surface-50 sticky top-0">{g.name}</p>
+                                <p className="px-3 pt-2 pb-1 text-2xs font-semibold uppercase tracking-wide text-surface-500 bg-surface-50 sticky top-0">{g.name}</p>
                                 {g.items.map((p: any) => (
                                     <button
                                         key={p.id}
@@ -350,7 +350,7 @@ function OrderTypePill({ isCustomer }: { isCustomer: boolean }) {
 }
 
 function SectionHead({ title }: { title: string }) {
-    return <h4 className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2">{title}</h4>;
+    return <h4 className="text-2xs font-bold text-surface-500 uppercase tracking-widest mb-2">{title}</h4>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -525,7 +525,7 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
                                     }
                                 </div>
                                 <p className={clsx("text-xs font-semibold", orderType === opt.key ? "text-brand-700" : "text-surface-900")}>{opt.label}</p>
-                                <p className="text-2xs text-surface-400 mt-0.5">{opt.desc}</p>
+                                <p className="text-2xs text-surface-500 mt-0.5">{opt.desc}</p>
                             </button>
                         ))}
                     </div>
@@ -616,7 +616,7 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
                             onChange={e => set("due_date", e.target.value)} className="input" />
                     </div>
                     <div>
-                        <label className="label">Destination Outlet <span className="text-surface-400 text-2xs">(optional)</span></label>
+                        <label className="label">Destination Outlet <span className="text-surface-500 text-2xs">(optional)</span></label>
                         <select value={form.outlet_id} onChange={e => set("outlet_id", e.target.value)} className="input">
                             <option value="">General Warehouse</option>
                             {outlets.map((o: any) => <option key={o.id} value={o.id}>{o.name}</option>)}
@@ -649,7 +649,7 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
                             ))}
                             {gender && (
                                 <button type="button" onClick={() => setGender("")}
-                                    className="text-2xs text-surface-400 hover:text-danger ml-1">clear</button>
+                                    className="text-2xs text-surface-500 hover:text-danger ml-1">clear</button>
                             )}
                         </div>
 
@@ -659,7 +659,7 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
                                     <div key={field.name}>
                                         <label className="block text-xs font-medium text-surface-700 mb-1">
                                             {field.name}
-                                            {field.unit && <span className="text-surface-400 font-normal ml-1">({field.unit})</span>}
+                                            {field.unit && <span className="text-surface-500 font-normal ml-1">({field.unit})</span>}
                                             {(field as any).required && <span className="text-danger ml-0.5">*</span>}
                                         </label>
                                         <input
@@ -674,7 +674,7 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
                             </div>
                         ) : (
                             <div>
-                                <p className="text-2xs text-surface-400 mb-1">Select a gender above for the standard sheet, or enter free-text measurements.</p>
+                                <p className="text-2xs text-surface-500 mb-1">Select a gender above for the standard sheet, or enter free-text measurements.</p>
                                 <input type="text" value={form.measurements}
                                     onChange={e => set("measurements", e.target.value)}
                                     className="input font-mono text-xs"
@@ -689,7 +689,7 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
                     <div>
                         <label className="label">
                             Customer Preferences
-                            <span className="ml-2 text-surface-400 font-normal text-2xs">e.g. color:navy blue, lining:silk, buttons:gold</span>
+                            <span className="ml-2 text-surface-500 font-normal text-2xs">e.g. color:navy blue, lining:silk, buttons:gold</span>
                         </label>
                         <input type="text" value={form.customer_preferences}
                             onChange={e => set("customer_preferences", e.target.value)}
@@ -742,13 +742,13 @@ function NoTasksPrompt({ orderId, onCreated }: { orderId: number; onCreated: () 
     return (
         <div className="text-center py-6 space-y-3">
             <div className="w-12 h-12 rounded-2xl bg-surface-100 flex items-center justify-center mx-auto">
-                <svg className="w-6 h-6 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <svg className="w-6 h-6 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z" />
                 </svg>
             </div>
             <div>
                 <p className="text-sm font-semibold text-surface-700">No production tasks yet</p>
-                <p className="text-xs text-surface-400 mt-1">
+                <p className="text-xs text-surface-500 mt-1">
                     This order has no stages assigned. This usually happens when the order was confirmed before
                     production stages were configured.
                 </p>
@@ -841,12 +841,12 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                 ) : activeTasks.length === 0 ? (
                     <div className="text-center py-6">
                         <p className="text-sm font-medium text-surface-500">All stages completed</p>
-                        <p className="text-xs text-surface-400 mt-1">There are no pending or in-progress stages left to assign.</p>
+                        <p className="text-xs text-surface-500 mt-1">There are no pending or in-progress stages left to assign.</p>
                     </div>
                 ) : (
                     <div className="space-y-2">
                         {/* Column headers */}
-                        <div className="grid grid-cols-12 gap-3 px-3 text-2xs font-bold text-surface-400 uppercase tracking-wide">
+                        <div className="grid grid-cols-12 gap-3 px-3 text-2xs font-bold text-surface-500 uppercase tracking-wide">
                             <span className="col-span-4">Stage</span>
                             <span className="col-span-5">Assign to</span>
                             <span className="col-span-3">Est. hours</span>
@@ -864,7 +864,7 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                                             {task.stage?.name ?? `Stage ${task.production_stage_id}`}
                                         </p>
                                         <span className={clsx("text-2xs font-medium mt-0.5",
-                                            task.status === "in_progress" ? "text-brand-600" : "text-surface-400")}>
+                                            task.status === "in_progress" ? "text-brand-700" : "text-surface-500")}>
                                             {task.status === "in_progress" ? "In progress" : "Pending"}
                                         </span>
                                     </div>
@@ -882,7 +882,7 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                                             value={hours[task.id] ?? (task.estimated_hours?.toString() ?? "")}
                                             onChange={e => setHours(p => ({ ...p, [task.id]: e.target.value }))}
                                             className="input text-sm pr-7 w-full" />
-                                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-2xs text-surface-400">h</span>
+                                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-2xs text-surface-500">h</span>
                                     </div>
                                 </div>
                             );
@@ -932,14 +932,14 @@ function IssueMaterialsModal({ order, onClose, onSaved }: { order: ProductionOrd
 
     if (allocs.length === 0) return (
         <Modal open title="Issue Materials" onClose={onClose}>
-            <div className="p-8 text-center text-surface-400 text-sm">No material allocations found for this order.</div>
+            <div className="p-8 text-center text-surface-500 text-sm">No material allocations found for this order.</div>
         </Modal>
     );
 
     return (
         <Modal open title={`Issue Materials - ${order.order_number}`} onClose={onClose} size="lg">
             <div className="p-5 space-y-4 overflow-x-auto">
-                <div className="grid grid-cols-12 gap-2 text-2xs font-bold text-surface-400 uppercase tracking-wide px-2 min-w-[440px]">
+                <div className="grid grid-cols-12 gap-2 text-2xs font-bold text-surface-500 uppercase tracking-wide px-2 min-w-[440px]">
                     <span className="col-span-4">Material</span>
                     <span className="col-span-2 text-right">Required</span>
                     <span className="col-span-2 text-right">Allocated</span>
@@ -956,7 +956,7 @@ function IssueMaterialsModal({ order, onClose, onSaved }: { order: ProductionOrd
                             <div className="grid grid-cols-12 gap-2 items-center text-xs">
                                 <div className="col-span-4">
                                     <p className="font-semibold text-surface-900">{a.material.name}</p>
-                                    <p className="text-2xs text-surface-400">{a.material.code} · {u}</p>
+                                    <p className="text-2xs text-surface-500">{a.material.code} · {u}</p>
                                 </div>
                                 <span className="col-span-2 text-right tabular-nums text-surface-600">{fmtNum(a.quantity_required)}</span>
                                 <span className={clsx("col-span-2 text-right tabular-nums font-semibold",
@@ -1122,7 +1122,7 @@ function CompleteModal({ order, onClose, onDone }: { order: ProductionOrder; onC
                     <label className="label">Final Quantity Produced</label>
                     <input type="number" min={1} max={order.quantity} value={finalQty}
                         onChange={e => setFinalQty(e.target.value)} className="input" />
-                    <p className="text-2xs text-surface-400 mt-1">Production target was {order.quantity} unit(s)</p>
+                    <p className="text-2xs text-surface-500 mt-1">Production target was {order.quantity} unit(s)</p>
                 </div>
                 {!forCustomer && (
                     <div>
@@ -1211,7 +1211,7 @@ function ActivityLog({ orderId, currentUserId }: { orderId: number; currentUserI
                         <svg className="w-10 h-10 mx-auto mb-2 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                         </svg>
-                        <p className="text-sm font-medium text-surface-400">No activity yet</p>
+                        <p className="text-sm font-medium text-surface-500">No activity yet</p>
                         <p className="text-xs text-surface-500 mt-1">Start the conversation below</p>
                     </div>
                 ) : (
@@ -1220,7 +1220,7 @@ function ActivityLog({ orderId, currentUserId }: { orderId: number; currentUserI
                         const isNote = msg.type === "note";
                         const isSystem = msg.type === "system";
                         if (isSystem) return (
-                            <div key={msg.id} className="flex items-center gap-2 text-2xs text-surface-400">
+                            <div key={msg.id} className="flex items-center gap-2 text-2xs text-surface-500">
                                 <div className="flex-1 h-px bg-surface-100" />
                                 <span>{msg.body}</span>
                                 <div className="flex-1 h-px bg-surface-100" />
@@ -1264,7 +1264,7 @@ function ActivityLog({ orderId, currentUserId }: { orderId: number; currentUserI
                             className={clsx("text-2xs px-2.5 py-1 rounded-full font-medium transition-all",
                                 type === t
                                     ? t === "note" ? "bg-amber-100 text-amber-700" : "bg-brand-100 text-brand-700"
-                                    : "text-surface-400 hover:text-surface-600")}>
+                                    : "text-surface-500 hover:text-surface-600")}>
                             {t === "note" ? "📝 Internal Note" : "💬 Message"}
                         </button>
                     ))}
@@ -1379,7 +1379,7 @@ aria-label="Close">
 
                 {/* Progress */}
                 <div className="mt-3">
-                    <div className="flex justify-between text-2xs text-surface-400 mb-1">
+                    <div className="flex justify-between text-2xs text-surface-500 mb-1">
                         <span>{stageLabel(order.current_stage, order.completion_percentage, order.status)}</span>
                         <span>{order.completion_percentage}%</span>
                     </div>
@@ -1490,7 +1490,7 @@ aria-label="Close">
                                         done   ? "bg-success text-white" :
                                         active ? "bg-brand-500 text-white" :
                                         failed ? "bg-danger text-white" :
-                                        "bg-surface-100 text-surface-400")}>
+                                        "bg-surface-100 text-surface-500")}>
                                         {done ? "✓" : failed ? "✗" : <StageIcon slug={task.stage?.slug} className="w-3.5 h-3.5" />}
                                     </div>
                                     <div className="flex-1 min-w-0">
@@ -1498,7 +1498,7 @@ aria-label="Close">
                                             <p className="text-sm font-semibold text-surface-900">{task.stage?.name}</p>
                                             <div className="flex items-center gap-2 shrink-0">
                                                 {isMyTask && (
-                                                    <span className="text-2xs font-semibold text-brand-600 bg-brand-50 border border-brand-200 px-1.5 py-0.5 rounded-full">
+                                                    <span className="text-2xs font-semibold text-brand-700 bg-brand-50 border border-brand-200 px-1.5 py-0.5 rounded-full">
                                                         My task
                                                     </span>
                                                 )}
@@ -1518,7 +1518,7 @@ aria-label="Close">
                                                   </p>
                                                 : <p className="text-2xs text-surface-500 italic mt-0.5">Unassigned</p>;
                                         })()}
-                                        {task.notes && <p className="text-2xs text-surface-400 mt-1 italic">{task.notes}</p>}
+                                        {task.notes && <p className="text-2xs text-surface-500 mt-1 italic">{task.notes}</p>}
 
                                         <StageActions
                                             status={task.status}
@@ -1588,8 +1588,8 @@ aria-label="Close">
                         className={clsx(
                             "flex-1 py-2.5 text-xs font-semibold transition-colors border-b-2",
                             detailTab === tab
-                                ? "border-brand-500 text-brand-600"
-                                : "border-transparent text-surface-400 hover:text-surface-700"
+                                ? "border-brand-500 text-brand-700"
+                                : "border-transparent text-surface-500 hover:text-surface-700"
                         )}>
                         {tab === "details" ? "📋 Details & Specs" : "💬 Activity"}
                     </button>
@@ -1621,7 +1621,7 @@ aria-label="Close">
                             <div className="bg-surface-50 rounded-xl p-3 space-y-1.5">
                                 {Object.entries(order.specifications).map(([k, v]) => (
                                     <div key={k} className="flex gap-2 text-xs">
-                                        <span className="text-surface-400 w-32 shrink-0 capitalize">{k.replace(/_/g, " ")}</span>
+                                        <span className="text-surface-500 w-32 shrink-0 capitalize">{k.replace(/_/g, " ")}</span>
                                         <span className="font-medium text-surface-900 flex-1">{v as string}</span>
                                     </div>
                                 ))}
@@ -1655,7 +1655,7 @@ aria-label="Close">
                     {/* Empty state */}
                     {!order.measurements && !order.specifications && !order.customer_preferences && !order.notes && (
                         <div className="text-center py-10 text-surface-500">
-                            <p className="text-sm font-medium text-surface-400">No details recorded</p>
+                            <p className="text-sm font-medium text-surface-500">No details recorded</p>
                             <p className="text-xs mt-1">Measurements, specifications and notes will appear here when added.</p>
                         </div>
                     )}
@@ -1767,14 +1767,14 @@ function ProductionOrdersTab() {
                     { key: "in_progress", label: "In Progress", tint: "bg-brand-50",    color: "text-brand-700"   },
                     { key: "qc_pending",  label: "QC",          tint: "bg-accent-50",   color: "text-accent-700"  },
                     { key: "completed",   label: "Completed",   tint: "bg-success-light", color: "text-success-dark" },
-                    { key: "overdue",     label: "Overdue",     tint: "bg-danger-light", color: "text-danger"      },
+                    { key: "overdue",     label: "Overdue",     tint: "bg-danger-light", color: "text-danger-700"  },
                 ].map(({ key, label, tint, color }) => (
                     <button key={key} onClick={() => setF("status", filters.status === key ? "" : key)}
                         className={clsx("rounded-control px-0.5 py-2 sm:p-3 transition-all min-w-0 flex flex-col items-center sm:items-start justify-center",
                             tint,
                             filters.status === key ? "ring-2 ring-brand-500 ring-offset-1" : "hover:brightness-95")}>
                         <p className={clsx("text-[15px] sm:text-2xl font-extrabold tabular-nums sm:mt-0.5", color)}>{stats[key] ?? 0}</p>
-                        <p className={clsx("text-2xs truncate max-w-full leading-tight sm:order-first font-semibold", color, "opacity-70")}>{label}</p>
+                        <p className={clsx("text-2xs truncate max-w-full leading-tight sm:order-first font-semibold", color)}>{label}</p>
                     </button>
                 ))}
             </div>
@@ -1784,31 +1784,31 @@ function ProductionOrdersTab() {
                 like the POS category chips. Desktop wraps as before. */}
             <div className="flex gap-2 items-center overflow-x-auto no-scrollbar sm:flex-wrap sm:overflow-visible [&>*]:shrink-0">
                 <div className="relative flex-1 min-w-40">
-                    <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+                    <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
                     <input value={filters.search} onChange={e => setF("search", e.target.value)}
                         placeholder="Search…" className="input pl-8 text-sm" />
                 </div>
-                <select value={filters.type} onChange={e => setF("type", e.target.value)} className="input w-36 text-sm">
+                <select aria-label="Filter by type" value={filters.type} onChange={e => setF("type", e.target.value)} className="input w-36 text-sm">
                     {/* Wording tracks the card pill: filtering by what you can
                         see on a card is the whole point of this control. */}
                     <option value="">All Types</option>
                     <option value="stock">Production Orders</option>
                     <option value="customer">Custom Orders</option>
                 </select>
-                <select value={filters.priority} onChange={e => setF("priority", e.target.value)} className="input w-32 text-sm">
+                <select aria-label="Filter by priority" value={filters.priority} onChange={e => setF("priority", e.target.value)} className="input w-32 text-sm">
                     <option value="">All Priorities</option>
                     <option value="urgent">Urgent</option>
                     <option value="high">High</option>
                     <option value="normal">Normal</option>
                     <option value="low">Low</option>
                 </select>
-                <select value={filters.status} onChange={e => setF("status", e.target.value)} className="input w-36 text-sm">
+                <select aria-label="Filter by status" value={filters.status} onChange={e => setF("status", e.target.value)} className="input w-36 text-sm">
                     <option value="">All Statuses</option>
                     {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                     <option value="overdue">Overdue</option>
                 </select>
                 <button onClick={() => { setFilters({ status: "", priority: "", type: "", search: "" }); setPage(1); }}
-                    className="btn-ghost btn-sm text-surface-400">Clear</button>
+                    className="btn-ghost btn-sm text-surface-500">Clear</button>
                 {canRaiseOrder && (
                 <button onClick={() => setShowCreate(true)} className="btn-primary btn-sm gap-1.5 ml-auto">
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
@@ -1878,11 +1878,11 @@ function ProductionOrdersTab() {
 
                                                     {/* 3 — job reference and the clock */}
                                                     <div className="mt-1.5 flex items-center gap-2">
-                                                        <span className="font-mono text-2xs text-surface-400 truncate">
+                                                        <span className="font-mono text-2xs text-surface-500 truncate">
                                                             {o.order_number}
                                                         </span>
                                                         {o.quantity > 1 && (
-                                                            <span className="text-2xs text-surface-400 shrink-0">x{o.quantity}</span>
+                                                            <span className="text-2xs text-surface-500 shrink-0">x{o.quantity}</span>
                                                         )}
                                                         <span className={clsx(
                                                             'ml-auto shrink-0 text-2xs tabular-nums font-bold',
@@ -1934,7 +1934,7 @@ function ProductionOrdersTab() {
                             <thead className="bg-surface-50 border-b border-line sticky top-0">
                                 <tr>
                                     {["Order #", "Type", "Product", "Customer", "Qty", "Priority", "Status", "Progress", "Due", ""].map((h, i) => (
-                                        <th key={h || i} className={`px-3 py-3 text-left text-2xs font-bold text-surface-400 uppercase tracking-wider whitespace-nowrap ${["Type","Priority","Progress"].includes(h) ? "hidden md:table-cell" : ""} ${["Due"].includes(h) ? "hidden sm:table-cell" : ""}`}>{h}</th>
+                                        <th key={h || i} className={`px-3 py-3 text-left text-2xs font-bold text-surface-500 uppercase tracking-wider whitespace-nowrap ${["Type","Priority","Progress"].includes(h) ? "hidden md:table-cell" : ""} ${["Due"].includes(h) ? "hidden sm:table-cell" : ""}`}>{h}</th>
                                     ))}
                                 </tr>
                             </thead>
@@ -1951,7 +1951,7 @@ function ProductionOrdersTab() {
                                         <tr key={o.id} onClick={() => navigate(`/production/orders/${o.id}`)}
                                             className="cursor-pointer hover:bg-surface-50 transition-colors">
                                             <td className="px-3 py-3">
-                                                <span className="font-mono text-xs font-bold text-brand-600 whitespace-nowrap">{o.order_number}</span>
+                                                <span className="font-mono text-xs font-bold text-brand-700 whitespace-nowrap">{o.order_number}</span>
                                             </td>
                                             <td className="px-3 py-3 hidden md:table-cell">
                                                 <OrderTypePill isCustomer={isCustomer} />
@@ -1970,13 +1970,13 @@ function ProductionOrdersTab() {
                                                     <>
                                                         <p className="font-semibold text-surface-900 truncate text-xs" title={o.customer_label}>{o.customer_label}</p>
                                                         {o.customer_contact && (
-                                                            <p className="text-2xs text-surface-400 tabular-nums truncate">{o.customer_contact}</p>
+                                                            <p className="text-2xs text-surface-500 tabular-nums truncate">{o.customer_contact}</p>
                                                         )}
                                                     </>
                                                 ) : isCustomer ? (
                                                     <span className="text-2xs text-warning-dark bg-warning-light rounded px-1.5 py-0.5">Name missing</span>
                                                 ) : (
-                                                    <span className="text-2xs text-surface-400">For stock</span>
+                                                    <span className="text-2xs text-surface-500">For stock</span>
                                                 )}
                                             </td>
                                             <td className="px-3 py-3 text-surface-600 tabular-nums">{o.quantity}</td>
@@ -1984,7 +1984,7 @@ function ProductionOrdersTab() {
                                             <td className="px-3 py-3"><StatusBadge status={o.status} /></td>
                                             <td className="px-3 py-3 w-28 hidden md:table-cell">
                                                 <ProgressBar pct={o.completion_percentage} />
-                                                <p className="text-2xs text-surface-400 mt-0.5 tabular-nums">{o.completion_percentage}%</p>
+                                                <p className="text-2xs text-surface-500 mt-0.5 tabular-nums">{o.completion_percentage}%</p>
                                             </td>
                                             <td className={clsx("px-3 py-3 text-xs font-semibold whitespace-nowrap hidden sm:table-cell", DUE_TONE_CLS[due.tone])}
                                                 title={fmtDueDate(o.due_date)}>
@@ -2008,7 +2008,7 @@ function ProductionOrdersTab() {
                                     </Fragment>
                                 ))}
                                 {orders.length === 0 && !isLoading && (
-                                    <tr><td colSpan={10} className="text-center py-16 text-surface-400">No production orders found</td></tr>
+                                    <tr><td colSpan={10} className="text-center py-16 text-surface-500">No production orders found</td></tr>
                                 )}
                             </tbody>
                         </table>
@@ -2188,7 +2188,7 @@ function WIPTab({
                     <span className="text-xs text-surface-500">
                         Showing orders for <strong className="text-surface-800">{selectedUserName}</strong>
                         {" "}
-                        <span className="text-surface-400">({orders.length} order{orders.length !== 1 ? "s" : ""})</span>
+                        <span className="text-surface-500">({orders.length} order{orders.length !== 1 ? "s" : ""})</span>
                     </span>
                     {canViewFull && (
                         <button
@@ -2205,7 +2205,7 @@ function WIPTab({
             )}
 
             {selectedUserId !== "all" && !isLoading && (filteredOrderIds?.size ?? 0) === 0 && (
-                <span className="text-xs text-surface-400 italic shrink-0">No active orders assigned</span>
+                <span className="text-xs text-surface-500 italic shrink-0">No active orders assigned</span>
             )}
 
             {/* ── Kanban board ─────────────────────────────────────────────── */}
@@ -2222,7 +2222,7 @@ function WIPTab({
                                     <div className="flex items-center gap-2 mb-3 px-1">
                                         <span className={clsx("w-2.5 h-2.5 rounded-full shrink-0", cfg?.dot ?? "bg-surface-300")} />
                                         <span className="text-sm font-semibold text-surface-700">{col.label}</span>
-                                        <span className="ml-auto text-xs text-surface-400 bg-surface-100 rounded-full px-2 py-0.5 font-medium">
+                                        <span className="ml-auto text-xs text-surface-500 bg-surface-100 rounded-full px-2 py-0.5 font-medium">
                                             {colOrders.length}
                                         </span>
                                     </div>
@@ -2254,7 +2254,7 @@ function WIPTab({
                                                        title={`${isCustomer ? o.product_name : jobFor(o)}${o.product?.sku ? ` · ${o.product.sku}` : ""}`}>
                                                         {isCustomer ? o.product_name : jobFor(o)}
                                                         {o.product?.sku && (
-                                                            <span className="font-mono text-surface-400"> · {o.product.sku}</span>
+                                                            <span className="font-mono text-surface-500"> · {o.product.sku}</span>
                                                         )}
                                                     </p>
 
@@ -2303,7 +2303,7 @@ function WIPTab({
                                                         kept on the right because overdue is the one thing on this
                                                         card that must shout. */}
                                                     <div className="flex items-center justify-between gap-2 text-2xs mt-1">
-                                                        <span className="text-surface-400 truncate">
+                                                        <span className="text-surface-500 truncate">
                                                             {o.started_at ? shortDate(o.started_at) : "not started"} → {shortDate(o.due_date)}
                                                         </span>
                                                         <span className={clsx("shrink-0 font-semibold", DUE_TONE_CLS[dueInfo(o.due_date, o.status).tone])} title={fmtDueDate(o.due_date)}>
@@ -2313,7 +2313,7 @@ function WIPTab({
                                                     <div className="flex justify-end mt-2">
                                                         <button
                                                             onClick={(e) => { e.stopPropagation(); navigate(`/production/orders/${o.id}`); }}
-                                                            className="text-2xs text-brand-500 hover:text-brand-700 font-semibold"
+                                                            className="text-2xs text-brand-700 hover:text-brand-800 font-semibold"
                                                         >
                                                             View Detail →
                                                         </button>
@@ -2322,7 +2322,7 @@ function WIPTab({
                                             );
                                         })}
                                         {colOrders.length === 0 && (
-                                            <div className="text-center py-10 text-surface-200 text-2xs border-2 border-dashed border-line rounded-xl">
+                                            <div className="text-center py-10 text-surface-500 text-2xs border-2 border-dashed border-line rounded-xl">
                                                 Empty
                                             </div>
                                         )}
@@ -2395,7 +2395,7 @@ function BOMTab() {
                 showingDetail ? "hidden sm:flex" : "flex w-full"
             )}>
                 <div className="relative">
-                    <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+                    <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
                     <input value={search} onChange={e => setSearch(e.target.value)}
                         placeholder="Search products…" className="input pl-8 text-sm" />
                 </div>
@@ -2403,7 +2403,7 @@ function BOMTab() {
                     {loadingProducts ? (
                         <div className="flex justify-center py-8"><Spinner /></div>
                     ) : products.length === 0 ? (
-                        <p className="text-xs text-surface-400 text-center py-8 px-4">No producible products found</p>
+                        <p className="text-xs text-surface-500 text-center py-8 px-4">No producible products found</p>
                     ) : (
                         <div className="divide-y divide-line">
                             {products.map(p => {
@@ -2435,7 +2435,7 @@ function BOMTab() {
                                                 isSelected ? "text-brand-700" : "text-surface-900")}>
                                                 {name}
                                             </p>
-                                            <p className="text-2xs text-surface-400 font-mono mt-0.5 truncate">{p.sku}</p>
+                                            <p className="text-2xs text-surface-500 font-mono mt-0.5 truncate">{p.sku}</p>
                                             <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                                                 {p.category && (
                                                     <span className="text-2xs text-surface-500 bg-surface-100 px-1.5 py-0.5 rounded-md truncate max-w-[90px]">
@@ -2493,7 +2493,7 @@ function BOMTab() {
                             </button>
                             <div className="flex-1 min-w-0">
                                 <h3 className="font-bold text-surface-900 truncate">{selectedProduct?.name ?? selectedProduct?.sku}</h3>
-                                <p className="text-xs text-surface-400">{boms.length} BOM version{boms.length !== 1 ? "s" : ""}</p>
+                                <p className="text-xs text-surface-500">{boms.length} BOM version{boms.length !== 1 ? "s" : ""}</p>
                             </div>
                             {canEditProducts && (
                             <button onClick={() => setShowCreate(true)}
@@ -2506,7 +2506,7 @@ function BOMTab() {
                         </div>
 
                         {boms.length === 0 && (
-                            <div className="card p-10 text-center text-surface-400">
+                            <div className="card p-10 text-center text-surface-500">
                                 <p className="text-sm">No BOM defined yet.</p>
                                 {canEditProducts && (
                                 <button onClick={() => setShowCreate(true)} className="btn-primary btn-sm mt-4">Create First BOM</button>
@@ -2524,7 +2524,7 @@ function BOMTab() {
                                             {bom.is_active && (
                                                 <span className="text-2xs font-bold px-2 py-0.5 bg-brand-500 text-white rounded-full shrink-0">Active</span>
                                             )}
-                                            {bom.notes && <span className="text-xs text-surface-400 italic truncate">{bom.notes}</span>}
+                                            {bom.notes && <span className="text-xs text-surface-500 italic truncate">{bom.notes}</span>}
                                         </div>
                                         <div className="flex gap-2 shrink-0">
                                             {!bom.is_active && (
@@ -2541,7 +2541,7 @@ function BOMTab() {
                                             <thead className="bg-surface-50 border-b border-surface-50">
                                                 <tr>
                                                     {["Material", "Code", "Qty", "Unit", "Unit Cost", "Total Cost", "Stock"].map(h => (
-                                                        <th key={h} className="px-3 py-2 text-left text-2xs font-bold text-surface-400 uppercase tracking-wide">{h}</th>
+                                                        <th key={h} className="px-3 py-2 text-left text-2xs font-bold text-surface-500 uppercase tracking-wide">{h}</th>
                                                     ))}
                                                 </tr>
                                             </thead>
@@ -2551,7 +2551,7 @@ function BOMTab() {
                                                         <td className="px-3 py-2 font-medium text-surface-900">
                                                             {item.material?.name ?? item.material_name ?? "-"}
                                                         </td>
-                                                        <td className="px-3 py-2 font-mono text-surface-400">
+                                                        <td className="px-3 py-2 font-mono text-surface-500">
                                                             {item.material?.code ?? item.material_code ?? "-"}
                                                         </td>
                                                         <td className="px-3 py-2 tabular-nums">{fmtNum(item.quantity)}</td>
@@ -2604,27 +2604,27 @@ function BOMTab() {
                                                     <div className="flex items-start justify-between gap-2">
                                                         <div className="min-w-0">
                                                             <p className="text-sm font-semibold text-surface-900 truncate">{materialName}</p>
-                                                            <p className="text-2xs text-surface-400 font-mono">{code}</p>
+                                                            <p className="text-2xs text-surface-500 font-mono">{code}</p>
                                                         </div>
                                                         {item.is_short && (
-                                                            <span className="text-2xs font-bold text-danger bg-danger-light px-1.5 py-0.5 rounded shrink-0">
+                                                            <span className="text-2xs font-bold text-danger-700 bg-danger-light px-1.5 py-0.5 rounded shrink-0">
                                                                 Low stock
                                                             </span>
                                                         )}
                                                     </div>
                                                     <div className="grid grid-cols-3 gap-2 mt-2">
                                                         <div>
-                                                            <p className="text-2xs text-surface-400">Qty</p>
+                                                            <p className="text-2xs text-surface-500">Qty</p>
                                                             <p className="text-xs font-semibold text-surface-900 tabular-nums">{fmtNum(item.quantity)} {item.unit_of_measure}</p>
                                                         </div>
                                                         <div>
-                                                            <p className="text-2xs text-surface-400">Unit cost</p>
+                                                            <p className="text-2xs text-surface-500">Unit cost</p>
                                                             <p className="text-xs font-semibold text-surface-900 tabular-nums">
                                                                 {unitCost != null ? `KES ${fmtNum(unitCost, 2)}` : "-"}
                                                             </p>
                                                         </div>
                                                         <div>
-                                                            <p className="text-2xs text-surface-400">Total</p>
+                                                            <p className="text-2xs text-surface-500">Total</p>
                                                             <p className="text-xs font-semibold text-surface-900 tabular-nums">
                                                                 {totalCost != null ? `KES ${fmtNum(totalCost, 2)}` : "-"}
                                                             </p>
@@ -2632,7 +2632,7 @@ function BOMTab() {
                                                     </div>
                                                     {item.stock_on_hand != null && (
                                                         <div className="mt-1.5 flex items-center gap-1.5">
-                                                            <span className="text-2xs text-surface-400">Stock:</span>
+                                                            <span className="text-2xs text-surface-500">Stock:</span>
                                                             <span className={clsx("text-2xs font-semibold tabular-nums",
                                                                 item.is_short ? "text-danger" : "text-success")}>
                                                                 {fmtNum(item.stock_on_hand)} {item.unit_of_measure}
@@ -2718,7 +2718,7 @@ function BOMEditModal({ productId, bom, onClose, onSaved }: {
 
                     {/* Desktop: compact inline grid */}
                     <div className="hidden sm:block space-y-2">
-                        <div className="grid grid-cols-12 gap-2 px-2 text-2xs font-bold text-surface-400 uppercase tracking-wide">
+                        <div className="grid grid-cols-12 gap-2 px-2 text-2xs font-bold text-surface-500 uppercase tracking-wide">
                             <span className="col-span-5">Material</span>
                             <span className="col-span-2 text-right">Qty</span>
                             <span className="col-span-2">Unit</span>
@@ -2757,7 +2757,7 @@ function BOMEditModal({ productId, bom, onClose, onSaved }: {
                             <div key={i} className="bg-surface-50 rounded-xl p-3 space-y-2.5">
                                 {/* Row header: index + remove */}
                                 <div className="flex items-center justify-between">
-                                    <span className="text-2xs font-bold text-surface-400 uppercase tracking-wide">
+                                    <span className="text-2xs font-bold text-surface-500 uppercase tracking-wide">
                                         Material {i + 1}
                                     </span>
                                     <button
@@ -2813,7 +2813,7 @@ function BOMEditModal({ productId, bom, onClose, onSaved }: {
                         ))}
 
                         {items.length === 0 && (
-                            <p className="text-xs text-surface-400 text-center py-4">No materials yet — tap + Add Row to begin.</p>
+                            <p className="text-xs text-surface-500 text-center py-4">No materials yet — tap + Add Row to begin.</p>
                         )}
                     </div>
                 </div>
@@ -2882,7 +2882,7 @@ function QualityControlTab() {
                     {[
                         { key: "pending", label: "Awaiting QC",   color: "text-accent-600",     bg: "bg-accent-50"    },
                         { key: "passed",  label: "QC Passed",     color: "text-success",        bg: "bg-success-light" },
-                        { key: "failed",  label: "QC Failed",     color: "text-danger",         bg: "bg-danger-light" },
+                        { key: "failed",  label: "QC Failed",     color: "text-danger-700",        bg: "bg-danger-light" },
                     ].map(({ key, label, color, bg }) => (
                         <div key={key} className={clsx("card p-4 text-left", bg)}>
                             <p className="text-2xs text-surface-500 font-medium">{label}</p>
@@ -2913,10 +2913,10 @@ function QualityControlTab() {
                 ) : orders.length === 0 ? (
                     <div className="flex-1 flex items-center justify-center text-surface-500">
                         <div className="text-center py-16">
-                            <div className="flex items-center justify-center w-16 h-16 bg-surface-100 rounded-2xl mb-3 text-surface-400">
+                            <div className="flex items-center justify-center w-16 h-16 bg-surface-100 rounded-2xl mb-3 text-surface-500">
                                 <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                             </div>
-                            <p className="text-sm font-medium text-surface-400">
+                            <p className="text-sm font-medium text-surface-500">
                                 {filterStatus === "pending" ? "No orders awaiting QC" : `No ${filterStatus} QC results`}
                             </p>
                         </div>
@@ -2974,7 +2974,7 @@ function QualityControlTab() {
                                     <div className="flex justify-end mt-2 pt-2 border-t border-surface-50">
                                         <button
                                             onClick={(e) => { e.stopPropagation(); navigate(`/production/orders/${o.id}`); }}
-                                            className="text-2xs text-brand-500 hover:text-brand-700 font-semibold"
+                                            className="text-2xs text-brand-700 hover:text-brand-800 font-semibold"
                                         >
                                             View Detail →
                                         </button>
@@ -3081,7 +3081,7 @@ export function ProductionWIPPage() {
 
             {canViewFull && canViewUsers && (
                 <div className="relative">
-                    <select
+                    <select aria-label="Show work for"
                         value={selectedUserId}
                         onChange={e => setSelectedUserId(e.target.value)}
                         className={clsx(
@@ -3107,12 +3107,12 @@ export function ProductionWIPPage() {
                             ))}
                     </select>
                     <svg className={clsx("pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5",
-                        selectedUserId !== "all" ? "text-white" : "text-surface-400")}
+                        selectedUserId !== "all" ? "text-white" : "text-surface-500")}
                         fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/>
                     </svg>
                     <svg className={clsx("pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3",
-                        selectedUserId !== "all" ? "text-white/70" : "text-surface-400")}
+                        selectedUserId !== "all" ? "text-white/70" : "text-surface-500")}
                         fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7"/>
                     </svg>

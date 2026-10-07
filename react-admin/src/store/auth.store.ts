@@ -3,6 +3,8 @@ import { authApi } from "@/api/auth";
 import { tokenStorage } from "@/api/client";
 import { registerPush, unregisterPush } from "@/lib/pushRegistration";
 import { resetSecurityPrompts } from "@/store/security.store";
+import { useToastStore } from "@/store/toast.store";
+import { queueSignOutBehindUpdates } from "@/lib/offlineQueue";
 import type { User, LoginCredentials, LoginResponse, ApiError } from "@/types";
 
 /**
@@ -144,12 +146,29 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
             // No Cache Storage (private mode, old browser) — nothing cached.
         }
 
+        // Updates still waiting to sync go first, under this person's name;
+        // the sign-out follows them through the queue (offlineQueue.ts).
+        let waiting = 0;
         try {
-            await authApi.logout();
+            waiting = await queueSignOutBehindUpdates();
+        } catch {
+            // No IndexedDB — nothing can be waiting.
+        }
+
+        try {
+            if (waiting === 0) await authApi.logout();
         } catch {
             // Swallow — clear locally regardless
         } finally {
             get().clearAuth();
+        }
+
+        if (waiting > 0) {
+            useToastStore.getState().info(
+                waiting === 1
+                    ? "Signed out. Your 1 waiting update will sync under your name when the tablet is online."
+                    : `Signed out. Your ${waiting} waiting updates will sync under your name when the tablet is online.`,
+            );
         }
     },
 

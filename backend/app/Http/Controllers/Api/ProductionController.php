@@ -28,6 +28,7 @@ use App\Services\ActivityLogService;
 use App\Services\IntelligenceService;
 use App\Services\ProductSerialService;
 use App\Support\MakerChecker;
+use App\Support\OrderMakers;
 use App\Support\OrderStatusMachine;
 use App\Support\ProductionPayload;
 use Illuminate\Http\Request;
@@ -811,11 +812,19 @@ class ProductionController extends Controller
         }
 
         // The person who sewed it does not pass it (owner's Policy 4): nobody
-        // assigned a stage on this order may record its QC — managers and the
-        // owner included. Before the transaction: the refusal is logged and
-        // must not roll back with it.
-        // Everyone who holds a stage on the order: refused as inspectors here,
-        // told the outcome below.
+        // who worked on this order may record its QC — managers and the owner
+        // included. "Worked on" is every stage holder past and present, anyone
+        // who counted its pieces, and its order-level assignees (OrderMakers).
+        // Before the transaction: the refusal is logged and must not roll back
+        // with it.
+        MakerChecker::assertNotMaker(
+            $request->user(),
+            'production_qc.submit',
+            $order,
+            ...OrderMakers::ids($order),
+        );
+
+        // Whoever holds a stage now is told the outcome below.
         $makerIds = ProductionTask::withoutViewerScope()
             ->where('production_order_id', $order->id)
             ->whereNotNull('assigned_to')
@@ -823,13 +832,6 @@ class ProductionController extends Controller
             ->unique()
             ->values()
             ->all();
-
-        MakerChecker::assertNotMaker(
-            $request->user(),
-            'production_qc.submit',
-            $order,
-            ...$makerIds,
-        );
 
         DB::beginTransaction();
         try {
@@ -2701,7 +2703,21 @@ class ProductionController extends Controller
         // who raised it — or she promises dates the workshop cannot keep.
         // What makes that safe is what the board carries: schedule facts
         // only. No prices, no costs, no contact details.
+        //
+        // That reason is a clerk's, not a tailor's. A floor worker (shop-floor
+        // access and nothing that assigns, confirms or raises work) sees only
+        // her own jobs here, as everywhere else (owner decision 5 Oct 2026).
+        // Before, the board showed her every customer's job on the floor.
+        $user = request()->user();
+        $floorWorkerOnly = $user
+            && ! $user->hasAnyRole(['admin', 'super_admin'])
+            && $user->can('production.worker')
+            && ! $user->can('production.manage_assignees')
+            && ! $user->can('production.confirm_order')
+            && ! $user->can('production.raise_order');
+
         $active = ProductionOrder::query()
+            ->when($floorWorkerOnly, fn ($q) => $q->visibleTo($user))
             ->whereIn('status', ['pending', 'in_progress', 'on_hold', 'qc_pending'])
             ->with([
                 'tasks.stage',
@@ -2839,7 +2855,26 @@ class ProductionController extends Controller
             'notes' => 'nullable|string|max:1000',
         ]);
 
-        ProductionOrder::findOrFail($id);
+        // The same checks as the QC itself (owner decision 5 Oct 2026). Only
+        // an order the signer can open, as show().
+        $order = ProductionOrder::visibleTo($request->user())->findOrFail($id);
+
+        // A QC sign-off must agree with the QC on record, and must not come
+        // from someone who worked on the order.
+        $qcGateStatuses = ['qc_passed' => ['qc_passed', 'completed'], 'qc_failed' => ['qc_failed']];
+        if (isset($qcGateStatuses[$validated['gate']])) {
+            if (! in_array($order->status, $qcGateStatuses[$validated['gate']], true)) {
+                return response()->json([
+                    'message' => 'This sign-off does not match the order\'s Quality Control result.',
+                ], 422);
+            }
+            MakerChecker::assertNotMaker(
+                $request->user(),
+                'production_qc.submit',
+                $order,
+                ...OrderMakers::ids($order),
+            );
+        }
 
         $approval = DB::table('production_order_approvals')->insertGetId([
             'production_order_id' => $id,

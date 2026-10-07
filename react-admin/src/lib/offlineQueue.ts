@@ -102,3 +102,33 @@ export function requestReplay(): void {
 /** A request that never reached the server (no HTTP status), as opposed to a refusal. */
 export const isNetworkFailure = (e: unknown) =>
     !!e && typeof e === "object" && (e as { status?: number }).status === undefined;
+
+/** The queued sign-out's URL, which the worker replays quietly (sw.ts). */
+export const SIGN_OUT_URL = "/api/v1/admin/auth/logout";
+
+/**
+ * Sign-out on a shared tablet with updates still waiting. Revoking the token
+ * now would make every waiting update fail as "signed out" when it replays,
+ * and the tailor's work would be lost. Not revoking it would leave a live
+ * token on the tablet. So the sign-out joins the queue behind her updates:
+ * they reach the server under her name first, then her token is revoked.
+ *
+ * Returns how many of her updates are still waiting (0: nothing queued, the
+ * caller signs out normally).
+ */
+export async function queueSignOutBehindUpdates(): Promise<number> {
+    const token = tokenStorage.get() ?? "";
+    const db = await open();
+    const rows = await new Promise<Array<{ url: string; token?: string }>>((resolve, reject) => {
+        const req = db.transaction(STORE, "readonly").objectStore(STORE).getAll();
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+    db.close();
+    // Only this person's own updates: another tailor's waiting work on the
+    // same tablet replays under that tailor's token and holds nobody up.
+    const waiting = rows.filter((r) => r.token === token && r.url !== SIGN_OUT_URL).length;
+    if (waiting === 0) return 0;
+    await enqueueOffline({ url: SIGN_OUT_URL, method: "POST", body: {}, dedupeKey: `sign-out:${token}` });
+    return waiting;
+}

@@ -151,7 +151,7 @@ const fmtDateTime = (d?: string | null) =>
 // single button is what pushed it onto a second line before.
 // 44px on a phone (one-handed, on the floor); the compact 36px from sm up.
 const ACT_BTN = "flex items-center gap-1 bg-white border border-surface-200 rounded-lg px-2.5 h-11 sm:h-9 " +
-    "text-[11px] sm:text-xs font-semibold text-surface-700 hover:border-brand-300 hover:text-brand-600 transition-colors";
+    "text-[11px] sm:text-xs font-semibold text-surface-700 hover:border-brand-300 hover:text-brand-700 transition-colors";
 const MENU_ITEM = "w-full text-left px-3.5 py-2.5 text-xs font-semibold text-surface-700 hover:bg-surface-50 transition-colors";
 const fmtNum = (n: number) => n.toLocaleString("en-KE", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
 const hoursBetween = (from?: string | null, to?: string | null): number | null =>
@@ -173,13 +173,13 @@ const batchPassed = (task: Task, batch: OrderBatch): number =>
 // ── Shared UI atoms ───────────────────────────────────────────────────────────
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-    return <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2">{children}</p>;
+    return <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest mb-2">{children}</p>;
 }
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
     return (
         <div className="flex items-start justify-between gap-2 py-1.5 border-b border-surface-50 last:border-0">
-            <span className="text-xs text-surface-400 shrink-0">{label}</span>
+            <span className="text-xs text-surface-500 shrink-0">{label}</span>
             <span className="text-xs text-surface-800 font-medium text-right">{value ?? "-"}</span>
         </div>
     );
@@ -274,7 +274,7 @@ function EditOrderModal({ order, onClose, onSaved, canReduce = false }: { order:
                             </p>
                         )}
                         {!isDraft && !canReduce && (
-                            <p className="text-2xs text-surface-400 mt-1 leading-snug">
+                            <p className="text-2xs text-surface-500 mt-1 leading-snug">
                                 Locked after confirmation — serials and material requirements were
                                 generated from it. Cancel &amp; re-raise, or raise a second order for the difference.
                             </p>
@@ -301,22 +301,22 @@ function EditOrderModal({ order, onClose, onSaved, canReduce = false }: { order:
                         <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Fitting date</label>
                         <input type="date" value={fittingDate} onChange={e => setFittingDate(e.target.value)}
                             className="input mt-1 w-full text-sm" />
-                        <p className="text-2xs text-surface-400 mt-1">When the customer comes in to be fitted.</p>
+                        <p className="text-2xs text-surface-500 mt-1">When the customer comes in to be fitted.</p>
                     </div>
                     <div>
                         <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Collection date</label>
                         <input type="date" value={collectionDate} onChange={e => setCollectionDate(e.target.value)}
                             className="input mt-1 w-full text-sm" />
-                        <p className="text-2xs text-surface-400 mt-1">When they collect the finished garment.</p>
+                        <p className="text-2xs text-surface-500 mt-1">When they collect the finished garment.</p>
                     </div>
                 </div>
                 <div>
                     <div className="flex items-center justify-between">
                         <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Measurements</label>
-                        <button type="button" onClick={addMeas} className="text-2xs font-bold text-brand-600 hover:underline">+ Add measurement</button>
+                        <button type="button" onClick={addMeas} className="text-2xs font-bold text-brand-700 hover:underline">+ Add measurement</button>
                     </div>
                     {measRows.length === 0 ? (
-                        <p className="text-2xs text-surface-400 mt-1">No measurements yet — add the customer's measurements for the workshop.</p>
+                        <p className="text-2xs text-surface-500 mt-1">No measurements yet — add the customer's measurements for the workshop.</p>
                     ) : (
                         <div className="mt-1.5 space-y-1.5">
                             {measRows.map((r, i) => (
@@ -335,7 +335,7 @@ function EditOrderModal({ order, onClose, onSaved, canReduce = false }: { order:
                             ))}
                         </div>
                     )}
-                    <p className="text-2xs text-surface-400 mt-1">Editable any time before completion — only the quantity is locked.</p>
+                    <p className="text-2xs text-surface-500 mt-1">Editable any time before completion — only the quantity is locked.</p>
                 </div>
                 <div>
                     <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Notes</label>
@@ -343,7 +343,7 @@ function EditOrderModal({ order, onClose, onSaved, canReduce = false }: { order:
                         placeholder="Amendment reason, customer request, spec change…"
                         className="input mt-1 w-full text-sm resize-none" />
                 </div>
-                <p className="text-2xs text-surface-400">
+                <p className="text-2xs text-surface-500">
                     Changes are recorded on the order's audit trail (what changed, from and to).
                 </p>
                 <div className="flex gap-2 pt-1">
@@ -425,7 +425,7 @@ function BatchesModal({ order, onClose, onSaved }: { order: ProductionOrder; onC
                                 className="input w-20 text-sm text-right" />
                             <button onClick={() => setRows((p) => p.filter((_, j) => j !== i))}
                                 disabled={rows.length === 1}
-                                className="shrink-0 w-8 h-8 rounded-lg text-surface-400 hover:text-danger hover:bg-danger/10 disabled:opacity-30 transition-colors"
+                                className="shrink-0 w-8 h-8 rounded-lg text-surface-500 hover:text-danger hover:bg-danger/10 disabled:opacity-30 transition-colors"
                                 aria-label="Remove batch">✕</button>
                         </div>
                         <input value={r.attrs} placeholder="Attributes — e.g. piping: blue, buttons: blue"
@@ -434,7 +434,7 @@ function BatchesModal({ order, onClose, onSaved }: { order: ProductionOrder; onC
                     </div>
                 ))}
                 <button onClick={() => setRows((p) => [...p, { label: "", quantity: "", attrs: "" }])}
-                    className="w-full text-xs font-semibold text-brand-600 border border-dashed border-brand-300 rounded-xl py-2 hover:bg-brand-50 transition-colors">
+                    className="w-full text-xs font-semibold text-brand-700 border border-dashed border-brand-300 rounded-xl py-2 hover:bg-brand-50 transition-colors">
                     + Add batch
                 </button>
                 <div className={clsx("rounded-xl px-3 py-2 text-xs font-semibold",
@@ -533,7 +533,7 @@ function ReworkModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                             <div key={t.id} className={clsx("rounded-xl border p-3", on ? "border-brand-300 bg-brand-50/50" : "border-line")}>
                                 <label className="flex items-center gap-3 min-h-11 cursor-pointer">
                                     <input type="checkbox" checked={on} onChange={() => toggle(t.id)}
-                                        className="w-5 h-5 rounded border-surface-300 text-brand-600 focus:ring-brand-400" />
+                                        className="w-5 h-5 rounded border-surface-300 text-brand-700 focus:ring-brand-400" />
                                     <span className="flex-1 min-w-0">
                                         <span className="block text-sm font-semibold text-surface-900">{t.stage?.name ?? `Stage ${t.production_stage_id}`}</span>
                                         <span className="block text-2xs text-surface-500">
@@ -646,7 +646,7 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                 ) : activeTasks.length === 0 ? (
                     <div className="text-center py-6">
                         <p className="text-sm font-medium text-surface-500">All stages completed</p>
-                        <p className="text-xs text-surface-400 mt-1">No pending stages to assign.</p>
+                        <p className="text-xs text-surface-500 mt-1">No pending stages to assign.</p>
                     </div>
                 ) : (
                     <div className="space-y-2 overflow-x-auto">
@@ -659,7 +659,7 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                                         const on = e.target.checked;
                                         setChecked(Object.fromEntries(activeTasks.map(t => [t.id, on])));
                                     }}
-                                    className="w-4 h-4 rounded border-surface-300 text-brand-600 focus:ring-brand-400" />
+                                    className="w-4 h-4 rounded border-surface-300 text-brand-700 focus:ring-brand-400" />
                                 Select all
                             </label>
                             <select value={bulkTailor} onChange={e => setBulkTailor(e.target.value)}
@@ -682,7 +682,7 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                                 Apply
                             </button>
                         </div>
-                        <div className="grid grid-cols-12 gap-3 px-3 text-2xs font-bold text-surface-400 uppercase tracking-wide min-w-[480px]">
+                        <div className="grid grid-cols-12 gap-3 px-3 text-2xs font-bold text-surface-500 uppercase tracking-wide min-w-[480px]">
                             <span className="col-span-4">Stage</span>
                             <span className="col-span-5">Assign to</span>
                             <span className="col-span-3">Est. hours</span>
@@ -694,13 +694,13 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                                     <div className="col-span-4 flex items-center gap-2">
                                         <input type="checkbox" checked={!!checked[task.id]}
                                             onChange={e => setChecked(p => ({ ...p, [task.id]: e.target.checked }))}
-                                            className="w-4 h-4 rounded border-surface-300 text-brand-600 focus:ring-brand-400 shrink-0" />
+                                            className="w-4 h-4 rounded border-surface-300 text-brand-700 focus:ring-brand-400 shrink-0" />
                                     <div className="min-w-0">
                                         <p className="text-sm font-semibold text-surface-900 flex items-center gap-1.5">
                                             <StageIcon slug={task.stage?.slug} className="w-3.5 h-3.5 text-surface-500" />
                                             {task.stage?.name ?? `Stage ${task.production_stage_id}`}
                                         </p>
-                                        <span className={clsx("text-2xs font-medium mt-0.5", task.status === "in_progress" ? "text-brand-600" : "text-surface-400")}>
+                                        <span className={clsx("text-2xs font-medium mt-0.5", task.status === "in_progress" ? "text-brand-700" : "text-surface-500")}>
                                             {task.status === "in_progress" ? "In progress" : "Pending"}
                                         </span>
                                     </div>
@@ -716,7 +716,7 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                                             value={hours[task.id] ?? (task.estimated_hours?.toString() ?? "")}
                                             onChange={e => setHours(p => ({ ...p, [task.id]: e.target.value }))}
                                             className="input text-sm pr-7 w-full" />
-                                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-2xs text-surface-400">h</span>
+                                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-2xs text-surface-500">h</span>
                                     </div>
                                 </div>
                             );
@@ -762,14 +762,14 @@ function IssueMaterialsModal({ order, onClose, onSaved }: { order: ProductionOrd
 
     if (!allocs.length) return (
         <Modal open title="Issue Materials" onClose={onClose}>
-            <div className="p-8 text-center text-surface-400 text-sm">No material allocations found for this order.</div>
+            <div className="p-8 text-center text-surface-500 text-sm">No material allocations found for this order.</div>
         </Modal>
     );
 
     return (
         <Modal open title={`Issue Materials - ${order.order_number}`} onClose={onClose} size="lg">
             <div className="p-5 space-y-4">
-                <div className="grid grid-cols-12 gap-2 text-2xs font-bold text-surface-400 uppercase tracking-wide px-2">
+                <div className="grid grid-cols-12 gap-2 text-2xs font-bold text-surface-500 uppercase tracking-wide px-2">
                     <span className="col-span-4">Material</span>
                     <span className="col-span-2 text-right">Required</span>
                     <span className="col-span-2 text-right">Allocated</span>
@@ -784,7 +784,7 @@ function IssueMaterialsModal({ order, onClose, onSaved }: { order: ProductionOrd
                             <div className="grid grid-cols-12 gap-2 items-center text-xs">
                                 <div className="col-span-4">
                                     <p className="font-semibold text-surface-900">{a.material.name}</p>
-                                    <p className="text-2xs text-surface-400">{a.material.code} · {a.material.unit_of_measure}</p>
+                                    <p className="text-2xs text-surface-500">{a.material.code} · {a.material.unit_of_measure}</p>
                                 </div>
                                 <span className="col-span-2 text-right tabular-nums text-surface-600">{fmtNum(a.quantity_required)}</span>
                                 <span className={clsx("col-span-2 text-right tabular-nums font-semibold", pct >= 100 ? "text-success-600" : "text-amber-700")}>{fmtNum(a.quantity_allocated)}</span>
@@ -920,7 +920,7 @@ function CompleteModal({ order, onClose, onDone }: { order: ProductionOrder; onC
                     <label className="label">Final Quantity Produced</label>
                     <input type="number" min={1} max={order.quantity} value={finalQty}
                         onChange={e => setFinalQty(e.target.value)} className="input" />
-                    <p className="text-2xs text-surface-400 mt-1">Production target was {order.quantity} unit(s)</p>
+                    <p className="text-2xs text-surface-500 mt-1">Production target was {order.quantity} unit(s)</p>
                 </div>
                 {!forCustomer && (
                     <div>
@@ -959,11 +959,11 @@ function StageTiming({ task }: { task: Task }) {
         return (
             <>
                 <span>Entered {fmtDate(task.started_at)}</span>
-                <span className={clsx("flex items-center gap-1 font-medium", over ? "text-amber-700" : "text-brand-600")}>
+                <span className={clsx("flex items-center gap-1 font-medium", over ? "text-amber-700" : "text-brand-700")}>
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    {fmtDuration(elapsed)} in stage{est != null && !over && <span className="text-surface-400 font-normal"> · est {fmtDuration(est)}</span>}
+                    {fmtDuration(elapsed)} in stage{est != null && !over && <span className="text-surface-500 font-normal"> · est {fmtDuration(est)}</span>}
                 </span>
                 {over && (
                     <span className="text-2xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-1.5 py-0.5">
@@ -1027,7 +1027,7 @@ function StagesPipeline({
     // here may look actionable — no Ready, no pile warnings, no buttons.
     const workOpen = acceptsFloorWork(orderStatus);
     if (!tasks.length) return (
-        <div className="text-center py-12 text-surface-400">
+        <div className="text-center py-12 text-surface-500">
             <svg className="w-10 h-10 mx-auto mb-2 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
             </svg>
@@ -1140,7 +1140,7 @@ function StagesPipeline({
                         : isFailed
                             ? "bg-danger-100 text-danger-700"
                             : task.status === "cancelled"
-                                ? "bg-surface-100 text-surface-400"
+                                ? "bg-surface-100 text-surface-500"
                                 : "bg-amber-50 text-amber-700";
 
                 const badgeLabel = task.status === "completed"
@@ -1245,11 +1245,11 @@ function StagesPipeline({
                                 ) : (
                                     <span className="text-surface-500 italic text-2xs">Unassigned</span>
                                 )}
-                                {isMyTask && <span className="text-2xs font-bold text-brand-600">(you)</span>}
+                                {isMyTask && <span className="text-2xs font-bold text-brand-700">(you)</span>}
                                 {workOpen && canUnlock && !isDone && !task.started_at && (
                                     <button type="button"
                                         onClick={() => onUnlock(task.id, !task.concurrent_allowed)}
-                                        className="ml-auto -my-3 py-3 pl-3 text-2xs font-semibold text-surface-400 hover:text-brand-600 underline decoration-dotted underline-offset-2 transition-colors"
+                                        className="ml-auto -my-3 py-3 pl-3 text-2xs font-semibold text-surface-500 hover:text-brand-700 underline decoration-dotted underline-offset-2 transition-colors"
                                         title={task.concurrent_allowed
                                             ? "Re-lock this stage to sequential order"
                                             : "Let this stage run in parallel with earlier stages"}>
@@ -1272,7 +1272,7 @@ function StagesPipeline({
                                                 className={clsx("text-2xs font-semibold px-1.5 py-0.5 rounded-md tabular-nums border",
                                                     full ? "bg-success-50 text-success-700 border-success-200"
                                                     : p > 0 ? "bg-brand-50 text-brand-700 border-brand-200"
-                                                    : "bg-surface-50 text-surface-400 border-surface-200")}>
+                                                    : "bg-surface-50 text-surface-500 border-surface-200")}>
                                                 {full ? "✓ " : ""}{b.label} {p}/{b.quantity}
                                             </span>
                                         );
@@ -1347,7 +1347,7 @@ function ThreadMentionPopup({ query, onSelect }: { query: string; onSelect: (u: 
                     </div>
                     <div className="min-w-0">
                         <p className="text-xs font-semibold text-surface-800 truncate">{u.name}</p>
-                        {u.email && <p className="text-2xs text-surface-400 truncate">{u.email}</p>}
+                        {u.email && <p className="text-2xs text-surface-500 truncate">{u.email}</p>}
                     </div>
                 </button>
             ))}
@@ -1380,16 +1380,16 @@ function ThreadEntityPopup({ query, onSelect, onDismiss }: {
     return (
         <div className="absolute bottom-full left-0 mb-1 w-72 bg-white rounded-xl border border-surface-200 shadow-xl py-1 z-50 max-h-60 overflow-y-auto">
             <div className="flex items-center justify-between px-3 pt-1.5 pb-1">
-                <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest">Tag order or production</p>
+                <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest">Tag order or production</p>
                 <button onMouseDown={e => { e.preventDefault(); onDismiss(); }}
-                    className="text-surface-500 hover:text-surface-500 p-0.5 rounded">
+                    className="text-surface-500 hover:text-surface-700 p-0.5 rounded">
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
                     </svg>
                 </button>
             </div>
             {results.length === 0 ? (
-                <p className="text-xs text-surface-400 px-3 py-2">{query.length < 1 ? "Type to search orders…" : "No results"}</p>
+                <p className="text-xs text-surface-500 px-3 py-2">{query.length < 1 ? "Type to search orders…" : "No results"}</p>
             ) : results.map(r => (
                 <button key={`${r.type}:${r.id}`}
                     onMouseDown={e => { e.preventDefault(); onSelect(r); }}
@@ -1397,7 +1397,7 @@ function ThreadEntityPopup({ query, onSelect, onDismiss }: {
                     <div className={clsx("mt-0.5 w-6 h-6 rounded-md flex items-center justify-center shrink-0",
                         r.type === "order" ? "bg-brand-50" : "bg-accent-50")}>
                         {r.type === "order" ? (
-                            <svg className="w-3.5 h-3.5 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <svg className="w-3.5 h-3.5 text-brand-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
                             </svg>
                         ) : (
@@ -1414,7 +1414,7 @@ function ThreadEntityPopup({ query, onSelect, onDismiss }: {
                             </span>
                         </div>
                         <p className="text-2xs text-surface-500 truncate mt-0.5">{r.subtitle}</p>
-                        <p className="text-2xs text-surface-400">{r.meta}</p>
+                        <p className="text-2xs text-surface-500">{r.meta}</p>
                     </div>
                 </button>
             ))}
@@ -1650,7 +1650,7 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
             {/* CommsHub deep-link */}
             {channel && (
                 <div className="pb-2 shrink-0">
-                    <p className="text-2xs text-surface-400">
+                    <p className="text-2xs text-surface-500">
                         Messages here also appear in{" "}
                         <Link to={`/comms/${channel.id}`} className="text-brand-500 hover:underline font-medium">
                             CommsHub → {channel.name}
@@ -1666,12 +1666,12 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
                         <svg className="w-10 h-10 mx-auto mb-2 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                         </svg>
-                        <p className="text-sm font-medium text-surface-400">No messages yet</p>
+                        <p className="text-sm font-medium text-surface-500">No messages yet</p>
                         <p className="text-xs text-surface-500 mt-1">Start the conversation below</p>
                     </div>
                 ) : messages.map(msg => {
                     if (msg.type === "system") return (
-                        <div key={msg.id} className="flex items-center gap-2 text-2xs text-surface-400 py-1">
+                        <div key={msg.id} className="flex items-center gap-2 text-2xs text-surface-500 py-1">
                             <div className="flex-1 h-px bg-surface-100" />
                             <span>{msg.body}</span>
                             <div className="flex-1 h-px bg-surface-100" />
@@ -1723,7 +1723,7 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
                                 style={{ wordBreak: "break-word", minHeight: "20px" }}>
                                 {body
                                     ? parseBodyToNodes(body)
-                                    : <span className="text-surface-400">Message… (Enter to send · @ mention · # tag order)</span>
+                                    : <span className="text-surface-500">Message… (Enter to send · @ mention · # tag order)</span>
                                 }
                                 <span className="select-none">{"​"}</span>
                             </div>
@@ -1757,12 +1757,12 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
                 {!body && (
                     <div className="flex items-center gap-3 px-1 pt-1.5">
                         <span className="flex items-center gap-1 text-2xs text-surface-500">
-                            <kbd className="px-1 py-0.5 rounded bg-surface-100 text-surface-400 font-mono text-2xs border border-surface-200 leading-none">@</kbd>
+                            <kbd className="px-1 py-0.5 rounded bg-surface-100 text-surface-500 font-mono text-2xs border border-surface-200 leading-none">@</kbd>
                             mention people
                         </span>
                         <span className="text-surface-200 text-2xs select-none">·</span>
                         <span className="flex items-center gap-1 text-2xs text-surface-500">
-                            <kbd className="px-1 py-0.5 rounded bg-surface-100 text-surface-400 font-mono text-2xs border border-surface-200 leading-none">#</kbd>
+                            <kbd className="px-1 py-0.5 rounded bg-surface-100 text-surface-500 font-mono text-2xs border border-surface-200 leading-none">#</kbd>
                             tag an order
                         </span>
                         <span className="text-surface-200 text-2xs select-none">·</span>
@@ -1814,7 +1814,7 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
                             Mention anyway (they won't see it)
                         </button>
                         <button onClick={() => setPendingMention(null)}
-                            className="w-full py-2 rounded-xl text-surface-400 text-sm hover:text-surface-600 transition-colors">
+                            className="w-full py-2 rounded-xl text-surface-500 text-sm hover:text-surface-600 transition-colors">
                             Cancel
                         </button>
                     </div>
@@ -1834,20 +1834,20 @@ function AuditTrail({ orderId }: { orderId: number }) {
     });
     const logs = data?.logs ?? [];
     if (isLoading) return <div className="flex justify-center py-10"><Spinner /></div>;
-    if (!logs.length) return <div className="text-center py-12 text-xs text-surface-400">No audit entries yet.</div>;
+    if (!logs.length) return <div className="text-center py-12 text-xs text-surface-500">No audit entries yet.</div>;
     return (
         <div className="divide-y divide-line">
             {logs.map(e => (
                 <div key={e.id} className="flex gap-3 py-3.5">
                     <div className="w-7 h-7 rounded-full bg-brand-100 flex items-center justify-center shrink-0 mt-0.5">
-                        <svg className="w-3 h-3 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <svg className="w-3 h-3 text-brand-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
                     </div>
                     <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2">
                             <span className="text-xs font-semibold text-surface-800">{e.label} <span className="font-normal text-surface-500">· {e.actor_name}</span></span>
-                            <span className="text-2xs text-surface-400 shrink-0">{fmtDateTime(e.created_at)}</span>
+                            <span className="text-2xs text-surface-500 shrink-0">{fmtDateTime(e.created_at)}</span>
                         </div>
                         <p className="text-xs text-surface-600 mt-0.5">{e.description}</p>
                     </div>
@@ -1877,7 +1877,7 @@ function SpecGrid({ data, accentClass = "bg-surface-50 border-line" }: { data: R
         <div className="grid grid-cols-3 gap-1.5">
             {entries.map(([k, v]) => (
                 <div key={k} className={clsx("rounded-lg border px-2.5 py-2 min-w-0", accentClass)}>
-                    <p className="text-2xs text-surface-400 capitalize truncate leading-tight">{k.replace(/_/g, " ")}</p>
+                    <p className="text-2xs text-surface-500 capitalize truncate leading-tight">{k.replace(/_/g, " ")}</p>
                     <p className="text-sm font-bold text-surface-900 tabular-nums leading-tight mt-0.5 break-words">{v}</p>
                 </div>
             ))}
@@ -1941,7 +1941,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                         <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
                                 <p className="text-sm font-bold text-surface-900 truncate">{batch.label}</p>
-                                <p className="text-2xs text-surface-400 mt-0.5">
+                                <p className="text-2xs text-surface-500 mt-0.5">
                                     <span className="font-semibold text-surface-600 tabular-nums">{batch.quantity} pcs</span>
                                     {order.priority !== "normal" && <>{" · "}<PriorityBadge priority={order.priority} /></>}
                                     {batch.created_at && <> · Created {fmtDate(batch.created_at)}</>}
@@ -1958,12 +1958,12 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                         {/* Where it is and who has it — the two questions the floor asks */}
                         {!complete && currentTask && (
                             <p className="text-xs text-surface-600 mt-1.5 flex items-center gap-1.5 flex-wrap">
-                                <StageIcon slug={currentTask.stage?.slug} className="w-3 h-3 text-surface-400 shrink-0" />
+                                <StageIcon slug={currentTask.stage?.slug} className="w-3 h-3 text-surface-500 shrink-0" />
                                 <span>Now at <b className="text-surface-800">{currentTask.stage?.name}</b></span>
                                 <span className="text-surface-500">·</span>
                                 {tailor
                                     ? <span>{tailor.first_name} {tailor.last_name}</span>
-                                    : <span className="italic text-surface-400">unassigned</span>}
+                                    : <span className="italic text-surface-500">unassigned</span>}
                             </p>
                         )}
                     </div>
@@ -1974,7 +1974,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 mt-3">
                         {attrs.map(([k, v]) => (
                             <div key={k} className="flex gap-1.5 text-2xs leading-snug min-w-0">
-                                <span className="text-surface-400 capitalize shrink-0">{k.replace(/_/g, " ")}:</span>
+                                <span className="text-surface-500 capitalize shrink-0">{k.replace(/_/g, " ")}:</span>
                                 <span className="text-surface-800 font-semibold truncate">{v}</span>
                             </div>
                         ))}
@@ -1992,7 +1992,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                                     className={clsx("shrink-0 text-2xs font-semibold px-1.5 py-0.5 rounded-md tabular-nums border",
                                         full ? "bg-success-50 text-success-700 border-success-200"
                                         : p > 0 ? "bg-brand-50 text-brand-700 border-brand-200"
-                                        : "bg-surface-50 text-surface-400 border-surface-200")}>
+                                        : "bg-surface-50 text-surface-500 border-surface-200")}>
                                     {t.stage?.name} {p}/{batch.quantity}
                                 </span>
                             );
@@ -2027,7 +2027,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                             </div>
                         ))}
                         {canEdit && (
-                            <label className={clsx("w-10 h-10 rounded-md border border-dashed border-surface-300 text-surface-400 flex items-center justify-center text-sm cursor-pointer hover:border-brand-400 hover:text-brand-500 transition-colors", uploadPending && "opacity-50 pointer-events-none")}>
+                            <label className={clsx("w-10 h-10 rounded-md border border-dashed border-surface-300 text-surface-500 flex items-center justify-center text-sm cursor-pointer hover:border-brand-400 hover:text-brand-500 transition-colors", uploadPending && "opacity-50 pointer-events-none")}>
                                 +
                                 <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
                                     onChange={e => {
@@ -2044,14 +2044,14 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
             {/* Material share — what this batch consumes of the order's allocations */}
             {allocations.length > 0 && share > 0 && (
                 <details className="border-t border-line group">
-                    <summary className="px-3 sm:px-4 py-2 text-2xs font-bold text-surface-400 uppercase tracking-widest cursor-pointer select-none hover:text-surface-600 flex items-center gap-1.5 list-none [&::-webkit-details-marker]:hidden">
+                    <summary className="px-3 sm:px-4 py-2 text-2xs font-bold text-surface-500 uppercase tracking-widest cursor-pointer select-none hover:text-surface-600 flex items-center gap-1.5 list-none [&::-webkit-details-marker]:hidden">
                         <svg className="w-3 h-3 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
                         </svg>
                         Materials — {Math.round(share * 100)}% share of order
                     </summary>
                     <div className="px-3 sm:px-4 pb-3">
-                        <div className="grid grid-cols-12 gap-2 text-2xs font-bold text-surface-400 uppercase tracking-wide px-1 pb-1">
+                        <div className="grid grid-cols-12 gap-2 text-2xs font-bold text-surface-500 uppercase tracking-wide px-1 pb-1">
                             <span className="col-span-5">Material</span>
                             <span className="col-span-2 text-right">Req.</span>
                             <span className="col-span-2 text-right">Used</span>
@@ -2066,7 +2066,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                                     <div key={a.id} className="grid grid-cols-12 gap-2 items-center py-1.5 text-xs">
                                         <div className="col-span-5 min-w-0">
                                             <p className="font-medium text-surface-800 truncate">{a.material.name}</p>
-                                            <p className="text-2xs text-surface-400">{a.material.unit_of_measure}</p>
+                                            <p className="text-2xs text-surface-500">{a.material.unit_of_measure}</p>
                                         </div>
                                         <span className="col-span-2 text-right tabular-nums text-surface-600">{fmtNum(req)}</span>
                                         <span className="col-span-2 text-right tabular-nums text-surface-600">{fmtNum(used)}</span>
@@ -2077,7 +2077,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                                 );
                             })}
                         </div>
-                        <p className="text-2xs text-surface-400 mt-1.5">
+                        <p className="text-2xs text-surface-500 mt-1.5">
                             Pro-rata estimate: this batch is {batch.quantity} of {order.quantity} pieces, so it carries {Math.round(share * 100)}% of each order allocation.
                         </p>
                     </div>
@@ -2100,13 +2100,13 @@ function BatchesSection({ order, seqTasks, canEdit, onEditBatches, onUpload, onD
     if (batches.length === 0) return (
         <div className="text-center py-10">
             <p className="text-sm font-medium text-surface-500">No batches defined</p>
-            <p className="text-xs text-surface-400 mt-1 max-w-sm mx-auto">
+            <p className="text-xs text-surface-500 mt-1 max-w-sm mx-auto">
                 Split the order into colourway batches — same garment, different trim — and
                 tailors count each batch separately.
             </p>
             {canEdit && (
                 <button onClick={onEditBatches}
-                    className="mt-4 text-xs font-semibold text-brand-600 border border-dashed border-brand-300 rounded-xl px-4 py-2 hover:bg-brand-50 transition-colors">
+                    className="mt-4 text-xs font-semibold text-brand-700 border border-dashed border-brand-300 rounded-xl px-4 py-2 hover:bg-brand-50 transition-colors">
                     + Split into colourway batches
                 </button>
             )}
@@ -2115,12 +2115,12 @@ function BatchesSection({ order, seqTasks, canEdit, onEditBatches, onUpload, onD
     return (
         <div className="space-y-3">
             <div className="flex items-center justify-between">
-                <p className="text-xs text-surface-400">
+                <p className="text-xs text-surface-500">
                     {batches.length} batch{batches.length === 1 ? "" : "es"} · {order.quantity} pieces total
                 </p>
                 {canEdit && (
                     <button onClick={onEditBatches}
-                        className="text-2xs font-semibold text-brand-600 hover:text-brand-700">✎ Edit batches</button>
+                        className="text-2xs font-semibold text-brand-700 hover:text-brand-800">✎ Edit batches</button>
                 )}
             </div>
             {batches.map(b => (
@@ -2251,7 +2251,7 @@ export default function ProductionOrderDetailPage() {
 
     if (isLoading) return <div className="flex items-center justify-center h-64"><Spinner /></div>;
     if (!order) return (
-        <div className="text-center py-16 text-surface-400 text-sm">
+        <div className="text-center py-16 text-surface-500 text-sm">
             Production order not found.
             <button onClick={() => navigate("/production/orders")} className="block mt-3 btn-secondary mx-auto">Back</button>
         </div>
@@ -2601,7 +2601,7 @@ export default function ProductionOrderDetailPage() {
                             {tabs.map(t => (
                                 <button key={t.key} onClick={() => setTab(t.key as any)}
                                     className={clsx("px-2.5 sm:px-4 min-h-12 sm:min-h-0 py-2 sm:py-2.5 text-xs font-semibold border-b-2 transition-all whitespace-nowrap",
-                                        tab === t.key ? "border-brand-500 text-brand-600" : "border-transparent text-surface-500 hover:text-surface-700")}>
+                                        tab === t.key ? "border-brand-500 text-brand-700" : "border-transparent text-surface-500 hover:text-surface-700")}>
                                     <span className="hidden sm:inline">{t.icon} </span>{t.label}
                                 </button>
                             ))}
@@ -2637,7 +2637,7 @@ export default function ProductionOrderDetailPage() {
                         />}
                         {tab === "materials" && (
                             allocations.length === 0 ? (
-                                <div className="text-center py-10 text-surface-400">
+                                <div className="text-center py-10 text-surface-500">
                                     <p className="text-xs">No material allocations. <button onClick={() => setModal("materials")} className="text-brand-500 hover:underline">Issue materials now</button>.</p>
                                 </div>
                             ) : (
@@ -2659,7 +2659,7 @@ export default function ProductionOrderDetailPage() {
                                                     <tr key={a.id}>
                                                         <td className="px-3 py-2.5">
                                                             <p className="font-medium text-surface-800">{a.material.name}</p>
-                                                            <p className="text-2xs text-surface-400 font-mono">{a.material.code} · {a.material.unit_of_measure}</p>
+                                                            <p className="text-2xs text-surface-500 font-mono">{a.material.code} · {a.material.unit_of_measure}</p>
                                                         </td>
                                                         <td className="px-3 py-2.5 text-right tabular-nums">{a.quantity_required}</td>
                                                         <td className={clsx("px-3 py-2.5 text-right tabular-nums font-semibold", pct >= 100 ? "text-success-700" : "text-amber-700")}>{a.quantity_allocated}</td>
@@ -2682,7 +2682,7 @@ export default function ProductionOrderDetailPage() {
                             <div className="space-y-4">
                                 {specGender && (
                                     <div className="flex items-center gap-3 rounded-xl bg-surface-800 px-4 py-3">
-                                        <span className="text-2xs font-semibold uppercase tracking-widest text-surface-400">Gender</span>
+                                        <span className="text-2xs font-semibold uppercase tracking-widest text-surface-500">Gender</span>
                                         <span className="text-sm font-bold text-white capitalize">{specGender}</span>
                                     </div>
                                 )}
@@ -2701,7 +2701,7 @@ export default function ProductionOrderDetailPage() {
                                     </div>
                                 )}
                                 {!hasSpecs && !order.notes && (
-                                    <p className="text-xs text-surface-400 text-center py-8">No specifications recorded.</p>
+                                    <p className="text-xs text-surface-500 text-center py-8">No specifications recorded.</p>
                                 )}
                             </div>
                         )}
@@ -2733,7 +2733,7 @@ export default function ProductionOrderDetailPage() {
                                 ))}
                             </div>
                             <ProgressBar pct={order.completion_percentage} done={order.status === "completed"} />
-                            <p className="text-2xs text-surface-400 mt-1 text-right">{order.completion_percentage}%</p>
+                            <p className="text-2xs text-surface-500 mt-1 text-right">{order.completion_percentage}%</p>
                         </div>
 
                         {/* Assignees */}
@@ -2748,7 +2748,7 @@ export default function ProductionOrderDetailPage() {
                                             </div>
                                             <div>
                                                 <p className="text-xs font-semibold text-surface-800">{a.user.first_name} {a.user.last_name}</p>
-                                                <p className="text-2xs text-surface-400 capitalize">{a.role_in_order.replace("_", " ")}</p>
+                                                <p className="text-2xs text-surface-500 capitalize">{a.role_in_order.replace("_", " ")}</p>
                                             </div>
                                         </div>
                                     ))}
@@ -2763,7 +2763,7 @@ export default function ProductionOrderDetailPage() {
                                 keeps only a one-line pointer when batches exist. */}
                             {(order.batches?.length ?? 0) > 0 && (
                                 <button onClick={() => setTab("batches")}
-                                    className="w-full mb-5 flex items-center justify-between text-xs font-semibold text-brand-600 border border-brand-100 bg-brand-50/60 rounded-xl px-3 py-2 hover:bg-brand-50 transition-colors">
+                                    className="w-full mb-5 flex items-center justify-between text-xs font-semibold text-brand-700 border border-brand-100 bg-brand-50/60 rounded-xl px-3 py-2 hover:bg-brand-50 transition-colors">
                                     <span>🎨 {order.batches!.length} colourway batch{order.batches!.length === 1 ? "" : "es"}</span>
                                     <span aria-hidden="true">→</span>
                                 </button>
@@ -2818,7 +2818,7 @@ export default function ProductionOrderDetailPage() {
 
                         <div className="mb-5">
                             <label className="block text-xs font-semibold text-surface-700 mb-1.5">
-                                Reason <span className="text-surface-400 font-normal">(optional)</span>
+                                Reason <span className="text-surface-500 font-normal">(optional)</span>
                             </label>
                             <textarea
                                 value={cancelReason}

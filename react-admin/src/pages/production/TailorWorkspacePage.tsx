@@ -205,7 +205,7 @@ const WORKFLOW_SECTIONS: { id: WorkflowState; label: string; tone: string; hint:
     { id: "in_progress", label: "In progress",       tone: "text-brand-700 bg-brand-50 border-brand-200",     hint: "Pick up where you left off" },
     // Second, not buried in Completed: a garment she finished came back from
     // inspection. Nothing to tap yet; her manager decides the rework.
-    { id: "qc_failed",   label: "Failed QC",         tone: "text-danger bg-danger-light border-danger/30",     hint: "Your manager will decide the rework — nothing to do yet" },
+    { id: "qc_failed",   label: "Failed QC",         tone: "text-danger-700 bg-danger-light border-danger/30",     hint: "Your manager will decide the rework — nothing to do yet" },
     { id: "ready",       label: "Ready to start",    tone: "text-success-700 bg-success-50 border-success-200", hint: "Nothing is blocking these" },
     { id: "waiting",     label: "Waiting",           tone: "text-amber-700 bg-amber-50 border-amber-200",     hint: "Blocked by an earlier stage or missing materials" },
     { id: "qc",          label: "Ready for QC",      tone: "text-accent-700 bg-accent-50 border-accent-200",  hint: "Your part is done — awaiting quality check" },
@@ -540,19 +540,19 @@ function SpecsDrawer({
         <RightDrawer open={open} onClose={onClose} title="Order specs">
             <div className="p-4 space-y-5">
                 <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-mono text-xs text-surface-400">
+                    <span className="font-mono text-xs text-surface-500">
                         {order.order_number}
                     </span>
                     <PriorityBadge priority={order.priority} />
                     <DueBadge date={order.due_date} />
-                    <span className="text-xs text-surface-400">
+                    <span className="text-xs text-surface-500">
                         Qty: {order.quantity}
                     </span>
                 </div>
 
                 {task.stage.description && (
                     <div className="rounded-xl bg-brand-50 border border-brand-100 p-3">
-                        <p className="text-2xs font-bold text-brand-600 uppercase tracking-widest mb-1">
+                        <p className="text-2xs font-bold text-brand-700 uppercase tracking-widest mb-1">
                             Stage notes
                         </p>
                         <p className="text-xs text-brand-900">
@@ -563,7 +563,7 @@ function SpecsDrawer({
 
                 {hasMeasurements && (
                     <div>
-                        <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2">
+                        <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest mb-2">
                             Measurements{gender ? ` · ${gender}` : ""}
                         </p>
                         <div className="grid grid-cols-2 gap-2">
@@ -573,7 +573,7 @@ function SpecsDrawer({
                                         key={k}
                                         className="rounded-xl bg-surface-50 border border-line px-3 py-2.5 flex flex-col gap-0.5"
                                     >
-                                        <span className="text-2xs text-surface-400 uppercase tracking-wide">
+                                        <span className="text-2xs text-surface-500 uppercase tracking-wide">
                                             {k}
                                         </span>
                                         <span className="text-xl font-bold text-surface-900 leading-none">
@@ -588,7 +588,7 @@ function SpecsDrawer({
 
                 {hasSpecs && (
                     <div>
-                        <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2">
+                        <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest mb-2">
                             Specifications
                         </p>
                         <div className="card p-3 space-y-2">
@@ -613,7 +613,7 @@ function SpecsDrawer({
 
                 {hasPrefs && (
                     <div>
-                        <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2">
+                        <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest mb-2">
                             Customer preferences
                         </p>
                         <div className="card p-3 space-y-2">
@@ -638,7 +638,7 @@ function SpecsDrawer({
 
                 {hasMaterials && (
                     <div>
-                        <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2">
+                        <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest mb-2">
                             Materials
                         </p>
                         {/* Allocated / required, as on the Focus card — the
@@ -673,7 +673,7 @@ function SpecsDrawer({
                     !hasSpecs &&
                     !hasPrefs &&
                     !hasMaterials && (
-                        <p className="text-sm text-surface-400 text-center py-6">
+                        <p className="text-sm text-surface-500 text-center py-6">
                             No specifications recorded for this order.
                         </p>
                     )}
@@ -722,7 +722,7 @@ function CompletionScreen({
                 <p className="text-xl font-bold text-surface-900">
                     Stage done!
                 </p>
-                <p className="text-xs text-surface-400 mt-1">
+                <p className="text-xs text-surface-500 mt-1">
                     {getProductName(completedTask)} ·{" "}
                     {completedTask.stage.name}
                 </p>
@@ -754,7 +754,7 @@ function CompletionScreen({
                                         {nextGroup.productName}
                                     </p>
                                     <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                        <span className="text-xs font-medium text-brand-600">
+                                        <span className="text-xs font-medium text-brand-700">
                                             {nextTask.stage.name}
                                         </span>
                                         <DueBadge date={nextGroup.dueDate} />
@@ -779,7 +779,7 @@ function CompletionScreen({
                         <p className="font-bold text-surface-900">
                             All tasks done!
                         </p>
-                        <p className="text-xs text-surface-400 mt-1">
+                        <p className="text-xs text-surface-500 mt-1">
                             You've cleared your queue.
                         </p>
                     </div>
@@ -832,7 +832,7 @@ function InlineDetail({
                 <span className="text-2xs font-bold text-surface-600 uppercase tracking-widest">
                     {label}
                 </span>
-                <span className="text-2xs font-semibold text-surface-400">
+                <span className="text-2xs font-semibold text-surface-500">
                     {count}
                 </span>
                 {alert && (
@@ -842,7 +842,7 @@ function InlineDetail({
                 )}
                 <svg
                     className={clsx(
-                        "w-3.5 h-3.5 text-surface-400 ml-auto transition-transform",
+                        "w-3.5 h-3.5 text-surface-500 ml-auto transition-transform",
                         open && "rotate-180"
                     )}
                     fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
@@ -969,22 +969,22 @@ function FocusCard({
                                 </p>
                                 <p className="text-[13px] font-medium text-surface-600 leading-snug truncate">
                                     {group.productName}
-                                    {gender && <span className="text-surface-400"> · {gender}</span>}
+                                    {gender && <span className="text-surface-500"> · {gender}</span>}
                                 </p>
                             </>
                         ) : (
                             <p className="font-bold text-surface-900 text-base leading-snug truncate">
                                 {group.productName}
-                                {gender && <span className="text-surface-400 font-medium"> · {gender}</span>}
+                                {gender && <span className="text-surface-500 font-medium"> · {gender}</span>}
                             </p>
                         )}
-                        <p className="font-mono text-2xs text-surface-400 mt-0.5">
+                        <p className="font-mono text-2xs text-surface-500 mt-0.5">
                             {group.orderNumber}
                         </p>
                         <div className="flex items-center gap-2 flex-wrap mt-1.5">
                             <PriorityBadge priority={group.priority} />
                             <DueBadge date={group.dueDate} />
-                            <span className="text-2xs text-surface-400">
+                            <span className="text-2xs text-surface-500">
                                 Qty {group.quantity}
                             </span>
                         </div>
@@ -993,10 +993,10 @@ function FocusCard({
                     {/* Timer */}
                     {elapsed && (
                         <div className="shrink-0 flex flex-col items-end">
-                            <span className="text-lg font-bold font-mono text-brand-600 leading-none tabular-nums">
+                            <span className="text-lg font-bold font-mono text-brand-700 leading-none tabular-nums">
                                 {elapsed}
                             </span>
-                            <span className="text-2xs text-surface-400 mt-0.5">
+                            <span className="text-2xs text-surface-500 mt-0.5">
                                 on task
                             </span>
                         </div>
@@ -1093,7 +1093,7 @@ function FocusCard({
                 {/* Progress header */}
                 <div className="px-3 pt-3 pb-2">
                     <div className="flex items-baseline justify-between gap-2 mb-1.5">
-                        <span className="text-2xs font-bold text-surface-400 uppercase tracking-widest whitespace-nowrap">
+                        <span className="text-2xs font-bold text-surface-500 uppercase tracking-widest whitespace-nowrap">
                             Your stages
                         </span>
                         <span className="text-2xs font-semibold text-surface-500 whitespace-nowrap">
@@ -1266,9 +1266,9 @@ function FocusCard({
                                                     )}
                                                     <div className="flex items-center gap-1 flex-wrap">
                                                         <span className="text-xs font-bold tabular-nums text-surface-700">
-                                                            {done}<span className="text-surface-400 font-medium">/{cap}</span>
+                                                            {done}<span className="text-surface-500 font-medium">/{cap}</span>
                                                             {batch && (
-                                                                <span className="text-2xs text-surface-400 font-medium ml-1.5">
+                                                                <span className="text-2xs text-surface-500 font-medium ml-1.5">
                                                                     overall {overall}/{order!.quantity}
                                                                 </span>
                                                             )}
@@ -1372,7 +1372,7 @@ function DeliveryWeekStrip({ groups }: { groups: OrderGroup[] }) {
     return (
         <div className="card px-3 py-2.5">
             <div className="flex items-center justify-between mb-2">
-                <p className="text-2xs font-bold uppercase tracking-wide text-surface-400">Delivery week</p>
+                <p className="text-2xs font-bold uppercase tracking-wide text-surface-500">Delivery week</p>
                 {overdue > 0 && (
                     <span className="text-2xs font-bold text-danger bg-danger-light rounded-full px-2 py-0.5">
                         {overdue} overdue
@@ -1388,7 +1388,7 @@ function DeliveryWeekStrip({ groups }: { groups: OrderGroup[] }) {
                             "rounded-lg py-1.5 text-center border",
                             isToday ? "border-brand-300 bg-brand-50" : "border-line bg-surface-50",
                         )}>
-                            <p className="text-2xs text-surface-400 leading-none">
+                            <p className="text-2xs text-surface-500 leading-none">
                                 {d.toLocaleDateString("en-KE", { weekday: "short", timeZone: "UTC" })}
                             </p>
                             <p className={clsx("text-xs font-bold mt-0.5", isToday ? "text-brand-700" : "text-surface-700")}>
@@ -1401,7 +1401,7 @@ function DeliveryWeekStrip({ groups }: { groups: OrderGroup[] }) {
                                         daysUntil(g.dueDate) < 0 ? "bg-danger" : "bg-brand-500",
                                     )} />
                                 ))}
-                                {due.length > 3 && <span className="text-2xs leading-none text-surface-400">+</span>}
+                                {due.length > 3 && <span className="text-2xs leading-none text-surface-500">+</span>}
                             </div>
                         </div>
                     );
@@ -1478,7 +1478,7 @@ function QueueOrderGroup({
                             {group.productName}
                         </span>
                         {isFocusedOrder && (
-                            <span className="text-2xs font-bold text-brand-600 bg-brand-100 px-1.5 py-0.5 rounded-full">
+                            <span className="text-2xs font-bold text-brand-700 bg-brand-100 px-1.5 py-0.5 rounded-full">
                                 Active
                             </span>
                         )}
@@ -1490,7 +1490,7 @@ function QueueOrderGroup({
                         )}
                     </div>
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                        <span className="font-mono text-2xs text-surface-400">
+                        <span className="font-mono text-2xs text-surface-500">
                             {group.orderNumber}
                         </span>
                         <DueBadge date={group.dueDate} />
@@ -1506,7 +1506,7 @@ function QueueOrderGroup({
                                 style={{ width: `${progressPct}%` }}
                             />
                         </div>
-                        <span className="text-2xs text-surface-400 shrink-0">
+                        <span className="text-2xs text-surface-500 shrink-0">
                             {orderProgress
                                 ? `${orderProgress.percent}%`
                                 : `${group.completedCount}/${group.totalCount}`}
@@ -1924,8 +1924,8 @@ export default function TailorWorkspacePage() {
                         className={clsx(
                             "relative py-3 px-1 mr-6 text-sm font-semibold transition-colors",
                             activeTab === tab
-                                ? "text-brand-600"
-                                : "text-surface-400"
+                                ? "text-brand-700"
+                                : "text-surface-500"
                         )}
                     >
                         {tab === "focus" ? "Focus" : "Queue"}
@@ -1968,7 +1968,7 @@ export default function TailorWorkspacePage() {
                                 {/* Order position indicator */}
                                 {activeGroups.length > 1 && (
                                     <div className="flex items-center justify-between">
-                                        <p className="text-xs text-surface-400">
+                                        <p className="text-xs text-surface-500">
                                             Order {clampedFocusIndex + 1} of{" "}
                                             {activeGroups.length}
                                         </p>
@@ -2071,7 +2071,7 @@ export default function TailorWorkspacePage() {
                                 )}
                             </>
                         ) : (
-                            <div className="flex flex-col items-center justify-center py-24 text-surface-400">
+                            <div className="flex flex-col items-center justify-center py-24 text-surface-500">
                                 <div className="w-16 h-16 rounded-2xl bg-surface-100 flex items-center justify-center mb-4">
                                     <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
                                         <path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" />
@@ -2119,7 +2119,7 @@ export default function TailorWorkspacePage() {
                         </div>
 
                         {queueGroups.length === 0 ? (
-                            <div className="card flex flex-col items-center justify-center py-16 text-surface-400">
+                            <div className="card flex flex-col items-center justify-center py-16 text-surface-500">
                                 <p className="text-sm font-medium">
                                     {queueFilter === "active"
                                         ? "No active tasks right now"
@@ -2144,7 +2144,7 @@ export default function TailorWorkspacePage() {
                                                 <span className={clsx("text-2xs font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border", section.tone)}>
                                                     {section.label} · {inLane.length}
                                                 </span>
-                                                {section.hint && <span className="text-2xs text-surface-400">{section.hint}</span>}
+                                                {section.hint && <span className="text-2xs text-surface-500">{section.hint}</span>}
                                             </div>
                                             <div className="space-y-3">
                                                 {inLane.map((group, i) => (
