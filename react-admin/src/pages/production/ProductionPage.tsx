@@ -2246,14 +2246,20 @@ function WIPTab({
                                                     <p className="font-mono text-2xs font-bold text-surface-500 mb-1">{o.order_number}</p>
 
                                                     {/* 1 — customer, 2 — garment + SKU */}
+                                                    {/* The SKU always follows the garment, whichever
+                                                        line the garment is on: "For stock · SKU" read as
+                                                        if the SKU described the stock. */}
                                                     <p className="text-xs font-semibold text-surface-900 truncate"
-                                                       title={isCustomer ? jobFor(o) : o.product_name}>
+                                                       title={isCustomer ? jobFor(o) : `${o.product_name}${o.product?.sku ? ` · ${o.product.sku}` : ""}`}>
                                                         {isCustomer ? jobFor(o) : o.product_name}
+                                                        {!isCustomer && o.product?.sku && (
+                                                            <span className="font-mono font-normal text-2xs text-surface-500"> · {o.product.sku}</span>
+                                                        )}
                                                     </p>
                                                     <p className="text-2xs text-surface-500 truncate"
-                                                       title={`${isCustomer ? o.product_name : jobFor(o)}${o.product?.sku ? ` · ${o.product.sku}` : ""}`}>
+                                                       title={isCustomer ? `${o.product_name}${o.product?.sku ? ` · ${o.product.sku}` : ""}` : jobFor(o)}>
                                                         {isCustomer ? o.product_name : jobFor(o)}
-                                                        {o.product?.sku && (
+                                                        {isCustomer && o.product?.sku && (
                                                             <span className="font-mono text-surface-500"> · {o.product.sku}</span>
                                                         )}
                                                     </p>
