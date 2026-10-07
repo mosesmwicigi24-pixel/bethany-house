@@ -603,17 +603,20 @@ export function Topbar({
                     aria-label="Breadcrumb"
                     className="flex items-center gap-1.5 text-sm min-w-0"
                 >
-                    {/* On a phone only the page you are on, on one line: the
-                        full trail wrapped "Sales / & / Orders" onto three. */}
+                    {/* Below lg only the page you are on, on one line: the
+                        full trail wrapped "Sales / & / Orders" onto three on a
+                        phone, and on a portrait tablet (768-1023px, beside the
+                        search button) "Production" was squeezed until it drew
+                        over "My Tasks" (Production Cycle 10). */}
                     {breadcrumbs.map((crumb, i) => (
-                        <span key={i} className={clsx("items-center gap-1.5 min-w-0", i < breadcrumbs.length - 1 ? "hidden sm:flex" : "flex")}>
+                        <span key={i} className={clsx("items-center gap-1.5 min-w-0", i < breadcrumbs.length - 1 ? "hidden lg:flex" : "flex")}>
                             {i > 0 && (
-                                <span className="text-surface-500 hidden sm:inline">/</span>
+                                <span className="text-surface-500 hidden lg:inline">/</span>
                             )}
                             {crumb.href && i < breadcrumbs.length - 1 ? (
                                 <Link
                                     to={crumb.href}
-                                    className="text-surface-500 hover:text-surface-700 transition-colors"
+                                    className="whitespace-nowrap text-surface-500 hover:text-surface-700 transition-colors"
                                 >
                                     {crumb.label}
                                 </Link>
@@ -665,12 +668,15 @@ export function Topbar({
                                         {user?.first_name?.[0]}{user?.last_name?.[0]}
                                     </span>
                                 </div>
-                                <div className="hidden sm:flex flex-col items-start leading-tight">
+                                {/* Name and role from lg only: on a portrait tablet the
+                                    name wrapped to two lines and squeezed the page
+                                    title to "My T…". The sidebar footer shows both. */}
+                                <div className="hidden lg:flex flex-col items-start leading-tight">
                                     <span className="text-sm font-medium text-surface-700">{fullName}</span>
                                     {roleName && <span className="text-2xs text-surface-500">{roleName}</span>}
                                 </div>
                                 <svg
-                                    className={clsx("w-4 h-4 text-surface-400 transition-transform hidden sm:block", userMenuOpen && "rotate-180")}
+                                    className={clsx("w-4 h-4 text-surface-400 transition-transform hidden lg:block", userMenuOpen && "rotate-180")}
                                     fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
                                 >
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />

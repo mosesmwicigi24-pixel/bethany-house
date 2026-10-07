@@ -988,7 +988,7 @@ function IssueMaterialsModal({ order, onClose, onSaved }: { order: ProductionOrd
 // QC MODAL
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function QCModal({ order, onClose, onDone }: { order: ProductionOrder; onClose: () => void; onDone: () => void }) {
+function QCModal({ order, onClose, onDone }: { order: ProductionOrder; onClose: () => void; onDone: (passed: boolean) => void }) {
     const toast = useToastStore();
     const [form, setForm] = useState({
         passed: true, passed_quantity: order.quantity, failed_quantity: 0,
@@ -999,7 +999,7 @@ function QCModal({ order, onClose, onDone }: { order: ProductionOrder; onClose: 
         mutationFn: () => post(`/v1/admin/production-orders/${order.id}/qc`, form),
         onSuccess: () => {
             toast.success(form.passed ? "QC passed" : "QC failed — recorded on the order");
-            onDone(); onClose();
+            onDone(form.passed); onClose();
         },
         onError: (e: ApiError) => toast.error(e.message),
     });
@@ -1137,7 +1137,7 @@ function CompleteModal({ order, onClose, onDone }: { order: ProductionOrder; onC
                     <button onClick={onClose} className="btn-secondary flex-1">Cancel</button>
                     <button onClick={() => mutation.mutate()} disabled={mutation.isPending}
                         className="btn-primary flex-1">
-                        {mutation.isPending ? "Processing…" : "Complete & Add to Inventory"}
+                        {mutation.isPending ? "Processing…" : "Complete & stock"}
                     </button>
                 </div>
             </div>
@@ -2851,6 +2851,10 @@ function QualityControlTab() {
     const qc = useQueryClient();
     const navigate = useNavigate();
     const [selectedId, setSelectedId] = useState<number | null>(null);
+    // "Inspect Now" opens the inspection form itself (Production Cycle 10):
+    // it was a label that looked like a button, so a click opened the order
+    // summary and the inspector needed a second click on "Quality Check".
+    const [inspecting, setInspecting] = useState<ProductionOrder | null>(null);
     const [filterStatus, setFilterStatus] = useState<"all" | "pending" | "passed" | "failed">("pending");
     const refresh = useCallback(() => qc.invalidateQueries({ queryKey: ["production-qc"] }), [qc]);
 
@@ -2959,22 +2963,32 @@ function QualityControlTab() {
 
                                         {/* QC action inline for pending */}
                                         {o.status === "qc_pending" && (
-                                            <div className="text-xs text-accent-600 font-semibold bg-accent-50 rounded-xl px-3 py-2 shrink-0 flex items-center gap-1.5">
+                                            <button type="button"
+                                                onClick={(e) => { e.stopPropagation(); setInspecting(o); }}
+                                                className="min-h-11 text-xs text-accent-700 font-semibold bg-accent-50 hover:bg-accent-100 rounded-xl px-3 py-2 shrink-0 flex items-center gap-1.5 transition-colors">
                                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                                                 Inspect Now
-                                            </div>
+                                            </button>
                                         )}
                                         {o.status === "qc_passed" && (
-                                            <div className="text-xs text-success font-semibold flex items-center gap-1.5">
+                                            // Stocking moves inventory, so it is done on the
+                                            // order page, deliberately; this takes her there
+                                            // (it was a label that looked like a button).
+                                            <button type="button"
+                                                onClick={(e) => { e.stopPropagation(); navigate(`/production/orders/${o.id}`); }}
+                                                className="min-h-11 text-xs text-success-700 font-semibold bg-success-light hover:bg-success-200 rounded-xl px-3 py-2 shrink-0 flex items-center gap-1.5 transition-colors">
                                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
-                                                Ready to Stock
-                                            </div>
+                                                Complete &amp; stock →
+                                            </button>
                                         )}
                                         {o.status === "qc_failed" && (
-                                            <div className="text-xs text-danger font-semibold flex items-center gap-1.5">
-                                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                                                Rework Needed
-                                            </div>
+                                            // The action, not a label: it opens the order with
+                                            // the send-back form ready (Production Cycle 10).
+                                            <button type="button"
+                                                onClick={(e) => { e.stopPropagation(); navigate(`/production/orders/${o.id}?rework=1`); }}
+                                                className="min-h-11 text-xs text-danger-700 font-semibold bg-danger-light hover:bg-danger-200 rounded-xl px-3 py-2 shrink-0 flex items-center gap-1.5 transition-colors">
+                                                ↩ Send back for rework
+                                            </button>
                                         )}
                                     </div>
                                     <div className="flex justify-end mt-2 pt-2 border-t border-surface-50">
@@ -2993,6 +3007,15 @@ function QualityControlTab() {
 
             {selectedId && (
                 <OrderDetailModal orderId={selectedId} onClose={() => setSelectedId(null)} onUpdated={refresh} />
+            )}
+            {inspecting && (
+                <QCModal order={inspecting} onClose={() => setInspecting(null)}
+                    onDone={(passed) => {
+                        refresh();
+                        // A fail leads straight to the decision it needs: which
+                        // stage the order goes back to (Production Cycle 10).
+                        if (!passed) navigate(`/production/orders/${inspecting.id}?rework=1`);
+                    }} />
             )}
         </div>
     );

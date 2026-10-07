@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { toBusinessDateInput } from "@/lib/businessDate";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import {
@@ -468,7 +468,14 @@ function ReworkModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
     const toast = useToastStore();
     const qc = useQueryClient();
     const [picked, setPicked] = useState<Record<number, { pieces: string; assignee: string }>>({});
-    const [reason, setReason] = useState("");
+    // The inspector already wrote what failed: the QC endpoint appends it to
+    // the order notes as "QC: …". Start the reason from the latest one so it
+    // is not typed twice (Production Cycle 10); it stays editable.
+    const [reason, setReason] = useState(() => {
+        const qcLines = (order.notes ?? "").split("\n").filter((l) => l.startsWith("QC: "));
+        const last = qcLines[qcLines.length - 1]?.slice(4).trim() ?? "";
+        return last === "Failed" ? "" : last;
+    });
 
     const { data: tailorsData } = useQuery({
         queryKey: ["staff-users-list"],
@@ -934,7 +941,7 @@ function CompleteModal({ order, onClose, onDone }: { order: ProductionOrder; onC
                 <div className="flex gap-3">
                     <button onClick={onClose} className="btn-secondary flex-1">Cancel</button>
                     <button onClick={() => mutation.mutate()} disabled={mutation.isPending} className="btn-primary flex-1">
-                        {mutation.isPending ? "Processing…" : "Complete & Add to Inventory"}
+                        {mutation.isPending ? "Processing…" : "Complete & stock"}
                     </button>
                 </div>
             </div>
@@ -2179,6 +2186,16 @@ export default function ProductionOrderDetailPage() {
         staleTime: 0,
     });
     const order = (data as any)?.order as ProductionOrder | undefined;
+
+    // ?rework=1 — arriving from a failed inspection on the QC page: open the
+    // send-back form straight away, once (Production Cycle 10).
+    const [searchParams, setSearchParams] = useSearchParams();
+    useEffect(() => {
+        if (searchParams.get("rework") !== "1" || !order) return;
+        if (order.status === "qc_failed" && can("production.submit_qc")) setModal("rework");
+        searchParams.delete("rework");
+        setSearchParams(searchParams, { replace: true });
+    }, [order, searchParams, setSearchParams, can]);
 
     const refresh = useCallback(() => {
         qc.invalidateQueries({ queryKey: ["production-order", Number(id)] });

@@ -1009,7 +1009,7 @@ function FocusCard({
                         <svg className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
                         </svg>
-                        <p className="text-xs text-amber-800 leading-relaxed">
+                        <p className="text-xs text-amber-800 leading-relaxed whitespace-pre-line">
                             {order.notes}
                         </p>
                     </div>
@@ -1730,6 +1730,42 @@ export default function TailorWorkspacePage() {
         Math.max(0, activeGroups.length - 1)
     );
     const focusedGroup = activeGroups[clampedFocusIndex] ?? null;
+
+    // Focus follows the ORDER, not the slot (Production Cycle 10). Counting the
+    // last piece finishes a stage without the "Mark done" screen, and the order
+    // then leaves Focus: the index used to stay put and silently land her on
+    // whatever job slid into that slot. Now: if the order only moved in the
+    // ranking, keep it in focus; if her stages on it are all done, say where it
+    // went and open her most urgent job.
+    const focusedOrderRef = useRef<number | null>(null);
+    // She moved (Next/Prev, a queue tap): remember the order she is on.
+    useEffect(() => {
+        focusedOrderRef.current = focusedGroup?.orderId ?? null;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [focusIndex]);
+    // The list changed under her: follow the order, or move on when it is gone.
+    useEffect(() => {
+        const prev = focusedOrderRef.current;
+        if (prev == null) {
+            focusedOrderRef.current = focusedGroup?.orderId ?? null;
+            return;
+        }
+        const now = activeGroups.findIndex((g) => g.orderId === prev);
+        if (now >= 0) {
+            if (now !== clampedFocusIndex) setFocusIndex(now);
+            return;
+        }
+        const gone = allGroups.find((g) => g.orderId === prev);
+        if (gone && !showCompletion) {
+            const status = gone.tasks[0]?.production_order?.status;
+            toast.success(status === "qc_pending"
+                ? `Your stages on ${gone.orderNumber} are done — it's with Quality Control`
+                : `Your stages on ${gone.orderNumber} are done`);
+        }
+        focusedOrderRef.current = activeGroups[0]?.orderId ?? null;
+        setFocusIndex(0);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeGroups]);
     // The task to pass to Note/Specs drawers is the active task of the focused group
     const drawerTask = focusedGroup?.activeTask ?? null;
 
