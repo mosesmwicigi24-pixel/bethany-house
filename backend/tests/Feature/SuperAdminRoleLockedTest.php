@@ -26,6 +26,7 @@ class SuperAdminRoleLockedTest extends TestCase
         $sa = User::factory()->create();
         $sa->assignRole(Role::findByName('super_admin', 'sanctum'));
         Sanctum::actingAs($sa);
+        $this->stepUp($sa);   // role edits are a step-up route (Phase 4C)
         $role = Role::findByName('super_admin', 'sanctum');
         $before = $role->permissions()->count();
         $ids = Permission::where('guard_name', 'sanctum')->pluck('id')->all();
