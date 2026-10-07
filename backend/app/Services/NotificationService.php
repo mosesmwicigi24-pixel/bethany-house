@@ -962,6 +962,35 @@ class NotificationService
     }
 
     /**
+     * A QC-failed order was sent back for rework: each tailor given a stage
+     * to redo is told which, how many pieces, and why. Opens My Tasks, where
+     * the stage is open work again.
+     *
+     * @param list<array{user_id:?int, stage:?string, pieces:int}> $stages
+     */
+    public static function productionReworkAssigned(
+        int $productionOrderId,
+        string $orderNumber,
+        string $productName,
+        array $stages,
+        string $reason
+    ): void {
+        foreach (collect($stages)->filter(fn ($s) => $s['user_id'])->groupBy('user_id') as $userId => $mine) {
+            $what = $mine->map(fn ($s) => ($s['stage'] ?? 'a stage') . " ({$s['pieces']} " . ($s['pieces'] === 1 ? 'piece' : 'pieces') . ')')->implode(', ');
+            self::send(
+                self::resolve([], null, [(int) $userId]),
+                new InAppNotification(
+                    title:     "Rework: {$productName}",
+                    body:      "{$orderNumber} is back for rework — {$what}. Reason: {$reason}",
+                    actionUrl: '/production/my-tasks',
+                    icon:      'production',
+                    data:      ['production_order_id' => $productionOrderId],
+                )
+            );
+        }
+    }
+
+    /**
      * Fired when a production order fails quality control.
      */
     public static function productionQcFailed(

@@ -28,7 +28,7 @@ export const ORDER_STATUS: Record<string, StatusStyle> = {
     on_hold:     { label: "On Hold",     bg: "bg-warning-light",  text: "text-warning-dark", dot: "bg-warning" },
     qc_pending:  { label: "Awaiting QC", bg: "bg-accent-50",      text: "text-accent-700",   dot: "bg-accent-500" },
     qc_passed:   { label: "QC Passed",   bg: "bg-success-light",  text: "text-success-dark", dot: "bg-success-vivid" },
-    qc_failed:   { label: "QC Failed",   bg: "bg-danger-light",   text: "text-danger",       dot: "bg-danger" },
+    qc_failed:   { label: "QC Failed",   bg: "bg-danger-light",   text: "text-danger-700",       dot: "bg-danger" },
     completed:   { label: "Completed",   bg: "bg-success-light",  text: "text-success-dark", dot: "bg-success-vivid" },
     cancelled:   { label: "Cancelled",   bg: "bg-surface-100",    text: "text-surface-500",  dot: "bg-surface-300", strike: true },
 };
@@ -39,7 +39,7 @@ export const TASK_STATUS: Record<string, StatusStyle> = {
     paused:      { label: "Paused",      bg: "bg-warning-light", text: "text-warning-dark", dot: "bg-warning" },
     completed:   { label: "Done",        bg: "bg-success-light", text: "text-success-dark", dot: "bg-success-vivid" },
     skipped:     { label: "Skipped",     bg: "bg-surface-100",   text: "text-surface-500",  dot: "bg-surface-300" },
-    failed:      { label: "Failed",      bg: "bg-danger-light",  text: "text-danger",       dot: "bg-danger" },
+    failed:      { label: "Failed",      bg: "bg-danger-light",  text: "text-danger-700",       dot: "bg-danger" },
 };
 
 const FALLBACK: StatusStyle = { label: "", bg: "bg-surface-100", text: "text-surface-500", dot: "bg-surface-400" };
@@ -68,7 +68,7 @@ export const PRIORITY: Record<string, { label: string; cls: string; dot: string;
     low:    { label: "Low",    cls: "text-surface-500 bg-surface-50 border-surface-200",   dot: "bg-surface-300", border: "border-l-surface-300" },
     normal: { label: "Normal", cls: "text-surface-600 bg-surface-50 border-surface-200",   dot: "bg-surface-400", border: "border-l-surface-300" },
     high:   { label: "High",   cls: "text-warning-dark bg-warning-light border-warning/30", dot: "bg-warning",     border: "border-l-warning" },
-    urgent: { label: "Urgent", cls: "text-danger bg-danger-light border-danger/30",        dot: "bg-danger",      border: "border-l-danger" },
+    urgent: { label: "Urgent", cls: "text-danger-700 bg-danger-light border-danger/30",        dot: "bg-danger",      border: "border-l-danger" },
 };
 
 export function priority(p?: string | null) {
@@ -235,11 +235,11 @@ export function dueInfo(date?: string | null, status?: string | null): { label: 
 }
 
 export const DUE_TONE_CLS: Record<DueTone, string> = {
-    overdue: "text-danger",
+    overdue: "text-danger-700",
     today:   "text-warning-dark",
     soon:    "text-warning-dark",
     later:   "text-surface-500",
-    none:    "text-surface-400",
+    none:    "text-surface-500",
 };
 
 export function DueBadge({ date, status, className }: { date?: string | null; status?: string | null; className?: string }) {
