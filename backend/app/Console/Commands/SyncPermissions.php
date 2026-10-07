@@ -756,7 +756,24 @@ class SyncPermissions extends Command
             }
 
             if ($perms === '*') {
-                $this->info("  {$roleName}: super admin - no explicit permissions needed (wildcard bypass)");
+                // Owner, 2026-10-07: the super admin HOLDS every permission,
+                // not only passes checks through Gate::before — so the Roles
+                // screen shows every box ticked, explicit checks
+                // (hasPermissionTo) agree, and every permission declared from
+                // now on reaches the role on the next start. Add-only, like
+                // the rest of sync. The engine's rules are not permissions and
+                // stay: the maker never signs, nobody signs one request twice.
+                $t = config('permission.table_names');
+                $missing = \Illuminate\Support\Facades\DB::table($t['permissions'])
+                    ->where('guard_name', 'sanctum')
+                    ->whereNotIn('id', \Illuminate\Support\Facades\DB::table($t['role_has_permissions'])
+                        ->where('role_id', $role->id)->select('permission_id'))
+                    ->pluck('id');
+                foreach ($missing as $permissionId) {
+                    \Illuminate\Support\Facades\DB::table($t['role_has_permissions'])
+                        ->insertOrIgnore(['role_id' => $role->id, 'permission_id' => $permissionId]);
+                }
+                $this->info("  {$roleName}: holds every permission (+{$missing->count()} added)");
                 continue;
             }
 
