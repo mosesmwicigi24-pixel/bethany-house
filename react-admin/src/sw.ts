@@ -374,7 +374,10 @@ async function replayOnce(): Promise<void> {
     if (synced > 0) {
         await notifyClients({
             type: "task-updates-synced",
-            message: synced === 1 ? "Your offline update has synced." : `${synced} offline updates have synced.`,
+            // Not "your": after a shared-tablet sign-out (offlineQueue.ts) the
+            // update may be the previous tailor's, and this reaches whoever
+            // is signed in now.
+            message: synced === 1 ? "An offline update has synced." : `${synced} offline updates have synced.`,
         });
     }
 }

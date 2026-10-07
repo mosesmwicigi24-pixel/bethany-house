@@ -107,8 +107,6 @@ Route::prefix('v1')->group(function () {
         Route::post('/2fa/setup/confirm', [AuthController::class, 'adminConfirm2faSetup']);
 
         Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
-            Route::post('/logout',      [AuthController::class, 'logout']);
-            Route::get('/me',           [AuthController::class, 'adminMe']);
             Route::post('/2fa/enable',  [AuthController::class, 'enable2FA']);
             // Confirms a TOTP code and activates 2FA on the already-
             // authenticated account (profile security settings flow).
@@ -119,6 +117,19 @@ Route::prefix('v1')->group(function () {
             Route::post('/2fa/confirm', [AuthController::class, 'verify2FA']);
             Route::post('/2fa/disable', [AuthController::class, 'disable2FA']);
         });
+    });
+
+    // ═══ THE SIGNED-IN SESSION ═══════════════════════════════════════════════
+    // Outside the throttle:auth group above (5/min per IP). That limiter is
+    // for guessing passwords and codes; these two need a valid token and
+    // guess nothing. Every page load calls /me, so inside it a shop of
+    // tablets behind one address shared 5 page loads a minute, and the
+    // sixth showed "Can't reach Bethany House" (Production Cycle 9). A queued
+    // sign-out (offlineQueue.ts) spent the same allowance. The per-user
+    // throttle:api limit (120/min) still applies.
+    Route::prefix('admin/auth')->middleware(['auth:sanctum', 'throttle:api'])->group(function () {
+        Route::post('/logout',      [AuthController::class, 'logout']);
+        Route::get('/me',           [AuthController::class, 'adminMe']);
     });
 
     // ═══ SIGN-IN SAFETY — the signed-in person (Phase 4C) ════════════════════

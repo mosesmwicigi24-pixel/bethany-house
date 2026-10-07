@@ -20,10 +20,59 @@ A cycle is never re-run. A later cycle revisits an area only for a genuine highe
 | 6 | Mobile / tablet excellence | Closed |
 | 7 | Offline and recovery | Closed |
 | 8 | Accessibility / privacy / trust | Closed |
-| 9 | Visual polish and performance | Next |
-| 10 | A full working day (tailor + production manager) | |
+| 9 | Visual polish and performance | Closed |
+| 10 | A full working day (tailor + production manager) | Next |
 
 ---
+
+## Cycle 9 — Visual polish and performance (closed)
+
+**The question:** does the floor's tablet open the next screen every time, quickly, and does what it shows read cleanly?
+
+**Inspection.** I measured before changing anything:
+- **API calls per page load:** 5 on Production Orders, Order Detail and My Tasks, counted both in the browser and in the server log.
+- **The 5-a-minute limit:**
+  - Ten fast reloads by one person: the 2nd, 3rd, 9th and 10th failed with `429` on `GET /admin/auth/me` (`x-ratelimit-limit: 5`), and the app showed "Can't reach Bethany House".
+  - The cause was not the general API limit, as Cycle 1 had recorded. `/me` and `/logout` were nested inside the login brute-force limiter (`throttle:auth`, 5 a minute **per IP address**).
+  - Every page load calls `/me` first. So every tablet behind one shop router shared five page loads a minute, and a Cycle 8 queued sign-out spent the same allowance.
+  - Whether production nginx passes the client address (`X-Forwarded-For`) is `UNKNOWN — NEEDS VERIFICATION`. If it doesn't, the five are shared by every user everywhere.
+- **Code size:**
+  - Production screens: My Tasks 12 KB gzipped, Production Orders 23 KB, Order Detail 23 KB.
+  - The shared main bundle is 240 KB gzipped on every first load.
+- **Visual leftovers from earlier cycles:**
+  - two offline banners stacked on My Tasks;
+  - a stock job's WIP card read "For stock · SKU-…";
+  - the post-sync toast said "Your offline update" even after a shared-tablet handover.
+
+### What changed
+
+- **Page loads no longer share the login allowance** (owner-approved 7 Oct 2026; decision audit in the session).
+  - `GET /admin/auth/me` and `POST /admin/auth/logout` moved out of `throttle:auth` into their own `auth:sanctum` + `throttle:api` group (120 a minute per user, like every admin route).
+  - Login, forgot/reset password and every 2FA route are untouched: still 5 a minute per address.
+- **One offline banner.** My Tasks no longer adds its own; the app-wide banner already says changes will sync.
+- **The SKU follows the garment.** WIP cards read "Clergy Cassock · SKU-12273" over "For stock", rather than "For stock · SKU-12273".
+- **A neutral sync toast:** "An offline update has synced."
+- The `ProgressBar` 0% red-dot finding no longer reproduces: zero width draws nothing.
+
+### Tests
+
+- `SessionCheckRateLimitTest` (3 tests):
+  - three tailors on one address load 12 pages in a row without a refusal;
+  - a sign-out works after the address's login allowance is spent;
+  - the 6th login attempt in a minute from one address is still refused (429).
+- The first two fail on the previous routes. The third passes on both, which is its purpose: login stays protected.
+- Auth suites: 124 passed (2FA, lockout, sessions, PIN, step-up).
+- In a real browser: WIP and My Tasks checked; `tsc` and `vite build` clean.
+
+### Recorded for later cycles (non-blocking)
+
+| Cycle | Finding |
+|---|---|
+| Owner | Confirm that production nginx sends `X-Forwarded-For`. If it doesn't, every per-IP limit (login included) counts all users as one address. |
+| Later | The shared main bundle is 240 KB gzipped on first load; splitting it is an app-wide change. |
+| Later | The duplicated modals in Production Orders and Order Detail (Assign, Issue Materials, QC, Complete) still exist. Merging them is a refactor with no visible change, best done on its own. |
+| Later | Contrast outside production screens (`surface-400` / `brand-600` small text), and the app-wide `btn` sizes. |
+| 10 | A reopened stage's "in stage" clock still counts from its first entry. |
 
 ## Cycle 8 — Accessibility, privacy and trust (closed)
 
