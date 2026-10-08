@@ -21,9 +21,69 @@ A cycle is never re-run. A later cycle revisits an area only for a genuine highe
 | 7 | Offline and recovery | Closed |
 | 8 | Accessibility / privacy / trust | Closed |
 | 9 | Visual polish and performance | Closed |
-| 10 | A full working day (tailor + production manager) | Next |
+| 10 | A full working day (tailor + production manager) | Closed |
 
 ---
+
+## Cycle 10 — A full working day (closed)
+
+**The question:** can one order go from idea to stock in a single day, every hand-off obvious, with nobody needing to be told where to click next?
+
+**The walk.** I played one day on the local stack in a real browser, through the screens only:
+- **Grace (admin, desktop):**
+  - raises PRD-20261007-0001 (3 Clergy Cassocks, stock, due in 5 days);
+  - confirms it;
+  - assigns Cutting and Finishing to Mary and Stitching to John.
+- **Mary and John (tailors, 820 × 1180 tablet):** work their stages from My Tasks, counting pieces.
+- **Grace:**
+  - inspects and fails 1 of 3 ("hem stitching uneven");
+  - sends Stitching back to John for 1 piece;
+  - re-inspects after John's redo, passes it, and completes it into stock.
+
+Every state was checked in the database. The stock-in is one `production` transaction of +3 (0 → 3) referencing the order.
+
+**What worked first time:**
+- creating, confirming and assigning;
+- the risk-ranked queue, which put overdue urgent work ahead of the new order;
+- stage gating ("Waiting on Cutting");
+- the last piece completing a stage by itself;
+- the automatic hand-off to QC when all stages were done;
+- the rework path, the second inspection, and the stock-in.
+
+**Where it broke the day's flow, and what changed:**
+
+| Moment | Problem | Change |
+|---|---|---|
+| Any screen on a portrait tablet (768–1023px) | The top bar's breadcrumb overflowed into itself ("Produ/Mtion"). The user's name wrapped onto two lines, and the page title was cut to "My T…". | Below 1024px the bar shows only the page name and the user's initials; the sidebar footer already shows the name and role. The search button keeps its ⌘K padding on desktop only. (Shared layout, all modules.) |
+| Mary counts the last piece of her last stage | The order left Focus, and the screen silently landed on whatever job slid into the same slot ("Order 3 of 3"). Only "Mark done" showed a finish screen. | Focus now follows the order, not the slot. If the order re-ranks, it stays in focus. When her stages are done she is told "Your stages on PRD-… are done — it's with Quality Control" and lands on her most urgent job. "Next order" still works. |
+| Grace on the QC page | "Inspect Now" was a label styled as a button: a click opened the order summary, and inspecting took a second click on "Quality Check". It couldn't be reached by keyboard. | "Inspect Now" is a real button that opens the inspection form. |
+| Grace fails a piece | The order vanished from "Awaiting", and nothing led to the decision it needs. The send-back lived three clicks away on the order page. | A failed inspection on the QC page opens the order with "Send back for rework" already open. Failed cards carry the same action, replacing the "Rework Needed" label. |
+| The send-back form | Grace typed the defect twice: once as the inspection note, once as the reason. | The reason starts from the latest inspection note (the QC endpoint stores it in the order notes as "QC: …"). It stays editable. |
+| John's rework card | "QC: … Rework: …" ran together on one line. | Order notes keep their line breaks on the tailor's card. |
+| Grace on the Passed tab | "Ready to Stock" was another label that looked like a button. | It is a "Complete & stock →" button that opens the order. The stock dialog itself still opens only by choice on the order page: moving inventory stays deliberate. |
+| The stock dialog | Its main button wrapped onto three lines ("Complete & / Add to / Inventory"). | It reads "Complete & stock", matching the page button. |
+
+### Tests
+
+- The whole day was re-run after the changes:
+  - Mary's last piece shows the message and lands her on 1 of 3, and "Next order" moves to 2 of 3;
+  - "Inspect Now" opens the form in one click;
+  - a fail, or the Failed card, opens the order with the send-back form ready, and the `?rework=1` is cleared from the address;
+  - John's redo returns the order to QC by itself;
+  - the pass, then "Complete & stock →", stocks 3 units.
+- The top bar was measured at 768, 820, 900, 1024 and 1180px.
+- No backend code changed. As a guard, the related suites pass: 57 tests (rework, QC trust, QC result, My Tasks, floor safety).
+- `tsc --noEmit` and `vite build` are clean.
+
+### Recorded after the ten cycles (non-blocking)
+
+| For | Finding |
+|---|---|
+| Owner (finance) | Production stock-in writes `inventory_transactions.unit_cost` as empty. Finished goods enter stock without a cost, so a later sale has no historical COGS to draw on. Whether cost is filled in elsewhere is `UNKNOWN — NEEDS VERIFICATION`; it needs a decision audit before any change. |
+| Later | A reopened stage's "took …" and "in stage" clock counts from its first start, including the time before the rework. |
+| Later | The Assign window offers managers alongside tailors with no workload hint, and its "EST. HOURS" header is cut off. |
+| Later | After creating an order, the manager stays on the list; opening the new draft (to confirm and assign) is a separate search. |
+| Later | The draft page's own progress bar draws an orange stub at 0%. |
 
 ## Cycle 9 — Visual polish and performance (closed)
 

@@ -444,7 +444,7 @@ export function CommandPaletteButton() {
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
-            <span className="text-xs pe-12">Search…</span>
+            <span className="text-xs lg:pe-12">Search…</span>
             <div className="hidden lg:flex items-center gap-0.5">
                 <kbd className="px-1 py-0.5 rounded border border-surface-200 text-2xs font-mono bg-white">⌘</kbd>
                 <kbd className="px-1 py-0.5 rounded border border-surface-200 text-2xs font-mono bg-white">K</kbd>
