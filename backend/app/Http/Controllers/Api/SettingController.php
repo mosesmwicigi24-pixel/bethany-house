@@ -99,6 +99,15 @@ class SettingController extends Controller
             $merged = self::DEFAULTS;
         }
 
+        // The settings table also holds gateway and AI credentials (M-Pesa
+        // consumer secret and passkey, Paystack secret key, AI API keys), which
+        // PaymentMethodController and the AI settings copy in. This endpoint is
+        // read by anyone with settings.view — outlet managers included — and it
+        // returned every row raw. No screen reads a credential from here; each
+        // has its own endpoint that masks it. So credentials are left out, by
+        // the same key rule the audit trail uses to redact them.
+        $merged = array_filter($merged, fn ($key) => ! ActivityLogService::isSensitiveName((string) $key), ARRAY_FILTER_USE_KEY);
+
         return response()->json(['settings' => $merged]);
     }
 
@@ -549,17 +558,8 @@ class SettingController extends Controller
 
     private function logActivity(Request $request, string $action, string $description): void
     {
-        try {
-            DB::table('activity_log')->insert([
-                'causer_type' => \App\Models\User::class,
-                'causer_id'   => $request->user()->id,
-                'action'      => $action,
-                'description' => $description,
-                'ip_address'  => $request->ip(),
-                'created_at'  => now(),
-            ]);
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::warning('activity_log write failed', ['error' => $e->getMessage()]);
-        }
+        // Through the one audit writer (4D): request id, role(s), token,
+        // channel and outcome, inside a savepoint, never failing the request.
+        \App\Services\ActivityLogService::log($action, null, [], $description, $request->user());
     }
 }

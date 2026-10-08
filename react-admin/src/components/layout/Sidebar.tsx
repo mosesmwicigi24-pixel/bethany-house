@@ -6,6 +6,7 @@ import { get } from "@/api/client";
 import { useAuthStore } from "@/store/auth.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import type { NavGroup } from "@/types";
+import { gateAllows } from "@/lib/navGate";
 
 // ─── Role name formatter ───────────────────────────────────────────────────────
 function formatRoleName(raw: string): string {
@@ -20,7 +21,7 @@ function formatRoleName(raw: string): string {
 // PermissionGate is used by pages; Sidebar uses can() inline for nav filtering
 
 // ─── Navigation definition ────────────────────────────────────────────────────
-const NAV: NavGroup[] = [
+export const NAV: NavGroup[] = [
     // ── Workspace ────────────────────────────────────────────────────────────
     // Personal / at-a-glance items. Dashboard is the true "overview"; Approvals
     // sits here because it spans procurement AND payment workflows and needs
@@ -32,13 +33,18 @@ const NAV: NavGroup[] = [
                 label: "Dashboard",
                 href: "/dashboard",
                 icon: "dashboard",
+                permission: "dashboard.view",
             },
             {
                 label: "Approvals",
                 href: "/approvals",
                 icon: "approvals",
-                // Visible to anyone who can approve procurement OR international payments
-                anyOfPermissions: ["procurement.view", "payments.approve_international"],
+                // Phase 3B: one queue for everyone who signs a band (procurement,
+                // stock, expenses, finance, payment void/move, payment proofs)
+                // and "My submissions" for everyone who raises something that
+                // needs approval. Same list as the App.tsx route guard and the
+                // command palette. The server decides what each person can sign.
+                anyOfPermissions: ["procurement.approve", "inventory.approve", "expenses.approve", "approvals.finance_sign", "payments.void", "payments.reassign", "payments.approve_international", "payments.request_void", "payments.request_reassign", "procurement.create", "inventory.adjust", "inventory.transfer", "expenses.create", "products.edit", "products.edit_cost", "orders.set_deposit", "settings.financial_propose", "settings.pricing_rate_propose"],
             },
             {
                 label: "Notifications",
@@ -50,6 +56,9 @@ const NAV: NavGroup[] = [
                 label: "Messages",
                 href: "/comms",
                 icon: "messages",
+                // Deliberately ungated: /admin/channels checks no permission
+                // (every staff account messages; threads are as private as
+                // their record). A slug here would be one the API never checks.
             },
         ],
     },
@@ -143,9 +152,12 @@ const NAV: NavGroup[] = [
                 label: "Customers",
                 href: "/sales/customers",
                 icon: "customers",
-                // The DIRECTORY — addresses, credit, spend. A till clerk
-                // holds customers.view for the POS picker, not this page.
-                permission: "customers.insights",
+                // customers.view — what the list API checks. The profile's
+                // addresses, credit and spend stay behind customers.insights
+                // on the API, so a clerk opening this sees no more than her
+                // POS picker already returns; finance (customers.view since
+                // Phase 2, no insights) needs the page to read accounts.
+                permission: "customers.view",
             },
             {
                 label: "Balances",
@@ -156,16 +168,28 @@ const NAV: NavGroup[] = [
                 permission: "receivables.view",
             },
             {
+                label: "Tills",
+                href: "/pos/tills",
+                icon: "eod-reports",
+                // Count, verify, reconcile, correct (Phase 4B). Same gate as
+                // the API's tills group; each step inside has its own key.
+                anyOfPermissions: ["pos.access", "pos.tills_view_all", "pos.reconcile", "pos.till_correction"],
+            },
+            {
                 label: "EoD Reports",
                 href: "/pos/eod-reports",
                 icon: "eod-reports",
-                permission: "settings.view",
+                // Its own key since Phase 1C — was settings.view, which tied
+                // reviewing takings to reading Setup. Finance holds it too.
+                permission: "pos.eod_review",
             },
             {
                 label: "EoD Settings",
                 href: "/pos/eod-settings",
                 icon: "eod-settings",
-                permission: "settings.edit",
+                // The settings API sits inside the till group (pos.access)
+                // and saving is settings.edit.
+                allOfPermissions: ["pos.access", "settings.edit"],
             },
         ],
     },
@@ -209,8 +233,9 @@ const NAV: NavGroup[] = [
                 label: "Calendar",
                 href: "/production/calendar",
                 icon: "calendar",
-                // Visible to production team AND sales staff who raise orders
-                anyOfPermissions: ["production.view", "production.raise_order"],
+                // /admin/production/schedule is production.view, which every
+                // raise_order holder also has (PermissionDependencyService).
+                permission: "production.view",
             },
             {
                 label: "Bill of Materials",
@@ -288,7 +313,9 @@ const NAV: NavGroup[] = [
                 label: "Goods Receipt",
                 href: "/procurement/goods-receipt",
                 icon: "grn",
-                permission: "procurement.receive",
+                // The GRN list is procurement.view; receiving is checked on
+                // the action, not the page.
+                permission: "procurement.view",
             },
             {
                 label: "Purchase Returns",
@@ -328,10 +355,9 @@ const NAV: NavGroup[] = [
                 label: "Analytics",
                 href: "/expenses/analytics",
                 icon: "reports",
-                // Spend analytics is management reporting: a clerk with
-                // expenses.view records her own costs, she doesn't chart
-                // the company's.
-                permission: "reports.view",
+                // /admin/expenses/summary is expenses.view. (Clerks no
+                // longer hold expenses at all since Phase 2.)
+                permission: "expenses.view",
             },
         ],
     },
@@ -386,7 +412,9 @@ const NAV: NavGroup[] = [
                 label: "Storefront Insights",
                 href: "/insights",
                 icon: "countries",
-                permission: "reports.view",
+                // Visitors and buyers by country: the storefront's half of
+                // Customers & Neema (was reports.view; Phase 3A).
+                permission: "reports.customers",
             },
         ],
     },
@@ -406,94 +434,36 @@ const NAV: NavGroup[] = [
                 // record a takings. The ledger has its own permission.
                 permission: "payments.transactions",
             },
-            {
-                label: "Financial Report",
-                href: "/reports/financial",
-                icon: "expenses",
-                // The backend has required reports.financial for a while; the
-                // menu still offered it to anyone with reports.view, who then
-                // got a 403 on arrival.
-                permission: "reports.financial",
-            },
+            // The Financial Report moved into Reports as "Finance & Cash"
+            // (reports consolidation, 2026-10-01).
         ],
     },
 
     // ── Reports ───────────────────────────────────────────────────────────────
-    // Sub-report order mirrors the operational section order above:
-    //   Sales → Customers → Production → Inventory → Procurement
-    // (The Financial Report moved to the Finance section above.)
+    // The consolidated Reports module (owner brief, 2026-10-01): a few deep
+    // pages, each answering one management question, instead of many shallow
+    // ones. Unconfirmed Orders is a tab of Sales & Orders; Neema, Channels and
+    // Geography are tabs of Customers & Neema; the Intelligence group's Signals
+    // is a Reports page. The Business Explorer and Data Quality join this list
+    // when they are built — never as empty pages.
     {
         label: "Reports",
         items: [
-            {
-                label: "Overview",
-                href: "/reports",
-                icon: "reports",
-                permission: "reports.view",
-            },
-            {
-                label: "Sales",
-                href: "/reports/sales",
-                icon: "orders",
-                permission: "reports.view",
-            },
-            {
-                label: "Unconfirmed Orders",
-                href: "/reports/order-pipeline",
-                icon: "orders",
-                permission: "reports.view",
-            },
-            {
-                label: "Customers",
-                href: "/reports/customers",
-                icon: "customers",
-                permission: "reports.view",
-            },
-            {
-                label: "Production",
-                href: "/reports/production",
-                icon: "production",
-                permission: "reports.view",
-            },
-            {
-                label: "Inventory",
-                href: "/reports/inventory",
-                icon: "stock",
-                permission: "reports.view",
-            },
-            {
-                label: "Procurement",
-                href: "/reports/procurement",
-                icon: "purchase-orders",
-                permission: "reports.view",
-            },
-        ],
-    },
-
-    // ── Intelligence ──────────────────────────────────────────────────────────
-    {
-        label: "Intelligence",
-        items: [
-            {
-                label: "Signals",
-                href: "/intelligence",
-                icon: "intelligence",
-                permission: "reports.view",
-            },
-            {
-                label: "Customer Geography",
-                href: "/intelligence/geography",
-                icon: "customers",
-                                // Not customers.view — serving a customer is not the
-                // same as reading where the customer base lives.
-                permission: "intelligence.view",
-            },
-            {
-                label: "Channel Engagement",
-                href: "/intelligence/channels",
-                icon: "customers",
-                permission: "intelligence.view",
-            },
+            // One permission per page (Role Hardening Plan §6, Phase 3A) — the
+            // same slug each page's API checks (report.page:<page>).
+            { label: "Executive Overview",      href: "/reports",             icon: "reports",         permission: "reports.executive" },
+            { label: "Sales & Orders",          href: "/reports/sales",       icon: "orders",          permission: "reports.sales" },
+            { label: "Customers & Neema",       href: "/reports/customers",   icon: "customers",       permission: "reports.customers" },
+            { label: "Finance & Cash",          href: "/reports/finance",     icon: "expenses",        permission: "reports.financial" },
+            { label: "Production & Fulfilment", href: "/reports/production",  icon: "production",      permission: "reports.production" },
+            { label: "Inventory",               href: "/reports/inventory",   icon: "stock",           permission: "reports.inventory" },
+            { label: "Procurement & Suppliers", href: "/reports/procurement", icon: "purchase-orders", permission: "reports.procurement" },
+            { label: "Staff, Outlets & Performance", href: "/reports/performance", icon: "outlets", permission: "reports.performance" },
+            // Signals' feeds (/admin/intelligence/*) check reports.signals on
+            // top of each card's module permission.
+            { label: "Signals",                 href: "/reports/signals",     icon: "intelligence",    permission: "reports.signals" },
+            { label: "Business Explorer",       href: "/reports/explorer",    icon: "layers",          permission: "reports.explorer" },
+            { label: "Audit & Data Quality",    href: "/reports/data-quality", icon: "qc",             permission: "reports.data_quality" },
         ],
     },
 
@@ -516,7 +486,10 @@ const NAV: NavGroup[] = [
                 label: "Outlets",
                 href: "/settings/outlets",
                 icon: "outlets",
-                permission: "settings.view",
+                // The page and its API are outlets.view (outlet managers hold
+                // outlets.view/edit). settings.view here hid it from them once
+                // they left Setup, while the route itself still let them in.
+                permission: "outlets.view",
             },
             {
                 label: "Attendance",
@@ -538,42 +511,48 @@ const NAV: NavGroup[] = [
                 permission: "users.view",
             },
             // Localisation cluster
+            // Countries, Languages and Shipping are technical reference data:
+            // the platform head edits them with setup.technical; settings.view
+            // still reads them (Phase 2).
             {
                 label: "Countries",
                 href: "/settings/countries",
                 icon: "countries",
-                permission: "settings.view",
+                anyOfPermissions: ["settings.view", "setup.technical"],
             },
             {
                 label: "Currencies",
                 href: "/settings/currencies",
                 icon: "currencies",
-                permission: "settings.view",
+                // Phase 3C: finance and admin read it to propose rate changes.
+                anyOfPermissions: ["settings.view", "settings.financial_propose", "settings.pricing_rate_propose"],
             },
             {
                 label: "Languages",
                 href: "/settings/languages",
                 icon: "languages",
-                permission: "settings.view",
+                anyOfPermissions: ["settings.view", "setup.technical"],
             },
             // Transactional config cluster
             {
                 label: "Tax Rates",
                 href: "/settings/taxes",
                 icon: "taxes",
-                permission: "settings.view",
+                // Phase 3C: finance reads it to propose rate changes.
+                anyOfPermissions: ["settings.view", "settings.financial_propose"],
             },
             {
                 label: "Payment Methods",
                 href: "/settings/payment-methods",
                 icon: "payments-setup",
-                permission: "settings.view",
+                // Phase 3C: finance reads it to propose settlement changes.
+                anyOfPermissions: ["settings.view", "settings.financial_propose"],
             },
             {
                 label: "Shipping",
                 href: "/settings/shipping",
                 icon: "shipping",
-                permission: "settings.view",
+                anyOfPermissions: ["settings.view", "setup.technical"],
             },
             // Production configuration (moved from Production group)
             {
@@ -613,11 +592,26 @@ const NAV: NavGroup[] = [
                 label: "Database Management",
                 href: "/settings/database",
                 icon: "database",
-                permission: "settings.manage_database",
+                // The API is role:super_admin (and settings.manage_database).
+                superAdminOnly: true,
             },
         ],
     },
 ];
+
+/**
+ * Which menu item a path belongs to: an exact match, or the MOST SPECIFIC
+ * prefix. A plain prefix test lit "Executive Overview" (/reports) on every
+ * report page (/reports/sales…) beside the page's own entry — two items
+ * highlighted at once (reports consolidation, 2026-10-01).
+ */
+const ALL_HREFS = NAV.flatMap((g) => g.items.map((i) => i.href));
+function isActiveHref(pathname: string, href: string): boolean {
+    if (pathname === href) return true;
+    if (!pathname.startsWith(href + "/")) return false;
+    return !ALL_HREFS.some((h) => h !== href && h.length > href.length
+        && (pathname === h || pathname.startsWith(h + "/")));
+}
 
 // ─── Icon map ─────────────────────────────────────────────────────────────────
 const Icon = ({ name }: { name: string }) => {
@@ -1141,10 +1135,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
 
     useEffect(() => {
         const activeGroup = NAV.find((g) =>
-            g.items.some((item) =>
-                location.pathname === item.href ||
-                location.pathname.startsWith(item.href + "/")
-            )
+            g.items.some((item) => isActiveHref(location.pathname, item.href))
         );
         if (activeGroup) {
             setExpandedGroups((prev) => ({ ...prev, [activeGroup.label]: true }));
@@ -1189,15 +1180,9 @@ export function Sidebar({ collapsed }: SidebarProps) {
             {/* Nav */}
             <nav className="flex-1 overflow-y-auto py-3 no-scrollbar">
                 {NAV.map((group) => {
-                    // Filter items by permission
-                    const visibleItems = group.items.filter((item) => {
-                        if (isSuperAdmin) return true;
-                        if (item.superAdminOnly) return false;
-                        if (item.anyOfPermissions?.length) {
-                            return item.anyOfPermissions.some((p) => can(p));
-                        }
-                        return !item.permission || can(item.permission);
-                    });
+                    // Filter items by permission — the same rule the route
+                    // guards and the command palette apply (lib/navGate).
+                    const visibleItems = group.items.filter((item) => gateAllows(item, { can, isSuperAdmin }));
                     if (!visibleItems.length) return null;
 
                     const isExpanded = expandedGroups[group.label];
@@ -1234,9 +1219,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
                             {(collapsed || isExpanded) && (
                                 <ul className="mt-0.5">
                                     {visibleItems.map((item) => {
-                                        const isActive =
-                                            location.pathname === item.href ||
-                                            location.pathname.startsWith(item.href + "/");
+                                        const isActive = isActiveHref(location.pathname, item.href);
 
                                         return (
                                             <li key={item.href}>

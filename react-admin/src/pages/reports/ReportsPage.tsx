@@ -5,10 +5,12 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { DrillPanel, ReportPageHeader, useDateRange, periodParams, LoadFailed, ReportPending } from "./reportShared";
 import { reportsApi, type EngineRoomSummaries } from "@/api/reports";
 import { purchaseOrderApi } from "@/api/procurement";
 import { fmtKes } from "@/api/expenses";
 import { usePermissions } from "@/hooks/usePermissions";
+import { canExportReport, mayOpenReportLink, reportPageOfRoute, canViewReport } from "@/lib/reportPages";
 import { useToastStore } from "@/store/toast.store";
 import { Spinner } from "@/components/ui/Spinner";
 import { clsx } from "clsx";
@@ -20,16 +22,6 @@ import { useState } from "react";
 // {current, previous, series}: value, delta vs the equivalent prior period,
 // sparkline of the current window, and a click-through to the report that
 // explains it. The attention feed answers "what needs me today?"
-
-const PERIODS = [
-    { key: "today",        label: "Today" },
-    { key: "last_7",       label: "7 Days" },
-    { key: "last_30",      label: "30 Days" },
-    { key: "this_month",   label: "This Month" },
-    { key: "last_month",   label: "Last Month" },
-    { key: "this_quarter", label: "Quarter" },
-    { key: "this_year",    label: "Year" },
-];
 
 function Sparkline({ series }: { series?: Record<string, number> }) {
     const values = Object.values(series ?? {}).map(Number);
@@ -46,16 +38,33 @@ function Sparkline({ series }: { series?: Record<string, number> }) {
     );
 }
 
-function DeltaChip({ current, previous, downIsGood = false }: {
-    current: number; previous: number; downIsGood?: boolean;
+/**
+ * The change against the previous period, in the form that is true for it. A
+ * percentage only means something against a positive base: "▲724%" off a
+ * negative net read as a boom, and "prev n/a" called a previous zero missing.
+ */
+function DeltaChip({ current, previous, downIsGood = false, money = false }: {
+    current: number; previous: number; downIsGood?: boolean; money?: boolean;
 }) {
-    if (!previous) return <span className="text-2xs text-surface-500">— prev n/a</span>;
-    const pct = ((current - previous) / Math.abs(previous)) * 100;
-    if (Math.abs(pct) < 0.05) return <span className="text-2xs text-surface-400">± 0%</span>;
-    const up = pct > 0;
+    const diff = current - previous;
+    if (Math.abs(diff) < 0.005) return <span className="text-2xs text-surface-400">± 0</span>;
+    const up = diff > 0;
     const good = downIsGood ? !up : up;
+    const tone = good ? "text-success-600" : "text-danger-600";
+    if (previous === 0) {
+        return <span className={clsx("text-2xs font-bold", tone)} title="Nothing in the previous period">{up ? "new" : "▼ from 0"}</span>;
+    }
+    if (previous < 0) {
+        const abs = Math.abs(diff);
+        return (
+            <span className={clsx("text-2xs font-bold tabular-nums", tone)} title="Change in amount — a percentage of a negative figure means nothing">
+                {up ? "▲" : "▼"} {money ? fmtKes(abs) : abs.toLocaleString()}
+            </span>
+        );
+    }
+    const pct = (diff / previous) * 100;
     return (
-        <span className={clsx("text-2xs font-bold tabular-nums", good ? "text-success-600" : "text-danger-600")}>
+        <span className={clsx("text-2xs font-bold tabular-nums", tone)}>
             {up ? "▲" : "▼"} {Math.abs(pct).toFixed(1)}%
         </span>
     );
@@ -67,24 +76,32 @@ function MetricCard({ label, value, sub, metric, to, money = false, downIsGood =
     to?: string; money?: boolean; downIsGood?: boolean; onOpen?: () => void;
 }) {
     const navigate = useNavigate();
+    // A link to a report page the viewer cannot open is not offered (Phase 3A).
+    const { can } = usePermissions();
+    if (to && !mayOpenReportLink(can, to)) to = undefined;
     const display = value ?? (money
-        ? `KES ${Number(metric?.current ?? 0).toLocaleString()}`
+        ? fmtKes(metric?.current ?? 0)
         : Number(metric?.current ?? 0).toLocaleString());
     return (
         <button onClick={() => (onOpen ? onOpen() : to && navigate(to))} disabled={!to && !onOpen}
             className={clsx("card card-body text-left transition-shadow", (to || onOpen) && "hover:shadow-md cursor-pointer")}>
             <div className="flex items-start justify-between gap-2">
-                <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest">{label}</p>
-                {metric && <DeltaChip current={metric.current} previous={metric.previous} downIsGood={downIsGood} />}
+                <p className="text-xs text-surface-500">{label}</p>
+                {metric && <DeltaChip current={metric.current} previous={metric.previous} downIsGood={downIsGood} money={money} />}
             </div>
-            <p className="text-lg sm:text-xl font-bold text-surface-900 tabular-nums mt-1 truncate">{display}</p>
+            <p className="text-[clamp(1.05rem,4.4vw,1.25rem)] leading-tight font-bold text-surface-900 tabular-nums mt-1 break-words">{display}</p>
             <div className="flex items-end justify-between gap-2 mt-1 min-h-[24px]">
-                <p className="text-2xs text-surface-400 truncate">
+                <p className="text-2xs text-surface-400 line-clamp-3">
                     {sub ?? (metric?.previous
-                        ? `prev ${money ? "KES " : ""}${Number(metric.previous).toLocaleString()}`
+                        ? `prev ${money ? fmtKes(metric.previous) : Number(metric.previous).toLocaleString()}`
                         : "")}
                 </p>
-                <Sparkline series={metric?.series} />
+                {/* The figure leads; the cue that it opens its records sits with
+                    the small print, as on every other report's cards. */}
+                <span className="flex shrink-0 items-end gap-2">
+                    {onOpen && <span className="text-2xs font-medium text-brand-600" aria-hidden="true">records ›</span>}
+                    <Sparkline series={metric?.series} />
+                </span>
             </div>
         </button>
     );
@@ -197,7 +214,7 @@ function AttentionPanel({ items }: { items: any[] }) {
         <div>
             <div className="flex items-center gap-2 mb-2">
                 <span aria-hidden="true">⚠️</span>
-                <p className="text-2xs font-bold text-amber-800 uppercase tracking-widest">Needs your attention</p>
+                <h2 className="text-sm font-semibold text-amber-800">Needs your attention</h2>
                 <span className="text-2xs font-bold text-amber-700 bg-amber-100 rounded-full px-1.5 py-0.5">{items.length}</span>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
@@ -213,7 +230,7 @@ function AttentionPanel({ items }: { items: any[] }) {
 // it. Data comes from GET /reports/engine-room — six summaries in one call;
 // an engine that failed server-side arrives as null and renders a "—" card.
 
-/** "KES 1.2M" instead of fmtKes's full "KES 1,234,567.00" — strip cards are small. */
+/** "KES 1.2M" instead of fmtKes's full "KES 1,234,567" — strip cards are small. */
 function kesCompact(amount: number | null | undefined): string {
     if (amount == null) return "—";
     return (
@@ -232,34 +249,43 @@ function daysUntil(date: string): number {
     );
 }
 
-function EngineCard({ icon, label, value, sub, to, zero = false }: {
-    icon: string; label: string; value: string; sub: string; to: string; zero?: boolean;
+function EngineCard({ label, value, sub, to, zero = false }: {
+    label: string; value: string; sub: string; to?: string; zero?: boolean;
 }) {
     const navigate = useNavigate();
     return (
         <button
-            onClick={() => navigate(to)}
-            className="card card-body text-left transition-shadow hover:shadow-md cursor-pointer"
+            onClick={() => to && navigate(to)}
+            disabled={!to}
+            className={clsx("card card-body text-left transition-shadow", to && "hover:shadow-md cursor-pointer")}
         >
-            <div className="flex items-center gap-1.5">
-                <span className="text-base leading-none" aria-hidden="true">{icon}</span>
-                <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest truncate">{label}</p>
-            </div>
+            {/* Labels say what the money is in plain words and are never cut
+                off — a truncated "MONEY ON TH…" told a manager nothing. */}
+            <p className="text-xs text-surface-500 leading-snug">{label}</p>
             <p className={clsx(
                 "text-lg font-bold tabular-nums mt-1 truncate",
                 zero || value === "—" ? "text-surface-400" : "text-surface-900",
             )}>
                 {value}
             </p>
-            <p className="text-2xs text-surface-400 truncate mt-0.5">{sub}</p>
+            <p className="text-2xs text-surface-400 mt-0.5 line-clamp-2">{sub}</p>
         </button>
     );
 }
 
-function EngineRoomStrip() {
+function EngineRoomStrip({ outlet }: { outlet?: string }) {
+    const navigate = useNavigate();
+    // Each opportunity links to the report page behind it — offered only when
+    // the viewer may open that page (Phase 3A: finance reads this strip but
+    // not Customers & Neema).
+    const { can } = usePermissions();
+    const linkable = (to: string) => (mayOpenReportLink(can, to) ? to : undefined);
+    // The page's outlet, like everything else on it: the attention items
+    // followed the outlet filter while these stayed business-wide — one page,
+    // two scopes, nothing saying so.
     const { data, isLoading } = useQuery<EngineRoomSummaries>({
-        queryKey: ["engine-room"],
-        queryFn: () => reportsApi.engineRoom(),
+        queryKey: ["engine-room", outlet ?? ""],
+        queryFn: () => reportsApi.engineRoom(outlet ? Number(outlet) : undefined),
         staleTime: 5 * 60_000,
     });
 
@@ -273,8 +299,8 @@ function EngineRoomStrip() {
     return (
         <div>
             <div className="flex items-center gap-2 mb-2">
-                <span aria-hidden="true">⚙️</span>
-                <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest">Revenue engines</p>
+                <h2 className="text-sm font-semibold text-surface-900">Opportunities</h2>
+                <p className="text-2xs text-surface-400">— money waiting to be won, each one a click from the list behind it</p>
             </div>
             {isLoading || !data ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
@@ -287,186 +313,89 @@ function EngineRoomStrip() {
                     ))}
                 </div>
             ) : (
-                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-                    <EngineCard
-                        icon="💰"
-                        label="Money on the Table"
-                        value={collections ? kesCompact(collections.money_on_table) : "—"}
-                        sub={collections
+                (() => {
+                    // Only engines with money waiting get a card; the rest are
+                    // named on one quiet line — four KES 0 cards read as four
+                    // headlines saying nothing.
+                    const engines = [
+                        { label: "Open quotes & balances", to: "/reports/sales?tab=collections",
+                          value: collections ? kesCompact(collections.money_on_table) : "—",
+                          sub: collections
                             ? `${collections.open_quotes.count} quotes · ${collections.unpaid_balances.count} unpaid balances`
-                            : "unavailable right now"}
-                        zero={!collections || collections.money_on_table <= 0}
-                        to="/reports/sales?tab=collections"
-                    />
-                    <EngineCard
-                        icon="📉"
-                        label="Bleeding Now"
-                        value={stockout ? `${kesCompact(stockout.est_daily_loss_now)}/day` : "—"}
-                        sub={stockout
+                            : "unavailable right now",
+                          zero: !collections || collections.money_on_table <= 0 },
+                        { label: "Lost to empty shelves", to: "/reports/inventory?tab=intelligence",
+                          value: stockout ? `${kesCompact(stockout.est_daily_loss_now)}/day` : "—",
+                          sub: stockout
                             ? `${stockout.products_currently_out} product${stockout.products_currently_out === 1 ? "" : "s"} out now`
-                            : "unavailable right now"}
-                        zero={!stockout || stockout.est_daily_loss_now <= 0}
-                        to="/reports/inventory?tab=intelligence"
-                    />
-                    <EngineCard
-                        icon="🔄"
-                        label="Value at Risk"
-                        value={winback ? kesCompact(winback.annual_value_at_risk) : "—"}
-                        sub={winback
+                            : "unavailable right now",
+                          zero: !stockout || stockout.est_daily_loss_now <= 0 },
+                        { label: "Regulars gone quiet", to: "/reports/customers?tab=winback",
+                          value: winback ? kesCompact(winback.annual_value_at_risk) : "—",
+                          sub: winback
                             ? `${winback.customers_at_risk} customers · ${kesCompact(winback.recovered_revenue_90d)} recovered 90d`
-                            : "unavailable right now"}
-                        zero={!winback || winback.annual_value_at_risk <= 0}
-                        to="/reports/customers?tab=winback"
-                    />
-                    <EngineCard
-                        icon="🛒"
-                        label="Missed Attach"
-                        value={attach ? kesCompact(attach.missed_revenue_estimate_total) : "—"}
-                        sub={attach?.top_pair
+                            : "unavailable right now",
+                          zero: !winback || winback.annual_value_at_risk <= 0 },
+                        { label: "Add-ons not sold", to: "/reports/sales?tab=basket",
+                          value: attach ? kesCompact(attach.missed_revenue_estimate_total) : "—",
+                          sub: attach?.top_pair
                             ? `best pair: ${attach.top_pair.anchor} → ${attach.top_pair.companion} ${attach.top_pair.attach_rate}%`
-                            : attach ? "not enough basket history yet" : "unavailable right now"}
-                        zero={!attach || attach.missed_revenue_estimate_total <= 0}
-                        to="/reports/sales?tab=basket"
-                    />
-                    <EngineCard
-                        icon="🎯"
-                        label="Radar"
-                        value={radar ? kesCompact(radar.expected_revenue) : "—"}
-                        sub={radar
+                            : attach ? "not enough basket history yet" : "unavailable right now",
+                          zero: !attach || attach.missed_revenue_estimate_total <= 0 },
+                        { label: "Due to buy again", to: "/reports/customers?tab=replenishment",
+                          value: radar ? kesCompact(radar.expected_revenue) : "—",
+                          sub: radar
                             ? `${radar.due_pairs} due · pings 30d: ${radar.pings_30d}`
-                            : "unavailable right now"}
-                        zero={!radar || radar.expected_revenue <= 0}
-                        to="/reports/customers?tab=replenishment"
-                    />
-                    <EngineCard
-                        icon="⛪"
-                        label="Seasonal"
-                        value={seasonal
+                            : "unavailable right now",
+                          zero: !radar || radar.expected_revenue <= 0 },
+                        { label: "Season ahead", to: "/reports/procurement?tab=seasonal",
+                          value: seasonal
                             ? seasonal.history_depth_days === 0
                                 ? "—"
                                 : kesCompact(seasonal.total_gap_value)
-                            : "—"}
-                        sub={seasonal
+                            : "—",
+                          sub: seasonal
                             ? seasonal.history_depth_days === 0
                                 ? "import legacy history to unlock"
                                 : seasonal.next_season
                                   ? `${seasonal.next_season.label} in ${daysUntil(seasonal.next_season.start)}d · stock gap`
                                   : "no season in the next 120 days"
-                            : "unavailable right now"}
-                        zero={!seasonal || seasonal.history_depth_days === 0 || seasonal.total_gap_value <= 0}
-                        to="/reports/procurement?tab=seasonal"
-                    />
-                </div>
+                            : "unavailable right now",
+                          zero: !seasonal || seasonal.history_depth_days === 0 || seasonal.total_gap_value <= 0 },
+                    ];
+                    const live = engines.filter((e) => !e.zero);
+                    const quiet = engines.filter((e) => e.zero);
+                    return (
+                        <>
+                            {live.length > 0 && (
+                                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+                                    {live.map((e) => <EngineCard key={e.label} label={e.label} value={e.value} sub={e.sub} to={linkable(e.to)} />)}
+                                </div>
+                            )}
+                            {quiet.length > 0 && (
+                                <p className="mt-2 text-2xs text-surface-400">
+                                    Nothing waiting: {quiet.map((e, i) => (
+                                        <span key={e.label}>{i > 0 && " · "}{linkable(e.to)
+                                            ? <button onClick={() => navigate(e.to)} className="hover:text-brand-600 hover:underline">{e.label}</button>
+                                            : e.label}</span>
+                                    ))}
+                                </p>
+                            )}
+                        </>
+                    );
+                })()
             )}
         </div>
     );
 }
 
-// ─── Drill-down modal: the rows behind the number ─────────────────────────────
-// Spec rule 3: a figure with no drill-down is a rumour. The modal lists the
-// exact source rows the KPI summed, paginated; tapping a row opens the record.
-
-const KIND_PATH: Record<string, (r: any) => string | null> = {
-    order:      r => `/sales/orders/${r.id}`,
-    payment:    r => (r.order_id ? `/sales/orders/${r.order_id}` : null),
-    production: r => `/production/orders/${r.id}`,
-    customer:   () => "/sales/customers",
-    expense:    () => "/expenses",
-};
-
-function DrillModal({ metric, label, money, bucket, period, reportPath, onClose }: {
-    metric: string; label: string; money?: boolean; bucket?: string; period: string;
-    reportPath?: string; onClose: () => void;
-}) {
-    const navigate = useNavigate();
-    const [page, setPage] = useState(1);
-    const { data, isLoading } = useQuery({
-        queryKey: ["drill", metric, bucket, period, page],
-        queryFn: () => reportsApi.drill(metric, period, { page, bucket }),
-        staleTime: 60_000,
-    });
-    const rows = data?.rows ?? [];
-    const pages = data ? Math.max(1, Math.ceil(data.total / data.per_page)) : 1;
-
-    return (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-6"
-            onClick={onClose}>
-            <div className="bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[85vh] flex flex-col"
-                onClick={e => e.stopPropagation()}>
-                <div className="px-4 py-3 border-b border-line flex items-center gap-3">
-                    <div className="min-w-0">
-                        <p className="text-sm font-bold text-surface-900">{label}</p>
-                        <p className="text-2xs text-surface-400">
-                            {data ? `${data.total.toLocaleString()} source record${data.total === 1 ? "" : "s"}` : "Loading…"}
-                            {" · every row is part of the number you tapped"}
-                        </p>
-                    </div>
-                    <button onClick={onClose} aria-label="Close"
-                        className="ml-auto w-7 h-7 rounded-lg flex items-center justify-center text-surface-400 hover:bg-surface-100">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
-                </div>
-                <div className="flex-1 overflow-y-auto">
-                    {isLoading ? (
-                        <div className="flex justify-center py-12"><Spinner /></div>
-                    ) : rows.length === 0 ? (
-                        <p className="text-center text-xs text-surface-400 py-12">No records in this period.</p>
-                    ) : (
-                        <div className="divide-y divide-line">
-                            {rows.map((r: any) => {
-                                const path = KIND_PATH[r.kind]?.(r) ?? null;
-                                return (
-                                    <button key={`${r.kind}-${r.id}`} disabled={!path}
-                                        onClick={() => path && navigate(path)}
-                                        className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-50 transition-colors disabled:cursor-default">
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-xs font-semibold text-surface-800 font-mono truncate">{r.ref}</p>
-                                            <p className="text-2xs text-surface-400 truncate">
-                                                {new Date(r.at).toLocaleDateString("en-KE", { day: "2-digit", month: "short" })}
-                                                {r.who ? ` · ${r.who}` : ""}{r.detail ? ` · ${r.detail}` : ""}
-                                            </p>
-                                        </div>
-                                        {r.amount != null && (
-                                            <span className="text-xs font-bold tabular-nums text-surface-800 shrink-0">
-                                                {money ? `KES ${Number(r.amount).toLocaleString()}` : Number(r.amount).toLocaleString()}
-                                            </span>
-                                        )}
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    )}
-                </div>
-                <div className="px-4 py-2.5 border-t border-line flex items-center gap-2">
-                    {pages > 1 && (
-                        <>
-                            <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}
-                                className="btn-secondary text-2xs px-2.5 py-1 disabled:opacity-40">← Prev</button>
-                            <span className="text-2xs text-surface-400 tabular-nums">{page} / {pages}</span>
-                            <button disabled={page >= pages} onClick={() => setPage(p => p + 1)}
-                                className="btn-secondary text-2xs px-2.5 py-1 disabled:opacity-40">Next →</button>
-                        </>
-                    )}
-                    {reportPath && (
-                        <button onClick={() => navigate(reportPath)}
-                            className="ml-auto text-2xs font-semibold text-brand-600 hover:text-brand-700">
-                            Open full report →
-                        </button>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
-}
 
 function AgingCard({ aging, onBucket }: { aging: any; onBucket: (bucket: string, label: string) => void }) {
     const buckets = aging?.buckets ?? [];
     const max = Math.max(...buckets.map((b: any) => Number(b.amount)), 1);
     return (
         <div className="card card-body h-full">
-            <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest">Balance Aging</p>
+            <h3 className="text-sm font-semibold text-surface-900">Balance aging</h3>
             <div className="space-y-1.5 mt-2">
                 {buckets.map((b: any) => (
                     <button key={b.key} onClick={() => Number(b.amount) > 0 && onBucket(b.key, `Owed ${b.label}`)}
@@ -489,99 +418,166 @@ function AgingCard({ aging, onBucket }: { aging: any; onBucket: (bucket: string,
 }
 
 function ExecutiveOverview() {
-    const [period, setPeriod] = useState("this_month");
+    // The same header, period and outlet as every report — the period follows
+    // the reader in from (and out to) the other pages.
+    const dr = useDateRange("this_month");
+    const query = periodParams(dr.preset, dr.start, dr.end, dr.outlet);
     const [drill, setDrill] = useState<{ metric: string; label: string; money?: boolean; bucket?: string; reportPath?: string } | null>(null);
-    const { data, isLoading } = useQuery({
-        queryKey: ["executive-dashboard", period],
-        queryFn: () => reportsApi.executive(period),
+    const { data, isError, refetch, isPlaceholderData, fetchStatus } = useQuery({
+        queryKey: ["executive-dashboard", query],
+        queryFn: () => reportsApi.executive(query),
         staleTime: 60_000,
+        placeholderData: (prev) => prev,   // keep the figures while a new period loads
     });
 
     const k = data?.kpis;
 
     return (
         <div className="space-y-4">
-            {/* Period selector */}
-            <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1">
-                {PERIODS.map(pd => (
-                    <button key={pd.key} onClick={() => setPeriod(pd.key)}
-                        className={clsx("shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors",
-                            period === pd.key
-                                ? "bg-surface-900 text-white"
-                                : "bg-white border border-surface-200 text-surface-500 hover:border-brand-300 hover:text-brand-600")}>
-                        {pd.label}
-                    </button>
-                ))}
-            </div>
+            <ReportPageHeader
+                title="Executive Overview"
+                subtitle="How the business is doing: what changed, where the pressure is, and where to look next. Tap a figure for the records behind it."
+                preset={dr.preset}
+                start={dr.start}
+                end={dr.end}
+                onPresetChange={dr.handlePreset}
+                onStartChange={dr.setStart}
+                onEndChange={dr.setEnd}
+                outlet={dr.outlet}
+                onOutletChange={dr.setOutlet}
+            />
 
-            {isLoading || !k ? (
-                <div className="flex justify-center py-12"><Spinner /></div>
+            {isError && (!k || isPlaceholderData) ? (
+                <LoadFailed what="The Executive Overview" onRetry={() => refetch()} />
+            ) : !k ? (
+                <ReportPending paused={fetchStatus === "paused"} />
             ) : (
                 <>
+                    <Headline k={k} start={dr.start} end={dr.end} attention={(data.attention ?? []).length} />
+
                     <AttentionPanel items={data.attention ?? []} />
 
-                    <EngineRoomStrip />
+                    <EngineRoomStrip outlet={dr.outlet} />
 
-                    {/* One continuous grid: the whole screen is the dashboard.
-                        2-up on phones, 4-up on laptops, 8-up on big displays. */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 2xl:grid-cols-8 gap-3">
-                        <MetricCard label="Revenue" metric={k.sales.revenue} money
-                            onOpen={() => setDrill({ metric: "revenue", label: "Revenue — source orders", money: true, reportPath: "/reports/sales" })} />
+                    {/* Grouped by the question a manager asks — sales, money,
+                        operations, finance — instead of fourteen equal cards.
+                        Every figure and every drill is kept. */}
+                    <MetricGroup title="Sales">
+                        <MetricCard label="Sold" metric={k.sales.revenue} money
+                            onOpen={() => setDrill({ metric: "revenue", label: "Sold — the orders", money: true, reportPath: "/reports/sales" })} />
+                        <MetricCard label="Orders" metric={k.sales.orders}
+                            onOpen={() => setDrill({ metric: "orders", label: "Orders in period", reportPath: "/reports/sales" })} />
+                        <MetricCard label="Avg order value" metric={k.sales.aov} money to="/reports/sales" />
+                        <MetricCard label="New customers" metric={k.sales.new_customers}
+                            onOpen={() => setDrill({ metric: "new_customers", label: "New customers", reportPath: "/reports/customers" })} />
+                    </MetricGroup>
+
+                    <MetricGroup title="Money">
                         <MetricCard label="Collected" metric={k.money.collected} money
                             onOpen={() => setDrill({ metric: "collected", label: "Collected — settled payments", money: true, reportPath: can_financial_path(k) })} />
                         <MetricCard label="Outstanding"
-                            value={`KES ${Number(k.money.outstanding.amount).toLocaleString()}`}
+                            value={fmtKes(k.money.outstanding.amount)}
                             sub={`${k.money.outstanding.orders} open orders`}
                             onOpen={() => setDrill({ metric: "outstanding", label: "Outstanding balances", money: true, reportPath: "/pos/outstanding-balances" })} />
-                        <MetricCard label="Deposits Held"
-                            value={`KES ${Number(k.money.aging?.deposits_held?.amount ?? 0).toLocaleString()}`}
+                        <MetricCard label="Deposits held"
+                            value={fmtKes(k.money.aging?.deposits_held?.amount ?? 0)}
                             sub={`${k.money.aging?.deposits_held?.orders ?? 0} undelivered — not income`}
                             onOpen={() => setDrill({ metric: "outstanding", bucket: "deposits", label: "Deposits held (undelivered)", money: true })} />
-                        <MetricCard label="Orders" metric={k.sales.orders}
-                            onOpen={() => setDrill({ metric: "orders", label: "Orders in period", reportPath: "/reports/sales" })} />
-                        <MetricCard label="Avg Order Value" metric={k.sales.aov} money to="/reports/sales" />
-                        <MetricCard label="New Customers" metric={k.sales.new_customers}
-                            onOpen={() => setDrill({ metric: "new_customers", label: "New customers", reportPath: "/reports/customers" })} />
-                        <MetricCard label="Low Stock"
+                        <div className="col-span-2 lg:col-span-1">
+                            <AgingCard aging={k.money.aging}
+                                onBucket={(bucket, label) => setDrill({ metric: "outstanding", bucket, label, money: true, reportPath: "/pos/outstanding-balances" })} />
+                        </div>
+                    </MetricGroup>
+
+                    <MetricGroup title="Operations">
+                        <MetricCard label="Low stock"
                             value={String(k.inventory.low_stock)}
                             sub={k.inventory.low_stock > 0 ? "items at reorder point" : "all healthy"}
                             to="/reports/inventory" />
-
-                        <MetricCard label="Production Done" metric={k.production.completed}
+                        <MetricCard label="Production done" metric={k.production.completed}
                             onOpen={() => setDrill({ metric: "production_completed", label: "Completed production orders", reportPath: "/reports/production" })} />
                         <MetricCard label="On-time %"
                             value={k.production.on_time_pct.current != null ? `${k.production.on_time_pct.current}%` : "—"}
                             sub={k.production.on_time_pct.previous != null ? `prev ${k.production.on_time_pct.previous}%` : "no prior data"}
                             to="/reports/production" />
-                        <MetricCard label="WIP / Overdue"
+                        <MetricCard label="WIP / overdue"
                             value={`${k.production.wip}${k.production.overdue > 0 ? ` · ${k.production.overdue} late` : ""}`}
                             sub={k.production.overdue > 0 ? "overdue on the floor" : "nothing overdue"}
                             onOpen={k.production.overdue > 0
                                 ? () => setDrill({ metric: "production_overdue", label: "Overdue production orders", reportPath: "/production/wip" })
                                 : undefined}
                             to="/production/wip" />
-                        {k.financial && (
-                            <>
-                                <MetricCard label="Expenses" metric={k.financial.expenses} money downIsGood
-                                    onOpen={() => setDrill({ metric: "expenses", label: "Expenses in period", money: true, reportPath: "/expenses" })} />
-                                <MetricCard label="Net (Coll. − Exp.)" metric={k.financial.net_collected} money to="/reports/financial" />
-                            </>
-                        )}
-                        <div className={clsx(k.financial ? "col-span-2 2xl:col-span-3" : "col-span-2 md:col-span-3 2xl:col-span-5")}>
-                            <AgingCard aging={k.money.aging}
-                                onBucket={(bucket, label) => setDrill({ metric: "outstanding", bucket, label, money: true, reportPath: "/pos/outstanding-balances" })} />
-                        </div>
-                    </div>
+                    </MetricGroup>
+
+                    {k.financial && (
+                        <MetricGroup title="Finance">
+                            <MetricCard label="Expenses" metric={k.financial.expenses} money downIsGood
+                                onOpen={() => setDrill({ metric: "expenses", label: "Expenses in period", money: true, reportPath: "/expenses" })} />
+                            <MetricCard label="Net (collected − expenses)" metric={k.financial.net_collected} money to="/reports/finance" />
+                            {/* Profit, not cash — the earned P&L from Finance & Cash,
+                                with what it leaves out stated, never a bare margin. */}
+                            {k.financial.earned && (
+                                <MetricCard label="Earned profit"
+                                    value={fmtKes(k.financial.earned.net_profit)}
+                                    sub={k.financial.earned.limits?.length
+                                        ? `Limited: ${k.financial.earned.limits.join("; ")}`
+                                        : k.financial.earned.gross_margin_pct != null
+                                            ? `${k.financial.earned.gross_margin_pct}% gross margin · every cost in`
+                                            : "no fully-paid orders yet"}
+                                    to="/reports/finance?tab=intelligence" />
+                            )}
+                        </MetricGroup>
+                    )}
                 </>
             )}
-            {drill && <DrillModal {...drill} period={period} onClose={() => setDrill(null)} />}
+            {/* The shared drill panel: the backend says what each number is and
+                where each row may lead (permission-checked); nothing is guessed here. */}
+            {drill && (
+                <DrillPanel metric={drill.metric} title={drill.label}
+                    query={{ ...query, ...(drill.bucket ? { bucket: drill.bucket } : {}) }}
+                    onClose={() => setDrill(null)} />
+            )}
+        </div>
+    );
+}
+
+/** A titled group of figures — 2-up on phones, 4-up from tablets. */
+function MetricGroup({ title, children }: { title: string; children: React.ReactNode }) {
+    return (
+        <section aria-label={title}>
+            <h2 className="text-sm font-semibold text-surface-900 mb-2">{title}</h2>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{children}</div>
+        </section>
+    );
+}
+
+/**
+ * The period in one sentence, from the figures below it — what was sold
+ * against the previous period, what came in, what is still owed. It states;
+ * it does not advise.
+ */
+function Headline({ k, start, end, attention }: { k: any; start: string; end: string; attention: number }) {
+    const sold = Number(k.sales.revenue.current ?? 0), prev = Number(k.sales.revenue.previous ?? 0);
+    const change = prev > 0 ? Math.round(((sold - prev) / prev) * 1000) / 10 : null;
+    const span = `${new Date(start).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} – ${new Date(end).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
+    return (
+        <div className="card card-body">
+            <p className="text-sm leading-relaxed text-surface-700">
+                <span className="font-semibold text-surface-900">{span}:</span>{" "}
+                sold <span className="font-semibold text-surface-900">{fmtKes(sold)}</span> on {Number(k.sales.orders.current ?? 0).toLocaleString()} orders
+                {change != null && <> ({change >= 0 ? "up" : "down"} {Math.abs(change)}% on the previous period)</>}
+                {prev === 0 && sold > 0 && <> (nothing in the previous period)</>}
+                ; collected <span className="font-semibold text-surface-900">{fmtKes(k.money.collected.current)}</span>
+                ; <span className="font-semibold text-surface-900">{fmtKes(k.money.outstanding.amount)}</span> still owed on {Number(k.money.outstanding.orders ?? 0).toLocaleString()} open orders.
+                {attention > 0 && <> {attention} {attention === 1 ? "thing needs" : "things need"} attention below.</>}
+            </p>
         </div>
     );
 }
 
 // Collected drills to financial for those who may enter; sales otherwise.
 function can_financial_path(k: any): string {
-    return k?.financial ? "/reports/financial" : "/reports/sales";
+    return k?.financial ? "/reports/finance" : "/reports/sales";
 }
 
 // ─── Scheduled reports summary ─────────────────────────────────────────────────
@@ -655,12 +651,21 @@ interface ReportCategory {
     icon: React.ReactNode;
     path: string;
     color: string;
+    /** What the page offers — the tags must be true for each page. */
+    csv?: boolean;
+    schedulable?: boolean;
 }
+
+const tileIcon = (d: string) => (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+        <path strokeLinecap="round" strokeLinejoin="round" d={d} />
+    </svg>
+);
 
 const CATEGORIES: ReportCategory[] = [
     {
         id: "sales",
-        label: "Sales",
+        label: "Sales & Orders",
         description: "Revenue, orders, products, channels, patterns & returns",
         path: "/reports/sales",
         color: "text-info-600 bg-info-50",
@@ -682,7 +687,7 @@ const CATEGORIES: ReportCategory[] = [
     },
     {
         id: "customers",
-        label: "Customers",
+        label: "Customers & Neema",
         description: "Growth, segments, lifetime value, retention cohorts",
         path: "/reports/customers",
         color: "text-accent-600 bg-accent-50",
@@ -698,6 +703,51 @@ const CATEGORIES: ReportCategory[] = [
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
+                />
+            </svg>
+        ),
+    },
+    {
+        id: "financial",
+        label: "Finance & Cash",
+        description: "P&L statement, revenue vs expenses, tax, discounts",
+        path: "/reports/finance",
+        color: "text-info-600 bg-info-50",
+        icon: (
+            <svg
+                className="w-5 h-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.75}
+            >
+                <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+            </svg>
+        ),
+    },
+    {
+        id: "production",
+        label: "Production & Fulfilment",
+        description:
+            "Completion, on-time rate, tailor performance, QC failures",
+        path: "/reports/production",
+        color: "text-accent-600 bg-accent-50",
+        icon: (
+            <svg
+                className="w-5 h-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.75}
+            >
+                <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M11.42 15.17L17.25 21A2.652 2.652 0 0021 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 11-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 004.486-6.336l-3.276 3.277a3.004 3.004 0 01-2.25-2.25l3.276-3.276a4.5 4.5 0 00-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085m-1.745 1.437L5.909 7.5H4.5L2.25 3.75l1.5-1.5L7.5 4.5v1.409l4.26 4.26m-1.745 1.437l1.745-1.437m6.615 8.206L15.75 15.75M4.867 19.125h.008v.008h-.008v-.008z"
                 />
             </svg>
         ),
@@ -726,31 +776,8 @@ const CATEGORIES: ReportCategory[] = [
         ),
     },
     {
-        id: "production",
-        label: "Production",
-        description:
-            "Completion, on-time rate, tailor performance, QC failures",
-        path: "/reports/production",
-        color: "text-accent-600 bg-accent-50",
-        icon: (
-            <svg
-                className="w-5 h-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1.75}
-            >
-                <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M11.42 15.17L17.25 21A2.652 2.652 0 0021 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 11-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 004.486-6.336l-3.276 3.277a3.004 3.004 0 01-2.25-2.25l3.276-3.276a4.5 4.5 0 00-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085m-1.745 1.437L5.909 7.5H4.5L2.25 3.75l1.5-1.5L7.5 4.5v1.409l4.26 4.26m-1.745 1.437l1.745-1.437m6.615 8.206L15.75 15.75M4.867 19.125h.008v.008h-.008v-.008z"
-                />
-            </svg>
-        ),
-    },
-    {
         id: "procurement",
-        label: "Procurement",
+        label: "Procurement & Suppliers",
         description:
             "Purchase orders, supplier spend, top items, fulfilment status",
         path: "/reports/procurement",
@@ -772,26 +799,40 @@ const CATEGORIES: ReportCategory[] = [
         ),
     },
     {
-        id: "financial",
-        label: "Financial",
-        description: "P&L statement, revenue vs expenses, tax, discounts",
-        path: "/reports/financial",
+        id: "performance",
+        label: "Staff, Outlets & Performance",
+        description: "Each outlet and salesperson against the previous period",
+        path: "/reports/performance",
+        color: "text-brand-600 bg-brand-50",
+        csv: true, schedulable: false,
+        icon: tileIcon("M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"),
+    },
+    {
+        id: "signals",
+        label: "Signals",
+        description: "Reorder suggestions, channel engagement, customer geography",
+        path: "/reports/signals",
         color: "text-info-600 bg-info-50",
-        icon: (
-            <svg
-                className="w-5 h-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1.75}
-            >
-                <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-            </svg>
-        ),
+        csv: false, schedulable: false,
+        icon: tileIcon("M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"),
+    },
+    {
+        id: "explorer",
+        label: "Business Explorer",
+        description: "Any figure by month, channel, outlet, product or person — and the orders behind it",
+        path: "/reports/explorer",
+        color: "text-accent-600 bg-accent-50",
+        csv: true, schedulable: false,
+        icon: tileIcon("M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"),
+    },
+    {
+        id: "data-quality",
+        label: "Audit & Data Quality",
+        description: "Can these numbers be trusted — and where the records are incomplete",
+        path: "/reports/data-quality",
+        color: "text-success-600 bg-success-50",
+        csv: true, schedulable: false,
+        icon: tileIcon("M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"),
     },
 ];
 
@@ -800,33 +841,23 @@ const CATEGORIES: ReportCategory[] = [
 export default function ReportsPage() {
     const navigate = useNavigate();
     const { can } = usePermissions();
-    // Every /reports/* sub-page requires reports.view, already implied by
-    // reaching this page - except /reports/financial, which requires the
-    // more restricted reports.financial (see routes/api.php and
-    // SyncPermissions.php: outlet_manager and procurement_officer/manager
-    // deliberately get reports.view but not reports.financial). Filtering
-    // the tile here so it doesn't link to a page that will 403.
+    // One permission per report page (Phase 3A): a tile is shown only for
+    // a page the viewer holds — the same slug its route and API check — and
+    // says "CSV export" / "Schedulable" only when this viewer may take a file
+    // out of it.
     const visibleCategories = CATEGORIES.filter(
-        (cat) => cat.id !== "financial" || can("reports.financial"),
+        (cat) => canViewReport(can, reportPageOfRoute(cat.path)),
     );
 
     return (
         <div className="space-y-8 animate-fade-in">
-            <div>
-                <h1 className="page-title">Reports & Analytics</h1>
-                <p className="page-subtitle">
-                    Business intelligence overview. Select a category to drill
-                    down with custom date ranges, CSV export, and scheduling.
-                </p>
-            </div>
-
             <ExecutiveOverview />
             <SchedulesSummary />
 
             <div>
-                <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-3">
-                    Report Categories
-                </p>
+                <h2 className="text-sm font-semibold text-surface-900 mb-3">
+                    All reports
+                </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {visibleCategories.map((cat) => (
                         <button
@@ -850,7 +881,7 @@ export default function ReportsPage() {
                                     {cat.description}
                                 </p>
                                 <div className="flex items-center gap-3 mt-2 text-xs text-surface-400">
-                                    <span className="flex items-center gap-0.5">
+                                    {cat.csv !== false && canExportReport(can, reportPageOfRoute(cat.path)) && <span className="flex items-center gap-0.5">
                                         <svg
                                             className="w-3 h-3"
                                             fill="none"
@@ -865,8 +896,8 @@ export default function ReportsPage() {
                                             />
                                         </svg>
                                         CSV export
-                                    </span>
-                                    <span className="flex items-center gap-0.5">
+                                    </span>}
+                                    {cat.schedulable !== false && canExportReport(can, reportPageOfRoute(cat.path)) && <span className="flex items-center gap-0.5">
                                         <svg
                                             className="w-3 h-3"
                                             fill="none"
@@ -881,7 +912,7 @@ export default function ReportsPage() {
                                             />
                                         </svg>
                                         Schedulable
-                                    </span>
+                                    </span>}
                                 </div>
                             </div>
                             <svg

@@ -22,14 +22,25 @@ import {
 } from "@/components/setup/FormComponents";
 import type { Currency, CurrencyFormData } from "@/types/setup";
 import type { ApiError } from "@/types";
+import { usePermissions } from "@/hooks/usePermissions";
+import { waitsForApproval } from "@/api/proposals";
+import { PendingChanges, NeedsApprovalHint, PROPOSALS_QUERY_KEY } from "@/components/approvals/PendingChanges";
 
 const schema = z.object({
     code: z.string().min(2).max(10).toUpperCase(),
     name: z.string().min(1, "Name is required"),
     symbol: z.string().min(1, "Symbol is required"),
-    exchange_rate: z.coerce
-        .number()
-        .min(0.0001, "Exchange rate must be positive"),
+    // Entered the way people say it — "150 KES per £" — and inverted on save
+    // into the stored exchange_rate (units of this currency per 1 KES). The
+    // old box asked for the inverted number directly: GBP went in as 0.0066,
+    // i.e. 151.5 KES/£, when 150 was meant (cycle 10).
+    kes_per_unit: z.coerce.number().min(0.0001, "Enter how many KES one unit costs a customer"),
+    // What a unit of EARNED money is worth in reports. There was no field for
+    // it at all, so a currency added here reported nothing (cycle 10).
+    reporting_rate_to_kes: z.preprocess(
+        (v) => (v === "" || v === null || v === undefined ? null : Number(v)),
+        z.number().min(0.0001, "Must be positive").nullable(),
+    ),
     decimal_places: z.coerce.number().min(0).max(4),
     thousand_separator: z.string(),
     decimal_separator: z.string(),
@@ -44,7 +55,8 @@ const DEFAULTS: FormValues = {
     code: "",
     name: "",
     symbol: "",
-    exchange_rate: 1,
+    kes_per_unit: 1,
+    reporting_rate_to_kes: null,
     decimal_places: 2,
     thousand_separator: ",",
     decimal_separator: ".",
@@ -53,12 +65,16 @@ const DEFAULTS: FormValues = {
     is_active: true,
 };
 
+// Presets fill names and symbols only. They used to carry rate guesses
+// (USD 0.0077 = 130 KES/$, GBP 0.006 = 166.7 KES/£) that a busy person could
+// save without noticing; a rate is a business decision, typed on purpose.
 const PRESETS: Partial<Record<string, Partial<FormValues>>> = {
     KES: {
         code: "KES",
         name: "Kenyan Shilling",
         symbol: "KES",
-        exchange_rate: 1,
+        kes_per_unit: 1,
+        reporting_rate_to_kes: 1,
         decimal_places: 2,
         symbol_position: "before",
     },
@@ -66,7 +82,6 @@ const PRESETS: Partial<Record<string, Partial<FormValues>>> = {
         code: "USD",
         name: "US Dollar",
         symbol: "$",
-        exchange_rate: 0.0077,
         decimal_places: 2,
         symbol_position: "before",
     },
@@ -74,7 +89,6 @@ const PRESETS: Partial<Record<string, Partial<FormValues>>> = {
         code: "EUR",
         name: "Euro",
         symbol: "€",
-        exchange_rate: 0.0071,
         decimal_places: 2,
         symbol_position: "before",
     },
@@ -82,7 +96,6 @@ const PRESETS: Partial<Record<string, Partial<FormValues>>> = {
         code: "GBP",
         name: "British Pound",
         symbol: "£",
-        exchange_rate: 0.006,
         decimal_places: 2,
         symbol_position: "before",
     },
@@ -93,6 +106,11 @@ export default function CurrenciesPage() {
     const toast = useToastStore();
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<Currency | null>(null);
+    // Phase 3C: the two rates are proposals (pricing: admin → finance;
+    // reporting: finance → super admin); everything else is the super admin's.
+    const { can } = usePermissions();
+    const canEdit = can("settings.edit");
+    const [effectiveFrom, setEffectiveFrom] = useState("");
     const [deleting, setDeleting] = useState<Currency | null>(null);
 
     const { data, isLoading } = useQuery({
@@ -121,11 +139,13 @@ export default function CurrenciesPage() {
         setModalOpen(true);
     };
     const openEdit = (c: Currency) => {
+        setEffectiveFrom("");
         reset({
             code: c.code,
             name: c.name,
             symbol: c.symbol,
-            exchange_rate: c.exchange_rate,
+            kes_per_unit: c.exchange_rate > 0 ? Math.round((1 / Number(c.exchange_rate)) * 100) / 100 : 1,
+            reporting_rate_to_kes: c.reporting_rate_to_kes == null ? null : Number(c.reporting_rate_to_kes),
             decimal_places: c.decimal_places,
             thousand_separator: c.thousand_separator,
             decimal_separator: c.decimal_separator,
@@ -137,14 +157,27 @@ export default function CurrenciesPage() {
         setModalOpen(true);
     };
 
+    // The form speaks "KES per 1 unit"; the API stores the inverse, to the six
+    // decimals the column holds (150 KES/£ → 0.006667).
+    const toPayload = ({ kes_per_unit, ...rest }: FormValues): CurrencyFormData => ({
+        ...rest,
+        // An untouched figure sends the stored rate back exactly: the 2-decimal
+        // round trip must never read as a pricing-rate change (Phase 3C).
+        exchange_rate: editing && Number(kes_per_unit) === (editing.exchange_rate > 0 ? Math.round((1 / Number(editing.exchange_rate)) * 100) / 100 : 1)
+            ? Number(editing.exchange_rate)
+            : Math.round((1 / kes_per_unit) * 1_000_000) / 1_000_000,
+    });
+
     const saveMutation = useMutation({
         mutationFn: (values: FormValues) =>
             editing
-                ? currenciesApi.update(editing.id, values)
-                : currenciesApi.create(values),
-        onSuccess: () => {
+                ? currenciesApi.update(editing.id, { ...toPayload(values), effective_from: effectiveFrom ? new Date(effectiveFrom).toISOString() : null })
+                : currenciesApi.create(toPayload(values)),
+        onSuccess: (res) => {
             qc.invalidateQueries({ queryKey: ["currencies"] });
-            toast.success(editing ? "Currency updated." : "Currency added.");
+            qc.invalidateQueries({ queryKey: [PROPOSALS_QUERY_KEY] });
+            if (waitsForApproval(res)) toast.info(res.message);
+            else toast.success(editing ? "Currency updated." : "Currency added.");
             setModalOpen(false);
         },
         onError: (err: ApiError) => toast.error(err.message),
@@ -190,10 +223,14 @@ export default function CurrenciesPage() {
                         orders use the customer's selected currency.
                     </p>
                 </div>
-                <button onClick={openCreate} className="btn-primary shrink-0 self-start sm:self-auto">
-                    + Add Currency
-                </button>
+                {canEdit && (
+                    <button onClick={openCreate} className="btn-primary shrink-0 self-start sm:self-auto">
+                        + Add Currency
+                    </button>
+                )}
             </div>
+
+            <PendingChanges subjectType="currency" subjectIds={currencies.map((c) => c.id)} />
 
             <Section title="Active Currencies">
                 {isLoading ? (
@@ -243,14 +280,25 @@ export default function CurrenciesPage() {
                                         />
                                     </div>
                                     <p className="text-xs text-surface-400 mt-0.5">
-                                        Rate: {currency.exchange_rate} ·{" "}
-                                        {currency.decimal_places} decimals ·
-                                        Symbol {currency.symbol_position}
+                                        Customers:{" "}
+                                        {Number(currency.exchange_rate) > 0
+                                            ? (1 / Number(currency.exchange_rate)).toFixed(2)
+                                            : "—"}{" "}
+                                        KES · Reports:{" "}
+                                        {currency.reporting_rate_to_kes != null
+                                            ? Number(currency.reporting_rate_to_kes).toFixed(2) + " KES"
+                                            : "not set"}{" "}
+                                        · {currency.decimal_places} decimals
                                     </p>
+                                    {currency.reporting_rate_to_kes == null && !currency.is_base && (
+                                        <p className="text-xs text-amber-700 mt-0.5">
+                                            No reporting rate: sales in {currency.code} are left out of every report until one is set.
+                                        </p>
+                                    )}
                                 </div>
                                 {/* Actions */}
                                 <div className="flex items-center gap-1.5 shrink-0">
-                                    {!currency.is_default && (
+                                    {canEdit && !currency.is_default && (
                                         <button
                                             onClick={() =>
                                                 defaultMutation.mutate(
@@ -263,7 +311,7 @@ export default function CurrenciesPage() {
                                             Set default
                                         </button>
                                     )}
-                                    <button
+                                    {canEdit && <button
                                         onClick={() =>
                                             toggleMutation.mutate(currency.id)
                                         }
@@ -273,7 +321,7 @@ export default function CurrenciesPage() {
                                         {currency.is_active
                                             ? "Disable"
                                             : "Enable"}
-                                    </button>
+                                    </button>}
                                     <button
                                         onClick={() => openEdit(currency)}
                                         className="btn-ghost btn-sm"
@@ -281,7 +329,7 @@ export default function CurrenciesPage() {
                                     >
                                         <EditIcon />
                                     </button>
-                                    {!currency.is_default && (
+                                    {canEdit && !currency.is_default && (
                                         <button
                                             onClick={() =>
                                                 setDeleting(currency)
@@ -388,17 +436,52 @@ export default function CurrenciesPage() {
                             />
                         </Field>
                         <Field
-                            label="Exchange Rate"
-                            error={errors.exchange_rate?.message}
-                            hint="Relative to KES (KES = 1)"
+                            label={`Customer price: KES per 1 ${watch("code") || "unit"}`}
+                            error={errors.kes_per_unit?.message}
+                            hint={(() => {
+                                const k = Number(watch("kes_per_unit"));
+                                return k > 0
+                                    ? `What a customer paying in this currency is charged. Stored as ${(Math.round((1 / k) * 1_000_000) / 1_000_000).toFixed(6)}.`
+                                    : "What a customer paying in this currency is charged.";
+                            })()}
                         >
                             <FieldInput
                                 className="input"
                                 type="number"
-                                step="0.000001"
-                                {...register("exchange_rate")}
+                                step="0.01"
+                                placeholder="150"
+                                {...register("kes_per_unit")}
                             />
+                            {editing && <NeedsApprovalHint>A change needs approval from finance.</NeedsApprovalHint>}
                         </Field>
+                        <Field
+                            label={`Reporting rate: KES per 1 ${watch("code") || "unit"}`}
+                            error={errors.reporting_rate_to_kes?.message}
+                            hint="What a unit of earned money is worth in reports. Leave empty only if you never sell in this currency: its sales would be left out of every report."
+                        >
+                            <FieldInput
+                                className="input"
+                                type="number"
+                                step="0.01"
+                                placeholder="165"
+                                {...register("reporting_rate_to_kes")}
+                            />
+                            {editing && <NeedsApprovalHint>A change needs approval from the super admin.</NeedsApprovalHint>}
+                        </Field>
+                        {editing && (
+                            <Field
+                                label="Reporting rate takes effect"
+                                hint="Leave empty for 'when approved'. Never earlier than now."
+                                className="col-span-2"
+                            >
+                                <FieldInput
+                                    className="input"
+                                    type="datetime-local"
+                                    value={effectiveFrom}
+                                    onChange={(e) => setEffectiveFrom(e.target.value)}
+                                />
+                            </Field>
+                        )}
                         <Field label="Decimal Places">
                             <FieldInput
                                 className="input"

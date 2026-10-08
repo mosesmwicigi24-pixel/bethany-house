@@ -28,7 +28,13 @@ class EnsureStaff
     {
         $user = $request->user();
 
-        if (! $user || ! $user->canAccessAdmin()) {
+        // isActive(): the token path is refused by Sanctum (AuthServiceProvider);
+        // this catches any other way a non-active staff user is authenticated.
+        // A named service account (config security.service_accounts — Neema)
+        // passes the boundary; its roles and permissions still gate each route.
+        $admitted = $user && ($user->canAccessAdmin() || $user->isServiceAccount());
+
+        if (! $admitted || ! $user->isActive()) {
             return response()->json(['message' => 'This action is unauthorized.'], 403);
         }
 

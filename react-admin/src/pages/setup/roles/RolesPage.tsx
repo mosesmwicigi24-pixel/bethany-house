@@ -5,6 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { rolesApi, permissionsApi } from "@/api/setup";
 import { useToastStore } from "@/store/toast.store";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { DataTable } from "@/components/ui/DataTable";
@@ -85,6 +86,10 @@ const SYSTEM_ROLES = [
 
 export default function RolesPage() {
     const qc = useQueryClient();
+    // Write controls follow roles.edit — the server's own check — so a
+    // read-only viewer (admin, system_admin) sees no buttons that would fail.
+    const { can } = usePermissions();
+    const canEdit = can("roles.edit");
     const toast = useToastStore();
     const [modalOpen, setModalOpen] = useState(false);
     const [permModalOpen, setPermModalOpen] = useState(false);
@@ -108,6 +113,11 @@ export default function RolesPage() {
 
     const roles = rolesData?.data ?? [];
     const permGroups = permsData?.data ?? [];
+    // The super admin holds every permission (Gate::before) — shown all ticked
+    // and locked, never edited (owner, 2026-10-07).
+    const allPermIds = permGroups.flatMap((g) => g.permissions.map((p) => p.id));
+    const isSuper = (r?: { name: string } | null) => r?.name === "super_admin";
+    const superLocked = isSuper(managingPerms);
 
     const form = useForm<RoleFormValues>({
         resolver: zodResolver(roleSchema),
@@ -142,7 +152,9 @@ export default function RolesPage() {
 
     const openPerms = (r: RoleSetup) => {
         setManagingPerms(r);
-        setSelectedPerms(r.permissions.map((p) => p.id));
+        setSelectedPerms(
+            isSuper(r) ? allPermIds : r.permissions.map((p) => p.id),
+        );
         setExpandedGroups(new Set(permGroups.map((g) => g.group)));
         setPermModalOpen(true);
     };
@@ -180,12 +192,14 @@ export default function RolesPage() {
     });
 
     const togglePerm = (id: number) => {
+        if (superLocked) return;
         setSelectedPerms((prev) =>
             prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id],
         );
     };
 
     const toggleGroup = (group: PermissionGroup) => {
+        if (superLocked) return;
         const groupIds = group.permissions.map((p) => p.id);
         const allSelected = groupIds.every((id) => selectedPerms.includes(id));
         if (allSelected) {
@@ -222,9 +236,11 @@ export default function RolesPage() {
                         restricted access.
                     </p>
                 </div>
-                <button onClick={openCreate} className="btn-primary shrink-0 self-start sm:self-auto">
-                    + Create Role
-                </button>
+                {canEdit && (
+                    <button onClick={openCreate} className="btn-primary shrink-0 self-start sm:self-auto">
+                        + Create Role
+                    </button>
+                )}
             </div>
 
             {/* SRS-mandated roles reference */}
@@ -268,14 +284,14 @@ export default function RolesPage() {
                     <EmptyState
                         title="No roles configured"
                         description="Create the system roles listed above to get started."
-                        action={
+                        action={canEdit ? (
                             <button
                                 onClick={openCreate}
                                 className="btn-primary btn-sm"
                             >
                                 Create Role
                             </button>
-                        }
+                        ) : undefined}
                     />
                 ) : (
                     <div className="table-wrapper">
@@ -315,11 +331,9 @@ export default function RolesPage() {
                                                 onClick={() => openPerms(role)}
                                                 className="text-xs text-brand-600 hover:text-brand-700 font-medium"
                                             >
-                                                {role.permissions.length}{" "}
-                                                permission
-                                                {role.permissions.length !== 1
-                                                    ? "s"
-                                                    : ""}
+                                                {isSuper(role)
+                                                    ? `All permissions (${allPermIds.length})`
+                                                    : `${role.permissions.length} permission${role.permissions.length !== 1 ? "s" : ""}`}
                                             </button>
                                         </td>
                                         <td>
@@ -342,6 +356,7 @@ export default function RolesPage() {
                                                 >
                                                     Permissions
                                                 </button>
+                                                {canEdit && (
                                                 <button
                                                     onClick={() =>
                                                         openEdit(role)
@@ -351,7 +366,8 @@ export default function RolesPage() {
                                                 >
                                                     <EditIcon />
                                                 </button>
-                                                {!role.is_system && (
+                                                )}
+                                                {canEdit && !role.is_system && (
                                                     <button
                                                         onClick={() =>
                                                             setDeleting(role)
@@ -497,7 +513,9 @@ export default function RolesPage() {
                 footer={
                     <>
                         <div className="mr-auto text-xs text-surface-500">
-                            {selectedPerms.length} permissions selected
+                            {superLocked
+                                ? `Super Admin holds all ${allPermIds.length} permissions, including any added later. It cannot be restricted.`
+                                : `${selectedPerms.length} permissions selected`}
                         </div>
                         <button
                             onClick={() => setPermModalOpen(false)}
@@ -505,6 +523,7 @@ export default function RolesPage() {
                         >
                             Cancel
                         </button>
+                        {!superLocked && (
                         <button
                             onClick={() => syncPermsMutation.mutate()}
                             disabled={syncPermsMutation.isPending}
@@ -518,6 +537,7 @@ export default function RolesPage() {
                             ) : null}
                             Save Permissions
                         </button>
+                        )}
                     </>
                 }
             >
@@ -557,6 +577,7 @@ export default function RolesPage() {
                                             <input
                                                 type="checkbox"
                                                 checked={allSelected}
+                                                disabled={superLocked}
                                                 ref={(el) => {
                                                     if (el)
                                                         el.indeterminate =
@@ -613,6 +634,7 @@ export default function RolesPage() {
                                                         onChange={() =>
                                                             togglePerm(perm.id)
                                                         }
+                                                        disabled={superLocked}
                                                         className="accent-brand-500 w-4 h-4 mt-0.5 shrink-0"
                                                     />
                                                     <div>

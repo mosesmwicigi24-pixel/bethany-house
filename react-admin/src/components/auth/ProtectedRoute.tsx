@@ -1,5 +1,7 @@
 import { Link } from "react-router-dom";
 import { usePermissions } from "@/hooks/usePermissions";
+import { gateAllows } from "@/lib/navGate";
+import { useHomePath } from "@/hooks/useHomePath";
 
 interface ProtectedRouteProps {
     /** Single permission required */
@@ -8,10 +10,12 @@ interface ProtectedRouteProps {
     anyOf?: string[];
     /** All of these permissions (AND) */
     allOf?: string[];
-    /** Require a specific role instead of (or alongside) a permission */
-    role?: string;
-    /** Require ANY of these roles (OR) - e.g. ['super_admin', 'admin'] */
-    anyOfRoles?: string[];
+    /**
+     * The page's API is role:super_admin (Activity Logs, Database). The only
+     * role-shaped guard there is — every other page is gated by the
+     * permission its API checks (Role Hardening Plan §16).
+     */
+    superAdminOnly?: boolean;
     children: React.ReactNode;
 }
 
@@ -42,18 +46,16 @@ export function ProtectedRoute({
     permission,
     anyOf,
     allOf,
-    role,
-    anyOfRoles,
+    superAdminOnly,
     children,
 }: ProtectedRouteProps) {
-    const { can, canAny, canAll, hasRole } = usePermissions();
+    const { can, isSuperAdmin } = usePermissions();
 
-    let allowed = true;
-    if (permission) allowed = allowed && can(permission);
-    if (anyOf?.length) allowed = allowed && canAny(...anyOf);
-    if (allOf?.length) allowed = allowed && canAll(...allOf);
-    if (role) allowed = allowed && hasRole(role);
-    if (anyOfRoles?.length) allowed = allowed && anyOfRoles.some((r) => hasRole(r));
+    // The same rule the Sidebar and the command palette apply (lib/navGate).
+    const allowed = gateAllows(
+        { permission, anyOfPermissions: anyOf, allOfPermissions: allOf, superAdminOnly },
+        { can, isSuperAdmin },
+    );
 
     if (!allowed) {
         return <AccessDenied />;
@@ -63,6 +65,9 @@ export function ProtectedRoute({
 }
 
 function AccessDenied() {
+    // Back to a page this user CAN open. It used to link to /dashboard, which
+    // for a role without the dashboard was this same locked screen again.
+    const home = useHomePath();
     return (
         <div className="flex flex-col items-center justify-center text-center px-6 py-24 min-h-[60vh]">
             <div className="w-20 h-20 rounded-2xl bg-warning-light text-warning-dark flex items-center justify-center mb-4">
@@ -88,8 +93,8 @@ function AccessDenied() {
                 think this is a mistake, ask an admin to check your account's
                 role and permissions.
             </p>
-            <Link to="/dashboard" className="mt-5 btn btn-secondary btn-sm">
-                Back to dashboard
+            <Link to={home} className="mt-5 btn btn-secondary btn-sm">
+                Go to my home page
             </Link>
         </div>
     );

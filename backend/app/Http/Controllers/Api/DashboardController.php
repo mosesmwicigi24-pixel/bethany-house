@@ -9,6 +9,7 @@ use App\Models\Product;
 use Illuminate\Http\Request;
 use App\Enums\DataScope;
 use App\Services\DataScopeResolver;
+use App\Support\ReportPages;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -44,6 +45,11 @@ class DashboardController extends Controller
     {
         $user   = $request->user();
         $badges = [];
+
+        // Platform-only accounts get no business counts (4D).
+        if (self::isPlatformOnly($user)) {
+            return response()->json($badges);
+        }
 
         try { $badges['orders'] = Order::whereIn('status', ['pending', 'processing'])->count(); }
         catch (\Exception) { $badges['orders'] = 0; }
@@ -106,8 +112,10 @@ class DashboardController extends Controller
     private function buildStats(Request $request): array
     {
         // today_sales used to be every paid order in the business, which is why
-        // it was put behind reports.view. That is still the right lock for a
-        // caller who would see the GROUP's takings — a tailor, say.
+        // it was put behind reports.view — since Phase 3A the Sales & Orders
+        // report (reports.sales), the page those takings come from. That is
+        // still the right lock for a caller who would see the GROUP's
+        // takings — a tailor, say.
         //
         // But Order now carries a viewer scope, so for a narrowed role the same
         // sum is their OWN takings, which is exactly what a cashier should see
@@ -118,7 +126,8 @@ class DashboardController extends Controller
         // view is already narrower than the whole business.
         $user        = $request->user();
         $scope       = DataScopeResolver::for($user, 'orders.view');
-        $maySeeMoney = ($user?->can('reports.view') ?? false) || $scope !== DataScope::All;
+        // None (no role grants orders.view) is not "a narrower view" — it is no view.
+        $maySeeMoney = ($user?->can('reports.sales') ?? false) || in_array($scope, [DataScope::Own, DataScope::Outlet], true);
 
         $stats = [
             // What the figures below are counted over, so the UI can say "your
@@ -127,8 +136,19 @@ class DashboardController extends Controller
             'total_users'  => User::count(),
             'active_users' => User::where('status', 'active')->count(),
             'staff_users'  => User::staffUsers()->count(),
-            'customers'    => User::customers()->count(),
         ];
+
+        // The system administrator runs the platform, not the business (4D):
+        // accounts and their own notifications — no order, product, stock,
+        // shipment, production, customer or money counts.
+        if (self::isPlatformOnly($user)) {
+            $stats['platform_only'] = true;
+            $stats['unread_notifications'] = $this->unreadNotifications($user);
+            return $stats;
+        }
+
+        $stats['platform_only'] = false;
+        $stats['customers']     = User::customers()->count();
 
         try {
             $stats['total_orders']   = Order::count();
@@ -165,13 +185,21 @@ class DashboardController extends Controller
                 ->count();
         } catch (\Exception) {}
 
-        // Phase 4 - production queue
+        // Phase 4 - production queue. Counted over the orders this viewer can
+        // SEE (ProductionOrder::visibleTo, the rule the Production Orders list
+        // uses): the whole floor for those who run it, their outlets for an
+        // outlet manager, their own work for a tailor. These were raw
+        // shop-wide counts, so a tailor's Home read "3 active, 2 overdue"
+        // beside a list with 2 and 1 (Tailor View Cycle 2, F5/B26).
         try {
-            $stats['production_draft']       = DB::table('production_orders')->where('status', 'draft')->count();
-            $stats['production_queue']       = DB::table('production_orders')->where('status', 'pending')->count();
-            $stats['production_in_progress'] = DB::table('production_orders')->where('status', 'in_progress')->count();
-            $stats['production_qc_pending']  = DB::table('production_orders')->where('status', 'qc_pending')->count();
-            $stats['production_overdue']     = DB::table('production_orders')
+            $user    = $request->user();
+            $visible = fn () => \App\Models\ProductionOrder::query()->visibleTo($user);
+
+            $stats['production_draft']       = $visible()->where('status', 'draft')->count();
+            $stats['production_queue']       = $visible()->where('status', 'pending')->count();
+            $stats['production_in_progress'] = $visible()->where('status', 'in_progress')->count();
+            $stats['production_qc_pending']  = $visible()->where('status', 'qc_pending')->count();
+            $stats['production_overdue']     = $visible()
                 ->where('due_date', '<', now())
                 ->whereNotIn('status', ['completed', 'cancelled', 'draft'])
                 ->count();
@@ -188,6 +216,45 @@ class DashboardController extends Controller
         } catch (\Exception) {}
 
         return $stats;
+    }
+
+    /**
+     * A caller who holds no business-domain permission at all — the system
+     * administrator in the Phase 2 catalogue (accounts, outlets, roles,
+     * attendance, technical setup). Decided by permission, not role name, so
+     * a role edited the same way gets the same platform-only dashboard.
+     * Any report page counts as business (one permission per page since
+     * Phase 3A — see ReportPages; reports.view is retired).
+     */
+    private const BUSINESS_PERMISSIONS = [
+        'orders.view', 'products.view', 'inventory.view', 'production.view', 'shipment.view',
+        'payments.view', 'customers.view', 'procurement.view', 'expenses.view', 'pos.access',
+    ];
+
+    private static function isPlatformOnly($user): bool
+    {
+        if (!$user) {
+            return true;
+        }
+        foreach (self::BUSINESS_PERMISSIONS as $permission) {
+            if ($user->can($permission)) {
+                return false;
+            }
+        }
+        return !ReportPages::canViewAny($user, ReportPages::keys());
+    }
+
+    private function unreadNotifications($user): int
+    {
+        try {
+            return DB::table('notifications')
+                ->where('notifiable_type', get_class($user))
+                ->where('notifiable_id', $user->id)
+                ->whereNull('read_at')
+                ->count();
+        } catch (\Exception) {
+            return 0;
+        }
     }
 
     /**
@@ -230,19 +297,11 @@ class DashboardController extends Controller
         // Overdue production orders — admins, managers, and tailors
         if ($isAdmin || $isManager || $isTailor) {
             try {
-                $overdueQuery = DB::table('production_orders')
+                // The same orders the Overdue tile counts (buildStats), so the
+                // banner and the tile can never disagree.
+                $overdueQuery = \App\Models\ProductionOrder::query()->visibleTo($user)
                     ->where('due_date', '<', now())
                     ->whereNotIn('status', ['completed', 'cancelled', 'draft']);
-
-                // Tailors only see orders they are assigned to
-                if ($isTailor && !$isAdmin) {
-                    $overdueQuery->whereExists(function ($q) use ($user) {
-                        $q->select(DB::raw(1))
-                          ->from('production_tasks')
-                          ->whereColumn('production_tasks.production_order_id', 'production_orders.id')
-                          ->where('production_tasks.assigned_to', $user->id);
-                    });
-                }
 
                 $n = $overdueQuery->count();
                 if ($n > 0) $alerts[] = [

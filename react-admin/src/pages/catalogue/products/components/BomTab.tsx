@@ -155,9 +155,11 @@ interface LineItemRowProps {
     index: number;
     onChange: (key: string, field: keyof BomItem, value: any) => void;
     onRemove: (key: string) => void;
+    /** products.view_cost — the API sends no costs without it. */
+    showCost: boolean;
 }
 
-function LineItemRow({ item, index, onChange, onRemove }: LineItemRowProps) {
+function LineItemRow({ item, index, onChange, onRemove, showCost }: LineItemRowProps) {
     const lineCost = (item.quantity ?? 0) * (item.material?.cost_per_unit ?? 0);
 
     return (
@@ -226,6 +228,7 @@ function LineItemRow({ item, index, onChange, onRemove }: LineItemRowProps) {
             </td>
 
             {/* Line cost */}
+            {showCost && (
             <td className="px-3 py-2.5 w-32 text-right">
                 <p className="text-sm font-medium text-surface-800">
                     KES{" "}
@@ -240,6 +243,7 @@ function LineItemRow({ item, index, onChange, onRemove }: LineItemRowProps) {
                     /{item.unit_of_measure}
                 </p>
             </td>
+            )}
 
             {/* Notes */}
             <td className="px-3 py-2.5">
@@ -384,7 +388,12 @@ export default function BomTab({ productId, variants }: BomTabProps) {
     const qc = useQueryClient();
     const toast = useToastStore();
     const { can } = usePermissions();
-    const canEdit = can("products.edit");
+    // Create / edit / activate a BOM: bom.edit on the API since Phase 2
+    // (procurement owns BOMs), not products.edit.
+    const canEdit = can("bom.edit");
+    // Material costs, line costs and totals are products.view_cost. The BOM
+    // itself (materials, quantities) stays readable to production.view_bom.
+    const canSeeCost = can("products.view_cost");
 
     const [activeBomId, setActiveBomId] = useState<number | null>(null);
     const [editing, setEditing] = useState(false);
@@ -698,9 +707,11 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                                 <th className="px-3 py-2.5 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider w-28">
                                     UOM
                                 </th>
+                                {canSeeCost && (
                                 <th className="px-3 py-2.5 text-right text-xs font-semibold text-surface-500 uppercase tracking-wider w-32">
                                     Line Cost
                                 </th>
+                                )}
                                 <th className="px-3 py-2.5 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider">
                                     Notes
                                 </th>
@@ -711,7 +722,7 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                             {lineItems.length === 0 ? (
                                 <tr>
                                     <td
-                                        colSpan={7}
+                                        colSpan={canSeeCost ? 7 : 6}
                                         className="px-3 py-8 text-center text-sm text-surface-400"
                                     >
                                         No materials added yet - search above to add.
@@ -725,6 +736,7 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                                         index={i}
                                         onChange={updateItem}
                                         onRemove={removeItem}
+                                        showCost={canSeeCost}
                                     />
                                 ))
                             )}
@@ -739,6 +751,7 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                                         {itemCount} material
                                         {itemCount !== 1 ? "s" : ""}
                                     </td>
+                                    {canSeeCost && (
                                     <td className="px-3 py-2.5 text-right">
                                         <p className="text-sm font-bold text-surface-900">
                                             KES{" "}
@@ -754,6 +767,7 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                                             per unit
                                         </p>
                                     </td>
+                                    )}
                                     <td colSpan={2} />
                                 </tr>
                             </tfoot>
@@ -882,10 +896,13 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                                         </span>
                                     )}
                                     <span className="text-xs text-surface-400">
-                                        {bom.items_count} materials · KES{" "}
+                                        {bom.items_count} materials
+                                        {canSeeCost && <>
+                                        {" "}· KES{" "}
                                         {Number(
                                             bom.total_cost,
                                         ).toLocaleString()}
+                                        </>}
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-2 flex-wrap">
@@ -954,12 +971,14 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                                 <th className="px-3 py-2.5 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider">
                                     UOM
                                 </th>
+                                {canSeeCost && (<>
                                 <th className="px-3 py-2.5 text-right text-xs font-semibold text-surface-500 uppercase tracking-wider">
                                     Unit Cost
                                 </th>
                                 <th className="px-3 py-2.5 text-right text-xs font-semibold text-surface-500 uppercase tracking-wider">
                                     Line Cost
                                 </th>
+                                </>)}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-line">
@@ -991,6 +1010,7 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                                     <td className="px-3 py-2.5 text-sm text-surface-600">
                                         {item.unit_of_measure}
                                     </td>
+                                    {canSeeCost && (<>
                                     <td className="px-3 py-2.5 text-right text-sm text-surface-600 tabular-nums">
                                         {Number(
                                             item.material?.cost_per_unit ?? 0,
@@ -1005,13 +1025,14 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                                             maximumFractionDigits: 2,
                                         })}
                                     </td>
+                                    </>)}
                                 </tr>
                             ))}
                         </tbody>
                         <tfoot>
                             <tr className="border-t-2 border-line bg-surface-50">
                                 <td
-                                    colSpan={5}
+                                    colSpan={canSeeCost ? 5 : 4}
                                     className="px-3 py-2.5 text-xs text-surface-500"
                                 >
                                     {viewingBom.items_count} material
@@ -1022,6 +1043,7 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                                         </span>
                                     )}
                                 </td>
+                                {canSeeCost && (
                                 <td className="px-3 py-2.5 text-right">
                                     <p className="text-sm font-bold text-surface-900">
                                         KES{" "}
@@ -1036,6 +1058,7 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                                         material cost / unit
                                     </p>
                                 </td>
+                                )}
                             </tr>
                         </tfoot>
                     </table>

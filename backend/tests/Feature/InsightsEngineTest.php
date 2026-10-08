@@ -32,7 +32,7 @@ class InsightsEngineTest extends TestCase
     {
         $user = User::factory()->create();
         $user->assignRole(Role::findOrCreate('sales_manager', 'sanctum'));
-        $user->givePermissionTo(Permission::findOrCreate('reports.view', 'sanctum'));
+        \Tests\ReportAccess::grantPages($user);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 

@@ -15,9 +15,6 @@ import {
     Bar,
     LineChart,
     Line,
-    PieChart,
-    Pie,
-    Cell,
     XAxis,
     YAxis,
     CartesianGrid,
@@ -28,6 +25,11 @@ import {
 import {
     KPI_GRID,
     KpiCard,
+    tablistKeys,
+    LoadFailed,
+    ReportPending,
+    ShareBars,
+    EmptyNote,
     ReportPdfButton,
     SectionHeader,
     TableWrapper,
@@ -42,6 +44,8 @@ import {
     CHART_COLORS,
     TH,
     TH_R,
+    useReportOutlet,
+    useReportTab,
 } from "./reportShared";
 
 type ProcurementTab =
@@ -63,26 +67,21 @@ export default function ProcurementReportPage() {
     // Honour deep-links like /reports/procurement?tab=seasonal (the attention
     // feed sends users here) — read once on mount, same pattern as
     // CustomersReportPage; after that the tab buttons own the state.
-    const [searchParams] = useSearchParams();
-    const [activeTab, setActiveTab] = useState<ProcurementTab>(() => {
-        const t = searchParams.get("tab");
-        return PROCUREMENT_TABS.includes(t as ProcurementTab)
-            ? (t as ProcurementTab)
-            : "overview";
-    });
+    const [activeTab, setActiveTab] = useReportTab(PROCUREMENT_TABS, "overview");
 
-    const { data, isLoading } = useQuery({
-        queryKey: ["report-procurement", dr.start, dr.end],
+    const { data, isError, refetch, isPlaceholderData, fetchStatus } = useQuery({
+        queryKey: ["report-procurement", dr.start, dr.end, dr.outlet],
+        placeholderData: (prev) => prev,   // keep the figures while a new period loads — no blank page
         queryFn: () => reportsApi.purchaseOrders(dr.params),
         enabled: !!dr.start && !!dr.end,
     });
 
-    if (isLoading)
-        return (
-            <div className="flex justify-center py-20">
-                <Spinner />
-            </div>
-        );
+    // Kept figures are the PREVIOUS period's: on failure they must not stand
+    // under this period's heading.
+    if (isError && (!data || isPlaceholderData))
+        return <LoadFailed what="Procurement & Suppliers" onRetry={() => refetch()} />;
+    if (!data)
+        return <ReportPending paused={fetchStatus === "paused"} />;
 
     const summary = data?.summary ?? {};
     const bySupplier = data?.by_supplier ?? [];
@@ -113,7 +112,7 @@ export default function ProcurementReportPage() {
     return (
         <div className="space-y-6 animate-fade-in">
             <ReportPageHeader
-                title="Procurement Report"
+                title="Procurement & Suppliers"
                 subtitle="Purchase orders, supplier spend, and fulfilment."
                 reportType="procurement"
                 exportPath="purchase-orders"
@@ -124,17 +123,19 @@ export default function ProcurementReportPage() {
                 onPresetChange={dr.handlePreset}
                 onStartChange={dr.setStart}
                 onEndChange={dr.setEnd}
+                outlet={dr.outlet}
+                onOutletChange={dr.setOutlet}
             />
 
             {/* KPIs */}
             <div className={KPI_GRID}>
                 <KpiCard label="Total POs" value={summary.total_orders ?? 0} />
                 <KpiCard
-                    label="Total Spend"
+                    label="Total spend"
                     value={fmtKes(summary.total_value)}
                 />
                 <KpiCard
-                    label="Received Value"
+                    label="Received value"
                     value={fmtKes(summary.received_value)}
                     color="text-success"
                 />
@@ -146,18 +147,19 @@ export default function ProcurementReportPage() {
             </div>
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Avg PO Value"
+                    label="Avg PO value"
                     value={fmtKes(summary.avg_po_value)}
                 />
                 <KpiCard
-                    label="Fulfillment Rate"
-                    value={`${fulfillmentRate}%`}
+                    label="Fulfilment rate"
+                    value={summary.total_orders > 0 ? `${fulfillmentRate}%` : "—"}
+                    sub={summary.total_orders > 0 ? undefined : "no purchase orders in this period"}
                     color={
                         fulfillmentRate >= 80 ? "text-success" : "text-warning"
                     }
                 />
                 <KpiCard
-                    label="Avg Lead Time"
+                    label="Avg lead time"
                     value={
                         summary.avg_lead_days
                             ? `${Math.round(summary.avg_lead_days)} days`
@@ -165,7 +167,7 @@ export default function ProcurementReportPage() {
                     }
                 />
                 <KpiCard
-                    label="Partial Received"
+                    label="Partial received"
                     value={fmtKes(summary.partial_value)}
                     color="text-info"
                 />
@@ -173,12 +175,12 @@ export default function ProcurementReportPage() {
 
             {/* Tabs */}
             <div className="border-b border-line overflow-x-auto no-scrollbar">
-                <nav className="flex gap-1 -mb-px">
+                <nav className="flex gap-1 -mb-px" role="tablist" aria-label="Report sections" onKeyDown={tablistKeys}>
                     {PROCUREMENT_TABS.map(
                         (tab) => (
                             <button
                                 key={tab}
-                                onClick={() => setActiveTab(tab)}
+                                onClick={() => setActiveTab(tab)} role="tab" aria-selected={activeTab === tab}
                                 className={clsx(
                                     "px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap shrink-0 transition-colors capitalize",
                                     activeTab === tab
@@ -202,10 +204,14 @@ export default function ProcurementReportPage() {
             {/* ── OVERVIEW ── */}
             {activeTab === "overview" && (
                 <div className="space-y-6">
+                    {data && !(Number(summary.total_orders) > 0) && monthlyTrend.length === 0 && (
+                        <EmptyNote title="No purchase orders in this period."
+                            hint="Try a longer range, or open Suppliers for the full supplier list." />
+                    )}
                     {/* Monthly spend trend */}
                     {monthlyTrend.length > 0 && (
                         <div className="card p-5">
-                            <SectionHeader title="Monthly Spend Trend" />
+                            <SectionHeader title="Monthly spend trend" />
                             <ResponsiveContainer width="100%" height={240}>
                                 <LineChart data={monthlyTrend}>
                                     <CartesianGrid
@@ -243,43 +249,11 @@ export default function ProcurementReportPage() {
                     {byStatus.length > 0 && (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="card p-5">
-                                <SectionHeader title="PO Status Distribution" />
-                                <ResponsiveContainer width="100%" height={200}>
-                                    <PieChart>
-                                        <Pie
-                                            data={byStatus}
-                                            dataKey="count"
-                                            nameKey="status"
-                                            cx="50%"
-                                            cy="50%"
-                                            outerRadius={75}
-                                            label={({ status, percent }: any) =>
-                                                `${status?.replace(/_/g, " ")} ${(percent * 100).toFixed(0)}%`
-                                            }
-                                            labelLine={false}
-                                        >
-                                            {byStatus.map(
-                                                (_: any, i: number) => (
-                                                    <Cell
-                                                        key={i}
-                                                        fill={
-                                                            CHART_COLORS[
-                                                                i %
-                                                                    CHART_COLORS.length
-                                                            ]
-                                                        }
-                                                    />
-                                                ),
-                                            )}
-                                        </Pie>
-                                        <Tooltip
-                                            formatter={(v, name) => [v, name]}
-                                        />
-                                    </PieChart>
-                                </ResponsiveContainer>
+                                <SectionHeader title="PO status distribution" />
+                                <ShareBars rows={(byStatus ?? []).map((d: any) => ({ label: String(d.status ?? "—"), value: Number(d.count ?? 0) }))} />
                             </div>
                             <div className="card p-5">
-                                <SectionHeader title="By Status" />
+                                <SectionHeader title="By status" />
                                 <div className="space-y-3 mt-2">
                                     {byStatus.map((s: any, i: number) => (
                                         <div
@@ -309,7 +283,7 @@ export default function ProcurementReportPage() {
                 <div className="space-y-6">
                     {chartData.length > 0 && (
                         <div className="card p-5">
-                            <SectionHeader title="Spend by Supplier" />
+                            <SectionHeader title="Spend by supplier" />
                             <ResponsiveContainer width="100%" height={280}>
                                 <BarChart data={chartData} layout="vertical">
                                     <CartesianGrid
@@ -346,7 +320,7 @@ export default function ProcurementReportPage() {
 
                     <div className="card overflow-hidden">
                         <div className="px-5 pt-5 pb-4">
-                            <SectionHeader title="Supplier Summary">
+                            <SectionHeader title="Supplier summary">
                                 <ExportCsvButton
                                     path="purchase-orders"
                                     params={dr.params}
@@ -425,9 +399,9 @@ export default function ProcurementReportPage() {
             {activeTab === "items" && (
                 <div className="card overflow-hidden">
                     <div className="px-5 pt-5 pb-4">
-                        <SectionHeader title="Top Purchased Items" />
+                        <SectionHeader title="Top purchased items" />
                     </div>
-                    <TableWrapper>
+                    <TableWrapper ranked>
                         <table className="w-full">
                             <thead>
                                 <tr className="border-y border-line bg-surface-50/50">
@@ -492,9 +466,10 @@ export default function ProcurementReportPage() {
 // times. Pre-import (no history) it invites the legacy import instead.
 
 function SeasonalDemandTab() {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["seasonal-demand"],
-        queryFn: () => reportsApi.seasonalDemand(),
+        queryKey: ["outlet", outletId, "seasonal-demand"],
+        queryFn: () => reportsApi.seasonalDemand(outletId),
         staleTime: 60_000,
     });
     if (isLoading || !data)
@@ -594,7 +569,7 @@ function SeasonalDemandTab() {
             {/* KPI row */}
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Next Season"
+                    label="Next season"
                     value={summary.next_season?.label ?? "—"}
                     sub={
                         summary.next_season
@@ -603,7 +578,7 @@ function SeasonalDemandTab() {
                     }
                 />
                 <KpiCard
-                    label="Gap Value (est.)"
+                    label="Gap value (est.)"
                     value={fmtKes(summary.total_gap_value)}
                     color={
                         summary.total_gap_value > 0
@@ -612,7 +587,7 @@ function SeasonalDemandTab() {
                     }
                 />
                 <KpiCard
-                    label="Urgent Order-bys"
+                    label="Urgent order-bys"
                     value={summary.urgent_orders}
                     color={
                         summary.urgent_orders > 0
@@ -730,9 +705,10 @@ function SeasonalDemandTab() {
 }
 
 function ProcurementIntelligence({ start, end }: { start: string; end: string }) {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["procurement-intelligence", start, end],
-        queryFn: () => reportsApi.procurementIntelligence(start, end),
+        queryKey: ["outlet", outletId, "procurement-intelligence", start, end],
+        queryFn: () => reportsApi.procurementIntelligence(start, end, outletId),
         enabled: !!start && !!end,
         staleTime: 60_000,
     });
@@ -745,8 +721,8 @@ function ProcurementIntelligence({ start, end }: { start: string; end: string })
             <div className={KPI_GRID}>
                 <KpiCard label="Open POs" value={open_pos.count}
                     sub={open_pos.oldest_days != null ? `oldest ${open_pos.oldest_days}d` : "none in flight"} />
-                <KpiCard label="In-flight Value" value={fmtKes(open_pos.value)} />
-                <KpiCard label="Suggested Buys" value={fmtKes(totalSuggested)}
+                <KpiCard label="In-flight value" value={fmtKes(open_pos.value)} />
+                <KpiCard label="Suggested buys" value={fmtKes(totalSuggested)}
                     color={totalSuggested > 0 ? "text-warning" : "text-success"}
                     sub={`${suggestions.length} materials`} />
             </div>

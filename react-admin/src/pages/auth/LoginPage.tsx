@@ -8,7 +8,10 @@ import { useToastStore } from "@/store/toast.store";
 import { authApi } from "@/api/auth";
 import { Spinner } from "@/components/ui/Spinner";
 import { clsx } from "clsx";
-import type { ApiError } from "@/types";
+import { QrCode } from "@/components/security/QrCode";
+import { RecoveryCodes } from "@/components/security/RecoveryCodes";
+import type { ApiError, LoginResponse } from "@/types";
+
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -18,8 +21,10 @@ const loginSchema = z.object({
     remember_me: z.boolean().optional(),
 });
 
+// The code step takes either the authenticator's 6 digits or a recovery code
+// (xxxxx-xxxxx); which one is checked in the submit handler.
 const tfaSchema = z.object({
-    code: z.string().length(6, "Enter the 6-digit code from your authenticator"),
+    code: z.string().trim().min(1, "Enter the code"),
 });
 
 const forgotSchema = z.object({
@@ -40,7 +45,7 @@ type LoginForm  = z.infer<typeof loginSchema>;
 type TfaForm    = z.infer<typeof tfaSchema>;
 type ForgotForm = z.infer<typeof forgotSchema>;
 type ResetForm  = z.infer<typeof resetSchema>;
-type Step = "credentials" | "2fa" | "forgot" | "forgot-sent" | "reset";
+type Step = "credentials" | "2fa" | "2fa-setup" | "recovery-codes" | "forgot" | "forgot-sent" | "reset";
 
 // ─── Left panel ───────────────────────────────────────────────────────────────
 
@@ -126,7 +131,7 @@ function PasswordToggle({ shown, onToggle }: { shown: boolean; onToggle: () => v
 export default function LoginPage() {
     const navigate = useNavigate();
     const location = useLocation();
-    const { isAuthenticated, login, verify2fa, isLoading } = useAuthStore();
+    const { isAuthenticated, login, verify2fa, isLoading, start2faSetup, confirm2faSetup, completeLogin } = useAuthStore();
     const toast = useToastStore();
 
     const [step,          setStep]          = useState<Step>("credentials");
@@ -138,6 +143,12 @@ export default function LoginPage() {
     const [showPassword,  setShowPassword]  = useState(false);
     const [showNewPw,     setShowNewPw]     = useState(false);
     const [showConfirmPw, setShowConfirmPw] = useState(false);
+    // Two-step sign-in: recovery code instead of the app; staged-rollout setup.
+    const [useRecovery,   setUseRecovery]   = useState(false);
+    const [setupData,     setSetupData]     = useState<{ secret_key: string; qr_code_url: string } | null>(null);
+    const [setupCode,     setSetupCode]     = useState("");
+    const [setupError,    setSetupError]    = useState<string | null>(null);
+    const [pendingSession, setPendingSession] = useState<LoginResponse | null>(null);
 
     // ── All hooks unconditional ───────────────────────────────────────────────
     const credForm = useForm<LoginForm>({
@@ -165,8 +176,11 @@ export default function LoginPage() {
     const nextParam = new URLSearchParams(location.search).get("next");
     const safeNext =
         nextParam && /^\/(?!\/)/.test(nextParam) ? nextParam : null;
+    // No destination asked for → "/", which HomeRedirect resolves to the
+    // user's own home page once their permissions are loaded (lib/homePath).
+    // Not computed here: before sign-in there are no permissions to decide by.
     const from =
-        (location.state as { from?: Location })?.from?.pathname ?? safeNext ?? "/dashboard";
+        (location.state as { from?: Location })?.from?.pathname ?? safeNext ?? "/";
 
     // ── Handle reset link from email (?token=...&email=...) ──────────────────
     // Laravel's password reset email links to APP_URL — configure APP_URL to
@@ -190,8 +204,22 @@ export default function LoginPage() {
             const result = await login(values);
             if (result.requires2fa && result.userId) {
                 setUserId(result.userId);
+                setUseRecovery(false);
                 setStep("2fa");
                 tfaForm.reset();
+            } else if (result.requires2faSetup && result.userId) {
+                // The role now requires two-step sign-in and this account has
+                // none: set it up before any session is issued.
+                setUserId(result.userId);
+                setSetupData(null);
+                setSetupCode("");
+                setSetupError(null);
+                setStep("2fa-setup");
+                try {
+                    setSetupData(await start2faSetup(result.userId));
+                } catch (e) {
+                    setSetupError((e as ApiError).message ?? "Setup could not start. Sign in again.");
+                }
             } else {
                 navigate(from, { replace: true });
             }
@@ -209,14 +237,38 @@ export default function LoginPage() {
 
     const on2faSubmit = async (values: TfaForm) => {
         if (!userId) return;
+        const code = values.code.trim();
+        if (!useRecovery && !/^\d{6}$/.test(code)) {
+            tfaForm.setError("code", { message: "Enter the 6-digit code from your authenticator" });
+            return;
+        }
         try {
-            await verify2fa(userId, values.code);
+            const res = await verify2fa(userId, code, useRecovery);
+            if (useRecovery && typeof res.recovery_codes_left === "number") {
+                toast.success(`Signed in with a recovery code. ${res.recovery_codes_left} left — make new ones from your profile.`);
+            }
             navigate(from, { replace: true });
         } catch (err) {
             const apiErr = err as ApiError;
             tfaForm.setError("code", {
-                message: apiErr.message ?? "Invalid code. Please try again.",
+                message: apiErr.errors?.code?.[0] ?? apiErr.errors?.recovery_code?.[0] ?? apiErr.errors?.email?.[0]
+                    ?? apiErr.message ?? "Invalid code. Please try again.",
             });
+        }
+    };
+
+    const onSetupConfirm = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!userId || setupCode.length !== 6) return;
+        setSetupError(null);
+        try {
+            const res = await confirm2faSetup(userId, setupCode);
+            setPendingSession(res);
+            setStep("recovery-codes");
+        } catch (err) {
+            const apiErr = err as ApiError;
+            setSetupError(apiErr.errors?.code?.[0] ?? apiErr.message ?? "That code did not match.");
+            setSetupCode("");
         }
     };
 
@@ -361,25 +413,29 @@ export default function LoginPage() {
                                     <BackButton onClick={() => { setStep("credentials"); tfaForm.reset(); }} label="Back" />
                                     <h1 className="font-display text-2xl font-bold text-surface-900">Two-factor auth</h1>
                                     <p className="mt-1 text-sm text-surface-500">
-                                        Enter the 6-digit code from your authenticator app.
+                                        {useRecovery
+                                            ? "Enter one of your recovery codes. Each works once."
+                                            : "Enter the 6-digit code from your authenticator app."}
                                     </p>
                                 </div>
 
                                 <form onSubmit={tfaForm.handleSubmit(on2faSubmit)} noValidate className="space-y-5">
                                     <div>
-                                        <label className="label" htmlFor="code">Verification code</label>
+                                        <label className="label" htmlFor="code">{useRecovery ? "Recovery code" : "Verification code"}</label>
                                         <input
                                             id="code"
+                                            key={useRecovery ? "recovery" : "totp"}
                                             type="text"
-                                            inputMode="numeric"
-                                            autoComplete="one-time-code"
-                                            maxLength={6}
+                                            inputMode={useRecovery ? "text" : "numeric"}
+                                            autoComplete={useRecovery ? "off" : "one-time-code"}
+                                            maxLength={useRecovery ? 32 : 6}
                                             autoFocus
                                             className={clsx(
-                                                "input text-center font-mono text-xl tracking-[0.5em]",
+                                                "input text-center font-mono text-xl",
+                                                useRecovery ? "tracking-wider" : "tracking-[0.5em]",
                                                 tfaForm.formState.errors.code && "input-error"
                                             )}
-                                            placeholder="000000"
+                                            placeholder={useRecovery ? "xxxxx-xxxxx" : "000000"}
                                             {...tfaForm.register("code")}
                                         />
                                         {tfaForm.formState.errors.code && (
@@ -393,7 +449,66 @@ export default function LoginPage() {
                                             : "Verify"
                                         }
                                     </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => { setUseRecovery((r) => !r); tfaForm.reset(); }}
+                                        className="w-full text-center text-sm text-brand-600 hover:text-brand-700 transition-colors"
+                                    >
+                                        {useRecovery ? "Use my authenticator app instead" : "Lost your phone? Use a recovery code"}
+                                    </button>
                                 </form>
+                            </>
+                        )}
+
+                        {/* ── 2FA setup (role requires it) ─────────────── */}
+                        {step === "2fa-setup" && (
+                            <>
+                                <div className="mb-6">
+                                    <BackButton onClick={() => { setStep("credentials"); setSetupData(null); }} label="Back" />
+                                    <h1 className="font-display text-2xl font-bold text-surface-900">Set up two-step sign-in</h1>
+                                    <p className="mt-1 text-sm text-surface-500">
+                                        Your role now signs in with a code from an authenticator app (Google Authenticator,
+                                        Microsoft Authenticator, Authy). Scan the code, then enter the 6 digits it shows.
+                                    </p>
+                                </div>
+                                <form onSubmit={onSetupConfirm} noValidate className="space-y-5">
+                                    <div className="flex flex-col items-center gap-3">
+                                        {setupData ? <QrCode value={setupData.qr_code_url} /> : !setupError && <Spinner size="lg" />}
+                                        {setupData && (
+                                            <div className="w-full rounded-lg bg-surface-50 px-3 py-2 text-center">
+                                                <p className="text-xs text-surface-400 mb-1">Can’t scan? Enter this key in the app:</p>
+                                                <p className="font-mono text-sm text-surface-800 tracking-widest break-all">{setupData.secret_key}</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <label className="label" htmlFor="setup-code">Code from the app</label>
+                                        <input
+                                            id="setup-code" type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6}
+                                            value={setupCode} onChange={(e) => setSetupCode(e.target.value.replace(/\D/g, ""))}
+                                            className={clsx("input text-center font-mono text-xl tracking-[0.5em]", setupError && "input-error")}
+                                            placeholder="000000" disabled={!setupData}
+                                        />
+                                        {setupError && <p className="field-error text-center">{setupError}</p>}
+                                    </div>
+                                    <button type="submit" disabled={isLoading || !setupData || setupCode.length !== 6} className="btn-primary w-full h-10">
+                                        {isLoading ? <Spinner size="sm" className="border-white/30 border-t-white" /> : "Turn on and continue"}
+                                    </button>
+                                </form>
+                            </>
+                        )}
+
+                        {/* ── recovery codes (shown once) ──────────────── */}
+                        {step === "recovery-codes" && pendingSession && (
+                            <>
+                                <div className="mb-5">
+                                    <h1 className="font-display text-2xl font-bold text-surface-900">Save your recovery codes</h1>
+                                    <p className="mt-1 text-sm text-surface-500">Two-step sign-in is on.</p>
+                                </div>
+                                <RecoveryCodes
+                                    codes={pendingSession.recovery_codes ?? []}
+                                    onDone={() => { completeLogin(pendingSession); navigate(from, { replace: true }); }}
+                                />
                             </>
                         )}
 

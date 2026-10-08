@@ -82,7 +82,7 @@ export function StatusTabs({
                                 "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium whitespace-nowrap",
                                 "border-b-2 -mb-px transition-colors duration-150",
                                 isActive
-                                    ? "border-brand-500 text-brand-600"
+                                    ? "border-brand-500 text-brand-700"
                                     : "border-transparent text-surface-500 hover:text-surface-700 hover:border-surface-300",
                             )}
                         >

@@ -82,26 +82,92 @@ class MetricEngine
     }
 
     /**
-     * Build an engine scoped to what this user is allowed to aggregate.
-     * Admins (or users with no outlet assignments) see everything; a user
-     * with outlet assignments sees only those outlets. An explicit
-     * $requestedOutletId narrows further but can never escape the scope.
+     * Build an engine for this caller.
+     *
+     * Reports are BUSINESS-WIDE (owner's decision, 2026-09-30). Reaching any
+     * of them already requires that page's permission (`reports.<page>`
+     * since Phase 3A; `reports.view` before it); that permission is the
+     * access control, and the outlet is not a second one.
+     *
+     * Until that decision this method scoped a non-admin to their assigned
+     * outlets while ReportController, EnhancedReportController and
+     * AnalyticsController — the other two thirds of the section — applied no
+     * scope at all. The one scoped user therefore read a figure ~10% below
+     * the owner's on Executive and the full figure on Sales, with nothing on
+     * either page saying which was which. Measured at the time: 835 of 850
+     * orders sat on the single real outlet, the "WhatsApp Orders (Neema)"
+     * outlet held none, and the 15 orders with no outlet were staff-raised
+     * quotes averaging ~50,000 — so scoping hid the online business while
+     * separating nothing.
+     *
+     * What distinguishes this business's sales is the CHANNEL — till, web,
+     * WhatsApp, Messenger, quoted — carried by `orders.sales_bucket` and
+     * `orders.source_channel`, not by the outlet. Report by those.
+     *
+     * $requestedOutletId remains an ordinary filter, for the day a second
+     * staffed shop exists. Restoring per-user scoping then means restoring
+     * the assignment lookup HERE **and** adding it to the three controllers
+     * named above — scoping this engine alone is what produced the
+     * contradiction in the first place.
      */
     public static function for(User $user, ?int $requestedOutletId = null): self
     {
-        $isAdmin  = $user->hasAnyRole(['admin', 'super_admin']);
-        $assigned = $isAdmin ? collect() : $user->outlets()->pluck('outlets.id');
+        return new self($requestedOutletId ? [$requestedOutletId] : null);
+    }
 
-        if ($assigned->isEmpty()) {
-            $scope = $requestedOutletId ? [$requestedOutletId] : null;
-        } elseif ($requestedOutletId) {
-            abort_unless($assigned->contains($requestedOutletId), 403, 'You do not have access to this outlet.');
-            $scope = [$requestedOutletId];
-        } else {
-            $scope = $assigned->all();
+    /**
+     * Metrics that read zero because the WORK BEHIND THEM has never happened,
+     * as distinct from a quiet month.
+     *
+     * A manager looking at "0 completed · on-time —" cannot tell whether the
+     * floor had a slow week or whether no production order has ever been closed
+     * out. On production, 2026-09-30, it is the latter: 0 of 145 production
+     * orders have ever been marked complete, and all 25 expenses sit in
+     * pending_approval, so throughput, on-time rate and every operating-expense
+     * figure are structurally unpopulatable. The same shape as the end-of-day
+     * reports nobody submits.
+     *
+     * Reporting the zero without the reason invites the wrong conclusion —
+     * that the business made nothing and spent nothing. This says which it is,
+     * and a reader who sees no gaps listed knows the zeros are real.
+     */
+    public function structuralGaps(): array
+    {
+        $gaps = [];
+
+        $production = DB::table('production_orders')
+            ->selectRaw("COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'completed') AS completed")
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+            ->first();
+
+        if (($production->total ?? 0) > 0 && (int) ($production->completed ?? 0) === 0) {
+            $gaps[] = [
+                'key'     => 'production_never_completed',
+                'metrics' => ['production.completed', 'production.on_time_pct'],
+                'title'   => 'No production order has ever been marked complete',
+                'detail'  => (int) $production->total . ' production orders exist and none has been closed out, '
+                           . 'so throughput and on-time rate cannot populate. The figures are not zero because '
+                           . 'nothing was made — they are zero because nothing is being signed off.',
+            ];
         }
 
-        return new self($scope);
+        $expenses = DB::table('expenses')
+            ->selectRaw("COUNT(*) AS total, COUNT(*) FILTER (WHERE status IN ('approved','paid')) AS spend")
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+            ->first();
+
+        if (($expenses->total ?? 0) > 0 && (int) ($expenses->spend ?? 0) === 0) {
+            $gaps[] = [
+                'key'     => 'expenses_never_approved',
+                'metrics' => ['financial.expenses', 'financial.net_collected', 'profit_loss.operating_expenses'],
+                'title'   => 'No expense has ever been approved',
+                'detail'  => 'All ' . (int) $expenses->total . ' recorded expenses are awaiting approval, so every '
+                           . 'operating-expense figure reads zero and each margin beside it is gross of costs '
+                           . 'the business has already incurred.',
+            ];
+        }
+
+        return $gaps;
     }
 
     /** Business-wide engine for scheduled jobs (no request user to scope by). */
@@ -139,9 +205,12 @@ class MetricEngine
                 $now->subDays(29)->startOfDay(), $now->endOfDay(),
                 $now->subDays(59)->startOfDay(), $now->subDays(30)->endOfDay(),
             ],
+            // A period still in progress is compared LIKE FOR LIKE — the same
+            // stretch of the previous one (1–2 Oct against 1–2 Sep), never the
+            // whole of it: two days against thirty read as a 77% collapse.
             'this_month' => [
                 $now->startOfMonth(), $now->endOfDay(),
-                $now->subMonthNoOverflow()->startOfMonth(), $now->subMonthNoOverflow()->endOfMonth(),
+                $now->subMonthNoOverflow()->startOfMonth(), $now->subMonthNoOverflow()->endOfDay(),
             ],
             'last_month' => [
                 $now->subMonthNoOverflow()->startOfMonth(), $now->subMonthNoOverflow()->endOfMonth(),
@@ -149,11 +218,11 @@ class MetricEngine
             ],
             'this_quarter' => [
                 $now->startOfQuarter(), $now->endOfDay(),
-                $now->subQuarter()->startOfQuarter(), $now->subQuarter()->endOfQuarter(),
+                $now->subMonthsNoOverflow(3)->startOfQuarter(), $now->subMonthsNoOverflow(3)->endOfDay(),
             ],
             'this_year' => [
                 $now->startOfYear(), $now->endOfDay(),
-                $now->subYear()->startOfYear(), $now->subYear()->endOfYear(),
+                $now->subYearNoOverflow()->startOfYear(), $now->subYearNoOverflow()->endOfDay(),
             ],
             'custom' => (function () use ($from, $to, $now) {
                 $s = CarbonImmutable::parse($from ?: $now->format('Y-m-d'), self::TZ)->startOfDay();
@@ -235,12 +304,19 @@ class MetricEngine
                 ->orWhereIn("{$alias}.payment_status", \App\Models\Order::SETTLED_PAYMENT_STATUSES));
     }
 
-    /** Sales-truth base: recognised orders, KES, scoped. */
-    private function salesBase()
+    /**
+     * Sales-truth base: recognised orders, KES, scoped.
+     *
+     * @param string $alias table alias, for callers that join (the Explorer
+     *                      joins lines, products and payments onto it)
+     */
+    private function salesBase(string $alias = 'orders')
     {
-        return $this->recognise(DB::table('orders'))
-            ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code)) IS NOT NULL")
-            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds));
+        $from = $alias === 'orders' ? 'orders' : "orders as {$alias}";
+
+        return $this->recognise(DB::table($from), $alias)
+            ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER({$alias}.currency_code)) IS NOT NULL")
+            ->when($this->outletIds, fn ($q) => $q->whereIn("{$alias}.outlet_id", $this->outletIds));
     }
 
     /** Money-truth base: settled payments net of refunds, KES, scoped via order. */
@@ -248,7 +324,7 @@ class MetricEngine
     {
         return DB::table('payments as p')
             ->join('orders as o', 'o.id', '=', 'p.order_id')
-            ->where('p.status', 'paid')
+            ->tap(fn ($q) => \App\Support\SettledPayment::where($q, 'p'))
             ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code)) IS NOT NULL")
             ->when($this->outletIds, fn ($q) => $q->whereIn('o.outlet_id', $this->outletIds));
     }
@@ -370,8 +446,55 @@ class MetricEngine
 
     // ── Point-in-time metrics (now, not a window) ─────────────────────────────
 
-    /** What a customer still owes on one open order. */
-    private const OWED = 'GREATEST(total_amount - COALESCE(pp.paid,0), 0)';
+    /**
+     * An order's total in SHILLINGS.
+     *
+     * Every money figure this engine emits is KES, because a total is only
+     * comparable to another total once both are in one unit. `total_amount`
+     * is denominated in the order's own currency, so reading it raw mixes
+     * units — see owed() below for what that cost.
+     */
+    /** Any money column, in shillings, by the currency column beside it. */
+    private static function kesOf(string $amountColumn, string $currencyColumn): string
+    {
+        return \App\Support\ReportingCurrency::kes($amountColumn, $currencyColumn);
+    }
+
+    private static function totalKes(string $table = 'orders'): string
+    {
+        return \App\Support\ReportingCurrency::kes("{$table}.total_amount", "{$table}.currency_code");
+    }
+
+    /**
+     * What a customer still owes on one open order, in shillings.
+     *
+     * This was `GREATEST(total_amount - COALESCE(pp.paid,0), 0)` — a RAW
+     * foreign total minus a payment already CONVERTED to KES by the join in
+     * openBalances(). The two sides were different units. Measured on
+     * production 2026-09-30: outstanding read KES 434,220 where it was
+     * 482,092 (understated 47,872, 11%), and each non-KES row was out by the
+     * exchange rate itself — a USD 4,360 order listed as "4,360" rather than
+     * 558,080, a factor of 128.
+     *
+     * The same defect the Collected tile had (see ReportingCurrency::kes),
+     * which is why the conversion goes through that one helper and not a
+     * hand-written multiplication.
+     */
+    private static function owed(): string
+    {
+        return 'GREATEST(' . self::totalKes() . ' - COALESCE(pp.paid,0), 0)';
+    }
+
+    /**
+     * Money already collected on an open order, in shillings — never more
+     * than the order is worth. Capping a CONVERTED payment against a RAW
+     * total (the old `LEAST(pp.paid, total_amount)`) capped USD 25,600 of
+     * deposits at "200", so deposits held understated by the rate as well.
+     */
+    private static function depositHeld(): string
+    {
+        return 'LEAST(COALESCE(pp.paid,0), ' . self::totalKes() . ')';
+    }
 
     /**
      * Open orders (pending/partial/deposit) with their settled money joined —
@@ -381,20 +504,39 @@ class MetricEngine
     private function openBalances()
     {
         return $this->salesBase()
-            ->whereIn('payment_status', ['pending', 'partial', 'deposit'])
             ->leftJoinSub(
-                DB::table('payments')->where('status', 'paid')
+                \App\Support\SettledPayment::where(DB::table('payments'))
                     ->selectRaw('order_id, SUM((amount - COALESCE(refund_amount,0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))) AS paid')
                     ->groupBy('order_id'),
                 'pp', 'pp.order_id', '=', 'orders.id',
-            );
+            )
+            // Open = not settled, and money still owed.
+            //
+            // It was `whereIn('payment_status', ['pending','partial','deposit'])`
+            // — an enumeration, and a fifth value existed: one recognised order
+            // sits in `pending_approval` owing KES 15,500, which the receivables
+            // page could not see while the sales figures counted it. Found by
+            // reconciling sold − collected (434,242) against outstanding
+            // (482,092): the gap is exactly that 15,500, less 63,350 of
+            // overpayment which this correctly clamps away per order.
+            //
+            // The two conditions are deliberate and do different jobs.
+            // `payment_status <> 'paid'` respects a human's judgement that an
+            // order is settled: a partially REFUNDED order leaves paid-net
+            // below its total, and whether that is a receivable or a total that
+            // should have been reduced is a business question, not arithmetic.
+            // The `owed > 0` half then catches every other status, including
+            // ones nobody has invented yet — enumerating them is how money goes
+            // missing quietly.
+            ->where('payment_status', '<>', 'paid')
+            ->whereRaw(self::owed() . ' > 0');
     }
 
     /** Sales minus money truth per open order: what customers still owe. */
     public function outstandingBalance(): array
     {
         $row = $this->openBalances()
-            ->selectRaw('COUNT(*) AS orders, COALESCE(SUM(' . self::OWED . '),0) AS owed')
+            ->selectRaw('COUNT(*) AS orders, COALESCE(SUM(' . self::owed() . '),0) AS owed')
             ->first();
         return ['amount' => round((float) $row->owed, 2), 'orders' => (int) $row->orders];
     }
@@ -415,7 +557,7 @@ class MetricEngine
     public function outstandingAging(): array
     {
         [$d30, $d60, $d90] = $this->agingCutoffs();
-        $owed = self::OWED;
+        $owed = self::owed();
 
         $row = $this->openBalances()->selectRaw("
             COALESCE(SUM(CASE WHEN orders.created_at >= ? THEN {$owed} ELSE 0 END),0) AS a0,
@@ -430,7 +572,7 @@ class MetricEngine
 
         $deposits = $this->openBalances()
             ->where('payment_status', 'deposit')
-            ->selectRaw('COUNT(*) AS n, COALESCE(SUM(LEAST(COALESCE(pp.paid,0), total_amount)),0) AS held')
+            ->selectRaw('COUNT(*) AS n, COALESCE(SUM(' . self::depositHeld() . '),0) AS held')
             ->first();
 
         return [
@@ -450,40 +592,73 @@ class MetricEngine
      * Spec rule 3: every number opens. Each drill is THE SAME base query as
      * its aggregate with the aggregation removed — never a second query that
      * can drift. Rows share one shape: {id, ref, at, who, detail, amount,
-     * kind[, order_id]} so every surface renders them with one component.
+     * currency, amount_original, kind[, order_id]} so every surface renders
+     * them with one component.
+     *
+     * `amount` is always SHILLINGS, converted by the same expression the
+     * headline uses, so the rows add up to the figure they opened from. Until
+     * 2026-09-30 every money arm selected the RAW `total_amount` / payment
+     * while the headline converted: recognised USD was raw 4,307 against KES
+     * 551,296, so the rows could not sum to the tile, and no arm carried a
+     * currency at all — a USD 200 row and a KES 200 row were identical on
+     * screen. `amount_original` + `currency` keep what the customer was
+     * actually charged, for rows that need to show both.
+     *
+     * Non-money arms (production quantities, new customers) have no original
+     * and say so with NULL rather than repeating a number in another unit.
      */
-    public function drill(string $metric, Carbon $s, Carbon $e, int $page = 1, ?string $bucket = null): array
+    public function drill(string $metric, Carbon $s, Carbon $e, int $page = 1, ?string $bucket = null, ?int $salespersonId = null): array
     {
-        $perPage = 25;
-        $who = "TRIM(CONCAT(COALESCE(customer_first_name,''),' ',COALESCE(customer_last_name,'')))";
+        $perPage  = 25;
+        $who      = "TRIM(CONCAT(COALESCE(customer_first_name,''),' ',COALESCE(customer_last_name,'')))";
+        $totalKes = self::totalKes();
+        $paidKes  = \App\Support\ReportingCurrency::kes('p.amount - COALESCE(p.refund_amount,0)', 'p.currency_code');
 
         $q = match ($metric) {
             'revenue', 'orders' => $this->salesBase()
                 ->whereBetween(DB::raw('orders.created_at'), [$s, $e])
+                ->when($salespersonId, fn ($q) => $q->where('orders.created_by', $salespersonId))
                 ->orderByDesc('orders.created_at')
                 ->selectRaw("orders.id, order_number AS ref, orders.created_at AS at, {$who} AS who,
-                    payment_status AS detail, total_amount AS amount, 'order' AS kind"),
+                    payment_status AS detail, {$totalKes} AS amount,
+                    orders.total_amount AS amount_original, UPPER(orders.currency_code) AS currency,
+                    'order' AS kind, orders.customer_id"),
+
+            'lost' => $this->lostBase()
+                ->whereBetween('orders.created_at', [$s, $e])
+                ->when($salespersonId, fn ($q) => $q->where('orders.created_by', $salespersonId))
+                ->orderByDesc('orders.created_at')
+                ->selectRaw("orders.id, order_number AS ref, orders.created_at AS at, {$who} AS who,
+                    orders.status AS detail, {$totalKes} AS amount,
+                    orders.total_amount AS amount_original, UPPER(orders.currency_code) AS currency,
+                    'order' AS kind, orders.customer_id"),
 
             'collected' => $this->moneyBase()
                 ->whereBetween(DB::raw(self::PAID_AT), [$s, $e])
+                ->when($salespersonId, fn ($q) => $q->where('o.created_by', $salespersonId))
                 ->orderByDesc(DB::raw(self::PAID_AT))
                 ->selectRaw("p.id, o.order_number AS ref, " . self::PAID_AT . " AS at,
                     TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,''))) AS who,
-                    p.payment_method AS detail, (p.amount - COALESCE(p.refund_amount,0)) AS amount,
-                    'payment' AS kind, o.id AS order_id"),
+                    p.payment_method AS detail, {$paidKes} AS amount,
+                    (p.amount - COALESCE(p.refund_amount,0)) AS amount_original,
+                    UPPER(p.currency_code) AS currency,
+                    'payment' AS kind, o.id AS order_id, o.customer_id, p.payment_number"),
 
             'outstanding' => $this->openBalances()
                 ->when($bucket, fn ($q) => $this->applyAgingBucket($q, $bucket))
                 ->orderBy('orders.created_at')
                 ->selectRaw("orders.id, order_number AS ref, orders.created_at AS at, {$who} AS who,
-                    payment_status AS detail, " . self::OWED . " AS amount, 'order' AS kind"),
+                    payment_status AS detail, " . self::owed() . " AS amount,
+                    orders.total_amount AS amount_original, UPPER(orders.currency_code) AS currency,
+                    'order' AS kind, orders.customer_id"),
 
             'new_customers' => DB::table('customers')
                 ->whereBetween('created_at', [$s, $e])
                 ->orderByDesc('created_at')
                 ->selectRaw("id, TRIM(CONCAT(COALESCE(first_name,''),' ',COALESCE(last_name,''))) AS ref,
                     created_at AS at, COALESCE(phone,'') AS who, COALESCE(email,'') AS detail,
-                    NULL::numeric AS amount, 'customer' AS kind"),
+                    NULL::numeric AS amount, NULL::numeric AS amount_original,
+                    NULL::text AS currency, 'customer' AS kind"),
 
             'production_completed' => DB::table('production_orders')
                 ->where('status', 'completed')
@@ -491,7 +666,8 @@ class MetricEngine
                 ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
                 ->orderByDesc('completed_at')
                 ->selectRaw("id, order_number AS ref, completed_at AS at, '' AS who,
-                    CONCAT('due ', due_date) AS detail, quantity::numeric AS amount, 'production' AS kind"),
+                    CONCAT('due ', due_date) AS detail, quantity::numeric AS amount,
+                    NULL::numeric AS amount_original, NULL::text AS currency, 'production' AS kind"),
 
             'production_overdue' => DB::table('production_orders')
                 ->whereNotIn('status', ['completed', 'cancelled', 'draft'])
@@ -499,13 +675,16 @@ class MetricEngine
                 ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
                 ->orderBy('due_date')
                 ->selectRaw("id, order_number AS ref, due_date::timestamp AS at, '' AS who,
-                    status AS detail, quantity::numeric AS amount, 'production' AS kind"),
+                    status AS detail, quantity::numeric AS amount,
+                    NULL::numeric AS amount_original, NULL::text AS currency, 'production' AS kind"),
 
             'expenses' => $this->expenseSpendBase()
                 ->whereBetween('expense_date', [$s->format('Y-m-d'), $e->format('Y-m-d')])
                 ->orderByDesc('expense_date')
                 ->selectRaw("id, title AS ref, expense_date::timestamp AS at, COALESCE(vendor_name,'') AS who,
-                    COALESCE(department,'') AS detail, amount_kes AS amount, 'expense' AS kind"),
+                    COALESCE(department,'') AS detail, amount_kes AS amount,
+                    amount AS amount_original, UPPER(COALESCE(currency_code,'KES')) AS currency,
+                    'expense' AS kind"),
 
             default => abort(422, "Metric '{$metric}' has no drill-down."),
         };
@@ -514,12 +693,721 @@ class MetricEngine
         $rows  = $q->forPage(max(1, $page), $perPage)->get();
 
         return [
-            'metric'   => $metric,
-            'rows'     => $rows,
-            'total'    => $total,
-            'page'     => max(1, $page),
-            'per_page' => $perPage,
+            'metric'     => $metric,
+            // What the number IS, in the words a reader needs — stated by the
+            // definition layer, so a drill panel never has to guess (reports
+            // build, 2026-10-01).
+            'definition' => self::DRILL_DEFINITIONS[$metric] ?? null,
+            'rows'       => $rows,
+            'total'      => $total,
+            'page'       => max(1, $page),
+            'per_page'   => $perPage,
         ];
+    }
+
+    /**
+     * Outlets and salespeople, on the SAME definitions as every other page
+     * (reports build, 2026-10-01): sold = salesBase (recognised, rated
+     * currencies, the report's outlet), collected = moneyBase by payment date,
+     * buyers = BuyerIdentity, unconfirmed = pipeline carts. Each with the
+     * previous equivalent window. A salesperson is the staff member who raised
+     * the order (orders.created_by); an order with none — a web checkout — is
+     * reported under its own line, never dropped. Operational sales figures
+     * only: nothing here tracks a person's logins or activity.
+     */
+    public function performance(Carbon $s, Carbon $e, Carbon $ps, Carbon $pe): array
+    {
+        $buyer = \App\Support\BuyerIdentity::sql('orders');
+
+        $sold = fn (string $dim, Carbon $a, Carbon $b) => $this->salesBase()
+            ->whereBetween('orders.created_at', [$a, $b])
+            ->groupBy("orders.{$dim}")
+            ->selectRaw("orders.{$dim} AS k, COUNT(*) AS orders,
+                COALESCE(SUM(" . self::totalKes() . "), 0) AS sold,
+                COUNT(DISTINCT {$buyer}) AS buyers")
+            ->get()->keyBy(fn ($r) => (string) $r->k);
+
+        $collected = fn (string $dim) => $this->moneyBase()
+            ->whereBetween(DB::raw(self::PAID_AT), [$s, $e])
+            ->groupBy("o.{$dim}")
+            ->selectRaw("o.{$dim} AS k, COALESCE(SUM((p.amount - COALESCE(p.refund_amount,0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code))), 0) AS collected")
+            ->get()->keyBy(fn ($r) => (string) $r->k);
+
+        $unconfirmed = fn (string $dim) => DB::table('orders')
+            ->whereIn('orders.status', \App\Models\Order::PIPELINE_STATUSES)
+            ->whereBetween('orders.created_at', [$s, $e])
+            ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(orders.currency_code)) IS NOT NULL")
+            ->when($this->outletIds, fn ($q) => $q->whereIn('orders.outlet_id', $this->outletIds))
+            ->groupBy("orders.{$dim}")
+            ->selectRaw("orders.{$dim} AS k, COUNT(*) AS carts, COALESCE(SUM(" . self::totalKes() . "), 0) AS value")
+            ->get()->keyBy(fn ($r) => (string) $r->k);
+
+        $build = function (string $dim, \Closure $name) use ($sold, $collected, $unconfirmed, $s, $e, $ps, $pe) {
+            $now  = $sold($dim, $s, $e);
+            $prev = $sold($dim, $ps, $pe);
+            $col  = $collected($dim);
+            $unc  = $unconfirmed($dim);
+            $keys = collect([$now, $prev, $col, $unc])->flatMap(fn ($c) => $c->keys())->unique();
+
+            return $keys->map(function ($k) use ($now, $prev, $col, $unc, $name) {
+                $n = $now->get($k);
+                $orders = (int) ($n->orders ?? 0);
+                $soldV  = round((float) ($n->sold ?? 0), 2);
+
+                return [
+                    'id'                => $k === '' ? null : (int) $k,
+                    'name'              => $name($k === '' ? null : (int) $k),
+                    'sold'              => $soldV,
+                    'sold_previous'     => round((float) ($prev->get($k)->sold ?? 0), 2),
+                    'orders'            => $orders,
+                    'orders_previous'   => (int) ($prev->get($k)->orders ?? 0),
+                    'aov'               => $orders > 0 ? round($soldV / $orders, 2) : null,
+                    'buyers'            => (int) ($n->buyers ?? 0),
+                    'collected'         => round((float) ($col->get($k)->collected ?? 0), 2),
+                    'unconfirmed_carts' => (int) ($unc->get($k)->carts ?? 0),
+                    'unconfirmed_value' => round((float) ($unc->get($k)->value ?? 0), 2),
+                ];
+            })->sortByDesc('sold')->values()->all();
+        };
+
+        $outletNames = DB::table('outlets')->pluck('name', 'id');
+        $userNames   = DB::table('users')->selectRaw("id, TRIM(CONCAT(COALESCE(first_name,''),' ',COALESCE(last_name,''))) AS n")
+            ->pluck('n', 'id');
+
+        $outlets     = $build('outlet_id', fn ($id) => $id === null ? 'No outlet' : ($outletNames[$id] ?? "Outlet #{$id}"));
+        $salespeople = $build('created_by', fn ($id) => $id === null ? 'No salesperson (web checkout)' : (($userNames[$id] ?? '') ?: "Staff #{$id}"));
+
+        $sum = fn (array $rows, string $k) => round(array_sum(array_column($rows, $k)), 2);
+
+        return [
+            'outlets'     => $outlets,
+            'salespeople' => $salespeople,
+            // Both breakdowns partition the same orders, so each sums to the
+            // whole business for the window — the reconciliation a reader needs.
+            'totals'      => [
+                'sold'      => $sum($outlets, 'sold'),
+                'orders'    => (int) $sum($outlets, 'orders'),
+                'collected' => $sum($outlets, 'collected'),
+            ],
+        ];
+    }
+
+    /**
+     * Orders paid MORE than they are worth, in shillings (cycle 9) — one
+     * definition for the attention feed and the Data Quality page. Same
+     * payments as Collected: paid, approved where approval applies; live
+     * orders only; the report's outlet.
+     */
+    private function overpaidOrders(): array
+    {
+        return DB::select("
+            SELECT o.id, o.order_number, o.customer_id,
+                   (pp.paid - o.total_amount * rc.reporting_rate_to_kes) AS excess
+            FROM orders o
+            JOIN currencies rc ON UPPER(rc.code) = UPPER(o.currency_code) AND rc.reporting_rate_to_kes IS NOT NULL
+            JOIN (
+                SELECT p.order_id,
+                       SUM((p.amount - COALESCE(p.refund_amount, 0)) * prc.reporting_rate_to_kes) AS paid
+                FROM payments p
+                JOIN currencies prc ON UPPER(prc.code) = UPPER(p.currency_code) AND prc.reporting_rate_to_kes IS NOT NULL
+                WHERE " . \App\Support\SettledPayment::sql('p') . "
+                GROUP BY p.order_id
+            ) pp ON pp.order_id = o.id
+            WHERE o.status NOT IN ('cancelled', 'voided', 'refunded')
+              " . $this->outletScopeSql('o.outlet_id') . "
+              AND pp.paid > o.total_amount * rc.reporting_rate_to_kes + 0.5
+            ORDER BY excess DESC
+        ");
+    }
+
+    /** Recognised sales in a currency with no reporting rate (cycle 10) — feed and Data Quality. */
+    private function unratedCurrencySales(): array
+    {
+        return DB::select("
+            SELECT UPPER(o.currency_code) AS currency, COUNT(*) AS orders, SUM(o.total_amount) AS total
+            FROM orders o
+            LEFT JOIN currencies rc ON UPPER(rc.code) = UPPER(o.currency_code)
+            WHERE rc.reporting_rate_to_kes IS NULL
+              AND o.status NOT IN ('cancelled', 'voided', 'refunded')
+              AND (o.status IN ('confirmed', 'processing', 'shipped', 'delivered', 'completed')
+                   OR o.payment_status IN ('paid', 'partial', 'deposit'))
+              " . $this->outletScopeSql('o.outlet_id') . "
+            GROUP BY UPPER(o.currency_code)
+            ORDER BY COUNT(*) DESC
+        ");
+    }
+
+    // ── Business Explorer ────────────────────────────────────────────────────
+
+    /** Rows the Explorer returns for one dimension; totals always cover all of them. */
+    public const EXPLORER_ROW_LIMIT = 200;
+
+    /**
+     * The Explorer's dimensions. `level` decides which measures can be read
+     * by it, because each measure lives on one grain:
+     *   order   — Sold, Orders, Buyers, Avg order, and Collected (by payment)
+     *   item    — Units and Line value (what Sales by Product sums), Orders, Buyers
+     *   payment — Collected only (a method belongs to a payment, not an order)
+     * Time dimensions read the ORDER date for sales and the PAYMENT date for
+     * Collected — the same dates as the Sold and Collected tiles.
+     */
+    public const EXPLORER_DIMENSIONS = [
+        'month'       => ['label' => 'Month',          'level' => 'order'],
+        'week'        => ['label' => 'Week',           'level' => 'order'],
+        'day'         => ['label' => 'Day',            'level' => 'order'],
+        'outlet'      => ['label' => 'Outlet',         'level' => 'order'],
+        'channel'     => ['label' => 'Channel',        'level' => 'order'],
+        'salesperson' => ['label' => 'Salesperson',    'level' => 'order'],
+        'currency'    => ['label' => 'Currency',       'level' => 'order'],
+        'category'    => ['label' => 'Category',       'level' => 'item'],
+        'product'     => ['label' => 'Product',        'level' => 'item'],
+        'method'      => ['label' => 'Payment method', 'level' => 'payment'],
+    ];
+
+    /** Filters the Explorer accepts — every non-time dimension except method. */
+    public const EXPLORER_FILTERS = ['channel', 'salesperson', 'currency', 'category', 'product'];
+
+    /**
+     * [key expression, label expression] for a dimension, on aliases o
+     * (orders), oi (order_items), pr (products), p (payments). $ts is the
+     * timestamp the time dimensions bucket.
+     */
+    private function explorerKey(string $dim, string $ts): array
+    {
+        $tz = "({$ts})";
+
+        return match ($dim) {
+            'month'       => ["to_char(date_trunc('month', {$tz}), 'YYYY-MM')", null],
+            'week'        => ["to_char(date_trunc('week', {$tz}), 'YYYY-MM-DD')", null],
+            'day'         => ["to_char({$tz}, 'YYYY-MM-DD')", null],
+            'outlet'      => ['o.outlet_id::text', '(SELECT ol.name FROM outlets ol WHERE ol.id = o.outlet_id)'],
+            'channel'     => [\App\Models\Order::reportingChannelSql(\App\Models\Order::salesBucketSql('o'), 'o'), null],
+            'salesperson' => ['o.created_by::text', "(SELECT TRIM(CONCAT(u.first_name, ' ', u.last_name)) FROM users u WHERE u.id = o.created_by)"],
+            'currency'    => ['UPPER(o.currency_code)', null],
+            'category'    => ['pr.category_id::text', '(SELECT c.name_en FROM categories c WHERE c.id = pr.category_id)'],
+            'product'     => ['oi.product_id::text', 'MIN(oi.product_name)'],
+            'method'      => ['p.payment_method', null],
+        };
+    }
+
+    /** Narrow a query by the Explorer's filters; item filters need oi/pr joined. */
+    private function explorerFilter($q, array $filters)
+    {
+        foreach ($filters as $dim => $value) {
+            if ($value === null || $value === '') {
+                continue;
+            }
+            [$key] = $this->explorerKey($dim, 'o.created_at');
+            // A "none" value (web checkout, no outlet, uncategorised) is the
+            // NULL key, so it can be explored like any other row.
+            $value === '__none__' ? $q->whereRaw("({$key}) IS NULL") : $q->whereRaw("({$key}) = ?", [(string) $value]);
+        }
+
+        return $q;
+    }
+
+    /**
+     * Business Explorer — any measure by any dimension, narrowed by filters,
+     * on the definitions every other page uses. The totals are computed over
+     * the whole slice, not by adding rows: they are the headline figures for
+     * the slice (Sold = the Sold tile, Collected = the Collected tile), and
+     * Buyers are distinct people, which no sum of rows can give.
+     *
+     * @param array<string,string> $filters dimension => key (EXPLORER_FILTERS only)
+     */
+    public function explorer(Carbon $s, Carbon $e, string $dim, array $filters): array
+    {
+        $meta  = self::EXPLORER_DIMENSIONS[$dim];
+        $level = $meta['level'];
+        $itemFiltered = (bool) array_intersect(array_keys(array_filter($filters, fn ($v) => $v !== null && $v !== '')), ['category', 'product']);
+        // A category or product filter turns the question into "lines of
+        // that kind": order totals would carry the rest of each basket.
+        if ($itemFiltered && $level === 'order') {
+            $level = 'item';
+        }
+        abort_if($itemFiltered && $level === 'payment', 422,
+            'A payment pays a whole order, not a line — clear the category or product filter to read by payment method.');
+
+        $buyer   = \App\Support\BuyerIdentity::sql('o');
+        $soldKes = self::totalKes('o');
+        $lineKes = \App\Support\ReportingCurrency::kes('oi.total_price', 'o.currency_code');
+        $payKes  = '(p.amount - COALESCE(p.refund_amount,0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code))';
+
+        $sales = fn () => $this->explorerFilter(
+            $this->salesBase('o')->whereBetween('o.created_at', [$s, $e])
+                ->when($level === 'item' || $itemFiltered, fn ($q) => $q
+                    ->join('order_items as oi', 'oi.order_id', '=', 'o.id')
+                    ->leftJoin('products as pr', 'pr.id', '=', 'oi.product_id')),
+            $filters);
+        // Collected never takes an item filter: a payment pays an order, not a line.
+        $money = fn () => $this->explorerFilter(
+            $this->moneyBase()->whereBetween(DB::raw(self::PAID_AT), [$s, $e]), $filters);
+
+        $rows = [];
+        $measures = match ($level) {
+            'order'   => ['sold', 'orders', 'buyers', 'aov', 'collected'],
+            'item'    => ['line_value', 'units', 'orders', 'buyers'],
+            'payment' => ['collected'],
+        };
+
+        $merge = function (iterable $got, array $fields) use (&$rows) {
+            foreach ($got as $r) {
+                $k = $r->k === null ? '__none__' : (string) $r->k;
+                $rows[$k] ??= ['key' => $k, 'label' => $r->label ?? null];
+                $rows[$k]['label'] ??= $r->label ?? null;
+                foreach ($fields as $f) {
+                    $rows[$k][$f] = round((float) $r->{$f}, 2);
+                }
+            }
+        };
+
+        if ($level === 'order' || $level === 'item') {
+            [$key, $label] = $this->explorerKey($dim, 'o.created_at');
+            $select = $level === 'order'
+                ? "COALESCE(SUM({$soldKes}),0) AS sold, COUNT(*) AS orders, COUNT(DISTINCT {$buyer}) AS buyers"
+                : "COALESCE(SUM({$lineKes}),0) AS line_value, COALESCE(SUM(oi.quantity),0) AS units, COUNT(DISTINCT o.id) AS orders, COUNT(DISTINCT {$buyer}) AS buyers";
+            $merge($sales()->groupBy(DB::raw($key))
+                ->selectRaw("({$key}) AS k, " . ($label && $dim !== 'product' ? "MIN({$label})" : ($label ?? 'NULL')) . " AS label, {$select}")
+                ->get(), $level === 'order' ? ['sold', 'orders', 'buyers'] : ['line_value', 'units', 'orders', 'buyers']);
+        }
+        if (in_array('collected', $measures, true)) {
+            [$key, $label] = $this->explorerKey($dim, self::PAID_AT);
+            $merge($money()->groupBy(DB::raw($key))
+                ->selectRaw("({$key}) AS k, " . ($label ? "MIN({$label})" : 'NULL') . " AS label, COALESCE(SUM({$payKes}),0) AS collected")
+                ->get(), ['collected']);
+        }
+
+        $none = match ($dim) {
+            'outlet' => 'No outlet', 'salesperson' => 'No salesperson (web checkout)',
+            'category' => 'Uncategorised', 'product' => 'No product', default => 'None',
+        };
+        $rows = array_map(function ($r) use ($measures, $none) {
+            foreach ($measures as $m) {
+                $r[$m] ??= 0.0;
+            }
+            if (in_array('aov', $measures, true)) {
+                $r['aov'] = $r['orders'] > 0 ? round($r['sold'] / $r['orders'], 2) : null;
+            }
+            $r['orders'] = isset($r['orders']) ? (int) $r['orders'] : null;
+            $r['label'] ??= $r['key'] === '__none__' ? $none : $r['key'];
+
+            return $r;
+        }, array_values($rows));
+        if ($dim === 'channel') {
+            foreach ($rows as &$r) {
+                $r['label'] = \App\Models\Order::REPORTING_CHANNEL_LABELS[$r['key']] ?? $r['label'];
+            }
+            unset($r);
+        }
+
+        // Time reads in order; everything else biggest first.
+        $lead = $measures[0];
+        usort($rows, in_array($dim, ['month', 'week', 'day'], true)
+            ? fn ($a, $b) => strcmp($a['key'], $b['key'])
+            : fn ($a, $b) => $b[$lead] <=> $a[$lead]);
+
+        // Totals over the whole slice — never a sum of rows.
+        $totals = [];
+        if ($level === 'order' || $level === 'item') {
+            $t = $sales()->selectRaw($level === 'order'
+                ? "COALESCE(SUM({$soldKes}),0) AS sold, COUNT(*) AS orders, COUNT(DISTINCT {$buyer}) AS buyers"
+                : "COALESCE(SUM({$lineKes}),0) AS line_value, COALESCE(SUM(oi.quantity),0) AS units, COUNT(DISTINCT o.id) AS orders, COUNT(DISTINCT {$buyer}) AS buyers")->first();
+            foreach ((array) $t as $k => $v) {
+                $totals[$k] = $k === 'orders' || $k === 'buyers' ? (int) $v : round((float) $v, 2);
+            }
+            if ($level === 'order') {
+                $totals['aov'] = $totals['orders'] > 0 ? round($totals['sold'] / $totals['orders'], 2) : null;
+            }
+        }
+        if (in_array('collected', $measures, true)) {
+            $totals['collected'] = round((float) $money()->selectRaw("COALESCE(SUM({$payKes}),0) AS v")->value('v'), 2);
+        }
+
+        return [
+            'dimension' => $dim,
+            'level'     => $level,
+            'measures'  => $measures,
+            'rows'      => array_slice($rows, 0, self::EXPLORER_ROW_LIMIT),
+            'row_count' => count($rows),
+            'totals'    => $totals,
+        ];
+    }
+
+    /**
+     * The orders behind one Explorer slice — the rows a cell is made of, with
+     * the amount the cell counted for each (the order total, or for an item
+     * slice the matching lines' value). Collected-only slices list payments.
+     */
+    public function explorerOrders(Carbon $s, Carbon $e, ?string $dim, ?string $key, array $filters, int $page = 1): array
+    {
+        if ($dim !== null && $key !== null) {
+            $filters[$dim] = $key;
+        }
+        $perPage = 50;
+        $method  = $filters['method'] ?? null;
+        unset($filters['method']);
+        $itemFiltered = (bool) array_intersect(array_keys(array_filter($filters, fn ($v) => $v !== null && $v !== '')), ['category', 'product']);
+        $time = in_array($dim, ['month', 'week', 'day'], true) ? $dim : null;
+
+        if ($method !== null) {
+            abort_if($itemFiltered, 422, 'A payment pays a whole order, not a line — clear the category or product filter.');
+            $q = $this->explorerFilter($this->moneyBase()->whereBetween(DB::raw(self::PAID_AT), [$s, $e]), array_diff_key($filters, ['month' => 1, 'week' => 1, 'day' => 1]))
+                ->where('p.payment_method', $method);
+            if ($time) {
+                [$k] = $this->explorerKey($time, self::PAID_AT);
+                $q->whereRaw("({$k}) = ?", [$key]);
+            }
+            $total = (clone $q)->count();
+            $rows = $q->selectRaw("'payment' AS kind, p.id, p.payment_number AS ref, p.payment_number, p.order_id, o.customer_id,
+                    " . self::PAID_AT . " AS date, (p.amount - COALESCE(p.refund_amount,0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code)) AS amount")
+                ->orderByDesc(DB::raw(self::PAID_AT))->forPage($page, $perPage)->get();
+
+            return ['rows' => $rows->map(fn ($r) => (array) $r)->all(), 'total' => $total, 'page' => $page, 'per_page' => $perPage];
+        }
+
+        $timeFilter = $time ? [$time => $filters[$time]] : [];
+        $filters = array_diff_key($filters, ['month' => 1, 'week' => 1, 'day' => 1]);
+        $q = $this->salesBase('o')->whereBetween('o.created_at', [$s, $e]);
+        if ($itemFiltered) {
+            $q->join('order_items as oi', 'oi.order_id', '=', 'o.id')->leftJoin('products as pr', 'pr.id', '=', 'oi.product_id');
+        }
+        $q = $this->explorerFilter($q, $filters + $timeFilter);
+        $amount = $itemFiltered
+            ? 'SUM(' . \App\Support\ReportingCurrency::kes('oi.total_price', 'o.currency_code') . ')'
+            : 'MIN(' . self::totalKes('o') . ')';
+        $q->groupBy('o.id');
+        $total = DB::query()->fromSub((clone $q)->selectRaw('o.id'), 'x')->count();
+        $rows = $q->selectRaw("'order' AS kind, o.id, MIN(o.order_number) AS ref, MIN(o.customer_id) AS customer_id, MIN(o.created_at) AS date,
+                MIN(TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,'')))) AS customer, {$amount} AS amount")
+            ->orderByDesc(DB::raw('MIN(o.created_at)'))->forPage($page, $perPage)->get();
+
+        return ['rows' => $rows->map(fn ($r) => (array) $r)->all(), 'total' => $total, 'page' => $page, 'per_page' => $perPage];
+    }
+
+    /** Rows a Data Quality check lists; `count` always says how many there are in all. */
+    public const DATA_QUALITY_ROW_LIMIT = 50;
+
+    /**
+     * Audit & Data Quality — "can I trust these numbers, and where is the data
+     * incomplete?" Each check names a gap in the records that a figure on
+     * another page silently depends on, says which figures it bends, and lists
+     * the rows to fix. Nothing here is a new definition: every check reuses
+     * the rule the figure itself uses (recognised orders, BuyerIdentity,
+     * normalize_phone, the P&L's cost lookup, the pipeline scope), so a check
+     * that reads clean means the figure is whole on that count.
+     *
+     * Scope is stated per check, because the two kinds answer different
+     * questions: 'period' checks say whether THIS window's figures are whole;
+     * 'current' checks are the standing state of the records, whatever the
+     * window. `outlet` says whether the outlet filter narrows a check —
+     * customers belong to the whole business, and orders with no outlet are
+     * by definition outside every outlet's view.
+     *
+     * Measured on production, 2026-10-01: 51 order phone fields hold notes
+     * ("cash", "refer to iand m", "ATC Measurements"), 57 recognised sales
+     * carry no buyer at all, 39 numbers sit on 87 customer records, and all 25
+     * expenses await approval.
+     *
+     * @param bool $withFinancial include checks whose rows are expense money (reports.financial)
+     */
+    public function dataQuality(Carbon $s, Carbon $e, bool $withFinancial): array
+    {
+        $limit = self::DATA_QUALITY_ROW_LIMIT;
+        $kes   = self::totalKes('o');
+        $sold  = fn () => $this->recognise(DB::table('orders as o'), 'o')
+            ->whereBetween('o.created_at', [$s, $e])
+            ->when($this->outletIds, fn ($q) => $q->whereIn('o.outlet_id', $this->outletIds));
+        $orderRow = "'order' AS kind, o.id, o.order_number AS ref, o.customer_id, o.created_at AS date,
+            TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,''))) AS customer,
+            {$kes} AS amount";
+
+        $checks = [];
+        $add = function (string $key, array $meta, int $count, ?float $value, array $rows) use (&$checks) {
+            $checks[] = $meta + [
+                'key'   => $key,
+                'count' => $count,
+                'value' => $value === null ? null : round($value, 2),
+                'rows'  => array_map(fn ($r) => (array) $r, $rows),
+            ];
+        };
+
+        // ── This window's sales ──────────────────────────────────────────────
+
+        // 1. Sales with no buyer: no phone that reads as a number, no customer
+        //    record, no email, no login. Revenue counts them; buyers cannot.
+        $anon = $sold()->whereRaw(\App\Support\BuyerIdentity::sql('o') . ' IS NULL');
+        $agg  = (clone $anon)->selectRaw("COUNT(*) AS n, COALESCE(SUM({$kes}),0) AS v")->first();
+        $add('anonymous_sales', [
+            'group' => 'sales', 'scope' => 'period', 'outlet' => true, 'severity' => 'medium',
+            'title'   => 'Sales with no buyer recorded',
+            'affects' => 'Buyers, repeat-purchase and customer figures. Revenue includes these sales; no buyer count can.',
+            'fix'     => ['label' => 'Add the customer to the order', 'to' => null, 'permission' => null],
+        ], (int) $agg->n, (float) $agg->v,
+            (clone $anon)->selectRaw($orderRow)->orderByDesc(DB::raw($kes))->limit($limit)->get()->all());
+
+        // 2. Phone fields that hold a note, not a number. normalize_phone
+        //    rejects them, so the buyer falls back to the record or is lost.
+        $notes = $sold()->whereRaw("NULLIF(btrim(o.customer_phone), '') IS NOT NULL AND normalize_phone(o.customer_phone) IS NULL");
+        $add('unreadable_order_phones', [
+            'group' => 'sales', 'scope' => 'period', 'outlet' => true, 'severity' => 'medium',
+            'title'   => 'Order phone fields holding a note, not a number',
+            'affects' => 'Buyer identity: these orders cannot be matched to the person by phone, so one customer can count as two, or as nobody.',
+            'fix'     => ['label' => 'Move the note to the order notes and enter the phone', 'to' => null, 'permission' => null],
+        ], (clone $notes)->count(), null,
+            (clone $notes)->selectRaw($orderRow . ', o.customer_phone AS phone_field')->orderByDesc('o.created_at')->limit($limit)->get()->all());
+
+        // 3. Lines sold at no price — a product given away, or a price never set.
+        $free = $sold()->join('order_items as oi', 'oi.order_id', '=', 'o.id')
+            ->where(fn ($q) => $q->whereNull('oi.unit_price')->orWhere('oi.unit_price', '<=', 0));
+        $add('unpriced_lines', [
+            'group' => 'sales', 'scope' => 'period', 'outlet' => true, 'severity' => 'medium',
+            'title'   => 'Lines sold at no price',
+            'affects' => 'Sales by product and average price: the quantity counts, the revenue is zero.',
+            'fix'     => ['label' => 'Correct the line price, or record it as a discount', 'to' => null, 'permission' => null],
+        ], (clone $free)->count(), null,
+            (clone $free)->selectRaw("'order' AS kind, o.id, o.order_number AS ref, o.customer_id, o.created_at AS date,
+                oi.product_id, CONCAT(oi.product_name, ' × ', oi.quantity) AS detail")
+                ->orderByDesc('o.created_at')->limit($limit)->get()->all());
+
+        // 4. Lines with no cost — neither the cost snapshotted at sale nor a
+        //    KES cost in the price book. The P&L's cost of goods counts them
+        //    as zero, so its margin is overstated by whatever they cost. The
+        //    lookup (CostBasis) and the population (rated currencies) are the
+        //    P&L's, so this count IS its `unpriced_lines` — the reader can
+        //    check one against the other.
+        $bookCost = \App\Support\CostBasis::bookCostSql('oi');
+        $soldLines = fn () => $sold()->join('order_items as oi', 'oi.order_id', '=', 'o.id')
+            ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('o.currency_code'));
+        $uncosted = $soldLines()->whereRaw("COALESCE(oi.cost_price, {$bookCost}) IS NULL");
+        $lineKes = \App\Support\ReportingCurrency::kes('oi.total_price', 'o.currency_code');
+        $agg = (clone $uncosted)->selectRaw("COUNT(*) AS n, COALESCE(SUM({$lineKes}),0) AS v")->first();
+        $costedTotal = $soldLines()->count();
+        $add('uncosted_lines', [
+            'group' => 'sales', 'scope' => 'period', 'outlet' => true, 'severity' => 'high',
+            'title'   => 'Lines sold with no cost',
+            'affects' => 'Cost of goods and every margin: the P&L leaves these lines out of cost, so profit reads higher than it is. The value shown is their revenue.',
+            'fix'     => ['label' => 'Set a KES cost price on the product', 'to' => null, 'permission' => null],
+        ], (int) $agg->n, (float) $agg->v,
+            (clone $uncosted)->groupBy('oi.product_id', 'oi.product_name')
+                ->selectRaw("'product' AS kind, oi.product_id AS id, oi.product_name AS ref, COUNT(*) AS lines, SUM({$lineKes}) AS amount")
+                ->orderByDesc(DB::raw("SUM({$lineKes})"))->limit($limit)->get()->all());
+
+        // 5. Orders with no outlet — in the business total, in no outlet's.
+        //    Not narrowed by the outlet filter: they are exactly what it hides.
+        $orphans = $this->recognise(DB::table('orders as o'), 'o')
+            ->whereBetween('o.created_at', [$s, $e])->whereNull('o.outlet_id');
+        $agg = (clone $orphans)->selectRaw("COUNT(*) AS n, COALESCE(SUM({$kes}),0) AS v")->first();
+        $add('orders_without_outlet', [
+            'group' => 'sales', 'scope' => 'period', 'outlet' => false, 'severity' => 'low',
+            'title'   => 'Sales with no outlet',
+            'affects' => 'Outlet figures: the business total includes these; no single outlet does, so outlets sum to less than the whole.',
+            'fix'     => ['label' => 'Set the outlet on the order', 'to' => null, 'permission' => null],
+        ], (int) $agg->n, (float) $agg->v,
+            (clone $orphans)->selectRaw($orderRow)->orderByDesc(DB::raw($kes))->limit($limit)->get()->all());
+
+        // ── Standing state of the records ────────────────────────────────────
+
+        // 6. Paid more than the order is worth (the attention feed's rule).
+        $over = $this->overpaidOrders();
+        $add('overpaid_orders', [
+            'group' => 'money', 'scope' => 'current', 'outlet' => true, 'severity' => 'high',
+            'title'   => 'Orders paid more than their total',
+            'affects' => 'Collected includes this money; Sold and the order balances do not. Collected minus Sold is not "owed".',
+            'fix'     => ['label' => 'Refund it, hold it as credit, or correct the order', 'to' => null, 'permission' => null],
+        ], count($over), array_sum(array_map(fn ($r) => (float) $r->excess, $over)),
+            array_map(fn ($r) => ['kind' => 'order', 'id' => $r->id, 'ref' => $r->order_number,
+                'customer_id' => $r->customer_id, 'amount' => round((float) $r->excess, 2)], array_slice($over, 0, $limit)));
+
+        // 7. Sales in a currency no report can value.
+        $unrated = $this->unratedCurrencySales();
+        $add('unrated_currency_sales', [
+            'group' => 'money', 'scope' => 'current', 'outlet' => true, 'severity' => 'high',
+            'title'   => 'Sales in a currency with no reporting rate',
+            'affects' => 'Every sales and money figure: these sales are left out rather than guessed at.',
+            'fix'     => ['label' => 'Set a reporting rate in Settings → Currencies', 'to' => '/settings/currencies', 'permission' => 'role:super_admin'],
+        ], array_sum(array_map(fn ($r) => (int) $r->orders, $unrated)), null,
+            array_map(fn ($r) => ['kind' => 'currency', 'id' => null, 'ref' => $r->currency,
+                'detail' => (int) $r->orders . ' orders · ' . $r->currency . ' ' . number_format((float) $r->total, 2)], $unrated));
+
+        // 8. Payments claimed but not approved: not in Collected until they are.
+        $pending = DB::table('payments as p')->join('orders as o', 'o.id', '=', 'p.order_id')
+            ->where('p.requires_approval', true)->where('p.approval_status', 'pending_review')
+            ->when($this->outletIds, fn ($q) => $q->whereIn('o.outlet_id', $this->outletIds));
+        $payKes = \App\Support\ReportingCurrency::kes('p.amount', 'p.currency_code');
+        $agg = (clone $pending)->selectRaw("COUNT(*) AS n, COALESCE(SUM({$payKes}),0) AS v")->first();
+        $add('payments_awaiting_approval', [
+            'group' => 'money', 'scope' => 'current', 'outlet' => true, 'severity' => 'medium',
+            'title'   => 'Payments awaiting approval',
+            'affects' => 'Collected leaves these out until someone approves them; the order still shows a balance.',
+            'fix'     => ['label' => 'Review in Approvals', 'to' => '/approvals', 'permission' => 'any:procurement.approve,inventory.approve'],
+        ], (int) $agg->n, (float) $agg->v,
+            (clone $pending)->selectRaw("'payment' AS kind, p.id, p.payment_number AS ref, p.payment_number, p.order_id,
+                o.customer_id, p.created_at AS date, {$payKes} AS amount")
+                ->orderBy('p.created_at')->limit($limit)->get()->all());
+
+        // 9. Expenses awaiting approval: not spend, so not in any expense
+        //    figure or margin. Expense money stays behind reports.financial.
+        if ($withFinancial) {
+            $waiting = DB::table('expenses')->where('status', 'pending_approval')->whereNull('deleted_at')
+                ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds));
+            $agg = (clone $waiting)->selectRaw('COUNT(*) AS n, COALESCE(SUM(amount_kes),0) AS v')->first();
+            $add('expenses_awaiting_approval', [
+                'group' => 'money', 'scope' => 'current', 'outlet' => true, 'severity' => 'high',
+                'title'   => 'Expenses awaiting approval',
+                'affects' => 'Every expense figure and net margin: only approved and paid expenses count as spend.',
+                'fix'     => ['label' => 'Approve or reject in Expenses', 'to' => '/expenses', 'permission' => 'expenses.view'],
+            ], (int) $agg->n, (float) $agg->v,
+                (clone $waiting)->selectRaw("'expense' AS kind, id, reference_number AS ref, title AS detail,
+                    expense_date AS date, amount_kes AS amount")
+                    ->orderBy('expense_date')->limit($limit)->get()->all());
+        }
+
+        // 10. Carts left unconfirmed over 30 days: not sales, still in the order book.
+        $stale = DB::table('orders as o')->whereIn('o.status', \App\Models\Order::PIPELINE_STATUSES)
+            ->whereNotIn('o.payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES)
+            ->where('o.created_at', '<', CarbonImmutable::now(self::TZ)->subDays(30)->toMutable())
+            ->when($this->outletIds, fn ($q) => $q->whereIn('o.outlet_id', $this->outletIds));
+        $agg = (clone $stale)->selectRaw("COUNT(*) AS n, COALESCE(SUM({$kes}),0) AS v")->first();
+        $add('stale_unconfirmed_carts', [
+            'group' => 'sales', 'scope' => 'current', 'outlet' => true, 'severity' => 'low',
+            'title'   => 'Carts unconfirmed for over 30 days',
+            'affects' => 'The unconfirmed pipeline: these are counted as live leads. They are not sales on any page.',
+            'fix'     => ['label' => 'Confirm or cancel in Sales → Unconfirmed', 'to' => '/reports/sales?tab=unconfirmed', 'permission' => 'reports.sales'],
+        ], (int) $agg->n, (float) $agg->v,
+            (clone $stale)->selectRaw($orderRow)->orderByDesc(DB::raw($kes))->limit($limit)->get()->all());
+
+        // 11. One number on several customer records — one person, registered
+        //     twice. Buyer counts already join them by phone; the records,
+        //     their histories and their contact details are still split.
+        $dupes = DB::table('customers')->whereNull('deleted_at')
+            ->whereRaw('normalize_phone(phone) IS NOT NULL')
+            ->groupBy(DB::raw('normalize_phone(phone)'))->havingRaw('COUNT(*) > 1');
+        $add('duplicate_customer_records', [
+            'group' => 'customers', 'scope' => 'current', 'outlet' => false, 'severity' => 'low',
+            'title'   => 'Customer records sharing one phone number',
+            'affects' => 'Customer history and lifetime value: one person\'s orders are split across records. Buyer counts already join them by phone.',
+            'fix'     => ['label' => 'Merge the records', 'to' => null, 'permission' => null],
+        ], DB::query()->fromSub((clone $dupes)->selectRaw('1'), 'd')->count(), null,
+            (clone $dupes)->selectRaw("'customer' AS kind, MIN(id) AS id, COUNT(*) AS records,
+                STRING_AGG(TRIM(CONCAT(first_name, ' ', last_name)), ' · ' ORDER BY id) AS customer,
+                MIN(phone) AS phone_field")
+                ->orderByDesc(DB::raw('COUNT(*)'))->limit($limit)->get()->all());
+
+        // 12. Customer records whose phone is a note.
+        $badRec = DB::table('customers')->whereNull('deleted_at')
+            ->whereRaw("NULLIF(btrim(phone), '') IS NOT NULL AND normalize_phone(phone) IS NULL");
+        $add('unreadable_customer_phones', [
+            'group' => 'customers', 'scope' => 'current', 'outlet' => false, 'severity' => 'low',
+            'title'   => 'Customer records with an unreadable phone',
+            'affects' => 'These customers cannot be matched to their till orders by phone, or contacted from the record.',
+            'fix'     => ['label' => 'Correct the phone on the customer', 'to' => null, 'permission' => null],
+        ], (clone $badRec)->count(), null,
+            (clone $badRec)->selectRaw("'customer' AS kind, id, TRIM(CONCAT(first_name, ' ', last_name)) AS customer,
+                phone AS phone_field, created_at AS date")
+                ->orderByDesc('created_at')->limit($limit)->get()->all());
+
+        $soldOrders = (clone $sold())->count();
+        $identified = $soldOrders - (int) collect($checks)->firstWhere('key', 'anonymous_sales')['count'];
+
+        return [
+            'checks'   => $checks,
+            // Zeros that are structural, not quiet (production never signed
+            // off, expenses never approved) — the same notes the overview shows.
+            'gaps'     => $this->structuralGaps(),
+            'coverage' => [
+                'orders'            => $soldOrders,
+                'buyer_identified'  => $soldOrders > 0 ? round($identified / $soldOrders * 100, 1) : null,
+                'lines'             => $costedTotal,
+                'lines_costed'      => $costedTotal > 0
+                    ? round(($costedTotal - (int) collect($checks)->firstWhere('key', 'uncosted_lines')['count']) / $costedTotal * 100, 1)
+                    : null,
+            ],
+            'row_limit' => $limit,
+        ];
+    }
+
+    /** One sentence per drillable metric: exactly what its rows add up to. */
+    public const DRILL_DEFINITIONS = [
+        'revenue'              => 'Recognised orders in the period (confirmed or paid), in KES at the reporting rate. Pending carts and cancelled orders are not included.',
+        'orders'               => 'The same recognised orders, counted.',
+        'collected'            => 'Payments settled in the period, by payment date, net of refunds, in KES. Payments awaiting approval are not included.',
+        'outstanding'          => 'What customers still owe on open recognised orders, per order, in KES. An overpayment never reduces another order\'s balance.',
+        'new_customers'        => 'Customer records created in the period. Customers belong to the whole business, so the outlet filter does not apply.',
+        'production_completed' => 'Production orders completed in the period; the figure is pieces.',
+        'production_overdue'   => 'Open production orders past their due date today.',
+        'expenses'             => 'Approved and paid expenses dated in the period, in KES. Expenses awaiting approval are not included.',
+        'lost'                 => 'Orders raised in the period and then cancelled or voided, in KES at the reporting rate. Refunded orders are returns, reported with Returns.',
+    ];
+
+    /** Lost = raised, then cancelled or voided. Refunded is a return, not a lost sale. */
+    public const LOST_STATUSES = ['cancelled', 'voided'];
+
+    /** Lost-sales base: dead orders that never became income, KES-rated, scoped. */
+    private function lostBase()
+    {
+        return DB::table('orders')
+            ->whereIn('orders.status', self::LOST_STATUSES)
+            ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(orders.currency_code)) IS NOT NULL")
+            ->when($this->outletIds, fn ($q) => $q->whereIn('orders.outlet_id', $this->outletIds));
+    }
+
+    /**
+     * Where the period's orders went — every order raised in the window, in
+     * exactly one bucket, so the buckets add up to the order book:
+     *   sold        recognised (the Sold tile, to the shilling)
+     *   unconfirmed carts nobody confirmed (the pipeline)
+     *   lost        cancelled or voided — value the business quoted and lost
+     *   refunded    returned after sale (Returns reports the money)
+     *   other       anything else (a status no rule claims), so nothing hides
+     * Rated currencies only, like every KES figure. Lost carries the previous
+     * period too, because "are we losing more?" is the question it answers.
+     */
+    public function orderOutcomes(Carbon $s, Carbon $e, Carbon $ps, Carbon $pe): array
+    {
+        $kes  = self::totalKes();
+        $rec  = \App\Models\Order::RECOGNISED_STATUSES;
+        $settled = \App\Models\Order::SETTLED_PAYMENT_STATUSES;
+        $list = fn (array $v) => implode(',', array_map(fn ($x) => "'{$x}'", $v));
+        [$dead, $lost, $recognised, $paid, $pipeline] = [
+            $list(\App\Models\Order::DEAD_STATUSES), $list(self::LOST_STATUSES), $list($rec),
+            $list($settled), $list(\App\Models\Order::PIPELINE_STATUSES),
+        ];
+        $bucket = "CASE
+            WHEN orders.status IN ({$dead}) THEN CASE WHEN orders.status IN ({$lost}) THEN 'lost' ELSE 'refunded' END
+            WHEN orders.status IN ({$recognised}) OR orders.payment_status IN ({$paid}) THEN 'sold'
+            WHEN orders.status IN ({$pipeline}) THEN 'unconfirmed'
+            ELSE 'other' END";
+
+        $read = fn (Carbon $a, Carbon $b) => DB::table('orders')
+            ->whereBetween('orders.created_at', [$a, $b])
+            ->whereRaw("(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(orders.currency_code)) IS NOT NULL")
+            ->when($this->outletIds, fn ($q) => $q->whereIn('orders.outlet_id', $this->outletIds))
+            ->groupBy(DB::raw($bucket))
+            ->selectRaw("{$bucket} AS b, COUNT(*) AS n, COALESCE(SUM({$kes}),0) AS v")
+            ->get()->keyBy('b');
+
+        $now = $read($s, $e);
+        $before = $read($ps, $pe);
+        $out = [];
+        foreach (['sold', 'unconfirmed', 'lost', 'refunded', 'other'] as $b) {
+            $out[$b] = ['orders' => (int) ($now[$b]->n ?? 0), 'value' => round((float) ($now[$b]->v ?? 0), 2)];
+        }
+        $out['lost']['previous_value']  = round((float) ($before['lost']->v ?? 0), 2);
+        $out['lost']['previous_orders'] = (int) ($before['lost']->n ?? 0);
+        $raised = array_sum(array_map(fn ($k) => $out[$k]['value'], ['sold', 'unconfirmed', 'lost', 'refunded', 'other']));
+        $out['lost']['share_pct'] = $raised > 0 ? round($out['lost']['value'] / $raised * 100, 1) : null;
+
+        // Lost by who raised it: is losing a person's pattern or the shop's?
+        $out['lost']['by_salesperson'] = $this->lostBase()->whereBetween('orders.created_at', [$s, $e])
+            ->groupBy('orders.created_by')
+            ->selectRaw("orders.created_by AS id,
+                COALESCE((SELECT TRIM(CONCAT(u.first_name, ' ', u.last_name)) FROM users u WHERE u.id = orders.created_by), 'No salesperson (web checkout)') AS name,
+                COUNT(*) AS orders, COALESCE(SUM({$kes}),0) AS value")
+            ->orderByDesc(DB::raw("SUM({$kes})"))->get()
+            ->map(fn ($r) => ['id' => $r->id, 'name' => $r->name, 'orders' => (int) $r->orders, 'value' => round((float) $r->value, 2)])
+            ->all();
+
+        return $out;
     }
 
     /** Narrow an outstanding drill to one aging bucket (or deposits). */
@@ -743,12 +1631,13 @@ class MetricEngine
                    COUNT(*) FILTER (WHERE (ii.quantity_on_hand - ii.quantity_reserved) <= 0) AS out_of_stock,
                    COUNT(*) FILTER (WHERE ii.reorder_point > 0
                        AND (ii.quantity_on_hand - ii.quantity_reserved) <= ii.reorder_point) AS low_stock,
-                   COUNT(*) FILTER (WHERE pr.cost_price IS NULL)       AS unpriced,
-                   COALESCE(SUM(GREATEST(ii.quantity_on_hand, 0) * COALESCE(pr.cost_price, 0)), 0)    AS cost_value,
+                   COUNT(*) FILTER (WHERE cb.cost IS NULL)             AS unpriced,
+                   COALESCE(SUM(GREATEST(ii.quantity_on_hand, 0) * COALESCE(cb.cost, 0)), 0)          AS cost_value,
                    COALESCE(SUM(GREATEST(ii.quantity_on_hand, 0) * COALESCE(pr.regular_price, 0)), 0) AS retail_value
             FROM inventory_items ii
             LEFT JOIN LATERAL (
-                SELECT pp.cost_price, pp.regular_price
+                -- Retail price only; cost comes from CostBasis (cb) below.
+                SELECT pp.regular_price
                 FROM product_prices pp
                 WHERE pp.product_id = ii.product_id
                   AND UPPER(pp.currency_code) = 'KES'
@@ -756,6 +1645,9 @@ class MetricEngine
                 ORDER BY (pp.product_variant_id IS NOT NULL AND pp.product_variant_id = ii.product_variant_id) DESC
                 LIMIT 1
             ) pr ON TRUE
+            -- Cost through the one lookup (CostBasis): a variant row with no
+            -- cost no longer hides the product's own (2026-10-02 decision).
+            LEFT JOIN LATERAL (SELECT " . \App\Support\CostBasis::bookCostSql('ii') . " AS cost) cb ON TRUE
             WHERE TRUE {$scope}
         ");
 
@@ -771,6 +1663,74 @@ class MetricEngine
         ];
     }
 
+    /**
+     * Stock aging — how long since each stock line last MOVED (any
+     * inventory transaction: a sale, a count, an adjustment, a receipt), in
+     * buckets, valued at cost through CostBasis so the buckets add up to the
+     * overview's stock value. Dead stock elsewhere means "unsold for 90 days";
+     * this is the wider question — stock nobody has touched at all.
+     *
+     * Turnover is stated plainly as an approximation: units sold in the last
+     * 90 days against the units on hand TODAY (the ledger starts 2026-06-23,
+     * too short for a true average-stock figure).
+     */
+    public function stockAging(): array
+    {
+        $scope = $this->outletScopeSql('ii.outlet_id');
+        $now   = CarbonImmutable::now(self::TZ)->toMutable();
+        $rows = DB::select("
+            SELECT ii.id, ii.product_id, GREATEST(ii.quantity_on_hand, 0) AS units,
+                   COALESCE(
+                       (SELECT pt.name FROM product_translations pt WHERE pt.product_id = ii.product_id AND pt.language_code = 'en' LIMIT 1),
+                       (SELECT p.sku FROM products p WHERE p.id = ii.product_id)) AS name,
+                   (SELECT o.name FROM outlets o WHERE o.id = ii.outlet_id) AS outlet,
+                   GREATEST(ii.quantity_on_hand, 0) * COALESCE(" . \App\Support\CostBasis::bookCostSql('ii') . ", 0) AS cost_value,
+                   " . \App\Support\CostBasis::bookCostSql('ii') . " IS NULL AS uncosted,
+                   (SELECT MAX(t.created_at) FROM inventory_transactions t WHERE t.inventory_item_id = ii.id) AS last_moved,
+                   (SELECT COALESCE(-SUM(t.quantity_change), 0) FROM inventory_transactions t
+                     WHERE t.inventory_item_id = ii.id AND t.transaction_type = 'sale' AND t.created_at >= ?) AS sold_90
+            FROM inventory_items ii
+            WHERE ii.quantity_on_hand > 0 {$scope}
+        ", [$now->copy()->subDays(90)]);
+
+        $buckets = [];
+        foreach (['0_30' => '0–30 days', '31_60' => '31–60 days', '61_90' => '61–90 days', '90_plus' => 'Over 90 days', 'never' => 'Never moved'] as $k => $label) {
+            $buckets[$k] = ['key' => $k, 'label' => $label, 'lines' => 0, 'units' => 0, 'cost_value' => 0.0];
+        }
+        $items = [];
+        $units = 0; $sold = 0; $value = 0.0; $uncosted = 0;
+        foreach ($rows as $r) {
+            $days = $r->last_moved ? (int) Carbon::parse($r->last_moved)->diffInDays($now) : null;
+            $k = match (true) {
+                $days === null => 'never', $days <= 30 => '0_30', $days <= 60 => '31_60', $days <= 90 => '61_90', default => '90_plus',
+            };
+            $buckets[$k]['lines']++;
+            $buckets[$k]['units'] += (int) $r->units;
+            $buckets[$k]['cost_value'] += (float) $r->cost_value;
+            $units += (int) $r->units; $sold += (int) $r->sold_90; $value += (float) $r->cost_value;
+            $uncosted += $r->uncosted ? 1 : 0;
+            if ($k !== '0_30') {
+                $items[] = ['kind' => 'product', 'id' => (int) $r->product_id, 'ref' => $r->name, 'detail' => $r->outlet,
+                    'units' => (int) $r->units, 'amount' => round((float) $r->cost_value, 2),
+                    'days_since_moved' => $days, 'bucket' => $k];
+            }
+        }
+        foreach ($buckets as &$b) { $b['cost_value'] = round($b['cost_value'], 2); } unset($b);
+        usort($items, fn ($a, $b) => $b['amount'] <=> $a['amount']);
+
+        return [
+            'buckets'      => array_values($buckets),
+            'slow_items'   => array_slice($items, 0, 100),
+            'totals'       => ['lines' => count($rows), 'units' => $units, 'cost_value' => round($value, 2), 'uncosted_lines' => $uncosted],
+            'turnover'     => [
+                'sold_90_days' => $sold,
+                'on_hand'      => $units,
+                'ratio'        => $units > 0 ? round($sold / $units, 2) : null,
+                'note'         => 'Units sold in the last 90 days ÷ units on hand today — an approximation; the stock ledger starts 23 June 2026.',
+            ],
+        ];
+    }
+
     /** Revenue per product in the window (sales truth via order lines). */
     private function productRevenue(Carbon $s, Carbon $e)
     {
@@ -783,8 +1743,9 @@ class MetricEngine
             ->when($this->outletIds, fn ($q) => $q->whereIn('o.outlet_id', $this->outletIds))
             ->groupBy('oi.product_id')
             ->selectRaw('oi.product_id, MAX(oi.product_name) AS product,
-                COALESCE(SUM(oi.total_price), 0) AS revenue, COALESCE(SUM(oi.quantity), 0) AS units')
-            ->orderByDesc(DB::raw('SUM(oi.total_price)'))
+                COALESCE(SUM(' . self::kesOf('oi.total_price', 'o.currency_code') . '), 0) AS revenue,
+                COALESCE(SUM(oi.quantity), 0) AS units')
+            ->orderByDesc(DB::raw('SUM(' . self::kesOf('oi.total_price', 'o.currency_code') . ')'))
             ->get();
     }
 
@@ -946,6 +1907,9 @@ class MetricEngine
      */
     public function supplierPerformance(Carbon $s, Carbon $e)
     {
+        // Purchase orders are all KES today, so this was right by luck.
+        $poSpend = self::kesOf('po.total_amount', 'po.currency_code');
+
         return DB::table('purchase_orders as po')
             ->join('suppliers as sup', 'sup.id', '=', 'po.supplier_id')
             ->leftJoin(DB::raw('(
@@ -965,13 +1929,13 @@ class MetricEngine
             ->groupBy('sup.id', 'sup.name', 'sup.rating')
             ->selectRaw("sup.name AS supplier, sup.rating,
                 COUNT(*) AS orders,
-                COALESCE(SUM(po.total_amount), 0) AS spend,
+                COALESCE(SUM({$poSpend}), 0) AS spend,
                 ROUND(AVG(g.received_date - po.order_date) FILTER (WHERE g.received_date IS NOT NULL)::numeric, 1) AS avg_delivery_days,
                 COUNT(*) FILTER (WHERE g.received_date IS NOT NULL) AS delivered,
                 COUNT(*) FILTER (WHERE g.received_date > po.expected_delivery_date) AS late,
                 COALESCE(SUM(gq.qty_received), 0) AS qty_received,
                 COALESCE(SUM(gq.qty_rejected), 0) AS qty_rejected")
-            ->orderByDesc(DB::raw('COALESCE(SUM(po.total_amount), 0)'))
+            ->orderByDesc(DB::raw('COALESCE(SUM(' . self::kesOf('po.total_amount', 'po.currency_code') . '), 0)'))
             ->limit(10)
             ->get();
     }
@@ -1064,7 +2028,9 @@ class MetricEngine
     // with neither are walk-ins and are reported as such, not guessed.
 
     /** Per-order customer key expression (id wins, else full phone). */
-    private const CUSTOMER_KEY = "COALESCE(o.customer_id::text, NULLIF(o.customer_phone, ''))";
+    // CUSTOMER_KEY was "customer_id, else the RAW phone" — so '0711…' and
+    // '+254711…' were two people, and it disagreed with three other buyer
+    // definitions in the module (cycle 10). One rule now: BuyerIdentity.
 
     /** Sales-truth orders aliased o, with the customer key attached. */
     private function customerOrders()
@@ -1088,7 +2054,7 @@ class MetricEngine
             ->groupBy(DB::raw("COALESCE(cid.customer_type, cp.customer_type, 'walk_in')"))
             ->selectRaw("COALESCE(cid.customer_type, cp.customer_type, 'walk_in') AS segment,
                 COUNT(*) AS orders, COALESCE(SUM(o.total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))), 0) AS revenue,
-                COUNT(DISTINCT " . self::CUSTOMER_KEY . ") AS customers")
+                COUNT(DISTINCT " . \App\Support\BuyerIdentity::sql('o') . ") AS customers")
             ->orderByDesc(DB::raw('COALESCE(SUM(o.total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))), 0)'))
             ->get();
     }
@@ -1100,7 +2066,7 @@ class MetricEngine
      */
     public function newVsReturning(Carbon $s, Carbon $e): array
     {
-        $key = self::CUSTOMER_KEY;
+        $key = \App\Support\BuyerIdentity::sql('o');
         $rows = DB::select("
             WITH keyed AS (
                 SELECT o.id, o.total_amount, o.currency_code, o.created_at, {$key} AS ckey,
@@ -1132,7 +2098,7 @@ class MetricEngine
     /** Window's top customers with their all-time value beside the period. */
     public function topCustomers(Carbon $s, Carbon $e)
     {
-        $key = self::CUSTOMER_KEY;
+        $key = \App\Support\BuyerIdentity::sql('o');
         return collect(DB::select("
             WITH keyed AS (
                 SELECT {$key} AS ckey, o.total_amount, o.currency_code, o.created_at,
@@ -1163,7 +2129,7 @@ class MetricEngine
      */
     public function dormantTopCustomers(int $quietDays = 60, int $topN = 20)
     {
-        $key = self::CUSTOMER_KEY;
+        $key = \App\Support\BuyerIdentity::sql('o');
         $now = CarbonImmutable::now(self::TZ);
         return collect(DB::select("
             WITH keyed AS (
@@ -1215,7 +2181,7 @@ class MetricEngine
      */
     public function rfmSegments(): array
     {
-        $key = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
+        $key = \App\Support\BuyerIdentity::sql('o');
         $now = CarbonImmutable::now(self::TZ);
         $since = $now->subDays(365);
         $outletSql = $this->outletIds
@@ -1431,7 +2397,7 @@ class MetricEngine
      */
     public function winBackEconomics(int $limit = 50): array
     {
-        $key = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
+        $key = \App\Support\BuyerIdentity::sql('o');
         $now   = CarbonImmutable::now(self::TZ);
         $today = $now->format('Y-m-d');
         $since = $now->subDays(365);
@@ -1491,7 +2457,8 @@ class MetricEngine
             FROM win_back_outreach w
             LEFT JOIN users u ON u.id = w.contacted_by
             LEFT JOIN LATERAL (
-                SELECT o.id AS order_id, o.order_number, o.total_amount AS recovered_amount,
+                SELECT o.id AS order_id, o.order_number,
+                       (o.total_amount) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) AS recovered_amount,
                        o.created_at AS ordered_at
                 FROM orders o
                 WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
@@ -1618,7 +2585,7 @@ class MetricEngine
      */
     public function replenishmentRadar(int $limit = 50): array
     {
-        $key = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
+        $key = \App\Support\BuyerIdentity::sql('o');
         $now   = CarbonImmutable::now(self::TZ);
         $today = $now->format('Y-m-d');
         $since = $now->subDays(540);
@@ -1632,7 +2599,7 @@ class MetricEngine
                 -- value is that day's total line spend on the product.
                 SELECT {$key} AS ckey, oi.product_id,
                        DATE(o.created_at) AS buy_date,
-                       SUM(oi.total_price) AS event_value,
+                       SUM((oi.total_price) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))) AS event_value,
                        MAX(TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,'')))) AS name,
                        MAX(o.customer_phone) AS phone
                 FROM orders o
@@ -1775,13 +2742,18 @@ class MetricEngine
             WITH paid AS (
                 SELECT order_id, SUM((amount - COALESCE(refund_amount,0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))) AS net,
                        MAX(COALESCE(paid_at, created_at)) AS settled_at
-                FROM payments WHERE status = 'paid' GROUP BY order_id
+                FROM payments WHERE " . \App\Support\SettledPayment::sql() . " GROUP BY order_id
             )
             SELECT COUNT(*) AS orders, COALESCE(SUM(o.total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))), 0) AS revenue
             FROM orders o JOIN paid p ON p.order_id = o.id
             WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
               AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL {$scope}
-              AND p.net >= o.total_amount - 0.01
+              -- Fully paid, compared in ONE unit. p.net is already in shillings;
+              -- o.total_amount is in the order's own currency. Comparing them
+              -- raw (cycle 9) let 21,120 KES 'cover' a USD 450 order — 450 is a
+              -- smaller number than 21,120 — so a part-paid dollar order was
+              -- reported as earned. The same defect owed() had (cycle 2).
+              AND p.net >= o.total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) - 0.01
               AND p.settled_at BETWEEN ? AND ?
         ", [$s, $e]);
 
@@ -1789,7 +2761,7 @@ class MetricEngine
             WITH paid AS (
                 SELECT order_id, SUM((amount - COALESCE(refund_amount,0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(currency_code))) AS net,
                        MAX(COALESCE(paid_at, created_at)) AS settled_at
-                FROM payments WHERE status = 'paid' GROUP BY order_id
+                FROM payments WHERE " . \App\Support\SettledPayment::sql() . " GROUP BY order_id
             )
             -- Prefer the cost snapshotted on the line at sale time; fall back to
             -- the current product cost for historical lines that predate it.
@@ -1798,22 +2770,25 @@ class MetricEngine
             FROM orders o
             JOIN paid p ON p.order_id = o.id
             JOIN order_items oi ON oi.order_id = o.id
-            LEFT JOIN LATERAL (
-                SELECT pp.cost_price FROM product_prices pp
-                WHERE pp.product_id = oi.product_id AND UPPER(pp.currency_code) = 'KES'
-                  AND (pp.product_variant_id = oi.product_variant_id OR pp.product_variant_id IS NULL)
-                ORDER BY (pp.product_variant_id IS NOT NULL AND pp.product_variant_id = oi.product_variant_id) DESC
-                LIMIT 1
-            ) pr ON TRUE
+            LEFT JOIN LATERAL (SELECT " . \App\Support\CostBasis::bookCostSql('oi') . " AS cost_price) pr ON TRUE
             WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
               AND (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL {$scope}
-              AND p.net >= o.total_amount - 0.01
+              AND p.net >= o.total_amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) - 0.01
               AND p.settled_at BETWEEN ? AND ?
         ", [$s, $e]);
 
         $expensesTotal = (float) $this->expenseSpendBase()
             ->whereBetween('expense_date', [$s->format('Y-m-d'), $e->format('Y-m-d')])
             ->sum('amount_kes');
+
+        // Awaiting approval: not spend yet, so not in net_profit — but stated
+        // beside it, exactly as the classic P&L does (cycle 9).
+        $pending = DB::table('expenses')
+            ->where('status', 'pending_approval')
+            ->whereBetween('expense_date', [$s->format('Y-m-d'), $e->format('Y-m-d')])
+            ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
+            ->selectRaw('COUNT(*) AS n, (COALESCE(SUM(amount_kes), 0))::float8 AS kes')
+            ->first();
 
         $revenue = round((float) $earned->revenue, 2);
         $cogsVal = round((float) $cogs->cogs, 2);
@@ -1825,6 +2800,7 @@ class MetricEngine
             'gross_profit'   => round($revenue - $cogsVal, 2),
             'expenses'       => round($expensesTotal, 2),
             'net_profit'     => round($revenue - $cogsVal - $expensesTotal, 2),
+            'expenses_pending_approval' => ['count' => (int) $pending->n, 'amount' => round((float) $pending->kes, 2)],
             'gross_margin_pct' => $revenue > 0 ? round(($revenue - $cogsVal) / $revenue * 100, 1) : null,
         ];
     }
@@ -1876,7 +2852,7 @@ class MetricEngine
             ->groupBy('p.payment_method')
             ->selectRaw("p.payment_method AS method, COUNT(*) AS payments,
                 COALESCE(SUM(p.amount * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code))), 0) AS gross,
-                COALESCE(SUM(COALESCE(p.refund_amount, 0)), 0) AS refunds,
+                COALESCE(SUM(COALESCE(p.refund_amount, 0) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code))), 0) AS refunds,
                 COALESCE(SUM((p.amount - COALESCE(p.refund_amount, 0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code))), 0) AS net")
             ->orderByDesc(DB::raw('COALESCE(SUM((p.amount - COALESCE(p.refund_amount, 0)) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(p.currency_code))), 0)'))
             ->get();
@@ -1936,9 +2912,12 @@ class MetricEngine
             $end   = $now->subMonthsNoOverflow($i)->endOfMonth();
             $months[] = [
                 'month'   => $start->format('M Y'),
+                // Converted, because the tile above this chart is. Read raw,
+                // the trend showed July at 2,312,285 while the tile said
+                // 2,617,974 — one page disagreeing with itself by 305,689.
                 'revenue' => round((float) $this->salesBase()
                     ->whereBetween('orders.created_at', [$start->toMutable(), $end->toMutable()])
-                    ->sum('total_amount'), 2),
+                    ->selectRaw('COALESCE(SUM(' . self::totalKes() . '),0) AS v')->value('v'), 2),
             ];
         }
 
@@ -2013,7 +2992,7 @@ class MetricEngine
     private function openBalancesWithLastPayment()
     {
         return $this->openBalances()->leftJoinSub(
-            DB::table('payments')->where('status', 'paid')
+            \App\Support\SettledPayment::where(DB::table('payments'))
                 ->selectRaw('order_id, MAX(COALESCE(paid_at, created_at)) AS last_paid_at')
                 ->groupBy('order_id'),
             'lp', 'lp.order_id', '=', 'orders.id',
@@ -2039,27 +3018,38 @@ class MetricEngine
     {
         $now      = CarbonImmutable::now(self::TZ);
         $today    = $now->format('Y-m-d');
-        $owed     = self::OWED;
+        $owed     = self::owed();
+        $held     = self::depositHeld();
+        $totalKes = self::totalKes();
+        $quoteKes = \App\Support\ReportingCurrency::kes('quotations.total_amount', 'quotations.currency_code');
         $custName = "TRIM(CONCAT(COALESCE(customer_first_name,''),' ',COALESCE(customer_last_name,'')))";
 
-        // Stage 1 — open quotes.
+        // Stage 1 — open quotes. Every row is converted to shillings and
+        // carries the currency it was quoted in, so the list adds up to the
+        // summary beneath it: these rows used to show a raw foreign total
+        // against a converted summary, and a USD quote sat in the list at
+        // 1/128th of what it was worth.
         $quoteRows = $this->openQuotes()
             ->selectRaw("id, COALESCE(quote_number, CONCAT('#', id)) AS number,
                 {$custName} AS customer, customer_phone AS phone,
-                total_amount AS value, status, valid_until AS expires_at,
+                {$quoteKes} AS value, quotations.total_amount AS value_original,
+                UPPER(quotations.currency_code) AS currency,
+                status, valid_until AS expires_at,
                 (?::date - COALESCE(issued_at, created_at)::date) AS age_days", [$today])
-            ->orderByDesc('total_amount')
+            ->orderByDesc(DB::raw($quoteKes))
             ->limit(25)
             ->get()
             ->map(fn ($r) => [
-                'id'         => (int) $r->id,
-                'number'     => $r->number,
-                'customer'   => $r->customer,
-                'phone'      => $r->phone,
-                'value'      => round((float) $r->value, 2),
-                'age_days'   => (int) $r->age_days,
-                'status'     => $r->status,
-                'expires_at' => $r->expires_at,
+                'id'             => (int) $r->id,
+                'number'         => $r->number,
+                'customer'       => $r->customer,
+                'phone'          => $r->phone,
+                'value'          => round((float) $r->value, 2),
+                'value_original' => round((float) $r->value_original, 2),
+                'currency'       => $r->currency,
+                'age_days'       => (int) $r->age_days,
+                'status'         => $r->status,
+                'expires_at'     => $r->expires_at,
             ])->values()->all();
 
         $quoteSummary = $this->openQuotes()
@@ -2075,8 +3065,9 @@ class MetricEngine
 
         $stalledRows = $stalledBase()
             ->selectRaw("orders.id, order_number AS number, {$custName} AS customer,
-                customer_phone AS phone, total_amount AS total,
-                LEAST(COALESCE(pp.paid,0), total_amount) AS deposit_paid,
+                customer_phone AS phone, {$totalKes} AS total,
+                orders.total_amount AS total_original, UPPER(orders.currency_code) AS currency,
+                {$held} AS deposit_paid,
                 {$owed} AS balance_due,
                 (?::date - COALESCE(lp.last_paid_at, orders.created_at)::date) AS days_since_last_payment", [$today])
             ->orderByDesc(DB::raw($owed))
@@ -2088,6 +3079,8 @@ class MetricEngine
                 'customer'                => $r->customer,
                 'phone'                   => $r->phone,
                 'total'                   => round((float) $r->total, 2),
+                'total_original'          => round((float) $r->total_original, 2),
+                'currency'                => $r->currency,
                 'deposit_paid'            => round((float) $r->deposit_paid, 2),
                 'balance_due'             => round((float) $r->balance_due, 2),
                 'days_since_last_payment' => (int) $r->days_since_last_payment,
@@ -2095,7 +3088,7 @@ class MetricEngine
 
         $stalledSummary = $stalledBase()
             ->selectRaw("COUNT(*) AS n,
-                COALESCE(SUM(LEAST(COALESCE(pp.paid,0), total_amount)),0) AS held,
+                COALESCE(SUM({$held}),0) AS held,
                 COALESCE(SUM({$owed}),0) AS due")
             ->first();
 
@@ -2103,7 +3096,8 @@ class MetricEngine
         [$d30, $d60, $d90] = $this->agingCutoffs();
         $unpaidRows = $this->openBalances()
             ->selectRaw("orders.id, order_number AS number, {$custName} AS customer,
-                customer_phone AS phone, total_amount AS total,
+                customer_phone AS phone, {$totalKes} AS total,
+                orders.total_amount AS total_original, UPPER(orders.currency_code) AS currency,
                 COALESCE(pp.paid,0) AS paid, {$owed} AS balance,
                 (?::date - orders.created_at::date) AS days_outstanding,
                 CASE WHEN orders.created_at >= ? THEN '0_30'
@@ -2119,6 +3113,8 @@ class MetricEngine
                 'customer'         => $r->customer,
                 'phone'            => $r->phone,
                 'total'            => round((float) $r->total, 2),
+                'total_original'   => round((float) $r->total_original, 2),
+                'currency'         => $r->currency,
                 'paid'             => round((float) $r->paid, 2),
                 'balance'          => round((float) $r->balance, 2),
                 'days_outstanding' => (int) $r->days_outstanding,
@@ -2152,7 +3148,7 @@ class MetricEngine
             ->where('payment_status', 'paid')
             ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
             ->joinSub(
-                DB::table('payments')->where('status', 'paid')
+                \App\Support\SettledPayment::where(DB::table('payments'))
                     ->selectRaw('order_id, COUNT(*) AS n,
                         MIN(COALESCE(paid_at, created_at)) AS first_pay,
                         MAX(COALESCE(paid_at, created_at)) AS last_pay')
@@ -2256,7 +3252,7 @@ class MetricEngine
         $linesCte = "
             lines AS (
                 SELECT o.id AS order_id, oi.product_id,
-                       SUM(oi.total_price) AS line_value
+                       SUM((oi.total_price) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))) AS line_value
                 FROM orders o
                 JOIN order_items oi ON oi.order_id = o.id
                 WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
@@ -2445,7 +3441,7 @@ class MetricEngine
         $sales = collect(DB::select("
             SELECT oi.product_id,
                    SUM(oi.quantity)    AS units,
-                   SUM(oi.total_price) AS revenue,
+                   SUM((oi.total_price) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))) AS revenue,
                    COALESCE(MAX(pt.name), MAX(p.slug), MAX(p.sku)) AS name
             FROM order_items oi
             JOIN orders o   ON o.id = oi.order_id
@@ -2775,7 +3771,7 @@ class MetricEngine
         $hub60 = collect(DB::select("
             SELECT oi.product_id,
                    SUM(oi.quantity)    AS units,
-                   SUM(oi.total_price) AS revenue
+                   SUM((oi.total_price) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))) AS revenue
             FROM order_items oi
             JOIN orders o ON o.id = oi.order_id
             WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
@@ -3071,7 +4067,7 @@ class MetricEngine
         // 2. Aging balances — money owed on orders older than 30 days.
         $aging = $this->openBalances()
             ->where('orders.created_at', '<', CarbonImmutable::now(self::TZ)->subDays(30))
-            ->selectRaw('COUNT(*) AS n, COALESCE(SUM(' . self::OWED . '),0) AS owed')
+            ->selectRaw('COUNT(*) AS n, COALESCE(SUM(' . self::owed() . '),0) AS owed')
             ->first();
         if ($aging->n > 0 && (float) $aging->owed > 0) {
             $items[] = [
@@ -3135,6 +4131,66 @@ class MetricEngine
                 'count' => (int) $pendingPay->n, 'link' => '/approvals',
                 'actions' => [
                     ['type' => 'navigate', 'label' => 'Review approvals', 'to' => '/approvals'],
+                ],
+            ];
+        }
+
+        // 3b. Paid MORE than the order is worth (cycle 9). Collected counts
+        //     every settled payment; the ledger caps each order at its total;
+        //     the difference was real money no page mentioned — KES 63,350 on
+        //     11 orders at discovery, traced to a duplicated Western Union
+        //     entry, an item removed after payment, a currency changed after
+        //     payment and early-July till entries. Whether the payment or the
+        //     total is wrong is a person's call (refund, credit, or correct the
+        //     order), so the feed names it rather than netting it away.
+        //     Same payments as the Collected tile: paid, and approved where
+        //     approval applies; live orders only.
+        $over = $this->overpaidOrders();
+        if ($over) {
+            $n      = count($over);
+            $excess = array_sum(array_map(fn ($r) => (float) $r->excess, $over));
+            $items[] = [
+                'key' => 'overpaid_orders', 'severity' => 'medium',
+                'title' => "{$n} order" . ($n > 1 ? 's were' : ' was') . ' paid more than ' . ($n > 1 ? 'their totals' : 'its total')
+                    . ' (KES ' . number_format($excess) . ')',
+                'detail' => 'Collected includes this money; the orders do not account for it. Refund it, hold it as '
+                    . 'credit, or correct the order — largest: ' . $over[0]->order_number
+                    . ' (KES ' . number_format((float) $over[0]->excess) . ' over).',
+                'count' => $n, 'link' => '/sales/orders',
+                'entities' => array_map(fn ($r) => [
+                    'number' => $r->order_number,
+                    'excess' => round((float) $r->excess, 2),
+                ], array_slice($over, 0, 5)),
+                'actions' => [
+                    ['type' => 'navigate', 'label' => 'Open orders', 'to' => '/sales/orders'],
+                ],
+            ];
+        }
+
+        // 3c. Sales in a currency with no REPORTING rate (cycle 10). Every
+        //     report leaves them out rather than guess what they are worth —
+        //     correct, and silent. GBP was created on 2026-10-01 with a pricing
+        //     rate and no reporting rate (the hub had no field for it), so the
+        //     first pound sale would have vanished from every page. Named here
+        //     the day it happens, with the currency, so it is fixed in Setup
+        //     rather than discovered at month end.
+        $unrated = $this->unratedCurrencySales();
+        if ($unrated) {
+            $n     = array_sum(array_map(fn ($r) => (int) $r->orders, $unrated));
+            $codes = implode(', ', array_map(fn ($r) => $r->currency, $unrated));
+            $items[] = [
+                'key' => 'unrated_currency_sales', 'severity' => 'high',
+                'title' => "{$n} sale" . ($n > 1 ? 's' : '') . " in {$codes} left out of every report",
+                'detail' => 'These currencies have no reporting rate, so no report can say what the sales are worth. '
+                    . 'Set one in Settings → Currencies (KES per 1 unit) and they count from then on.',
+                'count' => $n, 'link' => '/settings/currencies',
+                'entities' => array_map(fn ($r) => [
+                    'currency' => $r->currency,
+                    'orders'   => (int) $r->orders,
+                    'total'    => round((float) $r->total, 2),
+                ], $unrated),
+                'actions' => [
+                    ['type' => 'navigate', 'label' => 'Open currencies', 'to' => '/settings/currencies'],
                 ],
             ];
         }
@@ -3495,6 +4551,9 @@ class MetricEngine
     /** The uncached rollup pass behind institutionalAccounts(). */
     private function computeInstitutionalAccounts(): array
     {
+        // ACCOUNT, not person: an institution is a customer record whose buying
+        // staff change, so it groups by the record first — the one deliberate
+        // exception to BuyerIdentity (cycle 10, owner's phone-first rule).
         $key   = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
         $now   = CarbonImmutable::now(self::TZ);
         $today = $now->format('Y-m-d');
@@ -3511,7 +4570,9 @@ class MetricEngine
         // DISTINCT pairs is exactly the buyer-turnover signal.
         $instCte = "
             WITH keyed AS (
-                SELECT {$key} AS ckey, o.id AS order_id, o.customer_id, o.total_amount, o.created_at,
+                SELECT {$key} AS ckey, o.id AS order_id, o.customer_id,
+                       (o.total_amount) * (SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) AS total_amount,
+                       o.created_at,
                        TRIM(CONCAT(COALESCE(o.customer_first_name,''),' ',COALESCE(o.customer_last_name,''))) AS name,
                        o.customer_phone AS phone,
                        NULLIF(CONCAT(
@@ -3687,7 +4748,7 @@ class MetricEngine
     /** The uncached rollup pass behind internationalCorridor(). */
     private function computeInternationalCorridor(int $days): array
     {
-        $key   = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
+        $key   = \App\Support\BuyerIdentity::sql('o');
         $since = CarbonImmutable::now(self::TZ)->subDays($days)->startOfDay();
         $outletSql = $this->outletIds
             ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')'
@@ -3718,7 +4779,7 @@ class MetricEngine
                    SUM(p.amount - p.refund_amount) AS paid
             FROM payments p
             JOIN orders o ON o.id = p.order_id
-            WHERE p.status = 'paid'
+            WHERE " . \App\Support\SettledPayment::sql('p') . "
               AND UPPER(p.currency_code) = UPPER(o.currency_code)
               AND o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
               AND {$corridor}
@@ -3934,7 +4995,7 @@ class MetricEngine
      *    contact details needed to act.
      *
      * Identity, recognition, scoping and money follow the engine's conventions:
-     * CUSTOMER_KEY identity, recognised orders only (an abandoned cart is not a
+     * BuyerIdentity, recognised orders only (an abandoned cart is not a
      * first purchase), outlet scoping, and money stated in KES at the REPORTING
      * rate. A currency with no reporting rate stays in the counts — a customer
      * is a customer — but out of every money figure.
@@ -3955,7 +5016,7 @@ class MetricEngine
     // second purchase exists, THIS list is the only place they appear.
     public function secondPurchase(int $recentDays = 90, int $worklistLimit = 250): array
     {
-        $key = "COALESCE(o.customer_id::text, normalize_phone(o.customer_phone), LOWER(NULLIF(o.customer_email,'')))";
+        $key = \App\Support\BuyerIdentity::sql('o');
         $rate = "(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code))";
         $outletSql = $this->outletIds
             ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')'
@@ -4164,9 +5225,9 @@ class MetricEngine
 
         // ── Per channel ──────────────────────────────────────────────────────
         $byChannel = [];
-        foreach (\App\Models\Order::SALES_BUCKETS as $c) {
+        foreach (\App\Models\Order::REPORTING_CHANNELS as $c) {
             $row = \App\Models\Order::query()
-                ->salesChannel($c)
+                ->reportingChannel($c)
                 ->pipeline()
                 ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code'))
                 ->when($this->outletIds, fn ($q) => $q->whereIn('orders.outlet_id', $this->outletIds))
@@ -4175,9 +5236,16 @@ class MetricEngine
                     . '), 0) AS value')
                 ->first();
 
+            // An unlabelled-chat line with nothing in it is noise on the page;
+            // it appears only when such orders exist, and then it must appear,
+            // or the channel lines stop adding up to total revenue.
+            if ($c === 'chat' && (int) ($row->orders ?? 0) === 0) {
+                continue;
+            }
+
             $byChannel[] = [
                 'channel' => $c,
-                'label'   => ['till' => 'Till Sales', 'web' => 'Web Orders', 'chat' => 'Chat Orders', 'quoted' => 'Quoted Sales'][$c],
+                'label'   => \App\Models\Order::REPORTING_CHANNEL_LABELS[$c],
                 'orders'  => (int)   ($row->orders ?? 0),
                 'value'   => (float) ($row->value  ?? 0),
             ];

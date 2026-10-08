@@ -50,6 +50,38 @@ class Order extends Model
     /** Old channel names still arrive from callers; they map, never 404. */
     public const LEGACY_CHANNEL_MAP = ['pos' => 'till', 'online' => 'web', 'whatsapp' => 'chat'];
 
+    /**
+     * The chat bucket splits into the two apps the business actually sells on.
+     *
+     * `chat` is one staff queue but two channels the owner runs and judges
+     * separately — WhatsApp through Neema and Messenger. Reporting them as a
+     * single "Chat Orders" line hid that (measured 2026-09-30: Messenger 49
+     * orders / 638,890 against WhatsApp 41 / 261,990, so the smaller count
+     * carried the larger money and neither was visible). Which app a chat
+     * order came from is `source_channel`; the bucket stays `chat`, so no
+     * writer and no backfill changes.
+     *
+     * Beware the name: REPORTING_CHANNELS['whatsapp'] means WhatsApp ONLY,
+     * while the legacy filter value `salesChannel('whatsapp')` still means the
+     * whole chat bucket, because bookmarked URLs predate the split. Use
+     * scopeReportingChannel() for the reporting axis and scopeSalesChannel()
+     * for the queue.
+     */
+    public const CHAT_SOURCES = ['whatsapp', 'messenger'];
+
+    /** The channel axis every Reports breakdown groups by, in display order. */
+    public const REPORTING_CHANNELS = ['till', 'web', 'whatsapp', 'messenger', 'chat', 'quoted'];
+
+    /** Reporting channel → the words the console shows. */
+    public const REPORTING_CHANNEL_LABELS = [
+        'till'      => 'Till Sales',
+        'web'       => 'Web Orders',
+        'whatsapp'  => 'WhatsApp Orders',
+        'messenger' => 'Messenger Orders',
+        'chat'      => 'Other Chat Orders',
+        'quoted'    => 'Quoted Sales',
+    ];
+
     /** Neither: the order is dead and belongs in no sales figure. */
     public const DEAD_STATUSES = ['cancelled', 'voided', 'refunded'];
 
@@ -415,6 +447,64 @@ class Order extends Model
             $q->where('orders.sales_bucket', $bucket)
               ->orWhere(fn ($qq) => $qq->whereNull('orders.sales_bucket')->where($legacy));
         });
+    }
+
+    /**
+     * Narrow to one REPORTING channel — the axis Reports breaks down by,
+     * which is the sales bucket except that `chat` splits into WhatsApp and
+     * Messenger. See CHAT_SOURCES for why, and for the name trap.
+     *
+     * `chat` here means chat orders that name NEITHER app: a row whose
+     * source_channel was never written. Those must stay visible, or the four
+     * channel lines would silently stop adding up to total revenue — which is
+     * the whole defect this axis exists to prevent.
+     */
+    public function scopeReportingChannel($query, ?string $channel)
+    {
+        if (in_array($channel, self::CHAT_SOURCES, true)) {
+            return $query->salesChannel('chat')->where('orders.source_channel', $channel);
+        }
+
+        if ($channel === 'chat') {
+            return $query->salesChannel('chat')->where(
+                fn ($q) => $q->whereNull('orders.source_channel')
+                             ->orWhereNotIn('orders.source_channel', self::CHAT_SOURCES),
+            );
+        }
+
+        return $query->salesChannel($channel);
+    }
+
+    /**
+     * The sales bucket as SQL — the stored bucket, or for a NULL bucket
+     * (fixtures, a forgetful future writer) the legacy derivation, so an order
+     * degrades into a bucket instead of falling out of every channel figure.
+     */
+    public static function salesBucketSql(string $table = 'orders'): string
+    {
+        return "COALESCE({$table}.sales_bucket, CASE
+            WHEN {$table}.order_type = 'whatsapp' THEN 'chat'
+            WHEN {$table}.order_type = 'online' AND {$table}.created_by IS NULL THEN 'web'
+            WHEN {$table}.order_type = 'online' THEN 'quoted'
+            ELSE 'till' END)";
+    }
+
+    /**
+     * The reporting channel as ONE SQL expression, for the aggregate queries
+     * that bucket in a single pass instead of one query per channel.
+     *
+     * Mirrors scopeReportingChannel() above; the guard test asserts the two
+     * agree, because a breakdown that disagrees with its own drill-down is
+     * how a figure becomes unauditable.
+     */
+    public static function reportingChannelSql(string $bucketExpr, string $table = 'orders'): string
+    {
+        $sources = implode(',', array_map(fn ($s) => "'{$s}'", self::CHAT_SOURCES));
+
+        return "CASE WHEN ({$bucketExpr}) = 'chat'
+                     THEN CASE WHEN {$table}.source_channel IN ({$sources})
+                               THEN {$table}.source_channel ELSE 'chat' END
+                     ELSE ({$bucketExpr}) END";
     }
 
     public function scopePaid($query)

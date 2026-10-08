@@ -12,7 +12,8 @@ use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
 /**
- * The four sales buckets: till | web | chat | quoted.
+ * The sales buckets: till | web | chat | quoted — and, for REPORTING, chat
+ * split into the two apps the business sells on (Order::REPORTING_CHANNELS).
  *
  * One field (order_type) was answering two questions — where the customer came
  * from AND how the sale becomes money — so staff-converted quotations sat on
@@ -140,16 +141,21 @@ class SalesBucketTest extends TestCase
         $this->assertContains($web->id,  Order::query()->salesChannel('online')->pluck('orders.id')->all());
     }
 
-    public function test_the_ledger_splits_four_ways_and_reconciles(): void
+    public function test_the_ledger_splits_by_channel_and_reconciles(): void
     {
+        // One order per reporting channel, including both chat apps and a
+        // chat order that names neither — the case that must stay visible or
+        // the columns stop adding up to the row total.
         $this->order(['sales_bucket' => 'till']);
         $this->order(['sales_bucket' => 'web']);
-        $this->order(['sales_bucket' => 'chat']);
+        $this->order(['sales_bucket' => 'chat', 'source_channel' => 'whatsapp']);
+        $this->order(['sales_bucket' => 'chat', 'source_channel' => 'messenger']);
+        $this->order(['sales_bucket' => 'chat', 'source_channel' => null]);
         $this->order(['sales_bucket' => 'quoted']);
 
         $viewer = User::factory()->create();
         $viewer->assignRole(Role::findOrCreate('admin', 'sanctum'));
-        $viewer->givePermissionTo(Permission::findOrCreate('reports.view', 'sanctum'));
+        \Tests\ReportAccess::grantPages($viewer);
 
         $res = $this->actingAs($viewer, 'sanctum')
             ->getJson('/api/v1/admin/reports/sales/ledger?start='
@@ -158,10 +164,15 @@ class SalesBucketTest extends TestCase
         $res->assertOk();
         $channels = collect($res->json('channels'));
 
-        $this->assertSame(['till', 'web', 'chat', 'quoted'], $channels->pluck('channel')->all());
-        $this->assertSame(4, (int) $channels->sum('orders'), 'every order lands in exactly one bucket');
-        $channels->each(fn ($c) => $this->assertSame(1, (int) $c['orders']));
-        $this->assertSame(4000.0, (float) $channels->sum('sales'));
+        // Six reporting channels since #383: chat splits into the two apps the
+        // business sells on, and 'chat' now means an order naming neither —
+        // kept in the list so the channel figures still sum to the total.
+        $this->assertSame(\App\Models\Order::REPORTING_CHANNELS, $channels->pluck('channel')->all());
+        // The invariant is that the channels PARTITION the order book: every
+        // order in exactly one, none in two, none in none.
+        $this->assertSame(6, (int) $channels->sum('orders'), 'every order lands in exactly one channel');
+        $channels->each(fn ($c) => $this->assertSame(1, (int) $c['orders'], "channel {$c['channel']}"));
+        $this->assertSame(6000.0, (float) $channels->sum('sales'));
     }
 
     public function test_a_storefront_checkout_is_a_web_order(): void

@@ -7,6 +7,7 @@ use App\Models\Product;
 use App\Models\Quotation;
 use App\Models\QuotationItem;
 use App\Services\ActivityLogService;
+use App\Support\DiscountRule;
 use App\Services\QuotationService;
 use App\Services\TaxCalculationService;
 use Illuminate\Http\JsonResponse;
@@ -45,6 +46,38 @@ class QuotationController extends Controller
         return response()->json($query->paginate(min((int) $request->integer('per_page', 25), 100)));
     }
 
+    /**
+     * Phase 4A: a quotation's outlet is a write naming an outlet. A bounded
+     * caller (outlet manager, cashier) raises quotations at their own shops
+     * only, and one raised with no outlet lands at their primary shop — a
+     * head-office (null-outlet) quotation would vanish from the manager who
+     * wrote it, and from the manager who must issue a cashier's draft.
+     */
+    private function outletInScope(Request $request, ?int $outletId): ?int
+    {
+        $user  = $request->user();
+        $scope = \App\Services\DataScopeResolver::for($user, 'quotations.view');
+        if (!in_array($scope, [\App\Enums\DataScope::Outlet, \App\Enums\DataScope::Own], true)) {
+            return $outletId;
+        }
+
+        // A cashier's draft lands at her shop too, so the manager who issues
+        // it (quotations.issue, outlet scope) can find it.
+        if ($outletId === null) {
+            $outletId = $user->outlets()->orderByDesc('outlet_user.is_primary')->orderBy('outlets.id')->value('outlets.id');
+            $outletId = $outletId ? (int) $outletId : null;
+        }
+
+        if ($scope === \App\Enums\DataScope::Outlet || $outletId !== null) {
+            abort_unless(
+                $outletId !== null && in_array($outletId, \App\Services\DataScopeResolver::outletIds($user), true),
+                403, 'You do not have access to this outlet.',
+            );
+        }
+
+        return $outletId;
+    }
+
     public function show(int $id): JsonResponse
     {
         $quotation = Quotation::with(['items', 'documents', 'convertedOrder:id,order_number,status,payment_status'])
@@ -56,6 +89,8 @@ class QuotationController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $this->validatePayload($request);
+        $validated['outlet_id'] = $this->outletInScope($request, $validated['outlet_id'] ?? null);
+        $this->assertDiscountsWithinMaximum($request, $validated['items'], $validated['currency_code'] ?? 'KES');
 
         $quotation = DB::transaction(function () use ($validated, $request) {
             $quotation = Quotation::create([
@@ -95,7 +130,17 @@ class QuotationController extends Controller
             return response()->json(['message' => 'Only a draft quotation can be edited.'], 422);
         }
 
-        $validated = $this->validatePayload($request);
+        // Phase 4A: the edit form was filled from a masked screen for a
+        // masked role; a mask sent back is the value on file.
+        \App\Support\CustomerContacts::restoreMasked($request, [
+            'customer_phone' => $quotation->customer_phone,
+            'customer_email' => $quotation->customer_email,
+        ]);
+        $validated = $this->validatePayload($request, $quotation->customer_phone);
+        if (array_key_exists('outlet_id', $validated) && $validated['outlet_id'] !== null) {
+            $validated['outlet_id'] = $this->outletInScope($request, (int) $validated['outlet_id']);
+        }
+        $this->assertDiscountsWithinMaximum($request, $validated['items'], $validated['currency_code'] ?? $quotation->currency_code ?? 'KES');
 
         DB::transaction(function () use ($quotation, $validated) {
             $quotation->update([
@@ -104,8 +149,10 @@ class QuotationController extends Controller
                 'currency_code'       => $validated['currency_code'] ?? $quotation->currency_code,
                 'shipping_amount'     => $validated['shipping_amount'] ?? $quotation->shipping_amount,
                 'served_by'           => $validated['served_by'] ?? $quotation->served_by,
-                'customer_email'      => $validated['customer_email'] ?? null,
-                'customer_phone'      => $validated['customer_phone'] ?? null,
+                // A key absent from the request (a mask that matched nothing
+                // on file was dropped) leaves the stored value alone.
+                'customer_email'      => array_key_exists('customer_email', $validated) ? $validated['customer_email'] : $quotation->customer_email,
+                'customer_phone'      => array_key_exists('customer_phone', $validated) ? $validated['customer_phone'] : $quotation->customer_phone,
                 'customer_first_name' => $validated['customer_first_name'] ?? null,
                 'customer_last_name'  => $validated['customer_last_name'] ?? null,
                 'valid_until'         => $validated['valid_until'] ?? null,
@@ -280,7 +327,8 @@ class QuotationController extends Controller
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
-    private function validatePayload(Request $request): array
+    /** @param string|null $phoneOnFile the draft's current phone, which an edit may resend as it is */
+    private function validatePayload(Request $request, ?string $phoneOnFile = null): array
     {
         return $request->validate([
             'user_id'             => 'nullable|integer|exists:users,id',
@@ -290,7 +338,7 @@ class QuotationController extends Controller
             'shipping_amount'     => 'nullable|numeric|min:0',
             'served_by'           => 'nullable|string|max:150',
             'customer_email'      => 'nullable|email|max:255',
-            'customer_phone'      => 'nullable|string|max:20',
+            'customer_phone'      => ['nullable', 'string', 'max:20', new \App\Rules\CustomerPhone($phoneOnFile)],
             'customer_first_name' => 'nullable|string|max:100',
             'customer_last_name'  => 'nullable|string|max:100',
             'valid_until'         => 'nullable|date',
@@ -306,6 +354,43 @@ class QuotationController extends Controller
             'items.*.unit_price'          => 'required|numeric|min:0',
             'items.*.discount_amount'     => 'nullable|numeric|min:0',
         ]);
+    }
+
+    /**
+     * The owner's 5% rule on every quoted line and on the quotation as a
+     * whole: what is given away — discounts, plus any shortfall of a catalogue
+     * line's price under the catalogue in the quotation's currency — is at
+     * most 5% of the line, and of the quotation, unless a super_admin quotes. An ad-hoc line has no catalogue price
+     * to fall short of. Checked before anything is written.
+     *
+     * @see \App\Support\DiscountRule
+     */
+    private function assertDiscountsWithinMaximum(Request $request, array $items, string $currency): void
+    {
+        $tally = DiscountRule::tally();
+
+        foreach ($items as $idx => $item) {
+            $catalogue = DiscountRule::catalogueUnit(
+                !empty($item['product_id']) ? (int) $item['product_id'] : null,
+                !empty($item['product_variant_id']) ? (int) $item['product_variant_id'] : null,
+                strtoupper($currency),
+            );
+            $unitPrice = (float) $item['unit_price'];
+            $quantity  = (int) $item['quantity'];
+            $discount  = (float) ($item['discount_amount'] ?? 0);
+
+            DiscountRule::assertLineWithin(
+                $request->user(), $unitPrice, $quantity, $discount, $catalogue,
+                "items.{$idx}.unit_price", "items.{$idx}.discount_amount",
+            );
+
+            [$given, $base, $short] = DiscountRule::lineGiven($unitPrice, $quantity, $discount, $catalogue);
+            $tally->line($given, $base, $short ? "items.{$idx}.unit_price" : "items.{$idx}.discount_amount");
+        }
+
+        // The quotation as a whole: at most 5% of its gross (it has no
+        // order-level discount, so this is the lines together).
+        $tally->assert($request->user());
     }
 
     /**

@@ -2,7 +2,13 @@ import React, { useState, useMemo, useCallback, useEffect, Fragment } from "reac
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { clsx } from "clsx";
+import {
+    ORDER_STATUS, orderStatus, StatusBadge, PriorityBadge, DueBadge, ProgressBar,
+    dueInfo, DUE_TONE_CLS, fmtDueDate, isCustomerJob, jobFor, stageLabel, acceptsFloorWork, StageActions, CLERGY_SHEETS,
+} from "@/components/production/productionUi";
+import { toBusinessDateInput } from "@/lib/businessDate";
 import { get, post, put } from "@/api/client";
+import { useIsFloorWorker } from "@/hooks/useHomePath";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToastStore } from "@/store/toast.store";
 import { useAuthStore } from "@/store/auth.store";
@@ -172,24 +178,9 @@ interface QCRecord {
 // CONSTANTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const STATUS_CFG: Record<string, { label: string; bg: string; text: string; dot: string }> = {
-    draft:       { label: "Draft",       bg: "bg-surface-50",      text: "text-surface-400",   dot: "bg-surface-300"  },
-    pending:     { label: "Pending",     bg: "bg-surface-100",     text: "text-surface-600",   dot: "bg-surface-400"  },
-    in_progress: { label: "In Progress", bg: "bg-amber-light",     text: "text-amber-dark",    dot: "bg-amber"        },
-    on_hold:     { label: "On Hold",     bg: "bg-warning-light",   text: "text-warning-dark",  dot: "bg-warning"      },
-    qc_pending:  { label: "QC Pending",  bg: "bg-accent-50",       text: "text-accent-700",    dot: "bg-accent-500"   },
-    qc_passed:   { label: "QC Passed",   bg: "bg-success-light",   text: "text-success-dark",  dot: "bg-success-vivid" },
-    qc_failed:   { label: "QC Failed",   bg: "bg-danger-light",    text: "text-danger",        dot: "bg-danger"       },
-    completed:   { label: "Completed",   bg: "bg-success-light",   text: "text-success-dark",  dot: "bg-success-vivid" },
-    cancelled:   { label: "Cancelled",   bg: "bg-surface-100",     text: "text-surface-400",   dot: "bg-surface-300"  },
-};
-
-const PRIORITY_CFG: Record<string, { label: string; cls: string }> = {
-    low:    { label: "Low",    cls: "text-surface-400 bg-surface-50 border-surface-200"   },
-    normal: { label: "Normal", cls: "text-brand-600 bg-brand-50 border-brand-200"         },
-    high:   { label: "High",   cls: "text-warning-dark bg-warning-light border-warning/30" },
-    urgent: { label: "Urgent", cls: "text-danger bg-danger-light border-danger/30"        },
-};
+// Status, priority, due and progress come from the shared Production design
+// language (components/production/productionUi) — one vocabulary everywhere.
+const STATUS_CFG = ORDER_STATUS;
 
 const STAGE_ICONS: Record<string, string> = {
     cutting:      "cut",
@@ -219,7 +210,6 @@ const DEFECT_TYPES = [
 ];
 
 const fmtNum = (n: number, dp = 0) => n.toLocaleString("en-KE", { minimumFractionDigits: dp, maximumFractionDigits: dp > 0 ? dp : 3 });
-const daysUntil = (d: string) => Math.ceil((new Date(d).getTime() - Date.now()) / 86_400_000);
 
 /**
  * Parse a "key:value, key:value" string into a Record<string,string>.
@@ -242,16 +232,11 @@ function productLabel(p: any): string {
     return p?.en_translation?.name ? `${p.en_translation.name} — ${p.sku}` : (p?.sku ?? "—");
 }
 
-/** Standard clergy tailoring measurement sheets, by gender (all in inches). */
+/** Standard clergy tailoring measurement sheets, by gender (all in inches) —
+ *  the one list (productionUi) that also orders measurements on every screen. */
 const MEASUREMENT_SETS: Record<"men" | "ladies", { name: string; unit: string }[]> = {
-    men: [
-        "Neck", "Shoulders", "Sleeves", "Wrist", "Arm Hole", "Upper Arm",
-        "Chest", "Stomach", "Shirt Length", "Full Length",
-    ].map(name => ({ name, unit: "Inches" })),
-    ladies: [
-        "Neck", "Shoulders", "Sleeves", "Wrist", "Arm Hole", "Upper Arm",
-        "Bodice", "Waist", "Hips", "Blouse Length", "Full Length",
-    ].map(name => ({ name, unit: "Inches" })),
+    men:    CLERGY_SHEETS.men.map(name => ({ name, unit: "Inches" })),
+    ladies: CLERGY_SHEETS.ladies.map(name => ({ name, unit: "Inches" })),
 };
 
 /**
@@ -291,11 +276,11 @@ function ProductPicker({
     return (
         <div className="relative">
             <div className={clsx("flex items-center gap-2 input py-0", focused && "ring-2 ring-brand-300 border-brand-400")}>
-                <svg className="w-4 h-4 text-surface-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="w-4 h-4 text-surface-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
                 <input
-                    className="flex-1 py-2 bg-transparent outline-none text-sm placeholder:text-surface-400"
+                    className="flex-1 py-2 bg-transparent outline-none text-sm placeholder:text-surface-500"
                     placeholder={selected ? productLabel(selected) : "Search product by name or SKU…"}
                     value={focused ? query : (selected ? productLabel(selected) : "")}
                     onFocus={() => { setFocused(true); setOpen(true); }}
@@ -304,18 +289,18 @@ function ProductPicker({
                 />
                 {selected && !focused && (
                     <button type="button" onMouseDown={() => { onChange(""); setQuery(""); }}
-                        className="text-surface-400 hover:text-danger text-sm shrink-0" title="Clear">✕</button>
+                        className="text-surface-500 hover:text-danger text-sm shrink-0" title="Clear">✕</button>
                 )}
             </div>
 
             {open && (
                 <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-surface-200 rounded-xl shadow-lg overflow-hidden max-h-72 overflow-y-auto">
                     {filtered.length === 0 ? (
-                        <p className="text-sm text-surface-400 text-center py-4">No products found.</p>
+                        <p className="text-sm text-surface-500 text-center py-4">No products found.</p>
                     ) : (
                         filtered.map(g => (
                             <div key={g.name}>
-                                <p className="px-3 pt-2 pb-1 text-2xs font-semibold uppercase tracking-wide text-surface-400 bg-surface-50 sticky top-0">{g.name}</p>
+                                <p className="px-3 pt-2 pb-1 text-2xs font-semibold uppercase tracking-wide text-surface-500 bg-surface-50 sticky top-0">{g.name}</p>
                                 {g.items.map((p: any) => (
                                     <button
                                         key={p.id}
@@ -342,27 +327,14 @@ function ProductPicker({
 // SHARED UI ATOMS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function StatusBadge({ status }: { status: string }) {
-    const c = STATUS_CFG[status] ?? { label: status, bg: "bg-surface-100", text: "text-surface-500", dot: "bg-surface-400" };
-    return (
-        <span className={clsx("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-2xs font-semibold", c.bg, c.text)}>
-            <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", c.dot)} />
-            {c.label}
-        </span>
-    );
-}
-
 // "25 Jul" — the WIP card shows a started -> due span in a 260px column, so the
 // medium format ("25 Jul 2026") would wrap. Year is omitted deliberately: a job
 // on the floor is always within weeks of now.
 function shortDate(d?: string | null) {
-    if (!d) return "—";
-    return new Date(d).toLocaleDateString("en-KE", { day: "numeric", month: "short" });
-}
-
-function PriorityBadge({ priority }: { priority: string }) {
-    const c = PRIORITY_CFG[priority] ?? { label: priority, cls: "text-surface-400 bg-surface-50 border-surface-200" };
-    return <span className={clsx("text-2xs font-bold px-1.5 py-0.5 rounded border uppercase tracking-wide", c.cls)}>{c.label}</span>;
+    const ymd = toBusinessDateInput(d);
+    if (!ymd) return "—";
+    const [y, m, day] = ymd.split("-").map(Number);
+    return new Date(Date.UTC(y, m - 1, day, 9)).toLocaleDateString("en-KE", { timeZone: "Africa/Nairobi", day: "numeric", month: "short" });
 }
 
 function OrderTypePill({ isCustomer }: { isCustomer: boolean }) {
@@ -377,25 +349,8 @@ function OrderTypePill({ isCustomer }: { isCustomer: boolean }) {
           </span>;
 }
 
-function ProgressBar({ pct, colorClass = "bg-brand-500" }: { pct: number; colorClass?: string }) {
-    return (
-        <div className="h-1.5 bg-surface-100 rounded-full overflow-hidden">
-            <div className={clsx("h-full rounded-full transition-all duration-500", colorClass)}
-                style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} />
-        </div>
-    );
-}
-
-function DueBadge({ date }: { date: string }) {
-    const d = daysUntil(date);
-    if (d < 0)  return <span className="text-2xs font-medium text-danger">Overdue {Math.abs(d)}d</span>;
-    if (d === 0) return <span className="text-2xs font-medium text-warning-dark">Due today</span>;
-    if (d <= 2)  return <span className="text-2xs font-medium text-warning-dark">Due in {d}d</span>;
-    return <span className="text-2xs text-surface-400">{new Date(date).toLocaleDateString("en-KE", { dateStyle: "medium" })}</span>;
-}
-
 function SectionHead({ title }: { title: string }) {
-    return <h4 className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2">{title}</h4>;
+    return <h4 className="text-2xs font-bold text-surface-500 uppercase tracking-widest mb-2">{title}</h4>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -570,7 +525,7 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
                                     }
                                 </div>
                                 <p className={clsx("text-xs font-semibold", orderType === opt.key ? "text-brand-700" : "text-surface-900")}>{opt.label}</p>
-                                <p className="text-2xs text-surface-400 mt-0.5">{opt.desc}</p>
+                                <p className="text-2xs text-surface-500 mt-0.5">{opt.desc}</p>
                             </button>
                         ))}
                     </div>
@@ -661,7 +616,7 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
                             onChange={e => set("due_date", e.target.value)} className="input" />
                     </div>
                     <div>
-                        <label className="label">Destination Outlet <span className="text-surface-400 text-2xs">(optional)</span></label>
+                        <label className="label">Destination Outlet <span className="text-surface-500 text-2xs">(optional)</span></label>
                         <select value={form.outlet_id} onChange={e => set("outlet_id", e.target.value)} className="input">
                             <option value="">General Warehouse</option>
                             {outlets.map((o: any) => <option key={o.id} value={o.id}>{o.name}</option>)}
@@ -694,7 +649,7 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
                             ))}
                             {gender && (
                                 <button type="button" onClick={() => setGender("")}
-                                    className="text-2xs text-surface-400 hover:text-danger ml-1">clear</button>
+                                    className="text-2xs text-surface-500 hover:text-danger ml-1">clear</button>
                             )}
                         </div>
 
@@ -704,7 +659,7 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
                                     <div key={field.name}>
                                         <label className="block text-xs font-medium text-surface-700 mb-1">
                                             {field.name}
-                                            {field.unit && <span className="text-surface-400 font-normal ml-1">({field.unit})</span>}
+                                            {field.unit && <span className="text-surface-500 font-normal ml-1">({field.unit})</span>}
                                             {(field as any).required && <span className="text-danger ml-0.5">*</span>}
                                         </label>
                                         <input
@@ -719,7 +674,7 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
                             </div>
                         ) : (
                             <div>
-                                <p className="text-2xs text-surface-400 mb-1">Select a gender above for the standard sheet, or enter free-text measurements.</p>
+                                <p className="text-2xs text-surface-500 mb-1">Select a gender above for the standard sheet, or enter free-text measurements.</p>
                                 <input type="text" value={form.measurements}
                                     onChange={e => set("measurements", e.target.value)}
                                     className="input font-mono text-xs"
@@ -734,7 +689,7 @@ function CreateOrderModal({ onClose, onCreated }: { onClose: () => void; onCreat
                     <div>
                         <label className="label">
                             Customer Preferences
-                            <span className="ml-2 text-surface-400 font-normal text-2xs">e.g. color:navy blue, lining:silk, buttons:gold</span>
+                            <span className="ml-2 text-surface-500 font-normal text-2xs">e.g. color:navy blue, lining:silk, buttons:gold</span>
                         </label>
                         <input type="text" value={form.customer_preferences}
                             onChange={e => set("customer_preferences", e.target.value)}
@@ -787,13 +742,13 @@ function NoTasksPrompt({ orderId, onCreated }: { orderId: number; onCreated: () 
     return (
         <div className="text-center py-6 space-y-3">
             <div className="w-12 h-12 rounded-2xl bg-surface-100 flex items-center justify-center mx-auto">
-                <svg className="w-6 h-6 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <svg className="w-6 h-6 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z" />
                 </svg>
             </div>
             <div>
                 <p className="text-sm font-semibold text-surface-700">No production tasks yet</p>
-                <p className="text-xs text-surface-400 mt-1">
+                <p className="text-xs text-surface-500 mt-1">
                     This order has no stages assigned. This usually happens when the order was confirmed before
                     production stages were configured.
                 </p>
@@ -886,12 +841,12 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                 ) : activeTasks.length === 0 ? (
                     <div className="text-center py-6">
                         <p className="text-sm font-medium text-surface-500">All stages completed</p>
-                        <p className="text-xs text-surface-400 mt-1">There are no pending or in-progress stages left to assign.</p>
+                        <p className="text-xs text-surface-500 mt-1">There are no pending or in-progress stages left to assign.</p>
                     </div>
                 ) : (
                     <div className="space-y-2">
                         {/* Column headers */}
-                        <div className="grid grid-cols-12 gap-3 px-3 text-2xs font-bold text-surface-400 uppercase tracking-wide">
+                        <div className="grid grid-cols-12 gap-3 px-3 text-2xs font-bold text-surface-500 uppercase tracking-wide">
                             <span className="col-span-4">Stage</span>
                             <span className="col-span-5">Assign to</span>
                             <span className="col-span-3">Est. hours</span>
@@ -909,7 +864,7 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                                             {task.stage?.name ?? `Stage ${task.production_stage_id}`}
                                         </p>
                                         <span className={clsx("text-2xs font-medium mt-0.5",
-                                            task.status === "in_progress" ? "text-brand-600" : "text-surface-400")}>
+                                            task.status === "in_progress" ? "text-brand-700" : "text-surface-500")}>
                                             {task.status === "in_progress" ? "In progress" : "Pending"}
                                         </span>
                                     </div>
@@ -927,7 +882,7 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                                             value={hours[task.id] ?? (task.estimated_hours?.toString() ?? "")}
                                             onChange={e => setHours(p => ({ ...p, [task.id]: e.target.value }))}
                                             className="input text-sm pr-7 w-full" />
-                                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-2xs text-surface-400">h</span>
+                                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-2xs text-surface-500">h</span>
                                     </div>
                                 </div>
                             );
@@ -977,14 +932,14 @@ function IssueMaterialsModal({ order, onClose, onSaved }: { order: ProductionOrd
 
     if (allocs.length === 0) return (
         <Modal open title="Issue Materials" onClose={onClose}>
-            <div className="p-8 text-center text-surface-400 text-sm">No material allocations found for this order.</div>
+            <div className="p-8 text-center text-surface-500 text-sm">No material allocations found for this order.</div>
         </Modal>
     );
 
     return (
         <Modal open title={`Issue Materials - ${order.order_number}`} onClose={onClose} size="lg">
             <div className="p-5 space-y-4 overflow-x-auto">
-                <div className="grid grid-cols-12 gap-2 text-2xs font-bold text-surface-400 uppercase tracking-wide px-2 min-w-[440px]">
+                <div className="grid grid-cols-12 gap-2 text-2xs font-bold text-surface-500 uppercase tracking-wide px-2 min-w-[440px]">
                     <span className="col-span-4">Material</span>
                     <span className="col-span-2 text-right">Required</span>
                     <span className="col-span-2 text-right">Allocated</span>
@@ -1001,7 +956,7 @@ function IssueMaterialsModal({ order, onClose, onSaved }: { order: ProductionOrd
                             <div className="grid grid-cols-12 gap-2 items-center text-xs">
                                 <div className="col-span-4">
                                     <p className="font-semibold text-surface-900">{a.material.name}</p>
-                                    <p className="text-2xs text-surface-400">{a.material.code} · {u}</p>
+                                    <p className="text-2xs text-surface-500">{a.material.code} · {u}</p>
                                 </div>
                                 <span className="col-span-2 text-right tabular-nums text-surface-600">{fmtNum(a.quantity_required)}</span>
                                 <span className={clsx("col-span-2 text-right tabular-nums font-semibold",
@@ -1012,7 +967,7 @@ function IssueMaterialsModal({ order, onClose, onSaved }: { order: ProductionOrd
                                     onChange={e => setQtys(p => ({ ...p, [a.id]: e.target.value }))}
                                     className="col-span-2 input text-right text-xs py-1.5 disabled:opacity-40" />
                             </div>
-                            <ProgressBar pct={pct} colorClass={pct >= 100 ? "bg-success" : "bg-brand-500"} />
+                            <ProgressBar pct={pct} />
                         </div>
                     );
                 })}
@@ -1033,7 +988,7 @@ function IssueMaterialsModal({ order, onClose, onSaved }: { order: ProductionOrd
 // QC MODAL
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function QCModal({ order, onClose, onDone }: { order: ProductionOrder; onClose: () => void; onDone: () => void }) {
+function QCModal({ order, onClose, onDone }: { order: ProductionOrder; onClose: () => void; onDone: (passed: boolean) => void }) {
     const toast = useToastStore();
     const [form, setForm] = useState({
         passed: true, passed_quantity: order.quantity, failed_quantity: 0,
@@ -1043,8 +998,8 @@ function QCModal({ order, onClose, onDone }: { order: ProductionOrder; onClose: 
     const mutation = useMutation({
         mutationFn: () => post(`/v1/admin/production-orders/${order.id}/qc`, form),
         onSuccess: () => {
-            toast.success(form.passed ? "QC Passed!" : "QC Failed - order on hold");
-            onDone(); onClose();
+            toast.success(form.passed ? "QC passed" : "QC failed — recorded on the order");
+            onDone(form.passed); onClose();
         },
         onError: (e: ApiError) => toast.error(e.message),
     });
@@ -1134,6 +1089,9 @@ function CompleteModal({ order, onClose, onDone }: { order: ProductionOrder; onC
     const toast = useToastStore();
     const [outletId, setOutletId] = useState(order.outlet?.name ? "" : "");
     const [finalQty, setFinalQty] = useState(String(order.quantity));
+    // A customer's garment is held for them at the outlet their order was taken
+    // at, until they collect — the server decides where, not this picker.
+    const forCustomer = order.is_customer_order !== false && !!order.customer_order_id;
 
     const { data: outletsData } = useQuery({
         queryKey: ["outlets-list"],
@@ -1147,7 +1105,7 @@ function CompleteModal({ order, onClose, onDone }: { order: ProductionOrder; onC
             outlet_id: outletId ? Number(outletId) : undefined,
             final_quantity: Number(finalQty),
         }),
-        onSuccess: () => { toast.success(`${finalQty} unit(s) added to inventory`); onDone(); onClose(); },
+        onSuccess: (res: any) => { toast.success(res?.message ?? `${finalQty} unit(s) added to inventory`); onDone(); onClose(); },
         onError: (e: ApiError) => toast.error(e.message),
     });
 
@@ -1156,26 +1114,30 @@ function CompleteModal({ order, onClose, onDone }: { order: ProductionOrder; onC
             <div className="p-5 space-y-4">
                 <div className="bg-success-light border border-success/20 rounded-xl p-4">
                     <p className="text-sm font-semibold text-success-dark">Ready for inventory</p>
-                    <p className="text-xs text-success-dark/70 mt-0.5">QC has passed. Finished goods will be added to the selected location.</p>
+                    <p className="text-xs text-success-dark/70 mt-0.5">{forCustomer
+                        ? "QC has passed. The garment goes into stock held for this customer, at the outlet their order was taken at, and leaves stock when they collect."
+                        : "QC has passed. Finished goods will be added to the selected location."}</p>
                 </div>
                 <div>
                     <label className="label">Final Quantity Produced</label>
                     <input type="number" min={1} max={order.quantity} value={finalQty}
                         onChange={e => setFinalQty(e.target.value)} className="input" />
-                    <p className="text-2xs text-surface-400 mt-1">Production target was {order.quantity} unit(s)</p>
+                    <p className="text-2xs text-surface-500 mt-1">Production target was {order.quantity} unit(s)</p>
                 </div>
-                <div>
-                    <label className="label">Add to Outlet / Location</label>
-                    <select value={outletId} onChange={e => setOutletId(e.target.value)} className="input">
-                        <option value="">Main Warehouse (default)</option>
-                        {outlets.map((o: any) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                    </select>
-                </div>
+                {!forCustomer && (
+                    <div>
+                        <label className="label">Add to Outlet / Location</label>
+                        <select value={outletId} onChange={e => setOutletId(e.target.value)} className="input">
+                            <option value="">Its own outlet, else the warehouse (default)</option>
+                            {outlets.map((o: any) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                        </select>
+                    </div>
+                )}
                 <div className="flex gap-3">
                     <button onClick={onClose} className="btn-secondary flex-1">Cancel</button>
                     <button onClick={() => mutation.mutate()} disabled={mutation.isPending}
                         className="btn-primary flex-1">
-                        {mutation.isPending ? "Processing…" : "Complete & Add to Inventory"}
+                        {mutation.isPending ? "Processing…" : "Complete & stock"}
                     </button>
                 </div>
             </div>
@@ -1249,7 +1211,7 @@ function ActivityLog({ orderId, currentUserId }: { orderId: number; currentUserI
                         <svg className="w-10 h-10 mx-auto mb-2 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                         </svg>
-                        <p className="text-sm font-medium text-surface-400">No activity yet</p>
+                        <p className="text-sm font-medium text-surface-500">No activity yet</p>
                         <p className="text-xs text-surface-500 mt-1">Start the conversation below</p>
                     </div>
                 ) : (
@@ -1258,7 +1220,7 @@ function ActivityLog({ orderId, currentUserId }: { orderId: number; currentUserI
                         const isNote = msg.type === "note";
                         const isSystem = msg.type === "system";
                         if (isSystem) return (
-                            <div key={msg.id} className="flex items-center gap-2 text-2xs text-surface-400">
+                            <div key={msg.id} className="flex items-center gap-2 text-2xs text-surface-500">
                                 <div className="flex-1 h-px bg-surface-100" />
                                 <span>{msg.body}</span>
                                 <div className="flex-1 h-px bg-surface-100" />
@@ -1302,7 +1264,7 @@ function ActivityLog({ orderId, currentUserId }: { orderId: number; currentUserI
                             className={clsx("text-2xs px-2.5 py-1 rounded-full font-medium transition-all",
                                 type === t
                                     ? t === "note" ? "bg-amber-100 text-amber-700" : "bg-brand-100 text-brand-700"
-                                    : "text-surface-400 hover:text-surface-600")}>
+                                    : "text-surface-500 hover:text-surface-600")}>
                             {t === "note" ? "📝 Internal Note" : "💬 Message"}
                         </button>
                     ))}
@@ -1364,8 +1326,8 @@ function OrderDetail({ orderId, onClose, onUpdated }: { orderId: number; onClose
         mutationFn: ({ taskId, action }: { taskId: number; action: "start" | "complete" | "pause" }) =>
             put(`/v1/tailor/tasks/${taskId}/status`, { action }),
         onSuccess: (_, vars) => {
-            const msg = vars.action === "complete" ? "Stage marked complete!" :
-                        vars.action === "pause"    ? "Stage paused" : "Stage started!";
+            const msg = vars.action === "complete" ? "Stage done" :
+                        vars.action === "pause"    ? "Stage paused" : "Stage started";
             toast.success(msg);
             refresh();
         },
@@ -1374,7 +1336,7 @@ function OrderDetail({ orderId, onClose, onUpdated }: { orderId: number; onClose
 
     const cancelMut = useMutation({
         mutationFn: () => post(`/v1/admin/production-orders/${orderId}/cancel`, {}),
-        onSuccess: () => { toast.success("Order cancelled"); refresh(); },
+        onSuccess: () => { toast.success("Production order cancelled"); refresh(); },
         onError: (e: ApiError) => toast.error(e.message),
     });
 
@@ -1406,7 +1368,7 @@ function OrderDetail({ orderId, onClose, onUpdated }: { orderId: number; onClose
                         <h2 className="font-bold text-base text-surface-900 truncate">{order.product_name}</h2>
                         <div className="flex items-center gap-3 mt-0.5 text-xs text-surface-500">
                             <span>Qty: <strong>{order.quantity}</strong></span>
-                            <DueBadge date={order.due_date} />
+                            <DueBadge date={order.due_date} status={order.status} />
                         </div>
                     </div>
                     <button onClick={onClose} className="btn-ghost btn-icon btn-sm shrink-0"
@@ -1417,8 +1379,8 @@ aria-label="Close">
 
                 {/* Progress */}
                 <div className="mt-3">
-                    <div className="flex justify-between text-2xs text-surface-400 mb-1">
-                        <span>{order.current_stage ?? "Not started"}</span>
+                    <div className="flex justify-between text-2xs text-surface-500 mb-1">
+                        <span>{stageLabel(order.current_stage, order.completion_percentage, order.status)}</span>
                         <span>{order.completion_percentage}%</span>
                     </div>
                     <ProgressBar pct={order.completion_percentage} />
@@ -1515,9 +1477,6 @@ aria-label="Close">
                                 : task.assigned_to;
                             const isMyTask = currentUserId !== null && assignedId === currentUserId &&
                                 !["completed", "failed", "cancelled"].includes(task.status);
-                            const canStart    = isMyTask && (task.status === "pending" || task.status === "paused");
-                            const canComplete = isMyTask && task.status === "in_progress";
-                            const canPause    = isMyTask && task.status === "in_progress";
 
                             return (
                                 <div key={task.id}
@@ -1531,7 +1490,7 @@ aria-label="Close">
                                         done   ? "bg-success text-white" :
                                         active ? "bg-brand-500 text-white" :
                                         failed ? "bg-danger text-white" :
-                                        "bg-surface-100 text-surface-400")}>
+                                        "bg-surface-100 text-surface-500")}>
                                         {done ? "✓" : failed ? "✗" : <StageIcon slug={task.stage?.slug} className="w-3.5 h-3.5" />}
                                     </div>
                                     <div className="flex-1 min-w-0">
@@ -1539,15 +1498,11 @@ aria-label="Close">
                                             <p className="text-sm font-semibold text-surface-900">{task.stage?.name}</p>
                                             <div className="flex items-center gap-2 shrink-0">
                                                 {isMyTask && (
-                                                    <span className="text-2xs font-semibold text-brand-600 bg-brand-50 border border-brand-200 px-1.5 py-0.5 rounded-full">
+                                                    <span className="text-2xs font-semibold text-brand-700 bg-brand-50 border border-brand-200 px-1.5 py-0.5 rounded-full">
                                                         My task
                                                     </span>
                                                 )}
-                                                <span className={clsx("text-2xs font-semibold",
-                                                    done ? "text-success" : active ? "text-brand-600" :
-                                                    failed ? "text-danger" : "text-surface-400")}>
-                                                    {task.status}
-                                                </span>
+                                                <StatusBadge status={task.status} kind="task" />
                                             </div>
                                         </div>
                                         {(() => {
@@ -1563,48 +1518,15 @@ aria-label="Close">
                                                   </p>
                                                 : <p className="text-2xs text-surface-500 italic mt-0.5">Unassigned</p>;
                                         })()}
-                                        {task.notes && <p className="text-2xs text-surface-400 mt-1 italic">{task.notes}</p>}
+                                        {task.notes && <p className="text-2xs text-surface-500 mt-1 italic">{task.notes}</p>}
 
-                                        {isMyTask && (
-                                            <div className="flex items-center gap-1.5 mt-2.5">
-                                                {canStart && (
-                                                    <button
-                                                        onClick={() => taskMutation.mutate({ taskId: task.id, action: "start" })}
-                                                        disabled={taskMutation.isPending}
-                                                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-brand-500 text-white text-xs font-semibold hover:bg-brand-600 transition-colors disabled:opacity-50"
-                                                    >
-                                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
-                                                        </svg>
-                                                        {task.status === "paused" ? "Resume" : "Start"}
-                                                    </button>
-                                                )}
-                                                {canComplete && (
-                                                    <button
-                                                        onClick={() => taskMutation.mutate({ taskId: task.id, action: "complete" })}
-                                                        disabled={taskMutation.isPending}
-                                                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-success text-white text-xs font-semibold hover:bg-success-700 transition-colors disabled:opacity-50"
-                                                    >
-                                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                                                        </svg>
-                                                        Mark done
-                                                    </button>
-                                                )}
-                                                {canPause && (
-                                                    <button
-                                                        onClick={() => taskMutation.mutate({ taskId: task.id, action: "pause" })}
-                                                        disabled={taskMutation.isPending}
-                                                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-100 text-surface-600 text-xs font-semibold hover:bg-surface-200 transition-colors disabled:opacity-50"
-                                                    >
-                                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5" />
-                                                        </svg>
-                                                        Pause
-                                                    </button>
-                                                )}
-                                            </div>
-                                        )}
+                                        <StageActions
+                                            status={task.status}
+                                            canAct={isMyTask && acceptsFloorWork(order.status)}
+                                            blocked={!!(task as any).blocked_by_stage && !task.started_at}
+                                            pending={taskMutation.isPending}
+                                            onAction={(action) => taskMutation.mutate({ taskId: task.id, action })}
+                                        />
                                     </div>
                                 </div>
                             );
@@ -1649,7 +1571,7 @@ aria-label="Close">
                                                 {fmtNum(a.quantity_allocated)}/{fmtNum(a.quantity_required)} {a.material.unit_of_measure}
                                             </span>
                                         </div>
-                                        <ProgressBar pct={pct} colorClass={pct >= 100 ? "bg-success" : "bg-brand-500"} />
+                                        <ProgressBar pct={pct} />
                                     </div>
                                 );
                             })}
@@ -1666,8 +1588,8 @@ aria-label="Close">
                         className={clsx(
                             "flex-1 py-2.5 text-xs font-semibold transition-colors border-b-2",
                             detailTab === tab
-                                ? "border-brand-500 text-brand-600"
-                                : "border-transparent text-surface-400 hover:text-surface-700"
+                                ? "border-brand-500 text-brand-700"
+                                : "border-transparent text-surface-500 hover:text-surface-700"
                         )}>
                         {tab === "details" ? "📋 Details & Specs" : "💬 Activity"}
                     </button>
@@ -1699,7 +1621,7 @@ aria-label="Close">
                             <div className="bg-surface-50 rounded-xl p-3 space-y-1.5">
                                 {Object.entries(order.specifications).map(([k, v]) => (
                                     <div key={k} className="flex gap-2 text-xs">
-                                        <span className="text-surface-400 w-32 shrink-0 capitalize">{k.replace(/_/g, " ")}</span>
+                                        <span className="text-surface-500 w-32 shrink-0 capitalize">{k.replace(/_/g, " ")}</span>
                                         <span className="font-medium text-surface-900 flex-1">{v as string}</span>
                                     </div>
                                 ))}
@@ -1733,7 +1655,7 @@ aria-label="Close">
                     {/* Empty state */}
                     {!order.measurements && !order.specifications && !order.customer_preferences && !order.notes && (
                         <div className="text-center py-10 text-surface-500">
-                            <p className="text-sm font-medium text-surface-400">No details recorded</p>
+                            <p className="text-sm font-medium text-surface-500">No details recorded</p>
                             <p className="text-xs mt-1">Measurements, specifications and notes will appear here when added.</p>
                         </div>
                     )}
@@ -1832,10 +1754,10 @@ function ProductionOrdersTab() {
     return (
         <div className="flex flex-col gap-4 min-h-0 flex-1">
             {/* Stats */}
-            {/* Always one row of six — on the phone the cards tighten into a
-                compact stat strip (centered, small label, bold number) instead
-                of stacking. Tapping a tile still filters by that status. */}
-            <div className="grid grid-cols-6 gap-1 sm:gap-2">
+            {/* Six tiles: two rows of three on the phone, where six across ran
+                the labels into each other ("PendingIn Progress"); one row from
+                sm up. Tapping a tile still filters by that status. */}
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 sm:gap-2">
                 {/* Each state carries its own soft tint, so the row reads as a
                     status spectrum at a glance instead of six identical white
                     chips — the reference app's use of colour as information. */}
@@ -1845,14 +1767,14 @@ function ProductionOrdersTab() {
                     { key: "in_progress", label: "In Progress", tint: "bg-brand-50",    color: "text-brand-700"   },
                     { key: "qc_pending",  label: "QC",          tint: "bg-accent-50",   color: "text-accent-700"  },
                     { key: "completed",   label: "Completed",   tint: "bg-success-light", color: "text-success-dark" },
-                    { key: "overdue",     label: "Overdue",     tint: "bg-danger-light", color: "text-danger"      },
+                    { key: "overdue",     label: "Overdue",     tint: "bg-danger-light", color: "text-danger-700"  },
                 ].map(({ key, label, tint, color }) => (
                     <button key={key} onClick={() => setF("status", filters.status === key ? "" : key)}
                         className={clsx("rounded-control px-0.5 py-2 sm:p-3 transition-all min-w-0 flex flex-col items-center sm:items-start justify-center",
                             tint,
                             filters.status === key ? "ring-2 ring-brand-500 ring-offset-1" : "hover:brightness-95")}>
                         <p className={clsx("text-[15px] sm:text-2xl font-extrabold tabular-nums sm:mt-0.5", color)}>{stats[key] ?? 0}</p>
-                        <p className={clsx("text-2xs truncate leading-tight sm:order-first font-semibold", color, "opacity-70")}>{label}</p>
+                        <p className={clsx("text-2xs truncate max-w-full leading-tight sm:order-first font-semibold", color)}>{label}</p>
                     </button>
                 ))}
             </div>
@@ -1862,31 +1784,31 @@ function ProductionOrdersTab() {
                 like the POS category chips. Desktop wraps as before. */}
             <div className="flex gap-2 items-center overflow-x-auto no-scrollbar sm:flex-wrap sm:overflow-visible [&>*]:shrink-0">
                 <div className="relative flex-1 min-w-40">
-                    <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+                    <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
                     <input value={filters.search} onChange={e => setF("search", e.target.value)}
                         placeholder="Search…" className="input pl-8 text-sm" />
                 </div>
-                <select value={filters.type} onChange={e => setF("type", e.target.value)} className="input w-36 text-sm">
+                <select aria-label="Filter by type" value={filters.type} onChange={e => setF("type", e.target.value)} className="input w-36 text-sm">
                     {/* Wording tracks the card pill: filtering by what you can
                         see on a card is the whole point of this control. */}
                     <option value="">All Types</option>
                     <option value="stock">Production Orders</option>
                     <option value="customer">Custom Orders</option>
                 </select>
-                <select value={filters.priority} onChange={e => setF("priority", e.target.value)} className="input w-32 text-sm">
+                <select aria-label="Filter by priority" value={filters.priority} onChange={e => setF("priority", e.target.value)} className="input w-32 text-sm">
                     <option value="">All Priorities</option>
                     <option value="urgent">Urgent</option>
                     <option value="high">High</option>
                     <option value="normal">Normal</option>
                     <option value="low">Low</option>
                 </select>
-                <select value={filters.status} onChange={e => setF("status", e.target.value)} className="input w-36 text-sm">
+                <select aria-label="Filter by status" value={filters.status} onChange={e => setF("status", e.target.value)} className="input w-36 text-sm">
                     <option value="">All Statuses</option>
                     {Object.entries(STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                     <option value="overdue">Overdue</option>
                 </select>
                 <button onClick={() => { setFilters({ status: "", priority: "", type: "", search: "" }); setPage(1); }}
-                    className="btn-ghost btn-sm text-surface-400">Clear</button>
+                    className="btn-ghost btn-sm text-surface-500">Clear</button>
                 {canRaiseOrder && (
                 <button onClick={() => setShowCreate(true)} className="btn-primary btn-sm gap-1.5 ml-auto">
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
@@ -1897,9 +1819,11 @@ function ProductionOrdersTab() {
 
             {/* Phone: a card list. A 9-column table on a 430px screen scrolls
                 sideways and wraps the order number onto three lines — the
-                reference app never puts a table on a handset. Desktop keeps the
-                table, where the columns genuinely fit. */}
-            <div className="md:hidden flex-1 min-h-0 overflow-auto -mx-3 px-3">
+                reference app never puts a table on a handset. Tablets get the
+                cards too: beside the sidebar a 1024px tablet leaves ~730px, and
+                the table wrapped order numbers again and clipped Status. The
+                table starts at xl, where the columns genuinely fit. */}
+            <div className="xl:hidden flex-1 min-h-0 overflow-auto -mx-3 px-3">
                 {isLoading ? (
                     <div className="flex justify-center py-16"><Spinner size="lg" /></div>
                 ) : orderGroups.length === 0 ? (
@@ -1915,9 +1839,9 @@ function ProductionOrdersTab() {
                                 </p>
                                 <div className="card divide-y divide-line">
                                     {group.items.map((o) => {
-                                        const days = daysUntil(o.due_date);
-                                        const cfg = STATUS_CFG[o.status] ?? STATUS_CFG.draft;
-                                        const late = days < 0;
+                                        const due = dueInfo(o.due_date, o.status);
+                                        const cfg = orderStatus(o.status);
+                                        const late = due.tone === "overdue";
                                         return (
                                             <div key={o.id} className="relative flex items-stretch">
                                                 {/* Status as a left accent read peripherally: you see the
@@ -1935,34 +1859,36 @@ function ProductionOrdersTab() {
                                                     onClick={() => navigate(`/production/orders/${o.id}`)}
                                                     className="flex-1 min-w-0 text-left pl-4 pr-2 py-3 active:bg-surface-50 transition-colors"
                                                 >
-                                                    {/* 1 — who it is for, and its state */}
+                                                    {/* 1 — the job's name, and its state. A customer job leads
+                                                        with the customer; a stock job leads with the garment,
+                                                        so a run of stock work doesn't read "For stock" ×N. */}
                                                     <div className="flex items-center gap-2">
                                                         <p className="flex-1 min-w-0 font-bold text-surface-900 text-[14.5px] leading-snug truncate">
-                                                            {o.customer_label ?? (o.customer_order_id ? 'Name missing' : 'For stock')}
+                                                            {isCustomerJob(o) ? jobFor(o) : o.product_name}
                                                         </p>
                                                         <span className={clsx('shrink-0 text-2xs font-bold px-2 py-0.5 rounded-full', cfg.bg, cfg.text)}>
                                                             {cfg.label}
                                                         </span>
                                                     </div>
 
-                                                    {/* 2 — what is being made */}
+                                                    {/* 2 — the other half: what is being made, or who it's for */}
                                                     <p className="mt-0.5 text-[13px] font-medium text-surface-600 truncate">
-                                                        {o.product_name}
+                                                        {isCustomerJob(o) ? o.product_name : jobFor(o)}
                                                     </p>
 
                                                     {/* 3 — job reference and the clock */}
                                                     <div className="mt-1.5 flex items-center gap-2">
-                                                        <span className="font-mono text-2xs text-surface-400 truncate">
+                                                        <span className="font-mono text-2xs text-surface-500 truncate">
                                                             {o.order_number}
                                                         </span>
                                                         {o.quantity > 1 && (
-                                                            <span className="text-2xs text-surface-400 shrink-0">x{o.quantity}</span>
+                                                            <span className="text-2xs text-surface-500 shrink-0">x{o.quantity}</span>
                                                         )}
                                                         <span className={clsx(
-                                                            'ml-auto shrink-0 text-[11.5px] tabular-nums font-bold',
-                                                            late ? 'text-danger' : days <= 2 ? 'text-amber-dark' : 'text-surface-500',
+                                                            'ml-auto shrink-0 text-2xs tabular-nums font-bold',
+                                                            DUE_TONE_CLS[due.tone],
                                                         )}>
-                                                            {late ? `${Math.abs(days)}d late` : days === 0 ? 'Due today' : `${days}d left`}
+                                                            {due.label}
                                                         </span>
                                                     </div>
                                                 </button>
@@ -1978,7 +1904,7 @@ function ProductionOrdersTab() {
                                                         rel="noopener noreferrer"
                                                         onClick={(e) => e.stopPropagation()}
                                                         aria-label={`Call ${o.customer_label ?? 'customer'} on ${o.customer_contact}`}
-                                                        className="shrink-0 self-center mr-3 w-9 h-9 rounded-full bg-surface-100
+                                                        className="shrink-0 self-center mr-2 w-11 h-11 rounded-full bg-surface-100
                                                                    flex items-center justify-center text-surface-600
                                                                    active:bg-surface-200 transition-colors"
                                                     >
@@ -2000,7 +1926,7 @@ function ProductionOrdersTab() {
             </div>
 
             {/* Desktop table */}
-            <div className="hidden md:flex flex-1 min-h-0 overflow-auto card">
+            <div className="hidden xl:flex flex-1 min-h-0 overflow-auto card">
                     {isLoading ? (
                         <div className="flex justify-center py-16 w-full"><Spinner size="lg" /></div>
                     ) : (
@@ -2008,7 +1934,7 @@ function ProductionOrdersTab() {
                             <thead className="bg-surface-50 border-b border-line sticky top-0">
                                 <tr>
                                     {["Order #", "Type", "Product", "Customer", "Qty", "Priority", "Status", "Progress", "Due", ""].map((h, i) => (
-                                        <th key={h || i} className={`px-3 py-3 text-left text-2xs font-bold text-surface-400 uppercase tracking-wider whitespace-nowrap ${["Type","Priority","Progress"].includes(h) ? "hidden md:table-cell" : ""} ${["Due"].includes(h) ? "hidden sm:table-cell" : ""}`}>{h}</th>
+                                        <th key={h || i} className={`px-3 py-3 text-left text-2xs font-bold text-surface-500 uppercase tracking-wider whitespace-nowrap ${["Type","Priority","Progress"].includes(h) ? "hidden md:table-cell" : ""} ${["Due"].includes(h) ? "hidden sm:table-cell" : ""}`}>{h}</th>
                                     ))}
                                 </tr>
                             </thead>
@@ -2017,15 +1943,15 @@ function ProductionOrdersTab() {
                                     <Fragment key={group.key}>
                                         <DateGroupHeaderRow label={group.label} colSpan={10} />
                                         {group.items.map(o => {
-                                    const days = daysUntil(o.due_date);
+                                    const due = dueInfo(o.due_date, o.status);
                                     // Must agree with the resolved customer name, or the TYPE pill can read
                                     // "For Stock" on a row that names a real person.
-                                    const isCustomer = o.is_customer_order ?? !!(o.customer_order_id || o.customer_id);
+                                    const isCustomer = isCustomerJob(o);
                                     return (
                                         <tr key={o.id} onClick={() => navigate(`/production/orders/${o.id}`)}
                                             className="cursor-pointer hover:bg-surface-50 transition-colors">
                                             <td className="px-3 py-3">
-                                                <span className="font-mono text-xs font-bold text-brand-600">{o.order_number}</span>
+                                                <span className="font-mono text-xs font-bold text-brand-700 whitespace-nowrap">{o.order_number}</span>
                                             </td>
                                             <td className="px-3 py-3 hidden md:table-cell">
                                                 <OrderTypePill isCustomer={isCustomer} />
@@ -2044,25 +1970,25 @@ function ProductionOrdersTab() {
                                                     <>
                                                         <p className="font-semibold text-surface-900 truncate text-xs" title={o.customer_label}>{o.customer_label}</p>
                                                         {o.customer_contact && (
-                                                            <p className="text-2xs text-surface-400 tabular-nums truncate">{o.customer_contact}</p>
+                                                            <p className="text-2xs text-surface-500 tabular-nums truncate">{o.customer_contact}</p>
                                                         )}
                                                     </>
                                                 ) : isCustomer ? (
                                                     <span className="text-2xs text-warning-dark bg-warning-light rounded px-1.5 py-0.5">Name missing</span>
                                                 ) : (
-                                                    <span className="text-2xs text-surface-400">For stock</span>
+                                                    <span className="text-2xs text-surface-500">For stock</span>
                                                 )}
                                             </td>
                                             <td className="px-3 py-3 text-surface-600 tabular-nums">{o.quantity}</td>
-                                            <td className="px-3 py-3 hidden md:table-cell"><PriorityBadge priority={o.priority} /></td>
+                                            <td className="px-3 py-3 hidden md:table-cell"><PriorityBadge priority={o.priority} showNormal /></td>
                                             <td className="px-3 py-3"><StatusBadge status={o.status} /></td>
                                             <td className="px-3 py-3 w-28 hidden md:table-cell">
                                                 <ProgressBar pct={o.completion_percentage} />
-                                                <p className="text-2xs text-surface-400 mt-0.5 tabular-nums">{o.completion_percentage}%</p>
+                                                <p className="text-2xs text-surface-500 mt-0.5 tabular-nums">{o.completion_percentage}%</p>
                                             </td>
-                                            <td className={clsx("px-3 py-3 text-xs font-medium hidden sm:table-cell",
-                                                days < 0 ? "text-danger" : days <= 2 ? "text-warning-dark" : "text-surface-400")}>
-                                                {days < 0 ? `${Math.abs(days)}d ago` : days === 0 ? "Today" : `${days}d`}
+                                            <td className={clsx("px-3 py-3 text-xs font-semibold whitespace-nowrap hidden sm:table-cell", DUE_TONE_CLS[due.tone])}
+                                                title={fmtDueDate(o.due_date)}>
+                                                {due.label}
                                             </td>
                                             <td className="px-3 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                                                 <button
@@ -2082,7 +2008,7 @@ function ProductionOrdersTab() {
                                     </Fragment>
                                 ))}
                                 {orders.length === 0 && !isLoading && (
-                                    <tr><td colSpan={10} className="text-center py-16 text-surface-400">No production orders found</td></tr>
+                                    <tr><td colSpan={10} className="text-center py-16 text-surface-500">No production orders found</td></tr>
                                 )}
                             </tbody>
                         </table>
@@ -2172,7 +2098,7 @@ function WIPTab({
     const { data, isLoading: ordersLoading } = useQuery({
         queryKey: ["production-orders-wip"],
         queryFn: () => get<any>("/v1/admin/production-orders", {
-            params: { status: "in_progress,on_hold,qc_pending,qc_passed,qc_failed", per_page: "100" },
+            params: { status: "pending,in_progress,on_hold,qc_pending,qc_passed,qc_failed", per_page: "100" },
         }),
         enabled: canViewFull && selectedUserId === "all",
         staleTime: 0,
@@ -2210,7 +2136,7 @@ function WIPTab({
         queryKey: ["production-orders-wip-filtered", Array.from(filteredOrderIds ?? []).sort().join(",")],
         queryFn: () => get<any>("/v1/admin/production-orders", {
             params: {
-                status: "in_progress,on_hold,qc_pending,qc_passed,qc_failed",
+                status: "pending,in_progress,on_hold,qc_pending,qc_passed,qc_failed",
                 per_page: "100",
             },
         }),
@@ -2239,13 +2165,12 @@ function WIPTab({
     }, [selectedUserId, productionUsers]);
 
     // ── Group into pipeline columns ──────────────────────────────────────────
+    // Pending leads: a confirmed, assigned order nobody has started yet is the
+    // floor's next work. Without this column, newly assigned jobs were
+    // invisible on the board until someone pressed Start.
     const cols = [
-        { key: "in_progress", label: "In Progress" },
-        { key: "on_hold",     label: "On Hold" },
-        { key: "qc_pending",  label: "QC Check" },
-        { key: "qc_passed",   label: "QC Passed" },
-        { key: "qc_failed",   label: "QC Failed" },
-    ];
+        "pending", "in_progress", "on_hold", "qc_pending", "qc_passed", "qc_failed",
+    ].map(key => ({ key, label: orderStatus(key).label }));
 
     const byStatus = useMemo(() => {
         const m: Record<string, ProductionOrder[]> = {};
@@ -2263,7 +2188,7 @@ function WIPTab({
                     <span className="text-xs text-surface-500">
                         Showing orders for <strong className="text-surface-800">{selectedUserName}</strong>
                         {" "}
-                        <span className="text-surface-400">({orders.length} order{orders.length !== 1 ? "s" : ""})</span>
+                        <span className="text-surface-500">({orders.length} order{orders.length !== 1 ? "s" : ""})</span>
                     </span>
                     {canViewFull && (
                         <button
@@ -2280,7 +2205,7 @@ function WIPTab({
             )}
 
             {selectedUserId !== "all" && !isLoading && (filteredOrderIds?.size ?? 0) === 0 && (
-                <span className="text-xs text-surface-400 italic shrink-0">No active orders assigned</span>
+                <span className="text-xs text-surface-500 italic shrink-0">No active orders assigned</span>
             )}
 
             {/* ── Kanban board ─────────────────────────────────────────────── */}
@@ -2297,7 +2222,7 @@ function WIPTab({
                                     <div className="flex items-center gap-2 mb-3 px-1">
                                         <span className={clsx("w-2.5 h-2.5 rounded-full shrink-0", cfg?.dot ?? "bg-surface-300")} />
                                         <span className="text-sm font-semibold text-surface-700">{col.label}</span>
-                                        <span className="ml-auto text-xs text-surface-400 bg-surface-100 rounded-full px-2 py-0.5 font-medium">
+                                        <span className="ml-auto text-xs text-surface-500 bg-surface-100 rounded-full px-2 py-0.5 font-medium">
                                             {colOrders.length}
                                         </span>
                                     </div>
@@ -2305,8 +2230,7 @@ function WIPTab({
                                         {colOrders.map(o => {
                                             // Must agree with the resolved customer name, or the TYPE pill can read
                                     // "For Stock" on a row that names a real person.
-                                    const isCustomer = o.is_customer_order ?? !!(o.customer_order_id || o.customer_id);
-                                            const days = daysUntil(o.due_date);
+                                    const isCustomer = isCustomerJob(o);
                                             return (
                                                 <div key={o.id} onClick={() => setSelectedId(o.id === selectedId ? null : o.id)}
                                                     className={clsx("card p-3 cursor-pointer hover:shadow-md transition-all active:scale-[0.98]",
@@ -2322,17 +2246,21 @@ function WIPTab({
                                                     <p className="font-mono text-2xs font-bold text-surface-500 mb-1">{o.order_number}</p>
 
                                                     {/* 1 — customer, 2 — garment + SKU */}
+                                                    {/* The SKU always follows the garment, whichever
+                                                        line the garment is on: "For stock · SKU" read as
+                                                        if the SKU described the stock. */}
                                                     <p className="text-xs font-semibold text-surface-900 truncate"
-                                                       title={(o.customer_label ?? o.product_name) || undefined}>
-                                                        {o.customer_label ?? o.product_name}
+                                                       title={isCustomer ? jobFor(o) : `${o.product_name}${o.product?.sku ? ` · ${o.product.sku}` : ""}`}>
+                                                        {isCustomer ? jobFor(o) : o.product_name}
+                                                        {!isCustomer && o.product?.sku && (
+                                                            <span className="font-mono font-normal text-2xs text-surface-500"> · {o.product.sku}</span>
+                                                        )}
                                                     </p>
                                                     <p className="text-2xs text-surface-500 truncate"
-                                                       title={`${o.product_name}${o.product?.sku ? ` · ${o.product.sku}` : ""}`}>
-                                                        {o.customer_label
-                                                            ? o.product_name
-                                                            : (isCustomer ? "Name missing" : "For stock")}
-                                                        {o.product?.sku && (
-                                                            <span className="font-mono text-surface-400"> · {o.product.sku}</span>
+                                                       title={isCustomer ? `${o.product_name}${o.product?.sku ? ` · ${o.product.sku}` : ""}` : jobFor(o)}>
+                                                        {isCustomer ? o.product_name : jobFor(o)}
+                                                        {isCustomer && o.product?.sku && (
+                                                            <span className="font-mono text-surface-500"> · {o.product.sku}</span>
                                                         )}
                                                     </p>
 
@@ -2366,6 +2294,7 @@ function WIPTab({
                                                                     t.status === "completed"   ? "bg-success" :
                                                                     t.status === "in_progress" ? "bg-brand-500 animate-pulse" :
                                                                     t.status === "failed"      ? "bg-danger" :
+                                                                    t.status === "paused"      ? "bg-warning" :
                                                                     "bg-surface-100")} />
                                                         ))}
                                                     </div>
@@ -2373,24 +2302,24 @@ function WIPTab({
                                                     {/* 7 — level of progress: the stage it is sitting in right now */}
                                                     <p className="text-2xs font-medium text-surface-700 flex items-center gap-1 truncate">
                                                         <StageIcon slug={(o.current_stage ?? "").toLowerCase().replace(" ", "_")} className="w-3 h-3 shrink-0" />
-                                                        {o.current_stage ?? "Not started"}
+                                                        {stageLabel(o.current_stage, o.completion_percentage, o.status)}
                                                     </p>
 
                                                     {/* 8 — started → due, with the countdown that was already here
                                                         kept on the right because overdue is the one thing on this
                                                         card that must shout. */}
                                                     <div className="flex items-center justify-between gap-2 text-2xs mt-1">
-                                                        <span className="text-surface-400 truncate">
+                                                        <span className="text-surface-500 truncate">
                                                             {o.started_at ? shortDate(o.started_at) : "not started"} → {shortDate(o.due_date)}
                                                         </span>
-                                                        <span className={clsx("shrink-0", days < 0 ? "text-danger font-bold" : days <= 2 ? "text-amber-dark font-semibold" : "text-surface-400")}>
-                                                            {days < 0 ? `${Math.abs(days)}d overdue` : days === 0 ? "Today" : `${days}d`}
+                                                        <span className={clsx("shrink-0 font-semibold", DUE_TONE_CLS[dueInfo(o.due_date, o.status).tone])} title={fmtDueDate(o.due_date)}>
+                                                            {dueInfo(o.due_date, o.status).label}
                                                         </span>
                                                     </div>
                                                     <div className="flex justify-end mt-2">
                                                         <button
                                                             onClick={(e) => { e.stopPropagation(); navigate(`/production/orders/${o.id}`); }}
-                                                            className="text-2xs text-brand-500 hover:text-brand-700 font-semibold"
+                                                            className="text-2xs text-brand-700 hover:text-brand-800 font-semibold"
                                                         >
                                                             View Detail →
                                                         </button>
@@ -2399,7 +2328,7 @@ function WIPTab({
                                             );
                                         })}
                                         {colOrders.length === 0 && (
-                                            <div className="text-center py-10 text-surface-200 text-2xs border-2 border-dashed border-line rounded-xl">
+                                            <div className="text-center py-10 text-surface-500 text-2xs border-2 border-dashed border-line rounded-xl">
                                                 Empty
                                             </div>
                                         )}
@@ -2426,7 +2355,9 @@ function BOMTab() {
     const toast = useToastStore();
     const qc = useQueryClient();
     const { can } = usePermissions();
-    const canEditProducts = can("products.edit");
+    // BOM writes are bom.edit on the API (Phase 2: procurement owns BOMs),
+    // not products.edit.
+    const canEditProducts = can("bom.edit");
     const [search, setSearch] = useState("");
     const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
     const [editingBom, setEditingBom] = useState<Bom | null>(null);
@@ -2470,7 +2401,7 @@ function BOMTab() {
                 showingDetail ? "hidden sm:flex" : "flex w-full"
             )}>
                 <div className="relative">
-                    <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+                    <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
                     <input value={search} onChange={e => setSearch(e.target.value)}
                         placeholder="Search products…" className="input pl-8 text-sm" />
                 </div>
@@ -2478,7 +2409,7 @@ function BOMTab() {
                     {loadingProducts ? (
                         <div className="flex justify-center py-8"><Spinner /></div>
                     ) : products.length === 0 ? (
-                        <p className="text-xs text-surface-400 text-center py-8 px-4">No producible products found</p>
+                        <p className="text-xs text-surface-500 text-center py-8 px-4">No producible products found</p>
                     ) : (
                         <div className="divide-y divide-line">
                             {products.map(p => {
@@ -2510,7 +2441,7 @@ function BOMTab() {
                                                 isSelected ? "text-brand-700" : "text-surface-900")}>
                                                 {name}
                                             </p>
-                                            <p className="text-2xs text-surface-400 font-mono mt-0.5 truncate">{p.sku}</p>
+                                            <p className="text-2xs text-surface-500 font-mono mt-0.5 truncate">{p.sku}</p>
                                             <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                                                 {p.category && (
                                                     <span className="text-2xs text-surface-500 bg-surface-100 px-1.5 py-0.5 rounded-md truncate max-w-[90px]">
@@ -2568,7 +2499,7 @@ function BOMTab() {
                             </button>
                             <div className="flex-1 min-w-0">
                                 <h3 className="font-bold text-surface-900 truncate">{selectedProduct?.name ?? selectedProduct?.sku}</h3>
-                                <p className="text-xs text-surface-400">{boms.length} BOM version{boms.length !== 1 ? "s" : ""}</p>
+                                <p className="text-xs text-surface-500">{boms.length} BOM version{boms.length !== 1 ? "s" : ""}</p>
                             </div>
                             {canEditProducts && (
                             <button onClick={() => setShowCreate(true)}
@@ -2581,7 +2512,7 @@ function BOMTab() {
                         </div>
 
                         {boms.length === 0 && (
-                            <div className="card p-10 text-center text-surface-400">
+                            <div className="card p-10 text-center text-surface-500">
                                 <p className="text-sm">No BOM defined yet.</p>
                                 {canEditProducts && (
                                 <button onClick={() => setShowCreate(true)} className="btn-primary btn-sm mt-4">Create First BOM</button>
@@ -2599,7 +2530,7 @@ function BOMTab() {
                                             {bom.is_active && (
                                                 <span className="text-2xs font-bold px-2 py-0.5 bg-brand-500 text-white rounded-full shrink-0">Active</span>
                                             )}
-                                            {bom.notes && <span className="text-xs text-surface-400 italic truncate">{bom.notes}</span>}
+                                            {bom.notes && <span className="text-xs text-surface-500 italic truncate">{bom.notes}</span>}
                                         </div>
                                         <div className="flex gap-2 shrink-0">
                                             {!bom.is_active && (
@@ -2616,7 +2547,7 @@ function BOMTab() {
                                             <thead className="bg-surface-50 border-b border-surface-50">
                                                 <tr>
                                                     {["Material", "Code", "Qty", "Unit", "Unit Cost", "Total Cost", "Stock"].map(h => (
-                                                        <th key={h} className="px-3 py-2 text-left text-2xs font-bold text-surface-400 uppercase tracking-wide">{h}</th>
+                                                        <th key={h} className="px-3 py-2 text-left text-2xs font-bold text-surface-500 uppercase tracking-wide">{h}</th>
                                                     ))}
                                                 </tr>
                                             </thead>
@@ -2626,7 +2557,7 @@ function BOMTab() {
                                                         <td className="px-3 py-2 font-medium text-surface-900">
                                                             {item.material?.name ?? item.material_name ?? "-"}
                                                         </td>
-                                                        <td className="px-3 py-2 font-mono text-surface-400">
+                                                        <td className="px-3 py-2 font-mono text-surface-500">
                                                             {item.material?.code ?? item.material_code ?? "-"}
                                                         </td>
                                                         <td className="px-3 py-2 tabular-nums">{fmtNum(item.quantity)}</td>
@@ -2679,27 +2610,27 @@ function BOMTab() {
                                                     <div className="flex items-start justify-between gap-2">
                                                         <div className="min-w-0">
                                                             <p className="text-sm font-semibold text-surface-900 truncate">{materialName}</p>
-                                                            <p className="text-2xs text-surface-400 font-mono">{code}</p>
+                                                            <p className="text-2xs text-surface-500 font-mono">{code}</p>
                                                         </div>
                                                         {item.is_short && (
-                                                            <span className="text-2xs font-bold text-danger bg-danger-light px-1.5 py-0.5 rounded shrink-0">
+                                                            <span className="text-2xs font-bold text-danger-700 bg-danger-light px-1.5 py-0.5 rounded shrink-0">
                                                                 Low stock
                                                             </span>
                                                         )}
                                                     </div>
                                                     <div className="grid grid-cols-3 gap-2 mt-2">
                                                         <div>
-                                                            <p className="text-2xs text-surface-400">Qty</p>
+                                                            <p className="text-2xs text-surface-500">Qty</p>
                                                             <p className="text-xs font-semibold text-surface-900 tabular-nums">{fmtNum(item.quantity)} {item.unit_of_measure}</p>
                                                         </div>
                                                         <div>
-                                                            <p className="text-2xs text-surface-400">Unit cost</p>
+                                                            <p className="text-2xs text-surface-500">Unit cost</p>
                                                             <p className="text-xs font-semibold text-surface-900 tabular-nums">
                                                                 {unitCost != null ? `KES ${fmtNum(unitCost, 2)}` : "-"}
                                                             </p>
                                                         </div>
                                                         <div>
-                                                            <p className="text-2xs text-surface-400">Total</p>
+                                                            <p className="text-2xs text-surface-500">Total</p>
                                                             <p className="text-xs font-semibold text-surface-900 tabular-nums">
                                                                 {totalCost != null ? `KES ${fmtNum(totalCost, 2)}` : "-"}
                                                             </p>
@@ -2707,7 +2638,7 @@ function BOMTab() {
                                                     </div>
                                                     {item.stock_on_hand != null && (
                                                         <div className="mt-1.5 flex items-center gap-1.5">
-                                                            <span className="text-2xs text-surface-400">Stock:</span>
+                                                            <span className="text-2xs text-surface-500">Stock:</span>
                                                             <span className={clsx("text-2xs font-semibold tabular-nums",
                                                                 item.is_short ? "text-danger" : "text-success")}>
                                                                 {fmtNum(item.stock_on_hand)} {item.unit_of_measure}
@@ -2793,7 +2724,7 @@ function BOMEditModal({ productId, bom, onClose, onSaved }: {
 
                     {/* Desktop: compact inline grid */}
                     <div className="hidden sm:block space-y-2">
-                        <div className="grid grid-cols-12 gap-2 px-2 text-2xs font-bold text-surface-400 uppercase tracking-wide">
+                        <div className="grid grid-cols-12 gap-2 px-2 text-2xs font-bold text-surface-500 uppercase tracking-wide">
                             <span className="col-span-5">Material</span>
                             <span className="col-span-2 text-right">Qty</span>
                             <span className="col-span-2">Unit</span>
@@ -2832,7 +2763,7 @@ function BOMEditModal({ productId, bom, onClose, onSaved }: {
                             <div key={i} className="bg-surface-50 rounded-xl p-3 space-y-2.5">
                                 {/* Row header: index + remove */}
                                 <div className="flex items-center justify-between">
-                                    <span className="text-2xs font-bold text-surface-400 uppercase tracking-wide">
+                                    <span className="text-2xs font-bold text-surface-500 uppercase tracking-wide">
                                         Material {i + 1}
                                     </span>
                                     <button
@@ -2888,7 +2819,7 @@ function BOMEditModal({ productId, bom, onClose, onSaved }: {
                         ))}
 
                         {items.length === 0 && (
-                            <p className="text-xs text-surface-400 text-center py-4">No materials yet — tap + Add Row to begin.</p>
+                            <p className="text-xs text-surface-500 text-center py-4">No materials yet — tap + Add Row to begin.</p>
                         )}
                     </div>
                 </div>
@@ -2920,6 +2851,10 @@ function QualityControlTab() {
     const qc = useQueryClient();
     const navigate = useNavigate();
     const [selectedId, setSelectedId] = useState<number | null>(null);
+    // "Inspect Now" opens the inspection form itself (Production Cycle 10):
+    // it was a label that looked like a button, so a click opened the order
+    // summary and the inspector needed a second click on "Quality Check".
+    const [inspecting, setInspecting] = useState<ProductionOrder | null>(null);
     const [filterStatus, setFilterStatus] = useState<"all" | "pending" | "passed" | "failed">("pending");
     const refresh = useCallback(() => qc.invalidateQueries({ queryKey: ["production-qc"] }), [qc]);
 
@@ -2942,10 +2877,12 @@ function QualityControlTab() {
     });
 
     const orders: ProductionOrder[] = data?.data ?? [];
+    // Whole-floor counts from the server, whichever tab is open (they used to
+    // count only the current tab's rows, so "QC Passed" read 0 on Awaiting).
     const stats = {
-        pending: orders.filter(o => o.status === "qc_pending").length,
-        passed:  orders.filter(o => o.status === "qc_passed").length,
-        failed:  orders.filter(o => o.status === "qc_failed").length,
+        pending: data?.stats?.qc_pending ?? 0,
+        passed:  data?.stats?.qc_passed ?? 0,
+        failed:  data?.stats?.qc_failed ?? 0,
     };
 
     return (
@@ -2955,7 +2892,7 @@ function QualityControlTab() {
                     {[
                         { key: "pending", label: "Awaiting QC",   color: "text-accent-600",     bg: "bg-accent-50"    },
                         { key: "passed",  label: "QC Passed",     color: "text-success",        bg: "bg-success-light" },
-                        { key: "failed",  label: "QC Failed",     color: "text-danger",         bg: "bg-danger-light" },
+                        { key: "failed",  label: "QC Failed",     color: "text-danger-700",        bg: "bg-danger-light" },
                     ].map(({ key, label, color, bg }) => (
                         <div key={key} className={clsx("card p-4 text-left", bg)}>
                             <p className="text-2xs text-surface-500 font-medium">{label}</p>
@@ -2986,10 +2923,10 @@ function QualityControlTab() {
                 ) : orders.length === 0 ? (
                     <div className="flex-1 flex items-center justify-center text-surface-500">
                         <div className="text-center py-16">
-                            <div className="flex items-center justify-center w-16 h-16 bg-surface-100 rounded-2xl mb-3 text-surface-400">
+                            <div className="flex items-center justify-center w-16 h-16 bg-surface-100 rounded-2xl mb-3 text-surface-500">
                                 <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                             </div>
-                            <p className="text-sm font-medium text-surface-400">
+                            <p className="text-sm font-medium text-surface-500">
                                 {filterStatus === "pending" ? "No orders awaiting QC" : `No ${filterStatus} QC results`}
                             </p>
                         </div>
@@ -2999,8 +2936,7 @@ function QualityControlTab() {
                         {orders.map(o => {
                             // Must agree with the resolved customer name, or the TYPE pill can read
                                     // "For Stock" on a row that names a real person.
-                                    const isCustomer = o.is_customer_order ?? !!(o.customer_order_id || o.customer_id);
-                            const days = daysUntil(o.due_date);
+                                    const isCustomer = isCustomerJob(o);
                             return (
                                 <div key={o.id} onClick={() => setSelectedId(o.id === selectedId ? null : o.id)}
                                     className={clsx("card p-4 cursor-pointer hover:shadow-md transition-all",
@@ -3017,40 +2953,48 @@ function QualityControlTab() {
                                             <div className="flex gap-4 mt-1 text-xs text-surface-500">
                                                 <span>Qty: <strong className="text-surface-900">{o.quantity}</strong></span>
                                                 {/* The inspector passing or failing a garment should know who it is for. */}
-                                                {o.customer_label
-                                                    ? <span className="font-semibold text-surface-800 truncate max-w-[14rem]" title={o.customer_label}>{o.customer_label}</span>
-                                                    : isCustomer && <span className="text-warning-dark">Name missing</span>}
+                                                <span className={clsx("font-semibold truncate max-w-[14rem]", o.customer_label ? "text-surface-800" : "text-surface-500")} title={jobFor(o)}>{jobFor(o)}</span>
                                                 {isCustomer && o.customer_order && (
                                                     <span className="text-info-600">{o.customer_order.order_number}</span>
                                                 )}
-                                                <DueBadge date={o.due_date} />
+                                                <DueBadge date={o.due_date} status={o.status} />
                                             </div>
                                         </div>
 
                                         {/* QC action inline for pending */}
                                         {o.status === "qc_pending" && (
-                                            <div className="text-xs text-accent-600 font-semibold bg-accent-50 rounded-xl px-3 py-2 shrink-0 flex items-center gap-1.5">
+                                            <button type="button"
+                                                onClick={(e) => { e.stopPropagation(); setInspecting(o); }}
+                                                className="min-h-11 text-xs text-accent-700 font-semibold bg-accent-50 hover:bg-accent-100 rounded-xl px-3 py-2 shrink-0 flex items-center gap-1.5 transition-colors">
                                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                                                 Inspect Now
-                                            </div>
+                                            </button>
                                         )}
                                         {o.status === "qc_passed" && (
-                                            <div className="text-xs text-success font-semibold flex items-center gap-1.5">
+                                            // Stocking moves inventory, so it is done on the
+                                            // order page, deliberately; this takes her there
+                                            // (it was a label that looked like a button).
+                                            <button type="button"
+                                                onClick={(e) => { e.stopPropagation(); navigate(`/production/orders/${o.id}`); }}
+                                                className="min-h-11 text-xs text-success-700 font-semibold bg-success-light hover:bg-success-200 rounded-xl px-3 py-2 shrink-0 flex items-center gap-1.5 transition-colors">
                                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
-                                                Ready to Stock
-                                            </div>
+                                                Complete &amp; stock →
+                                            </button>
                                         )}
                                         {o.status === "qc_failed" && (
-                                            <div className="text-xs text-danger font-semibold flex items-center gap-1.5">
-                                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                                                Rework Needed
-                                            </div>
+                                            // The action, not a label: it opens the order with
+                                            // the send-back form ready (Production Cycle 10).
+                                            <button type="button"
+                                                onClick={(e) => { e.stopPropagation(); navigate(`/production/orders/${o.id}?rework=1`); }}
+                                                className="min-h-11 text-xs text-danger-700 font-semibold bg-danger-light hover:bg-danger-200 rounded-xl px-3 py-2 shrink-0 flex items-center gap-1.5 transition-colors">
+                                                ↩ Send back for rework
+                                            </button>
                                         )}
                                     </div>
                                     <div className="flex justify-end mt-2 pt-2 border-t border-surface-50">
                                         <button
                                             onClick={(e) => { e.stopPropagation(); navigate(`/production/orders/${o.id}`); }}
-                                            className="text-2xs text-brand-500 hover:text-brand-700 font-semibold"
+                                            className="text-2xs text-brand-700 hover:text-brand-800 font-semibold"
                                         >
                                             View Detail →
                                         </button>
@@ -3063,6 +3007,15 @@ function QualityControlTab() {
 
             {selectedId && (
                 <OrderDetailModal orderId={selectedId} onClose={() => setSelectedId(null)} onUpdated={refresh} />
+            )}
+            {inspecting && (
+                <QCModal order={inspecting} onClose={() => setInspecting(null)}
+                    onDone={(passed) => {
+                        refresh();
+                        // A fail leads straight to the decision it needs: which
+                        // stage the order goes back to (Production Cycle 10).
+                        if (!passed) navigate(`/production/orders/${inspecting.id}?rework=1`);
+                    }} />
             )}
         </div>
     );
@@ -3083,11 +3036,14 @@ function PageShell({ title, subtitle, children, headerRight }: {
         <div className="flex flex-col h-full animate-fade-in" style={{ height: "calc(100vh - 112px)" }}>
             <div className="shrink-0 mb-4">
                 {/* On desktop, title and headerRight sit on the same row.
-                    On mobile, headerRight drops below the subtitle. */}
+                    On mobile, headerRight drops below the title. These are
+                    working lists, so the heading is the compact one and the
+                    descriptive subtitle is left off phones — the work starts
+                    above the fold. */}
                 <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                     <div>
-                        <h1 className="page-title">{title}</h1>
-                        <p className="page-subtitle">{subtitle}</p>
+                        <h1 className="page-title-sm">{title}</h1>
+                        <p className="page-subtitle hidden sm:block">{subtitle}</p>
                     </div>
                     {headerRight && (
                         <div className="shrink-0">{headerRight}</div>
@@ -3114,14 +3070,15 @@ export function ProductionWIPPage() {
     const canViewFull = can("production.view");
     const isWorker    = !canViewFull && can("production.worker");
 
-    // Pre-select the logged-in user so they immediately see their own tasks.
-    // Workers are always locked to "mine"; admins/managers default to themselves
-    // but can switch to any user via the dropdown.
+    // Workers are locked to "mine"; tailors open on themselves. Whoever runs
+    // the floor opens on the whole board and can narrow to one person —
+    // opening a manager on their own assignments showed an empty board.
     const currentUserId = useAuthStore(s => s.user?.id ?? null);
     const canViewUsers  = can("users.view");
+    const floorWorker   = useIsFloorWorker();
 
     const [selectedUserId, setSelectedUserId] = useState<"all" | "mine" | string>(
-        isWorker ? "mine" : currentUserId ? String(currentUserId) : "all"
+        isWorker ? "mine" : floorWorker && currentUserId ? String(currentUserId) : "all"
     );
 
     // Fetch production users for the dropdown (admin only, requires users.view)
@@ -3153,7 +3110,7 @@ export function ProductionWIPPage() {
 
             {canViewFull && canViewUsers && (
                 <div className="relative">
-                    <select
+                    <select aria-label="Show work for"
                         value={selectedUserId}
                         onChange={e => setSelectedUserId(e.target.value)}
                         className={clsx(
@@ -3179,12 +3136,12 @@ export function ProductionWIPPage() {
                             ))}
                     </select>
                     <svg className={clsx("pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5",
-                        selectedUserId !== "all" ? "text-white" : "text-surface-400")}
+                        selectedUserId !== "all" ? "text-white" : "text-surface-500")}
                         fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/>
                     </svg>
                     <svg className={clsx("pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3",
-                        selectedUserId !== "all" ? "text-white/70" : "text-surface-400")}
+                        selectedUserId !== "all" ? "text-white/70" : "text-surface-500")}
                         fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7"/>
                     </svg>
@@ -3197,7 +3154,7 @@ export function ProductionWIPPage() {
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/>
                     </svg>
-                    {currentUserName}
+                    {selectedUserId === "all" ? "All orders" : currentUserName}
                 </div>
             )}
 

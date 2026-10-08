@@ -9,6 +9,8 @@ use App\Models\User;
 use App\Events\ChannelMessageSent;
 use App\Events\ChannelReactionUpdated;
 use App\Events\ChannelReadUpdated;
+use App\Services\ChannelPosting;
+use App\Services\ContextChannels;
 use App\Services\NotificationService;
 use App\Services\IntelligenceService;
 use Illuminate\Http\Request;
@@ -50,7 +52,19 @@ class ChannelController extends Controller
                 'lastMessage.user:id,first_name,last_name',
             ])
             ->orderByDesc('last_activity_at')
-            ->get()
+            ->get();
+
+        // An order thread is listed only while its order is visible to you:
+        // the row carries the last message's text, so a membership that
+        // outlived the work it was for must not keep showing it.
+        $visibleOrders = ContextChannels::visibleProductionOrderIds(
+            $user,
+            $channels->where('context_type', 'production_order')->pluck('context_id')->filter()->map(fn ($id) => (int) $id)->all(),
+        );
+
+        $channels = $channels
+            ->reject(fn ($channel) => $channel->context_type === 'production_order'
+                && ! in_array((int) $channel->context_id, $visibleOrders, true))
             ->filter(function ($channel) use ($user) {
                 // Only order/production-order context channels can be
                 // dismissed — DMs and manually-created Spaces are unaffected,
@@ -199,6 +213,13 @@ class ChannelController extends Controller
             return response()->json(['message' => 'Cannot add members to a DM.'], 422);
         }
 
+        $newMember = User::findOrFail($validated['user_id']);
+        if (! ContextChannels::mayAddMember($newMember, $channel)) {
+            return response()->json([
+                'message' => "{$newMember->first_name} cannot see this order, so cannot join its thread.",
+            ], 422);
+        }
+
         $channel->members()->syncWithoutDetaching([
             $validated['user_id'] => ['role' => $validated['role'] ?? 'member'],
         ]);
@@ -281,69 +302,12 @@ class ChannelController extends Controller
             'reply_to_id' => 'sometimes|nullable|integer|exists:channel_messages,id',
         ]);
 
-        $mentionedIds   = ChannelMessage::parseMentions($validated['body']);
-        $linkedEntities = ChannelMessage::parseLinkedEntities($validated['body']);
-
-        $message = ChannelMessage::create([
-            'channel_id'     => $channel->id,
-            'user_id'        => $request->user()->id,
-            'reply_to_id'    => $validated['reply_to_id'] ?? null,
-            'type'           => 'text',
-            'body'           => $validated['body'],
-            'mentions'       => $mentionedIds,
-            'linked_entities' => $linkedEntities ?: null,
-        ]);
-
-        // Update channel last activity
-        $channel->update([
-            'last_message_id'  => $message->id,
-            'last_activity_at' => now(),
-        ]);
-
-        $message->load('user:id,first_name,last_name', 'replyTo.user:id,first_name,last_name');
-
-        // Broadcast to channel members via Reverb (real-time).
-        // Wrapped in try/catch - if Reverb is unreachable the message is
-        // still saved to DB and clients receive it on their next poll.
-        try {
-            broadcast(new ChannelMessageSent($message));
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::warning('Reverb broadcast failed: ' . $e->getMessage());
-        }
-
-        // ── Notify @mentioned users + offline members ─────────────────────────
-        try {
-            $poster     = $request->user();
-            $posterName = trim("{$poster->first_name} {$poster->last_name}");
-            $channelName = $channel->name ?? 'a conversation';
-            $preview    = mb_substr(strip_tags($validated['body']), 0, 100);
-
-            $notified = collect($mentionedIds);
-
-            foreach ($mentionedIds as $uid) {
-                if ($uid === $poster->id) continue;
-                NotificationService::channelMention(
-                    $uid, $posterName, $channelName, $preview,
-                    "/comms/{$channel->id}", $message->id
-                );
-            }
-
-            // Notify other channel members who weren't mentioned
-            $memberIds = DB::table('channel_members')
-                ->where('channel_id', $channel->id)
-                ->where('user_id', '!=', $poster->id)
-                ->whereNotIn('user_id', $notified->toArray())
-                ->pluck('user_id');
-
-            foreach ($memberIds as $uid) {
-                NotificationService::channelMessage(
-                    $uid, $posterName, $channelName, $preview,
-                    "/comms/{$channel->id}", $message->id
-                );
-            }
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::warning('Channel notification failed: ' . $e->getMessage());
-        }
+        $message = ChannelPosting::post(
+            $channel,
+            $request->user(),
+            $validated['body'],
+            $validated['reply_to_id'] ?? null,
+        );
 
         return response()->json(['message' => $this->formatMessage($message)], 201);
     }
@@ -518,9 +482,7 @@ class ChannelController extends Controller
     // Media + docs staff share in chat. Whitelisted by EXTENSION (not server MIME)
     // because phone uploads — iPhone .mov/.heic, Android .3gp voice notes — are
     // frequently mislabelled by finfo, which would wrongly reject legitimate media.
-    // SVG is deliberately absent: it is a script container wearing an image
-    // extension, and serving one inline executes it in this app's origin.
-    private const ATTACHMENT_IMAGE_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp'];
+    private const ATTACHMENT_IMAGE_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp', 'svg'];
     private const ATTACHMENT_VIDEO_EXT = ['mp4', 'mov', 'm4v', 'webm', '3gp', '3gpp', 'avi', 'mkv'];
     private const ATTACHMENT_AUDIO_EXT = ['mp3', 'm4a', 'wav', 'aac', 'ogg', 'oga', 'opus', 'amr', 'flac', 'weba'];
     private const ATTACHMENT_DOC_EXT   = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt', 'csv'];
@@ -552,6 +514,10 @@ class ChannelController extends Controller
 
         Storage::disk('local')->put($path, file_get_contents($file->getRealPath()));
 
+        // Until the message carrying it is sent, the uploader is the only
+        // person who may open it (serveAttachment) — the composer previews it.
+        \Illuminate\Support\Facades\Cache::put(self::uploaderKey($path), $request->user()->id, now()->addDay());
+
         return response()->json([
             'path'      => $path,
             'name'      => $file->getClientOriginalName(),
@@ -567,72 +533,55 @@ class ChannelController extends Controller
 
     // ── GET /channels/attachments/serve?path= ─────────────────────────────────────
 
-    /**
-     * The Content-Type served for each whitelisted extension. DECLARED, never
-     * sniffed: mimeType() reads file CONTENT, so an HTML payload wearing a
-     * .jpg name would sniff as text/html and — served inline — execute in
-     * this app's origin with the viewer's session. The extension decides the
-     * type; nosniff (below) forbids the browser second-guessing it.
-     */
-    private const SERVE_MIME = [
-        'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png',
-        'gif' => 'image/gif', 'webp' => 'image/webp', 'heic' => 'image/heic',
-        'heif' => 'image/heif', 'bmp' => 'image/bmp',
-        'mp4' => 'video/mp4', 'mov' => 'video/quicktime', 'm4v' => 'video/x-m4v',
-        'webm' => 'video/webm', '3gp' => 'video/3gpp', '3gpp' => 'video/3gpp',
-        'avi' => 'video/x-msvideo', 'mkv' => 'video/x-matroska',
-        'mp3' => 'audio/mpeg', 'm4a' => 'audio/mp4', 'wav' => 'audio/wav',
-        'aac' => 'audio/aac', 'ogg' => 'audio/ogg', 'oga' => 'audio/ogg',
-        'opus' => 'audio/opus', 'amr' => 'audio/amr', 'flac' => 'audio/flac',
-        'weba' => 'audio/webm',
-        'pdf' => 'application/pdf',
-    ];
-
     public function serveAttachment(Request $request)
     {
         $path = $request->get('path', '');
 
-        // Confined to the attachments folder, with no upward steps: Flysystem
-        // would throw on traversal anyway, but a crafted path deserves a clean
-        // 403, not a 500.
-        if (!$path || !str_starts_with($path, 'channel-attachments/') || str_contains($path, '..')) {
+        // A prefix check alone let "channel-attachments/../payment-proofs/…"
+        // through: the storage layer resolves ".." inside the disk, so any staff
+        // member could read payment proofs, shipment papers and archived exports
+        // by name. The path must name a file inside channel-attachments and
+        // nothing else — no "..", no backslashes, no control characters.
+        if (!is_string($path) || !preg_match('#^channel-attachments/[A-Za-z0-9._\-/]+$#', $path)
+            || preg_match('#(^|/)\.\.?(/|$)#', $path) || str_contains($path, '//')) {
             return response()->json(['message' => 'Access denied.'], 403);
         }
 
-        if (!Storage::disk('local')->exists($path)) {
+        // The file belongs to the conversation it was posted in (4D): only a
+        // member of a channel holding a message that carries it — or its
+        // uploader, before sending — gets a link. Any staff member with the
+        // path used to get the bytes. 404, so a guessed path says nothing.
+        if (!$this->mayOpenAttachment($path, (int) $request->user()->id)
+            || !Storage::disk('local')->exists($path)) {
             return response()->json(['message' => 'File not found.'], 404);
         }
 
-        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        // A signed link valid ≤5 minutes, not the bytes (App\Support\SignedFiles).
+        return \App\Support\SignedFiles::issue($request, 'files.channel-attachment', ['path' => $path], basename($path));
+    }
 
-        // Media and PDF render inline; every other kind (Office docs, txt/csv,
-        // any legacy file whose extension is no longer whitelisted — old .svg
-        // uploads included) downloads as an opaque blob. A download cannot
-        // script, whatever is inside it.
-        $mimeType = self::SERVE_MIME[$ext] ?? 'application/octet-stream';
-        $inline   = array_key_exists($ext, self::SERVE_MIME);
+    private static function uploaderKey(string $path): string
+    {
+        return 'channel-attachment-uploader:' . sha1($path);
+    }
 
-        $content  = Storage::disk('local')->get($path);
-        $filename = basename($path);
-
-        $response = response($content, 200)
-            ->header('Content-Type', $mimeType)
-            ->header('Content-Disposition', ($inline ? 'inline' : 'attachment') . '; filename="' . $filename . '"')
-            // Never let the browser second-guess the declared type — sniffing
-            // an HTML payload out of a mislabelled file is the XSS vector this
-            // endpoint used to have.
-            ->header('X-Content-Type-Options', 'nosniff')
-            ->header('Cache-Control', 'private, max-age=3600');
-
-        // Defence in depth for anything but PDF: even if a response were ever
-        // misinterpreted as a document, the sandbox strips scripts and
-        // same-origin access. PDFs are excluded because the sandbox also
-        // blocks the browser's PDF viewer plugin.
-        if ($ext !== 'pdf') {
-            $response->header('Content-Security-Policy', 'sandbox');
+    private function mayOpenAttachment(string $path, int $userId): bool
+    {
+        if ((int) \Illuminate\Support\Facades\Cache::get(self::uploaderKey($path)) === $userId) {
+            return true;
         }
 
-        return $response;
+        // Files are stored under a fresh UUID name, so the name alone finds
+        // the message(s) whose body links it (raw or url-encoded path).
+        $needle = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], basename($path));
+
+        return DB::table('channel_messages as m')
+            ->join('channel_members as cm', function ($j) use ($userId) {
+                $j->on('cm.channel_id', '=', 'm.channel_id')->where('cm.user_id', '=', $userId);
+            })
+            ->whereNull('m.deleted_at')
+            ->where('m.body', 'like', '%' . $needle . '%')
+            ->exists();
     }
 
     // ── POST /channels/context ────────────────────────────────────────────────
@@ -651,6 +600,13 @@ class ChannelController extends Controller
         $user = $request->user();
         $type = $validated['context_type'];
         $id   = (int) $validated['context_id'];
+
+        // Opening a record's thread joins it, so the caller must be able to
+        // open the record itself. 404, not 403: same answer as the record's
+        // own route, so the id's existence is not disclosed either.
+        if (! ContextChannels::mayJoin($user, $type, $id)) {
+            return response()->json(['message' => 'Not found.'], 404);
+        }
 
         // Build a rich name and description so the sidebar item has enough context
         // without the user having to open the channel.
@@ -726,6 +682,16 @@ class ChannelController extends Controller
 
         if (!$isMember) {
             abort(403, 'You are not a member of this channel.');
+        }
+
+        // A record's thread is open only while the record is (ContextChannels).
+        // Membership granted before that rule, or kept after a task moved to
+        // someone else, does not outlive the visibility it stood for.
+        if ($channel->context_type === 'production_order') {
+            $user = User::find($userId);
+            if (! $user || ! ContextChannels::mayUse($user, $channel)) {
+                abort(403, 'You no longer have access to this order.');
+            }
         }
 
         return $channel;
@@ -819,7 +785,10 @@ class ChannelController extends Controller
         // ── Production orders ─────────────────────────────────────────────────
         // Same scoping - production.view required, same reasoning as above.
         if (in_array('production_order', $types) && $user->can('production.view')) {
-            $query = \App\Models\ProductionOrder::with([
+            // visibleTo: production.view alone is every tailor; a tailor tags
+            // the jobs they are on, not the whole floor (same rule as the
+            // production list and the entity-preview chips).
+            $query = \App\Models\ProductionOrder::visibleTo($user)->with([
                     'product.translations' => fn ($q) => $q->where('language_code', 'en')->select('product_id', 'name'),
                 ])
                 ->select('id', 'order_number', 'status', 'priority', 'product_id', 'quantity')
@@ -853,9 +822,9 @@ class ChannelController extends Controller
         // ── EoD reports ───────────────────────────────────────────────────────
         // So a day's report can be quoted into a channel and discussed where
         // people already are, instead of only on a page nobody visits. Gated on
-        // settings.view, matching the report endpoints themselves — you can only
+        // pos.eod_review, matching the report endpoints themselves — you can only
         // tag what you could already open.
-        if (in_array('eod_report', $types) && $user->can('settings.view')) {
+        if (in_array('eod_report', $types) && $user->can('pos.eod_review')) {
             $query = \Illuminate\Support\Facades\DB::table('cash_register_eod_reports as r')
                 ->join('users as u',   'u.id', '=', 'r.user_id')
                 ->join('outlets as o', 'o.id', '=', 'r.outlet_id')

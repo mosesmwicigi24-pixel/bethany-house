@@ -177,7 +177,7 @@ class PurchaseOrderFromSuggestionsTest extends TestCase
 
         $user = User::factory()->create();
         $user->assignRole(Role::findOrCreate('procurement_manager', 'sanctum'));
-        $user->givePermissionTo(Permission::findOrCreate('reports.view', 'sanctum'));
+        \Tests\ReportAccess::grantPages($user);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 

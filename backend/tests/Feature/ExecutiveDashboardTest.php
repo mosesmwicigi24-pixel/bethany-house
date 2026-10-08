@@ -36,7 +36,7 @@ class ExecutiveDashboardTest extends TestCase
     {
         $user = User::factory()->create();
         $user->assignRole(Role::findOrCreate('sales_manager', 'sanctum'));
-        foreach (array_merge(['reports.view'], $extraPerms) as $perm) {
+        foreach (array_merge([...\Tests\ReportAccess::PAGES], $extraPerms) as $perm) {
             $user->givePermissionTo(Permission::findOrCreate($perm, 'sanctum'));
         }
         if ($assignedOutlet) {
@@ -175,7 +175,18 @@ class ExecutiveDashboardTest extends TestCase
         $this->assertNotNull($res->json('kpis.financial'));
     }
 
-    public function test_outlet_assigned_user_sees_only_their_outlet(): void
+    /**
+     * REVERSED 2026-09-30 by the owner. This used to assert that an
+     * outlet-assigned user saw only their outlet and was refused any other.
+     * Reports are business-wide now: `reports.view` is the control, and the
+     * outlet was never the axis this business is organised on — its channels
+     * are (till, web, WhatsApp, Messenger, quoted). Scoping only this engine
+     * while ReportController and friends scoped nothing is what made one user
+     * read two different revenues on two pages of the same section.
+     *
+     * ReportOutletPolicyTest carries the policy in full, across both families.
+     */
+    public function test_an_outlet_assigned_user_still_sees_the_whole_business(): void
     {
         $mine   = Outlet::factory()->create();
         $others = Outlet::factory()->create();
@@ -185,10 +196,13 @@ class ExecutiveDashboardTest extends TestCase
 
         $this->reportViewer([], $mine);
         $res = $this->getJson('/api/v1/admin/reports/executive?period=this_month')->assertOk();
-        $this->assertSame(4000.0, (float) $res->json('kpis.sales.revenue.current'));
+        $this->assertSame(64_000.0, (float) $res->json('kpis.sales.revenue.current'), 'both outlets');
 
-        // And they cannot request their way into the other outlet.
-        $this->getJson("/api/v1/admin/reports/executive?outlet_id={$others->id}")->assertStatus(403);
+        // An outlet is a filter now, and any of them may be asked for.
+        $filtered = $this->getJson("/api/v1/admin/reports/executive?period=this_month&outlet_id={$others->id}")
+            ->assertOk();
+        $this->assertSame(60_000.0, (float) $filtered->json('kpis.sales.revenue.current'),
+            'the outlet asked for, not a refusal');
     }
 
     public function test_reports_view_is_the_front_door(): void

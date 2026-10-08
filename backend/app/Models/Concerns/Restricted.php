@@ -41,6 +41,19 @@ trait Restricted
     }
 
     /**
+     * Bound a query to rows belonging to these outlets. The default reads the
+     * outlet column; a model whose rows belong to an outlet THROUGH a parent
+     * (a production task, through its production order) overrides this.
+     * An empty $outletIds matches nothing.
+     *
+     * @param  int[]  $outletIds
+     */
+    public function constrainToOutlets(Builder $builder, array $outletIds): void
+    {
+        $builder->whereIn($builder->getModel()->getTable() . '.' . $this->outletColumn(), $outletIds);
+    }
+
+    /**
      * Query without the viewer boundary. For code that runs outside a user's
      * view of the world — reports, jobs, reconciliation — and never as a way
      * around a refusal.

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { reportsApi } from "@/api/reports";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
 import { clsx } from "clsx";
 import dayjs from "dayjs";
@@ -11,9 +12,6 @@ import {
     Bar,
     LineChart,
     Line,
-    PieChart,
-    Pie,
-    Cell,
     XAxis,
     YAxis,
     CartesianGrid,
@@ -24,6 +22,11 @@ import {
 import {
     KPI_GRID,
     KpiCard,
+    tablistKeys,
+    LoadFailed,
+    ReportPending,
+    ShareBars,
+    EmptyNote,
     SectionHeader,
     TableWrapper,
     EmptyRow,
@@ -37,32 +40,41 @@ import {
     TH,
     TH_R,
     fmtHours,
+    useReportOutlet,
+    ReportPageHeader,
+    useReportTab,
 } from "./reportShared";
 
 export default function ProductionReportPage() {
     const dr = useDateRange("this_month");
-    const [activeTab, setActiveTab] = useState<
-        "overview" | "products" | "tailors" | "costing" | "intelligence"
-    >("overview");
+    // Costing shows gross profit, net profit and margins — the server holds it
+    // behind reports.financial (cycle 9), so the tab is offered only then.
+    const { can } = usePermissions();
+    const canSeeCosting = can("reports.financial");
+    // ?tab= in the URL; the costing tab exists only for reports.financial.
+    const productionTabs = (["overview", "products", "tailors", "costing", "intelligence"] as const)
+        .filter((t) => t !== "costing" || canSeeCosting);
+    const [activeTab, setActiveTab] = useReportTab<"overview" | "products" | "tailors" | "costing" | "intelligence">(productionTabs, "overview");
 
-    const { data, isLoading } = useQuery({
-        queryKey: ["report-production", dr.start, dr.end],
+    const { data, isError, refetch, isPlaceholderData, fetchStatus } = useQuery({
+        queryKey: ["report-production", dr.start, dr.end, dr.outlet],
+        placeholderData: (prev) => prev,   // keep the figures while a new period loads — no blank page
         queryFn: () => reportsApi.productionSummary(dr.params),
         enabled: !!dr.start && !!dr.end,
     });
 
     const { data: costingData, isLoading: costingLoading } = useQuery({
-        queryKey: ["report-production-costing", dr.start, dr.end],
+        queryKey: ["report-production-costing", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.productionCostingSummary(dr.params),
-        enabled: !!dr.start && !!dr.end && activeTab === "costing",
+        enabled: !!dr.start && !!dr.end && activeTab === "costing" && canSeeCosting,
     });
 
-    if (isLoading)
-        return (
-            <div className="flex justify-center py-20">
-                <Spinner />
-            </div>
-        );
+    // Kept figures are the PREVIOUS period's: on failure they must not stand
+    // under this period's heading.
+    if (isError && (!data || isPlaceholderData))
+        return <LoadFailed what="Production & Fulfilment" onRetry={() => refetch()} />;
+    if (!data)
+        return <ReportPending paused={fetchStatus === "paused"} />;
 
     const s = data?.summary ?? {};
     const byProduct = data?.by_product ?? [];
@@ -95,34 +107,30 @@ export default function ProductionReportPage() {
 
     return (
         <div className="space-y-6 animate-fade-in">
-            {/* Header */}
-            <div className="flex items-start justify-between gap-4 flex-wrap">
-                <div>
-                    <h1 className="page-title">Production Report</h1>
-                    <p className="page-subtitle">
-                        Order completion, on-time delivery, and tailor
-                        performance.
-                    </p>
-                </div>
-                <DateRangePicker
-                    preset={dr.preset}
-                    start={dr.start}
-                    end={dr.end}
-                    onPresetChange={dr.handlePreset}
-                    onStartChange={dr.setStart}
-                    onEndChange={dr.setEnd}
-                />
-            </div>
-
-            <ReportActionBar
+            <ReportPageHeader
+                title="Production & Fulfilment"
+                subtitle="Order completion, on-time delivery, and tailor performance."
                 reportType="production"
                 exportPath="production/summary"
                 params={dr.params}
+                preset={dr.preset}
+                start={dr.start}
+                end={dr.end}
+                onPresetChange={dr.handlePreset}
+                onStartChange={dr.setStart}
+                onEndChange={dr.setEnd}
+                outlet={dr.outlet}
+                onOutletChange={dr.setOutlet}
             />
+
+            {data && !(Number(s.total_orders) > 0) && (
+                <EmptyNote title="No production orders in this period."
+                    hint="Try a longer range — or check Production orders for jobs not yet scheduled." />
+            )}
 
             {/* KPIs row 1 */}
             <div className={KPI_GRID}>
-                <KpiCard label="Total Orders" value={s.total_orders ?? 0} />
+                <KpiCard label="Total orders" value={s.total_orders ?? 0} />
                 <KpiCard
                     label="Completed"
                     value={s.completed_count ?? 0}
@@ -134,7 +142,7 @@ export default function ProductionReportPage() {
                     color="text-info"
                 />
                 <KpiCard
-                    label="QC Failed"
+                    label="QC failed"
                     value={s.failed_count ?? 0}
                     color="text-danger"
                 />
@@ -143,17 +151,19 @@ export default function ProductionReportPage() {
             {/* KPIs row 2 */}
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Units Planned"
+                    label="Units planned"
                     value={s.total_units_planned ?? 0}
                 />
                 <KpiCard
-                    label="Units Produced"
+                    label="Units produced"
                     value={s.total_units_produced ?? 0}
                 />
                 <KpiCard
-                    label="Completion Rate"
-                    value={`${completionRate}%`}
-                    sub={`${s.total_units_produced ?? 0} / ${s.total_units_planned ?? 0} units`}
+                    label="Completion rate"
+                    value={s.total_units_planned > 0 ? `${completionRate}%` : "—"}
+                    sub={s.total_units_planned > 0
+                        ? `${s.total_units_produced ?? 0} / ${s.total_units_planned ?? 0} units`
+                        : "no units planned in this period"}
                     color={
                         completionRate >= 80
                             ? "text-success"
@@ -164,7 +174,7 @@ export default function ProductionReportPage() {
                 />
                 {s.on_time_rate !== null && s.on_time_rate !== undefined ? (
                     <KpiCard
-                        label="On-Time Rate"
+                        label="On-time rate"
                         value={`${s.on_time_rate}%`}
                         sub={`${s.on_time_count ?? 0} / ${s.completed_with_due ?? 0} with due date`}
                         color={
@@ -177,26 +187,26 @@ export default function ProductionReportPage() {
                     />
                 ) : (
                     <KpiCard
-                        label="Avg Completion"
-                        value={fmtHours(s.avg_completion_hours)}
-                        sub="per order"
+                        label="Avg completion"
+                        value={Number(s.avg_completion_hours) > 0 ? fmtHours(s.avg_completion_hours) : "—"}
+                        sub={Number(s.avg_completion_hours) > 0 ? "per order" : "nothing completed in this period"}
                     />
                 )}
             </div>
 
             {/* Tabs */}
-            <div className="border-b border-line">
-                <nav className="flex gap-1 -mb-px">
+            <div className="border-b border-line overflow-x-auto no-scrollbar">
+                <nav className="flex gap-1 -mb-px" role="tablist" aria-label="Report sections" onKeyDown={tablistKeys}>
                     {([
                         { id: "overview", label: "Overview" },
                         { id: "products", label: "Products" },
                         { id: "tailors",  label: "Tailors" },
-                        { id: "costing",  label: "Costing & Profitability" },
-                        { id: "intelligence", label: "🧠 Intelligence" },
-                    ] as const).map((tab) => (
+                        { id: "costing",  label: "Costing & profitability" },
+                        { id: "intelligence", label: "Intelligence" },
+                    ] as const).filter((tab) => tab.id !== "costing" || canSeeCosting).map((tab) => (
                         <button
                             key={tab.id}
-                            onClick={() => setActiveTab(tab.id)}
+                            onClick={() => setActiveTab(tab.id)} role="tab" aria-selected={activeTab === tab.id}
                             className={clsx(
                                 "px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
                                 activeTab === tab.id
@@ -217,41 +227,11 @@ export default function ProductionReportPage() {
                     {byStatus.length > 0 && (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="card p-5">
-                                <SectionHeader title="Status Distribution" />
-                                <ResponsiveContainer width="100%" height={200}>
-                                    <PieChart>
-                                        <Pie
-                                            data={byStatus}
-                                            dataKey="count"
-                                            nameKey="status"
-                                            cx="50%"
-                                            cy="50%"
-                                            outerRadius={75}
-                                            label={({ status, percent }: any) =>
-                                                `${status?.replace(/_/g, " ")} ${(percent * 100).toFixed(0)}%`
-                                            }
-                                            labelLine={false}
-                                        >
-                                            {byStatus.map(
-                                                (_: any, i: number) => (
-                                                    <Cell
-                                                        key={i}
-                                                        fill={
-                                                            CHART_COLORS[
-                                                                i %
-                                                                    CHART_COLORS.length
-                                                            ]
-                                                        }
-                                                    />
-                                                ),
-                                            )}
-                                        </Pie>
-                                        <Tooltip />
-                                    </PieChart>
-                                </ResponsiveContainer>
+                                <SectionHeader title="Status distribution" />
+                                <ShareBars rows={(byStatus ?? []).map((d: any) => ({ label: String(d.status ?? "—"), value: Number(d.count ?? 0) }))} />
                             </div>
                             <div className="card p-5">
-                                <SectionHeader title="Status Breakdown" />
+                                <SectionHeader title="Status breakdown" />
                                 <div className="space-y-3 mt-2">
                                     {byStatus.map((s: any, i: number) => (
                                         <div
@@ -289,7 +269,7 @@ export default function ProductionReportPage() {
                     {/* Daily trend */}
                     {dailyTrend.length > 0 && (
                         <div className="card p-5">
-                            <SectionHeader title="Daily Production Activity" />
+                            <SectionHeader title="Daily production activity" />
                             <ResponsiveContainer width="100%" height={220}>
                                 <BarChart data={dailyTrend}>
                                     <CartesianGrid
@@ -325,7 +305,7 @@ export default function ProductionReportPage() {
 
                     {/* Avg time metrics */}
                     <div className="card p-5">
-                        <SectionHeader title="Performance Metrics" />
+                        <SectionHeader title="Performance metrics" />
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                             <div>
                                 <p className="text-xs text-surface-500">
@@ -382,7 +362,7 @@ export default function ProductionReportPage() {
                 <div className="space-y-6">
                     {chartData.length > 0 && (
                         <div className="card p-5">
-                            <SectionHeader title="Planned vs Produced — Top Products" />
+                            <SectionHeader title="Planned vs produced — top products" />
                             <ResponsiveContainer width="100%" height={280}>
                                 <BarChart data={chartData}>
                                     <CartesianGrid
@@ -414,7 +394,7 @@ export default function ProductionReportPage() {
                     )}
                     <div className="card overflow-hidden">
                         <div className="px-5 pt-5 pb-4">
-                            <SectionHeader title="Production by Product">
+                            <SectionHeader title="Production by product">
                                 <ExportCsvButton
                                     path="production/summary"
                                     params={dr.params}
@@ -536,14 +516,14 @@ export default function ProductionReportPage() {
             {activeTab === "tailors" && (
                 <div className="card overflow-hidden">
                     <div className="px-5 pt-5 pb-4">
-                        <SectionHeader title="Tailor Performance">
+                        <SectionHeader title="Tailor performance">
                             <ExportCsvButton
                                 path="production/tailor-productivity"
                                 params={dr.params}
                             />
                         </SectionHeader>
                     </div>
-                    <TableWrapper>
+                    <TableWrapper ranked>
                         <table className="w-full">
                             <thead>
                                 <tr className="border-y border-line bg-surface-50/50">
@@ -645,7 +625,7 @@ function marginColor(m: number | null | undefined): string {
 function CostingTab({ data, isLoading, params }: {
     data: any;
     isLoading: boolean;
-    params: Record<string, string | undefined>;
+    params: Record<string, string | number | undefined>;
 }) {
     const navigate = useNavigate();
 
@@ -671,25 +651,25 @@ function CostingTab({ data, isLoading, params }: {
             {/* ── Summary KPIs ── */}
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Total Revenue"
+                    label="Total revenue"
                     value={fmtKes(totals.total_revenue)}
                     color="text-brand-600"
                     sub={`${totals.order_count ?? 0} batches`}
                 />
                 <KpiCard
-                    label="Total Material Cost"
+                    label="Total material cost"
                     value={fmtKes(totals.total_material_cost)}
                     color="text-warning"
                     sub={`${totals.total_qty_produced ?? 0} units produced`}
                 />
                 <KpiCard
-                    label="Total Gross Profit"
+                    label="Total gross profit"
                     value={fmtKes(totals.total_gross_profit)}
                     color={totals.total_gross_profit >= 0 ? "text-success" : "text-danger"}
                     sub={`${totals.profitable_count ?? 0} profitable batches`}
                 />
                 <KpiCard
-                    label="Avg Gross Margin"
+                    label="Avg gross margin"
                     value={fmtPctLocal(totals.avg_gross_margin)}
                     color={marginColor(totals.avg_gross_margin)}
                     sub={`${totals.loss_count ?? 0} loss-making batches`}
@@ -699,7 +679,7 @@ function CostingTab({ data, isLoading, params }: {
             {/* ── By Product ── */}
             <div className="card overflow-hidden">
                 <div className="px-5 pt-5 pb-4">
-                    <SectionHeader title="Profitability by Product">
+                    <SectionHeader title="Profitability by product">
                         <ExportCsvButton path="production/costing-summary" params={params} />
                     </SectionHeader>
                 </div>
@@ -795,7 +775,7 @@ function CostingTab({ data, isLoading, params }: {
             {/* ── Per-batch orders ── */}
             <div className="card overflow-hidden">
                 <div className="px-5 pt-5 pb-4">
-                    <SectionHeader title="All Batches" />
+                    <SectionHeader title="All batches" />
                 </div>
                 <TableWrapper>
                     <table className="w-full">
@@ -904,9 +884,10 @@ function CostingTab({ data, isLoading, params }: {
 // the floor's actual pace, QC truth, benches, and live material demand.
 
 function IntelligenceTab({ start, end }: { start: string; end: string }) {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["production-intelligence", start, end],
-        queryFn: () => reportsApi.productionIntelligence(start, end),
+        queryKey: ["outlet", outletId, "production-intelligence", start, end],
+        queryFn: () => reportsApi.productionIntelligence(start, end, outletId),
         enabled: !!start && !!end,
         staleTime: 60_000,
     });
@@ -924,9 +905,9 @@ function IntelligenceTab({ start, end }: { start: string; end: string }) {
             <div className={clsx("card card-body border", short ? "border-danger-200 bg-danger-50/40" : "border-success-200 bg-success-50/30")}>
                 <SectionHeader title="Capacity — next 7 days" />
                 <div className={clsx(KPI_GRID, "mt-1")}>
-                    <KpiCard label="Pieces Due" value={capacity.due_pieces} sub={`${capacity.due_orders} orders`} />
-                    <KpiCard label="Floor Pace" value={`${capacity.daily_throughput}/day`} sub="last 14 days, actual" />
-                    <KpiCard label="Week Capacity" value={capacity.week_capacity} sub="at current pace" />
+                    <KpiCard label="Pieces due" value={capacity.due_pieces} sub={`${capacity.due_orders} orders`} />
+                    <KpiCard label="Floor pace" value={`${capacity.daily_throughput}/day`} sub="last 14 days, actual" />
+                    <KpiCard label="Week capacity" value={capacity.week_capacity} sub="at current pace" />
                     <KpiCard label={short ? "Shortfall" : "Headroom"}
                         value={short ? capacity.shortfall : Math.round((capacity.week_capacity - capacity.due_pieces) * 10) / 10}
                         color={short ? "text-danger" : "text-success"}
@@ -1006,10 +987,10 @@ function IntelligenceTab({ start, end }: { start: string; end: string }) {
                         <p className="text-xs text-surface-400 py-4">No QC checks recorded in this period.</p>
                     ) : (
                         <div className="grid grid-cols-2 gap-3 mt-1">
-                            <KpiCard label="Pass Rate" value={`${qc.pass_rate}%`}
+                            <KpiCard label="Pass rate" value={`${qc.pass_rate}%`}
                                 color={Number(qc.pass_rate) >= 90 ? "text-success" : Number(qc.pass_rate) >= 70 ? "text-warning" : "text-danger"}
                                 sub={`${qc.checks} checks`} />
-                            <KpiCard label="Rework Pieces" value={qc.pieces_failed}
+                            <KpiCard label="Rework pieces" value={qc.pieces_failed}
                                 color={qc.pieces_failed > 0 ? "text-danger" : "text-success"}
                                 sub={`${qc.pieces_passed} passed`} />
                         </div>

@@ -1,5 +1,5 @@
 // src/pages/expenses/ExpensesPage.tsx
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { imprestApi, kes } from "@/api/imprest";
@@ -9,8 +9,15 @@ import {
     EXPENSE_STATUS_CONFIG,
     PAYMENT_METHODS,
     fmtKes,
+    EXPENSE_BULK_MAX,
 } from "@/api/expenses";
-import type { Expense, ExpenseListParams } from "@/api/expenses";
+import type {
+    Expense,
+    ExpenseListParams,
+    ExpenseBulkAction,
+    ExpenseBulkResponse,
+    ExpenseBulkResult,
+} from "@/api/expenses";
 import { useToastStore } from "@/store/toast.store";
 import { useAuthStore } from "@/store/auth.store";
 import { useTableState } from "@/hooks/useTableState";
@@ -536,18 +543,22 @@ function ExpenseRowActions({
     const { can } = usePermissions();
     const navigate = useNavigate();
     const [open, setOpen] = useState(false);
-    const [rejecting, setRejecting] = useState(false);
+    // Reject and Request changes both need a note for the maker.
+    const [reasonFor, setReasonFor] = useState<null | "reject" | "request_changes">(null);
     const [rejectReason, setRejectReason] = useState("");
     const [busy, setBusy] = useState(false);
 
     const doAction = async (fn: () => Promise<any>, msg: string) => {
         setBusy(true);
         try {
-            await fn();
-            toast.success(msg);
+            const res = await fn();
+            // An approval may be one band of several (Phase 3B): prefer the
+            // server's own words ("Signed. … waits for the next band.").
+            toast.success(res?.approval ? res.message : msg);
             onRefresh();
         } catch (err: any) {
-            toast.error(err?.response?.data?.message ?? "Action failed.");
+            // ApiError carries the server's message (e.g. SELF_APPROVAL).
+            toast.error(err?.message ?? err?.response?.data?.message ?? "Action failed.");
         } finally {
             setBusy(false);
             setOpen(false);
@@ -593,7 +604,7 @@ function ExpenseRowActions({
                         View Details
                     </button>
 
-                    {expense.status === "draft" && can("expenses.create") && (
+                    {["draft", "changes_requested"].includes(expense.status) && can("expenses.create") && (
                         <button
                             className="dropdown-item"
                             onClick={() =>
@@ -603,7 +614,7 @@ function ExpenseRowActions({
                                 )
                             }
                         >
-                            Submit for Approval
+                            {expense.status === "changes_requested" ? "Resubmit for Approval" : "Submit for Approval"}
                         </button>
                     )}
 
@@ -624,10 +635,21 @@ function ExpenseRowActions({
                                     ✓ Approve
                                 </button>
                                 <button
+                                    className="dropdown-item"
+                                    onClick={() => {
+                                        setOpen(false);
+                                        setRejectReason("");
+                                        setReasonFor("request_changes");
+                                    }}
+                                >
+                                    ↩ Request changes
+                                </button>
+                                <button
                                     className="dropdown-item text-danger"
                                     onClick={() => {
                                         setOpen(false);
-                                        setRejecting(true);
+                                        setRejectReason("");
+                                        setReasonFor("reject");
                                     }}
                                 >
                                     ✕ Reject
@@ -672,50 +694,266 @@ function ExpenseRowActions({
                 </div>
             )}
 
-            {rejecting && (
+            {reasonFor && (
                 <Modal
-                    open={rejecting}
-                    onClose={() => setRejecting(false)}
-                    title="Reject Expense"
+                    open={!!reasonFor}
+                    onClose={() => setReasonFor(null)}
+                    title={reasonFor === "reject" ? "Reject Expense" : "Request Changes"}
                     size="sm"
                 >
                     <p className="text-sm text-surface-600 mb-3">
-                        Provide a reason for rejection:
+                        {reasonFor === "reject"
+                            ? "Provide a reason for rejection:"
+                            : "Say what needs to change. It goes back to the person who raised it, who edits it and submits it again."}
                     </p>
                     <textarea
                         className="input w-full resize-none"
                         rows={3}
                         value={rejectReason}
                         onChange={(e) => setRejectReason(e.target.value)}
-                        placeholder="Reason…"
+                        placeholder={reasonFor === "reject" ? "Reason…" : "e.g. Attach the receipt"}
                     />
                     <div className="flex justify-end gap-3 mt-4">
                         <button
                             className="btn-ghost"
-                            onClick={() => setRejecting(false)}
+                            onClick={() => setReasonFor(null)}
                         >
                             Cancel
                         </button>
                         <button
-                            className="btn-danger"
+                            className={reasonFor === "reject" ? "btn-danger" : "btn-primary"}
                             disabled={!rejectReason.trim() || busy}
                             onClick={() => {
-                                setRejecting(false);
+                                const which = reasonFor;
+                                setReasonFor(null);
                                 doAction(
                                     () =>
-                                        expensesApi.reject(
-                                            expense.id,
-                                            rejectReason,
-                                        ),
-                                    "Expense rejected.",
+                                        which === "reject"
+                                            ? expensesApi.reject(expense.id, rejectReason)
+                                            : expensesApi.requestChanges(expense.id, rejectReason),
+                                    which === "reject" ? "Expense rejected." : "Sent back for changes.",
                                 );
                             }}
                         >
-                            Reject Expense
+                            {reasonFor === "reject" ? "Reject Expense" : "Send Back"}
                         </button>
                     </div>
                 </Modal>
             )}
+        </div>
+    );
+}
+
+// ─── Bulk actions ─────────────────────────────────────────────────────────────
+// Owner request 2026-10-03: select one or several expenses and apply one
+// action. The server runs each item through its single action's own path —
+// bands, maker ≠ checker, outlet scope — and reports each one; nothing here
+// decides who may approve what, it only offers what could apply.
+
+type BulkActionDef = {
+    action: ExpenseBulkAction;
+    label: string;
+    verb: string;          // "approve" → "Approve 3 expenses?"
+    appliesTo: Expense["status"];
+    needsReason: boolean;
+    tone: "primary" | "danger" | "secondary";
+    notApplicable: string; // why a selected item is left out
+};
+
+const BULK_ACTIONS: BulkActionDef[] = [
+    { action: "approve",         label: "Approve",         verb: "Approve",              appliesTo: "pending_approval", needsReason: false, tone: "primary",   notApplicable: "not waiting for approval" },
+    { action: "request_changes", label: "Request changes", verb: "Send back for changes", appliesTo: "pending_approval", needsReason: true,  tone: "secondary", notApplicable: "not waiting for approval" },
+    { action: "reject",          label: "Reject",          verb: "Reject",               appliesTo: "pending_approval", needsReason: true,  tone: "danger",    notApplicable: "not waiting for approval" },
+    { action: "mark_paid",       label: "Mark as paid",    verb: "Mark as paid",         appliesTo: "approved",         needsReason: false, tone: "secondary", notApplicable: "not approved" },
+];
+
+const plural = (n: number, one = "expense", many = "expenses") => `${n} ${n === 1 ? one : many}`;
+
+function BulkConfirmDialog({
+    def,
+    applicable,
+    skipped,
+    busy,
+    onCancel,
+    onConfirm,
+}: {
+    def: BulkActionDef;
+    applicable: Expense[];
+    skipped: number;
+    busy: boolean;
+    onCancel: () => void;
+    onConfirm: (reason: string) => void;
+}) {
+    const [reason, setReason] = useState("");
+    const total = applicable.reduce((sum, e) => sum + Number(e.amount_kes || 0), 0);
+
+    return (
+        <Modal open onClose={busy ? () => {} : onCancel} title={`${def.verb} ${plural(applicable.length)}?`} size="sm">
+            <div className="space-y-3">
+                <p className="text-sm text-surface-600">
+                    {plural(applicable.length)} · {fmtKes(total)}.{" "}
+                    {def.action === "approve" &&
+                        "Each is signed at the band it is waiting on — one above your limit waits for the next approver, and one you recorded is left for someone else."}
+                    {def.action === "request_changes" &&
+                        "Each goes back to the person who raised it with your note; they edit it and submit it again."}
+                    {def.action === "reject" && "Each is rejected with your reason and goes back to the person who raised it."}
+                    {def.action === "mark_paid" && "Each approved expense is recorded as paid today, by you."}
+                </p>
+                {skipped > 0 && (
+                    <p className="text-xs text-surface-500 bg-surface-50 rounded-lg px-3 py-2">
+                        {plural(skipped, "selected expense is", "selected expenses are")} {def.notApplicable} and will be left alone.
+                    </p>
+                )}
+                {def.needsReason && (
+                    <Field label={def.action === "reject" ? "Reason *" : "What needs to change *"}>
+                        <FieldTextarea
+                            id="bulk-reason"
+                            className="input w-full resize-none"
+                            rows={3}
+                            maxLength={1000}
+                            value={reason}
+                            onChange={(e) => setReason(e.target.value)}
+                            placeholder={def.action === "reject" ? "e.g. Not a business expense" : "e.g. Attach the receipt"}
+                        />
+                    </Field>
+                )}
+            </div>
+            <div className="flex justify-end gap-3 mt-5 pt-4 border-t border-surface-200">
+                <button className="btn-ghost" onClick={onCancel} disabled={busy}>
+                    Cancel
+                </button>
+                <button
+                    className={def.tone === "danger" ? "btn-danger" : "btn-primary"}
+                    disabled={busy || (def.needsReason && !reason.trim())}
+                    onClick={() => onConfirm(reason.trim())}
+                >
+                    {busy ? (
+                        <>
+                            <Spinner size="sm" className="mr-1.5" /> Working…
+                        </>
+                    ) : (
+                        `${def.verb} ${plural(applicable.length)}`
+                    )}
+                </button>
+            </div>
+        </Modal>
+    );
+}
+
+function BulkResultsDialog({
+    def,
+    response,
+    labels,
+    onClose,
+}: {
+    def: BulkActionDef;
+    response: ExpenseBulkResponse;
+    labels: Map<number, string>;
+    onClose: () => void;
+}) {
+    const done = response.results.filter((r) => r.ok);
+    const notDone = response.results.filter((r) => !r.ok);
+    const name = (r: ExpenseBulkResult) => r.reference ?? labels.get(r.id) ?? `Expense #${r.id}`;
+
+    return (
+        <Modal open onClose={onClose} title={`${def.label} — results`} size="md">
+            <p className="text-sm text-surface-600 mb-4">
+                {done.length} of {response.summary.requested} done
+                {notDone.length > 0 ? ` · ${notDone.length} not done` : ""}.
+            </p>
+            <div className="space-y-4 max-h-[55vh] overflow-y-auto">
+                {done.length > 0 && (
+                    <section>
+                        <h3 className="text-xs font-semibold uppercase tracking-wider text-success mb-2">Done</h3>
+                        <ul className="divide-y divide-line rounded-lg border border-line">
+                            {done.map((r) => (
+                                <li key={r.id} className="flex items-start gap-3 px-3 py-2">
+                                    <span className="text-success font-bold mt-0.5" aria-hidden>✓</span>
+                                    <div className="min-w-0">
+                                        <p className="font-mono text-xs text-surface-500">{name(r)}</p>
+                                        <p className="text-sm text-surface-800">{r.message}</p>
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    </section>
+                )}
+                {notDone.length > 0 && (
+                    <section>
+                        <h3 className="text-xs font-semibold uppercase tracking-wider text-danger mb-2">Not done</h3>
+                        <ul className="divide-y divide-line rounded-lg border border-line">
+                            {notDone.map((r) => (
+                                <li key={r.id} className="flex items-start gap-3 px-3 py-2">
+                                    <span className="text-danger font-bold mt-0.5" aria-hidden>✕</span>
+                                    <div className="min-w-0">
+                                        <p className="font-mono text-xs text-surface-500">{name(r)}</p>
+                                        <p className="text-sm text-surface-800">{r.message}</p>
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    </section>
+                )}
+            </div>
+            <div className="flex justify-end mt-5 pt-4 border-t border-surface-200">
+                <button className="btn-primary" onClick={onClose}>
+                    Close
+                </button>
+            </div>
+        </Modal>
+    );
+}
+
+function BulkActionBar({
+    selected,
+    canAct,
+    onRun,
+    onClear,
+}: {
+    selected: Expense[];
+    canAct: boolean;
+    onRun: (def: BulkActionDef) => void;
+    onClear: () => void;
+}) {
+    if (selected.length === 0) return null;
+
+    return (
+        <div className="sticky bottom-4 z-30 flex justify-center pointer-events-none">
+            <div
+                role="toolbar"
+                aria-label="Bulk actions"
+                className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-xl border border-surface-200 bg-white px-4 py-3 shadow-lg max-w-full"
+            >
+                <span className="text-sm font-semibold text-surface-900 mr-1">{selected.length} selected</span>
+                {BULK_ACTIONS.map((def) => {
+                    const n = selected.filter((e) => e.status === def.appliesTo).length;
+                    const enabled = canAct && n > 0;
+                    return (
+                        <button
+                            key={def.action}
+                            className={clsx(
+                                "btn-sm",
+                                def.tone === "danger" ? "btn-danger" : def.tone === "primary" ? "btn-primary" : "btn-secondary",
+                            )}
+                            disabled={!enabled}
+                            title={
+                                !canAct
+                                    ? "You do not have permission to do this."
+                                    : n === 0
+                                      ? `None of the selected expenses is ${def.appliesTo === "approved" ? "approved" : "waiting for approval"}.`
+                                      : undefined
+                            }
+                            onClick={() => onRun(def)}
+                        >
+                            {def.label}
+                            {enabled && n !== selected.length ? ` (${n})` : ""}
+                        </button>
+                    );
+                })}
+                <button className="btn-ghost btn-sm" onClick={onClear}>
+                    Clear
+                </button>
+            </div>
         </div>
     );
 }
@@ -733,6 +971,11 @@ function personName(p: unknown): string | null {
 export default function ExpensesPage() {
     const { can } = usePermissions();
     const navigate = useNavigate();
+    const toast = useToastStore();
+    const qc = useQueryClient();
+    // Every bulk action carries the single actions' gate (expenses.approve);
+    // without it there is nothing to select for.
+    const canBulk = can("expenses.approve");
 
     const [newModalOpen, setNewModalOpen] = useState(false);
     const { state, setPage, setSearch } = useTableState({ defaultPerPage: 20 });
@@ -764,6 +1007,104 @@ export default function ExpensesPage() {
     const pagination = data?.expenses;
     const stats = data?.stats;
 
+    // ── Selection (kept across pages; cleared when the filters change) ──
+    const [selected, setSelected] = useState<Map<number, Expense>>(new Map());
+    const [bulkDef, setBulkDef] = useState<BulkActionDef | null>(null);
+    const [bulkBusy, setBulkBusy] = useState(false);
+    const [selectingAll, setSelectingAll] = useState(false);
+    const [bulkResult, setBulkResult] = useState<{
+        def: BulkActionDef;
+        response: ExpenseBulkResponse;
+        labels: Map<number, string>;
+    } | null>(null);
+
+    const filterKey = JSON.stringify([state.search, statusFilter, startDate, endDate, imprestFilter]);
+    useEffect(() => {
+        setSelected(new Map());
+    }, [filterKey]);
+
+    // Keep the selected rows' statuses current when the page refreshes.
+    useEffect(() => {
+        setSelected((prev) => {
+            if (prev.size === 0) return prev;
+            let changed = false;
+            const next = new Map(prev);
+            for (const e of expenses) {
+                if (next.has(e.id) && next.get(e.id) !== e) {
+                    next.set(e.id, e);
+                    changed = true;
+                }
+            }
+            return changed ? next : prev;
+        });
+    }, [expenses]);
+
+    const toggleOne = (e: Expense) =>
+        setSelected((prev) => {
+            const next = new Map(prev);
+            if (next.has(e.id)) next.delete(e.id);
+            else next.set(e.id, e);
+            return next;
+        });
+    const pageAllSelected = expenses.length > 0 && expenses.every((e) => selected.has(e.id));
+    const pageSomeSelected = expenses.some((e) => selected.has(e.id));
+    const togglePage = () =>
+        setSelected((prev) => {
+            const next = new Map(prev);
+            if (pageAllSelected) expenses.forEach((e) => next.delete(e.id));
+            else expenses.forEach((e) => next.set(e.id, e));
+            return next;
+        });
+    const totalMatching: number = pagination?.total ?? 0;
+    const selectAllMatching = async () => {
+        setSelectingAll(true);
+        try {
+            const res = await expensesApi.list({ ...params, page: 1, per_page: EXPENSE_BULK_MAX });
+            const rows = (res?.expenses?.data ?? []) as Expense[];
+            setSelected((prev) => {
+                const next = new Map(prev);
+                rows.forEach((e) => next.set(e.id, e));
+                return next;
+            });
+        } catch (err: any) {
+            toast.error(err?.message ?? "Could not select them all.");
+        } finally {
+            setSelectingAll(false);
+        }
+    };
+    const selectedRows = [...selected.values()];
+
+    const runBulk = async (def: BulkActionDef, reason: string) => {
+        const applicable = selectedRows.filter((e) => e.status === def.appliesTo);
+        if (applicable.length === 0) return;
+        if (applicable.length > EXPENSE_BULK_MAX) {
+            toast.error(`At most ${EXPENSE_BULK_MAX} at a time — select fewer.`);
+            return;
+        }
+        setBulkBusy(true);
+        try {
+            const response = await expensesApi.bulk(
+                applicable.map((e) => e.id),
+                def.action,
+                def.needsReason ? reason : undefined,
+            );
+            setBulkResult({
+                def,
+                response,
+                labels: new Map(applicable.map((e) => [e.id, e.reference_number])),
+            });
+            setBulkDef(null);
+            setSelected(new Map());
+            qc.invalidateQueries({ queryKey: ["expenses"] });
+            qc.invalidateQueries({ queryKey: ["imprest"] });
+            refetch();
+        } catch (err: any) {
+            toast.error(err?.message ?? err?.response?.data?.message ?? "The bulk action failed.");
+        } finally {
+            setBulkBusy(false);
+        }
+    };
+
     // The petty-cash float, if one is set up (balance card + low warning).
     const { data: imprestSummary } = useQuery({ queryKey: ["imprest"], queryFn: () => imprestApi.summary() });
     const imprestAccount = imprestSummary?.accounts?.[0] ?? null;
@@ -771,6 +1112,8 @@ export default function ExpensesPage() {
     // Group the current page of rows by expense_date. Pagination, sort, and
     // filters are untouched - this only re-partitions the rows already fetched.
     const expenseGroups = groupRowsByDate(expenses, (exp) => exp.expense_date);
+
+    const colCount = canBulk ? 10 : 9;
 
     const clearFilters = () => {
         setStatusFilter("");
@@ -968,12 +1311,51 @@ export default function ExpensesPage() {
                 </div>
             </div>
 
+            {/* ── Select all matching ── */}
+            {canBulk && pageAllSelected && totalMatching > expenses.length && (
+                <div className="flex flex-wrap items-center gap-2 rounded-xl bg-brand-50 px-4 py-2 text-sm text-brand-800">
+                    <span>
+                        {selected.size >= Math.min(totalMatching, EXPENSE_BULK_MAX)
+                            ? `${selected.size} selected.`
+                            : `All ${expenses.length} on this page are selected.`}
+                    </span>
+                    {selected.size < Math.min(totalMatching, EXPENSE_BULK_MAX) && (
+                        <button
+                            className="font-semibold underline disabled:opacity-50"
+                            disabled={selectingAll}
+                            onClick={selectAllMatching}
+                        >
+                            {selectingAll
+                                ? "Selecting…"
+                                : totalMatching <= EXPENSE_BULK_MAX
+                                  ? `Select all ${totalMatching} matching`
+                                  : `Select the first ${EXPENSE_BULK_MAX} of ${totalMatching} matching (the most at once)`}
+                        </button>
+                    )}
+                </div>
+            )}
+
             {/* ── Table ── */}
             <div className="card overflow-hidden">
                 <div className="overflow-x-auto">
                 <table className="w-full min-w-[640px]">
                     <thead>
                         <tr className="border-b border-line bg-surface-50/50">
+                            {canBulk && (
+                                <th className="pl-4 pr-1 py-3 w-8">
+                                    <input
+                                        type="checkbox"
+                                        className="h-4 w-4 rounded border-surface-300 text-brand-600 focus:ring-brand-500"
+                                        aria-label="Select all on this page"
+                                        checked={pageAllSelected}
+                                        ref={(el) => {
+                                            if (el) el.indeterminate = !pageAllSelected && pageSomeSelected;
+                                        }}
+                                        disabled={expenses.length === 0}
+                                        onChange={togglePage}
+                                    />
+                                </th>
+                            )}
                             <th className="px-4 py-3 text-left text-xs font-semibold text-surface-500 uppercase tracking-wider hidden sm:table-cell">
                                 Reference
                             </th>
@@ -1005,7 +1387,7 @@ export default function ExpensesPage() {
                         {isLoading ? (
                             <tr>
                                 <td
-                                    colSpan={9}
+                                    colSpan={colCount}
                                     className="px-4 py-12 text-center"
                                 >
                                     <Spinner />
@@ -1014,7 +1396,7 @@ export default function ExpensesPage() {
                         ) : expenses.length === 0 ? (
                             <tr>
                                 <td
-                                    colSpan={9}
+                                    colSpan={colCount}
                                     className="px-4 py-16 text-center text-surface-400 text-sm"
                                 >
                                     {hasFilters || state.search
@@ -1025,15 +1407,33 @@ export default function ExpensesPage() {
                         ) : (
                             expenseGroups.map((group) => (
                                 <Fragment key={group.key}>
-                                    <DateGroupHeaderRow label={group.label} colSpan={9} />
+                                    <DateGroupHeaderRow label={group.label} colSpan={colCount} />
                                     {group.items.map((exp) => (
                             <tr
                                     key={exp.id}
-                                    className="hover:bg-surface-50/50 transition-colors cursor-pointer"
+                                    className={clsx(
+                                        "hover:bg-surface-50/50 transition-colors cursor-pointer",
+                                        selected.has(exp.id) && "bg-brand-50/40",
+                                    )}
                                     onClick={() =>
                                         navigate(`/expenses/${exp.id}`)
                                     }
                                 >
+                                    {canBulk && (
+                                        <td
+                                            className="pl-4 pr-1 py-3 w-8"
+                                            onClick={(e) => e.stopPropagation()}
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                className="h-4 w-4 rounded border-surface-300 text-brand-600 focus:ring-brand-500"
+                                                aria-label={`Select ${exp.reference_number}`}
+                                                checked={selected.has(exp.id)}
+                                                onChange={() => toggleOne(exp)}
+                                            />
+                                        </td>
+                                    )}
+
                                     {/* Reference */}
                                     <td className="px-4 py-3 hidden sm:table-cell">
                                         <span className="font-mono text-xs text-surface-500 bg-surface-100 px-1.5 py-0.5 rounded">
@@ -1192,6 +1592,35 @@ export default function ExpensesPage() {
                     </div>
                 )}
             </div>
+
+            {canBulk && (
+                <BulkActionBar
+                    selected={selectedRows}
+                    canAct={canBulk}
+                    onRun={(def) => setBulkDef(def)}
+                    onClear={() => setSelected(new Map())}
+                />
+            )}
+
+            {bulkDef && (
+                <BulkConfirmDialog
+                    def={bulkDef}
+                    applicable={selectedRows.filter((e) => e.status === bulkDef.appliesTo)}
+                    skipped={selectedRows.filter((e) => e.status !== bulkDef.appliesTo).length}
+                    busy={bulkBusy}
+                    onCancel={() => setBulkDef(null)}
+                    onConfirm={(reason) => runBulk(bulkDef, reason)}
+                />
+            )}
+
+            {bulkResult && (
+                <BulkResultsDialog
+                    def={bulkResult.def}
+                    response={bulkResult.response}
+                    labels={bulkResult.labels}
+                    onClose={() => setBulkResult(null)}
+                />
+            )}
 
             <NewExpenseModal
                 open={newModalOpen}

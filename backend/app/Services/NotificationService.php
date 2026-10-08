@@ -13,6 +13,7 @@ use App\Notifications\LowStockAlertNotification;
 use App\Notifications\ProductionAssignedNotification;
 use App\Notifications\ProductionStageCompletedNotification;
 use App\Notifications\ProductionOverdueNotification;
+use App\Notifications\ProductionCancelledNotification;
 use App\Notifications\ShipmentStatusChangedNotification;
 use App\Notifications\UserWelcomeNotification;
 use App\Notifications\InAppNotification;
@@ -230,6 +231,23 @@ class NotificationService
         }
     }
 
+    /**
+     * Field rights on the payload (4D): recipients are picked by role NAME,
+     * but what a payload may carry is decided by PERMISSION. A role the owner
+     * has edited down (an admin without payments.view) must not keep receiving
+     * the figures its screens no longer show.
+     */
+    private static function holding(Collection $users, string $permission): Collection
+    {
+        return $users->filter(function (User $u) use ($permission) {
+            try {
+                return $u->can($permission);
+            } catch (\Throwable) {
+                return false;
+            }
+        })->values();
+    }
+
     // ── Order notifications ───────────────────────────────────────────────────
 
     /**
@@ -312,6 +330,13 @@ class NotificationService
      */
     public static function leadCaptured(int $leadId, string $who, string $intent): void
     {
+        // A name is a summary; a phone or an email is a customer contact, and
+        // this goes to lock screens and through Expo/Web Push (4D). The lead id
+        // opens the record, where contact rights apply.
+        if (preg_match('/\d{5,}|@/', preg_replace('/[\s()+\-.]/', '', $who))) {
+            $who = 'a new contact';
+        }
+
         self::send(
             self::resolve(self::OWNERS),
             new \App\Notifications\LeadCapturedNotification($leadId, $who, $intent)
@@ -333,7 +358,7 @@ class NotificationService
         string $method
     ): void {
         self::send(
-            self::resolve(self::FINANCE),
+            self::holding(self::resolve(self::FINANCE), 'payments.view'),
             new PaymentReceivedNotification(
                 $paymentId, $paymentNumber, $orderId, $orderNumber, $amount, $currency, $method
             )
@@ -353,7 +378,7 @@ class NotificationService
         string $countryCode
     ): void {
         self::send(
-            self::resolve(self::FINANCE),
+            self::holding(self::resolve(self::FINANCE), 'payments.view'),
             new PaymentApprovalRequiredNotification(
                 $paymentId, $paymentNumber, $orderId, $orderNumber, $amount, $currency, $countryCode
             )
@@ -371,7 +396,7 @@ class NotificationService
         int $orderId
     ): void {
         self::send(
-            self::resolve(self::FINANCE),
+            self::holding(self::resolve(self::FINANCE), 'payments.view'),
             new PaymentApprovalRequiredNotification(
                 $paymentId, $paymentNumber, $orderId, $orderNumber, 0, '', ''
             )
@@ -531,6 +556,23 @@ class NotificationService
         );
     }
 
+    /**
+     * Fired when a production order is cancelled: tells the tailors holding its
+     * stages to stop work on it.
+     */
+    public static function productionCancelled(
+        int $productionOrderId,
+        string $orderNumber,
+        string $productName,
+        array $assignedUserIds,
+        ?string $reason = null
+    ): void {
+        self::send(
+            self::resolve([], null, $assignedUserIds),
+            new ProductionCancelledNotification($productionOrderId, $orderNumber, $productName, $reason)
+        );
+    }
+
     // ── Shipment notifications ────────────────────────────────────────────────
 
     /**
@@ -566,16 +608,19 @@ class NotificationService
         float $totalAmount,
         string $currency = 'KES'
     ): void {
-        self::send(
-            self::resolve(self::PROCUREMENT),
-            new InAppNotification(
-                title:     "Purchase Order {$poNumber} created",
-                body:      "New PO to {$supplierName} for {$currency} " . number_format($totalAmount, 2),
-                actionUrl: "/procurement/purchase-orders/{$purchaseOrderId}",
-                icon:      'orders',
-                data:      ['purchase_order_id' => $purchaseOrderId],
-            )
+        // A PO total is supplier cost: only products.view_cost holders see it.
+        $recipients = self::resolve(self::PROCUREMENT);
+        $withCost   = self::holding($recipients, 'products.view_cost');
+        $notice = fn (?string $amount) => new InAppNotification(
+            title:     "Purchase Order {$poNumber} created",
+            body:      "New PO to {$supplierName}" . ($amount !== null ? " for {$amount}" : ''),
+            actionUrl: "/procurement/purchase-orders/{$purchaseOrderId}",
+            icon:      'orders',
+            data:      ['purchase_order_id' => $purchaseOrderId],
         );
+
+        self::send($withCost, $notice("{$currency} " . number_format($totalAmount, 2)));
+        self::send($recipients->whereNotIn('id', $withCost->pluck('id'))->values(), $notice(null));
     }
 
     /**
@@ -687,6 +732,75 @@ class NotificationService
     /**
      * Fired when a stock adjustment requires admin approval.
      */
+    /**
+     * Phase 3B approval engine: a request is waiting for these people's band.
+     *
+     * @param  Collection<int, User>  $users
+     */
+    public static function approvalWaiting(Collection $users, int $requestId, string $title, ?float $amountKes): void
+    {
+        self::send(
+            $users,
+            new InAppNotification(
+                title:     "Waiting for your approval: {$title}",
+                body:      $amountKes !== null ? 'KES ' . number_format($amountKes, 2) . '. Open your Approvals inbox to sign or reject it.' : 'Open your Approvals inbox to sign or reject it.',
+                actionUrl: '/approvals',
+                icon:      'approval',
+                data:      ['approval_request_id' => $requestId],
+            )
+        );
+    }
+
+    /** Phase 3B approval engine: tell the maker how their submission ended. */
+    public static function approvalDecided(int $makerId, int $requestId, string $title, string $status, ?string $reason): void
+    {
+        $maker = self::user($makerId);
+        if (!$maker) {
+            return;
+        }
+        $words = match ($status) {
+            'approved' => 'approved',
+            'rejected' => 'rejected',
+            'expired'  => 'not decided within 72 hours and came back to you',
+            default    => $status,
+        };
+        self::send(
+            $maker,
+            new InAppNotification(
+                title:     ucfirst("{$title} — {$words}"),
+                body:      $reason ? "Reason: {$reason}" : null,
+                actionUrl: '/approvals?tab=mine',
+                icon:      'approval',
+                data:      ['approval_request_id' => $requestId, 'status' => $status],
+            )
+        );
+    }
+
+    /**
+     * A signer sent a record back to the people who raised it, asking for
+     * changes (ApprovalEngine::requestChanges). They edit it and submit again.
+     *
+     * @param  int[]  $makerIds
+     */
+    public static function changesRequested(array $makerIds, int $requestId, string $title, string $note, ?User $by, ?string $link): void
+    {
+        $makers = User::whereIn('id', array_values(array_unique(array_filter($makerIds))))->get();
+        if ($makers->isEmpty()) {
+            return;
+        }
+        $who = $by ? (trim("{$by->first_name} {$by->last_name}") ?: $by->email) : null;
+        self::send(
+            $makers,
+            new InAppNotification(
+                title:     "{$title} — changes requested",
+                body:      ($who ? "{$who} asks: " : 'Asked: ') . $note . ' Edit it and submit it again.',
+                actionUrl: $link ?? '/approvals?tab=mine',
+                icon:      'approval',
+                data:      ['approval_request_id' => $requestId, 'status' => 'changes_requested'],
+            )
+        );
+    }
+
     public static function stockAdjustmentPendingApproval(
         int $adjustmentId,
         string $productName,
@@ -817,6 +931,66 @@ class NotificationService
     }
 
     /**
+     * The QC result, told to the people who made the garment (every assignee
+     * of a stage on the order). Managers get their own notice above; this one
+     * is worded for the bench and opens My Tasks, where a failed order now
+     * sits in its own "Failed QC" lane.
+     */
+    public static function productionQcResultForMakers(
+        int $productionOrderId,
+        string $orderNumber,
+        string $productName,
+        bool $passed,
+        array $makerIds,
+        ?string $notes = null
+    ): void {
+        if (! $makerIds) return;
+
+        self::send(
+            self::resolve([], null, $makerIds),
+            new InAppNotification(
+                title:     $passed ? "QC passed: {$productName}" : "QC failed: {$productName}",
+                body:      $passed
+                    ? "{$orderNumber} passed inspection."
+                    : "{$orderNumber} did not pass inspection. Your manager will decide the rework."
+                        . ($notes ? " Inspector's notes: {$notes}" : ''),
+                actionUrl: '/production/my-tasks',
+                icon:      'production',
+                data:      ['production_order_id' => $productionOrderId],
+            )
+        );
+    }
+
+    /**
+     * A QC-failed order was sent back for rework: each tailor given a stage
+     * to redo is told which, how many pieces, and why. Opens My Tasks, where
+     * the stage is open work again.
+     *
+     * @param list<array{user_id:?int, stage:?string, pieces:int}> $stages
+     */
+    public static function productionReworkAssigned(
+        int $productionOrderId,
+        string $orderNumber,
+        string $productName,
+        array $stages,
+        string $reason
+    ): void {
+        foreach (collect($stages)->filter(fn ($s) => $s['user_id'])->groupBy('user_id') as $userId => $mine) {
+            $what = $mine->map(fn ($s) => ($s['stage'] ?? 'a stage') . " ({$s['pieces']} " . ($s['pieces'] === 1 ? 'piece' : 'pieces') . ')')->implode(', ');
+            self::send(
+                self::resolve([], null, [(int) $userId]),
+                new InAppNotification(
+                    title:     "Rework: {$productName}",
+                    body:      "{$orderNumber} is back for rework — {$what}. Reason: {$reason}",
+                    actionUrl: '/production/my-tasks',
+                    icon:      'production',
+                    data:      ['production_order_id' => $productionOrderId],
+                )
+            );
+        }
+    }
+
+    /**
      * Fired when a production order fails quality control.
      */
     public static function productionQcFailed(
@@ -841,6 +1015,30 @@ class NotificationService
     /**
      * Fired when a user account is suspended.
      */
+    /**
+     * Phase 4A: a staff member hit the hourly cap on revealing customer
+     * contacts. The managers of their outlets and the super admins hear of
+     * it — ids and a summary only, never a customer's details.
+     */
+    public static function customerRevealLimitReached(User $actor, int $perHour): void
+    {
+        $outletIds = DB::table('outlet_user')->where('user_id', $actor->id)->pluck('outlet_id');
+        $managers  = $outletIds->isEmpty() ? collect() : self::usersWithRole('outlet_manager')
+            ->filter(fn (User $u) => DB::table('outlet_user')->where('user_id', $u->id)->whereIn('outlet_id', $outletIds)->exists());
+        $recipients = $managers->merge(self::usersWithRole('super_admin'))
+            ->unique('id')
+            ->reject(fn (User $u) => $u->id === $actor->id)
+            ->values();
+
+        self::send($recipients, new InAppNotification(
+            title:     'Customer reveal limit reached',
+            body:      trim("{$actor->first_name} {$actor->last_name}") . " tried to reveal more than {$perHour} customer contacts in an hour and was blocked.",
+            actionUrl: null,
+            icon:      'shield',
+            data:      ['kind' => 'customer_reveal_limit', 'user_id' => $actor->id],
+        ));
+    }
+
     public static function userSuspended(int $userId, string $reason = ''): void
     {
         $user = self::user($userId);
@@ -870,7 +1068,13 @@ class NotificationService
         string $actionUrl,
         int    $messageId
     ): void {
-        $user = self::user($userId);
+        // A mention is not an invitation (4D): someone named in a message who is
+        // not in the conversation must not receive its preview.
+        $channelId = DB::table('channel_messages')->where('id', $messageId)->value('channel_id');
+        $isMember  = $channelId && DB::table('channel_members')
+            ->where('channel_id', $channelId)->where('user_id', $userId)->exists();
+
+        $user = $isMember ? self::user($userId) : null;
         if ($user) {
             self::send($user, new InAppNotification(
                 title:     "{$posterName} mentioned you in #{$channelName}",

@@ -28,6 +28,12 @@ use Carbon\Carbon;
  */
 class ReportController extends Controller
 {
+    use \App\Http\Controllers\Api\Concerns\ExportsCsv;
+    use \App\Http\Controllers\Api\Concerns\RecognisesIncome;
+    use \App\Http\Controllers\Api\Concerns\ReportsMoneyInKes;
+    use \App\Http\Controllers\Api\Concerns\ResolvesReportWindow;
+    use \App\Http\Controllers\Api\Concerns\IdentifiesBuyers;
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /**
@@ -82,12 +88,6 @@ class ReportController extends Controller
         return $data;
     }
 
-    private function dateRange(Request $request): array
-    {
-        $start = $request->get('start_date', now()->subDays(29)->format('Y-m-d'));
-        $end   = $request->get('end_date',   now()->format('Y-m-d'));
-        return [$start, $end . ' 23:59:59'];
-    }
 
     /**
      * Return the equivalent prior period date range for comparison.
@@ -118,32 +118,6 @@ class ReportController extends Controller
      * $rows: iterable of arrays (one per row)
      * $filename: download filename without extension
      */
-    private function csvResponse(array $headers, iterable $rows, string $filename): \Illuminate\Http\Response
-    {
-        // Build the CSV entirely in memory so errors are catchable and
-        // output-buffering conflicts with streamDownload are avoided.
-        $out = fopen('php://temp', 'r+');
-        // UTF-8 BOM for Excel compatibility
-        fwrite($out, "\xEF\xBB\xBF");
-        fputcsv($out, $headers);
-        foreach ($rows as $row) {
-            fputcsv($out, array_values((array) $row));
-        }
-        rewind($out);
-        $csv = stream_get_contents($out);
-        fclose($out);
-
-        return response($csv, 200, [
-            'Content-Type'        => 'text/csv; charset=UTF-8',
-            'Content-Disposition' => 'attachment; filename="' . $filename . '_' . now()->format('Ymd_His') . '.csv"',
-            'Cache-Control'       => 'no-cache, no-store, must-revalidate',
-        ]);
-    }
-
-    private function wantsExport(Request $request): bool
-    {
-        return $request->filled('export');
-    }
 
     private function pct(float $new, float $old): ?float
     {
@@ -184,35 +158,43 @@ class ReportController extends Controller
         // Same bucket-or-derive rule as Order::scopeSalesChannel, as SQL — a
         // NULL bucket (fixtures, a forgetful future writer) degrades to the
         // legacy derivation instead of falling out of every tile.
-        $bucketExpr = "COALESCE(orders.sales_bucket, CASE
-            WHEN orders.order_type = 'whatsapp' THEN 'chat'
-            WHEN orders.order_type = 'online' AND orders.created_by IS NULL THEN 'web'
-            WHEN orders.order_type = 'online' THEN 'quoted'
-            ELSE 'till' END)";
+        $bucketExpr = Order::salesBucketSql();
+
+        // The reporting axis: the bucket above, except chat splits into the two
+        // apps the owner sells on and judges separately (Order::CHAT_SOURCES).
+        // chat_revenue stays, as WhatsApp + Messenger + any unlabelled chat, so
+        // nothing that already reads this payload changes meaning.
+        $channelExpr = Order::reportingChannelSql($bucketExpr);
 
         $payKes = $reportInKes
             ? \App\Support\ReportingCurrency::kes('p.amount - COALESCE(p.refund_amount, 0)', 'p.currency_code')
             : 'p.amount - COALESCE(p.refund_amount, 0)';
 
-        $base = fn () => Order::whereBetween('orders.created_at', [$start, $end])
-            ->recognised()
+        // ONE definition of "the orders this report counts", parameterised by
+        // window so the prior period is the SAME question asked of an earlier
+        // month. It used to be written out a second time further down with
+        // `whereNotIn(['voided','cancelled'])` and a single-currency filter,
+        // which quietly counted pending carts and refunded orders as prior
+        // revenue and compared them against a recognised, multi-currency
+        // present — so revenue_change_pct measured two different things.
+        $baseFor = fn ($from, $to) => Order::whereBetween('orders.created_at', [$from, $to])
+            ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
             ->when($reportInKes,
                 fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code')),
                 fn ($q) => $q->whereRaw('UPPER(orders.currency_code) = ?', [$currency]))
             ->when($outletId,  fn ($q) => $q->where('orders.outlet_id',  $outletId))
             ->when($orderType, fn ($q) => $q->where('orders.order_type', $orderType));
 
+        $base = fn () => $baseFor($start, $end);
+
         // Money truth beside it: what actually settled in the same window.
         $collected = (float) DB::table('payments as p')
             ->join('orders as o', 'o.id', '=', 'p.order_id')
-            ->where('p.status', 'paid')
+            ->tap(fn ($q) => \App\Support\SettledPayment::where($q, 'p'))
             // Same rule as the ledger: a payment recorded from a customer's
             // word (Mukuru, Western Union, M-Pesa send-money) is not collected
             // until someone verifies it. The tile lacked this guard while the
             // methods panel had it — one of two reasons they could not foot.
-            ->where(fn ($q) => $q->where('p.requires_approval', false)
-                                 ->orWhereNull('p.requires_approval')
-                                 ->orWhere('p.approval_status', 'approved'))
             ->when($reportInKes,
                 fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('p.currency_code')),
                 fn ($q) => $q->whereRaw('UPPER(p.currency_code) = ?', [$currency]))
@@ -251,15 +233,24 @@ class ReportController extends Controller
             COUNT(CASE WHEN {$bucketExpr} = 'web'    THEN 1 END)              AS web_count,
             COUNT(CASE WHEN {$bucketExpr} = 'chat'   THEN 1 END)              AS chat_count,
             COUNT(CASE WHEN {$bucketExpr} = 'quoted' THEN 1 END)              AS quoted_count,
-            COUNT(DISTINCT COALESCE(user_id::text, normalize_phone(customer_phone), NULLIF(lower(btrim(customer_email)), '')))                                            AS unique_customers,
+            -- Chat, split into the two apps. These three sum to chat_revenue
+            -- above, so the tile a reader already knows keeps its meaning while
+            -- WhatsApp and Messenger become separately answerable.
+            (COALESCE(SUM(CASE WHEN {$channelExpr} = 'whatsapp'  THEN {$amtKes('orders.total_amount')} ELSE 0 END), 0))::float8 AS whatsapp_revenue,
+            (COALESCE(SUM(CASE WHEN {$channelExpr} = 'messenger' THEN {$amtKes('orders.total_amount')} ELSE 0 END), 0))::float8 AS messenger_revenue,
+            (COALESCE(SUM(CASE WHEN {$channelExpr} = 'chat'      THEN {$amtKes('orders.total_amount')} ELSE 0 END), 0))::float8 AS other_chat_revenue,
+            COUNT(CASE WHEN {$channelExpr} = 'whatsapp'  THEN 1 END)          AS whatsapp_count,
+            COUNT(CASE WHEN {$channelExpr} = 'messenger' THEN 1 END)          AS messenger_count,
+            COUNT(CASE WHEN {$channelExpr} = 'chat'      THEN 1 END)          AS other_chat_count,
+            COUNT(DISTINCT " . \App\Support\BuyerIdentity::sql('orders') . ")                                            AS unique_customers,
             (COALESCE(SUM({$amtKes('orders.discount_amount')}) / NULLIF(SUM({$amtKes('orders.total_amount')}) + SUM({$amtKes('orders.discount_amount')}), 0) * 100, 0))::float8 AS discount_rate_percent
         ")->first();
 
         $daily = $base()->selectRaw("
             DATE(created_at)               AS date,
             COUNT(*)                       AS orders,
-            (COALESCE(SUM(total_amount), 0))::float8 AS revenue,
-            COUNT(DISTINCT COALESCE(user_id::text, normalize_phone(customer_phone), NULLIF(lower(btrim(customer_email)), '')))        AS unique_customers
+            (COALESCE(SUM({$amtKes('orders.total_amount')}), 0))::float8 AS revenue,
+            COUNT(DISTINCT " . \App\Support\BuyerIdentity::sql('orders') . ")        AS unique_customers
         ")
             ->groupBy(DB::raw('DATE(created_at)'))
             ->orderBy('date')
@@ -269,7 +260,7 @@ class ReportController extends Controller
         $weekly = $base()->selectRaw("
             DATE_TRUNC('week', created_at)::date AS week_start,
             COUNT(*)                             AS orders,
-            (COALESCE(SUM(total_amount), 0))::float8       AS revenue
+            (COALESCE(SUM({$amtKes('orders.total_amount')}), 0))::float8       AS revenue
         ")
             ->groupBy(DB::raw("DATE_TRUNC('week', created_at)"))
             ->orderBy('week_start')
@@ -293,47 +284,13 @@ class ReportController extends Controller
         // that paid part of it. This now answers "how much money arrived through
         // each method", which is the question a paybill statement can answer
         // back. `count` stays a count of ORDERS so the column keeps its meaning.
-        $byPaymentMethod = DB::table('payments as p')
-            ->join('orders as o', 'o.id', '=', 'p.order_id')
-            ->leftJoin('payment_methods as pm', 'pm.code', '=', 'p.payment_method')
-            // The panel answers "HOW did the collected money arrive", so it
-            // shares the Collected tile's basis exactly: payment date, not
-            // order date. Windowing on o.created_at made it a receivables
-            // view wearing a treasury caption — on live data the two sides
-            // diverged by KES 315,780 of old orders' balances paid this
-            // period, and the divergence was invisible on same-day fixtures.
-            ->whereBetween(DB::raw('COALESCE(p.paid_at, p.created_at)'), [$start, $end])
-            ->whereNotIn('o.status', \App\Models\Order::DEAD_STATUSES)
-            // Reporting in KES converts every convertible rail at the reporting
-            // rate — the same rule as the Collected tile, so the method rows
-            // FOOT to it. The old hard KES filter left foreign payments off
-            // this panel entirely while Collected counted them, an
-            // irreconcilable gap nobody could explain from the screen.
-            ->when($reportInKes,
-                fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('p.currency_code')),
-                fn ($q) => $q->whereRaw('UPPER(p.currency_code) = ?', [$currency]))
-            ->when($outletId,  fn ($q) => $q->where('o.outlet_id',  $outletId))
-            ->when($orderType, fn ($q) => $q->where('o.order_type', $orderType))
-            ->where('p.status', 'paid')
-            ->where(fn ($q) => $q->where('p.requires_approval', false)
-                                 ->orWhereNull('p.requires_approval')
-                                 ->orWhere('p.approval_status', 'approved'))
-            ->selectRaw("
-                p.payment_method,
-                COALESCE(pm.name, p.payment_method) AS method_name,
-                pm.description                      AS method_description,
-                COUNT(DISTINCT o.id)                AS count,
-                (COALESCE(SUM({$payKes}), 0))::float8 AS total
-            ")
-            ->groupBy('p.payment_method', 'pm.name', 'pm.description')
-            ->orderByRaw("(COALESCE(SUM({$payKes}), 0))::float8 DESC")
-            ->get();
+        $byPaymentMethod = $this->paymentMethodBreakdown($start, $end, $reportInKes, $currency, $outletId, $orderType);
 
         // Hourly distribution - useful for staffing decisions
         $byHour = $base()->selectRaw("
             EXTRACT(HOUR FROM created_at)::int AS hour,
             COUNT(*)                           AS orders,
-            (COALESCE(SUM(total_amount), 0))::float8     AS revenue
+            (COALESCE(SUM({$amtKes('orders.total_amount')}), 0))::float8     AS revenue
         ")
             ->groupBy(DB::raw("EXTRACT(HOUR FROM created_at)"))
             ->orderBy('hour')
@@ -344,7 +301,7 @@ class ReportController extends Controller
             EXTRACT(DOW FROM created_at)::int AS dow,
             TO_CHAR(created_at, 'Day')        AS day_name,
             COUNT(*)                          AS orders,
-            (COALESCE(SUM(total_amount), 0))::float8    AS revenue
+            (COALESCE(SUM({$amtKes('orders.total_amount')}), 0))::float8    AS revenue
         ")
             ->groupBy(DB::raw("EXTRACT(DOW FROM created_at)"), DB::raw("TO_CHAR(created_at, 'Day')"))
             ->orderBy('dow')
@@ -354,15 +311,11 @@ class ReportController extends Controller
         $comparison = null;
         if ($request->boolean('compare')) {
             [$ps, $pe] = $this->priorPeriod($start, $end);
-            $prior = Order::whereBetween('created_at', [$ps, $pe])
-                ->whereNotIn('status', ['voided', 'cancelled'])
-                ->whereRaw('UPPER(currency_code) = ?', [$currency])
-                ->when($outletId,  fn ($q) => $q->where('outlet_id',  $outletId))
-                ->when($orderType, fn ($q) => $q->where('order_type', $orderType))
+            $prior = $baseFor($ps, $pe)
                 ->selectRaw("
                     COUNT(*) AS total_orders,
-                    (COALESCE(SUM(total_amount), 0))::float8 AS total_revenue,
-                    (COALESCE(AVG(total_amount), 0))::float8 AS average_order_value
+                    (COALESCE(SUM({$amtKes('orders.total_amount')}), 0))::float8 AS total_revenue,
+                    (COALESCE(AVG({$amtKes('orders.total_amount')}), 0))::float8 AS average_order_value
                 ")->first();
 
             $comparison = [
@@ -396,8 +349,12 @@ class ReportController extends Controller
         //     totals at that rate. Saying "excluded" about these (the old
         //     behaviour) contradicted the very tiles above them.
         $foreign = Order::whereBetween('orders.created_at', [$start, $end])
-            ->recognised()
+            ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
             ->whereRaw('UPPER(orders.currency_code) <> ?', [$currency])
+            // DELIBERATELY NOT CONVERTED: this lists what was left out, by
+            // currency, so each row is its own unit — 61 orders, USD 4,307.
+            // Converting it would answer a different question and hide the
+            // one it exists to answer.
             ->selectRaw('UPPER(orders.currency_code) AS currency_code, COUNT(*) AS orders, (COALESCE(SUM(orders.total_amount),0))::float8 AS total')
             ->groupBy(DB::raw('UPPER(orders.currency_code)'))
             ->get();
@@ -463,10 +420,13 @@ class ReportController extends Controller
         [$start, $end] = $this->dateRange($request);
         $outletId  = $request->get('outlet_id');
         $currency  = strtoupper($request->get('currency_code', 'KES'));
-        // The four staff queues (Order::SALES_BUCKETS). 'Online' used to conflate
-        // self-service web orders with staff-converted quotations; the split
-        // restates that one channel's history — POS and WhatsApp are unchanged.
-        $channels  = ['till', 'web', 'chat', 'quoted'];
+        // The reporting channels (Order::REPORTING_CHANNELS). 'Online' used to
+        // conflate self-service web orders with staff-converted quotations, and
+        // 'chat' conflated the two apps the business actually sells on. The
+        // sales summary was split in #381; this page kept one "Chat Orders"
+        // line, so two pages of the same section disagreed about what a channel
+        // is. One list now, from the model.
+        $channels  = \App\Models\Order::REPORTING_CHANNELS;
 
         // Cash per order: settled payments net of refunds. Computed once as a
         // sub-select so every aggregate below reuses it instead of re-joining.
@@ -491,28 +451,46 @@ class ReportController extends Controller
             ? \App\Support\ReportingCurrency::kes('COALESCE(pay.paid, 0)', 'orders.currency_code')
             : 'COALESCE(pay.paid, 0)';
 
+        // Summed in the payment's own currency and converted below at the
+        // ORDER's rate. Sound only while a payment is in the same currency as
+        // the order it settles: measured 2026-09-30, 0 of 834 payments differ
+        // and no order has payments in two currencies. If that ever changes,
+        // convert HERE, per payment, using payments.currency_code.
+        // A LATERAL lookup per order, not an aggregate over every payment.
+        //
+        // This was `SELECT order_id, SUM(...) FROM payments GROUP BY order_id`
+        // joined with leftJoinSub. Measured at scale (cycle 7), Postgres put
+        // that aggregate on the inner side of a nested loop and RE-COMPUTED it
+        // for every order — 2,195 loops over 2,501 payments — so the ledger
+        // grew with the SQUARE of the data: 301 ms at 850 orders, 7.7 s at
+        // 5,000, 116 s at 20,000. The index payments_order_id_index already
+        // existed; the old shape simply could not use it, because the join
+        // happened after the aggregation. A lateral subquery correlated on
+        // orders.id hits that index once per order instead.
+        //
+        // Results are unchanged — proven by diffing a deterministic 5,000-order
+        // snapshot of every ledger figure before and after. Without payments
+        // the aggregate returns one row of 0 rather than a NULL row; the
+        // COALESCE(pay.paid, 0) downstream makes those identical.
         $paidPerOrder = DB::table('payments')
-            ->selectRaw('order_id, (COALESCE(SUM(amount - COALESCE(refund_amount, 0)), 0))::float8 AS paid')
-            ->where('status', 'paid')
-            ->where(fn ($q) => $q->where('requires_approval', false)
-                                 ->orWhereNull('requires_approval')
-                                 ->orWhere('approval_status', 'approved'))
-            ->groupBy('order_id');
+            ->selectRaw('(COALESCE(SUM(payments.amount - COALESCE(payments.refund_amount, 0)), 0))::float8 AS paid')
+            ->whereColumn('payments.order_id', 'orders.id')
+            ->tap(fn ($q) => \App\Support\SettledPayment::where($q, 'payments'));
 
         $scoped = fn (?string $channel) => Order::query()
-            ->salesChannel($channel)
+            ->reportingChannel($channel)
             ->whereBetween('orders.created_at', [$start, $end])
             // Recognised income only: an order a human has confirmed. Before
             // this the filter was NOT IN (voided, cancelled), which counted
             // abandoned storefront/WhatsApp carts as sales — 33% of the last
             // 30 days' reported revenue. The unconfirmed money is not lost,
             // it is reported separately as pipeline (see $pipeline below).
-            ->recognised()
+            ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
             ->when($reportInKes,
                 fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code')),
                 fn ($q) => $q->whereRaw('UPPER(orders.currency_code) = ?', [$currency]))
             ->when($outletId, fn ($q) => $q->where('orders.outlet_id', $outletId))
-            ->leftJoinSub($paidPerOrder, 'pay', fn ($j) => $j->on('pay.order_id', '=', 'orders.id'));
+            ->leftJoinLateral($paidPerOrder, 'pay');
 
         // Clamp PER ORDER, not on the bucket sum. paid is capped at each order's
         // own total and balance is that order's shortfall — the rule
@@ -539,7 +517,7 @@ class ReportController extends Controller
             $r = $scoped($c)->selectRaw($agg)->first();
             $byChannel[] = [
                 'channel' => $c,
-                'label'   => ['till' => 'Till Sales', 'web' => 'Web Orders', 'chat' => 'Chat Orders', 'quoted' => 'Quoted Sales'][$c],
+                'label'   => \App\Models\Order::REPORTING_CHANNEL_LABELS[$c],
                 'orders'  => (int)   ($r->orders  ?? 0),
                 'sales'   => (float) ($r->sales   ?? 0),
                 'paid'    => (float) ($r->paid    ?? 0),
@@ -633,7 +611,7 @@ class ReportController extends Controller
             }
             $byStage[] = [
                 'channel' => $c,
-                'label'   => ['till' => 'Till Sales', 'web' => 'Web Orders', 'chat' => 'Chat Orders', 'quoted' => 'Quoted Sales'][$c],
+                'label'   => \App\Models\Order::REPORTING_CHANNEL_LABELS[$c],
                 'stages'  => $stages,
             ];
         }
@@ -643,14 +621,14 @@ class ReportController extends Controller
         // to wonder where the missing money went: sales + pipeline + dead is
         // the whole order book.
         $pipelineScoped = fn (?string $channel) => Order::query()
-            ->salesChannel($channel)
+            ->reportingChannel($channel)
             ->whereBetween('orders.created_at', [$start, $end])
             ->pipeline()
             ->when($reportInKes,
                 fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code')),
                 fn ($q) => $q->whereRaw('UPPER(orders.currency_code) = ?', [$currency]))
             ->when($outletId, fn ($q) => $q->where('orders.outlet_id', $outletId))
-            ->leftJoinSub($paidPerOrder, 'pay', fn ($j) => $j->on('pay.order_id', '=', 'orders.id'));
+            ->leftJoinLateral($paidPerOrder, 'pay');
 
         $pipeline = ['total' => ['orders' => 0, 'sales' => 0.0], 'by_channel' => []];
         foreach ($channels as $c) {
@@ -717,9 +695,16 @@ class ReportController extends Controller
     public function salesNeema(Request $request)
     {
         [$start, $end] = $this->dateRange($request);
-        $currency  = strtoupper($request->get('currency_code', $request->get('currency', 'KES')));
         $startDate = substr($start, 0, 10);
         $endDate   = substr($end, 0, 10);
+
+        // This report is about the channel where the foreign money is. Until
+        // 2026-09-30 it filtered to one currency and summed raw, so a KES
+        // reading of chat sales showed 900,880 of a true 3,419,690 — the
+        // WhatsApp and Messenger business under-reported by 3.8x. Two
+        // converters because the queries below alias `orders` differently.
+        [$amtKes,  $inKes, $currency] = $this->reportingMoney($request);
+        [$amtKesO]                    = $this->reportingMoney($request, 'o.currency_code');
 
         // ── Leads funnel ─────────────────────────────────────────────────────
         $leadBase = fn () => DB::table('leads')->whereBetween('created_at', [$start, $end]);
@@ -758,40 +743,49 @@ class ReportController extends Controller
         // Revenue over DISTINCT matched orders — a join-then-SUM would count an
         // order once per lead it matches, and one person can send two leads.
         $convOrders = DB::table('orders as o')
+            ->tap(fn ($q) => $this->inOutlet($q, 'o.outlet_id'))
             ->whereNotIn('o.status', \App\Models\Order::DEAD_STATUSES)
             ->where(fn ($q) => $q->whereIn('o.status', \App\Models\Order::RECOGNISED_STATUSES)
                                  ->orWhereIn('o.payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES))
             ->whereExists(fn ($q) => $q->select(DB::raw(1))->from('leads as l')
                 ->whereBetween('l.created_at', [$start, $end])
                 ->whereRaw($matchSql))
-            ->selectRaw('COUNT(*) AS orders, (COALESCE(SUM(o.total_amount), 0))::float8 AS revenue')
+            ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency, 'o.currency_code'))
+            ->selectRaw('COUNT(*) AS orders, (COALESCE(SUM(' . $amtKesO('o.total_amount') . '), 0))::float8 AS revenue')
             ->first();
 
         // ── WhatsApp-channel sales (same rule as the ledger) ─────────────────
+        // Payments carry their own currency, so they are converted HERE, once,
+        // in the same unit the order totals below are stated in.
+        [$payKes] = $this->reportingMoney($request, 'currency_code');
+
         $paidPerOrder = DB::table('payments')
-            ->selectRaw('order_id, (COALESCE(SUM(amount - COALESCE(refund_amount, 0)), 0))::float8 AS paid')
-            ->where('status', 'paid')
-            ->where(fn ($q) => $q->where('requires_approval', false)
-                                 ->orWhereNull('requires_approval')
-                                 ->orWhere('approval_status', 'approved'))
+            ->selectRaw('order_id, (COALESCE(SUM(' . $payKes('amount - COALESCE(refund_amount, 0)') . '), 0))::float8 AS paid')
+            ->tap(fn ($q) => \App\Support\SettledPayment::where($q))
             ->groupBy('order_id');
+
+        // Payments are converted where they are summed, so the clamp below
+        // compares like with like. `pay.paid` is therefore already in the
+        // report's currency and must NOT be converted a second time.
+        $total = $amtKes('orders.total_amount');
 
         $wa = Order::query()
             ->salesChannel('whatsapp')
             ->whereBetween('orders.created_at', [$start, $end])
-            ->recognised()
-            ->whereRaw('UPPER(orders.currency_code) = ?', [$currency])
+            ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
+            ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency))
             ->leftJoinSub($paidPerOrder, 'pay', fn ($j) => $j->on('pay.order_id', '=', 'orders.id'))
             // Per-order clamp, same rule as the sales ledger above: cap paid at
             // each order's own total and take its shortfall, so an overpaid order
-            // cannot mask another's balance in the bucket sum. Single currency
-            // here, so the expressions are native rather than KES-translated.
-            ->selectRaw('
-                COUNT(*)                                                                              AS orders,
-                (COALESCE(SUM(orders.total_amount), 0))::float8                                        AS revenue,
-                (COALESCE(SUM(LEAST(COALESCE(pay.paid, 0), orders.total_amount)), 0))::float8          AS paid,
-                (COALESCE(SUM(GREATEST(orders.total_amount - COALESCE(pay.paid, 0), 0)), 0))::float8   AS balance
-            ')
+            // cannot mask another's balance in the bucket sum. Both sides are in
+            // the report's currency — capping a converted payment against a raw
+            // total is the defect that understated Outstanding by 11% (#381).
+            ->selectRaw("
+                COUNT(*)                                                                   AS orders,
+                (COALESCE(SUM({$total}), 0))::float8                                       AS revenue,
+                (COALESCE(SUM(LEAST(COALESCE(pay.paid, 0), {$total})), 0))::float8         AS paid,
+                (COALESCE(SUM(GREATEST({$total} - COALESCE(pay.paid, 0), 0)), 0))::float8  AS balance
+            ")
             ->first();
 
         // ── Contacts per messaging platform ──────────────────────────────────
@@ -889,31 +883,43 @@ class ReportController extends Controller
     public function salesByProduct(Request $request)
     {
         [$start, $end] = $this->dateRange($request);
-        $currency = $request->get('currency_code', 'KES');
         $limit    = (int) $request->get('limit', 50);
 
-        $products = DB::table('order_items')
-            ->join('orders', 'order_items.order_id', '=', 'orders.id')
+        // Order items carry no currency of their own — they are worth whatever
+        // their ORDER is denominated in. Until 2026-09-30 this report filtered
+        // to a single currency and summed raw, so a KES reading simply did not
+        // contain the foreign business: 6,592,367 of a true 7,089,826.
+        [$amtKes, $inKes, $currency] = $this->reportingMoney($request);
+        $revenue   = $amtKes('order_items.total_price');
+        $unitPrice = $amtKes('order_items.unit_price');
+
+        $products = $this->recognisedOrders(
+                DB::table('order_items')->join('orders', 'order_items.order_id', '=', 'orders.id'),
+            )
             ->whereBetween('orders.created_at', [$start, $end])
-            ->where('orders.payment_status', 'paid')
-            ->whereRaw('UPPER(orders.currency_code) = ?', [strtoupper($currency)])
+            // Recognised income, the same scope as the sales summary, so the
+            // product rows now ADD UP to total revenue. They never did: this
+            // counted only fully-paid orders, which dropped every part-paid and
+            // deposit order from the product breakdown while the headline above
+            // it included them (owner's decision, 2026-09-30 — D3).
+            ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency))
             ->whereNotNull('order_items.product_name')
             ->groupBy('order_items.product_id', 'order_items.product_name', 'order_items.sku')
             ->selectRaw("
                 order_items.product_id                                             AS id,
                 order_items.product_name                                           AS name_en,
                 order_items.sku,
-                (SUM(order_items.quantity))::float8                                          AS units_sold,
-                (COALESCE(SUM(order_items.total_price), 0))::float8                          AS total_revenue,
-                (COALESCE(AVG(order_items.unit_price), 0))::float8                           AS avg_selling_price,
-                COALESCE(MIN(order_items.unit_price), 0)                           AS min_price,
-                COALESCE(MAX(order_items.unit_price), 0)                           AS max_price,
-                (COALESCE(SUM(order_items.discount_amount), 0))::float8                      AS total_discounts,
+                (SUM(order_items.quantity))::float8                                AS units_sold,
+                (COALESCE(SUM({$revenue}), 0))::float8                             AS total_revenue,
+                (COALESCE(AVG({$unitPrice}), 0))::float8                           AS avg_selling_price,
+                COALESCE(MIN({$unitPrice}), 0)                                     AS min_price,
+                COALESCE(MAX({$unitPrice}), 0)                                     AS max_price,
+                (COALESCE(SUM({$amtKes('order_items.discount_amount')}), 0))::float8 AS total_discounts,
                 COUNT(DISTINCT orders.id)                                          AS order_count,
-                COUNT(DISTINCT orders.user_id)                                     AS unique_customers,
-                (COALESCE(SUM(order_items.total_price) / NULLIF(SUM(order_items.quantity), 0), 0))::float8 AS revenue_per_unit
+                COUNT(DISTINCT " . \App\Support\BuyerIdentity::sql('orders') . ") AS unique_customers,
+                (COALESCE(SUM({$revenue}) / NULLIF(SUM(order_items.quantity), 0), 0))::float8 AS revenue_per_unit
             ")
-            ->orderByRaw('(COALESCE(SUM(order_items.total_price), 0))::float8 DESC')
+            ->orderByRaw("(COALESCE(SUM({$revenue}), 0))::float8 DESC")
             ->limit($limit)
             ->get();
 
@@ -938,26 +944,32 @@ class ReportController extends Controller
     public function salesByCategory(Request $request)
     {
         [$start, $end] = $this->dateRange($request);
-        $currency = $request->get('currency_code', 'KES');
 
-        $categories = DB::table('order_items')
-            ->join('orders',     'order_items.order_id',  '=', 'orders.id')
-            ->join('products',   'order_items.product_id','=', 'products.id')
-            ->join('categories', 'products.category_id',  '=', 'categories.id')
+        // Same rules as salesByProduct: an item is worth what its order is
+        // denominated in, and the scope is recognised income so the categories
+        // sum to the same total the headline states.
+        [$amtKes, $inKes, $currency] = $this->reportingMoney($request);
+        $revenue = $amtKes('order_items.total_price');
+
+        $categories = $this->recognisedOrders(
+                DB::table('order_items')
+                    ->join('orders',     'order_items.order_id',  '=', 'orders.id')
+                    ->join('products',   'order_items.product_id','=', 'products.id')
+                    ->join('categories', 'products.category_id',  '=', 'categories.id'),
+            )
             ->whereBetween('orders.created_at', [$start, $end])
-            ->where('orders.payment_status', 'paid')
-            ->whereRaw('UPPER(orders.currency_code) = ?', [strtoupper($currency)])
+            ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency))
             ->groupBy('categories.id', 'categories.name_en')
             ->selectRaw("
                 categories.id,
                 categories.name_en                                          AS category_name,
-                (SUM(order_items.quantity))::float8                                   AS units_sold,
-                (COALESCE(SUM(order_items.total_price), 0))::float8                   AS total_revenue,
-                (COALESCE(AVG(order_items.unit_price), 0))::float8                    AS avg_price,
+                (SUM(order_items.quantity))::float8                         AS units_sold,
+                (COALESCE(SUM({$revenue}), 0))::float8                      AS total_revenue,
+                (COALESCE(AVG({$amtKes('order_items.unit_price')}), 0))::float8 AS avg_price,
                 COUNT(DISTINCT orders.id)                                   AS order_count,
                 COUNT(DISTINCT order_items.product_id)                      AS product_count
             ")
-            ->orderByRaw('(COALESCE(SUM(order_items.total_price), 0))::float8 DESC')
+            ->orderByRaw("(COALESCE(SUM({$revenue}), 0))::float8 DESC")
             ->get();
 
         if ($this->wantsExport($request)) {
@@ -980,38 +992,46 @@ class ReportController extends Controller
     public function salesByCustomer(Request $request)
     {
         [$start, $end] = $this->dateRange($request);
-        $limit    = (int) $request->get('limit', 50);
-        $currency = $request->get('currency_code', 'KES');
+        $limit = (int) $request->get('limit', 50);
+        [$amtKes, $inKes, $currency] = $this->reportingMoney($request);
 
-        $customers = DB::table('orders')
-            ->leftJoin('customers', function ($join) {
-                $join->on('customers.user_id', '=', 'orders.user_id')
-                     ->whereNotNull('orders.user_id');
-            })
+        // This report was EMPTY on production and had always been. It grouped
+        // by `orders.user_id` and required it to be present, and not one of
+        // the 623 paid orders has a login attached — 5,283,740 of business,
+        // nobody on the page. Third instance of the class fixed in #377 and
+        // again in cycle 1: a buyer is the CUSTOMER record, with the web login
+        // as a second arm, the two id spaces prefixed so they cannot collide.
+        //
+        // Grouping is on that key, and the display fields come through MAX()
+        // rather than the GROUP BY, so a customer whose name was typed
+        // differently on two orders is still one line rather than two.
+        $buyer   = $this->buyerKey('orders');
+        $spent   = $amtKes('orders.total_amount');
+
+        // Recognised income, because #378 already settled that "what a customer
+        // spent" means recognised income on the customer's own page — and this
+        // report was still answering paid-only. The same question, two answers:
+        // measured 2026-09-30, 450 buyers / 5,820,409 here against the page's
+        // 494 / 6,972,439, a gap of 44 people and KES 1,152,030. Conformance to
+        // an approved definition, not a new one.
+        $customers = Order::query()
             ->whereBetween('orders.created_at', [$start, $end])
-            ->where('orders.payment_status', 'paid')
-            ->whereRaw('UPPER(orders.currency_code) = ?', [strtoupper($currency)])
-            ->whereNotNull('orders.user_id')
-            ->groupBy(
-                'orders.user_id',
-                'orders.customer_first_name',
-                'orders.customer_last_name',
-                'orders.customer_email',
-                'orders.customer_phone',
-                'customers.id'
-            )
+            ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
+            ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency))
+            ->whereRaw("{$buyer} IS NOT NULL")
+            ->groupByRaw($buyer)
             ->selectRaw("
-                orders.user_id,
-                customers.id                                    AS customer_id,
-                CONCAT(orders.customer_first_name, ' ', COALESCE(orders.customer_last_name, '')) AS name,
-                orders.customer_email                           AS email,
-                orders.customer_phone                           AS phone,
+                MAX(orders.user_id)                             AS user_id,
+                MAX(orders.customer_id)                         AS customer_id,
+                MAX(CONCAT(orders.customer_first_name, ' ', COALESCE(orders.customer_last_name, ''))) AS name,
+                MAX(orders.customer_email)                      AS email,
+                MAX(orders.customer_phone)                      AS phone,
                 COUNT(orders.id)                                AS order_count,
-                (COALESCE(SUM(orders.total_amount), 0))::float8           AS total_spent,
-                (COALESCE(AVG(orders.total_amount), 0))::float8           AS avg_order_value,
+                (COALESCE(SUM({$spent}), 0))::float8            AS total_spent,
+                (COALESCE(AVG({$spent}), 0))::float8            AS avg_order_value,
                 MAX(orders.created_at)                          AS last_order_date
             ")
-            ->orderByRaw('(COALESCE(SUM(orders.total_amount), 0))::float8 DESC')
+            ->orderByRaw("(COALESCE(SUM({$spent}), 0))::float8 DESC")
             ->limit($limit)
             ->get();
 
@@ -1094,26 +1114,71 @@ class ReportController extends Controller
     public function salesByPaymentMethod(Request $request)
     {
         [$start, $end] = $this->dateRange($request);
-        $currency = $request->get('currency_code', 'KES');
+        [, $inKes, $currency] = $this->reportingMoney($request, 'p.currency_code');
+        $outletId  = $request->filled('outlet_id')  ? (int) $request->outlet_id : null;
+        $orderType = $request->filled('order_type') ? (string) $request->order_type : null;
 
-        $rows = DB::table('orders')
-            ->whereBetween('created_at', [$start, $end])
-            ->where('payment_status', 'paid')
-            ->whereRaw('UPPER(currency_code) = ?', [strtoupper($currency)])
-            ->whereNotNull('payment_method')
-            ->selectRaw("
-                payment_method,
-                COUNT(*) AS count,
-                (COALESCE(SUM(total_amount), 0))::float8 AS total
-            ")
-            ->groupBy('payment_method')
-            ->orderByRaw('(COALESCE(SUM(total_amount), 0))::float8 DESC')
-            ->get();
+        // The SAME breakdown the sales summary's panel shows, from the same
+        // query (paymentMethodBreakdown). This endpoint used to run its own:
+        // fully paid ORDERS grouped by the order's single payment_method,
+        // summing order totals. On production for September (cycle 9) it said
+        // 1,523,450 across 157 orders while the panel — and Collected — said
+        // 1,942,320. No screen calls it today; anything that does now gets the
+        // panel's answer, not a second one.
+        $rows = $this->paymentMethodBreakdown($start, $end, $inKes, $currency, $outletId, $orderType);
 
         return response()->json([
             'period'          => ['start' => $start, 'end' => $end],
+            'basis'           => 'Money received in this period, by payment date, net of refunds. '
+                               . 'Adds up to Collected. A split payment counts under each method it used.',
+            'total'           => round((float) $rows->sum('total'), 2),
             'payment_methods' => $rows,
         ]);
+    }
+
+    /**
+     * How the collected money arrived, by payment method: the panel on the
+     * sales summary and the /sales/by-payment-method endpoint both read this,
+     * so the two cannot disagree again (cycle 9).
+     */
+    private function paymentMethodBreakdown(string $start, string $end, bool $reportInKes, string $currency, ?int $outletId, ?string $orderType)
+    {
+        $payKes = $reportInKes
+            ? \App\Support\ReportingCurrency::kes('p.amount - COALESCE(p.refund_amount, 0)', 'p.currency_code')
+            : 'p.amount - COALESCE(p.refund_amount, 0)';
+
+        return DB::table('payments as p')
+            ->join('orders as o', 'o.id', '=', 'p.order_id')
+            ->leftJoin('payment_methods as pm', 'pm.code', '=', 'p.payment_method')
+            // The panel answers "HOW did the collected money arrive", so it
+            // shares the Collected tile's basis exactly: payment date, not
+            // order date. Windowing on o.created_at made it a receivables
+            // view wearing a treasury caption — on live data the two sides
+            // diverged by KES 315,780 of old orders' balances paid this
+            // period, and the divergence was invisible on same-day fixtures.
+            ->whereBetween(DB::raw('COALESCE(p.paid_at, p.created_at)'), [$start, $end])
+            ->whereNotIn('o.status', \App\Models\Order::DEAD_STATUSES)
+            // Reporting in KES converts every convertible rail at the reporting
+            // rate — the same rule as the Collected tile, so the method rows
+            // FOOT to it. The old hard KES filter left foreign payments off
+            // this panel entirely while Collected counted them, an
+            // irreconcilable gap nobody could explain from the screen.
+            ->when($reportInKes,
+                fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('p.currency_code')),
+                fn ($q) => $q->whereRaw('UPPER(p.currency_code) = ?', [$currency]))
+            ->when($outletId,  fn ($q) => $q->where('o.outlet_id',  $outletId))
+            ->when($orderType, fn ($q) => $q->where('o.order_type', $orderType))
+            ->tap(fn ($q) => \App\Support\SettledPayment::where($q, 'p'))
+            ->selectRaw("
+                p.payment_method,
+                COALESCE(pm.name, p.payment_method) AS method_name,
+                pm.description                      AS method_description,
+                COUNT(DISTINCT o.id)                AS count,
+                (COALESCE(SUM({$payKes}), 0))::float8 AS total
+            ")
+            ->groupBy('p.payment_method', 'pm.name', 'pm.description')
+            ->orderByRaw("(COALESCE(SUM({$payKes}), 0))::float8 DESC")
+            ->get();
     }
 
     /**
@@ -1124,35 +1189,51 @@ class ReportController extends Controller
     {
         [$start, $end] = $this->dateRange($request);
 
-        // order_returns columns: return_reason, refund_amount, status
-        // Join orders to get user_id for unique customer count
+        // A refund is denominated in the currency of the order it reverses —
+        // order_returns carries no currency of its own — and the people who
+        // returned something are counted the same way buyers are everywhere
+        // else. There are no returns on production yet, so this is correct by
+        // construction rather than by measurement; it will be right the first
+        // time a dollar order comes back.
+        [$amtKes, $inKes, $currency] = $this->reportingMoney($request);
+        $refund = $amtKes('order_returns.refund_amount');
+
         $returns = DB::table('order_returns')
             ->join('orders', 'order_returns.order_id', '=', 'orders.id')
             ->whereBetween('order_returns.created_at', [$start, $end])
+            ->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
+            ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency))
             ->selectRaw("
                 COUNT(*)                                        AS total_returns,
-                (COALESCE(SUM(order_returns.refund_amount), 0))::float8   AS total_refunded,
-                (COALESCE(AVG(order_returns.refund_amount), 0))::float8   AS avg_refund,
-                COUNT(DISTINCT orders.user_id)                  AS unique_customers
+                (COALESCE(SUM({$refund}), 0))::float8           AS total_refunded,
+                (COALESCE(AVG({$refund}), 0))::float8           AS avg_refund,
+                COUNT(DISTINCT " . $this->buyerKey('orders') . ") AS unique_customers
             ")
             ->first();
 
-        // Breakdown by return_reason on order_returns (header-level reason)
+        // Breakdown by return_reason. The join to orders exists only to know
+        // what currency each refund is in; without it this sum would add
+        // dollars to shillings again, one report further down the page.
         $byReason = DB::table('order_returns')
-            ->whereBetween('created_at', [$start, $end])
-            ->whereNotNull('return_reason')
+            ->join('orders', 'order_returns.order_id', '=', 'orders.id')
+            ->whereBetween('order_returns.created_at', [$start, $end])
+            ->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
+            ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency))
+            ->whereNotNull('order_returns.return_reason')
             ->selectRaw("
-                return_reason AS reason,
+                order_returns.return_reason AS reason,
                 COUNT(*) AS count,
-                (COALESCE(SUM(refund_amount), 0))::float8 AS total_refunded
+                (COALESCE(SUM({$refund}), 0))::float8 AS total_refunded
             ")
-            ->groupBy('return_reason')
+            ->groupBy('order_returns.return_reason')
             ->orderByRaw('COUNT(*) DESC')
             ->get();
 
         // Also aggregate per-item reasons from return_items for a finer breakdown
         $byItemReason = DB::table('return_items')
             ->join('order_returns', 'return_items.return_id', '=', 'order_returns.id')
+            ->join('orders', 'order_returns.order_id', '=', 'orders.id')
+            ->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
             ->whereBetween('order_returns.created_at', [$start, $end])
             ->whereNotNull('return_items.reason')
             ->selectRaw("
@@ -1197,29 +1278,43 @@ class ReportController extends Controller
     /**
      * GET /admin/reports/customers/summary
      */
+    /**
+     * Who placed an order, for counting distinct buyers.
+     *
+     * This counted `user_id` alone, and 683 of 684 customers have no login —
+     * a walk-in never gets one — so unique buyers, repeat buyers, the repeat
+     * rate and returning buyers all read ZERO while 566 people bought in the
+     * quarter (measured 2026-09-29). customer_id is the link; user_id stays as
+     * a second arm for web accounts. Prefixed so the two id spaces cannot
+     * collide.
+     */
+
     public function customerSummary(Request $request)
     {
         [$start, $end] = $this->dateRange($request);
+        $buyer = $this->buyerKey();
 
         $totalCustomers = Customer::count();
         $newCustomers   = Customer::whereBetween('created_at', [$start, $end])->count();
 
-        $uniqueBuyers = DB::table('orders')
+        // A buyer is someone whose order was RECOGNISED, not only someone who
+        // has finished paying (owner's decision, 2026-09-30). Paid-only made a
+        // deposit customer invisible until their last instalment: measured on
+        // Q3, 442 buyers against 485, and 33 repeat buyers against 37.
+        $uniqueBuyers = (int) $this->recognisedOrders(DB::table('orders'))
             ->whereBetween('created_at', [$start, $end])
-            ->where('payment_status', 'paid')
-            ->whereNotNull('user_id')
-            ->distinct('user_id')
-            ->count('user_id');
+            ->whereRaw("{$buyer} IS NOT NULL")   // any identity under BuyerIdentity — not "record or login", which left out every phone-only walk-in (a cycle 10 sibling, found building the outlet filter)
+            ->distinct()
+            ->count(DB::raw($buyer));
 
         // Repeat purchase rate: customers who placed >= 2 orders in the period
         // Use DB::table with explicit selectRaw so PostgreSQL GROUP BY is satisfied
         $repeatBuyers = DB::table(
-            DB::table('orders')
-                ->selectRaw('user_id, COUNT(*) AS order_count')
+            $this->recognisedOrders(DB::table('orders'))
+                ->selectRaw("{$buyer} AS buyer, COUNT(*) AS order_count")
                 ->whereBetween('created_at', [$start, $end])
-                ->where('payment_status', 'paid')
-                ->whereNotNull('user_id')
-                ->groupBy('user_id'),
+                ->whereRaw("{$buyer} IS NOT NULL")   // any identity under BuyerIdentity — not "record or login", which left out every phone-only walk-in (a cycle 10 sibling, found building the outlet filter)
+                ->groupBy(DB::raw($buyer)),
             'buyer_counts'
         )
             ->where('order_count', '>=', 2)
@@ -1228,18 +1323,19 @@ class ReportController extends Controller
         $repeatRate = $uniqueBuyers > 0 ? round(($repeatBuyers / $uniqueBuyers) * 100, 1) : 0;
 
         // New vs returning in period
-        $returningBuyers = DB::table('orders as o1')
+        // Both sides of the comparison move together, or "returning" would
+        // mean a recognised order this period against a fully-paid one before
+        // it — two different questions in one ratio.
+        $returningBuyers = (int) $this->recognisedOrders(DB::table('orders as o1'), 'o1')
             ->whereBetween('o1.created_at', [$start, $end])
-            ->where('o1.payment_status', 'paid')
-            ->whereNotNull('o1.user_id')
+            ->whereRaw($this->buyerKey('o1') . ' IS NOT NULL')
             ->whereExists(function ($q) use ($start) {
-                $q->from('orders as o2')
-                  ->whereRaw('o2.user_id = o1.user_id')
-                  ->where('o2.payment_status', 'paid')
+                $this->recognisedOrders($q->from('orders as o2'), 'o2')
+                  ->whereRaw($this->buyerKey('o2') . ' = ' . $this->buyerKey('o1'))
                   ->where('o2.created_at', '<', $start);
             })
-            ->distinct('o1.user_id')
-            ->count('o1.user_id');
+            ->distinct()
+            ->count(DB::raw($this->buyerKey('o1')));
 
         // New customer acquisition by month
         $acquisitionTrend = DB::table('customers')
@@ -1272,27 +1368,55 @@ class ReportController extends Controller
         $stats = [
             'total_customers'  => Customer::count(),
             'new_customers'    => Customer::where('created_at', '>=', now()->subDays($period))->count(),
-            'active_customers' => DB::table('orders')
+            // Counted distinct logins, of which paid orders have none: this
+            // read 0 while hundreds of people were buying. Same buyer key as
+            // the customer summary (cycle 1) and salesByCustomer.
+            'active_customers' => $this->recognisedOrders(DB::table('orders'))
                 ->where('created_at', '>=', now()->subDays($period))
-                ->where('payment_status', 'paid')
-                ->whereNotNull('user_id')
-                ->distinct('user_id')
-                ->count('user_id'),
+                ->whereRaw($this->buyerKey('orders') . ' IS NOT NULL')
+                ->distinct()
+                ->count(DB::raw($this->buyerKey('orders'))),
         ];
 
-        // Segment by lifetime order count
+        // Segment by lifetime order count. The join hung on the login too, so
+        // every walk-in customer matched no orders at all and the whole book
+        // was reported as "New" — a segmentation that described nothing.
+        // Each customer's recognised orders, matched by EITHER key.
+        //
+        // This was one LEFT JOIN on `orders.customer_id = customers.id OR
+        // orders.user_id = customers.user_id`. The OR was added in cycle 3 to
+        // stop every walk-in being classed "New" — and it fixed that while
+        // making the query quadratic: an OR in a join condition rules out a
+        // hash or merge join, so Postgres nested-looped every customer over
+        // every order (measured at 20,000 orders, with real statistics:
+        // 2,000 customers x 13,334 orders, 866 ms of a 941 ms request; at
+        // 50,000 it was the first report in the module past one second).
+        //
+        // Two equality joins, UNIONed. UNION — not UNION ALL — de-duplicates
+        // the (customer, order) pairs, so an order that matches a customer by
+        // BOTH keys still counts once, exactly as the OR did. Each arm can
+        // hash-join. Proven equivalent by snapshot at volume and by a test for
+        // the both-keys case, which the snapshot's walk-in data cannot reach.
+        $byCustomerRecord = $this->recognisedOrders(DB::table('orders as o'), 'o')
+            ->whereNotNull('o.customer_id')
+            ->selectRaw('o.customer_id AS cid, o.id AS oid');
+
+        $byLogin = $this->recognisedOrders(
+                DB::table('orders as o')->join('customers as lc', 'lc.user_id', '=', 'o.user_id'),
+                'o',
+            )
+            ->whereNotNull('o.user_id')
+            ->selectRaw('lc.id AS cid, o.id AS oid');
+
         $segments = DB::table('customers')
-            ->leftJoin('orders', function ($join) {
-                $join->on('orders.user_id', '=', 'customers.user_id')
-                     ->where('orders.payment_status', 'paid');
-            })
+            ->leftJoinSub($byCustomerRecord->union($byLogin), 'm', 'm.cid', '=', 'customers.id')
             ->groupBy('customers.id')
             ->selectRaw("
-                COUNT(orders.id) AS order_count,
+                COUNT(m.oid) AS order_count,
                 CASE
-                    WHEN COUNT(orders.id) >= 10 THEN 'VIP'
-                    WHEN COUNT(orders.id) >= 5  THEN 'Regular'
-                    WHEN COUNT(orders.id) >= 2  THEN 'Repeat'
+                    WHEN COUNT(m.oid) >= 10 THEN 'VIP'
+                    WHEN COUNT(m.oid) >= 5  THEN 'Regular'
+                    WHEN COUNT(m.oid) >= 2  THEN 'Repeat'
                     ELSE 'New'
                 END AS segment
             ")
@@ -1300,19 +1424,27 @@ class ReportController extends Controller
             ->groupBy('segment')
             ->map(fn ($group) => $group->count());
 
-        // RFM-style spend distribution
-        $spendBrackets = DB::table('orders')
-            ->where('payment_status', 'paid')
-            ->whereNotNull('user_id')
-            ->groupBy('user_id')
+        // RFM-style spend distribution. Keyed on the buyer, and in shillings:
+        // the brackets are stated in KES, so a USD order compared against
+        // them raw put a 1,280-dollar customer in "Under 5k" instead of
+        // "100k+" — the bracket boundaries made the unit mistake visible in a
+        // way a plain total does not.
+        [$amtKesB, $inKesB, $currencyB] = $this->reportingMoney($request, 'currency_code');
+        $ltv   = $amtKesB('total_amount');
+        $buyer = $this->buyerKey('orders');
+
+        $spendBrackets = $this->recognisedOrders(DB::table('orders'))
+            ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKesB, $currencyB, 'currency_code'))
+            ->whereRaw("{$buyer} IS NOT NULL")
+            ->groupByRaw($buyer)
             ->selectRaw("
-                user_id,
-                (SUM(total_amount))::float8 AS lifetime_value,
+                MAX(user_id) AS user_id,
+                (SUM({$ltv}))::float8 AS lifetime_value,
                 CASE
-                    WHEN (SUM(total_amount))::float8 >= 100000 THEN '100k+'
-                    WHEN (SUM(total_amount))::float8 >= 50000  THEN '50k-100k'
-                    WHEN (SUM(total_amount))::float8 >= 10000  THEN '10k-50k'
-                    WHEN (SUM(total_amount))::float8 >= 5000   THEN '5k-10k'
+                    WHEN (SUM({$ltv}))::float8 >= 100000 THEN '100k+'
+                    WHEN (SUM({$ltv}))::float8 >= 50000  THEN '50k-100k'
+                    WHEN (SUM({$ltv}))::float8 >= 10000  THEN '10k-50k'
+                    WHEN (SUM({$ltv}))::float8 >= 5000   THEN '5k-10k'
                     ELSE 'Under 5k'
                 END AS bracket
             ")
@@ -1336,32 +1468,35 @@ class ReportController extends Controller
         [$start, $end] = $this->dateRange($request);
         $limit = (int) $request->get('limit', 25);
 
-        $customers = DB::table('orders')
-            ->leftJoin('customers', 'customers.user_id', '=', 'orders.user_id')
-            ->where('orders.payment_status', 'paid')
-            ->whereNotNull('orders.user_id')
-            ->groupBy(
-                'orders.user_id',
-                'orders.customer_first_name',
-                'orders.customer_last_name',
-                'orders.customer_email',
-                'orders.customer_phone',
-                'customers.id'
-            )
+        // Empty on production for the same reason as salesByCustomer: it
+        // required `orders.user_id`, which not one paid order has. A lifetime
+        // value report that lists nobody is worse than none, because its
+        // emptiness reads as "no valuable customers".
+        [$amtKes, $inKes, $currency] = $this->reportingMoney($request);
+        $buyer = $this->buyerKey('orders');
+        $spent = $amtKes('orders.total_amount');
+
+        // Same definition as the customer's own page and as Sales by Customer:
+        // lifetime value is recognised income, not just the fully-settled part.
+        $customers = Order::query()
+            ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
+            ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency))
+            ->whereRaw("{$buyer} IS NOT NULL")
+            ->groupByRaw($buyer)
             ->selectRaw("
-                customers.id,
-                CONCAT(orders.customer_first_name, ' ', COALESCE(orders.customer_last_name, '')) AS name,
-                orders.customer_email                                AS email,
-                orders.customer_phone                                AS phone,
+                MAX(orders.customer_id)                              AS id,
+                MAX(CONCAT(orders.customer_first_name, ' ', COALESCE(orders.customer_last_name, ''))) AS name,
+                MAX(orders.customer_email)                           AS email,
+                MAX(orders.customer_phone)                           AS phone,
                 COUNT(orders.id)                                     AS order_count,
-                (COALESCE(SUM(orders.total_amount), 0))::float8                AS total_spent,
-                (COALESCE(AVG(orders.total_amount), 0))::float8                AS avg_order_value,
-                COALESCE(MAX(orders.total_amount), 0)                AS max_order_value,
+                (COALESCE(SUM({$spent}), 0))::float8                 AS total_spent,
+                (COALESCE(AVG({$spent}), 0))::float8                 AS avg_order_value,
+                COALESCE(MAX({$spent}), 0)                           AS max_order_value,
                 MIN(orders.created_at)                               AS first_order_date,
                 MAX(orders.created_at)                               AS last_order_date,
                 EXTRACT(DAY FROM (MAX(orders.created_at) - MIN(orders.created_at))) AS customer_lifespan_days
             ")
-            ->orderByRaw('(COALESCE(SUM(orders.total_amount), 0))::float8 DESC')
+            ->orderByRaw("(COALESCE(SUM({$spent}), 0))::float8 DESC")
             ->limit($limit)
             ->get();
 
@@ -1406,41 +1541,59 @@ class ReportController extends Controller
             ->orderBy('cohort_month')
             ->get();
 
-        // For each cohort, count how many made a purchase in subsequent months
-        $retention = $cohorts->map(function ($cohort) {
-            $cohortMonth = $cohort->cohort_month;
+        // Who in each cohort bought again, month by month — ONE query, with the
+        // same buyer rule as every other count (App\Support\BuyerIdentity).
+        //
+        // History: this was `whereNotNull('user_id')`, and with one login among
+        // 718 customers every cohort read ZERO retention — "not one of the 692
+        // customers acquired in Q3 came back" while 37 bought repeatedly. The
+        // worst figure in this programme. Cycle 6 keyed members as 'c<id>' /
+        // 'u<login>'; when buyers became phone-first (cycle 10) those keys
+        // stopped matching any customer who has a phone — the same zero, by a
+        // different road. It also ran a query per cohort, each recomputing every
+        // order's identity: 70 ms at 5,000 orders, 632 ms at 20,000.
+        //
+        // A member's identity is built by the SAME rule an order's is: their
+        // phone (normalised), else their record — plus their login if they have
+        // one. Counting distinct MEMBERS, so a person who bought both ways in a
+        // month is one returning customer, not two.
+        $dead       = "'" . implode("','", Order::DEAD_STATUSES) . "'";
+        $recognised = "'" . implode("','", Order::RECOGNISED_STATUSES) . "'";
+        $settled    = "'" . implode("','", Order::SETTLED_PAYMENT_STATUSES) . "'";
+        $buyer      = \App\Support\BuyerIdentity::sql('o');
 
-            // Customers acquired in this cohort month
-            $cohortUserIds = DB::table('customers')
-                ->whereRaw("TO_CHAR(created_at, 'YYYY-MM') = ?", [$cohortMonth])
-                ->whereNotNull('user_id')
-                ->pluck('user_id');
+        $rows = collect(DB::select("
+            WITH mem AS (
+                SELECT c.id AS cid, TO_CHAR(c.created_at, 'YYYY-MM') AS cohort, k.bk
+                FROM customers c
+                CROSS JOIN LATERAL (VALUES
+                    (COALESCE(normalize_phone(c.phone), 'c' || c.id)),
+                    ('u' || c.user_id)
+                ) AS k(bk)
+                WHERE c.created_at BETWEEN ? AND ? AND k.bk IS NOT NULL
+            ),
+            ord AS (
+                SELECT {$buyer} AS bk, TO_CHAR(o.created_at, 'YYYY-MM') AS month
+                FROM orders o
+                WHERE o.status NOT IN ({$dead})
+                  AND (o.status IN ({$recognised}) OR o.payment_status IN ({$settled}))
+                  " . ($this->reportOutletId() ? 'AND o.outlet_id = ' . (int) $this->reportOutletId() : '') . "
+            )
+            SELECT mem.cohort, ord.month, COUNT(DISTINCT mem.cid) AS retained
+            FROM mem
+            JOIN ord ON ord.bk = mem.bk AND ord.month >= mem.cohort
+            GROUP BY mem.cohort, ord.month
+            ORDER BY mem.cohort, ord.month
+        ", [$start, $end]))->groupBy('cohort');
 
-            if ($cohortUserIds->isEmpty()) {
-                return ['cohort' => $cohortMonth, 'size' => $cohort->cohort_size, 'months' => []];
-            }
-
-            // Purchases per month by cohort members (up to 6 months forward)
-            $purchaseMonths = DB::table('orders')
-                ->whereIn('user_id', $cohortUserIds)
-                ->where('payment_status', 'paid')
-                ->whereRaw("TO_CHAR(created_at, 'YYYY-MM') >= ?", [$cohortMonth])
-                ->selectRaw("
-                    TO_CHAR(created_at, 'YYYY-MM') AS month,
-                    COUNT(DISTINCT COALESCE(user_id::text, normalize_phone(customer_phone), NULLIF(lower(btrim(customer_email)), ''))) AS retained
-                ")
-                ->groupBy(DB::raw("TO_CHAR(created_at, 'YYYY-MM')"))
-                ->orderBy('month')
-                ->limit(7)
-                ->get()
-                ->mapWithKeys(fn ($r) => [$r->month => $r->retained]);
-
-            return [
-                'cohort' => $cohortMonth,
-                'size'   => $cohort->cohort_size,
-                'months' => $purchaseMonths,
-            ];
-        });
+        $retention = $cohorts->map(fn ($cohort) => [
+            'cohort' => $cohort->cohort_month,
+            'size'   => $cohort->cohort_size,
+            // Up to seven months from acquisition, as before.
+            'months' => collect($rows->get($cohort->cohort_month, []))
+                ->take(7)
+                ->mapWithKeys(fn ($r) => [$r->month => (int) $r->retained]),
+        ]);
 
         return response()->json([
             'period'    => ['start' => $start, 'end' => $end],
@@ -1572,11 +1725,31 @@ class ReportController extends Controller
     // trap; the split-brain that produced it is audit item Q-4.
 
     /**
-     * GET /admin/reports/inventory/aging  - stub
+     * GET /reports/inventory/aging — stock by time since it last moved, at
+     * cost (MetricEngine::stockAging). Was a stub that said "not yet
+     * implemented" while routed; the buckets now add up to the overview's
+     * stock value.
      */
     public function inventoryAging(Request $request)
     {
-        return response()->json(['message' => 'Inventory aging not yet implemented.', 'aging' => []]);
+        $result = \App\Services\Reporting\MetricEngine::for($request->user(), $this->reportOutletId())->stockAging();
+        $user = $request->user();
+
+        // Stock at COST is what the business paid — behind reports.financial,
+        // exactly as on the inventory overview (cycle 9). Ages, units and
+        // turnover stay: they are what running the shop needs.
+        if (! $user->can('reports.financial')) {
+            $result['totals']['cost_value'] = null;
+            $result['buckets'] = array_map(fn ($b) => ['cost_value' => null] + $b, $result['buckets']);
+            $result['slow_items'] = array_map(fn ($r) => ['amount' => null] + $r, $result['slow_items']);
+        }
+        $result['slow_items'] = array_map(function ($r) use ($user) {
+            $r['links'] = $user->can('products.view') ? ['product' => "/catalogue/products/{$r['id']}"] : [];
+
+            return $r;
+        }, $result['slow_items']);
+
+        return response()->json($result);
     }
 
     /**
@@ -1588,6 +1761,7 @@ class ReportController extends Controller
 
         $query = DB::table('inventory_transactions')
             ->join('inventory_items', 'inventory_transactions.inventory_item_id', '=', 'inventory_items.id')
+            ->tap(fn ($q) => $this->inOutlet($q, 'inventory_items.outlet_id'))
             ->leftJoin('product_variants', 'inventory_items.product_variant_id', '=', 'product_variants.id')
             ->leftJoin('products',         'inventory_items.product_id',          '=', 'products.id')
             ->leftJoin('product_translations', function ($join) {
@@ -1614,7 +1788,9 @@ class ReportController extends Controller
 
         // Movement summary by type
         $byType = DB::table('inventory_transactions')
-            ->whereBetween('created_at', [$start, $end])
+            ->join('inventory_items', 'inventory_transactions.inventory_item_id', '=', 'inventory_items.id')
+            ->tap(fn ($q) => $this->inOutlet($q, 'inventory_items.outlet_id'))
+            ->whereBetween('inventory_transactions.created_at', [$start, $end])
             ->selectRaw("
                 transaction_type AS type,
                 COUNT(*) AS count,
@@ -1661,7 +1837,7 @@ class ReportController extends Controller
         $plInKes = strtoupper($currency) === 'KES';
         $revenue = (float) Order::query()
             ->whereBetween('orders.created_at', [$start, $end])
-            ->recognised()
+            ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
             ->when($plInKes,
                 fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code')),
                 fn ($q) => $q->whereRaw('UPPER(orders.currency_code) = ?', [strtoupper($currency)]))
@@ -1683,22 +1859,12 @@ class ReportController extends Controller
                 COUNT(*) FILTER (WHERE COALESCE(oi.cost_price, pr.cost_price) IS NULL)         AS unpriced_lines
             FROM order_items oi
             JOIN orders o ON o.id = oi.order_id
-            LEFT JOIN LATERAL (
-                SELECT pp.cost_price
-                FROM product_prices pp
-                WHERE UPPER(pp.currency_code) = 'KES'
-                  AND pp.cost_price IS NOT NULL
-                  AND (
-                        (oi.product_variant_id IS NOT NULL AND pp.product_variant_id = oi.product_variant_id)
-                     OR (pp.product_id = oi.product_id AND pp.product_variant_id IS NULL)
-                  )
-                ORDER BY pp.product_variant_id IS NULL
-                LIMIT 1
-            ) pr ON TRUE
+            LEFT JOIN LATERAL (SELECT " . \App\Support\CostBasis::bookCostSql('oi') . " AS cost_price) pr ON TRUE
             WHERE o.created_at BETWEEN ? AND ?
               AND o.status NOT IN ('cancelled','voided','refunded')
               AND (o.status IN ('confirmed','processing','shipped','delivered','completed')
                    OR o.payment_status IN ('paid','partial','deposit'))
+              " . ($this->reportOutletId() ? 'AND o.outlet_id = ' . (int) $this->reportOutletId() : '') . "
               AND " . ($plInKes
                   ? "(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL"
                   : "UPPER(o.currency_code) = " . DB::getPdo()->quote(strtoupper($currency))) . "
@@ -1710,13 +1876,26 @@ class ReportController extends Controller
         $grossMargin = $revenue > 0 ? round(($grossProfit / $revenue) * 100, 2) : 0;
 
         $opex = DB::table('expenses')
+            ->tap(fn ($q) => $this->inOutlet($q, 'expenses.outlet_id'))
             ->whereBetween('expense_date', [substr($start, 0, 10), substr($end, 0, 10)])
             ->whereIn('status', ['approved', 'paid'])
             ->sum('amount_kes');
 
+        // Spending nobody has approved yet is rightly left out of net profit —
+        // but a "net profit" that is silent about it overstates what a reader
+        // will take home (cycle 9: September showed net = gross while 20
+        // expenses, KES 11,240, waited for approval). Stated, not netted.
+        $pendingOpex = DB::table('expenses')
+            ->tap(fn ($q) => $this->inOutlet($q, 'expenses.outlet_id'))
+            ->whereBetween('expense_date', [substr($start, 0, 10), substr($end, 0, 10)])
+            ->where('status', 'pending_approval')
+            ->selectRaw('COUNT(*) AS n, (COALESCE(SUM(amount_kes), 0))::float8 AS kes')
+            ->first();
+
         // Expenses by category for breakdown
         $expensesByCategory = DB::table('expenses')
             ->leftJoin('expense_categories', 'expenses.category_id', '=', 'expense_categories.id')
+            ->tap(fn ($q) => $this->inOutlet($q, 'expenses.outlet_id'))
             ->whereBetween('expenses.expense_date', [substr($start, 0, 10), substr($end, 0, 10)])
             ->whereIn('expenses.status', ['approved', 'paid'])
             ->groupBy('expense_categories.id', 'expense_categories.name')
@@ -1728,19 +1907,28 @@ class ReportController extends Controller
             ->orderByRaw('(COALESCE(SUM(expenses.amount_kes), 0))::float8 DESC')
             ->get();
 
-        // Tax collected
-        $taxCollected = DB::table('orders')
-            ->whereBetween('created_at', [$start, $end])
-            ->where('payment_status', 'paid')
-            ->whereRaw('UPPER(currency_code) = ?', [strtoupper($currency)])
-            ->sum('tax_amount');
+        // Tax and discounts sat on a different basis from the revenue line
+        // directly above them: revenue converts every currency, these two were
+        // shillings-only, so one statement carried a whole-business top line
+        // with KES-only deductions. Same basis now.
+        //
+        // And on the SAME basis as that revenue line: recognised income. They
+        // were paid-only, so a statement deducted tax and discounts from a
+        // wider set of sales than it charged them against (D3, settled
+        // 2026-09-30).
+        $plMoney = fn (string $column) => (float) Order::query()
+            ->whereBetween('orders.created_at', [$start, $end])
+            ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
+            ->when($plInKes,
+                fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('currency_code')),
+                fn ($q) => $q->whereRaw('UPPER(currency_code) = ?', [strtoupper($currency)]))
+            ->selectRaw('COALESCE(SUM(' . ($plInKes
+                ? \App\Support\ReportingCurrency::kes($column, 'currency_code')
+                : $column) . '), 0) AS v')
+            ->value('v');
 
-        // Discounts given
-        $discountsGiven = DB::table('orders')
-            ->whereBetween('created_at', [$start, $end])
-            ->where('payment_status', 'paid')
-            ->whereRaw('UPPER(currency_code) = ?', [strtoupper($currency)])
-            ->sum('discount_amount');
+        $taxCollected   = $plMoney('tax_amount');
+        $discountsGiven = $plMoney('discount_amount');
 
         $netProfit = $grossProfit - $opex;
         $netMargin = $revenue > 0 ? round(($netProfit / $revenue) * 100, 2) : 0;
@@ -1753,7 +1941,7 @@ class ReportController extends Controller
             // apples to oranges.
             $priorRevenue = (float) Order::query()
                 ->whereBetween('orders.created_at', [$ps, $pe])
-                ->recognised()
+                ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
                 ->when($plInKes,
                     fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code')),
                     fn ($q) => $q->whereRaw('UPPER(orders.currency_code) = ?', [strtoupper($currency)]))
@@ -1762,6 +1950,7 @@ class ReportController extends Controller
                     : 'orders.total_amount') . '), 0) AS v')
                 ->value('v');
             $priorOpex = DB::table('expenses')
+                ->tap(fn ($q) => $this->inOutlet($q, 'expenses.outlet_id'))
                 ->whereBetween('expense_date', [substr($ps, 0, 10), substr($pe, 0, 10)])
                 ->whereIn('status', ['approved', 'paid'])
                 ->sum('amount_kes');
@@ -1801,6 +1990,7 @@ class ReportController extends Controller
             'gross_profit'               => round($grossProfit, 2),
             'gross_profit_margin_percent'=> $grossMargin,
             'operating_expenses'         => round($opex, 2),
+            'expenses_pending_approval'  => ['count' => (int) $pendingOpex->n, 'amount' => round((float) $pendingOpex->kes, 2)],
             'net_profit'                 => round($netProfit, 2),
             'net_margin'                 => $netMargin,
             'tax_collected'              => round($taxCollected, 2),
@@ -1809,13 +1999,21 @@ class ReportController extends Controller
             'comparison'                 => $comparison,
         ]);
 
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+            // A deliberate refusal (403 without reports.export, 422 on a bad
+            // window) is an answer, not a failure. This catch used to swallow
+            // it and turn it into a 500 (cycle 9).
+            throw $e;
         } catch (\Throwable $e) {
+            // The detail goes to the log, never to the caller: this response
+            // used to carry the exception's message, file and line — server
+            // paths, and SQL text whenever the database was the one failing.
             \Illuminate\Support\Facades\Log::error('profitLoss failed', [
                 'error' => $e->getMessage(),
                 'file'  => $e->getFile(),
                 'line'  => $e->getLine(),
             ]);
-            return response()->json(['message' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()], 500);
+            return response()->json(['message' => 'The profit and loss report could not be produced.'], 500);
         }
     }
 
@@ -1825,21 +2023,87 @@ class ReportController extends Controller
     public function revenue(Request $request)
     {
         [$start, $end] = $this->dateRange($request);
-        $currency = $request->get('currency_code', 'KES');
 
-        $monthly = DB::table('orders')
-            ->whereBetween('created_at', [$start, $end])
-            ->where('payment_status', 'paid')
-            ->whereRaw('UPPER(currency_code) = ?', [strtoupper($currency)])
-            ->selectRaw("TO_CHAR(created_at, 'YYYY-MM') AS month, (COALESCE(SUM(total_amount), 0))::float8 AS total, COUNT(*) AS orders")
-            ->groupBy(DB::raw("TO_CHAR(created_at, 'YYYY-MM')"))
+        // TWO bases, both named, and the word "revenue" no longer standing
+        // alone (the brief's invariant 3, and the owner's decision of
+        // 2026-09-30).
+        //
+        // This endpoint used to report one figure: orders whose
+        // payment_status was 'paid'. That is neither of the two honest
+        // answers. It excluded every part-paid and deposit order, so it
+        // understated what was SOLD; and it counted the full value of each
+        // paid order regardless of when the cash arrived, so it was not
+        // COLLECTED either. Measured on Q3 2026: sold 6,811,239 across 678
+        // orders, collected 6,451,047 across 684, and the old hybrid
+        // 5,721,209 across 611 — a number that answered no question anyone
+        // would ask, on a page titled Revenue.
+        //
+        // The 360,192 by which sold exceeds collected is not an error. It is
+        // the quarter's movement in what customers owe, and showing both
+        // bases is the only way a reader can see it.
+        [$amtKes, $inKes, $currency] = $this->reportingMoney($request, 'currency_code');
+        $soldKes = $amtKes('total_amount');
+
+        // SOLD — recognised income, the same scope every other sales figure
+        // uses, so this foots with the sales summary to the cent.
+        $soldMonthly = Order::query()
+            ->whereBetween('orders.created_at', [$start, $end])
+            ->recognised()->tap(fn ($q) => $this->inOutlet($q, 'orders.outlet_id'))
+            ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency))
+            ->selectRaw("TO_CHAR(orders.created_at, 'YYYY-MM') AS month,
+                (COALESCE(SUM({$amtKes('orders.total_amount')}), 0))::float8 AS total,
+                COUNT(*) AS orders")
+            ->groupBy(DB::raw("TO_CHAR(orders.created_at, 'YYYY-MM')"))
             ->orderBy('month')
             ->get();
 
+        // COLLECTED — money that actually arrived, by the date it arrived,
+        // net of refunds. Payments carry their own currency.
+        [$payKes] = $this->reportingMoney($request, 'p.currency_code');
+        $collectedMonthly = DB::table('payments as p')
+            ->join('orders as o', 'o.id', '=', 'p.order_id')
+            ->tap(fn ($q) => $this->inOutlet($q, 'o.outlet_id'))
+            ->tap(fn ($q) => \App\Support\SettledPayment::where($q, 'p'))
+            ->whereBetween(DB::raw('COALESCE(p.paid_at, p.created_at)'), [$start, $end])
+            ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency, 'p.currency_code'))
+            ->selectRaw("TO_CHAR(COALESCE(p.paid_at, p.created_at), 'YYYY-MM') AS month,
+                (COALESCE(SUM({$payKes('p.amount - COALESCE(p.refund_amount, 0)')}), 0))::float8 AS total,
+                COUNT(DISTINCT o.id) AS orders")
+            ->groupBy(DB::raw("TO_CHAR(COALESCE(p.paid_at, p.created_at), 'YYYY-MM')"))
+            ->orderBy('month')
+            ->get();
+
+        $sold      = (float) $soldMonthly->sum('total');
+        $collected = (float) $collectedMonthly->sum('total');
+
         return response()->json([
-            'period'  => ['start' => $start, 'end' => $end],
-            'monthly' => $monthly,
-            'total'   => $monthly->sum('total'),
+            'period' => ['start' => $start, 'end' => $end, 'currency' => $currency],
+            'sold' => [
+                'label'   => 'Sold in the period',
+                'basis'   => 'recognised income, by order date',
+                'total'   => round($sold, 2),
+                'monthly' => $soldMonthly,
+            ],
+            'collected' => [
+                'label'   => 'Collected in the period',
+                'basis'   => 'settled payments net of refunds, by the date the money arrived',
+                'total'   => round($collected, 2),
+                'monthly' => $collectedMonthly,
+            ],
+            // What the difference IS, so nobody has to guess whether it is a bug.
+            'receivable_movement' => [
+                'amount' => round($sold - $collected, 2),
+                'note'   => 'Sold minus collected: the change in what customers owe over this '
+                          . 'period. A positive figure means the business sold faster than it '
+                          . 'was paid; it is not a discrepancy.',
+            ],
+            // The old key, kept for one release so nothing breaks silently, and
+            // pointed at the basis a reader almost certainly meant.
+            'monthly' => $soldMonthly,
+            'total'   => round($sold, 2),
+            'note'    => 'This page used to publish a single figure filtered on payment_status=paid, '
+                       . 'which was neither sold nor collected. `total` now means SOLD; `collected` '
+                       . 'is stated beside it.',
         ]);
     }
 
@@ -1911,7 +2175,10 @@ class ReportController extends Controller
                 'count' => (int) ($pendingRow->count ?? 0),
                 'total' => round((float) ($pendingRow->total ?? 0), 2),
             ],
-            'total'     => $expensesList->sum('amount'),
+            // amount_kes is maintained on the row; summing `amount` adds
+            // currencies together. Every expense is KES today, so this was
+            // right by luck.
+            'total'     => $expensesList->sum('amount_kes'),
         ]);
     }
 
@@ -1927,6 +2194,7 @@ class ReportController extends Controller
         [$start, $end] = $this->dateRange($request);
 
         $summary = DB::table('production_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
             ->whereBetween('created_at', [$start, $end])
             ->selectRaw("
                 COUNT(*)                                                                           AS total_orders,
@@ -1945,6 +2213,7 @@ class ReportController extends Controller
 
         // On-time delivery rate
         $onTime = DB::table('production_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
             ->whereBetween('created_at', [$start, $end])
             ->where('status', 'completed')
             ->whereNotNull('due_date')
@@ -1953,6 +2222,7 @@ class ReportController extends Controller
             ->count();
 
         $completedWithDue = DB::table('production_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
             ->whereBetween('created_at', [$start, $end])
             ->where('status', 'completed')
             ->whereNotNull('due_date')
@@ -1962,6 +2232,7 @@ class ReportController extends Controller
 
         // By product
         $byProduct = DB::table('production_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
             ->join('products', 'production_orders.product_id', '=', 'products.id')
             ->leftJoin('product_translations', function ($join) {
                 $join->on('product_translations.product_id', '=', 'products.id')
@@ -1986,6 +2257,7 @@ class ReportController extends Controller
         $byTailor = DB::table('production_order_assignees')
             ->join('production_orders', 'production_order_assignees.production_order_id', '=', 'production_orders.id')
             ->join('users', 'production_order_assignees.user_id', '=', 'users.id')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
             ->whereBetween('production_orders.created_at', [$start, $end])
             ->where('production_orders.status', 'completed')
             ->groupBy('users.id', 'users.first_name', 'users.last_name')
@@ -2001,6 +2273,7 @@ class ReportController extends Controller
 
         // Daily production trend
         $dailyTrend = DB::table('production_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
             ->whereBetween('created_at', [$start, $end])
             ->selectRaw("
                 DATE(created_at) AS date,
@@ -2013,6 +2286,7 @@ class ReportController extends Controller
 
         // Status distribution
         $byStatus = DB::table('production_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
             ->whereBetween('created_at', [$start, $end])
             ->selectRaw("status, COUNT(*) AS count, (COALESCE(SUM(quantity), 0))::float8 AS units")
             ->groupBy('status')
@@ -2048,6 +2322,7 @@ class ReportController extends Controller
         [$start, $end] = $this->dateRange($request);
 
         $efficiency = DB::table('production_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
             ->whereBetween('created_at', [$start, $end])
             ->selectRaw("
                 COUNT(*) AS total,
@@ -2075,6 +2350,7 @@ class ReportController extends Controller
         $tailors = DB::table('production_order_assignees')
             ->join('production_orders', 'production_order_assignees.production_order_id', '=', 'production_orders.id')
             ->join('users', 'production_order_assignees.user_id', '=', 'users.id')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
             ->whereBetween('production_orders.created_at', [$start, $end])
             ->where('production_orders.status', 'completed')
             ->groupBy('users.id', 'users.first_name', 'users.last_name')
@@ -2113,23 +2389,34 @@ class ReportController extends Controller
     {
         [$start, $end] = $this->dateRange($request);
 
+        // Every purchase order on production is in shillings today (52 of 52),
+        // so these sums are right by luck rather than by construction. The
+        // first foreign PO would have been added at face value — the same way
+        // a dollar order was added to a shilling total everywhere else in this
+        // module. Converting now costs nothing and removes the trap.
+        [$amtKes, $inKes, $currency] = $this->reportingMoney($request, 'purchase_orders.currency_code');
+        $poTotal     = $amtKes('purchase_orders.total_amount');
+        $poItemSpend = $amtKes('purchase_order_items.total_price');
+
         $summary = DB::table('purchase_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'purchase_orders.outlet_id'))
             ->whereBetween('created_at', [$start, $end])
             ->selectRaw("
                 COUNT(*)                                                                           AS total_orders,
-                (COALESCE(SUM(total_amount), 0))::float8                                                     AS total_value,
-                (COALESCE(SUM(CASE WHEN status = 'received' THEN total_amount ELSE 0 END), 0))::float8       AS received_value,
-                (COALESCE(SUM(CASE WHEN status = 'partial'  THEN total_amount ELSE 0 END), 0))::float8       AS partial_value,
+                (COALESCE(SUM({$poTotal}), 0))::float8                                                     AS total_value,
+                (COALESCE(SUM(CASE WHEN status = 'received' THEN {$poTotal} ELSE 0 END), 0))::float8       AS received_value,
+                (COALESCE(SUM(CASE WHEN status = 'partial'  THEN {$poTotal} ELSE 0 END), 0))::float8       AS partial_value,
                 COUNT(CASE WHEN status IN ('pending','approved','ordered') THEN 1 END)             AS pending_count,
                 COUNT(CASE WHEN status = 'received' THEN 1 END)                                    AS received_count,
                 COUNT(CASE WHEN status = 'cancelled' THEN 1 END)                                   AS cancelled_count,
-                (COALESCE(AVG(total_amount), 0))::float8                                                     AS avg_po_value,
+                (COALESCE(AVG({$poTotal}), 0))::float8                                                     AS avg_po_value,
                 COALESCE(AVG(CASE WHEN status = 'received' AND expected_delivery_date IS NOT NULL
                     THEN EXTRACT(DAY FROM (updated_at - created_at)) END), 0)                      AS avg_lead_days
             ")
             ->first();
 
         $bySupplier = DB::table('purchase_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'purchase_orders.outlet_id'))
             ->join('suppliers', 'purchase_orders.supplier_id', '=', 'suppliers.id')
             ->whereBetween('purchase_orders.created_at', [$start, $end])
             ->groupBy('suppliers.id', 'suppliers.name', 'suppliers.email')
@@ -2138,21 +2425,22 @@ class ReportController extends Controller
                 suppliers.name,
                 suppliers.email,
                 COUNT(*)                                         AS order_count,
-                (COALESCE(SUM(purchase_orders.total_amount), 0))::float8  AS total_value,
-                (COALESCE(AVG(purchase_orders.total_amount), 0))::float8  AS avg_value,
+                (COALESCE(SUM({$poTotal}), 0))::float8  AS total_value,
+                (COALESCE(AVG({$poTotal}), 0))::float8  AS avg_value,
                 COUNT(CASE WHEN purchase_orders.status = 'received' THEN 1 END) AS received_count,
                 COUNT(CASE WHEN purchase_orders.status IN ('pending','ordered') THEN 1 END) AS pending_count
             ")
-            ->orderByRaw('(COALESCE(SUM(purchase_orders.total_amount), 0))::float8 DESC')
+            ->orderByRaw("(COALESCE(SUM({$poTotal}), 0))::float8 DESC")
             ->get();
 
         // Monthly spend trend
         $monthlyTrend = DB::table('purchase_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'purchase_orders.outlet_id'))
             ->whereBetween('created_at', [$start, $end])
             ->selectRaw("
                 TO_CHAR(created_at, 'YYYY-MM') AS month,
                 COUNT(*) AS orders,
-                (COALESCE(SUM(total_amount), 0))::float8 AS total_value
+                (COALESCE(SUM({$poTotal}), 0))::float8 AS total_value
             ")
             ->groupBy(DB::raw("TO_CHAR(created_at, 'YYYY-MM')"))
             ->orderBy('month')
@@ -2160,14 +2448,16 @@ class ReportController extends Controller
 
         // Status breakdown
         $byStatus = DB::table('purchase_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'purchase_orders.outlet_id'))
             ->whereBetween('created_at', [$start, $end])
-            ->selectRaw("status, COUNT(*) AS count, (COALESCE(SUM(total_amount), 0))::float8 AS total")
+            ->selectRaw("status, COUNT(*) AS count, (COALESCE(SUM({$poTotal}), 0))::float8 AS total")
             ->groupBy('status')
             ->get();
 
         // Top purchased items
         $topItems = DB::table('purchase_order_items')
             ->join('purchase_orders', 'purchase_order_items.purchase_order_id', '=', 'purchase_orders.id')
+            ->tap(fn ($q) => $this->inOutlet($q, 'purchase_orders.outlet_id'))
             ->leftJoin('products', 'purchase_order_items.product_id', '=', 'products.id')
             ->leftJoin('product_translations', function ($join) {
                 $join->on('product_translations.product_id', '=', 'products.id')
@@ -2179,10 +2469,10 @@ class ReportController extends Controller
                 COALESCE(product_translations.name, products.sku, 'Unknown') AS product_name,
                 products.sku,
                 (SUM(purchase_order_items.quantity))::float8 AS total_quantity,
-                (COALESCE(SUM(purchase_order_items.total_price), 0))::float8 AS total_spend,
+                (COALESCE(SUM({$poItemSpend}), 0))::float8 AS total_spend,
                 COUNT(DISTINCT purchase_orders.id) AS po_count
             ")
-            ->orderByRaw('(COALESCE(SUM(purchase_order_items.total_price), 0))::float8 DESC')
+            ->orderByRaw("(COALESCE(SUM({$poItemSpend}), 0))::float8 DESC")
             ->limit(15)
             ->get();
 
@@ -2213,26 +2503,32 @@ class ReportController extends Controller
      */
     public function dashboardKPIs(Request $request)
     {
-        $period   = (int) $request->get('days', 30);
-        $since    = now()->subDays($period);
-        $currency = $request->get('currency_code', 'KES');
+        $period = (int) $request->get('days', 30);
+        $since  = now()->subDays($period);
+
+        // The three sales KPIs must describe the SAME orders. They did not:
+        // total and average filtered to one currency while count did not, so
+        // the dashboard divided a KES-only total by an all-currency count and
+        // published the result as the average order value. One base now, one
+        // unit, and the average is the total's own average.
+        [$amtKes, $inKes, $currency] = $this->reportingMoney($request, 'currency_code');
+        // Recognised income, like every other sales figure (D3, approved
+        // 2026-09-30). This was the last paid-only revenue basis left in the
+        // module and it sat on the FIRST screen a manager opens: measured on
+        // the live database 2026-10-01, the dashboard showed 176 orders and
+        // KES 1,655,650 for the last 30 days where the sales page showed 207
+        // and 2,118,350 — a 462,700 gap, 28%, between two pages describing the
+        // same month. Found by a live verification that contradicted my own
+        // claim that only sales-by-payment-method remained on this basis.
+        $kpiSales = fn () => $this->recognisedOrders(DB::table('orders'))
+            ->where('created_at', '>=', $since)
+            ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $currency, 'currency_code'));
 
         $kpis = [
             'sales' => [
-                'total' => DB::table('orders')
-                    ->where('payment_status', 'paid')
-                    ->whereRaw('UPPER(currency_code) = ?', [strtoupper($currency)])
-                    ->where('created_at', '>=', $since)
-                    ->sum('total_amount'),
-                'count' => DB::table('orders')
-                    ->where('payment_status', 'paid')
-                    ->where('created_at', '>=', $since)
-                    ->count(),
-                'average' => DB::table('orders')
-                    ->where('payment_status', 'paid')
-                    ->whereRaw('UPPER(currency_code) = ?', [strtoupper($currency)])
-                    ->where('created_at', '>=', $since)
-                    ->avg('total_amount') ?? 0,
+                'total'   => $kpiSales()->selectRaw('COALESCE(SUM(' . $amtKes('total_amount') . '),0) AS v')->value('v'),
+                'count'   => $kpiSales()->count(),
+                'average' => $kpiSales()->selectRaw('COALESCE(AVG(' . $amtKes('total_amount') . '),0) AS v')->value('v') ?? 0,
             ],
             'customers' => [
                 'total' => Customer::count(),
@@ -2244,9 +2540,11 @@ class ReportController extends Controller
             ],
             'production' => [
                 'active' => DB::table('production_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
                     ->whereIn('status', ['pending', 'assigned', 'in_progress'])
                     ->count(),
                 'completed_this_period' => DB::table('production_orders')
+            ->tap(fn ($q) => $this->inOutlet($q, 'production_orders.outlet_id'))
                     ->where('status', 'completed')
                     ->where('completed_at', '>=', $since)
                     ->count(),
@@ -2269,10 +2567,18 @@ class ReportController extends Controller
      */
     public function listSchedules(Request $request)
     {
+        // Only schedules for report pages the caller can open (Phase 3A): a
+        // schedule names its report and its recipients, and the list used to
+        // show every page's to anyone who could read any report.
+        $user = $request->user();
         $schedules = DB::table('system_settings')
             ->where('key', 'like', 'report_schedule_%')
             ->get()
-            ->map(fn ($s) => json_decode($s->value, true));
+            ->map(fn ($s) => json_decode($s->value, true))
+            ->filter(fn ($s) => is_array($s)
+                && isset(\App\Support\ReportPages::PAGES[$s['report_type'] ?? ''])
+                && \App\Support\ReportPages::canView($user, $s['report_type']))
+            ->values();
 
         return response()->json(['schedules' => $schedules]);
     }
@@ -2294,6 +2600,17 @@ class ReportController extends Controller
             'filters'      => 'nullable|array',
             'is_active'    => 'boolean',
         ]);
+
+        // A schedule mails the report to whoever is listed, so it may carry no
+        // more than its author may take out of the building: view of that
+        // report's page and that page's export right — exactly what the same
+        // report's PDF needs (cycle 9; per page since Phase 3A).
+        abort_unless(
+            \App\Support\ReportPages::canExport($request->user(), $validated['report_type']),
+            403,
+            'Scheduling this report requires its page (' . \App\Support\ReportPages::slug($validated['report_type'])
+                . ') and the permission to export it.',
+        );
 
         $id  = $validated['report_type'] . '_' . \Illuminate\Support\Str::slug($validated['name']);
         $key = 'report_schedule_' . $id;
@@ -2318,6 +2635,18 @@ class ReportController extends Controller
      */
     public function deleteSchedule(Request $request, string $id)
     {
+        // Stopping a schedule is the same right as starting one (Phase 3A).
+        $row = DB::table('system_settings')->where('key', 'report_schedule_' . $id)->first();
+        $type = $row ? (json_decode($row->value, true)['report_type'] ?? null) : null;
+        if ($row) {
+            abort_unless(
+                is_string($type) && isset(\App\Support\ReportPages::PAGES[$type])
+                    && \App\Support\ReportPages::canExport($request->user(), $type),
+                403,
+                'Deleting this schedule requires its report page and the permission to export it.',
+            );
+        }
+
         DB::table('system_settings')->where('key', 'report_schedule_' . $id)->delete();
         return response()->json(['message' => 'Schedule deleted.']);
     }
@@ -2326,14 +2655,20 @@ class ReportController extends Controller
     // LEGACY EXPORT STUBS (now replaced by ?export=csv on each endpoint)
     // =========================================================================
 
+    /**
+     * Neither endpoint produces a file, and nothing calls them. exportPDF used
+     * to answer 501 claiming no PDF library was installed — false since the
+     * dompdf reports at /reports/pdf/* exist. 410 says what is true: this door
+     * is closed, and names the ones that work (cycle 9).
+     */
     public function exportPDF(Request $request)
     {
-        return response()->json(['message' => 'Use ?export=csv on any report endpoint for data export. PDF export requires a server-side PDF library (e.g. barryvdh/laravel-dompdf).'], 501);
+        return response()->json(['message' => 'This endpoint does not produce files. PDFs: GET /api/v1/admin/reports/pdf/{sales|customers|inventory|procurement|production|financial}.'], 410);
     }
 
     public function exportExcel(Request $request)
     {
-        return response()->json(['message' => 'Use ?export=csv on any report endpoint. The CSV uses UTF-8 BOM so it opens correctly in Excel.'], 200);
+        return response()->json(['message' => 'This endpoint does not produce files. Add ?export=csv to any report endpoint; the CSV opens in Excel.'], 410);
     }
     // =========================================================================
     // PRODUCT COSTING & PROFITABILITY
@@ -2367,6 +2702,13 @@ class ReportController extends Controller
      */
     public function productCostingReport(Request $request, int $id)
     {
+        // Material costs are in shillings, so the sales side must be too, or
+        // a job sold in dollars is set against KES costs and the margin it
+        // reports is wrong by the exchange rate.
+        [$amtKesCost] = $this->reportingMoney($request, 'orders.currency_code');
+        $costingUnitPrice  = $amtKesCost('order_items.unit_price');
+        $costingSalesValue = $amtKesCost('order_items.total_price');
+
         // ── 1. Load production order with all relations ───────────────────────
         $order = \App\Models\ProductionOrder::with([
             'product:id,sku',
@@ -2490,9 +2832,9 @@ class ReportController extends Controller
                     ->when($order->product_variant_id, fn ($q) =>
                         $q->where('order_items.product_variant_id', $order->product_variant_id))
                     ->selectRaw("
-                        (SUM(order_items.quantity))::float8         AS quantity_sold,
-                        (AVG(order_items.unit_price))::float8       AS avg_selling_price,
-                        (SUM(order_items.total_price))::float8      AS total_sales_value
+                        (SUM(order_items.quantity))::float8                       AS quantity_sold,
+                        (AVG({$costingUnitPrice}))::float8                        AS avg_selling_price,
+                        (SUM({$costingSalesValue}))::float8                       AS total_sales_value
                     ")
                     ->first();
             }
@@ -2673,6 +3015,14 @@ class ReportController extends Controller
         // material cost, and left-join order_items to get revenue where a
         // customer order is linked.
 
+        // Costs here are in shillings (materials.unit_cost), so revenue must be
+        // too, or every dollar-sold job reports a catastrophic margin.
+        // The customer order is already joined below as `o`; its currency is
+        // what the linked item was sold in. No second join needed.
+        [$amtKesCo] = $this->reportingMoney($request, 'o.currency_code');
+        $itemRevenue   = $amtKesCo('oi.total_price');
+        $itemUnitPrice = $amtKesCo('oi.unit_price');
+
         $rows = DB::table('production_orders AS po')
             ->join('products AS p',    'po.product_id', '=', 'p.id')
             ->leftJoin('product_translations AS pt', function ($j) {
@@ -2726,10 +3076,10 @@ class ReportController extends Controller
                 ), 0))::float8                                                            AS material_cost,
 
                 -- Revenue: from linked order item(s)
-                (COALESCE(SUM(oi.total_price), 0))::float8                                AS revenue,
+                (COALESCE(SUM({$itemRevenue}), 0))::float8                                AS revenue,
 
                 -- Selling price per unit (avg)
-                (COALESCE(AVG(oi.unit_price), 0))::float8                                 AS selling_price_per_unit,
+                (COALESCE(AVG({$itemUnitPrice}), 0))::float8                                 AS selling_price_per_unit,
 
                 -- Qty sold (from linked order)
                 (COALESCE(SUM(oi.quantity), 0))::float8                                   AS qty_sold

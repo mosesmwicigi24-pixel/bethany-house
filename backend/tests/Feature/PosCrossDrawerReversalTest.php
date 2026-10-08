@@ -6,12 +6,15 @@ use App\Models\CashRegister;
 use App\Models\Order;
 use App\Models\Outlet;
 use App\Models\Payment;
+use App\Models\ProductVariant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
+use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
+use Tests\Concerns\ApprovesTillReversals;
 use Tests\TestCase;
 
 /**
@@ -21,12 +24,28 @@ use Tests\TestCase;
  */
 class PosCrossDrawerReversalTest extends TestCase
 {
-    use RefreshDatabase;
+    use RefreshDatabase, ApprovesTillReversals;
 
-    private function actingAsSuperAdmin(): User
+    /**
+     * The voiding actor. This was a super_admin until role hardening 1B: the
+     * owner's accounts no longer transact at the till (owner.no_transact
+     * refuses them a void), so an admin holding the till's void key does it.
+     * What these tests pin — which drawer a void reverses — is unchanged.
+     */
+    private function actingAsVoidingAdmin(): User
     {
         $user = User::factory()->create();
-        $user->assignRole(Role::findOrCreate('super_admin', 'sanctum'));
+        // The admin role reads every order, as the catalogue's does (Phase 4A:
+        // a role granting nothing resolves to no orders).
+        $admin = Role::findOrCreate('admin', 'sanctum');
+        $admin->givePermissionTo(Permission::findOrCreate('orders.view', 'sanctum'));
+        $user->assignRole($admin);
+        $user->givePermissionTo(
+            Permission::findOrCreate('pos.access', 'sanctum'),
+            Permission::findOrCreate('pos.void', 'sanctum'),
+            // The catalogue admin's outlet reach — a permission since 4D.
+            Permission::findOrCreate('outlets.all_access', 'sanctum'),
+        );
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 
@@ -49,7 +68,7 @@ class PosCrossDrawerReversalTest extends TestCase
 
     public function test_void_reverses_the_originating_open_drawer_not_the_current_one(): void
     {
-        $user   = $this->actingAsSuperAdmin();
+        $user   = $this->actingAsVoidingAdmin();
         $outlet = Outlet::factory()->create();
 
         // Register A — took the sale, opened by a DIFFERENT cashier, still open.
@@ -73,16 +92,26 @@ class PosCrossDrawerReversalTest extends TestCase
         Payment::factory()->create(['order_id' => $order->id, 'amount' => 300, 'status' => 'paid', 'payment_method' => 'cash']);
         $this->saleOnDrawer($order, $regA, 300, 1300);
 
-        $this->postJson("/api/v1/admin/pos/sales/{$order->id}/void", ['reason' => 'test'])
-            ->assertOk();
+        // Phase 4B part 2: the till only asks; sign every band, then assert as before.
+        $this->approveTillReversal(
+            $this->postJson("/api/v1/admin/pos/sales/{$order->id}/void", ['reason' => 'test'])->assertStatus(202)->json('approval.id')
+        );
 
         $this->assertEquals(1000, $regA->fresh()->expected_cash); // reversed on the drawer that took it
         $this->assertEquals(5000, $regB->fresh()->expected_cash); // current drawer untouched
     }
 
-    public function test_void_falls_back_to_current_drawer_when_the_originating_shift_is_closed(): void
+    /**
+     * Phase 4B part 2: once the originating shift is closed a VOID is refused
+     * (refund only). What this test pinned — a reversal against a closed
+     * shift is paid out of the acting cashier's current drawer — now holds
+     * for the refund.
+     */
+    public function test_after_the_originating_shift_closes_a_void_is_refused_and_a_refund_comes_from_the_current_drawer(): void
     {
-        $user   = $this->actingAsSuperAdmin();
+        $user   = $this->actingAsVoidingAdmin();
+        $user->givePermissionTo(Permission::findOrCreate('pos.returns', 'sanctum'));
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
         $outlet = Outlet::factory()->create();
 
         // Register A — took the sale but its shift is already CLOSED.
@@ -102,11 +131,26 @@ class PosCrossDrawerReversalTest extends TestCase
             'order_type' => 'pos', 'status' => 'confirmed', 'outlet_id' => $outlet->id,
             'total_amount' => 1000, 'payment_method' => 'cash',
         ]);
+        $variant = ProductVariant::factory()->create();
+        DB::table('order_items')->insert([
+            'order_id' => $order->id, 'product_id' => $variant->product_id, 'product_variant_id' => $variant->id,
+            'sku' => 'SKU-X', 'product_name' => 'Stole', 'quantity' => 1, 'unit_price' => 1000, 'total_price' => 1000,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
         Payment::factory()->create(['order_id' => $order->id, 'amount' => 300, 'status' => 'paid', 'payment_method' => 'cash']);
         $this->saleOnDrawer($order, $regA, 300, 1300);
 
         $this->postJson("/api/v1/admin/pos/sales/{$order->id}/void", ['reason' => 'test'])
-            ->assertOk();
+            ->assertStatus(422)->assertJsonPath('code', 'TILL_CLOSED');
+
+        $this->approveTillReversal(
+            $this->postJson('/api/v1/admin/pos/returns', [
+                'original_order_id' => $order->id,
+                'items'             => [['variant_id' => $variant->id, 'quantity' => 1]],
+                'reason'            => 'test',
+                'refund_method'     => 'cash',
+            ])->assertStatus(202)->json('approval.id')
+        );
 
         // Originating shift is closed → the 300 is paid out of the current drawer.
         $this->assertEquals(4700, $regB->fresh()->expected_cash);

@@ -21,6 +21,8 @@ const CATEGORY: Record<string, string> = {
     gated: "Needs approval",
     exempt: "Invoice / quotation / receipt",
     never_attach: "Database backup",
+    // Phase 4A: > 200 customers' contacts in full — a super admin decides.
+    bulk_contacts: "Customer contacts in bulk — super admin approves",
 };
 
 function Waiting({ openUuid }: { openUuid: string | null }) {

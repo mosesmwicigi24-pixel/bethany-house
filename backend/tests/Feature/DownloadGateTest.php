@@ -24,6 +24,7 @@ use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
+use Tests\Concerns\StepsUp;
 use Tests\TestCase;
 
 /**
@@ -33,7 +34,7 @@ use Tests\TestCase;
  */
 class DownloadGateTest extends TestCase
 {
-    use RefreshDatabase;
+    use RefreshDatabase, StepsUp;
 
     private User $owner;
 
@@ -61,6 +62,17 @@ class DownloadGateTest extends TestCase
         return $u;
     }
 
+    /**
+     * Sign in as $u for the next requests, already past step-up: exports and
+     * download approvals are step-up routes (Phase 4C), and what these tests
+     * examine is the gate behind it.
+     */
+    private function actAs(User $u): void
+    {
+        Sanctum::actingAs($u);
+        $this->stepUp($u);
+    }
+
     private function clerk(): User
     {
         return $this->staff([], ['orders.view']);
@@ -75,7 +87,7 @@ class DownloadGateTest extends TestCase
     private function held(User $clerk, string $url = '/api/v1/admin/orders/export?status=pending'): string
     {
         $this->enforce();
-        Sanctum::actingAs($clerk);
+        $this->actAs($clerk);
         $r = $this->getJson($url)->assertStatus(403)->assertJsonPath('code', 'download_approval_required');
         return $r->json('held');
     }
@@ -102,7 +114,7 @@ class DownloadGateTest extends TestCase
         Queue::fake();
         $this->enforce(false);
         $clerk = $this->clerk();
-        Sanctum::actingAs($clerk);
+        $this->actAs($clerk);
 
         $r = $this->get('/api/v1/admin/orders/export')->assertOk();
 
@@ -123,7 +135,7 @@ class DownloadGateTest extends TestCase
     {
         Queue::fake();
         $clerk = $this->clerk();
-        Sanctum::actingAs($clerk);
+        $this->actAs($clerk);
 
         $body = $this->get('/api/v1/admin/_test/streamed.csv')->assertOk()->streamedContent();
 
@@ -136,7 +148,7 @@ class DownloadGateTest extends TestCase
     {
         Queue::fake();
         $finance = $this->staff([], ['payments.view', 'payments.transactions']);
-        Sanctum::actingAs($finance);
+        $this->actAs($finance);
 
         $r = $this->get('/api/v1/admin/payment-transactions/export?start_date=2026-01-01&status=paid')->assertOk();
 
@@ -155,7 +167,7 @@ class DownloadGateTest extends TestCase
         $this->enforce();
         $order = \App\Models\Order::factory()->create();
         $clerk = $this->clerk();
-        Sanctum::actingAs($clerk);
+        $this->actAs($clerk);
 
         $r = $this->get("/api/v1/admin/pdf/orders/{$order->id}/invoice")->assertOk();
 
@@ -185,7 +197,7 @@ class DownloadGateTest extends TestCase
     public function test_an_unlisted_download_endpoint_fails_closed(): void
     {
         $this->enforce();
-        Sanctum::actingAs($this->clerk());
+        $this->actAs($this->clerk());
 
         $this->get('/api/v1/admin/_test/unlisted.csv')->assertStatus(403)->assertJsonPath('code', 'download_approval_required');
         $this->getJson('/api/v1/admin/_test/screen')->assertOk()->assertJsonPath('data', [1, 2]);   // a screen is untouched
@@ -194,7 +206,7 @@ class DownloadGateTest extends TestCase
     public function test_the_route_permission_still_decides_before_the_gate(): void
     {
         $this->enforce();
-        Sanctum::actingAs($this->staff());   // no orders.view
+        $this->actAs($this->staff());   // no orders.view
 
         $this->getJson('/api/v1/admin/orders/export')->assertStatus(403)->assertJsonMissingPath('held');
     }
@@ -202,7 +214,7 @@ class DownloadGateTest extends TestCase
     public function test_customers_are_not_gated(): void
     {
         $this->enforce();
-        Sanctum::actingAs(User::factory()->customer()->create());
+        $this->actAs(User::factory()->customer()->create());
         $this->get('/api/v1/admin/_test/unlisted.csv');
         $this->assertSame(0, DownloadRequest::count());
     }
@@ -222,11 +234,11 @@ class DownloadGateTest extends TestCase
         Notification::assertSentTo($this->owner, DownloadApprovalRequiredNotification::class);
         Mail::assertQueued(DownloadApprovalRequestMail::class, fn ($m) => $m->hasTo('copies@bethany.test'));
 
-        Sanctum::actingAs($this->owner);
+        $this->actAs($this->owner);
         $this->postJson("/api/v1/admin/downloads/requests/{$uuid}/approve", ['note' => 'ok'])->assertOk();
         Notification::assertSentTo($clerk, DownloadDecisionNotification::class);
 
-        Sanctum::actingAs($clerk);
+        $this->actAs($clerk);
         $t = $this->postJson("/api/v1/admin/downloads/requests/{$uuid}/token")->assertOk()->json();
 
         $r = $this->get('/api/v1/admin/orders/export?status=pending', [$t['header'] => $t['token']])->assertOk();
@@ -248,9 +260,9 @@ class DownloadGateTest extends TestCase
         $clerk = $this->clerk();
         $uuid = $this->held($clerk);
         $this->postJson('/api/v1/admin/downloads/requests', ['held' => $uuid, 'reason' => 'Needed for audit']);
-        Sanctum::actingAs($this->owner);
+        $this->actAs($this->owner);
         $this->postJson("/api/v1/admin/downloads/requests/{$uuid}/approve");
-        Sanctum::actingAs($clerk);
+        $this->actAs($clerk);
         $t = $this->postJson("/api/v1/admin/downloads/requests/{$uuid}/token")->json();
 
         // Different filters than approved.
@@ -258,11 +270,11 @@ class DownloadGateTest extends TestCase
 
         // Someone else holding the link.
         $t2 = $this->postJson("/api/v1/admin/downloads/requests/{$uuid}/token")->json();
-        Sanctum::actingAs($this->clerk());
+        $this->actAs($this->clerk());
         $this->get('/api/v1/admin/orders/export?status=pending', [$t2['header'] => $t2['token']])->assertStatus(403);
 
         // Expired.
-        Sanctum::actingAs($clerk);
+        $this->actAs($clerk);
         $t3 = $this->postJson("/api/v1/admin/downloads/requests/{$uuid}/token")->json();
         $this->travel(31)->minutes();
         $this->get('/api/v1/admin/orders/export?status=pending', [$t3['header'] => $t3['token']])->assertStatus(403);
@@ -277,15 +289,15 @@ class DownloadGateTest extends TestCase
         $this->postJson('/api/v1/admin/downloads/requests', ['held' => $uuid, 'reason' => 'Stock count']);
 
         $staffAdmin = $this->staff(['super_admin']);   // every permission via Gate::before — still not an approver
-        Sanctum::actingAs($staffAdmin);
+        $this->actAs($staffAdmin);
         $this->postJson("/api/v1/admin/downloads/requests/{$uuid}/approve")->assertStatus(403);
         $this->postJson('/api/v1/admin/downloads/approvers', ['user_id' => $staffAdmin->id])->assertStatus(403);
 
-        Sanctum::actingAs($this->owner);
+        $this->actAs($this->owner);
         $manager = $this->staff();
         $this->postJson('/api/v1/admin/downloads/approvers', ['user_id' => $manager->id])->assertCreated();
 
-        Sanctum::actingAs($manager);
+        $this->actAs($manager);
         $this->postJson("/api/v1/admin/downloads/requests/{$uuid}/approve")->assertOk();
     }
 
@@ -309,11 +321,11 @@ class DownloadGateTest extends TestCase
         $uuid = $this->held($clerk);
         $this->postJson('/api/v1/admin/downloads/requests', ['held' => $uuid, 'reason' => 'Curious']);
 
-        Sanctum::actingAs($this->owner);
+        $this->actAs($this->owner);
         $this->postJson("/api/v1/admin/downloads/requests/{$uuid}/deny")->assertStatus(422);
         $this->postJson("/api/v1/admin/downloads/requests/{$uuid}/deny", ['note' => 'Not needed'])->assertOk();
 
-        Sanctum::actingAs($clerk);
+        $this->actAs($clerk);
         $this->postJson("/api/v1/admin/downloads/requests/{$uuid}/token")->assertStatus(422);
     }
 
@@ -321,7 +333,7 @@ class DownloadGateTest extends TestCase
     {
         Queue::fake();
         $this->enforce();
-        Sanctum::actingAs($this->owner);
+        $this->actAs($this->owner);
 
         $this->get('/api/v1/admin/orders/export')->assertOk();
 
@@ -366,7 +378,7 @@ class DownloadGateTest extends TestCase
     public function test_a_gated_pdf_carries_its_export_id_and_downloader(): void
     {
         $clerk = $this->clerk();
-        Sanctum::actingAs($clerk);
+        $this->actAs($clerk);
         request()->attributes->set('download_export_id', 'BH-EXP-000042');
         request()->setUserResolver(fn () => $clerk);
 

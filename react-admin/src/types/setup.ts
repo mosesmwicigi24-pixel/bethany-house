@@ -34,6 +34,8 @@ export interface Currency {
     name: string;
     symbol: string;
     exchange_rate: number;
+    /** KES per 1 unit, for reports (128 = 1 USD). Null: the currency's sales are left out of reports. */
+    reporting_rate_to_kes: number | null;
     decimal_places: number;
     thousand_separator: string;
     decimal_separator: string;
@@ -50,6 +52,7 @@ export interface CurrencyFormData {
     name: string;
     symbol: string;
     exchange_rate: number;
+    reporting_rate_to_kes: number | null;
     decimal_places: number;
     thousand_separator: string;
     decimal_separator: string;
@@ -270,6 +273,10 @@ export interface UserSetup {
     created_at: string;
     roles: { id: number; name: string; display_name: string }[];
     outlet: { id: number; name: string } | null;
+    // Account lock after failed sign-ins (Phase 4C)
+    locked_at?: string | null;
+    locked_until?: string | null;
+    lock_reason?: string | null;
 }
 
 export interface UserFormData {

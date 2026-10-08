@@ -19,6 +19,7 @@ use App\Models\ProductVariant;
 use App\Services\NotificationService;
 use App\Services\ActivityLogService;
 use App\Services\ProductSerialService;
+use App\Support\MakerChecker;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -464,14 +465,40 @@ class PurchaseOrderController extends Controller
             $updateData['total_amount']    = $purchaseOrder->subtotal + $shippingAmount + $taxAmount;
         }
 
+        // An approval is bound to what was approved (Phase 3B). Changing the
+        // supplier or the total of a PO that is waiting for, or already has,
+        // its approval withdraws it: back to draft, to be submitted again.
+        $boundChanged = (isset($updateData['supplier_id']) && (int) $updateData['supplier_id'] !== (int) $purchaseOrder->supplier_id)
+            || (isset($updateData['total_amount']) && round((float) $updateData['total_amount'], 2) !== round((float) $purchaseOrder->total_amount, 2));
+        $withdrawn = $boundChanged && in_array($purchaseOrder->status, ['pending_approval', 'approved'], true);
+        if ($withdrawn) {
+            $updateData['status']      = 'draft';
+            $updateData['approved_by'] = null;
+            $updateData['approved_at'] = null;
+        }
+
+        $previousStatus = $purchaseOrder->status;
         $purchaseOrder->update($updateData);
+
+        if ($withdrawn) {
+            app(\App\Services\Approvals\ApprovalEngine::class)->cancelOpen(
+                'purchase_order', $purchaseOrder, $request->user(), 'The purchase order was edited after submission.',
+            );
+            ActivityLogService::log('status_changed', $purchaseOrder, [
+                'old_status' => $previousStatus,
+                'new_status' => 'draft',
+                'why'        => 'supplier or total changed — approval withdrawn',
+            ], "PO {$purchaseOrder->po_number} returned to draft: edited after {$previousStatus}");
+        }
 
         ActivityLogService::log('updated', $purchaseOrder, [
             'changed_fields' => array_keys($updateData),
         ], "Updated PO {$purchaseOrder->po_number}: " . implode(', ', array_keys($updateData)));
 
         return response()->json([
-            'message'        => 'Purchase order updated successfully.',
+            'message'        => $withdrawn
+                ? 'Purchase order updated. Its approval was withdrawn — submit it again.'
+                : 'Purchase order updated successfully.',
             'purchase_order' => $purchaseOrder->fresh(),
         ]);
     }
@@ -489,16 +516,66 @@ class PurchaseOrderController extends Controller
 
         $purchaseOrder = PurchaseOrder::findOrFail($id);
         $oldStatus     = $purchaseOrder->status;
+        $engine        = app(\App\Services\Approvals\ApprovalEngine::class);
 
         $updateData = ['status' => $validated['status']];
 
-        // Set approved_at when approving
-        if ($validated['status'] === 'approved') {
-            $updateData['approved_by'] = $request->user()->id;
-            $updateData['approved_at'] = now();
-        }
+        // This endpoint can move a PO to any status, so it is a second door
+        // to approval: jumping a PO that was never approved to approved,
+        // ordered or received IS approving it. The raiser and submitter may
+        // not (maker ≠ checker), and since Phase 3B approval is signed band
+        // by band through the approval engine — this door signs the band the
+        // PO is waiting on, and moves the PO on only once the last band has
+        // signed. Moving an already approved PO along (approved → ordered) is
+        // not a second approval.
+        $preApproval  = in_array($oldStatus, ['draft', 'pending_approval', 'cancelled'], true);
+        $postApproval = in_array($validated['status'], ['approved', 'ordered', 'partially_received', 'received'], true);
+        $approvesNow  = $preApproval && $postApproval;
 
-        $purchaseOrder->update($updateData);
+        if ($approvesNow) {
+            MakerChecker::assertNotMaker(
+                $request->user(), 'purchase_order.approve', $purchaseOrder,
+                $purchaseOrder->created_by, $purchaseOrder->submitted_by,
+            );
+            if ($oldStatus !== 'pending_approval') {
+                return response()->json([
+                    'message' => 'Submit this purchase order for approval first; it is approved band by band.',
+                    'code'    => 'NOT_AWAITING_APPROVAL',
+                ], 422);
+            }
+
+            $approval = $engine->sign(
+                $engine->openOrAdopt('purchase_order', $purchaseOrder), $request->user(),
+                \App\Models\ApprovalSignature::APPROVED, $validated['notes'] ?? null,
+            );
+            if ($approval->status !== \App\Models\ApprovalRequest::APPROVED) {
+                return response()->json([
+                    'message'         => 'Signed. It now waits for the next band before it can move on.',
+                    'purchase_order'  => $purchaseOrder->fresh(),
+                    'previous_status' => $oldStatus,
+                    'approval'        => $engine->present($approval->load(['signatures', 'maker']), $request->user()),
+                ]);
+            }
+            // The engine approved it (approved_by = the final signer); now the
+            // status the caller asked for.
+            $purchaseOrder->refresh();
+            if ($validated['status'] !== 'approved') {
+                $purchaseOrder->update(['status' => $validated['status']]);
+            }
+        } else {
+            if ($validated['status'] === 'pending_approval' && $oldStatus === 'draft') {
+                $updateData['submitted_by'] = $request->user()->id;
+                $updateData['submitted_at'] = now();
+            }
+            $purchaseOrder->update($updateData);
+
+            if ($oldStatus === 'pending_approval' && $validated['status'] !== 'pending_approval') {
+                $engine->cancelOpen('purchase_order', $purchaseOrder, $request->user(), "Status moved to {$validated['status']}.");
+            }
+            if ($validated['status'] === 'pending_approval' && $oldStatus !== 'pending_approval') {
+                $engine->submit('purchase_order', $purchaseOrder->fresh(), $request->user());
+            }
+        }
 
         // ── Audit log ────────────────────────────────────────────────────────
         ActivityLogService::log('status_changed', $purchaseOrder, [
@@ -549,6 +626,12 @@ class PurchaseOrderController extends Controller
         if (!in_array($purchaseOrder->status, ['approved', 'ordered', 'partially_received'])) {
             return response()->json(['message' => 'Purchase order must be approved or ordered before receiving.'], 422);
         }
+
+        // Whoever approved the order does not also sign for the goods.
+        MakerChecker::assertNotMaker(
+            $request->user(), 'purchase_order.receive', $purchaseOrder,
+            $purchaseOrder->approved_by,
+        );
 
         DB::beginTransaction();
         try {
@@ -804,15 +887,24 @@ class PurchaseOrderController extends Controller
             return response()->json(['message' => 'Cannot submit a purchase order with no items.'], 422);
         }
 
-        $purchaseOrder->update([
-            'status'       => 'pending_approval',
-            'submitted_by'  => $request->user()->id,
-            'submitted_at'  => now(),
-        ]);
+        // Into the approval engine: bands by value in KES at the reporting
+        // rate, judged on the rolling 24h total to this supplier (Phase 3B).
+        // A PO rejected or expired before comes back as the next version.
+        $approval = DB::transaction(function () use ($purchaseOrder, $request) {
+            $purchaseOrder->update([
+                'status'       => 'pending_approval',
+                'submitted_by'  => $request->user()->id,
+                'submitted_at'  => now(),
+            ]);
+
+            return app(\App\Services\Approvals\ApprovalEngine::class)
+                ->submit('purchase_order', $purchaseOrder->fresh(), $request->user());
+        });
 
         ActivityLogService::log('status_changed', $purchaseOrder, [
-            'old_status' => 'draft',
-            'new_status' => 'pending_approval',
+            'old_status'          => 'draft',
+            'new_status'          => 'pending_approval',
+            'approval_request_id' => $approval->id,
         ], "PO {$purchaseOrder->po_number} submitted for approval");
 
         NotificationService::purchaseOrderStatusChanged(
@@ -826,6 +918,7 @@ class PurchaseOrderController extends Controller
         return response()->json([
             'message'        => 'Purchase order submitted for approval.',
             'purchase_order' => $purchaseOrder->fresh(),
+            'approval'       => app(\App\Services\Approvals\ApprovalEngine::class)->present($approval->load(['signatures', 'maker']), $request->user()),
         ]);
     }
 
@@ -836,7 +929,10 @@ class PurchaseOrderController extends Controller
 
     public function approve(Request $request, $id)
     {
-        $validated = $request->validate(['notes' => 'nullable|string|max:1000']);
+        $validated = $request->validate([
+            'notes'   => 'nullable|string|max:1000',
+            'version' => 'nullable|integer|min:1',
+        ]);
 
         $purchaseOrder = PurchaseOrder::findOrFail($id);
 
@@ -844,40 +940,24 @@ class PurchaseOrderController extends Controller
             return response()->json(['message' => 'Only purchase orders pending approval can be approved.'], 422);
         }
 
-        // Was a hardcoded role list (super_admin/admin/procurement_manager)
-        // that silently excluded procurement_officer even though that role
-        // is explicitly granted procurement.approve (see SyncPermissions)
-        // and the route middleware above already lets them through - this
-        // redundant check then rejected them anyway. Checking the actual
-        // permission keeps this in sync with whoever the route grants.
-        $user = $request->user();
-        if (!$user->can('procurement.approve')) {
-            return response()->json(['message' => 'You do not have permission to approve purchase orders.'], 403);
-        }
-
-        $purchaseOrder->update([
-            'status'      => 'approved',
-            'approved_by' => $user->id,
-            'approved_at' => now(),
-            'notes'       => $validated['notes'] ?? $purchaseOrder->notes,
-        ]);
-
-        ActivityLogService::log('approved', $purchaseOrder, [
-            'approved_by' => $user->id,
-            'notes'       => $validated['notes'] ?? null,
-        ], "PO {$purchaseOrder->po_number} approved by {$user->first_name} {$user->last_name}");
-
-        NotificationService::purchaseOrderStatusChanged(
-            $purchaseOrder->id,
-            $purchaseOrder->po_number,
-            'pending_approval',
-            'approved',
-            $purchaseOrder->created_by
+        // Since Phase 3B this endpoint SIGNS the band the PO is waiting on.
+        // The engine decides whether the caller holds that band, refuses the
+        // raiser and submitter (maker ≠ checker, super admin included) and
+        // approves the PO only when the last band has signed.
+        $engine   = app(\App\Services\Approvals\ApprovalEngine::class);
+        $approval = $engine->sign(
+            $engine->openOrAdopt('purchase_order', $purchaseOrder), $request->user(),
+            \App\Models\ApprovalSignature::APPROVED, $validated['notes'] ?? null,
+            $purchaseOrder->id, $validated['version'] ?? null,
         );
+        $done = $approval->status === \App\Models\ApprovalRequest::APPROVED;
 
         return response()->json([
-            'message'        => "Purchase order {$purchaseOrder->po_number} approved.",
+            'message'        => $done
+                ? "Purchase order {$purchaseOrder->po_number} approved."
+                : "Signed. Purchase order {$purchaseOrder->po_number} now waits for the next band.",
             'purchase_order' => $purchaseOrder->fresh(['approvedBy:id,first_name,last_name']),
+            'approval'       => $engine->present($approval->load(['signatures', 'maker']), $request->user()),
         ]);
     }
 
@@ -896,34 +976,18 @@ class PurchaseOrderController extends Controller
             return response()->json(['message' => 'Only purchase orders pending approval can be rejected.'], 422);
         }
 
-        $user = $request->user();
-        if (!$user->can('procurement.approve')) {
-            return response()->json(['message' => 'You do not have permission to reject purchase orders.'], 403);
-        }
-
-        $purchaseOrder->update([
-            'status'      => 'draft',           // Return to draft so it can be revised
-            'approved_by' => null,
-            'approved_at' => null,
-            'notes'       => "REJECTED: {$validated['reason']}\n\n" . ($purchaseOrder->notes ?? ''),
-        ]);
-
-        ActivityLogService::log('rejected', $purchaseOrder, [
-            'rejected_by' => $user->id,
-            'reason'      => $validated['reason'],
-        ], "PO {$purchaseOrder->po_number} rejected by {$user->first_name} {$user->last_name}: {$validated['reason']}");
-
-        NotificationService::purchaseOrderStatusChanged(
-            $purchaseOrder->id,
-            $purchaseOrder->po_number,
-            'pending_approval',
-            'draft',
-            $purchaseOrder->created_by
+        // A rejection is a decision at the band the PO is waiting on; the
+        // engine returns the PO to draft for its maker (PurchaseOrderHandler).
+        $engine   = app(\App\Services\Approvals\ApprovalEngine::class);
+        $approval = $engine->sign(
+            $engine->openOrAdopt('purchase_order', $purchaseOrder), $request->user(),
+            \App\Models\ApprovalSignature::REJECTED, $validated['reason'], $purchaseOrder->id,
         );
 
         return response()->json([
             'message'        => "Purchase order {$purchaseOrder->po_number} rejected and returned to draft.",
             'purchase_order' => $purchaseOrder->fresh(),
+            'approval'       => $engine->present($approval->load(['signatures', 'maker']), $request->user()),
         ]);
     }
 
@@ -952,6 +1016,9 @@ class PurchaseOrderController extends Controller
             'status' => 'cancelled',
             'notes'  => "CANCELLED: {$validated['reason']}\n\n" . ($purchaseOrder->notes ?? ''),
         ]);
+        app(\App\Services\Approvals\ApprovalEngine::class)->cancelOpen(
+            'purchase_order', $purchaseOrder, $request->user(), "Cancelled: {$validated['reason']}",
+        );
 
         ActivityLogService::log('cancelled', $purchaseOrder, [
             'reason'       => $validated['reason'],
@@ -988,6 +1055,8 @@ class PurchaseOrderController extends Controller
         }
 
         $return = PurchaseReturn::where('status', 'pending')->findOrFail($id);
+
+        MakerChecker::assertNotMaker($user, 'purchase_return.approve', $return, $return->created_by);
 
         $return->update([
             'status'      => 'approved',

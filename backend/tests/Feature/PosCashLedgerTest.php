@@ -11,6 +11,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
+use Tests\Concerns\ApprovesTillReversals;
 use Tests\TestCase;
 
 /**
@@ -22,7 +23,7 @@ use Tests\TestCase;
  */
 class PosCashLedgerTest extends TestCase
 {
-    use RefreshDatabase;
+    use RefreshDatabase, ApprovesTillReversals;
 
     private function actingWithPermissions(array $permissions): User
     {
@@ -81,8 +82,10 @@ class PosCashLedgerTest extends TestCase
             'payment_method' => 'cash',
         ]);
 
-        $this->postJson("/api/v1/admin/pos/sales/{$order->id}/void", ['reason' => 'cashier error'])
-            ->assertOk();
+        // Phase 4B part 2: the till only asks; sign every band, then assert as before.
+        $this->approveTillReversal(
+            $this->postJson("/api/v1/admin/pos/sales/{$order->id}/void", ['reason' => 'cashier error'])->assertStatus(202)->json('approval.id')
+        );
 
         // A per-movement ledger row is written, with balance_after = 5000 - 1000.
         $this->assertDatabaseHas('cash_register_transactions', [
@@ -114,8 +117,10 @@ class PosCashLedgerTest extends TestCase
             'payment_method' => 'mpesa',
         ]);
 
-        $this->postJson("/api/v1/admin/pos/sales/{$order->id}/void", ['reason' => 'wrong entry'])
-            ->assertOk();
+        // Phase 4B part 2: the till only asks; sign every band, then assert as before.
+        $this->approveTillReversal(
+            $this->postJson("/api/v1/admin/pos/sales/{$order->id}/void", ['reason' => 'wrong entry'])->assertStatus(202)->json('approval.id')
+        );
 
         // M-Pesa isn't a cash-drawer movement, so no cash ledger row.
         $this->assertDatabaseMissing('cash_register_transactions', ['order_id' => $order->id]);

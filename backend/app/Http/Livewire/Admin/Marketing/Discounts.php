@@ -3,6 +3,7 @@
 namespace App\Http\Livewire\Admin\Marketing;
 
 use App\Models\Coupon;
+use App\Support\DiscountRule;
 use Illuminate\Support\Str;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -127,6 +128,12 @@ class Discounts extends Component
             'created_by'                => auth()->id(),
         ];
 
+        // The owner's 5% rule: a coupon worth more is the super_admin's to set.
+        if ($message = DiscountRule::couponRefusal(auth()->user(), $this->couponWorth($data))) {
+            $this->addError('value', $message);
+            return;
+        }
+
         if ($this->isEditing) {
             Coupon::findOrFail($this->editingId)->update($data);
             $msg = 'Coupon updated successfully.';
@@ -144,6 +151,11 @@ class Discounts extends Component
     public function duplicate(int $id): void
     {
         $original = Coupon::findOrFail($id);
+        // A copy is a new coupon, held to the same rule as creating one.
+        if ($message = DiscountRule::couponRefusal(auth()->user(), $this->couponWorth($original->toArray()))) {
+            session()->flash('error', $message);
+            return;
+        }
         $new = $original->replicate();
         $new->code       = strtoupper(Str::random(8));
         $new->times_used = 0;
@@ -155,7 +167,24 @@ class Discounts extends Component
     public function toggleActive(int $id): void
     {
         $c = Coupon::findOrFail($id);
+        // Switching one on above 5% is the owner's; switching off is anyone's.
+        if (!$c->is_active && ($message = DiscountRule::couponRefusal(auth()->user(), $this->couponWorth($c->toArray())))) {
+            session()->flash('error', $message);
+            return;
+        }
         $c->update(['is_active' => !$c->is_active]);
+    }
+
+    /** The largest share of an order this coupon can take (App\Support\DiscountRule::couponPercent). */
+    private function couponWorth(array $c): ?float
+    {
+        return DiscountRule::couponPercent(
+            (string) $c['type'],
+            (float) $c['value'],
+            isset($c['minimum_order_amount']) && $c['minimum_order_amount'] !== null ? (float) $c['minimum_order_amount'] : null,
+            $c['applicable_products'] ?? null,
+            $c['applicable_categories'] ?? null,
+        );
     }
 
     // ── Delete ─────────────────────────────────────────────────────────────────

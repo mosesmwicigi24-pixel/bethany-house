@@ -25,6 +25,19 @@ class ProductionTask extends Model
         return 'assigned_to';
     }
 
+    /**
+     * A task has no outlet of its own: it belongs to the outlet its
+     * production order was raised at (Phase 4A — an outlet manager sees the
+     * floor work of the jobs raised at their shop).
+     */
+    public function constrainToOutlets(\Illuminate\Database\Eloquent\Builder $builder, array $outletIds): void
+    {
+        $builder->whereIn(
+            $builder->getModel()->getTable() . '.production_order_id',
+            \Illuminate\Support\Facades\DB::table('production_orders')->select('id')->whereIn('outlet_id', $outletIds),
+        );
+    }
+
     use HasFactory;
 
     protected $fillable = [
@@ -96,7 +109,17 @@ class ProductionTask extends Model
 
         $orderQty = (int) ($this->productionOrder?->quantity ?? 1);
 
-        $earlier = self::where('production_order_id', $this->production_order_id)
+        // Unscoped deliberately. "Has an earlier stage passed me any pieces"
+        // is a question about this ORDER's pipeline, not about who is asking —
+        // and the earlier stages sit on OTHER tailors' benches by definition.
+        // Read through the viewer scope, this returned almost nothing for a
+        // tailor, minPassed stayed at the order quantity, and the gate told
+        // every one of them that nothing was blocking their work (#301).
+        //
+        // Reading the pipeline is not permission to see it: the rows never
+        // leave this method, only the name of the stage in front of her does.
+        $earlier = self::withoutViewerScope()
+            ->where('production_order_id', $this->production_order_id)
             ->whereNotNull('sequence')
             ->where('sequence', '<', $this->sequence)
             ->orderBy('sequence')
@@ -163,11 +186,16 @@ class ProductionTask extends Model
         return $query->where('assigned_to', $userId);
     }
 
+    /**
+     * Start or resume. started_at is the moment work FIRST began on this
+     * stage: Resume sends the same action, and overwriting the stamp on every
+     * resume made time-in-stage read as "since the last tea break".
+     */
     public function start()
     {
         $this->update([
             'status' => 'in_progress',
-            'started_at' => now(),
+            'started_at' => $this->started_at ?? now(),
         ]);
 
         return $this;

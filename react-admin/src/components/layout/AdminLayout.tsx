@@ -103,18 +103,45 @@ const SEGMENT_LABELS: Record<string, string> = {
     new: "New",
 }
 
+const REPORT_PAGE_LABELS: Record<string, string> = {
+    sales: 'Sales & Orders',
+    customers: 'Customers & Neema',
+    finance: 'Finance & Cash',
+    production: 'Production & Fulfilment',
+    inventory: 'Inventory',
+    procurement: 'Procurement & Suppliers',
+    signals: 'Signals',
+    performance: 'Staff, Outlets & Performance',
+    explorer: 'Business Explorer',
+    'data-quality': 'Audit & Data Quality',
+}
+
+// A record id under these paths gets a word, not "#6": on a phone the last
+// crumb IS the top-bar title, and a database id names nothing for the floor.
+// (The page itself carries the order number.)
+const ID_LABEL_BY_PARENT: Record<string, string> = {
+    '/production/orders': 'Production Order',
+}
+
 function buildBreadcrumbs(pathname: string) {
     const segments = pathname.replace(/^\//, '').split('/')
     const crumbs: { label: string; href?: string }[] = []
     let path = ''
 
     for (const seg of segments) {
+        const parent = path
         path += `/${seg}`
         if (/^\d+$/.test(seg)) {
-            crumbs.push({ label: '#' + seg })
+            crumbs.push({ label: ID_LABEL_BY_PARENT[parent] ?? '#' + seg })
             continue
         }
+        // Report pages are named for the question they answer (reports
+        // consolidation, 2026-10-01) — "Sales & Orders", not the module word.
+        const reportLabel = path.startsWith('/reports/') && path.split('/').length === 3
+            ? REPORT_PAGE_LABELS[seg.toLowerCase()]
+            : undefined
         const label =
+            reportLabel ??
             SEGMENT_LABELS[seg.toLowerCase()] ??
             seg
                 .split('-')

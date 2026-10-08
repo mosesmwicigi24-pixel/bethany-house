@@ -9,7 +9,7 @@ import { openWhatsApp } from "@/lib/whatsapp";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToastStore } from "@/store/toast.store";
 import { Spinner } from "@/components/ui/Spinner";
-import { KPI_GRID, KpiCard, TableWrapper, EmptyRow } from "./reportShared";
+import { KPI_GRID, KpiCard, TableWrapper, EmptyRow, useReportOutlet } from "./reportShared";
 import { clsx } from "clsx";
 import dayjs from "dayjs";
 import type { ApiError } from "@/types";
@@ -52,7 +52,8 @@ const CHANNEL_LABEL: Record<string, string> = {
     whatsapp: "WhatsApp", online: "Online", pos: "POS",
 };
 
-export default function OrderPipelinePage() {
+/** `embedded`: shown as the Unconfirmed tab of Sales & Orders — no page title of its own. */
+export default function OrderPipelinePage({ embedded = false }: { embedded?: boolean } = {}) {
     const [sort, setSort] = useState<"value" | "age">("value");
     const [busyId, setBusyId] = useState<number | null>(null);
     const navigate = useNavigate();
@@ -62,9 +63,11 @@ export default function OrderPipelinePage() {
 
     const canWork = can("orders.edit");
 
+    // The report's outlet filter (as a tab of Sales & Orders it must follow it).
+    const outletId = useReportOutlet();
     const query = useQuery({
-        queryKey: ["order-pipeline", sort],
-        queryFn: () => reportsApi.orderPipeline({ sort }),
+        queryKey: ["order-pipeline", sort, outletId],
+        queryFn: () => reportsApi.orderPipeline({ sort, ...(outletId ? { outlet_id: outletId } : {}) }),
     });
 
     const refresh = () => {
@@ -97,9 +100,9 @@ export default function OrderPipelinePage() {
     }
 
     return (
-        <div className="space-y-6 p-5">
+        <div className={embedded ? "space-y-6" : "space-y-6 p-5"}>
             <div>
-                <h1 className="text-2xl font-bold text-surface-900">Unconfirmed orders</h1>
+                {!embedded && <h1 className="text-2xl font-bold text-surface-900">Unconfirmed orders</h1>}
                 <p className="text-sm text-surface-500 mt-1 max-w-3xl">
                     Carts customers started on the storefront or over WhatsApp and never had
                     confirmed. They are <strong>not</strong> counted as sales. Confirm the real
@@ -135,7 +138,7 @@ export default function OrderPipelinePage() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 {d?.by_channel.map(c => (
                     <div key={c.channel} className="card p-4">
-                        <p className="text-xs font-semibold text-surface-500 uppercase tracking-wide">{c.label}</p>
+                        <p className="text-xs text-surface-500">{c.label}</p>
                         <p className="text-xl font-bold text-surface-900 mt-1 tabular-nums">{fmtKes(c.value)}</p>
                         <p className="text-xs text-surface-500 mt-0.5">{c.orders} unconfirmed</p>
                     </div>

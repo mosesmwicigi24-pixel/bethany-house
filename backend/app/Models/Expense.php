@@ -54,7 +54,7 @@ class Expense extends Model
         'recurrence_frequency',
         'recurrence_end_date',
         'parent_expense_id',
-        'status',          // draft | pending_approval | approved | rejected | paid | cancelled
+        'status',          // draft | pending_approval | changes_requested | approved | rejected | paid | cancelled
         'submitted_by',
         'submitted_at',
         'approved_by',
@@ -234,6 +234,7 @@ class Expense extends Model
         return match($this->status) {
             'draft'            => 'gray',
             'pending_approval' => 'yellow',
+            'changes_requested'=> 'orange',
             'approved'         => 'blue',
             'paid'             => 'green',
             'rejected'         => 'red',

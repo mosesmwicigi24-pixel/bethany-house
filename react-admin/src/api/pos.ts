@@ -2,6 +2,16 @@ import { get, post, patch } from "./client";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+/** Why a contact is being revealed — the server accepts only these. */
+export type RevealReason = "payment_follow_up" | "delivery" | "customer_callback" | "order_issue";
+
+export const REVEAL_REASONS: { value: RevealReason; label: string }[] = [
+    { value: "payment_follow_up", label: "Payment follow-up" },
+    { value: "delivery",          label: "Delivery" },
+    { value: "customer_callback", label: "Calling the customer back" },
+    { value: "order_issue",       label: "A problem with the order" },
+];
+
 export interface PosOutlet {
     id: number;
     name: string;
@@ -83,27 +93,38 @@ export interface CartItem {
     tax_rate: number;
 }
 
+/**
+ * A till as the POS screens read it. BLIND to its own operator until a
+ * manager has finalized it (Phase 4B): the server then leaves out expected
+ * cash, the variance and every sales total that adds up to them — they are
+ * absent, not zero — and sets `blind: true`.
+ */
 export interface CashRegister {
     id: number;
     outlet_id: number;
     opened_by: string | null;
     closed_by: string | null;
-    // Balances (map from DB: opening_balance, closing_balance, expected_cash)
     opening_cash: number;
+    /** Her own count, once submitted. Null while open. */
     closing_cash: number | null;
-    expected_cash: number;
-    // Sales breakdown
     transaction_count: number;
-    total_sales: number;
-    total_cash_sales: number;
-    total_card_sales: number;
-    total_mpesa_sales: number;
-    total_refunds: number;
-    variance: number | null;
-    status: "open" | "closed";
+    status: "open" | "counted" | "closed";
+    stage: "open" | "awaiting_verification" | "finalized" | "closed_unverified";
+    /** Opened before the till lifecycle existed. */
+    legacy: boolean;
+    blind: boolean;
     notes?: string | null;
     opened_at: string;
     closed_at?: string | null;
+    finalized_at?: string | null;
+    // Present only when not blind:
+    expected_cash?: number;
+    total_sales?: number;
+    total_cash_sales?: number;
+    total_card_sales?: number;
+    total_mpesa_sales?: number;
+    total_refunds?: number;
+    variance?: number | null;
 }
 
 export interface PosOrderItem {
@@ -170,6 +191,47 @@ export interface PosSale {
     /** HMAC token for the public /pay/:token payment page */
     payment_token?: string | null;
     created_at: string;
+    /** Void / refund requests on this sale still waiting for a signature (Phase 4B). */
+    pending_reversals?: PosPendingReversal[];
+}
+
+// ── Till voids and refunds (Phase 4B part 2) ─────────────────────────────────
+// A void or a return at the till is a REQUEST. An approver signs it on this
+// till with their own PIN, or later from the Approvals inbox.
+
+export interface PosPendingReversal {
+    approval_id: number;
+    event: "pos_void" | "pos_refund";
+    kind: "void" | "refund";
+    approvable_id: number;
+    version: number;
+    amount: number | null;
+    currency_code: string | null;
+    /** The band key the request is waiting on, e.g. pos.approve_reversal. */
+    awaiting: string | null;
+    requested_by: string | null;
+    requested_at: string | null;
+    expires_at: string | null;
+}
+
+/** The engine's view of one approval request (the parts the till shows). */
+export interface TillApprovalRequest {
+    id: number;
+    event: string;
+    status: "pending" | "approved" | "rejected" | "expired" | "cancelled";
+    version: number;
+    approvable_id: number;
+    amount: number | null;
+    currency_code: string | null;
+    bands: { order: number; permission: string; up_to_kes: number | null; signed: boolean }[];
+    awaiting: { order: number; permission: string } | null;
+    summary: { title: string; reference?: string | null; lines: string[] } | null;
+}
+
+export interface TillApprover {
+    id: number;
+    name: string;
+    pin_set: boolean;
 }
 
 export interface DailySummary {
@@ -256,7 +318,8 @@ export const posApi = {
         post<{ message: string; register: CashRegister }>("/v1/admin/pos/register/open", data),
 
     closeRegister: (data: { outlet_id: number; closing_cash: number; notes?: string; denomination_count?: Record<number, number> }) =>
-        post<{ message: string; register: CashRegister; variance: number }>(
+        // A blind count: the reply carries no expected figure and no variance.
+        post<{ message: string; register: CashRegister }>(
             "/v1/admin/pos/register/close",
             data,
         ),
@@ -297,8 +360,29 @@ export const posApi = {
     saleDetail: (id: number) =>
         get<{ sale: PosSale }>(`/v1/admin/pos/sales/${id}`),
 
+    /** Ask for a void (202). The sale is voided only when an approver signs. */
     voidSale: (id: number, reason: string) =>
-        post<{ message: string }>(`/v1/admin/pos/sales/${id}/void`, { reason }),
+        post<{ message: string; approval: TillApprovalRequest; pending: PosPendingReversal[] }>(
+            `/v1/admin/pos/sales/${id}/void`, { reason }),
+
+    saleReversals: (id: number) =>
+        get<{ sale_id: number; pending: PosPendingReversal[]; till_closed: boolean }>(
+            `/v1/admin/pos/sales/${id}/reversals`),
+
+    /** Who could sign this request now, at this till. */
+    tillApprovers: (approvalId: number) =>
+        get<{ data: TillApprover[] }>(`/v1/admin/pos/approvals/${approvalId}/approvers`),
+
+    /** The approver signs on this till with THEIR terminal PIN. */
+    pinSign: (approvalId: number, data: {
+        approver_id: number;
+        pin: string;
+        decision?: "approve" | "reject";
+        reason?: string;
+        version?: number;
+    }) =>
+        post<{ message: string; request: TillApprovalRequest; pending: PosPendingReversal[] }>(
+            `/v1/admin/pos/approvals/${approvalId}/pin-sign`, data),
 
     /**
      * Phase 2 two-step checkout: create the order without a payment so that
@@ -370,7 +454,14 @@ export const posApi = {
         reason: string;
         refund_method: string;
     }) =>
-        post<{ message: string; return_number: string; refund_amount: number }>(
+        // Ask for a refund (202). It is made only when an approver signs.
+        post<{
+            message: string;
+            refund_request_id: number;
+            refund_amount: number;
+            approval: TillApprovalRequest;
+            pending: PosPendingReversal[];
+        }>(
             "/v1/admin/pos/returns",
             data,
         ),
@@ -426,10 +517,27 @@ export const posApi = {
             data,
         ),
 
+    // Phase 4A: the autocomplete returns name + MASKED phone + id only, from
+    // 3 characters, at most 20 results, scoped before matching.
     searchCustomers: (q: string) =>
-        get<{ data: { id: number; name: string; phone: string; email: string }[] }>(
+        get<{ data: { id: number; name: string; phone: string | null; email?: string | null }[] }>(
             "/v1/admin/pos/customers/search",
             { params: { q } },
+        ),
+
+    // Phase 4A: reveal one contact of the customer on THIS sale. Audited
+    // server-side (actor, field, reason, sale, IP, session); 20 an hour.
+    revealCustomerContact: (
+        customerId: number,
+        data: {
+            field: "phone" | "email" | "address";
+            reason: RevealReason;
+            context: { type: "order" | "shipment"; id: number };
+        },
+    ) =>
+        post<{ field: string; value: string | Record<string, string | null> | null }>(
+            `/v1/admin/customers/${customerId}/reveal`,
+            data,
         ),
 
     // Uses the POS-scoped route (pos.access permission), NOT

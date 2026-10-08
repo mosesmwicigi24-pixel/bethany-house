@@ -91,7 +91,14 @@ class PosOutletScopeTest extends TestCase
     public function test_an_admin_with_no_outlet_is_unaffected(): void
     {
         $user = User::factory()->create();
-        $user->assignRole(Role::findOrCreate('admin', 'sanctum'));
+        // The admin role reads every order, as the catalogue's does (a role
+        // granting nothing now resolves to no orders — Phase 4A), and holds
+        // outlets.all_access — the permission that replaced the role-name
+        // check (4D). A bare role merely NAMED admin no longer floats between outlets.
+        $admin = Role::findOrCreate('admin', 'sanctum');
+        $admin->givePermissionTo(Permission::findOrCreate('orders.view', 'sanctum'));
+        $admin->givePermissionTo(Permission::findOrCreate('outlets.all_access', 'sanctum'));
+        $user->assignRole($admin);
         $user->givePermissionTo(Permission::findOrCreate('pos.access', 'sanctum'));
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);

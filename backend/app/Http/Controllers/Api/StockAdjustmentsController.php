@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\InventoryItem;
 use App\Models\InventoryTransaction;
+use App\Services\DataScopeResolver;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Services\NotificationService;
@@ -36,11 +37,28 @@ class StockAdjustmentsController extends Controller
     // Paginated list of all adjustments with filters.
     // =========================================================================
 
+    /**
+     * Adjustments this caller may see (Phase 4A): an adjustment belongs to the
+     * outlet of the stock row it moved. Bounded callers (outlet manager,
+     * cashier) see their outlets'; another outlet's id answers 404.
+     */
+    private function scoped()
+    {
+        $query = InventoryTransaction::query();
+        $ids   = DataScopeResolver::outletIdsForUnowned(request()->user(), 'inventory.view');
+        if ($ids !== null) {
+            $query->whereIn('inventory_transactions.inventory_item_id',
+                DB::table('inventory_items')->select('id')->whereIn('outlet_id', $ids));
+        }
+
+        return $query;
+    }
+
     public function index(Request $request)
     {
         $perPage = min((int) $request->get('per_page', 25), 100);
 
-        $query = InventoryTransaction::with([
+        $query = $this->scoped()->with([
             'inventoryItem.product:id,sku',
             'inventoryItem.product.translations' => fn ($q) => $q->where('language_code', 'en')->select('product_id', 'name'),
             'inventoryItem.product.images'       => fn ($q) => $q->where('is_primary', true)->select('product_id', 'image_url'),
@@ -84,7 +102,7 @@ class StockAdjustmentsController extends Controller
 
         // Stats - count all adjustment transactions regardless of status
         $adjustmentTypes = array_keys(self::REASON_CODES);
-        $baseQuery = fn () => InventoryTransaction::whereIn('transaction_type', $adjustmentTypes);
+        $baseQuery = fn () => $this->scoped()->whereIn('transaction_type', $adjustmentTypes);
 
         $stats = [
             'total'            => $baseQuery()->count(),
@@ -119,7 +137,7 @@ class StockAdjustmentsController extends Controller
 
     public function show($id)
     {
-        $adjustment = InventoryTransaction::with([
+        $adjustment = $this->scoped()->with([
             'inventoryItem.product.translations',
             'inventoryItem.product.images' => fn ($q) => $q->where('is_primary', true),
             'inventoryItem.variant',
@@ -146,15 +164,32 @@ class StockAdjustmentsController extends Controller
             'reference_number'  => 'nullable|string|max:100',
         ]);
 
-        $item         = InventoryItem::findOrFail($validated['inventory_item_id']);
+        // A stock row at an outlet outside the caller's scope is absent.
+        $item         = InventoryItem::query()
+            ->tap(fn ($q) => DataScopeResolver::boundToOutlets($q, $request->user(), 'inventory.view', 'inventory_items.outlet_id'))
+            ->findOrFail($validated['inventory_item_id']);
         $reasonConfig = self::REASON_CODES[$validated['reason_code']];
         $change       = $validated['quantity_change'];
 
-        // Super admins and admins bypass the approval workflow -
-        // they have authority to adjust stock directly.
-        $user         = auth()->user();
-        $isPrivileged = $user && $user->hasAnyRole(['super_admin', 'admin']);
-        $requiresApproval = $reasonConfig['requires_approval'] && !$isPrivileged;
+        // Whether an adjustment waits for approval (Phase 3B). It is valued
+        // at |quantity| × the product's KES book cost (CostBasis). A reason
+        // code that never needed approval still applies at once — but ONLY
+        // while the value, on the rolling 24-hour total of this person's
+        // adjustments to this item, is within the procurement manager's band.
+        // Above it, or with no cost on the book (a value that cannot be
+        // stated is never guessed), it waits like any other. Admins and super
+        // admins wait too: whoever originates a stock event never approves it
+        // (Phase 1B).
+        $user          = auth()->user();
+        $engine        = app(\App\Services\Approvals\ApprovalEngine::class);
+        $valueKes      = \App\Services\Approvals\Handlers\StockAdjustmentHandler::valueKes($item->id, (int) $change);
+        $appliedKes    = $this->appliedWithoutApprovalKes($user->id, $item->id);
+        $basisKes      = $appliedKes === null ? null
+            : $engine->rollingBasis('stock_adjustment', $user->id, "inventory_item:{$item->id}", $valueKes, null, $appliedKes);
+        $pmBand        = $engine->thresholds()->bands('stock_adjustment')->first();
+        $withinPmBand  = $basisKes !== null && $pmBand !== null
+            && ($pmBand->up_to_kes === null || $basisKes <= (float) $pmBand->up_to_kes);
+        $requiresApproval = $reasonConfig['requires_approval'] || !$withinPmBand;
 
         // Direction validation
         if ($reasonConfig['direction'] === 'decrease' && $change > 0) {
@@ -195,16 +230,21 @@ class StockAdjustmentsController extends Controller
                 'reason_code'       => $validated['reason_code'],
                 'status'            => $requiresApproval ? 'pending_approval' : 'approved',
                 'created_by'        => $user->id,
-                // Self-approve when privileged role bypasses workflow
+                // A reason that needs no approval applies at once, recorded
+                // against the person who made it.
                 'approved_by'       => $requiresApproval ? null : $user->id,
                 'approved_at'       => $requiresApproval ? null : now(),
-                'approval_notes'    => $requiresApproval ? null : ($isPrivileged ? 'Auto-approved: admin role' : null),
+                'approval_notes'    => null,
             ]);
 
             // Apply immediately if no approval needed
             if (!$requiresApproval) {
                 $item->increment('quantity_on_hand', $change);
             }
+
+            $approval = $requiresApproval
+                ? $engine->submit('stock_adjustment', $transaction, $user, null, (float) ($appliedKes ?? 0))
+                : null;
 
             DB::commit();
 
@@ -251,13 +291,45 @@ class StockAdjustmentsController extends Controller
                     'approvedBy:id,first_name,last_name,email',
                 ])),
                 'requires_approval' => $requiresApproval,
-                'auto_approved'     => !$requiresApproval && $isPrivileged && $reasonConfig['requires_approval'],
+                // Kept for older clients; no role skips approval any more.
+                'auto_approved'     => false,
+                'value_kes'         => $valueKes,
+                'approval'          => $approval ? $engine->present($approval->load(['signatures', 'maker']), $user) : null,
             ], 201);
 
+        } catch (\Illuminate\Http\Exceptions\HttpResponseException $e) {
+            DB::rollBack();
+            throw $e;
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['message' => 'Failed to save adjustment.', 'error' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * KES value of this person's adjustments to this item in the last 24
+     * hours that applied without approval (reason codes under the PM band),
+     * for the anti-splitting total. Null when any of them cannot be valued.
+     */
+    private function appliedWithoutApprovalKes(int $userId, int $itemId): ?float
+    {
+        $total = 0.0;
+        $rows = InventoryTransaction::where('inventory_item_id', $itemId)
+            ->where('reference_type', 'adjustment')
+            ->where('created_by', $userId)
+            ->whereColumn('approved_by', 'created_by')
+            ->where('status', 'approved')
+            ->where('created_at', '>=', now()->subDay())
+            ->get(['quantity_change']);
+        foreach ($rows as $row) {
+            $v = \App\Services\Approvals\Handlers\StockAdjustmentHandler::valueKes($itemId, (int) $row->quantity_change);
+            if ($v === null) {
+                return null;
+            }
+            $total += $v;
+        }
+
+        return $total;
     }
 
     // =========================================================================
@@ -267,65 +339,27 @@ class StockAdjustmentsController extends Controller
 
     public function approve(Request $request, $id)
     {
-        $transaction = InventoryTransaction::where('status', 'pending_approval')->findOrFail($id);
-        $item        = $transaction->inventoryItem;
+        $transaction = $this->scoped()->where('status', 'pending_approval')->findOrFail($id);
 
-        // Re-check stock for decreases
-        if ($transaction->quantity_change < 0) {
-            $newQty = $item->quantity_on_hand + $transaction->quantity_change;
-            if ($newQty < 0) {
-                return response()->json([
-                    'message' => "Cannot approve - stock has changed. Available: {$item->quantity_on_hand}, change: {$transaction->quantity_change}.",
-                ], 422);
-            }
-        }
+        // Since Phase 3B this SIGNS the band the adjustment is waiting on. The
+        // engine refuses its raiser (maker ≠ checker), checks the caller holds
+        // the band, and applies the stock (StockAdjustmentHandler, re-checking
+        // it cannot go negative) only when the last band has signed.
+        $engine   = app(\App\Services\Approvals\ApprovalEngine::class);
+        $approval = $engine->sign(
+            $engine->openOrAdopt('stock_adjustment', $transaction), $request->user(),
+            \App\Models\ApprovalSignature::APPROVED, $request->get('notes'), $transaction->id,
+        );
+        $done = $approval->status === \App\Models\ApprovalRequest::APPROVED;
 
-        DB::beginTransaction();
-        try {
-            $quantityBefore = $item->quantity_on_hand;
-
-            // Apply the quantity change
-            $item->increment('quantity_on_hand', $transaction->quantity_change);
-            $item->refresh(); // ensure in-memory value matches DB
-
-            $quantityAfter = $item->quantity_on_hand;
-
-            $transaction->update([
-                'status'           => 'approved',
-                'quantity_before'  => $quantityBefore,
-                'quantity_after'   => $quantityAfter,
-                'approved_by'      => auth()->id(),
-                'approved_at'      => now(),
-                'approval_notes'   => $request->get('notes'),
-            ]);
-
-            DB::commit();
-
-            $item->loadMissing(['product.translations', 'variant', 'outlet']);
-            $productName = $item->product?->translations?->first()?->name ?? $item->product?->sku ?? 'Unknown';
-            $sku         = $item->variant?->sku ?? $item->product?->sku ?? 'N/A';
-            $sign        = $transaction->quantity_change > 0 ? '+' : '';
-            ActivityLogService::log('adjustment_approved', null, [
-                'transaction_id'  => $transaction->id,
-                'sku'             => $sku,
-                'quantity_before' => $quantityBefore,
-                'quantity_change' => $transaction->quantity_change,
-                'quantity_after'  => $quantityAfter,
-                'approved_by'     => auth()->id(),
-            ], "Adjustment approved: {$sku} {$sign}{$transaction->quantity_change} (was {$quantityBefore}, now {$quantityAfter})");
-
-            return response()->json([
-                'message'    => 'Adjustment approved and applied.',
-                'adjustment' => $this->formatAdjustment($transaction->fresh()->load([
-                    'inventoryItem', 'createdBy:id,first_name,last_name,email',
-                    'approvedBy:id,first_name,last_name,email',
-                ])),
-            ]);
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return response()->json(['message' => 'Approval failed.', 'error' => $e->getMessage()], 500);
-        }
+        return response()->json([
+            'message'    => $done ? 'Adjustment approved and applied.' : 'Signed. The adjustment now waits for the next band.',
+            'adjustment' => $this->formatAdjustment($transaction->fresh()->load([
+                'inventoryItem', 'createdBy:id,first_name,last_name,email',
+                'approvedBy:id,first_name,last_name,email',
+            ])),
+            'approval'   => $engine->present($approval->load(['signatures', 'maker']), $request->user()),
+        ]);
     }
 
     // =========================================================================
@@ -337,20 +371,13 @@ class StockAdjustmentsController extends Controller
     {
         $request->validate(['reason' => 'required|string|max:500']);
 
-        $transaction = InventoryTransaction::where('status', 'pending_approval')->findOrFail($id);
+        $transaction = $this->scoped()->where('status', 'pending_approval')->findOrFail($id);
 
-        $transaction->update([
-            'status'          => 'rejected',
-            'approved_by'     => auth()->id(),
-            'approved_at'     => now(),
-            'approval_notes'  => $request->reason,
-        ]);
-
-        ActivityLogService::log('adjustment_rejected', null, [
-            'transaction_id' => $transaction->id,
-            'reason'         => $request->reason,
-            'rejected_by'    => auth()->id(),
-        ], "Adjustment #{$transaction->id} rejected: {$request->reason}");
+        $engine = app(\App\Services\Approvals\ApprovalEngine::class);
+        $engine->sign(
+            $engine->openOrAdopt('stock_adjustment', $transaction), $request->user(),
+            \App\Models\ApprovalSignature::REJECTED, $request->reason, $transaction->id,
+        );
 
         return response()->json(['message' => 'Adjustment rejected.']);
     }
@@ -361,7 +388,7 @@ class StockAdjustmentsController extends Controller
 
     public function auditLog($id)
     {
-        InventoryTransaction::findOrFail($id); // 404 guard
+        $this->scoped()->findOrFail($id); // 404 guard — scope included
 
         $logs = DB::table('activity_log as al')
             ->leftJoin('users as u', 'u.id', '=', 'al.causer_id')
@@ -396,7 +423,7 @@ class StockAdjustmentsController extends Controller
 
     public function pending()
     {
-        $items = InventoryTransaction::with([
+        $items = $this->scoped()->with([
             'inventoryItem.product.translations' => fn ($q) => $q->where('language_code', 'en'),
             'inventoryItem.outlet:id,name',
             'inventoryItem.variant:id,variant_name',
@@ -420,7 +447,7 @@ class StockAdjustmentsController extends Controller
 
     public function reverse(Request $request, $id)
     {
-        $original = InventoryTransaction::with(['inventoryItem'])
+        $original = $this->scoped()->with(['inventoryItem'])
             ->where('status', 'approved')
             ->whereNotNull('quantity_change')
             ->findOrFail($id);
@@ -446,6 +473,12 @@ class StockAdjustmentsController extends Controller
         $item           = $original->inventoryItem;
         $reverseChange  = -$original->quantity_change;
         $user           = auth()->user();
+
+        // A reversal undoes an approval, so it is the next check in the chain:
+        // whoever approved the original may not also be the one to reverse it
+        // (4D; approved_by is the creator when the reason needed no approval).
+        // Before the transaction, so the refusal's audit row is not rolled back.
+        \App\Support\MakerChecker::assertNotMaker($user, 'stock_adjustment.reverse', $original, $original->approved_by);
 
         // Check won't go negative
         if ($reverseChange < 0 && ($item->quantity_on_hand + $reverseChange) < 0) {

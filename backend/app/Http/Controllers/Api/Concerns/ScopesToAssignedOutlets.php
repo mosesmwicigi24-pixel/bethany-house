@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers\Api\Concerns;
 
+use App\Enums\DataScope;
 use App\Models\User;
+use App\Services\DataScopeResolver;
 
 /**
  * ONE definition of "which outlets may this caller touch".
@@ -31,23 +33,30 @@ use App\Models\User;
 trait ScopesToAssignedOutlets
 {
     /**
-     * Outlet ids this user may see and act on.
+     * Outlet ids this user may see and act on, for a capability.
      *
-     * null  → unrestricted (admins, super admins, and any role that is not
-     *         outlet-scoped, e.g. finance).
-     * array → exactly the outlets assigned via the outlet_user pivot. An
-     *         EMPTY array is meaningful: a manager with no assignment sees
-     *         nothing, rather than falling open to everything.
+     * null  → not bounded by outlet: a role at scope 'all' (admin, finance,
+     *         accountant…), or 'own', whose boundary is the model's owner
+     *         column (ViewerScope), not an outlet.
+     * array → exactly the outlets on the outlet_user pivot. An EMPTY array is
+     *         meaningful: a manager with no assignment sees nothing, and so
+     *         does a staff member none of whose roles grants $permission.
+     *
+     * Phase 4A: this used to test role NAMES (outlet_manager and not
+     * admin/super_admin). It now asks DataScopeResolver, so there is one rule
+     * — the role's data_scope, widest among the roles granting the
+     * capability — and this trait, ViewerScope and the raw-query constraint
+     * cannot disagree.
      *
      * @return int[]|null
      */
-    private function assignedOutletIdsOrNull(User $user): ?array
+    private function assignedOutletIdsOrNull(User $user, string $permission): ?array
     {
-        if (!$user->hasRole('outlet_manager') || $user->hasAnyRole(['admin', 'super_admin'])) {
-            return null;
-        }
-
-        return $user->outlets()->pluck('outlets.id')->map(fn ($id) => (int) $id)->all();
+        return match (DataScopeResolver::for($user, $permission)) {
+            DataScope::Outlet => DataScopeResolver::outletIds($user),
+            DataScope::None   => [],
+            default           => null,
+        };
     }
 
     /**
@@ -72,10 +81,10 @@ trait ScopesToAssignedOutlets
      * Convenience: authorise a record's `outlet_id` against the caller's
      * scope in one step. Handles the NULL-outlet case for you.
      */
-    private function authoriseOutletScopeFor(User $user, mixed $outletId): void
+    private function authoriseOutletScopeFor(User $user, mixed $outletId, string $permission): void
     {
         $this->authoriseOutletScope(
-            $this->assignedOutletIdsOrNull($user),
+            $this->assignedOutletIdsOrNull($user, $permission),
             $outletId === null ? null : (int) $outletId,
         );
     }

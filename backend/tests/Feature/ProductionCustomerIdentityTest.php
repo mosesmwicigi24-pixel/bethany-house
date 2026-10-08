@@ -32,7 +32,12 @@ class ProductionCustomerIdentityTest extends TestCase
         $user->assignRole(Role::findOrCreate('production_manager', 'sanctum'));
         // confirm_order is what makes this a floor coordinator: raising an
         // order alone no longer grants reading the whole book.
-        foreach (['production.view', 'production.raise_order', 'production.confirm_order'] as $p) {
+        // customers.view: since Phase 1C a production payload carries the
+        // customer's full name and phone only to roles that hold it (every
+        // real coordinator role does — outlet_manager, admin). Without it the
+        // label is a first name and the contact null; that rule is covered in
+        // ProductionPayloadRedactionTest.
+        foreach (['production.view', 'production.raise_order', 'production.confirm_order', 'customers.view'] as $p) {
             $user->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();

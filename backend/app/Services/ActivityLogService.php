@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\Audit\EventContext;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -73,8 +74,7 @@ class ActivityLogService
                 'causer_id'    => $causerId,
                 // Also fill the legacy column used by AuditLogController
                 'action'       => $event,
-                'properties'   => json_encode(self::redactSensitive($properties), JSON_PARTIAL_OUTPUT_ON_ERROR),
-            ]);
+            ], self::redactSensitive($properties), $causer, $subject, $event);
         } catch (\Throwable $e) {
             // Logging failures must never crash the application
             Log::error('ActivityLogService failed: ' . $e->getMessage());
@@ -102,8 +102,7 @@ class ActivityLogService
                 'causer_type'  => $causer ? get_class($causer) : null,
                 'causer_id'    => $causer?->id,
                 'action'       => $event,
-                'properties'   => json_encode($properties, JSON_PARTIAL_OUTPUT_ON_ERROR),
-            ]);
+            ], $properties, $causer, $model, $event);
             self::context()?->markObserved(get_class($model), $model->getKey(), $event);
         } catch (\Throwable $e) {
             Log::error('ActivityLogService::recordModelChange failed: ' . $e->getMessage());
@@ -119,8 +118,19 @@ class ActivityLogService
      * POS sale used to take the sale down with it (PrivilegeEscalationTest
      * documents the case). The savepoint confines a failure to the log entry.
      */
-    private static function write(array $row): void
+    private static function write(array $row, array $properties, $causer, $subject, string $event): void
     {
+        // Role(s), outlet, token, channel and outcome on EVERY entry (4D).
+        // After redaction, and under a key no caller writes.
+        try {
+            $properties[EventContext::KEY] = EventContext::build($causer, $subject, $event, $properties);
+        } catch (\Throwable $e) {
+            $properties[EventContext::KEY] = ['error' => 'context unavailable'];
+            Log::warning('audit context failed: ' . $e->getMessage());
+        }
+
+        $row['properties'] = json_encode($properties, JSON_PARTIAL_OUTPUT_ON_ERROR);
+
         $row += [
             'ip_address' => Request::ip(),
             'user_agent' => mb_substr((string) Request::userAgent(), 0, 500) ?: null,

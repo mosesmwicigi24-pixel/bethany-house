@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm, useFieldArray, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { discountCapHint, useDiscountCap, withSalePriceCap } from "@/lib/discountCap";
 import { z } from "zod";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -44,6 +45,8 @@ import type { ApiError } from "@/types";
 import type { ProductTaxRate } from "@/api/products";
 import { clsx } from "clsx";
 import { RecordHistory } from "@/components/audit/AuditParts";
+import { PendingChanges, PROPOSALS_QUERY_KEY } from "@/components/approvals/PendingChanges";
+import { proposeChange, waitsForApproval } from "@/api/proposals";
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -1397,8 +1400,21 @@ function EditVariantModal({
     productPrices?: { currency_code: string; regular_price: number; sale_price?: number | null; cost_price?: number | null }[];
 }) {
     const toast = useToastStore();
+    // Cost is need-to-know (products.view_cost). Without it the API sends no
+    // cost_price and ignores one on save, so the box would only ever be empty.
+    const { can } = usePermissions();
+    const canSeeCost = can("products.view_cost");
+    // The owner's 5% rule on sale prices (null for the super_admin).
+    const discountCap = useDiscountCap();
+    const capRef  = useRef(discountCap);
+    capRef.current = discountCap;
+    const formRef = useRef<any>(null);
     const form = useForm<VariantForm>({
-        resolver: zodResolver(variantSchema),
+        resolver: withSalePriceCap(
+            zodResolver(variantSchema),
+            () => capRef.current,
+            () => formRef.current?.formState?.defaultValues?.prices as any,
+        ),
         mode: "onSubmit",
         reValidateMode: "onSubmit",
         defaultValues: {
@@ -1411,6 +1427,7 @@ function EditVariantModal({
             prices: [],
         },
     });
+    formRef.current = form;
     const {
         register,
         handleSubmit,
@@ -1471,8 +1488,10 @@ function EditVariantModal({
                     cost_price: p.cost_price ?? null,
                 })),
             }),
-        onSuccess: () => {
-            toast.success("Variant updated.");
+        onSuccess: (res) => {
+            // Phase 3C: a price change past the maker's band waits for approval.
+            if (waitsForApproval(res)) toast.info(res.message);
+            else toast.success("Variant updated.");
             onSaved();
             onClose();
         },
@@ -1629,7 +1648,7 @@ function EditVariantModal({
                         return (
                             <div
                                 key={currency.code}
-                                className={`grid grid-cols-4 gap-2 items-end rounded-lg p-2.5 mb-2 ${isBase ? "bg-brand-50 border border-brand-200" : "bg-surface-50"}`}
+                                className={`grid ${canSeeCost ? "grid-cols-4" : "grid-cols-3"} gap-2 items-end rounded-lg p-2.5 mb-2 ${isBase ? "bg-brand-50 border border-brand-200" : "bg-surface-50"}`}
                             >
                                 <div className={`text-xs font-mono font-semibold ${isBase ? "text-brand-700" : "text-surface-600"}`}>
                                     {currency.code}
@@ -1646,7 +1665,11 @@ function EditVariantModal({
                                         onChange={(e) => { regReg.onChange(e); cascade("regular_price")(e); }}
                                     />
                                 </Field>
-                                <Field label="Sale">
+                                <Field
+                                    label="Sale"
+                                    error={(errors as any).prices?.[i]?.sale_price?.message}
+                                    hint={discountCap !== null ? `${discountCapHint(discountCap)} under regular` : undefined}
+                                >
                                     <FieldInput
                                         className="input text-sm"
                                         type="number"
@@ -1657,6 +1680,7 @@ function EditVariantModal({
                                         placeholder="-"
                                     />
                                 </Field>
+                                {canSeeCost && (
                                 <Field label="Cost">
                                     <FieldInput
                                         className="input text-sm"
@@ -1667,6 +1691,7 @@ function EditVariantModal({
                                         placeholder="-"
                                     />
                                 </Field>
+                                )}
                             </div>
                         );
                     })}
@@ -2189,6 +2214,12 @@ const PriceRows = React.memo(function PriceRows({
     onRecalculate: (i: number) => void;
 }) {
     const baseRate = Number(baseCurrency?.exchange_rate ?? 1);
+    // Cost Price shows only to products.view_cost holders — the API strips
+    // cost_price for everyone else and leaves the stored value untouched.
+    const { can } = usePermissions();
+    const canSeeCost = can("products.view_cost");
+    // The owner's 5% rule on sale prices (null for the super_admin).
+    const discountCap = useDiscountCap();
 
     // Typing a price in the default currency fills in every other currency.
     //
@@ -2291,20 +2322,26 @@ const PriceRows = React.memo(function PriceRows({
                                 )}
                             />
                         </Field>
-                        <Field label="Sale Price">
+                        <Field label="Sale Price" hint={discountCap !== null ? `${discountCapHint(discountCap)} under regular` : undefined}>
                             <Controller control={control} name={`prices.${i}.sale_price`}
-                                render={({ field: f }) => (
-                                    <MoneyInput
-                                        name={f.name} inputRef={f.ref} onBlur={f.onBlur} placeholder="-"
-                                        value={f.value}
-                                        onValue={(v) => {
-                                            f.onChange(v);
-                                            if (isBase) cascade("sale_price", v);
-                                        }}
-                                    />
+                                render={({ field: f, fieldState }) => (
+                                    <>
+                                        <MoneyInput
+                                            name={f.name} inputRef={f.ref} onBlur={f.onBlur} placeholder="-"
+                                            value={f.value}
+                                            onValue={(v) => {
+                                                f.onChange(v);
+                                                if (isBase) cascade("sale_price", v);
+                                            }}
+                                        />
+                                        {fieldState.error?.message && (
+                                            <p className="text-2xs text-danger mt-1">{fieldState.error.message}</p>
+                                        )}
+                                    </>
                                 )}
                             />
                         </Field>
+                        {canSeeCost && (
                         <Field label="Cost Price">
                             <Controller control={control} name={`prices.${i}.cost_price`}
                                 render={({ field: f }) => (
@@ -2316,6 +2353,7 @@ const PriceRows = React.memo(function PriceRows({
                                 )}
                             />
                         </Field>
+                        )}
                         <Field label="Sale From">
                             <Controller control={control} name={`prices.${i}.sale_start_date`}
                                 render={({ field: f }) => (
@@ -2438,6 +2476,76 @@ function FeaturesTab({ features, onChange }: { features: Feature[]; onChange: (f
     );
 }
 
+// ── Cost proposals (Phase 3C) ────────────────────────────────────────────────
+// The procurement manager owns cost but not the catalogue (products.edit_cost
+// without products.edit), so the product form is read-only for them. This is
+// their one write: a KES cost per price row, proposed — at once within 5%,
+// otherwise it waits for finance (and the super admin above 25%).
+function CostProposalPanel({ product }: { product: { id: number; prices?: { id?: number; currency_code: string; cost_price: number | null; product_variant_id: number | null }[]; variants?: { id: number; variant_name: string; prices?: { id?: number; currency_code: string; cost_price: number | null; product_variant_id: number | null }[] }[] } }) {
+    const toast = useToastStore();
+    const qc = useQueryClient();
+    const rows = [
+        ...(product.prices ?? []).filter((p) => p.currency_code === "KES" && p.id).map((p) => ({ id: Number(p.id), label: "Product", cost: p.cost_price })),
+        ...(product.variants ?? []).flatMap((v) => (v.prices ?? [])
+            .filter((p) => p.currency_code === "KES" && p.id)
+            .map((p) => ({ id: Number(p.id), label: v.variant_name, cost: p.cost_price }))),
+    ];
+    const [values, setValues] = useState<Record<number, string>>({});
+
+    const propose = useMutation({
+        mutationFn: (row: { id: number; value: string }) =>
+            proposeChange({ event: "product_cost_change", subject_id: row.id, changes: { cost_price: row.value === "" ? null : Number(row.value) } }),
+        onSuccess: (res) => {
+            if (res.proposal && res.proposal.status !== "applied") toast.info(res.message);
+            else toast.success(res.message);
+            qc.invalidateQueries({ queryKey: [PROPOSALS_QUERY_KEY] });
+            qc.invalidateQueries({ queryKey: ["product", String(product.id)] });
+            setValues({});
+        },
+        onError: (e: ApiError) => toast.error(e.message),
+    });
+
+    if (rows.length === 0) {
+        return <p className="text-xs text-surface-500">This product has no KES price row yet, so it has nowhere to keep a cost.</p>;
+    }
+
+    return (
+        <div className="rounded-xl border border-line bg-surface-50/50 p-4 space-y-3">
+            <div>
+                <h4 className="text-sm font-semibold text-surface-800">Cost (KES)</h4>
+                <p className="text-xs text-surface-400 mt-0.5">
+                    Within 5% of the cost 24 hours ago it applies at once; more needs approval from finance
+                    (and the super admin above 25%).
+                </p>
+            </div>
+            {rows.map((r) => (
+                <div key={r.id} className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                    <label className="flex-1 min-w-0">
+                        <span className="label">{r.label} — now {r.cost == null ? "no cost" : `KES ${Number(r.cost).toLocaleString("en-KE", { minimumFractionDigits: 2 })}`}</span>
+                        <input
+                            className="input"
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={values[r.id] ?? ""}
+                            placeholder={r.cost == null ? "" : String(r.cost)}
+                            onChange={(e) => setValues((v) => ({ ...v, [r.id]: e.target.value }))}
+                        />
+                    </label>
+                    <button
+                        type="button"
+                        className="btn-secondary btn-sm shrink-0"
+                        disabled={propose.isPending || (values[r.id] ?? "") === ""}
+                        onClick={() => propose.mutate({ id: r.id, value: values[r.id] ?? "" })}
+                    >
+                        Propose cost
+                    </button>
+                </div>
+            ))}
+        </div>
+    );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function ProductFormPage() {
@@ -2515,8 +2623,17 @@ export default function ProductFormPage() {
 
     // ── Form ──────────────────────────────────────────────────────────────────
 
+    // The owner's 5% rule on sale prices (null for the super_admin).
+    const discountCap = useDiscountCap();
+    const capRef  = useRef(discountCap);
+    capRef.current = discountCap;
+    const formRef = useRef<any>(null);
     const form = useForm<FormValues>({
-        resolver: zodResolver(schema),
+        resolver: withSalePriceCap(
+            zodResolver(schema),
+            () => capRef.current,
+            () => formRef.current?.formState?.defaultValues?.prices as any,
+        ),
         mode: "onSubmit",
         reValidateMode: "onChange",
         defaultValues: {
@@ -2559,6 +2676,7 @@ export default function ProductFormPage() {
             production_stage_ids: [],
         },
     });
+    formRef.current = form;
     const {
         register,
         handleSubmit,
@@ -2812,7 +2930,11 @@ export default function ProductFormPage() {
             return res;
         },
         onSuccess: (res) => {
-            toast.success(isEditing ? "Product saved." : "Product created.");
+            // Phase 3C: a price or cost change past the maker's band waits for
+            // approval — the live price stays, and the message says who signs.
+            if (waitsForApproval(res)) toast.info(res.message);
+            else toast.success(isEditing ? "Product saved." : "Product created.");
+            qc.invalidateQueries({ queryKey: [PROPOSALS_QUERY_KEY] });
             qc.invalidateQueries({ queryKey: ["products"] });
             if (!isEditing)
                 navigate(`/catalogue/products/${res.product.id}`, {
@@ -3716,6 +3838,28 @@ export default function ProductFormPage() {
                                         taxInclusive={taxInclusive}
                                     />
                                 </div>
+
+                                {/* ── Changes waiting for approval (Phase 3C) ───── */}
+                                {product && (
+                                    <PendingChanges
+                                        subjectType="product_price"
+                                        subjectIds={[
+                                            ...(product.prices ?? []).map((p) => Number(p.id)),
+                                            ...(product.variants ?? []).flatMap((v) => (v.prices ?? []).map((p) => Number(p.id))),
+                                        ]}
+                                    />
+                                )}
+                                {isEditing && (
+                                    <p className="text-2xs text-surface-500">
+                                        A price change of more than 10%, or one that sells below cost, needs
+                                        approval from finance (and the super admin when more than 20% below
+                                        cost). A cost change of more than 5% needs finance (and the super admin
+                                        above 25%). Until then the current figure stays.
+                                    </p>
+                                )}
+                                {product && can("products.edit_cost") && !can("products.edit") && (
+                                    <CostProposalPanel product={product} />
+                                )}
 
                                 {/* Auto-calculates non-base currency prices — renders nothing visible */}
                                 {/* ── Currency prices ──────────────────────────── */}

@@ -203,7 +203,9 @@ class LimitedClerkAccessTest extends TestCase
 
         $row = collect($this->getJson('/api/v1/admin/customers')->assertOk()->json('data'))->first();
         $this->assertSame('Grace', $row['first_name']);
-        $this->assertSame('0700000001', $row['phone']);
+        // Phase 4A: a login whose only right is a hand grant has no role to
+        // read a contact policy from, so contacts reach it masked.
+        $this->assertSame('07••••0001', $row['phone']);
         foreach (['credit_limit', 'outstanding_balance', 'loyalty_points', 'notes', 'addresses', 'date_of_birth', 'tax_id'] as $private) {
             $this->assertArrayNotHasKey($private, $row, "customers.view leaks '{$private}'.");
         }

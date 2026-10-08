@@ -46,15 +46,22 @@ class CampaignPermissionIsServiceAccountOnlyTest extends TestCase
         $this->assertTrue($user->fresh()->can('pos.discount_campaign'));
     }
 
-    public function test_admin_keeps_the_unbounded_override_it_already_had(): void
+    public function test_the_unbounded_override_stays_with_the_shop_manager(): void
     {
-        // Nothing is taken away: the role that lost the agent pass-through
-        // still holds the larger permission.
+        // Phase 2 took the till's discount keys off admin (it no longer
+        // operates the till), so the escalation target for a cashier who hits
+        // the ceiling is the outlet manager — who holds the override, and still
+        // not the agent's pass-through.
+        // Since the owner's rule (2026-10-03) the override no longer lifts the 5%
+        // maximum for anyone — see DiscountMaximumTest; the grant only stays put.
         $this->artisan('permission:sync')->assertExitCode(0);
 
-        $admin = Role::where('name', 'admin')->where('guard_name', 'sanctum')->first();
+        $admin   = Role::where('name', 'admin')->where('guard_name', 'sanctum')->first();
+        $manager = Role::where('name', 'outlet_manager')->where('guard_name', 'sanctum')->first();
 
         $this->assertNotNull($admin);
-        $this->assertTrue($admin->hasPermissionTo('pos.discount_override'));
+        $this->assertFalse($admin->hasPermissionTo('pos.discount_override'));
+        $this->assertTrue($manager->hasPermissionTo('pos.discount_override'));
+        $this->assertFalse($manager->hasPermissionTo('pos.discount_campaign'));
     }
 }

@@ -1,5 +1,6 @@
 // src/api/expenses.ts
-import { get, post, put, del, api } from '@/api/client'
+import { get, post, put, del } from '@/api/client'
+import { fetchSignedFile } from '@/api/signedFiles'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -44,7 +45,7 @@ export interface Expense {
   is_recurring: boolean
   recurrence_frequency: string | null
   recurrence_end_date: string | null
-  status: 'draft' | 'pending_approval' | 'approved' | 'rejected' | 'paid' | 'cancelled'
+  status: 'draft' | 'pending_approval' | 'changes_requested' | 'approved' | 'rejected' | 'paid' | 'cancelled'
   submitted_by: number | null
   submitted_at: string | null
   approved_by: number | null
@@ -74,7 +75,7 @@ export interface ExpenseApproval {
   id: number
   expense_id: number
   approver_id: number
-  action: 'approved' | 'rejected' | 'requested_info'
+  action: 'approved' | 'rejected' | 'changes_requested' | 'requested_info'
   comments: string | null
   acted_at: string
   step: number
@@ -150,6 +151,29 @@ export interface CreateExpensePayload {
   }>
 }
 
+export type ExpenseBulkAction = 'approve' | 'reject' | 'request_changes' | 'mark_paid'
+
+export interface ExpenseBulkResult {
+  id: number
+  /** null when the expense was not found or is not one the caller can see. */
+  reference: string | null
+  ok: boolean
+  status_after: Expense['status'] | null
+  /** e.g. APPROVED, SIGNED_AWAITING_NEXT_BAND, SELF_APPROVAL, NOT_YOUR_BAND, NOT_FOUND */
+  code: string
+  /** Plain words, ready to show. */
+  message: string
+}
+
+export interface ExpenseBulkResponse {
+  action: ExpenseBulkAction
+  results: ExpenseBulkResult[]
+  summary: { requested: number; succeeded: number; failed: number; by_code: Record<string, number> }
+}
+
+/** The bulk cap the server enforces (ids: 1..100). */
+export const EXPENSE_BULK_MAX = 100
+
 // ── API Calls ─────────────────────────────────────────────────────────────────
 
 const BASE = '/v1/admin/expenses'
@@ -185,6 +209,16 @@ export const expensesApi = {
   reject: (id: number, reason: string) =>
     post<{ message: string; expense: Expense }>(`${BASE}/${id}/reject`, { reason }),
 
+  // Back to its maker with a note; the maker edits it and submits it again
+  // (a new approval version). Whoever may reject it now may do this.
+  requestChanges: (id: number, reason: string) =>
+    post<{ message: string; expense: Expense }>(`${BASE}/${id}/request-changes`, { reason }),
+
+  // Up to 100 at once. Each item runs its single action's own path and rules
+  // on the server and is reported on its own — never all-or-nothing.
+  bulk: (ids: number[], action: ExpenseBulkAction, reason?: string) =>
+    post<ExpenseBulkResponse>(`${BASE}/bulk`, { ids, action, reason: reason || undefined }),
+
   markPaid: (id: number, data?: { payment_reference?: string; payment_method?: string }) =>
     post<{ message: string; expense: Expense }>(`${BASE}/${id}/mark-paid`, data ?? {}),
 
@@ -198,14 +232,13 @@ export const expensesApi = {
     return post<{ message: string; receipt_path: string }>(`${BASE}/${id}/receipt`, form)
   },
 
-  // Fetches the receipt through the authenticated Axios client and returns
-  // a blob URL safe to use in <img src> or <iframe src>.
+  // The receipt endpoint issues a fresh signed link (≤5 min, 4D) after the
+  // outlet-scope check; returns a blob URL safe for <img src> / <iframe src>.
   fetchReceiptBlob: async (id: number): Promise<{ url: string; mimeType: string }> => {
-    const response = await api.get(`${BASE}/${id}/receipt`, { responseType: 'blob' })
-    const blob = response.data as Blob
+    const file = await fetchSignedFile(`/api${BASE}/${id}/receipt`)
     return {
-      url:      URL.createObjectURL(blob),
-      mimeType: blob.type,
+      url:      URL.createObjectURL(file.blob),
+      mimeType: file.contentType,
     }
   },
 
@@ -239,6 +272,7 @@ export const expensesApi = {
 export const EXPENSE_STATUS_CONFIG = {
   draft:            { label: 'Draft',            bg: 'bg-surface-100',   text: 'text-surface-500',   dot: 'bg-surface-400'   },
   pending_approval: { label: 'Pending Approval', bg: 'bg-warning-light', text: 'text-warning',       dot: 'bg-warning'       },
+  changes_requested:{ label: 'Changes Requested', bg: 'bg-brand-50',     text: 'text-brand-700',     dot: 'bg-brand-500'     },
   approved:         { label: 'Approved',          bg: 'bg-info-light',    text: 'text-info',          dot: 'bg-info'          },
   paid:             { label: 'Paid',              bg: 'bg-success-light', text: 'text-success',       dot: 'bg-success'       },
   rejected:         { label: 'Rejected',          bg: 'bg-danger-light',  text: 'text-danger',        dot: 'bg-danger'        },
@@ -255,6 +289,12 @@ export const PAYMENT_METHODS = [
 ]
 
 export function fmtKes(amount: number | null | undefined): string {
-  if (amount == null) return 'KES 0.00'
-  return 'KES ' + Number(amount).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  // Whole shillings without ".00" — on a report every figure carried two zeros
+  // that said nothing and pushed large numbers onto two lines. Cents, when
+  // there are any, still show both digits.
+  const n = Number(amount ?? 0)
+  const cents = Math.round(n * 100) % 100 !== 0
+  // A non-breaking space: "KES" never wraps away from its amount (a phone card
+  // showed "KES" alone on one line and the number on the next).
+  return 'KES\u00A0' + n.toLocaleString('en-KE', { minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: 2 })
 }

@@ -477,7 +477,7 @@ class CategoryController extends Controller
         $i        = 1;
 
         while (
-            Category::where('slug', $slug)
+            Category::withTrashed()->where('slug', $slug)
                 ->when($excludeId, fn ($q) => $q->where('id', '!=', $excludeId))
                 ->exists()
         ) {

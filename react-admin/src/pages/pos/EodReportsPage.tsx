@@ -11,9 +11,10 @@
 
 import { useState, useEffect, Fragment } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { clsx } from "clsx";
 import { get, post } from "@/api/client";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
 import { groupRowsByDate, DateGroupHeaderRow } from "@/lib/dateGrouping";
 
@@ -117,10 +118,16 @@ export default function EodReportsPage() {
 
     // ── Fetch filter options ──────────────────────────────────────────────────
 
+    // Reviewers with a till keep the POS outlet list (their assigned outlets).
+    // A reviewer without one — finance — cannot call /pos/outlets
+    // (pos.access), so the list endpoint serves the outlet filter too.
+    const { can } = usePermissions();
+    const hasTill = can("pos.access");
     const { data: outletsData } = useQuery({
         queryKey: ["pos-outlets-filter"],
         queryFn: () => get<{ data: OutletOption[] }>("/v1/admin/pos/outlets"),
         staleTime: 5 * 60_000,
+        enabled: hasTill,
     });
 
     // ── Fetch report list ─────────────────────────────────────────────────────
@@ -128,7 +135,7 @@ export default function EodReportsPage() {
     const { data, isLoading, isError } = useQuery({
         queryKey: ["eod-reports", dateFrom, dateTo, outletId, userId, page],
         queryFn: () =>
-            get<{ data: EodReportRow[]; users: UserOption[]; meta: EodReportMeta }>(
+            get<{ data: EodReportRow[]; users: UserOption[]; meta: EodReportMeta; outlets?: OutletOption[] }>(
                 "/v1/admin/pos/reports/eod-admin",
                 {
                     params: {
@@ -213,6 +220,10 @@ export default function EodReportsPage() {
                                 End-of-day reports submitted by cashiers
                             </p>
                         </div>
+                        {/* The counts behind the takings: verify, reconcile, correct (Phase 4B). */}
+                        <Link to="/pos/tills" className="btn-secondary btn-sm">
+                            Tills — counts &amp; reconciliation →
+                        </Link>
                     </div>
 
                     {/* Filters */}
@@ -246,7 +257,7 @@ export default function EodReportsPage() {
                                 className="input text-xs py-1.5 w-full"
                             >
                                 <option value="">All outlets</option>
-                                {(outletsData?.data ?? []).map((o) => (
+                                {((hasTill ? outletsData?.data : data?.outlets) ?? []).map((o) => (
                                     <option key={o.id} value={String(o.id)}>{o.name}</option>
                                 ))}
                             </select>

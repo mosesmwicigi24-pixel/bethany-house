@@ -36,7 +36,7 @@ class SalesLedgerTest extends TestCase
     {
         $u = User::factory()->create(['user_type' => 'staff']);
         $u->assignRole(Role::findOrCreate('admin', 'sanctum'));
-        $u->givePermissionTo(Permission::findOrCreate('reports.view', 'sanctum'));
+        \Tests\ReportAccess::grantPages($u);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($u);
 
@@ -184,7 +184,7 @@ class SalesLedgerTest extends TestCase
 
         foreach (['weekly', 'monthly'] as $grain) {
             foreach ($this->ledger()[$grain] as $row) {
-                $this->assertSame(['till', 'web', 'chat', 'quoted'],
+                $this->assertSame(\App\Models\Order::REPORTING_CHANNELS,
                     array_keys($row['by_channel']), "{$grain} row is missing a channel");
             }
         }

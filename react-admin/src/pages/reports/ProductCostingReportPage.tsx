@@ -617,7 +617,7 @@ export default function ProductCostingReportPage() {
                         <div className="p-4 space-y-2.5">
                             {[
                                 { icon: "💰", label: "Pricing",      value: r.recommendation.pricing_recommendation, cls: "bg-info-50 border-info-100" },
-                                { icon: "⚙️", label: "Cost Control", value: r.recommendation.cost_control_note,      cls: "bg-amber-50 border-amber-100"   },
+                                { icon: "⚙️", label: "Cost control", value: r.recommendation.cost_control_note,      cls: "bg-amber-50 border-amber-100"   },
                                 { icon: "📦", label: "Stock",        value: r.recommendation.stock_action,           cls: "bg-surface-50 border-surface-100"   },
                                 { icon: "✅", label: "Decision",     value: r.recommendation.management_decision,    cls: "bg-success-50 border-success-100" },
                             ].map(item => (

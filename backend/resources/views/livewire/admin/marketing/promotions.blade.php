@@ -20,6 +20,11 @@
             <i class="bi bi-check-circle-fill text-success-500 flex-shrink-0"></i>{{ session('success') }}
         </div>
     @endif
+    @if(session('error'))
+        <div class="flex items-center gap-3 rounded-xl bg-danger-50 border border-danger-200 px-4 py-3 text-sm text-danger-700">
+            <i class="bi bi-exclamation-circle-fill text-danger-500 flex-shrink-0"></i>{{ session('error') }}
+        </div>
+    @endif
 
     {{-- Summary strip --}}
     <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -276,8 +281,12 @@
                         </div>
                         <div>
                             <label class="block text-xs font-semibold text-primary-400 uppercase tracking-wide mb-1.5">Discount Value</label>
-                            <input wire:model="discountValue" type="number" min="0" step="0.01" placeholder="e.g. 15"
+                            <input wire:model="discountValue" type="number" min="0" step="0.01" placeholder="e.g. 5"
                                    class="w-full border border-primary-100 rounded-xl px-3.5 py-2.5 text-sm text-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/15 focus:border-primary-300 transition" />
+                            @unless(\App\Support\DiscountRule::isOwner(auth()->user()))
+                                <p class="text-xs text-primary-400 mt-1">At most {{ rtrim(rtrim(number_format(\App\Support\DiscountRule::capPercent(), 2), '0'), '.') }}%. Larger discounts are set by the owner.</p>
+                            @endunless
+                            @error('discountValue')<p class="text-xs text-danger-500 mt-1">{{ $message }}</p>@enderror
                         </div>
                     </div>
                     <div class="grid grid-cols-2 gap-4">

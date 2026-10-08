@@ -25,8 +25,11 @@ import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { clsx } from "clsx";
+import { ORDER_STATUS, PRIORITY, orderStatus, dueInfo, DUE_TONE_CLS, fmtDueDate } from "@/components/production/productionUi";
+import { businessToday, toBusinessDateInput } from "@/lib/businessDate";
 import { get } from "@/api/client";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useIsFloorWorker } from "@/hooks/useHomePath";
 import { useAuthStore } from "@/store/auth.store";
 import { Spinner } from "@/components/ui/Spinner";
 
@@ -36,7 +39,8 @@ interface ScheduleResponse {
     active_count: number;
     upcoming_orders: UpcomingOrder[];
     earliest_free_slot: string;         // ISO date string
-    by_stage: Record<string, number>;   // stage_id → pending task count
+    by_stage: Record<string, number>;   // stage_id → open task count
+    stage_names?: Record<string, string | null>; // stage_id → stage name
 }
 
 interface UpcomingOrder {
@@ -117,30 +121,14 @@ function taskToOrder(t: CalendarTask): ProductionOrder {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const STATUS_COLORS: Record<string, string> = {
-    pending:     "bg-surface-200 text-surface-600",
-    in_progress: "bg-brand-500/20 text-brand-700",
-    on_hold:     "bg-warning-light text-warning-dark",
-    qc_pending:  "bg-accent-50 text-accent-700",
-    qc_passed:   "bg-success-light text-success",
-    qc_failed:   "bg-danger-light text-danger",
-};
-
-const STATUS_DOT: Record<string, string> = {
-    pending:     "bg-surface-400",
-    in_progress: "bg-brand-500",
-    on_hold:     "bg-warning",
-    qc_pending:  "bg-accent-500",
-    qc_passed:   "bg-success",
-    qc_failed:   "bg-danger",
-};
-
-const PRIORITY_BORDER: Record<string, string> = {
-    urgent: "border-l-danger",
-    high:   "border-l-warning",
-    normal: "border-l-brand-400",
-    low:    "border-l-surface-300",
-};
+// Status colours and priority edges: the shared Production design language
+// (components/production/productionUi), so the calendar matches every surface.
+const STATUS_COLORS: Record<string, string> = Object.fromEntries(
+    Object.entries(ORDER_STATUS).map(([k, v]) => [k, `${v.bg} ${v.text}`]));
+const STATUS_DOT: Record<string, string> = Object.fromEntries(
+    Object.entries(ORDER_STATUS).map(([k, v]) => [k, v.dot]));
+const PRIORITY_BORDER: Record<string, string> = Object.fromEntries(
+    Object.entries(PRIORITY).map(([k, v]) => [k, v.border]));
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS   = [
@@ -150,9 +138,18 @@ const MONTHS   = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * The calendar day a grid cell stands for, from its own local fields.
+ * toISOString() converted local midnight to UTC, so in Nairobi every cell was
+ * keyed to the day before and "today" sat on tomorrow's cell.
+ */
 function isoDate(d: Date) {
-    return d.toISOString().slice(0, 10);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
+
+/** A due date as its business-calendar day ("YYYY-MM-DD"), never a UTC slice. */
+const dueKey = (iso?: string | null) => toBusinessDateInput(iso);
 
 function addDays(d: Date, n: number) {
     const r = new Date(d);
@@ -182,18 +179,12 @@ function heatClass(count: number): string {
 /** Friendly label for sales-team capacity indicator */
 function capacityLabel(count: number): { label: string; cls: string } {
     if (count === 0) return { label: "Free",    cls: "text-success font-semibold" };
-    if (count <= 2)  return { label: "Light",   cls: "text-brand-600 font-medium" };
+    if (count <= 2)  return { label: "Light",   cls: "text-brand-700 font-medium" };
     if (count <= 4)  return { label: "Moderate",cls: "text-warning-dark font-medium" };
     return              { label: "Busy",    cls: "text-danger font-semibold" };
 }
 
-function fmtDate(iso: string) {
-    return new Date(iso).toLocaleDateString("en-KE", { dateStyle: "medium" });
-}
-
-function daysFromNow(iso: string) {
-    return Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000);
-}
+const fmtDate = (iso: string) => fmtDueDate(iso);
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -238,7 +229,7 @@ function OrderPill({
         >
             <span className="font-mono font-semibold">{order.order_number}</span>
             {" "}
-            <span className="opacity-70 truncate">{order.product_name}</span>
+            <span className="truncate">{order.product_name}</span>
         </button>
     );
 }
@@ -246,8 +237,7 @@ function OrderPill({
 /** Summary row used in the "Upcoming" sidebar panel */
 function UpcomingRow({ order, isSales }: { order: ProductionOrder; isSales: boolean }) {
     const navigate = useNavigate();
-    const d = daysFromNow(order.due_date);
-    const overdue = d < 0;
+    const due = dueInfo(order.due_date, order.status);
     return (
         <div
             className={clsx(
@@ -262,16 +252,12 @@ function UpcomingRow({ order, isSales }: { order: ProductionOrder; isSales: bool
                 <p className={clsx("text-xs text-surface-600 truncate", isSales && "font-medium")}>{order.product_name}</p>
                 {(order.customer_name || order.created_by_name) && (
                     <p className="text-2xs text-surface-500 truncate">
-                        {order.customer_name ?? "Stock"}
+                        {order.customer_name ?? "For stock"}
                         {order.created_by_name ? ` · raised by ${order.created_by_name}` : ""}
                     </p>
                 )}
-                <p className={clsx("text-2xs mt-0.5", overdue ? "text-danger font-semibold" : "text-surface-400")}>
-                    {overdue
-                        ? `Overdue by ${Math.abs(d)}d`
-                        : d === 0
-                        ? "Due today"
-                        : `Due in ${d}d - ${fmtDate(order.due_date)}`}
+                <p className={clsx("text-2xs mt-0.5 font-semibold", DUE_TONE_CLS[due.tone])}>
+                    {due.label}{due.tone === "later" ? ` · ${fmtDueDate(order.due_date)}` : ""}
                 </p>
             </div>
             <div className="shrink-0">
@@ -318,7 +304,7 @@ function MonthGrid({
             {/* Weekday headers */}
             <div className="grid grid-cols-7 gap-px mb-1">
                 {WEEKDAYS.map(w => (
-                    <div key={w} className="text-center text-2xs font-semibold text-surface-400 uppercase tracking-wide py-1">
+                    <div key={w} className="text-center text-2xs font-semibold text-surface-500 uppercase tracking-wide py-1">
                         {w}
                     </div>
                 ))}
@@ -344,7 +330,9 @@ function MonthGrid({
                                 isToday
                                     ? "border-brand-400 bg-brand-50/60"
                                     : "border-line hover:border-brand-200",
-                                isPast && !isToday ? "opacity-60" : "",
+                                // Past days are muted by their fill, not by opacity: an overdue job sits
+                                // on a past day, and fading it hid exactly what needs seeing.
+                                isPast && !isToday ? "bg-surface-50" : "",
                                 !isSales && count > 0 ? heatClass(count) : "",
                             )}
                         >
@@ -352,7 +340,7 @@ function MonthGrid({
                             <div className="flex items-start justify-between">
                                 <span className={clsx(
                                     "text-xs font-semibold leading-none",
-                                    isToday ? "text-brand-600" : "text-surface-700",
+                                    isToday ? "text-brand-700" : "text-surface-700",
                                 )}>
                                     {cell.day}
                                 </span>
@@ -374,17 +362,21 @@ function MonthGrid({
                                     {orders.slice(0, 2).map(o => (
                                         <div
                                             key={o.id}
+                                            title={`${o.order_number} · ${o.product_name}`}
                                             className={clsx(
                                                 "text-2xs px-1 py-0.5 rounded border-l-2 truncate leading-tight",
                                                 STATUS_COLORS[o.status] ?? "bg-surface-100 text-surface-500",
                                                 PRIORITY_BORDER[o.priority] ?? "border-l-surface-300",
                                             )}
                                         >
-                                            <span className="font-mono">{o.order_number.replace(/^[A-Z]+-/, "")}</span>
+                                            {/* The garment, not the number: a day cell is ~45px wide
+                                                and "PRD-20261005-0005" clipped to "20…", which names
+                                                nothing. The full number is on hover and in the day panel. */}
+                                            {o.product_name}
                                         </div>
                                     ))}
                                     {orders.length > 2 && (
-                                        <span className="text-2xs text-surface-400 px-1">+{orders.length - 2} more</span>
+                                        <span className="text-2xs text-surface-500 px-1">+{orders.length - 2} more</span>
                                     )}
                                 </div>
                             )}
@@ -453,21 +445,21 @@ function WeekGrid({
                         key={iso}
                         className={clsx(
                             "flex flex-col gap-1.5 rounded-xl p-2 min-h-[180px] border transition-colors",
+                            // Past days muted by fill, not opacity (see the month grid).
                             isToday
                                 ? "border-brand-400 bg-brand-50/60"
-                                : "border-line bg-white",
-                            isPast && !isToday && "opacity-60",
+                                : isPast ? "border-line bg-surface-50" : "border-line bg-white",
                         )}
                     >
                         {/* Header */}
                         <div className="flex items-center justify-between mb-1">
                             <div>
-                                <p className="text-2xs text-surface-400 uppercase tracking-wide font-medium">
+                                <p className="text-2xs text-surface-500 uppercase tracking-wide font-medium">
                                     {WEEKDAYS[day.getDay()]}
                                 </p>
                                 <p className={clsx(
                                     "text-sm font-bold leading-tight",
-                                    isToday ? "text-brand-600" : "text-surface-800",
+                                    isToday ? "text-brand-700" : "text-surface-800",
                                 )}>
                                     {day.getDate()}
                                 </p>
@@ -553,12 +545,12 @@ function DayPanel({
                 {/* Header */}
                 <div className="flex items-center justify-between px-5 py-4 border-b border-line shrink-0">
                     <div>
-                        <p className="text-xs text-surface-400 uppercase tracking-wide font-semibold">
+                        <p className="text-xs text-surface-500 uppercase tracking-wide font-semibold">
                             {isSales ? "Workshop Schedule" : "Due on this day"}
                         </p>
                         <p className="text-sm font-bold text-surface-900 mt-0.5">{label}</p>
                     </div>
-                    <button onClick={onClose} className="btn-icon btn-ghost text-surface-400">
+                    <button onClick={onClose} className="btn-icon btn-ghost text-surface-500">
                         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                         </svg>
@@ -569,7 +561,7 @@ function DayPanel({
                 <div className="flex-1 overflow-y-auto">
                     {!isSales && appointments.length > 0 && (
                         <div className="px-5 py-3 border-b border-line space-y-1.5">
-                            <p className="text-2xs font-bold uppercase tracking-wide text-surface-400">Customer appointments</p>
+                            <p className="text-2xs font-bold uppercase tracking-wide text-surface-500">Customer appointments</p>
                             {appointments.map((a, i) => (
                                 <button key={i} onClick={() => a.order.id && onOrderClick(a.order.id)}
                                     className="w-full flex items-center gap-2 text-left text-xs hover:bg-surface-50 rounded-lg px-2 py-1.5 transition-colors">
@@ -578,13 +570,13 @@ function DayPanel({
                                         {a.type === "fitting" ? "Fitting" : "Collection"}
                                     </span>
                                     <span className="font-mono text-surface-500 truncate">{a.order.order_number}</span>
-                                    <span className="text-surface-400 truncate flex-1">{a.order.product_name}</span>
+                                    <span className="text-surface-500 truncate flex-1">{a.order.product_name}</span>
                                 </button>
                             ))}
                         </div>
                     )}
                     {orders.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-12 text-surface-400 gap-2">
+                        <div className="flex flex-col items-center justify-center py-12 text-surface-500 gap-2">
                             <svg className="w-10 h-10 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.25}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                             </svg>
@@ -605,7 +597,7 @@ function DayPanel({
                                     "text-3xl font-bold",
                                     orders.length >= 6 ? "text-danger" :
                                     orders.length >= 4 ? "text-warning-dark" :
-                                    orders.length >= 2 ? "text-brand-600" : "text-success",
+                                    orders.length >= 2 ? "text-brand-700" : "text-success",
                                 )}>
                                     {capacityLabel(orders.length).label}
                                 </p>
@@ -630,13 +622,13 @@ function DayPanel({
                                             <div className="flex items-center gap-2 flex-wrap">
                                                 <span className="font-mono text-xs font-bold text-surface-900">{o.order_number}</span>
                                                 <span className={clsx("text-2xs px-2 py-0.5 rounded-full font-medium", STATUS_COLORS[o.status] ?? "bg-surface-100 text-surface-600")}>
-                                                    {o.status.replace("_", " ")}
+                                                    {orderStatus(o.status).label}
                                                 </span>
                                             </div>
                                             {o.product_name && <p className="text-xs text-surface-600 mt-0.5 truncate">{o.product_name}</p>}
                                             {(o.customer_name || o.created_by_name) && (
                                                 <p className="text-2xs text-surface-500 truncate">
-                                                    {o.customer_name ?? "Stock"}
+                                                    {o.customer_name ?? "For stock"}
                                                     {o.created_by_name ? ` · raised by ${o.created_by_name}` : ""}
                                                 </p>
                                             )}
@@ -669,7 +661,7 @@ function DayPanel({
                                             <div className="flex items-center gap-2 flex-wrap">
                                                 <span className="font-mono text-sm font-bold text-surface-900">{o.order_number}</span>
                                                 <span className={clsx("text-2xs px-2 py-0.5 rounded-full font-medium", cfg)}>
-                                                    {o.status.replace("_", " ")}
+                                                    {orderStatus(o.status).label}
                                                 </span>
                                                 {o.customer_order_id && (
                                                     <span className="text-2xs px-2 py-0.5 rounded-full bg-accent-50 text-accent-700 font-medium">MTO</span>
@@ -684,7 +676,7 @@ function DayPanel({
                                                             style={{ width: `${o.completion_percentage}%` }}
                                                         />
                                                     </div>
-                                                    <span className="text-2xs text-surface-400">{o.completion_percentage}%</span>
+                                                    <span className="text-2xs text-surface-500">{o.completion_percentage}%</span>
                                                 </div>
                                             )}
                                         </div>
@@ -718,7 +710,7 @@ export default function ProductionCalendarPage() {
     const isSales = canRaiseOrder && !isCoordinator;
     const fullBoard = canViewFull && !isSales;
 
-    const today = isoDate(new Date());
+    const today = businessToday();
     const [viewMode, setViewMode] = useState<ViewMode>("month");
     const [cursor, setCursor] = useState(new Date()); // month/week navigation anchor
     const [selectedDay, setSelectedDay] = useState<string | null>(null);
@@ -728,11 +720,16 @@ export default function ProductionCalendarPage() {
     const currentUser   = useAuthStore(s => s.user);
     const canViewUsers  = can("users.view");
 
-    // Workers default to "mine". Admins/managers with production.view pre-select
-    // themselves so they see their own tasks immediately, but can switch to any user.
+    // Workers default to "mine"; tailors (production.view + worker) to
+    // themselves. Whoever runs the floor opens on everyone and can narrow to
+    // one person — opening a manager on their own (usually empty) diary hid
+    // the whole workshop behind a filter.
     const isWorker = !canViewFull && !canRaiseOrder && can("production.worker");
+    const floorWorker = useIsFloorWorker();
     const [selectedUserId, setSelectedUserId] = useState<"all" | "mine" | string>(
-        isWorker ? "mine" : isSales ? "all" : currentUserId ? String(currentUserId) : "all"
+        // A floor worker opens on their own work; anyone who runs the floor
+        // opens on the whole calendar (their own diary is one pick away).
+        isWorker ? "mine" : floorWorker && currentUserId ? String(currentUserId) : "all"
     );
 
     // ── Data fetching ────────────────────────────────────────────────────────
@@ -822,7 +819,7 @@ export default function ProductionCalendarPage() {
         if (selectedUserId !== "all") {
             // Worker own view OR admin filtered to a specific user — use task data
             for (const t of userTasks) {
-                const key = t.production_order.due_date?.slice(0, 10);
+                const key = dueKey(t.production_order.due_date);
                 if (!key) continue;
                 if (!map.has(key)) map.set(key, []);
                 // De-duplicate by production_order.id (multiple tasks per order)
@@ -833,7 +830,7 @@ export default function ProductionCalendarPage() {
             }
         } else if (fullBoard) {
             for (const o of orders) {
-                const key = o.due_date?.slice(0, 10);
+                const key = dueKey(o.due_date);
                 if (!key) continue;
                 if (!map.has(key)) map.set(key, []);
                 map.get(key)!.push(o);
@@ -841,7 +838,7 @@ export default function ProductionCalendarPage() {
         } else {
             // Sales view — the whole floor from the lean schedule feed
             for (const o of scheduleOrders) {
-                const key = o.due_date?.slice(0, 10);
+                const key = dueKey(o.due_date);
                 if (!key) continue;
                 if (!map.has(key)) map.set(key, []);
                 map.get(key)!.push(o);
@@ -857,7 +854,7 @@ export default function ProductionCalendarPage() {
         if (!fullBoard) return map;
         for (const o of orders) {
             for (const [type, date] of [["fitting", o.fitting_date], ["collection", o.collection_date]] as const) {
-                const key = date?.slice(0, 10);
+                const key = dueKey(date);
                 if (!key) continue;
                 if (!map.has(key)) map.set(key, []);
                 map.get(key)!.push({ type, order: o });
@@ -895,7 +892,8 @@ export default function ProductionCalendarPage() {
 
     // Upcoming orders for sidebar (next 14 days)
     const upcoming = useMemo(() => {
-        const cutoff = isoDate(addDays(new Date(), 14));
+        const [ty, tm, td] = today.split("-").map(Number);
+        const cutoff = isoDate(new Date(ty, tm - 1, td + 14));
 
         const source: ProductionOrder[] = selectedUserId !== "all"
             ? userTasks.map(taskToOrder)
@@ -907,7 +905,8 @@ export default function ProductionCalendarPage() {
             .filter(o => {
                 if (seen.has(o.id)) return false;
                 seen.add(o.id);
-                return o.due_date >= today && o.due_date <= cutoff;
+                const due = dueKey(o.due_date);
+                return !!due && due >= today && due <= cutoff;
             })
             .sort((a, b) => a.due_date.localeCompare(b.due_date));
     }, [orders, scheduleOrders, userTasks, today, fullBoard, selectedUserId]);
@@ -921,7 +920,8 @@ export default function ProductionCalendarPage() {
         return source.filter(o => {
             if (seen.has(o.id)) return false;
             seen.add(o.id);
-            return o.due_date < today && !["completed","cancelled"].includes(o.status);
+            const due = dueKey(o.due_date);
+            return !!due && due < today && !["completed","cancelled"].includes(o.status);
         }).length;
     }, [orders, scheduleOrders, userTasks, today, fullBoard, selectedUserId]);
 
@@ -935,7 +935,7 @@ export default function ProductionCalendarPage() {
             {/* ── Page header ────────────────────────────────────────────── */}
             <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div>
-                    <h1 className="page-title">
+                    <h1 className="page-title-sm">
                         {isSales ? "Workshop Availability" : "Production Calendar"}
                     </h1>
                     <p className="page-subtitle">
@@ -972,7 +972,7 @@ export default function ProductionCalendarPage() {
 
                         {fullBoard && canViewUsers && (
                             <div className="relative">
-                                <select
+                                <select aria-label="Show work for"
                                     value={selectedUserId}
                                     onChange={e => setSelectedUserId(e.target.value)}
                                     className={clsx(
@@ -998,12 +998,12 @@ export default function ProductionCalendarPage() {
                                         ))}
                                 </select>
                                 <svg className={clsx("pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5",
-                                    selectedUserId !== "all" ? "text-white" : "text-surface-400")}
+                                    selectedUserId !== "all" ? "text-white" : "text-surface-500")}
                                     fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/>
                                 </svg>
                                 <svg className={clsx("pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3",
-                                    selectedUserId !== "all" ? "text-white/70" : "text-surface-400")}
+                                    selectedUserId !== "all" ? "text-white/70" : "text-surface-500")}
                                     fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7"/>
                                 </svg>
@@ -1016,7 +1016,9 @@ export default function ProductionCalendarPage() {
                                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/>
                                 </svg>
-                                {`${currentUser.first_name} ${(currentUser as any).last_name ?? ""}`.trim()}
+                                {selectedUserId === "all"
+                                    ? "All orders"
+                                    : `${currentUser.first_name} ${(currentUser as any).last_name ?? ""}`.trim()}
                             </div>
                         )}
 
@@ -1055,14 +1057,14 @@ export default function ProductionCalendarPage() {
 
             {/* ── Summary strip (production team) ───────────────────────── */}
             {(canViewFull || isWorker) && !isLoading && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className={clsx("grid grid-cols-2 gap-3", isWorker || floorWorker ? "sm:grid-cols-3" : "sm:grid-cols-4")}>
                     {[
                         {
                             label: selectedUserId !== "all" ? "Assigned Orders" : "Active Orders",
                             value: selectedUserId !== "all"
                                 ? new Set(userTasks.map(t => t.production_order.id)).size
                                 : (scheduleData?.active_count ?? 0),
-                            cls: "text-brand-600",
+                            cls: "text-brand-700",
                             bg: "bg-brand-50",
                         },
                         {
@@ -1074,10 +1076,13 @@ export default function ProductionCalendarPage() {
                         {
                             label: "Overdue",
                             value: overdueCount,
-                            cls: overdueCount > 0 ? "text-danger" : "text-success",
+                            cls: overdueCount > 0 ? "text-danger-700" : "text-success-700",
                             bg: overdueCount > 0 ? "bg-danger-light" : "bg-success-light",
                         },
-                        {
+                        // A promising-dates figure for whoever runs the floor.
+                        // A tailor's feed holds only her own jobs (Cycle 8), so
+                        // for her it would be a meaningless date.
+                        ...(isWorker || floorWorker ? [] : [{
                             label: "Earliest Free Slot",
                             value: scheduleData?.earliest_free_slot
                                 ? fmtDate(scheduleData.earliest_free_slot)
@@ -1085,10 +1090,10 @@ export default function ProductionCalendarPage() {
                             cls: "text-surface-700 text-sm",
                             bg: "bg-surface-50",
                             small: true,
-                        },
-                    ].map(({ label, value, cls, bg, small }) => (
+                        }]),
+                    ].map(({ label, value, cls, bg, small }: { label: string; value: string | number; cls: string; bg: string; small?: boolean }) => (
                         <div key={label} className={clsx("rounded-2xl p-4", bg)}>
-                            <p className="text-2xs text-surface-400 font-semibold uppercase tracking-wide mb-1">{label}</p>
+                            <p className="text-2xs text-surface-500 font-semibold uppercase tracking-wide mb-1">{label}</p>
                             <p className={clsx("font-bold", small ? "text-lg" : "text-2xl", cls)}>{value}</p>
                         </div>
                     ))}
@@ -1107,7 +1112,7 @@ export default function ProductionCalendarPage() {
                     <div className="flex items-center gap-3">
                         <div className={clsx(
                             "px-4 py-2 rounded-xl font-bold text-sm",
-                            scheduleData.active_count >= 8 ? "bg-danger-light text-danger" :
+                            scheduleData.active_count >= 8 ? "bg-danger-light text-danger-700" :
                             scheduleData.active_count >= 5 ? "bg-warning-light text-warning-dark" :
                             scheduleData.active_count >= 2 ? "bg-brand-50 text-brand-700" : "bg-success-light text-success",
                         )}>
@@ -1154,7 +1159,7 @@ export default function ProductionCalendarPage() {
                     </div>
 
                     {/* Legend */}
-                    <div className="flex items-center gap-4 text-2xs text-surface-400 flex-wrap shrink-0">
+                    <div className="flex items-center gap-4 text-2xs text-surface-500 flex-wrap shrink-0">
                         {isSales ? (
                             <>
                                 <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-success inline-block" />Free</span>
@@ -1207,7 +1212,7 @@ export default function ProductionCalendarPage() {
                                     Due next 14 days
                                 </p>
                                 {selectedUserId !== "all" && canViewFull && (
-                                    <span className="text-2xs font-semibold px-2 py-0.5 rounded-full bg-brand-50 text-brand-600 truncate max-w-[120px]">
+                                    <span className="text-2xs font-semibold px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 truncate max-w-[120px]">
                                         {selectedUserId === "mine"
                                             ? "My tasks"
                                             : productionUsers.find(u => String(u.id) === selectedUserId)
@@ -1217,7 +1222,7 @@ export default function ProductionCalendarPage() {
                                 )}
                             </div>
                             {upcoming.length === 0 ? (
-                                <div className="flex items-center justify-center py-10 text-surface-400 text-sm">
+                                <div className="flex items-center justify-center py-10 text-surface-500 text-sm">
                                     No orders due soon
                                 </div>
                             ) : (
@@ -1272,7 +1277,7 @@ export default function ProductionCalendarPage() {
                                 </p>
                                 <p className="text-2xl font-bold text-surface-900">
                                     {scheduleData.active_count}
-                                    <span className="text-sm font-normal text-surface-400 ml-1">orders</span>
+                                    <span className="text-sm font-normal text-surface-500 ml-1">orders</span>
                                 </p>
                             </div>
                         </div>
@@ -1295,7 +1300,7 @@ export default function ProductionCalendarPage() {
                             }
                         } else if (scheduleData) {
                             for (const [stageId, count] of Object.entries(scheduleData.by_stage)) {
-                                byStage[stageId] = { name: `Stage ${stageId}`, count: count as number };
+                                byStage[stageId] = { name: scheduleData.stage_names?.[stageId] ?? `Stage ${stageId}`, count: count as number };
                             }
                         }
 
@@ -1311,7 +1316,7 @@ export default function ProductionCalendarPage() {
                                         Active tasks by stage
                                     </p>
                                     {useFiltered && (
-                                        <span className="text-2xs text-brand-600 font-semibold bg-brand-50 px-2 py-0.5 rounded-full">
+                                        <span className="text-2xs text-brand-700 font-semibold bg-brand-50 px-2 py-0.5 rounded-full">
                                             {selectedUserId === "mine"
                                                 ? "My tasks"
                                                 : (() => {

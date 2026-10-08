@@ -134,11 +134,15 @@ class Customers extends Component
             ? 'nullable|email|unique:customers,email,' . $this->editingId
             : 'nullable|email|unique:customers,email';
 
+        // Editing may resave the record's current phone as it is; a newly
+        // typed one must be a real number (App\Rules\CustomerPhone).
+        $phoneOnFile = $this->isEditing ? \App\Models\Customer::whereKey($this->editingId)->value('phone') : null;
+
         $this->validate([
             'firstName'        => 'required|string|max:100',
             'lastName'         => 'nullable|string|max:100',
             'email'            => $emailUnique,
-            'phone'            => 'nullable|string|max:30',
+            'phone'            => ['nullable', 'string', 'max:30', new \App\Rules\CustomerPhone($phoneOnFile)],
             'company'          => 'nullable|string|max:255',
             'taxId'            => 'nullable|string|max:100',
             'customerType'     => 'required|in:individual,business',

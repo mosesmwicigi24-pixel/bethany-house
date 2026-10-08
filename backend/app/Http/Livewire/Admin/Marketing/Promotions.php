@@ -3,6 +3,7 @@
 namespace App\Http\Livewire\Admin\Marketing;
 
 use App\Models\Promotion;
+use App\Support\DiscountRule;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -132,6 +133,15 @@ class Promotions extends Component
             'created_by'     => auth()->id(),
         ];
 
+        // The owner's 5% rule: above it is the super_admin's alone to set.
+        $before = $this->isEditing
+            ? Promotion::findOrFail($this->editingId)->only(['discount_type', 'discount_value', 'conditions', 'is_active'])
+            : null;
+        if ($message = DiscountRule::promotionRefusal(auth()->user(), $data, $before)) {
+            $this->addError('discountValue', $message);
+            return;
+        }
+
         if ($this->isEditing) {
             Promotion::findOrFail($this->editingId)->update($data);
             $msg = 'Promotion updated.';
@@ -148,6 +158,16 @@ class Promotions extends Component
     public function toggleActive(int $id): void
     {
         $p = Promotion::findOrFail($id);
+
+        // Switching one on is setting it running: above 5% that is the owner's.
+        // Switching off is always allowed.
+        $before = $p->only(['discount_type', 'discount_value', 'conditions', 'is_active']);
+        $after  = array_merge($before, ['is_active' => !$p->is_active]);
+        if ($message = DiscountRule::promotionRefusal(auth()->user(), $after, $before)) {
+            session()->flash('error', $message);
+            return;
+        }
+
         $p->update(['is_active' => !$p->is_active]);
     }
 

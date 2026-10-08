@@ -18,7 +18,8 @@ use Illuminate\Support\Facades\DB;
  * Every figure is computed by MetricEngine (the canonical metric layer per
  * docs/REPORTS_SPEC.md); this controller only decides WHICH blocks the
  * caller may see:
- *   - route gate: reports.view
+ *   - route gate: the page each endpoint belongs to (report.page:<page>,
+ *     Phase 3A — see App\Support\ReportPages); drills inherit their page
  *   - financial block (expenses, net position): reports.financial only
  *   - outlet managers: every number auto-scoped to their assigned outlets
  */
@@ -84,7 +85,11 @@ class ExecutiveReportController extends Controller
                     'low_stock' => $engine->lowStock(),
                 ],
             ],
-            'attention' => $engine->attention(),
+            // Which of the zeros above are zero because the work never
+            // happened, as opposed to a quiet month. An empty list means the
+            // zeros are real — which is itself worth being able to tell.
+            'structural_gaps' => $engine->structuralGaps(),
+            'attention'       => $engine->attention(),
         ];
 
         // CFO block: reports.financial holders only (rule 5 of the spec).
@@ -97,6 +102,22 @@ class ExecutiveReportController extends Controller
                     'previous' => round($collected['previous'] - $expenses['previous'], 2),
                     'series'   => collect(),
                 ],
+                // Profit, not cash: the earned P&L (fully-paid orders, their
+                // cost, approved expenses) — the figure Finance & Cash shows,
+                // with the reasons it is incomplete stated beside it, so the
+                // overview never presents a margin as if every cost were in.
+                'earned' => (function () use ($engine, $s, $e) {
+                    $pnl = $engine->earnedPnl($s, $e);
+                    $limits = [];
+                    if ($pnl['unpriced_lines'] > 0) {
+                        $limits[] = $pnl['unpriced_lines'] . ' line' . ($pnl['unpriced_lines'] === 1 ? '' : 's') . ' sold with no cost — counted at zero, so profit reads high';
+                    }
+                    if ($pnl['expenses_pending_approval']['count'] > 0) {
+                        $limits[] = 'KES ' . number_format($pnl['expenses_pending_approval']['amount']) . ' of expenses awaiting approval — not yet deducted';
+                    }
+
+                    return $pnl + ['limits' => $limits];
+                })(),
             ];
         }
 
@@ -147,14 +168,25 @@ class ExecutiveReportController extends Controller
         [$s, $e] = MetricEngine::resolvePeriod($periodKey, $validated['from'] ?? null, $validated['to'] ?? null);
         $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
 
+        $health    = $engine->inventoryHealth();
+        $materials = $engine->materialStockHealth();
+
+        // Stock at COST is what the business paid — a financial figure, held
+        // behind reports.financial like every other (cycle 9). Retail value,
+        // units and counts stay: they are what running the shop needs.
+        if (! $request->user()->can('reports.financial')) {
+            $health['cost_value']    = null;
+            $materials['cost_value'] = null;
+        }
+
         return response()->json([
             'period'         => ['key' => $periodKey, 'start' => $s->toIso8601String(), 'end' => $e->toIso8601String()],
-            'health'         => $engine->inventoryHealth(),
+            'health'         => $health,
             'abc'            => $engine->abcClassification($s, $e),
             'stockout_risks' => $engine->stockoutRisks(),
             'dead_stock'     => $engine->deadStock(),
             'shrinkage'      => $engine->shrinkage($s, $e),
-            'materials'      => $engine->materialStockHealth(),
+            'materials'      => $materials,
         ]);
     }
 
@@ -210,7 +242,7 @@ class ExecutiveReportController extends Controller
      * 10-minute cache or is a summary-sized query, so this stays cheap; each
      * one is computed independently so a single engine failing degrades to a
      * null (the SPA renders a "—" card) instead of taking the Overview down.
-     * reports.view via the route group; outlet scoping via MetricEngine::for.
+     * reports.view via the route group; an optional outlet_id filter via MetricEngine::for.
      */
     public function engineRoom(Request $request)
     {
@@ -244,7 +276,7 @@ class ExecutiveReportController extends Controller
      * Replenishment Radar — per-customer product reorder cycles. "As of now"
      * by design: the radar has no period parameter because due/overdue only
      * makes sense against today. reports.view via the route group; outlet
-     * scoping via MetricEngine::for like every other report.
+     * an optional outlet_id filter, like every other report.
      */
     public function replenishment(Request $request)
     {
@@ -274,7 +306,7 @@ class ExecutiveReportController extends Controller
      * Collections funnel — quote/deposit/balance: every shilling promised but
      * not collected, staged with per-row follow-up lists. "As of now" like the
      * replenishment radar (owed only means anything against today).
-     * reports.view via the route group; outlet scoping via MetricEngine::for.
+     * reports.view via the route group; an optional outlet_id filter via MetricEngine::for.
      */
     public function collections(Request $request)
     {
@@ -314,7 +346,7 @@ class ExecutiveReportController extends Controller
      * (default 180 days): which products sell together, how strongly (attach
      * rate + lift), and the ESTIMATED revenue missed on anchor sales where
      * the usual companion never made it into the basket. reports.view via the
-     * route group; outlet scoping via MetricEngine::for; result cached 10
+     * route group; an optional outlet_id filter via MetricEngine::for; result cached 10
      * minutes inside the engine (keyed by scope + days).
      */
     public function attachRates(Request $request)
@@ -351,7 +383,7 @@ class ExecutiveReportController extends Controller
      * velocity computed over in-stock days only, and the estimated KES lost
      * while shelves sat empty — plus the live "bleeding now" rate for
      * products out right now. reports.view via the route group; outlet
-     * scoping via MetricEngine::for; cached 10 minutes inside the engine
+     * an optional outlet_id filter via MetricEngine::for; cached 10 minutes inside the engine
      * (keyed by scope + days).
      */
     public function stockoutLoss(Request $request)
@@ -386,7 +418,7 @@ class ExecutiveReportController extends Controller
      * per-season product lift, projected units, stock gap and the ORDER-BY
      * date each purchase must leave by given supplier lead times. "As of
      * now" like the radar — the horizon is always the next 120 days.
-     * reports.view via the route group; outlet scoping via MetricEngine::for;
+     * reports.view via the route group; an optional outlet_id filter via MetricEngine::for;
      * cached 10 minutes inside the engine.
      */
     public function seasonalDemand(Request $request)
@@ -423,7 +455,7 @@ class ExecutiveReportController extends Controller
      * per-currency rollups, per-country grouping, corridor top products and
      * a 6-month trend. KES equivalents appear only where the currencies
      * table carries a real configured rate — never invented conversions.
-     * reports.view via the route group; outlet scoping via MetricEngine::for;
+     * reports.view via the route group; an optional outlet_id filter via MetricEngine::for;
      * cached 10 minutes inside the engine (keyed by scope + days).
      */
     public function international(Request $request)
@@ -464,7 +496,7 @@ class ExecutiveReportController extends Controller
      * purchase rhythm, with the KES at risk, outreach history and 30-day
      * recovery attribution. "As of now" like the radar (dormancy only means
      * anything against today). reports.view via the route group; outlet
-     * scoping via MetricEngine::for.
+     * an optional outlet_id filter via MetricEngine::for.
      */
     /**
      * The unconfirmed order queue — GET /reports/order-pipeline
@@ -579,7 +611,7 @@ class ExecutiveReportController extends Controller
      * (customer_type='business' or an institution keyword in the name — see
      * MetricEngine::INSTITUTION_NAME_REGEX). "As of now" like the radar (a
      * quiet church only means anything against today). reports.view via the
-     * route group; outlet scoping via MetricEngine::for; cached 10 minutes
+     * route group; an optional outlet_id filter via MetricEngine::for; cached 10 minutes
      * inside the engine (keyed by scope).
      */
     public function institutions(Request $request)
@@ -872,6 +904,7 @@ class ExecutiveReportController extends Controller
             'outlet_id' => 'nullable|integer|exists:outlets,id',
             'page'   => 'nullable|integer|min:1',
             'bucket' => 'nullable|string|in:0_30,31_60,61_90,90_plus,deposits',
+            'salesperson' => 'nullable|integer|min:1',
         ]);
 
         if ($metric === 'expenses') {
@@ -881,10 +914,260 @@ class ExecutiveReportController extends Controller
         [$s, $e] = MetricEngine::resolvePeriod($validated['period'] ?? 'this_month', $validated['from'] ?? null, $validated['to'] ?? null);
         $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
 
-        return response()->json($engine->drill(
+        $result = $engine->drill(
             $metric, $s, $e,
             (int) ($validated['page'] ?? 1),
             $validated['bucket'] ?? null,
-        ));
+            isset($validated['salesperson']) ? (int) $validated['salesperson'] : null,
+        );
+
+        $user = $request->user();
+        $result['rows'] = collect($result['rows'])->map(fn ($r) => $this->withLinks((array) $r, $user))->all();
+
+        return response()->json($result);
+    }
+
+    /**
+     * Where a report row leads — decided HERE, from what the row is and what
+     * this viewer may open, never guessed by the page. A link is offered only
+     * when its destination's own permission allows it: a drill must not become
+     * a way round the screen it points to. One composer for every report that
+     * lists rows (drill-downs, Data Quality), so the rule cannot drift.
+     */
+    private function withLinks(array $r, \App\Models\User $user): array
+    {
+        $can     = fn (string $p) => $user->can($p);
+        $kind    = $r['kind'] ?? null;
+        $orderId = $kind === 'order' ? ($r['id'] ?? null) : ($r['order_id'] ?? null);
+
+        $r['links'] = array_filter([
+            'order'      => $orderId && $can('orders.view') ? "/sales/orders/{$orderId}" : null,
+            'customer'   => match (true) {
+                $kind === 'customer' && ! empty($r['id']) && $can('customers.view') => "/sales/customers/{$r['id']}",
+                ! empty($r['customer_id']) && $can('customers.view')                => "/sales/customers/{$r['customer_id']}",
+                default                                                             => null,
+            },
+            'payment'    => $kind === 'payment' && ! empty($r['payment_number']) && $can('payments.transactions')
+                ? '/finance/transactions?search=' . rawurlencode($r['payment_number']) : null,
+            'production' => $kind === 'production' && $can('production.view') ? "/production/orders/{$r['id']}" : null,
+            'expense'    => $kind === 'expense' && $can('expenses.view') ? "/expenses/{$r['id']}" : null,
+            'product'    => match (true) {
+                $kind === 'product' && ! empty($r['id']) && $can('products.view')         => "/catalogue/products/{$r['id']}",
+                ! empty($r['product_id']) && $can('products.view')                        => "/catalogue/products/{$r['product_id']}",
+                default                                                                   => null,
+            },
+        ]);
+
+        return $r;
+    }
+
+    /**
+     * Audit & Data Quality — where the records behind the other pages are
+     * incomplete, and which figures that bends. Rows carry the same
+     * permission-checked links as a drill; a check's "where to fix it" link is
+     * offered only to someone who may open that screen. Expense money stays
+     * behind reports.financial, exactly as on Finance & Cash.
+     */
+    public function dataQuality(Request $request)
+    {
+        $validated = $request->validate([
+            'period'    => 'nullable|string|in:today,yesterday,last_7,last_30,this_month,last_month,this_quarter,this_year,custom',
+            'from'      => 'nullable|date|required_if:period,custom',
+            'to'        => 'nullable|date|required_if:period,custom',
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+        ]);
+
+        $user      = $request->user();
+        $periodKey = $validated['period'] ?? 'this_month';
+        [$s, $e]   = MetricEngine::resolvePeriod($periodKey, $validated['from'] ?? null, $validated['to'] ?? null);
+        $engine    = MetricEngine::for($user, isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+
+        $dq = $engine->dataQuality($s, $e, $user->can('reports.financial'));
+
+        $mayOpen = fn (?string $rule) => match (true) {
+            $rule === null                => false,
+            str_starts_with($rule, 'role:') => $user->hasRole(substr($rule, 5)),
+            str_starts_with($rule, 'any:')  => collect(explode(',', substr($rule, 4)))->contains(fn ($p) => $user->can($p)),
+            default                         => $user->can($rule),
+        };
+
+        $dq['checks'] = array_map(function (array $c) use ($user, $mayOpen) {
+            $c['rows'] = array_map(fn ($r) => $this->withLinks($r, $user), $c['rows']);
+            $c['fix']  = ['label' => $c['fix']['label'], 'to' => $mayOpen($c['fix']['permission']) ? $c['fix']['to'] : null];
+
+            return $c;
+        }, $dq['checks']);
+
+        // One line per listed record, under its check — the work list, for
+        // whoever fixes it. Contacts go through report.contacts like any CSV.
+        if ($this->wantsExport($request)) {
+            $rows = [];
+            foreach ($dq['checks'] as $c) {
+                foreach ($c['rows'] as $r) {
+                    $rows[] = [$c['title'], $c['scope'] === 'period' ? 'This period' : 'All records', $c['count'],
+                        $r['ref'] ?? ($r['id'] ?? ''), $r['customer'] ?? '', $r['detail'] ?? '', $r['phone_field'] ?? '',
+                        $r['date'] ?? '', $r['amount'] ?? ''];
+                }
+            }
+
+            return $this->csvResponse(
+                ['Check', 'Scope', 'Records in all', 'Reference', 'Customer', 'Detail', 'Phone field', 'Date', 'KES'],
+                $rows, 'data_quality');
+        }
+
+        return response()->json(['period' => [
+            'key' => $periodKey, 'start' => $s->toIso8601String(), 'end' => $e->toIso8601String(),
+        ]] + $dq);
+    }
+
+    /**
+     * Where the period's orders went — sold, unconfirmed, lost, refunded —
+     * and who lost them. Every order raised in the window, in one bucket.
+     */
+    public function outcomes(Request $request)
+    {
+        $v = $request->validate([
+            'period'    => 'nullable|string|in:today,yesterday,last_7,last_30,this_month,last_month,this_quarter,this_year,custom',
+            'from'      => 'nullable|date|required_if:period,custom',
+            'to'        => 'nullable|date|required_if:period,custom',
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+        ]);
+        [$s, $e, $ps, $pe] = MetricEngine::resolvePeriod($v['period'] ?? 'this_month', $v['from'] ?? null, $v['to'] ?? null);
+        $engine = MetricEngine::for($request->user(), isset($v['outlet_id']) ? (int) $v['outlet_id'] : null);
+
+        return response()->json($engine->orderOutcomes($s, $e, $ps, $pe));
+    }
+
+    /**
+     * Business Explorer — any measure by any dimension, narrowed by filters,
+     * on the same definitions as every other page. CSV exports the table.
+     */
+    public function explorer(Request $request)
+    {
+        [$s, $e, $engine, $filters] = $this->explorerInput($request);
+        $dim = $request->validate([
+            'by' => 'required|string|in:' . implode(',', array_keys(MetricEngine::EXPLORER_DIMENSIONS)),
+        ])['by'];
+
+        $result = $engine->explorer($s, $e, $dim, $filters);
+
+        if ($this->wantsExport($request)) {
+            $label = fn (string $m) => match ($m) {
+                'sold' => 'Sold KES', 'orders' => 'Orders', 'buyers' => 'Buyers', 'aov' => 'Avg order KES',
+                'collected' => 'Collected KES', 'line_value' => 'Line value KES', 'units' => 'Units',
+            };
+
+            return $this->csvResponse(
+                array_merge([MetricEngine::EXPLORER_DIMENSIONS[$dim]['label']], array_map($label, $result['measures'])),
+                array_merge(
+                    array_map(fn ($r) => array_merge([$r['label']], array_map(fn ($m) => $r[$m], $result['measures'])), $result['rows']),
+                    [array_merge(['Total'], array_map(fn ($m) => $result['totals'][$m] ?? '', $result['measures']))],
+                ),
+                'business_explorer_' . $dim);
+        }
+
+        return response()->json($result + [
+            'dimensions' => MetricEngine::EXPLORER_DIMENSIONS,
+            'filters'    => $filters,
+            'row_limit'  => MetricEngine::EXPLORER_ROW_LIMIT,
+        ]);
+    }
+
+    /** The orders (or, by payment method, the payments) behind one Explorer row. */
+    public function explorerOrders(Request $request)
+    {
+        [$s, $e, $engine, $filters] = $this->explorerInput($request);
+        $v = $request->validate([
+            'by'   => 'nullable|string|in:' . implode(',', array_keys(MetricEngine::EXPLORER_DIMENSIONS)),
+            'key'  => 'nullable|string|max:100|required_with:by',
+            'page' => 'nullable|integer|min:1',
+        ]);
+        if (($v['by'] ?? null) === 'method') {
+            $filters['method'] = $v['key'];
+            $v['by'] = $v['key'] = null;
+        }
+
+        $result = $engine->explorerOrders($s, $e, $v['by'] ?? null, $v['key'] ?? null, $filters, (int) ($v['page'] ?? 1));
+        $user = $request->user();
+        $result['rows'] = array_map(fn ($r) => $this->withLinks($r, $user), $result['rows']);
+
+        return response()->json($result);
+    }
+
+    /** Period, outlet and the Explorer's filters (f_<dimension>=<key>), validated once. */
+    private function explorerInput(Request $request): array
+    {
+        $rules = [
+            'period'    => 'nullable|string|in:today,yesterday,last_7,last_30,this_month,last_month,this_quarter,this_year,custom',
+            'from'      => 'nullable|date|required_if:period,custom',
+            'to'        => 'nullable|date|required_if:period,custom',
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+        ];
+        foreach (MetricEngine::EXPLORER_FILTERS as $f) {
+            $rules["f_{$f}"] = 'nullable|string|max:100';
+        }
+        $v = $request->validate($rules);
+
+        [$s, $e] = MetricEngine::resolvePeriod($v['period'] ?? 'this_month', $v['from'] ?? null, $v['to'] ?? null);
+        $engine  = MetricEngine::for($request->user(), isset($v['outlet_id']) ? (int) $v['outlet_id'] : null);
+        $filters = [];
+        foreach (MetricEngine::EXPLORER_FILTERS as $f) {
+            if (($v["f_{$f}"] ?? '') !== '') {
+                $filters[$f] = $v["f_{$f}"];
+            }
+        }
+
+        return [$s, $e, $engine, $filters];
+    }
+
+    /**
+     * Staff, Outlets & Performance — how each outlet and salesperson is doing,
+     * this window against the previous one. Sales figures only.
+     */
+    public function performance(Request $request)
+    {
+        $validated = $request->validate([
+            'period'    => 'nullable|string|in:today,yesterday,last_7,last_30,this_month,last_month,this_quarter,this_year,custom',
+            'from'      => 'nullable|date|required_if:period,custom',
+            'to'        => 'nullable|date|required_if:period,custom',
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+        ]);
+
+        $periodKey = $validated['period'] ?? 'this_month';
+        [$s, $e, $ps, $pe] = MetricEngine::resolvePeriod($periodKey, $validated['from'] ?? null, $validated['to'] ?? null);
+        $engine = MetricEngine::for($request->user(), isset($validated['outlet_id']) ? (int) $validated['outlet_id'] : null);
+
+        $perf = $engine->performance($s, $e, $ps, $pe);
+
+        if ($this->wantsExport($request)) {
+            $rows = [];
+            foreach (['outlets' => 'Outlet', 'salespeople' => 'Salesperson'] as $key => $label) {
+                foreach ($perf[$key] as $r) {
+                    $rows[] = [$label, $r['name'], $r['sold'], $r['sold_previous'], $r['orders'], $r['aov'],
+                        $r['buyers'], $r['collected'], $r['unconfirmed_value']];
+                }
+            }
+
+            return $this->csvResponse(
+                ['Breakdown', 'Name', 'Sold KES', 'Sold previous period KES', 'Orders', 'Avg order KES', 'Buyers', 'Collected KES', 'Unconfirmed KES'],
+                $rows, 'staff_outlets_performance');
+        }
+
+        return response()->json(['period' => [
+            'key' => $periodKey, 'start' => $s->toIso8601String(), 'end' => $e->toIso8601String(),
+            'previous_start' => $ps->toIso8601String(), 'previous_end' => $pe->toIso8601String(),
+        ]] + $perf);
+    }
+
+    /**
+     * The outlets a report can be filtered by. The only other list sits behind
+     * pos.access, which a report reader need not hold; names and ids only.
+     */
+    public function outlets()
+    {
+        return response()->json([
+            'data' => \Illuminate\Support\Facades\DB::table('outlets')
+                ->where('is_active', true)->orderBy('name')->get(['id', 'name']),
+        ]);
     }
 }

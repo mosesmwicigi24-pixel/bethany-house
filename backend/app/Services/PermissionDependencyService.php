@@ -60,12 +60,15 @@ class PermissionDependencyService
         'orders.edit_items'       => ['orders.view', 'orders.edit', 'products.view'],
         'orders.cancel'           => ['orders.view'],
         'orders.set_deposit'      => ['orders.view'],
-        // The shipping-fee modal loads GET /admin/shipping/methods, gated
-        // by settings.view - without it the method picker 403s.
-        'orders.set_shipping_fee' => ['orders.view', 'settings.view'],
+        // The shipping-fee modal's method picker reads
+        // GET /admin/orders/shipping-methods, gated by set_shipping_fee
+        // itself. It used to read the Setup endpoint /admin/shipping/methods,
+        // which is why this entry once pulled in settings.view — and with it
+        // all of Setup for every outlet manager (Phase 1C, "Setup leak").
+        'orders.set_shipping_fee' => ['orders.view'],
         'orders.authorize_dispatch' => ['orders.view'],
         // Reducing a paid receipt's shipping is a superset of setting it.
-        'orders.reduce_shipping_fee' => ['orders.set_shipping_fee', 'orders.view', 'settings.view'],
+        'orders.reduce_shipping_fee' => ['orders.set_shipping_fee', 'orders.view'],
         // Refunds are also reachable via the payment-transactions ledger
         // (nested under permission:payments.view) and need the underlying
         // payment record either way.
@@ -78,6 +81,8 @@ class PermissionDependencyService
         'payments.approve_international' => ['payments.view'],
         'payments.void'                  => ['payments.view'],
         'payments.reassign'              => ['payments.view'],
+        'payments.request_void'          => ['payments.view'],
+        'payments.request_reassign'      => ['payments.view'],
         'payments.transactions'          => ['payments.view'],
         // Recording a payment happens at POST /orders/{id}/payments, nested
         // inside permission:orders.view, not the payments module itself.
@@ -96,6 +101,9 @@ class PermissionDependencyService
         'production.raise_order' => ['production.view', 'products.view'],
         // The BOM read routes are nested inside the products.view group.
         'production.view_bom'    => ['products.view'],
+        // The BOM write routes sit in the same products.view group, and the
+        // editor opens on the BOM list (production.view_bom). Both are reads.
+        'bom.edit'               => ['products.view', 'production.view_bom'],
 
         // ── Shipments ────────────────────────────────────────────────────── 
         'shipment.edit'            => ['shipment.view'],
@@ -129,6 +137,8 @@ class PermissionDependencyService
         'products.edit'   => ['products.view'],
         'products.delete' => ['products.view'],
         'products.import' => ['products.view', 'products.create'],
+        // Writing a cost means seeing one (Phase 3C).
+        'products.edit_cost' => ['products.view', 'products.view_cost'],
 
         // ── POS ──────────────────────────────────────────────────────────── 
         // All of these sit inside the permission:pos.access admin/pos
@@ -142,10 +152,18 @@ class PermissionDependencyService
         'pos.close_register'  => ['pos.access'],
         'pos.returns'         => ['pos.access'],
         'pos.cash_management' => ['pos.access'],
+        // Verifying is done from the till screens (Phase 4B). Reconciling,
+        // correcting and reading all tills are back-office keys and stand
+        // outside pos.access, like pos.eod_review.
+        'pos.till_verify'     => ['pos.access'],
 
         // ── Reports ──────────────────────────────────────────────────────── 
-        'reports.export'    => ['reports.view'],
-        'reports.financial' => ['reports.view'],
+        // Each report page stands alone (Phase 3A): there is no section-wide
+        // view left for them to need. reports.export applies to whichever
+        // pages its holder can view, so it implies none of them;
+        // export_supply exists only for the two supply pages, so it brings
+        // their view with it.
+        'reports.export_supply' => ['reports.inventory', 'reports.procurement'],
 
         // ── Expenses ─────────────────────────────────────────────────────── 
         // Every expenses.* action lives inside permission:expenses.view.
@@ -167,6 +185,10 @@ class PermissionDependencyService
         // (see the routes/api.php change made in this same review).
         'settings.edit'            => ['settings.view'],
         'settings.manage_database' => ['settings.view'],
+        // setup.technical deliberately has NO prerequisite: the countries,
+        // languages and shipping routes accept it on its own, and pulling in
+        // settings.view would reopen business settings, tax rates, currencies
+        // and payment methods to the platform head (Phase 2).
 
         // ── Users & Roles ────────────────────────────────────────────────── 
         'users.create' => ['users.view'],

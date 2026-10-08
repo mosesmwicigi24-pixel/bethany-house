@@ -1,4 +1,17 @@
 import { get, post, put, patch, del } from "./client";
+import type { Proposal } from "@/api/proposals";
+
+/** A shipping method as the order editor's picker sees it (active only). */
+export interface OrderShippingMethod {
+    id: number;
+    name: string;
+    description?: string | null;
+    delivery_time?: string | null;
+    cost_type: "flat_rate" | "free" | "percentage";
+    flat_rate: number;
+    min_order_amount?: number | null;
+    zone_name?: string | null;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -355,6 +368,14 @@ export const ordersApi = {
             data,
         ),
 
+    /**
+     * Active shipping methods for the Set Shipping picker. Gated by
+     * orders.set_shipping_fee — NOT the Setup endpoint /v1/admin/shipping/methods
+     * (settings.view), which is what used to hand Setup to every outlet manager.
+     */
+    shippingMethods: () =>
+        get<{ data: OrderShippingMethod[] }>("/v1/admin/orders/shipping-methods"),
+
     /** Manually set or update the shipping fee before payment */
     setShippingFee: (
         id: number,
@@ -379,7 +400,8 @@ export const ordersApi = {
         id: number,
         data: { deposit_amount: number; balance_due_date?: string },
     ) =>
-        post<{ message: string; deposit_amount: number; balance_due_date: string | null }>(
+        // Phase 3C: credit past the maker's band (KES 20,000) waits for finance.
+        post<{ message: string; deposit_amount: number; balance_due_date: string | null; proposal?: Proposal | null }>(
             `/v1/admin/orders/${id}/set-deposit`,
             data,
         ),

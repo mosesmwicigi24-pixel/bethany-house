@@ -181,6 +181,42 @@ class AuditPermissions extends Command
         // "a.b" in the React sidebar's permission / anyOfPermissions keys
         $scan(dirname($base) . '/react-admin/src/components/layout/Sidebar.tsx', '/"([a-z_]+\.[a-z_]+)"/');
 
+        // 'report.page:sales' — a report page's gate (Phase 3A). The route
+        // names the page; App\Support\ReportPages maps it to its permission.
+        // 'any' reaches every page, 'drill' the pages that offer a drill.
+        $pages = [];
+        $scanPages = $found;
+        $found = [];
+        $scan($base . '/routes', "/['\"]report\.page:([a-z_,]+)/");
+        // …and through the route file's shorthands, $reportPage('sales') /
+        // $reportPdf('sales'), which build that same middleware.
+        $scan($base . '/routes', "/\\\$report(?:Page|Pdf)\\(\\s*'([a-z_]+)'/");
+        foreach ($found as $key) {
+            $keys = match ($key) {
+                'any'   => array_keys(\App\Support\ReportPages::PAGES),
+                'drill' => array_merge(...array_values(\App\Support\ReportPages::DRILLS)),
+                default => [$key],
+            };
+            foreach ($keys as $k) {
+                if (isset(\App\Support\ReportPages::PAGES[$k])) {
+                    $pages[] = \App\Support\ReportPages::PAGES[$k];
+                }
+            }
+        }
+        $found = array_merge($scanPages, $pages);
+
+        // A signing key is enforced through data, not a route: the approval
+        // engine checks the approver_permission of each band in
+        // approval_thresholds (Phases 3B/3C/4B). Read them from the table.
+        try {
+            if (\Illuminate\Support\Facades\Schema::hasTable('approval_thresholds')) {
+                $found = array_merge($found, \Illuminate\Support\Facades\DB::table('approval_thresholds')
+                    ->distinct()->pluck('approver_permission')->filter()->all());
+            }
+        } catch (\Throwable) {
+            // No database (static run): the code scan above still stands.
+        }
+
         return array_values(array_unique($found));
     }
 }

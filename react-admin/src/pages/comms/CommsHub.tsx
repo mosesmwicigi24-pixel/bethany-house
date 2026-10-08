@@ -412,16 +412,13 @@ function useAuthBlob(url: string, autoFetch = false) {
         if (blobUrl || loading) return blobUrl;
         setLoading(true);
         try {
-            const { tokenStorage } = await import("@/api/client");
-            const token = tokenStorage.get();
-            // Older messages baked in an http:// serve URL — the browser blocks
-            // that as mixed content on this https page (the attachment then can't
-            // load and falls back to a file card). Upgrade to https before fetch.
-            const secureUrl = url.replace(/^http:\/\//i, "https://");
-            const r = await fetch(secureUrl, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-            if (!r.ok) throw new Error(String(r.status));
-            const blob = await r.blob();
-            const obj  = URL.createObjectURL(blob);
+            // The serve URL in the message is the ISSUER (4D): with the staff
+            // token it answers a fresh signed link (≤5 min) if this user is in
+            // the conversation, and the bytes come from that link. Older
+            // http:// URLs are upgraded to https inside fetchSignedFile.
+            const { fetchSignedFile } = await import("@/api/signedFiles");
+            const file = await fetchSignedFile(url);
+            const obj  = URL.createObjectURL(file.blob);
             setBlobUrl(obj);
             setLoading(false);
             return obj;
@@ -593,6 +590,12 @@ function useStaffSearch(query: string) {
     });
 }
 
+/** Colleagues' emails are searchable only for those who may list staff accounts. */
+function useStaffSearchHint(): string {
+    const { can } = usePermissions();
+    return can("users.view") ? "Search by name or email…" : "Search by name…";
+}
+
 function useAllStaff() {
     return useQuery({
         queryKey: ["all-staff"],
@@ -730,7 +733,7 @@ function MentionPopup({ query, onSelect }: { query: string; onSelect: (u: Mentio
                     <Avatar initials={u.initials} name={u.name} />
                     <div className="min-w-0">
                         <p className="text-xs font-semibold text-surface-800 truncate">{u.name}</p>
-                        <p className="text-2xs text-surface-400 truncate">{u.email}</p>
+                        {u.email && <p className="text-2xs text-surface-400 truncate">{u.email}</p>}
                     </div>
                 </button>
             ))}
@@ -891,6 +894,7 @@ function MemberPicker({ selected, onToggle, excludeIds = [], label = "Add member
     excludeIds?: number[]; label?: string;
 }) {
     const [q, setQ] = useState("");
+    const searchHint = useStaffSearchHint();
     const { data: results = [] } = useStaffSearch(q);
     const filtered = results.filter(u => !excludeIds.includes(u.id));
 
@@ -907,7 +911,7 @@ function MemberPicker({ selected, onToggle, excludeIds = [], label = "Add member
                     ))}
                 </div>
             )}
-            <input className="input text-sm" value={q} onChange={e => setQ(e.target.value)} placeholder="Search by name or email…" />
+            <input className="input text-sm" value={q} onChange={e => setQ(e.target.value)} placeholder={searchHint} />
             {filtered.length > 0 && (
                 <div className="mt-1 border border-surface-200 rounded-xl overflow-hidden max-h-40 overflow-y-auto">
                     {filtered.map(u => {
@@ -918,7 +922,7 @@ function MemberPicker({ selected, onToggle, excludeIds = [], label = "Add member
                                 <Avatar initials={u.initials} name={u.name} />
                                 <div className="flex-1 min-w-0">
                                     <p className="font-semibold text-surface-800 truncate">{u.name}</p>
-                                    <p className="text-surface-400 truncate">{u.email}</p>
+                                    {u.email && <p className="text-surface-400 truncate">{u.email}</p>}
                                 </div>
                                 {isSelected && (
                                     <svg className="w-4 h-4 text-brand-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -2863,6 +2867,7 @@ function NewSpaceModal({ onClose, onCreated, currentUserId }: {
 
 function UserDirectory({ onOpenDm, onClose }: { onOpenDm: (id: number) => void; onClose: () => void }) {
     const [q, setQ]        = useState("");
+    const searchHint       = useStaffSearchHint();
     const { user }         = useAuthStore();
     const qc               = useQueryClient();
     const { data: all = [], isLoading } = useAllStaff();
@@ -2887,7 +2892,7 @@ aria-label="Close">
                     </button>
                 </div>
                 <div className="px-4 py-2 border-b border-line shrink-0">
-                    <input className="input" value={q} onChange={e => setQ(e.target.value)} placeholder="Search by name or email…" autoFocus />
+                    <input className="input" value={q} onChange={e => setQ(e.target.value)} placeholder={searchHint} autoFocus />
                 </div>
                 <div className="flex-1 overflow-y-auto py-2">
                     {isLoading ? (
@@ -2902,7 +2907,7 @@ aria-label="Close">
                             </div>
                             <div className="flex-1 min-w-0">
                                 <p className="text-sm font-semibold text-surface-800 truncate">{u.name}</p>
-                                <p className="text-xs text-surface-400 truncate">{u.email}</p>
+                                {u.email && <p className="text-xs text-surface-400 truncate">{u.email}</p>}
                             </div>
                             <svg className="w-4 h-4 text-surface-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>

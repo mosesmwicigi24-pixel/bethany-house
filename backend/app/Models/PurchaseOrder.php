@@ -27,6 +27,11 @@ class PurchaseOrder extends Model
         'created_by',
         'approved_by',
         'approved_at',
+        // submit() has always written these, but without them here Eloquent
+        // silently discarded both, so no PO ever recorded who submitted it —
+        // and the maker ≠ checker rule needs to know.
+        'submitted_by',
+        'submitted_at',
     ];
 
     protected $casts = [
@@ -37,6 +42,7 @@ class PurchaseOrder extends Model
         'shipping_amount' => 'decimal:2',
         'total_amount' => 'decimal:2',
         'approved_at' => 'datetime',
+        'submitted_at' => 'datetime',
     ];
 
     protected static function boot()

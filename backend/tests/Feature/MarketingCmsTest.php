@@ -70,18 +70,32 @@ class MarketingCmsTest extends TestCase
         $this->assertSoftDeleted('seasons', ['id' => $id]);
     }
 
-    public function test_admin_can_create_a_blessed_friday_promotion(): void
+    /**
+     * A 15% Blessed Friday is above the owner's 5% maximum (2026-10-03), so it
+     * is the super_admin's to set; a marketing manager is refused. See
+     * PromotionDiscountMaximumTest for the rule in full.
+     */
+    public function test_the_owner_can_create_a_blessed_friday_promotion(): void
     {
-        $this->admin();
-
-        $this->postJson('/api/v1/admin/marketing/promotions', [
+        $payload = [
             'name'           => 'Blessed Friday — Harvest',
             'discount_type'  => 'percentage',
             'discount_value' => 15,
             'is_active'      => true,
             'starts_at'      => '2026-08-01',
             'ends_at'        => '2026-08-31',
-        ])->assertCreated()->assertJsonPath('data.name', 'Blessed Friday — Harvest');
+        ];
+
+        $this->admin();
+        $this->postJson('/api/v1/admin/marketing/promotions', $payload)->assertStatus(422);
+        $this->assertDatabaseMissing('promotions', ['name' => 'Blessed Friday — Harvest']);
+
+        $owner = User::factory()->create();
+        $owner->assignRole(Role::findOrCreate('super_admin', 'sanctum'));
+        Sanctum::actingAs($owner);
+
+        $this->postJson('/api/v1/admin/marketing/promotions', $payload)
+            ->assertCreated()->assertJsonPath('data.name', 'Blessed Friday — Harvest');
 
         $this->assertDatabaseHas('promotions', ['name' => 'Blessed Friday — Harvest']);
     }

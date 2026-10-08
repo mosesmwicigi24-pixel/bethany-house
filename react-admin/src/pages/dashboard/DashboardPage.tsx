@@ -9,11 +9,15 @@ import { get } from "@/api/client";
 import { reportsApi } from "@/api/reports";
 import { useAuthStore } from "@/store/auth.store";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useIsFloorWorker } from "@/hooks/useHomePath";
+import { dueInfo, DUE_TONE_CLS } from "@/components/production/productionUi";
 import { clsx } from "clsx";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface DashboardStats {
+    /** The server's verdict (4D): no business counts for this account. */
+    platform_only?: boolean;
     total_users?: number;
     active_users?: number;
     staff_users?: number;
@@ -416,26 +420,17 @@ function TailorHome({ stats, isLoading, can }: {
         { label: "Calendar",      href: "/production/calendar",   icon: <ClockIcon /> },
     ];
 
+    // The shared Production due wording and thresholds (productionUi), on the
+    // business calendar — the same words as My Tasks and the order page.
     const dueChip = (t: any) => {
-        if (!t.production_order?.due_date) return null;
-        const days = Math.ceil((new Date(t.production_order.due_date).getTime() - Date.now()) / 86_400_000);
-        if (days < 0)  return <span className="text-2xs font-bold text-danger bg-danger-light rounded-full px-2 py-0.5">Overdue {-days}d</span>;
-        if (days === 0) return <span className="text-2xs font-bold text-warning-dark bg-warning-light rounded-full px-2 py-0.5">Due today</span>;
-        return <span className="text-2xs font-semibold text-surface-500 bg-surface-100 rounded-full px-2 py-0.5">Due in {days}d</span>;
+        const due = dueInfo(t.production_order?.due_date, t.production_order?.status);
+        if (due.tone === "none") return null;
+        const pill = { overdue: "bg-danger-light", today: "bg-warning-light", soon: "bg-warning-light", later: "bg-surface-100", none: "" }[due.tone];
+        return <span className={clsx("text-2xs font-bold rounded-full px-2 py-0.5 whitespace-nowrap", pill, DUE_TONE_CLS[due.tone])}>{due.label}</span>;
     };
 
     return (
         <div className="space-y-4">
-            {/* Compact stat strip — numbers at a glance, no vertical sprawl */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                <TailorStatTile label="Active"   value={stats?.production_in_progress} tone="text-brand-600"  href="/production/my-tasks" loading={isLoading} />
-                <TailorStatTile label="In queue" value={stats?.production_queue}       tone="text-info"       href="/production/my-tasks" loading={isLoading} />
-                <TailorStatTile label="Overdue"  value={stats?.production_overdue}     tone="text-danger"     href="/production/my-tasks" loading={isLoading} />
-                {isQc
-                    ? <TailorStatTile label="QC pending" value={stats?.production_qc_pending} tone="text-accent-600" href="/production/qc" loading={isLoading} />
-                    : <TailorStatTile label="Alerts"     value={stats?.unread_notifications}  tone="text-warning-dark" href="/notifications" loading={isLoading} />}
-            </div>
-
             {/* THE HERO — what to work on next */}
             <div className="card overflow-hidden">
                 <div className="card-header flex items-center justify-between">
@@ -466,7 +461,7 @@ function TailorHome({ stats, isLoading, can }: {
                                     {t.blocked_by_stage ? ` · 🔒 waiting on ${t.blocked_by_stage}` : ""}
                                 </p>
                             </div>
-                            <div className="shrink-0 flex items-center gap-2">
+                            <div className="shrink-0 flex flex-col sm:flex-row items-end sm:items-center gap-1 sm:gap-2">
                                 {dueChip(t)}
                                 {t.status === "in_progress" && (
                                     <span className="text-2xs font-bold text-brand-600 bg-brand-50 border border-brand-200 rounded-full px-2 py-0.5">In progress</span>
@@ -475,6 +470,16 @@ function TailorHome({ stats, isLoading, can }: {
                         </Link>
                     ))}
                 </div>
+            </div>
+
+            {/* Compact stat strip — numbers at a glance, after the work itself */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <TailorStatTile label="Active"   value={stats?.production_in_progress} tone="text-brand-600"  href="/production/my-tasks" loading={isLoading} />
+                <TailorStatTile label="In queue" value={stats?.production_queue}       tone="text-info"       href="/production/my-tasks" loading={isLoading} />
+                <TailorStatTile label="Overdue"  value={stats?.production_overdue}     tone="text-danger"     href="/production/my-tasks" loading={isLoading} />
+                {isQc
+                    ? <TailorStatTile label="QC pending" value={stats?.production_qc_pending} tone="text-accent-600" href="/production/qc" loading={isLoading} />
+                    : <TailorStatTile label="Alerts"     value={stats?.unread_notifications}  tone="text-warning-dark" href="/notifications" loading={isLoading} />}
             </div>
 
             {/* Quick actions — icons with a name, one row, not furniture */}
@@ -588,8 +593,8 @@ function ProductionSummaryCard({ stats, loading }: { stats?: DashboardStats; loa
 
 // ── Role-aware greeting subtitle ──────────────────────────────────────────────
 
-function roleSubtitle(roles: string[]): string {
-    if (roles.includes("tailor"))               return "Check your assigned tasks and stay on top of your production work.";
+function roleSubtitle(roles: string[], floorWorker: boolean): string {
+    if (floorWorker)                            return "Check your assigned tasks and stay on top of your production work.";
     if (roles.includes("pos_clerk"))            return "Open a register and start serving customers.";
     if (roles.includes("procurement_officer"))  return "Manage purchase orders, suppliers, and incoming stock.";
     if (roles.includes("outlet_manager"))       return "Here's what's happening at your outlet today.";
@@ -599,14 +604,36 @@ function roleSubtitle(roles: string[]): string {
 // ── Role-aware stat grid ───────────────────────────────────────────────────────
 
 function RoleStatGrid({
-    stats, isLoading, roles, can, isAdmin, fmtCurrency, kpis, kpiLoading,
+    stats, isLoading, roles, floorWorker, can, isAdmin, fmtCurrency, kpis, kpiLoading,
 }: {
-    stats?: DashboardStats; isLoading: boolean; roles: string[];
+    stats?: DashboardStats; isLoading: boolean; roles: string[]; floorWorker: boolean;
     can: (p: string) => boolean; isAdmin: boolean; fmtCurrency: (n?: number) => string;
     kpis: any; kpiLoading: boolean;
 }) {
-    // ── Tailor view — the full worker home, not just a stat grid ─────────────
-    if (roles.includes("tailor")) {
+    // ── Platform-only (system admin) — accounts, not the business (4D) ──────
+    if (stats?.platform_only) {
+        return (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatCard label="Staff Accounts"  value={stats?.staff_users}
+                    loading={isLoading} color="bg-brand-50 text-brand-600"
+                    href="/settings/users" icon={<ClipboardIcon />} />
+                <StatCard label="Active Accounts" value={stats?.active_users}
+                    loading={isLoading} color="bg-success-light text-success"
+                    href="/settings/users" icon={<ClipboardIcon />} />
+                <StatCard label="All Accounts"    value={stats?.total_users}
+                    loading={isLoading} color="bg-surface-100 text-surface-600"
+                    href="/settings/users" icon={<ClipboardIcon />} />
+                <StatCard label="Notifications"   value={stats?.unread_notifications}
+                    loading={isLoading} color="bg-warning-light text-warning-dark"
+                    href="/notifications" badge={stats?.unread_notifications} icon={<PaymentIcon />} />
+            </div>
+        );
+    }
+
+    // ── Floor worker — the full worker home, not just a stat grid. Decided by
+    // permission (lib/homePath isFloorWorker), the same rule as the landing
+    // page, not by the role name "tailor". ───────────────────────────────────
+    if (floorWorker) {
         return <TailorHome stats={stats} isLoading={isLoading} can={can} />;
     }
 
@@ -733,6 +760,7 @@ export default function DashboardPage() {
 
     // Derive roles from the auth store user
     const roles: string[] = user?.roles?.map((r: { name: string }) => r.name) ?? [];
+    const floorWorker = useIsFloorWorker();
 
     const [period, setPeriod] = useState<typeof PERIODS[number]>(PERIODS[1]); // 7 days default
 
@@ -745,8 +773,13 @@ export default function DashboardPage() {
         retry: false,
     });
 
-    // Roles that should not see business-wide financials
-    const hideFinancials = roles.some(r => ["tailor", "procurement_officer"].includes(r));
+    // Roles that should not see business-wide financials. The revenue row is
+    // the Sales & Orders report's figures, and its endpoints check
+    // reports.sales (Phase 3A) — without it the row could only fail. That
+    // covers anyone the reports engine would refuse, the system admin among
+    // them (4D).
+    const hideFinancials = !can("reports.sales") || floorWorker
+        || roles.some(r => ["tailor", "procurement_officer"].includes(r));
 
     // Rich KPIs + revenue trend from the reporting engine
     // Skipped for roles that won't see the revenue row.
@@ -788,7 +821,7 @@ export default function DashboardPage() {
     const fmtCurrency = (n?: number) =>
         n !== undefined ? `KES ${n.toLocaleString("en-KE", { minimumFractionDigits: 0 })}` : "—";
 
-    const quickActions = useQuickActions(stats, roles, can);
+    const quickActions = useQuickActions(stats, roles, can, floorWorker);
 
     return (
         <div className="animate-fade-in space-y-4 sm:space-y-6">
@@ -796,7 +829,7 @@ export default function DashboardPage() {
             <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div>
                     <h1 className="page-title">{greeting}, {user?.first_name ?? "there"}</h1>
-                    <p className="page-subtitle">{roleSubtitle(roles)}</p>
+                    <p className={clsx("page-subtitle", floorWorker && "hidden sm:block")}>{roleSubtitle(roles, floorWorker)}</p>
                 </div>
     {!hideFinancials && (
                     <div className="flex items-center gap-1 bg-surface-100 rounded-xl p-1">
@@ -816,8 +849,11 @@ export default function DashboardPage() {
                 )}
             </div>
 
-            {/* Alert bar */}
-            <AlertBar alerts={alerts} />
+            {/* Alert bar. Not on a floor worker's home: their one alert is
+                "N production orders overdue", which the Overdue tile and each
+                task's due chip already say — three signals for one fact
+                pushed their tasks below the fold. */}
+            {!floorWorker && <AlertBar alerts={alerts} />}
 
             {/* Revenue row: sparkline + channel split + cash today
                  Hidden for roles that have no business seeing financials:
@@ -855,20 +891,20 @@ export default function DashboardPage() {
             {/* Role-aware stat grid */}
             <RoleStatGrid
                 stats={stats} isLoading={isLoading}
-                roles={roles} can={can} isAdmin={isAdmin}
+                roles={roles} floorWorker={floorWorker} can={can} isAdmin={isAdmin}
                 fmtCurrency={fmtCurrency}
                 kpis={kpis} kpiLoading={kpiLoading}
             />
 
             {/* Production queue — shown for admin and users with production access (not the tailor-only view which has its own tasks UI) */}
-            {(can('production.view') || isAdmin) && !roles.includes("tailor") && (
+            {(can('production.view') || isAdmin) && !floorWorker && (
                 <ProductionSummaryCard stats={stats} loading={isLoading} />
             )}
 
             {/* Quick actions first — the operational launchpad now sits where the
                 activity feed used to, full-width as a tappable grid. Tailors have
                 their own icon grid in the hero, so they skip this one. */}
-            {!roles.includes("tailor") && <QuickActionsPanel actions={quickActions} />}
+            {!floorWorker && <QuickActionsPanel actions={quickActions} />}
 
             {/* Recent activity LAST — informational, not operational. Full width. */}
             <div className="card overflow-hidden">
@@ -957,9 +993,10 @@ function useQuickActions(
     stats: DashboardStats | undefined,
     roles: string[],
     can: (p: string) => boolean,
+    floorWorker: boolean,
 ): QuickAction[] {
-    // ── Tailor ───────────────────────────────────────────────────────────────
-    if (roles.includes("tailor")) {
+    // ── Floor worker ─────────────────────────────────────────────────────────
+    if (floorWorker) {
         return [
             { label: "My Tasks",          href: "/production/my-tasks", icon: "tasks",   highlight: true },
             { label: "Messages",          href: "/comms",               icon: "message"  },

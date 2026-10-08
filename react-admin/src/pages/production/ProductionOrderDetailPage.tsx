@@ -1,7 +1,12 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { toBusinessDateInput } from "@/lib/businessDate";
+import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
+import {
+    ORDER_STATUS, PRIORITY, StatusBadge, PriorityBadge, ProgressBar, dueInfo, DUE_TONE_CLS, fmtDueDate, stageLabel, acceptsFloorWork, StageActions, measurementRank,
+    isCustomerJob, jobFor, type OrderProgressData,
+} from "@/components/production/productionUi";
 import { get, post, put, del } from "@/api/client";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -42,9 +47,14 @@ interface ProductionOrder {
     completed_at?: string;
     confirmed_at?: string;
     completion_percentage: number;
+    /** The one whole-pipeline progress figure (backend OrderProgress). */
+    progress?: OrderProgressData | null;
+    /** Server-resolved customer name (first name only without customers.view). */
+    customer_label?: string | null;
     current_stage?: string;
     notes?: string;
     customer_order_id?: number | null;
+    is_customer_order?: boolean;
     customer_order?: { order_number: string; customer_first_name?: string | null; customer_last_name?: string | null; customer_phone?: string | null; customer_email?: string | null } | null;
     customer?: { id: number; first_name: string; last_name: string } | null;
     specifications?: Record<string, string>;
@@ -112,24 +122,10 @@ interface AuditEntry {
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const STATUS_CFG: Record<string, { label: string; color: string; bg: string; dot: string }> = {
-    draft:       { label: "Draft",        color: "text-surface-600",  bg: "bg-surface-100", dot: "bg-surface-400" },
-    pending:     { label: "Pending",      color: "text-amber-700",    bg: "bg-amber-50",    dot: "bg-amber-500" },
-    in_progress: { label: "In Progress",  color: "text-brand-700",    bg: "bg-brand-50",    dot: "bg-brand-500" },
-    on_hold:     { label: "On Hold",      color: "text-warning-800",  bg: "bg-warning-100", dot: "bg-warning-600" },
-    qc_pending:  { label: "QC Pending",   color: "text-accent-700",   bg: "bg-accent-50",   dot: "bg-accent-500" },
-    qc_passed:   { label: "QC Passed",    color: "text-success-700",  bg: "bg-success-50",  dot: "bg-success-500" },
-    qc_failed:   { label: "QC Failed",    color: "text-danger-700",      bg: "bg-danger-50",      dot: "bg-danger-500" },
-    completed:   { label: "Completed",    color: "text-success-700",  bg: "bg-success-100", dot: "bg-success-600" },
-    cancelled:   { label: "Cancelled",    color: "text-surface-500",  bg: "bg-surface-100", dot: "bg-surface-400" },
-};
-
-const PRIORITY_CFG: Record<string, { label: string; color: string; bg: string; cls: string }> = {
-    low:    { label: "Low",    color: "text-surface-500",  bg: "bg-surface-100", cls: "text-surface-400 bg-surface-50 border-surface-200" },
-    normal: { label: "Normal", color: "text-info-700",     bg: "bg-info-50",     cls: "text-brand-600 bg-brand-50 border-brand-200" },
-    high:   { label: "High",   color: "text-brand-700",   bg: "bg-brand-50",   cls: "text-warning-dark bg-warning-light border-warning/30" },
-    urgent: { label: "Urgent", color: "text-danger-700",      bg: "bg-danger-50",      cls: "text-danger bg-danger-light border-danger/30" },
-};
+// Status, priority, due wording and progress: the shared Production design
+// language (components/production/productionUi).
+const STATUS_CFG = ORDER_STATUS;
+const PRIORITY_CFG = PRIORITY;
 
 const STAGE_ICONS: Record<string, string> = {
     cutting: "cut", stitching: "needle", sewing: "needle",
@@ -149,13 +145,13 @@ const fmtDate = (d?: string | null) =>
     d ? new Date(d).toLocaleDateString("en-KE", { day: "2-digit", month: "short", year: "numeric" }) : "-";
 const fmtDateTime = (d?: string | null) =>
     d ? new Date(d).toLocaleString("en-KE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
-const daysUntil = (d: string) => Math.ceil((new Date(d).getTime() - Date.now()) / 86_400_000);
 
 // Shared geometry for the detail-page action row. Defined once so the width
 // budget in the comment above that row stays true — a one-off `px-3` on a
 // single button is what pushed it onto a second line before.
-const ACT_BTN = "flex items-center gap-1 bg-white border border-surface-200 rounded-lg px-2.5 h-[30px] sm:h-9 " +
-    "text-[11px] sm:text-xs font-semibold text-surface-700 hover:border-brand-300 hover:text-brand-600 transition-colors";
+// 44px on a phone (one-handed, on the floor); the compact 36px from sm up.
+const ACT_BTN = "flex items-center gap-1 bg-white border border-surface-200 rounded-lg px-2.5 h-11 sm:h-9 " +
+    "text-[11px] sm:text-xs font-semibold text-surface-700 hover:border-brand-300 hover:text-brand-700 transition-colors";
 const MENU_ITEM = "w-full text-left px-3.5 py-2.5 text-xs font-semibold text-surface-700 hover:bg-surface-50 transition-colors";
 const fmtNum = (n: number) => n.toLocaleString("en-KE", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
 const hoursBetween = (from?: string | null, to?: string | null): number | null =>
@@ -176,23 +172,14 @@ const batchPassed = (task: Task, batch: OrderBatch): number =>
 
 // ── Shared UI atoms ───────────────────────────────────────────────────────────
 
-function ProgressBar({ pct, colorClass = "bg-brand-500" }: { pct: number; colorClass?: string }) {
-    return (
-        <div className="h-1.5 bg-surface-100 rounded-full overflow-hidden">
-            <div className={clsx("h-full rounded-full transition-all duration-500", colorClass)}
-                style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} />
-        </div>
-    );
-}
-
 function SectionLabel({ children }: { children: React.ReactNode }) {
-    return <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2">{children}</p>;
+    return <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest mb-2">{children}</p>;
 }
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
     return (
         <div className="flex items-start justify-between gap-2 py-1.5 border-b border-surface-50 last:border-0">
-            <span className="text-xs text-surface-400 shrink-0">{label}</span>
+            <span className="text-xs text-surface-500 shrink-0">{label}</span>
             <span className="text-xs text-surface-800 font-medium text-right">{value ?? "-"}</span>
         </div>
     );
@@ -226,9 +213,9 @@ function EditOrderModal({ order, onClose, onSaved, canReduce = false }: { order:
 
     const [quantity, setQuantity] = useState(String(order.quantity));
     const [priority, setPriority] = useState(order.priority ?? "normal");
-    const [dueDate, setDueDate]   = useState((order.due_date ?? "").slice(0, 10));
-    const [fittingDate, setFittingDate]       = useState(((order as any).fitting_date ?? "").slice(0, 10));
-    const [collectionDate, setCollectionDate] = useState(((order as any).collection_date ?? "").slice(0, 10));
+    const [dueDate, setDueDate]   = useState(toBusinessDateInput(order.due_date));
+    const [fittingDate, setFittingDate]       = useState(toBusinessDateInput((order as any).fitting_date));
+    const [collectionDate, setCollectionDate] = useState(toBusinessDateInput((order as any).collection_date));
     const [notes, setNotes]       = useState((order as any).notes ?? "");
     // Measurements are editable at any stage (the garment isn't cut yet, or is
     // being re-measured) — only the QUANTITY is structural and locked. Kept as
@@ -287,7 +274,7 @@ function EditOrderModal({ order, onClose, onSaved, canReduce = false }: { order:
                             </p>
                         )}
                         {!isDraft && !canReduce && (
-                            <p className="text-2xs text-surface-400 mt-1 leading-snug">
+                            <p className="text-2xs text-surface-500 mt-1 leading-snug">
                                 Locked after confirmation — serials and material requirements were
                                 generated from it. Cancel &amp; re-raise, or raise a second order for the difference.
                             </p>
@@ -314,22 +301,22 @@ function EditOrderModal({ order, onClose, onSaved, canReduce = false }: { order:
                         <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Fitting date</label>
                         <input type="date" value={fittingDate} onChange={e => setFittingDate(e.target.value)}
                             className="input mt-1 w-full text-sm" />
-                        <p className="text-2xs text-surface-400 mt-1">When the customer comes in to be fitted.</p>
+                        <p className="text-2xs text-surface-500 mt-1">When the customer comes in to be fitted.</p>
                     </div>
                     <div>
                         <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Collection date</label>
                         <input type="date" value={collectionDate} onChange={e => setCollectionDate(e.target.value)}
                             className="input mt-1 w-full text-sm" />
-                        <p className="text-2xs text-surface-400 mt-1">When they collect the finished garment.</p>
+                        <p className="text-2xs text-surface-500 mt-1">When they collect the finished garment.</p>
                     </div>
                 </div>
                 <div>
                     <div className="flex items-center justify-between">
                         <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Measurements</label>
-                        <button type="button" onClick={addMeas} className="text-2xs font-bold text-brand-600 hover:underline">+ Add measurement</button>
+                        <button type="button" onClick={addMeas} className="text-2xs font-bold text-brand-700 hover:underline">+ Add measurement</button>
                     </div>
                     {measRows.length === 0 ? (
-                        <p className="text-2xs text-surface-400 mt-1">No measurements yet — add the customer's measurements for the workshop.</p>
+                        <p className="text-2xs text-surface-500 mt-1">No measurements yet — add the customer's measurements for the workshop.</p>
                     ) : (
                         <div className="mt-1.5 space-y-1.5">
                             {measRows.map((r, i) => (
@@ -348,7 +335,7 @@ function EditOrderModal({ order, onClose, onSaved, canReduce = false }: { order:
                             ))}
                         </div>
                     )}
-                    <p className="text-2xs text-surface-400 mt-1">Editable any time before completion — only the quantity is locked.</p>
+                    <p className="text-2xs text-surface-500 mt-1">Editable any time before completion — only the quantity is locked.</p>
                 </div>
                 <div>
                     <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Notes</label>
@@ -356,7 +343,7 @@ function EditOrderModal({ order, onClose, onSaved, canReduce = false }: { order:
                         placeholder="Amendment reason, customer request, spec change…"
                         className="input mt-1 w-full text-sm resize-none" />
                 </div>
-                <p className="text-2xs text-surface-400">
+                <p className="text-2xs text-surface-500">
                     Changes are recorded on the order's audit trail (what changed, from and to).
                 </p>
                 <div className="flex gap-2 pt-1">
@@ -438,7 +425,7 @@ function BatchesModal({ order, onClose, onSaved }: { order: ProductionOrder; onC
                                 className="input w-20 text-sm text-right" />
                             <button onClick={() => setRows((p) => p.filter((_, j) => j !== i))}
                                 disabled={rows.length === 1}
-                                className="shrink-0 w-8 h-8 rounded-lg text-surface-400 hover:text-danger hover:bg-danger/10 disabled:opacity-30 transition-colors"
+                                className="shrink-0 w-8 h-8 rounded-lg text-surface-500 hover:text-danger hover:bg-danger/10 disabled:opacity-30 transition-colors"
                                 aria-label="Remove batch">✕</button>
                         </div>
                         <input value={r.attrs} placeholder="Attributes — e.g. piping: blue, buttons: blue"
@@ -447,7 +434,7 @@ function BatchesModal({ order, onClose, onSaved }: { order: ProductionOrder; onC
                     </div>
                 ))}
                 <button onClick={() => setRows((p) => [...p, { label: "", quantity: "", attrs: "" }])}
-                    className="w-full text-xs font-semibold text-brand-600 border border-dashed border-brand-300 rounded-xl py-2 hover:bg-brand-50 transition-colors">
+                    className="w-full text-xs font-semibold text-brand-700 border border-dashed border-brand-300 rounded-xl py-2 hover:bg-brand-50 transition-colors">
                     + Add batch
                 </button>
                 <div className={clsx("rounded-xl px-3 py-2 text-xs font-semibold",
@@ -471,6 +458,143 @@ function BatchesModal({ order, onClose, onSaved }: { order: ProductionOrder; onC
 }
 
 // ── Assign Tasks Modal ────────────────────────────────────────────────────────
+
+// ── Send back for rework (owner's rule, 7 Oct 2026) ─────────────────────────
+// The QC manager chooses where in the process a failed order goes back (the
+// Buttons stage, say), how many pieces that stage redoes, and who redoes it.
+// The server reopens only those stages; the order returns to QC by itself when
+// they are done again, and nothing is stocked before it passes.
+function ReworkModal({ order, onClose, onSaved }: { order: ProductionOrder; onClose: () => void; onSaved: () => void }) {
+    const toast = useToastStore();
+    const qc = useQueryClient();
+    const [picked, setPicked] = useState<Record<number, { pieces: string; assignee: string }>>({});
+    // The inspector already wrote what failed: the QC endpoint appends it to
+    // the order notes as "QC: …". Start the reason from the latest one so it
+    // is not typed twice (Production Cycle 10); it stays editable.
+    const [reason, setReason] = useState(() => {
+        const qcLines = (order.notes ?? "").split("\n").filter((l) => l.startsWith("QC: "));
+        const last = qcLines[qcLines.length - 1]?.slice(4).trim() ?? "";
+        return last === "Failed" ? "" : last;
+    });
+
+    const { data: tailorsData } = useQuery({
+        queryKey: ["staff-users-list"],
+        queryFn: () => get<any>("/v1/admin/users", { params: { exclude_type: "customer", per_page: "100" } }),
+        staleTime: 60_000,
+        retry: false,
+    });
+    const tailors = tailorsData?.data ?? [];
+
+    const qty = Math.max(1, order.quantity ?? 1);
+    // A colourway order counts each stage per batch, so "redo 2" cannot say
+    // which colourway: the server redoes the whole stage there.
+    const wholeStageOnly = (order.batches?.length ?? 0) > 0;
+    const stages = [...(order.tasks ?? [])].sort(
+        (a, b) => (a.sequence ?? a.stage?.sort_order ?? 0) - (b.sequence ?? b.stage?.sort_order ?? 0));
+
+    const toggle = (id: number) => setPicked(p => {
+        const next = { ...p };
+        if (next[id]) delete next[id]; else next[id] = { pieces: String(qty), assignee: "" };
+        return next;
+    });
+    const edit = (id: number, patch: Partial<{ pieces: string; assignee: string }>) =>
+        setPicked(p => ({ ...p, [id]: { ...p[id], ...patch } }));
+
+    const ids = Object.keys(picked).map(Number);
+    const piecesOk = wholeStageOnly || ids.every(id => {
+        const n = Number(picked[id].pieces);
+        return Number.isInteger(n) && n >= 1 && n <= qty;
+    });
+    const ready = ids.length > 0 && reason.trim().length > 0 && piecesOk;
+
+    const mutation = useMutation({
+        mutationFn: () => post(`/v1/admin/production-orders/${order.id}/rework`, {
+            reason: reason.trim(),
+            stages: ids.map(id => ({
+                task_id: id,
+                ...(wholeStageOnly ? {} : { pieces: Number(picked[id].pieces) }),
+                ...(picked[id].assignee ? { assigned_to: Number(picked[id].assignee) } : {}),
+            })),
+        }),
+        onSuccess: () => {
+            toast.success("Sent back for rework — the tailors have been told");
+            qc.invalidateQueries({ queryKey: ["production-order", order.id] });
+            onSaved(); onClose();
+        },
+        onError: (e: ApiError) => toast.error(e.message),
+    });
+
+    return (
+        <Modal open title={`Send back for rework — ${order.order_number}`} onClose={onClose} size="lg">
+            <div className="p-5 space-y-4">
+                <p className="text-xs text-surface-500">
+                    Tick the stage(s) the order goes back to. Only those stages reopen; when they are
+                    done again the order returns to Quality Control. Nothing is added to stock until it passes.
+                </p>
+
+                <div className="space-y-2">
+                    {stages.map(t => {
+                        const on = !!picked[t.id];
+                        const current = resolveAssignee(t);
+                        return (
+                            <div key={t.id} className={clsx("rounded-xl border p-3", on ? "border-brand-300 bg-brand-50/50" : "border-line")}>
+                                <label className="flex items-center gap-3 min-h-11 cursor-pointer">
+                                    <input type="checkbox" checked={on} onChange={() => toggle(t.id)}
+                                        className="w-5 h-5 rounded border-surface-300 text-brand-700 focus:ring-brand-400" />
+                                    <span className="flex-1 min-w-0">
+                                        <span className="block text-sm font-semibold text-surface-900">{t.stage?.name ?? `Stage ${t.production_stage_id}`}</span>
+                                        <span className="block text-2xs text-surface-500">
+                                            {current ? `${current.first_name} ${current.last_name}` : "Unassigned"}
+                                        </span>
+                                    </span>
+                                </label>
+                                {on && (
+                                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 pl-8">
+                                        {wholeStageOnly ? (
+                                            <p className="text-2xs text-surface-500 self-center">Colourway order: the whole stage is redone.</p>
+                                        ) : (
+                                            <label className="text-2xs font-semibold text-surface-600">
+                                                Pieces to redo (of {qty})
+                                                <input type="number" inputMode="numeric" min={1} max={qty}
+                                                    value={picked[t.id].pieces}
+                                                    onChange={e => edit(t.id, { pieces: e.target.value })}
+                                                    className="input mt-1 text-sm" />
+                                            </label>
+                                        )}
+                                        <label className="text-2xs font-semibold text-surface-600">
+                                            Who redoes it
+                                            <select value={picked[t.id].assignee}
+                                                onChange={e => edit(t.id, { assignee: e.target.value })}
+                                                className="input mt-1 text-sm">
+                                                <option value="">{current ? `Same tailor (${current.first_name})` : "Keep as is"}</option>
+                                                {tailors.map((u: any) => <option key={u.id} value={u.id}>{u.first_name} {u.last_name}</option>)}
+                                            </select>
+                                        </label>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+
+                <label className="block text-xs font-semibold text-surface-700">
+                    Reason (the tailors see this)
+                    <textarea value={reason} onChange={e => setReason(e.target.value)} rows={2}
+                        placeholder="e.g. Loose buttons on two cassocks"
+                        className="input mt-1 text-sm" />
+                </label>
+
+                <div className="flex justify-end gap-2 pt-1">
+                    <button type="button" onClick={onClose} className="btn-ghost min-h-11">Cancel</button>
+                    <button type="button" onClick={() => mutation.mutate()} disabled={!ready || mutation.isPending}
+                        className="min-h-11 px-4 rounded-xl bg-brand-600 text-white text-sm font-bold hover:bg-brand-700 disabled:opacity-40 transition-colors">
+                        {mutation.isPending ? "Sending…" : "Send back for rework"}
+                    </button>
+                </div>
+            </div>
+        </Modal>
+    );
+}
 
 function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onClose: () => void; onSaved: () => void }) {
     const toast = useToastStore();
@@ -529,7 +653,7 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                 ) : activeTasks.length === 0 ? (
                     <div className="text-center py-6">
                         <p className="text-sm font-medium text-surface-500">All stages completed</p>
-                        <p className="text-xs text-surface-400 mt-1">No pending stages to assign.</p>
+                        <p className="text-xs text-surface-500 mt-1">No pending stages to assign.</p>
                     </div>
                 ) : (
                     <div className="space-y-2 overflow-x-auto">
@@ -542,7 +666,7 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                                         const on = e.target.checked;
                                         setChecked(Object.fromEntries(activeTasks.map(t => [t.id, on])));
                                     }}
-                                    className="w-4 h-4 rounded border-surface-300 text-brand-600 focus:ring-brand-400" />
+                                    className="w-4 h-4 rounded border-surface-300 text-brand-700 focus:ring-brand-400" />
                                 Select all
                             </label>
                             <select value={bulkTailor} onChange={e => setBulkTailor(e.target.value)}
@@ -565,7 +689,7 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                                 Apply
                             </button>
                         </div>
-                        <div className="grid grid-cols-12 gap-3 px-3 text-2xs font-bold text-surface-400 uppercase tracking-wide min-w-[480px]">
+                        <div className="grid grid-cols-12 gap-3 px-3 text-2xs font-bold text-surface-500 uppercase tracking-wide min-w-[480px]">
                             <span className="col-span-4">Stage</span>
                             <span className="col-span-5">Assign to</span>
                             <span className="col-span-3">Est. hours</span>
@@ -577,13 +701,13 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                                     <div className="col-span-4 flex items-center gap-2">
                                         <input type="checkbox" checked={!!checked[task.id]}
                                             onChange={e => setChecked(p => ({ ...p, [task.id]: e.target.checked }))}
-                                            className="w-4 h-4 rounded border-surface-300 text-brand-600 focus:ring-brand-400 shrink-0" />
+                                            className="w-4 h-4 rounded border-surface-300 text-brand-700 focus:ring-brand-400 shrink-0" />
                                     <div className="min-w-0">
                                         <p className="text-sm font-semibold text-surface-900 flex items-center gap-1.5">
                                             <StageIcon slug={task.stage?.slug} className="w-3.5 h-3.5 text-surface-500" />
                                             {task.stage?.name ?? `Stage ${task.production_stage_id}`}
                                         </p>
-                                        <span className={clsx("text-2xs font-medium mt-0.5", task.status === "in_progress" ? "text-brand-600" : "text-surface-400")}>
+                                        <span className={clsx("text-2xs font-medium mt-0.5", task.status === "in_progress" ? "text-brand-700" : "text-surface-500")}>
                                             {task.status === "in_progress" ? "In progress" : "Pending"}
                                         </span>
                                     </div>
@@ -599,7 +723,7 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
                                             value={hours[task.id] ?? (task.estimated_hours?.toString() ?? "")}
                                             onChange={e => setHours(p => ({ ...p, [task.id]: e.target.value }))}
                                             className="input text-sm pr-7 w-full" />
-                                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-2xs text-surface-400">h</span>
+                                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-2xs text-surface-500">h</span>
                                     </div>
                                 </div>
                             );
@@ -645,14 +769,14 @@ function IssueMaterialsModal({ order, onClose, onSaved }: { order: ProductionOrd
 
     if (!allocs.length) return (
         <Modal open title="Issue Materials" onClose={onClose}>
-            <div className="p-8 text-center text-surface-400 text-sm">No material allocations found for this order.</div>
+            <div className="p-8 text-center text-surface-500 text-sm">No material allocations found for this order.</div>
         </Modal>
     );
 
     return (
         <Modal open title={`Issue Materials - ${order.order_number}`} onClose={onClose} size="lg">
             <div className="p-5 space-y-4">
-                <div className="grid grid-cols-12 gap-2 text-2xs font-bold text-surface-400 uppercase tracking-wide px-2">
+                <div className="grid grid-cols-12 gap-2 text-2xs font-bold text-surface-500 uppercase tracking-wide px-2">
                     <span className="col-span-4">Material</span>
                     <span className="col-span-2 text-right">Required</span>
                     <span className="col-span-2 text-right">Allocated</span>
@@ -667,7 +791,7 @@ function IssueMaterialsModal({ order, onClose, onSaved }: { order: ProductionOrd
                             <div className="grid grid-cols-12 gap-2 items-center text-xs">
                                 <div className="col-span-4">
                                     <p className="font-semibold text-surface-900">{a.material.name}</p>
-                                    <p className="text-2xs text-surface-400">{a.material.code} · {a.material.unit_of_measure}</p>
+                                    <p className="text-2xs text-surface-500">{a.material.code} · {a.material.unit_of_measure}</p>
                                 </div>
                                 <span className="col-span-2 text-right tabular-nums text-surface-600">{fmtNum(a.quantity_required)}</span>
                                 <span className={clsx("col-span-2 text-right tabular-nums font-semibold", pct >= 100 ? "text-success-600" : "text-amber-700")}>{fmtNum(a.quantity_allocated)}</span>
@@ -677,7 +801,7 @@ function IssueMaterialsModal({ order, onClose, onSaved }: { order: ProductionOrd
                                     onChange={e => setQtys(p => ({ ...p, [a.id]: e.target.value }))}
                                     className="col-span-2 input text-right text-xs py-1.5 disabled:opacity-40" />
                             </div>
-                            <ProgressBar pct={pct} colorClass={pct >= 100 ? "bg-success-500" : "bg-brand-500"} />
+                            <ProgressBar pct={pct} />
                         </div>
                     );
                 })}
@@ -701,7 +825,7 @@ function QCModal({ order, onClose, onDone }: { order: ProductionOrder; onClose: 
     const [form, setForm] = useState({ passed: true, passed_quantity: order.quantity, failed_quantity: 0, notes: "", defect_types: [] as string[] });
     const mutation = useMutation({
         mutationFn: () => post(`/v1/admin/production-orders/${order.id}/qc`, form),
-        onSuccess: () => { toast.success(form.passed ? "QC Passed!" : "QC Failed - order on hold"); onDone(); onClose(); },
+        onSuccess: () => { toast.success(form.passed ? "QC passed" : "QC failed — recorded on the order"); onDone(); onClose(); },
         onError: (e: ApiError) => toast.error(e.message),
     });
     const toggleDefect = (d: string) => setForm(p => ({ ...p, defect_types: p.defect_types.includes(d) ? p.defect_types.filter(x => x !== d) : [...p.defect_types, d] }));
@@ -773,6 +897,9 @@ function CompleteModal({ order, onClose, onDone }: { order: ProductionOrder; onC
     const toast = useToastStore();
     const [outletId, setOutletId] = useState("");
     const [finalQty, setFinalQty] = useState(String(order.quantity));
+    // A customer's garment is held for them at the outlet their order was taken
+    // at, until they collect — the server decides where, not this picker.
+    const forCustomer = order.is_customer_order !== false && !!order.customer_order_id;
     const { data: outletsData } = useQuery({
         queryKey: ["outlets-list"],
         queryFn: () => get<any>("/v1/admin/outlets"),
@@ -784,7 +911,7 @@ function CompleteModal({ order, onClose, onDone }: { order: ProductionOrder; onC
             outlet_id: outletId ? Number(outletId) : undefined,
             final_quantity: Number(finalQty),
         }),
-        onSuccess: () => { toast.success(`${finalQty} unit(s) added to inventory`); onDone(); onClose(); },
+        onSuccess: (res: any) => { toast.success(res?.message ?? `${finalQty} unit(s) added to inventory`); onDone(); onClose(); },
         onError: (e: ApiError) => toast.error(e.message),
     });
     return (
@@ -792,25 +919,29 @@ function CompleteModal({ order, onClose, onDone }: { order: ProductionOrder; onC
             <div className="p-5 space-y-4">
                 <div className="bg-success-50 border border-success-200 rounded-xl p-4">
                     <p className="text-sm font-semibold text-success-800">Ready for inventory</p>
-                    <p className="text-xs text-success-700 mt-0.5">QC has passed. Finished goods will be added to the selected location.</p>
+                    <p className="text-xs text-success-700 mt-0.5">{forCustomer
+                        ? "QC has passed. The garment goes into stock held for this customer, at the outlet their order was taken at, and leaves stock when they collect."
+                        : "QC has passed. Finished goods will be added to the selected location."}</p>
                 </div>
                 <div>
                     <label className="label">Final Quantity Produced</label>
                     <input type="number" min={1} max={order.quantity} value={finalQty}
                         onChange={e => setFinalQty(e.target.value)} className="input" />
-                    <p className="text-2xs text-surface-400 mt-1">Production target was {order.quantity} unit(s)</p>
+                    <p className="text-2xs text-surface-500 mt-1">Production target was {order.quantity} unit(s)</p>
                 </div>
-                <div>
-                    <label className="label">Add to Outlet / Location</label>
-                    <select value={outletId} onChange={e => setOutletId(e.target.value)} className="input">
-                        <option value="">Main Warehouse (default)</option>
-                        {outlets.map((o: any) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                    </select>
-                </div>
+                {!forCustomer && (
+                    <div>
+                        <label className="label">Add to Outlet / Location</label>
+                        <select value={outletId} onChange={e => setOutletId(e.target.value)} className="input">
+                            <option value="">Its own outlet, else the warehouse (default)</option>
+                            {outlets.map((o: any) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                        </select>
+                    </div>
+                )}
                 <div className="flex gap-3">
                     <button onClick={onClose} className="btn-secondary flex-1">Cancel</button>
                     <button onClick={() => mutation.mutate()} disabled={mutation.isPending} className="btn-primary flex-1">
-                        {mutation.isPending ? "Processing…" : "Complete & Add to Inventory"}
+                        {mutation.isPending ? "Processing…" : "Complete & stock"}
                     </button>
                 </div>
             </div>
@@ -835,11 +966,11 @@ function StageTiming({ task }: { task: Task }) {
         return (
             <>
                 <span>Entered {fmtDate(task.started_at)}</span>
-                <span className={clsx("flex items-center gap-1 font-medium", over ? "text-amber-700" : "text-brand-600")}>
+                <span className={clsx("flex items-center gap-1 font-medium", over ? "text-amber-700" : "text-brand-700")}>
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    {fmtDuration(elapsed)} in stage{est != null && !over && <span className="text-surface-400 font-normal"> · est {fmtDuration(est)}</span>}
+                    {fmtDuration(elapsed)} in stage{est != null && !over && <span className="text-surface-500 font-normal"> · est {fmtDuration(est)}</span>}
                 </span>
                 {over && (
                     <span className="text-2xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-1.5 py-0.5">
@@ -876,15 +1007,19 @@ function StageTiming({ task }: { task: Task }) {
 function StagesPipeline({
     tasks,
     orderQuantity = 1,
+    totalStages,
     batches = [],
     currentUserId,
     onTaskAction,
     taskActionPending,
     canUnlock,
     onUnlock,
+    orderStatus,
 }: {
     tasks: Task[];
     orderQuantity?: number;
+    /** All stages on the order (server); a tailor's payload may hold fewer. */
+    totalStages?: number;
     batches?: OrderBatch[];
     currentUserId: number | null;
     onTaskAction: (taskId: number, action: "start" | "complete" | "pause") => void;
@@ -892,9 +1027,14 @@ function StagesPipeline({
     /** production.manage_assignees — the manager who may allow parallel stages */
     canUnlock: boolean;
     onUnlock: (taskId: number, allow: boolean) => void;
+    /** The order's status: a closed order shows its stages as history, with no actions. */
+    orderStatus: string;
 }) {
+    // Cancelled, in QC or finished: the server refuses floor work, so nothing
+    // here may look actionable — no Ready, no pile warnings, no buttons.
+    const workOpen = acceptsFloorWork(orderStatus);
     if (!tasks.length) return (
-        <div className="text-center py-12 text-surface-400">
+        <div className="text-center py-12 text-surface-500">
             <svg className="w-10 h-10 mx-auto mb-2 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
             </svg>
@@ -909,7 +1049,11 @@ function StagesPipeline({
     // finished = passed(last). Only meaningful for batch orders.
     const seq = [...tasks].filter(t => t.sequence != null).sort((a, b) => (a.sequence! - b.sequence!));
     const eff = (t: Task) => GATE_SATISFIED.includes((t.status ?? "").toLowerCase()) ? orderQuantity : Math.min(t.quantity_done ?? 0, orderQuantity);
-    const distribution = orderQuantity > 1 && seq.length > 0 ? {
+    // Only when every stage is on the page: a tailor's payload holds just her
+    // own, and chips derived from part of a pipeline read "6 finished" on an
+    // order that has finished nothing.
+    const wholePipeline = totalStages == null || seq.length >= totalStages;
+    const distribution = wholePipeline && orderQuantity > 1 && seq.length > 0 ? {
         notStarted: orderQuantity - eff(seq[0]),
         finished:   eff(seq[seq.length - 1]),
         held: seq.map((t, i) => ({
@@ -931,7 +1075,7 @@ function StagesPipeline({
 
     return (
         <div className="space-y-2">
-            {distribution && (
+            {distribution && orderStatus !== "cancelled" && (
                 <div className="flex flex-wrap items-center gap-1.5 px-1 pb-1">
                     <span className="text-2xs font-bold px-2 py-1 rounded-full bg-success-50 text-success-700 border border-success-200">
                         ✓ {distribution.finished} finished
@@ -977,9 +1121,6 @@ function StagesPipeline({
                 }
                 const isBlocked = !!blocker && !isDone && !isActive;
 
-                const canStart    = isMyTask && !isBlocked && (task.status === "pending" || task.status === "paused");
-                const canComplete = isMyTask && task.status === "in_progress";
-                const canPause    = isMyTask && task.status === "in_progress";
 
                 const statusColor = isDone && !isFailed
                     ? "bg-success-50 border-success-200"
@@ -1006,7 +1147,7 @@ function StagesPipeline({
                         : isFailed
                             ? "bg-danger-100 text-danger-700"
                             : task.status === "cancelled"
-                                ? "bg-surface-100 text-surface-400"
+                                ? "bg-surface-100 text-surface-500"
                                 : "bg-amber-50 text-amber-700";
 
                 const badgeLabel = task.status === "completed"
@@ -1062,7 +1203,7 @@ function StagesPipeline({
                                             {eff(task)}/{orderQuantity}
                                         </span>
                                     )}
-                                    {bottleneckId === task.id && !isDone && (
+                                    {workOpen && bottleneckId === task.id && !isDone && (
                                         <span className="text-2xs font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200"
                                             title="Largest pile in the pipeline is waiting on this bench">
                                             ⚠ {maxHeld} waiting
@@ -1080,6 +1221,10 @@ function StagesPipeline({
                                         <span className="text-2xs font-semibold px-2 py-0.5 rounded-full bg-success-100 text-success-700">✓ Done</span>
                                     ) : isFailed || task.status === "cancelled" ? (
                                         <span className={clsx("text-2xs font-semibold px-2 py-0.5 rounded-full", badgeColor)}>{badgeLabel}</span>
+                                    ) : !workOpen ? (
+                                        <span className="text-2xs font-semibold px-2 py-0.5 rounded-full bg-surface-100 text-surface-500">
+                                            {orderStatus === "cancelled" ? "Stopped" : "Not done"}
+                                        </span>
                                     ) : isActive ? (
                                         <span className="text-2xs font-semibold px-2 py-0.5 rounded-full bg-brand-100 text-brand-700">In progress</span>
                                     ) : isBlocked ? (
@@ -1107,11 +1252,11 @@ function StagesPipeline({
                                 ) : (
                                     <span className="text-surface-500 italic text-2xs">Unassigned</span>
                                 )}
-                                {isMyTask && <span className="text-2xs font-bold text-brand-600">(you)</span>}
-                                {canUnlock && !isDone && !task.started_at && (
+                                {isMyTask && <span className="text-2xs font-bold text-brand-700">(you)</span>}
+                                {workOpen && canUnlock && !isDone && !task.started_at && (
                                     <button type="button"
                                         onClick={() => onUnlock(task.id, !task.concurrent_allowed)}
-                                        className="ml-auto text-2xs font-semibold text-surface-400 hover:text-brand-600 underline decoration-dotted underline-offset-2 transition-colors"
+                                        className="ml-auto -my-3 py-3 pl-3 text-2xs font-semibold text-surface-500 hover:text-brand-700 underline decoration-dotted underline-offset-2 transition-colors"
                                         title={task.concurrent_allowed
                                             ? "Re-lock this stage to sequential order"
                                             : "Let this stage run in parallel with earlier stages"}>
@@ -1134,7 +1279,7 @@ function StagesPipeline({
                                                 className={clsx("text-2xs font-semibold px-1.5 py-0.5 rounded-md tabular-nums border",
                                                     full ? "bg-success-50 text-success-700 border-success-200"
                                                     : p > 0 ? "bg-brand-50 text-brand-700 border-brand-200"
-                                                    : "bg-surface-50 text-surface-400 border-surface-200")}>
+                                                    : "bg-surface-50 text-surface-500 border-surface-200")}>
                                                 {full ? "✓ " : ""}{b.label} {p}/{b.quantity}
                                             </span>
                                         );
@@ -1148,47 +1293,15 @@ function StagesPipeline({
                                 </p>
                             )}
 
-                            {/* Inline actions — only rendered for the current user's assigned tasks */}
-                            {isMyTask && (
-                                <div className="flex items-center gap-2 mt-3">
-                                    {canStart && (
-                                        <button
-                                            onClick={() => onTaskAction(task.id, "start")}
-                                            disabled={taskActionPending}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-500 text-white text-xs font-semibold hover:bg-brand-600 transition-colors disabled:opacity-50"
-                                        >
-                                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
-                                            </svg>
-                                            {task.status === "paused" ? "Resume" : "Start"}
-                                        </button>
-                                    )}
-                                    {canComplete && (
-                                        <button
-                                            onClick={() => onTaskAction(task.id, "complete")}
-                                            disabled={taskActionPending}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-success-700 text-white text-xs font-semibold hover:bg-success-700 transition-colors disabled:opacity-50"
-                                        >
-                                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                                            </svg>
-                                            Mark done
-                                        </button>
-                                    )}
-                                    {canPause && (
-                                        <button
-                                            onClick={() => onTaskAction(task.id, "pause")}
-                                            disabled={taskActionPending}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-100 text-surface-600 text-xs font-semibold hover:bg-surface-200 transition-colors disabled:opacity-50"
-                                        >
-                                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5" />
-                                            </svg>
-                                            Pause
-                                        </button>
-                                    )}
-                                </div>
-                            )}
+                            {/* Inline actions — the shared Production buttons, only for
+                                the viewer's own stage on an order that still takes work. */}
+                            <StageActions
+                                status={task.status}
+                                canAct={isMyTask && workOpen}
+                                blocked={isBlocked}
+                                pending={taskActionPending}
+                                onAction={(action) => onTaskAction(task.id, action)}
+                            />
                         </div>
                     </div>
                 );
@@ -1241,7 +1354,7 @@ function ThreadMentionPopup({ query, onSelect }: { query: string; onSelect: (u: 
                     </div>
                     <div className="min-w-0">
                         <p className="text-xs font-semibold text-surface-800 truncate">{u.name}</p>
-                        <p className="text-2xs text-surface-400 truncate">{u.email}</p>
+                        {u.email && <p className="text-2xs text-surface-500 truncate">{u.email}</p>}
                     </div>
                 </button>
             ))}
@@ -1274,16 +1387,16 @@ function ThreadEntityPopup({ query, onSelect, onDismiss }: {
     return (
         <div className="absolute bottom-full left-0 mb-1 w-72 bg-white rounded-xl border border-surface-200 shadow-xl py-1 z-50 max-h-60 overflow-y-auto">
             <div className="flex items-center justify-between px-3 pt-1.5 pb-1">
-                <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest">Tag order or production</p>
+                <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest">Tag order or production</p>
                 <button onMouseDown={e => { e.preventDefault(); onDismiss(); }}
-                    className="text-surface-500 hover:text-surface-500 p-0.5 rounded">
+                    className="text-surface-500 hover:text-surface-700 p-0.5 rounded">
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
                     </svg>
                 </button>
             </div>
             {results.length === 0 ? (
-                <p className="text-xs text-surface-400 px-3 py-2">{query.length < 1 ? "Type to search orders…" : "No results"}</p>
+                <p className="text-xs text-surface-500 px-3 py-2">{query.length < 1 ? "Type to search orders…" : "No results"}</p>
             ) : results.map(r => (
                 <button key={`${r.type}:${r.id}`}
                     onMouseDown={e => { e.preventDefault(); onSelect(r); }}
@@ -1291,7 +1404,7 @@ function ThreadEntityPopup({ query, onSelect, onDismiss }: {
                     <div className={clsx("mt-0.5 w-6 h-6 rounded-md flex items-center justify-center shrink-0",
                         r.type === "order" ? "bg-brand-50" : "bg-accent-50")}>
                         {r.type === "order" ? (
-                            <svg className="w-3.5 h-3.5 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <svg className="w-3.5 h-3.5 text-brand-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
                             </svg>
                         ) : (
@@ -1308,7 +1421,7 @@ function ThreadEntityPopup({ query, onSelect, onDismiss }: {
                             </span>
                         </div>
                         <p className="text-2xs text-surface-500 truncate mt-0.5">{r.subtitle}</p>
-                        <p className="text-2xs text-surface-400">{r.meta}</p>
+                        <p className="text-2xs text-surface-500">{r.meta}</p>
                     </div>
                 </button>
             ))}
@@ -1544,7 +1657,7 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
             {/* CommsHub deep-link */}
             {channel && (
                 <div className="pb-2 shrink-0">
-                    <p className="text-2xs text-surface-400">
+                    <p className="text-2xs text-surface-500">
                         Messages here also appear in{" "}
                         <Link to={`/comms/${channel.id}`} className="text-brand-500 hover:underline font-medium">
                             CommsHub → {channel.name}
@@ -1560,12 +1673,12 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
                         <svg className="w-10 h-10 mx-auto mb-2 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                         </svg>
-                        <p className="text-sm font-medium text-surface-400">No messages yet</p>
+                        <p className="text-sm font-medium text-surface-500">No messages yet</p>
                         <p className="text-xs text-surface-500 mt-1">Start the conversation below</p>
                     </div>
                 ) : messages.map(msg => {
                     if (msg.type === "system") return (
-                        <div key={msg.id} className="flex items-center gap-2 text-2xs text-surface-400 py-1">
+                        <div key={msg.id} className="flex items-center gap-2 text-2xs text-surface-500 py-1">
                             <div className="flex-1 h-px bg-surface-100" />
                             <span>{msg.body}</span>
                             <div className="flex-1 h-px bg-surface-100" />
@@ -1617,7 +1730,7 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
                                 style={{ wordBreak: "break-word", minHeight: "20px" }}>
                                 {body
                                     ? parseBodyToNodes(body)
-                                    : <span className="text-surface-400">Message… (Enter to send · @ mention · # tag order)</span>
+                                    : <span className="text-surface-500">Message… (Enter to send · @ mention · # tag order)</span>
                                 }
                                 <span className="select-none">{"​"}</span>
                             </div>
@@ -1651,12 +1764,12 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
                 {!body && (
                     <div className="flex items-center gap-3 px-1 pt-1.5">
                         <span className="flex items-center gap-1 text-2xs text-surface-500">
-                            <kbd className="px-1 py-0.5 rounded bg-surface-100 text-surface-400 font-mono text-2xs border border-surface-200 leading-none">@</kbd>
+                            <kbd className="px-1 py-0.5 rounded bg-surface-100 text-surface-500 font-mono text-2xs border border-surface-200 leading-none">@</kbd>
                             mention people
                         </span>
                         <span className="text-surface-200 text-2xs select-none">·</span>
                         <span className="flex items-center gap-1 text-2xs text-surface-500">
-                            <kbd className="px-1 py-0.5 rounded bg-surface-100 text-surface-400 font-mono text-2xs border border-surface-200 leading-none">#</kbd>
+                            <kbd className="px-1 py-0.5 rounded bg-surface-100 text-surface-500 font-mono text-2xs border border-surface-200 leading-none">#</kbd>
                             tag an order
                         </span>
                         <span className="text-surface-200 text-2xs select-none">·</span>
@@ -1708,7 +1821,7 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
                             Mention anyway (they won't see it)
                         </button>
                         <button onClick={() => setPendingMention(null)}
-                            className="w-full py-2 rounded-xl text-surface-400 text-sm hover:text-surface-600 transition-colors">
+                            className="w-full py-2 rounded-xl text-surface-500 text-sm hover:text-surface-600 transition-colors">
                             Cancel
                         </button>
                     </div>
@@ -1728,20 +1841,20 @@ function AuditTrail({ orderId }: { orderId: number }) {
     });
     const logs = data?.logs ?? [];
     if (isLoading) return <div className="flex justify-center py-10"><Spinner /></div>;
-    if (!logs.length) return <div className="text-center py-12 text-xs text-surface-400">No audit entries yet.</div>;
+    if (!logs.length) return <div className="text-center py-12 text-xs text-surface-500">No audit entries yet.</div>;
     return (
         <div className="divide-y divide-line">
             {logs.map(e => (
                 <div key={e.id} className="flex gap-3 py-3.5">
                     <div className="w-7 h-7 rounded-full bg-brand-100 flex items-center justify-center shrink-0 mt-0.5">
-                        <svg className="w-3 h-3 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <svg className="w-3 h-3 text-brand-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
                     </div>
                     <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2">
                             <span className="text-xs font-semibold text-surface-800">{e.label} <span className="font-normal text-surface-500">· {e.actor_name}</span></span>
-                            <span className="text-2xs text-surface-400 shrink-0">{fmtDateTime(e.created_at)}</span>
+                            <span className="text-2xs text-surface-500 shrink-0">{fmtDateTime(e.created_at)}</span>
                         </div>
                         <p className="text-xs text-surface-600 mt-0.5">{e.description}</p>
                     </div>
@@ -1753,14 +1866,10 @@ function AuditTrail({ orderId }: { orderId: number }) {
 
 // ── Key-value grid for specs / measurements ───────────────────────────────────
 
-// Tailoring reads top-down: the shop measures in this order, so every order
-// displays in this order — regardless of the sequence the keys were typed in.
-const MEASUREMENT_ORDER = ["neck", "shoulders", "sleeves", "wrist", "chest", "stomach", "waist", "hip", "shirt_length", "full_length"];
+// Tailoring reads top-down: every order displays in the clergy sheet's order
+// (measurementRank, shared with My Tasks and View specs in productionUi),
+// regardless of the sequence the keys were typed in.
 const normKey = (k: string) => k.toLowerCase().trim().replace(/[\s-]+/g, "_");
-const measurementRank = (k: string) => {
-    const i = MEASUREMENT_ORDER.indexOf(normKey(k));
-    return i === -1 ? MEASUREMENT_ORDER.length : i;
-};
 
 // Three measurements per row: a tape-measure card, not a ledger. Each cell is
 // name-over-value so the eye sweeps left-to-right exactly the way the shop
@@ -1775,7 +1884,7 @@ function SpecGrid({ data, accentClass = "bg-surface-50 border-line" }: { data: R
         <div className="grid grid-cols-3 gap-1.5">
             {entries.map(([k, v]) => (
                 <div key={k} className={clsx("rounded-lg border px-2.5 py-2 min-w-0", accentClass)}>
-                    <p className="text-2xs text-surface-400 capitalize truncate leading-tight">{k.replace(/_/g, " ")}</p>
+                    <p className="text-2xs text-surface-500 capitalize truncate leading-tight">{k.replace(/_/g, " ")}</p>
                     <p className="text-sm font-bold text-surface-900 tabular-nums leading-tight mt-0.5 break-words">{v}</p>
                 </div>
             ))}
@@ -1839,11 +1948,11 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                         <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
                                 <p className="text-sm font-bold text-surface-900 truncate">{batch.label}</p>
-                                <p className="text-2xs text-surface-400 mt-0.5">
+                                <p className="text-2xs text-surface-500 mt-0.5">
                                     <span className="font-semibold text-surface-600 tabular-nums">{batch.quantity} pcs</span>
-                                    {" · "}<span className={clsx("font-semibold uppercase", priorityCfg.color)}>{priorityCfg.label}</span>
+                                    {order.priority !== "normal" && <>{" · "}<PriorityBadge priority={order.priority} /></>}
                                     {batch.created_at && <> · Created {fmtDate(batch.created_at)}</>}
-                                    {" · "}Due {fmtDate(order.due_date)}
+                                    {" · "}Due {fmtDueDate(order.due_date)}
                                 </p>
                             </div>
                             <span className={clsx("shrink-0 text-2xs font-semibold px-2 py-0.5 rounded-full",
@@ -1856,12 +1965,12 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                         {/* Where it is and who has it — the two questions the floor asks */}
                         {!complete && currentTask && (
                             <p className="text-xs text-surface-600 mt-1.5 flex items-center gap-1.5 flex-wrap">
-                                <StageIcon slug={currentTask.stage?.slug} className="w-3 h-3 text-surface-400 shrink-0" />
+                                <StageIcon slug={currentTask.stage?.slug} className="w-3 h-3 text-surface-500 shrink-0" />
                                 <span>Now at <b className="text-surface-800">{currentTask.stage?.name}</b></span>
                                 <span className="text-surface-500">·</span>
                                 {tailor
                                     ? <span>{tailor.first_name} {tailor.last_name}</span>
-                                    : <span className="italic text-surface-400">unassigned</span>}
+                                    : <span className="italic text-surface-500">unassigned</span>}
                             </p>
                         )}
                     </div>
@@ -1872,7 +1981,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 mt-3">
                         {attrs.map(([k, v]) => (
                             <div key={k} className="flex gap-1.5 text-2xs leading-snug min-w-0">
-                                <span className="text-surface-400 capitalize shrink-0">{k.replace(/_/g, " ")}:</span>
+                                <span className="text-surface-500 capitalize shrink-0">{k.replace(/_/g, " ")}:</span>
                                 <span className="text-surface-800 font-semibold truncate">{v}</span>
                             </div>
                         ))}
@@ -1890,7 +1999,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                                     className={clsx("shrink-0 text-2xs font-semibold px-1.5 py-0.5 rounded-md tabular-nums border",
                                         full ? "bg-success-50 text-success-700 border-success-200"
                                         : p > 0 ? "bg-brand-50 text-brand-700 border-brand-200"
-                                        : "bg-surface-50 text-surface-400 border-surface-200")}>
+                                        : "bg-surface-50 text-surface-500 border-surface-200")}>
                                     {t.stage?.name} {p}/{batch.quantity}
                                 </span>
                             );
@@ -1925,7 +2034,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                             </div>
                         ))}
                         {canEdit && (
-                            <label className={clsx("w-10 h-10 rounded-md border border-dashed border-surface-300 text-surface-400 flex items-center justify-center text-sm cursor-pointer hover:border-brand-400 hover:text-brand-500 transition-colors", uploadPending && "opacity-50 pointer-events-none")}>
+                            <label className={clsx("w-10 h-10 rounded-md border border-dashed border-surface-300 text-surface-500 flex items-center justify-center text-sm cursor-pointer hover:border-brand-400 hover:text-brand-500 transition-colors", uploadPending && "opacity-50 pointer-events-none")}>
                                 +
                                 <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
                                     onChange={e => {
@@ -1942,14 +2051,14 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
             {/* Material share — what this batch consumes of the order's allocations */}
             {allocations.length > 0 && share > 0 && (
                 <details className="border-t border-line group">
-                    <summary className="px-3 sm:px-4 py-2 text-2xs font-bold text-surface-400 uppercase tracking-widest cursor-pointer select-none hover:text-surface-600 flex items-center gap-1.5 list-none [&::-webkit-details-marker]:hidden">
+                    <summary className="px-3 sm:px-4 py-2 text-2xs font-bold text-surface-500 uppercase tracking-widest cursor-pointer select-none hover:text-surface-600 flex items-center gap-1.5 list-none [&::-webkit-details-marker]:hidden">
                         <svg className="w-3 h-3 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
                         </svg>
                         Materials — {Math.round(share * 100)}% share of order
                     </summary>
                     <div className="px-3 sm:px-4 pb-3">
-                        <div className="grid grid-cols-12 gap-2 text-2xs font-bold text-surface-400 uppercase tracking-wide px-1 pb-1">
+                        <div className="grid grid-cols-12 gap-2 text-2xs font-bold text-surface-500 uppercase tracking-wide px-1 pb-1">
                             <span className="col-span-5">Material</span>
                             <span className="col-span-2 text-right">Req.</span>
                             <span className="col-span-2 text-right">Used</span>
@@ -1964,7 +2073,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                                     <div key={a.id} className="grid grid-cols-12 gap-2 items-center py-1.5 text-xs">
                                         <div className="col-span-5 min-w-0">
                                             <p className="font-medium text-surface-800 truncate">{a.material.name}</p>
-                                            <p className="text-2xs text-surface-400">{a.material.unit_of_measure}</p>
+                                            <p className="text-2xs text-surface-500">{a.material.unit_of_measure}</p>
                                         </div>
                                         <span className="col-span-2 text-right tabular-nums text-surface-600">{fmtNum(req)}</span>
                                         <span className="col-span-2 text-right tabular-nums text-surface-600">{fmtNum(used)}</span>
@@ -1975,7 +2084,7 @@ function BatchCard({ batch, order, seqTasks, allocations, canEdit, onUpload, onD
                                 );
                             })}
                         </div>
-                        <p className="text-2xs text-surface-400 mt-1.5">
+                        <p className="text-2xs text-surface-500 mt-1.5">
                             Pro-rata estimate: this batch is {batch.quantity} of {order.quantity} pieces, so it carries {Math.round(share * 100)}% of each order allocation.
                         </p>
                     </div>
@@ -1998,13 +2107,13 @@ function BatchesSection({ order, seqTasks, canEdit, onEditBatches, onUpload, onD
     if (batches.length === 0) return (
         <div className="text-center py-10">
             <p className="text-sm font-medium text-surface-500">No batches defined</p>
-            <p className="text-xs text-surface-400 mt-1 max-w-sm mx-auto">
+            <p className="text-xs text-surface-500 mt-1 max-w-sm mx-auto">
                 Split the order into colourway batches — same garment, different trim — and
                 tailors count each batch separately.
             </p>
             {canEdit && (
                 <button onClick={onEditBatches}
-                    className="mt-4 text-xs font-semibold text-brand-600 border border-dashed border-brand-300 rounded-xl px-4 py-2 hover:bg-brand-50 transition-colors">
+                    className="mt-4 text-xs font-semibold text-brand-700 border border-dashed border-brand-300 rounded-xl px-4 py-2 hover:bg-brand-50 transition-colors">
                     + Split into colourway batches
                 </button>
             )}
@@ -2013,12 +2122,12 @@ function BatchesSection({ order, seqTasks, canEdit, onEditBatches, onUpload, onD
     return (
         <div className="space-y-3">
             <div className="flex items-center justify-between">
-                <p className="text-xs text-surface-400">
+                <p className="text-xs text-surface-500">
                     {batches.length} batch{batches.length === 1 ? "" : "es"} · {order.quantity} pieces total
                 </p>
                 {canEdit && (
                     <button onClick={onEditBatches}
-                        className="text-2xs font-semibold text-brand-600 hover:text-brand-700">✎ Edit batches</button>
+                        className="text-2xs font-semibold text-brand-700 hover:text-brand-800">✎ Edit batches</button>
                 )}
             </div>
             {batches.map(b => (
@@ -2039,7 +2148,7 @@ export default function ProductionOrderDetailPage() {
     const toast = useToastStore();
     const qc = useQueryClient();
     const [tab, setTab] = useState<"stages" | "batches" | "materials" | "specs" | "activity" | "audit">("stages");
-    const [modal, setModal] = useState<"assign" | "materials" | "qc" | "complete" | "edit" | "batches" | null>(null);
+    const [modal, setModal] = useState<"assign" | "materials" | "qc" | "complete" | "edit" | "batches" | "rework" | null>(null);
     const [showCancelConfirm, setShowCancelConfirm] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [cancelReason, setCancelReason] = useState("");
@@ -2078,6 +2187,16 @@ export default function ProductionOrderDetailPage() {
     });
     const order = (data as any)?.order as ProductionOrder | undefined;
 
+    // ?rework=1 — arriving from a failed inspection on the QC page: open the
+    // send-back form straight away, once (Production Cycle 10).
+    const [searchParams, setSearchParams] = useSearchParams();
+    useEffect(() => {
+        if (searchParams.get("rework") !== "1" || !order) return;
+        if (order.status === "qc_failed" && can("production.submit_qc")) setModal("rework");
+        searchParams.delete("rework");
+        setSearchParams(searchParams, { replace: true });
+    }, [order, searchParams, setSearchParams, can]);
+
     const refresh = useCallback(() => {
         qc.invalidateQueries({ queryKey: ["production-order", Number(id)] });
         qc.invalidateQueries({ queryKey: ["production-orders"] });
@@ -2088,8 +2207,8 @@ export default function ProductionOrderDetailPage() {
         mutationFn: ({ taskId, action }: { taskId: number; action: "start" | "complete" | "pause" }) =>
             put(`/v1/tailor/tasks/${taskId}/status`, { action }),
         onSuccess: (_, vars) => {
-            const msg = vars.action === "complete" ? "Stage marked complete!" :
-                        vars.action === "pause"    ? "Stage paused" : "Stage started!";
+            const msg = vars.action === "complete" ? "Stage done" :
+                        vars.action === "pause"    ? "Stage paused" : "Stage started";
             toast.success(msg);
             refresh();
         },
@@ -2130,7 +2249,7 @@ export default function ProductionOrderDetailPage() {
     const cancelMutation = useMutation({
         mutationFn: (reason: string) => post(`/v1/admin/production-orders/${id}/cancel`, { reason }),
         onSuccess: () => {
-            toast.success("Production order cancelled.");
+            toast.success("Production order cancelled");
             setShowCancelConfirm(false);
             setCancelReason("");
             refresh();
@@ -2149,7 +2268,7 @@ export default function ProductionOrderDetailPage() {
 
     if (isLoading) return <div className="flex items-center justify-center h-64"><Spinner /></div>;
     if (!order) return (
-        <div className="text-center py-16 text-surface-400 text-sm">
+        <div className="text-center py-16 text-surface-500 text-sm">
             Production order not found.
             <button onClick={() => navigate("/production/orders")} className="block mt-3 btn-secondary mx-auto">Back</button>
         </div>
@@ -2162,17 +2281,22 @@ export default function ProductionOrderDetailPage() {
     const sortedTasks = [...(order.tasks ?? [])].sort((a, b) =>
         (a.sequence ?? a.stage?.sort_order ?? 0) - (b.sequence ?? b.stage?.sort_order ?? 0));
     const allocations = order.material_allocations ?? [];
-    const isCustomer  = !!order.customer_order_id;
-    const days        = daysUntil(order.due_date);
+    const isCustomer  = isCustomerJob(order);
+    const due         = dueInfo(order.due_date, order.status);
     // Whose job this is — the question the floor asks first, so it belongs in
     // the header rather than a card further down the page.
-    const customerName = [order.customer_order?.customer_first_name, order.customer_order?.customer_last_name]
-        .filter(Boolean).join(" ").trim() || null;
+    // The server-resolved name every surface shows (customer_label), with the
+    // sale's snapshot as a fallback for an older payload.
+    const customerName = order.customer_label?.trim()
+        || [order.customer_order?.customer_first_name, order.customer_order?.customer_last_name]
+            .filter(Boolean).join(" ").trim() || null;
     // Finished = pieces past the LAST stage — the same arithmetic the pipeline
     // runs on, surfaced as a headline number.
     const seqTasks = sortedTasks.filter(t => t.sequence != null);
     const lastSeq  = seqTasks[seqTasks.length - 1];
-    const finishedPieces = lastSeq
+    // The server's whole-pipeline figure first (OrderProgress) — a tailor's
+    // payload holds only her own stages, so recomputing here undercounted.
+    const finishedPieces = order.progress ? order.progress.finished : lastSeq
         ? (GATE_SATISFIED.includes((lastSeq.status ?? "").toLowerCase())
             ? order.quantity
             : Math.min(lastSeq.quantity_done ?? 0, order.quantity))
@@ -2197,6 +2321,8 @@ export default function ProductionOrderDetailPage() {
     const canMaterials= ["pending", "in_progress"].includes(order.status) && canManageAssignees;
     const canQC       = order.status === "qc_pending" && canSubmitQcPerm;
     const canComplete = order.status === "qc_passed" && canApproveQcPerm;
+    // The way out of a failed QC: the QC manager sends it back to chosen stages.
+    const canRework   = order.status === "qc_failed" && canSubmitQcPerm;
     const canCancel   = ["draft", "pending"].includes(order.status) && canConfirmOrderPerm;
     // Same permission that raises orders; the backend refuses completed/cancelled,
     // and only drafts may change quantity (serials + materials were sized from it).
@@ -2225,7 +2351,7 @@ export default function ProductionOrderDetailPage() {
         <div className="max-w-6xl mx-auto">
             {/* Back */}
             <button onClick={() => navigate("/production/orders")}
-                className="flex items-center gap-1.5 text-xs text-surface-500 hover:text-surface-800 mb-4 transition-colors">
+                className="flex items-center gap-1.5 min-h-11 -my-2.5 pr-3 text-xs text-surface-500 hover:text-surface-800 mb-1.5 transition-colors">
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
                 </svg>
@@ -2268,13 +2394,11 @@ export default function ProductionOrderDetailPage() {
                         {customerName ?? order.product_name}
                     </h1>
                     <p className="mt-0.5 text-sm sm:text-base font-semibold text-surface-600 truncate">
-                        {customerName ? order.product_name : (isCustomer ? "Customer order" : "For stock")}
+                        {customerName ? order.product_name : jobFor(order)}
                     </p>
 
                     <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                        <span className={clsx("px-2 py-0.5 rounded-full text-2xs font-bold", statusCfg.bg, statusCfg.color)}>
-                            {statusCfg.label}
-                        </span>
+                        <StatusBadge status={order.status} />
                         {/* Priority earns a chip only when it is NOT normal — a loud
                             "NORMAL" badge is the least actionable thing on the page. */}
                         {order.priority !== "normal" && (
@@ -2306,26 +2430,24 @@ export default function ProductionOrderDetailPage() {
                             <p className="text-surface-500 text-2xs font-bold uppercase tracking-wide mt-1 leading-tight">finished</p>
                         </div>
                         <div className="px-2.5 py-2">
-                            <p className={clsx("font-extrabold tabular-nums text-[17px] sm:text-xl leading-none",
-                                days < 0 ? "text-danger" : days <= 2 ? "text-amber-dark" : "text-surface-900")}>
-                                {days < 0 ? `${Math.abs(days)}d` : days === 0 ? "Today" : `${days}d`}
+                            <p className={clsx("font-extrabold tabular-nums text-[15px] sm:text-xl leading-none whitespace-nowrap",
+                                due.tone === "later" ? "text-surface-900" : DUE_TONE_CLS[due.tone])}>
+                                {due.label}
                             </p>
+                            {/* A closed order's label already IS the date — say "due"
+                                underneath instead of printing it twice. */}
                             <p className="text-surface-500 text-2xs font-bold uppercase tracking-wide mt-1 leading-tight">
-                                {days < 0 ? "overdue" : "until due"} · {fmtDate(order.due_date)}
+                                {due.tone === "none" ? "due" : fmtDueDate(order.due_date)}
                             </p>
                         </div>
                     </div>
 
                     <div className="mt-3">
                         <div className="flex justify-between text-2xs text-surface-500 mb-1.5">
-                            <span>{order.current_stage ?? "Not started"}</span>
+                            <span>{stageLabel(order.current_stage, order.completion_percentage, order.status)}</span>
                             <span className="font-bold">{order.completion_percentage}% complete</span>
                         </div>
-                        <div className="w-full h-1.5 bg-surface-100 rounded-full overflow-hidden">
-                            <div className={clsx("h-full rounded-full transition-all",
-                                order.completion_percentage >= 100 ? "bg-success-vivid" : "bg-amber")}
-                                style={{ width: `${Math.max(order.completion_percentage, 2)}%` }} />
-                        </div>
+                        <ProgressBar pct={Math.max(order.completion_percentage, 2)} done={order.completion_percentage >= 100} />
                     </div>
 
                     {/* References and provenance. Was surface-400 on white — 2.55:1,
@@ -2367,7 +2489,7 @@ export default function ProductionOrderDetailPage() {
                                 [&>*]:shrink-0">
                     {canConfirm && (
                         <button onClick={() => confirmMutation.mutate()} disabled={confirmMutation.isPending}
-                            className="bg-brand-500 text-white rounded-full px-3 sm:px-4 h-[30px] sm:h-9 text-[11px] sm:text-xs font-bold hover:bg-brand-600 active:bg-brand-700 transition-colors flex items-center gap-1">
+                            className="bg-brand-500 text-white rounded-full px-3 sm:px-4 h-11 sm:h-9 text-[11px] sm:text-xs font-bold hover:bg-brand-600 active:bg-brand-700 transition-colors flex items-center gap-1">
                             {confirmMutation.isPending ? "Confirming…" : <>✓ Confirm<span className="hidden sm:inline">&nbsp;Order</span></>}
                         </button>
                     )}
@@ -2383,13 +2505,19 @@ export default function ProductionOrderDetailPage() {
                     )}
                     {canQC && (
                         <button onClick={() => setModal("qc")}
-                            className="bg-accent-600 text-white border border-accent-600 rounded-lg px-2.5 h-[30px] sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-accent-700 transition-colors flex items-center gap-1">
+                            className="bg-accent-600 text-white border border-accent-600 rounded-lg px-2.5 h-11 sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-accent-700 transition-colors flex items-center gap-1">
                             <span className="hidden sm:inline">🔍 Quality Check</span><span className="sm:hidden">QC</span>
+                        </button>
+                    )}
+                    {canRework && (
+                        <button onClick={() => setModal("rework")}
+                            className="bg-danger text-white border border-danger rounded-lg px-2.5 h-11 sm:h-9 text-[11px] sm:text-xs font-semibold hover:brightness-95 transition-colors flex items-center gap-1">
+                            <span className="hidden sm:inline">↩ Send back for rework</span><span className="sm:hidden">Rework</span>
                         </button>
                     )}
                     {canComplete && (
                         <button onClick={() => setModal("complete")}
-                            className="bg-success-700 text-white border border-success-600 rounded-lg px-2.5 h-[30px] sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-success-700 transition-colors flex items-center gap-1">
+                            className="bg-success-700 text-white border border-success-600 rounded-lg px-2.5 h-11 sm:h-9 text-[11px] sm:text-xs font-semibold hover:bg-success-700 transition-colors flex items-center gap-1">
                             <span className="hidden sm:inline">✅ Complete &amp; Stock</span><span className="sm:hidden">Complete</span>
                         </button>
                     )}
@@ -2398,13 +2526,19 @@ export default function ProductionOrderDetailPage() {
                         neighbours and the row visibly ragged. min-h is reset
                         alongside the height. */}
                     <PdfDownloadButton type="production-orders" id={order.id} label="PDF"
-                        className="!rounded-lg !px-2.5 !h-[30px] !min-h-[30px] sm:!h-9 sm:!min-h-[36px] !text-[11px] sm:!text-xs" />
+                        className="!rounded-lg !px-2.5 !h-11 !min-h-11 sm:!h-9 sm:!min-h-[36px] !text-[11px] sm:!text-xs" />
+                    {/* Costing shows profit and margins: reports.financial, as
+                        the server now requires (cycle 9) — and it is a page of
+                        the Production report, so reports.production too
+                        (Phase 3A; same pair as its route guard). */}
+                    {can("reports.financial") && can("reports.production") && (
                     <button
                         onClick={() => navigate(`/reports/production/costing/${order.id}`)}
                         className={clsx(ACT_BTN, "hover:!border-success-300 hover:!text-success-700")}
                     >
                         <span className="hidden sm:inline">📊 </span>Costing<span className="hidden sm:inline">&nbsp;Report</span>
                     </button>
+                    )}
 
                     {/* WIP Board / Edit / Cancel / Delete live behind ⋯ at the end
                         of the row. They are occasional, one is navigation and two
@@ -2423,7 +2557,7 @@ export default function ProductionOrderDetailPage() {
                                 aria-haspopup="menu"
                                 aria-expanded={menuOpen}
                                 aria-label="More actions"
-                                className={clsx("w-[30px] h-[30px] sm:w-9 sm:h-9 rounded-lg border flex items-center justify-center transition-colors",
+                                className={clsx("w-11 h-11 sm:w-9 sm:h-9 rounded-lg border flex items-center justify-center transition-colors",
                                     menuOpen ? "bg-surface-100 border-surface-300 text-surface-900"
                                              : "bg-white border-surface-200 text-surface-600 hover:border-surface-300 hover:text-surface-900")}
                             >
@@ -2483,22 +2617,31 @@ export default function ProductionOrderDetailPage() {
                         <div className="flex border-b border-line overflow-x-auto no-scrollbar gap-0 -mb-px">
                             {tabs.map(t => (
                                 <button key={t.key} onClick={() => setTab(t.key as any)}
-                                    className={clsx("px-2 sm:px-4 py-2 sm:py-2.5 text-[11.5px] sm:text-xs font-semibold border-b-2 transition-all whitespace-nowrap",
-                                        tab === t.key ? "border-brand-500 text-brand-600" : "border-transparent text-surface-500 hover:text-surface-700")}>
+                                    className={clsx("px-2.5 sm:px-4 min-h-12 sm:min-h-0 py-2 sm:py-2.5 text-xs font-semibold border-b-2 transition-all whitespace-nowrap",
+                                        tab === t.key ? "border-brand-500 text-brand-700" : "border-transparent text-surface-500 hover:text-surface-700")}>
                                     <span className="hidden sm:inline">{t.icon} </span>{t.label}
                                 </button>
                             ))}
+                            {/* Scroll hint on phones: a fade pinned to the right edge
+                                while more tabs sit off-screen. It is the row's last
+                                item, so once scrolled to the end it rests beyond the
+                                last tab instead of covering it — and with no overflow
+                                it fades over empty card. */}
+                            <span aria-hidden="true"
+                                className="sm:hidden sticky right-0 shrink-0 w-8 pointer-events-none bg-gradient-to-l from-white to-transparent" />
                         </div>
 
                         {tab === "stages"    && <StagesPipeline
                             tasks={sortedTasks}
                             orderQuantity={order.quantity}
+                            totalStages={order.progress?.stages}
                             batches={order.batches ?? []}
                             currentUserId={currentUserId}
                             onTaskAction={(taskId, action) => taskMutation.mutate({ taskId, action })}
                             taskActionPending={taskMutation.isPending}
                             canUnlock={can("production.manage_assignees")}
                             onUnlock={(taskId, allow) => unlockMutation.mutate({ taskId, allow })}
+                            orderStatus={order.status}
                         />}
                         {tab === "batches" && <BatchesSection
                             order={order}
@@ -2511,7 +2654,7 @@ export default function ProductionOrderDetailPage() {
                         />}
                         {tab === "materials" && (
                             allocations.length === 0 ? (
-                                <div className="text-center py-10 text-surface-400">
+                                <div className="text-center py-10 text-surface-500">
                                     <p className="text-xs">No material allocations. <button onClick={() => setModal("materials")} className="text-brand-500 hover:underline">Issue materials now</button>.</p>
                                 </div>
                             ) : (
@@ -2533,14 +2676,14 @@ export default function ProductionOrderDetailPage() {
                                                     <tr key={a.id}>
                                                         <td className="px-3 py-2.5">
                                                             <p className="font-medium text-surface-800">{a.material.name}</p>
-                                                            <p className="text-2xs text-surface-400 font-mono">{a.material.code} · {a.material.unit_of_measure}</p>
+                                                            <p className="text-2xs text-surface-500 font-mono">{a.material.code} · {a.material.unit_of_measure}</p>
                                                         </td>
                                                         <td className="px-3 py-2.5 text-right tabular-nums">{a.quantity_required}</td>
                                                         <td className={clsx("px-3 py-2.5 text-right tabular-nums font-semibold", pct >= 100 ? "text-success-700" : "text-amber-700")}>{a.quantity_allocated}</td>
                                                         <td className="px-3 py-2.5 text-right tabular-nums text-surface-600">{a.quantity_used}</td>
                                                         <td className="px-3 py-2.5">
                                                             <div className="flex items-center gap-2">
-                                                                <div className="w-16"><ProgressBar pct={pct} colorClass={pct >= 100 ? "bg-success-500" : "bg-amber-400"} /></div>
+                                                                <div className="w-16"><ProgressBar pct={pct} /></div>
                                                                 <span className={clsx("text-2xs font-semibold", pct >= 100 ? "text-success-600" : "text-amber-600")}>{Math.round(pct)}%</span>
                                                             </div>
                                                         </td>
@@ -2556,7 +2699,7 @@ export default function ProductionOrderDetailPage() {
                             <div className="space-y-4">
                                 {specGender && (
                                     <div className="flex items-center gap-3 rounded-xl bg-surface-800 px-4 py-3">
-                                        <span className="text-2xs font-semibold uppercase tracking-widest text-surface-400">Gender</span>
+                                        <span className="text-2xs font-semibold uppercase tracking-widest text-surface-500">Gender</span>
                                         <span className="text-sm font-bold text-white capitalize">{specGender}</span>
                                     </div>
                                 )}
@@ -2575,7 +2718,7 @@ export default function ProductionOrderDetailPage() {
                                     </div>
                                 )}
                                 {!hasSpecs && !order.notes && (
-                                    <p className="text-xs text-surface-400 text-center py-8">No specifications recorded.</p>
+                                    <p className="text-xs text-surface-500 text-center py-8">No specifications recorded.</p>
                                 )}
                             </div>
                         )}
@@ -2606,8 +2749,8 @@ export default function ProductionOrderDetailPage() {
                                             t.status === "failed" ? "bg-danger-500" : "bg-surface-200")} />
                                 ))}
                             </div>
-                            <ProgressBar pct={order.completion_percentage} colorClass={order.status === "completed" ? "bg-success-500" : "bg-brand-500"} />
-                            <p className="text-2xs text-surface-400 mt-1 text-right">{order.completion_percentage}%</p>
+                            <ProgressBar pct={order.completion_percentage} done={order.status === "completed"} />
+                            <p className="text-2xs text-surface-500 mt-1 text-right">{order.completion_percentage}%</p>
                         </div>
 
                         {/* Assignees */}
@@ -2622,7 +2765,7 @@ export default function ProductionOrderDetailPage() {
                                             </div>
                                             <div>
                                                 <p className="text-xs font-semibold text-surface-800">{a.user.first_name} {a.user.last_name}</p>
-                                                <p className="text-2xs text-surface-400 capitalize">{a.role_in_order.replace("_", " ")}</p>
+                                                <p className="text-2xs text-surface-500 capitalize">{a.role_in_order.replace("_", " ")}</p>
                                             </div>
                                         </div>
                                     ))}
@@ -2637,7 +2780,7 @@ export default function ProductionOrderDetailPage() {
                                 keeps only a one-line pointer when batches exist. */}
                             {(order.batches?.length ?? 0) > 0 && (
                                 <button onClick={() => setTab("batches")}
-                                    className="w-full mb-5 flex items-center justify-between text-xs font-semibold text-brand-600 border border-brand-100 bg-brand-50/60 rounded-xl px-3 py-2 hover:bg-brand-50 transition-colors">
+                                    className="w-full mb-5 flex items-center justify-between text-xs font-semibold text-brand-700 border border-brand-100 bg-brand-50/60 rounded-xl px-3 py-2 hover:bg-brand-50 transition-colors">
                                     <span>🎨 {order.batches!.length} colourway batch{order.batches!.length === 1 ? "" : "es"}</span>
                                     <span aria-hidden="true">→</span>
                                 </button>
@@ -2649,10 +2792,10 @@ export default function ProductionOrderDetailPage() {
                                 <>
                                     <SectionLabel>Key Dates</SectionLabel>
                                     {(order as any).fitting_date && (
-                                        <InfoRow label="Fitting" value={<span className="font-semibold text-accent-700">{fmtDate((order as any).fitting_date)}</span>} />
+                                        <InfoRow label="Fitting" value={<span className="font-semibold text-accent-700">{fmtDueDate((order as any).fitting_date)}</span>} />
                                     )}
                                     {(order as any).collection_date && (
-                                        <InfoRow label="Collection" value={<span className="font-semibold text-success-700">{fmtDate((order as any).collection_date)}</span>} />
+                                        <InfoRow label="Collection" value={<span className="font-semibold text-success-700">{fmtDueDate((order as any).collection_date)}</span>} />
                                     )}
                                     {order.started_at && <InfoRow label="Started" value={fmtDate(order.started_at)} />}
                                     {order.completed_at && <InfoRow label="Completed" value={fmtDate(order.completed_at)} />}
@@ -2667,6 +2810,7 @@ export default function ProductionOrderDetailPage() {
             {modal === "edit"      && <EditOrderModal order={order} onClose={() => setModal(null)} onSaved={refresh} canReduce={can("production.delete_order")} />}
             {modal === "batches"   && <BatchesModal order={order} onClose={() => setModal(null)} onSaved={refresh} />}
             {modal === "assign"    && <AssignModal order={order} onClose={() => setModal(null)} onSaved={refresh} />}
+            {modal === "rework"    && <ReworkModal order={order} onClose={() => setModal(null)} onSaved={refresh} />}
             {modal === "materials" && <IssueMaterialsModal order={order} onClose={() => setModal(null)} onSaved={refresh} />}
             {modal === "qc"        && <QCModal order={order} onClose={() => setModal(null)} onDone={refresh} />}
             {modal === "complete"  && <CompleteModal order={order} onClose={() => setModal(null)} onDone={refresh} />}
@@ -2691,7 +2835,7 @@ export default function ProductionOrderDetailPage() {
 
                         <div className="mb-5">
                             <label className="block text-xs font-semibold text-surface-700 mb-1.5">
-                                Reason <span className="text-surface-400 font-normal">(optional)</span>
+                                Reason <span className="text-surface-500 font-normal">(optional)</span>
                             </label>
                             <textarea
                                 value={cancelReason}

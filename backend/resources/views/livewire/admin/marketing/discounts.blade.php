@@ -21,6 +21,11 @@
             <i class="bi bi-check-circle-fill text-success-500 flex-shrink-0"></i>{{ session('success') }}
         </div>
     @endif
+    @if(session('error'))
+        <div class="flex items-center gap-3 rounded-xl bg-danger-50 border border-danger-200 px-4 py-3 text-sm text-danger-700">
+            <i class="bi bi-exclamation-circle-fill text-danger-500 flex-shrink-0"></i>{{ session('error') }}
+        </div>
+    @endif
 
     {{-- Summary cards --}}
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -302,6 +307,9 @@
                                        :disabled="{{ $type === 'free_shipping' ? 'true' : 'false' }}"
                                        class="w-full border {{ $errors->has('value') ? 'border-danger-400' : 'border-primary-100' }} rounded-xl {{ $type === 'fixed' ? 'pl-11' : '' }} px-3.5 py-2.5 text-sm text-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/15 focus:border-primary-300 transition disabled:opacity-50" />
                             </div>
+                            @unless(\App\Support\DiscountRule::isOwner(auth()->user()))
+                                <p class="text-xs text-primary-400 mt-1">At most {{ rtrim(rtrim(number_format(\App\Support\DiscountRule::capPercent(), 2), '0'), '.') }}% of the smallest order it can apply to. Larger discounts are set by the owner.</p>
+                            @endunless
                             @error('value')<p class="text-xs text-danger-500 mt-1">{{ $message }}</p>@enderror
                         </div>
                     </div>

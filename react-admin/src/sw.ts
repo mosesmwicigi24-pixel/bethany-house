@@ -42,6 +42,11 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
     if (event.data && event.data.type === "SKIP_WAITING") {
         self.skipWaiting();
     }
+    // The page asks for a replay when it comes back online — the only way
+    // the queue drains on browsers without Background Sync (iOS Safari).
+    if (event.data && event.data.type === "REPLAY_TASK_UPDATES") {
+        event.waitUntil(replayQueuedTaskUpdates());
+    }
 });
 
 self.addEventListener("activate", (event) => {
@@ -88,6 +93,37 @@ registerRoute(
         plugins: [
             new ExpirationPlugin({ maxEntries: 100, maxAgeSeconds: 60 * 60 * 6 }),
             new CacheableResponsePlugin({ statuses: [0, 200] }),
+        ],
+    }),
+);
+
+// The signed-in user — network-first. Without it an offline reload stopped at
+// "Can't reach Bethany House" before any cached screen could show. Online it
+// is always fresh (a new sign-in overwrites it); cleared on sign-out.
+registerRoute(
+    ({ url, request }) => request.method === "GET" && url.pathname === "/api/v1/admin/auth/me",
+    new NetworkFirst({
+        cacheName: "api-session",
+        networkTimeoutSeconds: 4,
+        plugins: [
+            new ExpirationPlugin({ maxEntries: 2, maxAgeSeconds: 60 * 60 * 12 }),
+            new CacheableResponsePlugin({ statuses: [200] }),
+        ],
+    }),
+);
+
+// My Tasks — network-first, kept for a working day. The tailor's own list
+// (/tailor/tasks) did not match the production pattern below, so on a dropped
+// connection My Tasks opened empty. Cleared on sign-out (auth.store) so a
+// shared tablet does not hand one tailor's list to the next.
+registerRoute(
+    ({ url, request }) => request.method === "GET" && url.pathname === "/api/v1/tailor/tasks",
+    new NetworkFirst({
+        cacheName: "api-my-tasks",
+        networkTimeoutSeconds: 4,
+        plugins: [
+            new ExpirationPlugin({ maxEntries: 10, maxAgeSeconds: 60 * 60 * 12 }),
+            new CacheableResponsePlugin({ statuses: [200] }),
         ],
     }),
 );
@@ -283,24 +319,87 @@ self.addEventListener("sync", ((event: SyncEvent) => {
     }
 }) as EventListener);
 
-async function replayQueuedTaskUpdates(): Promise<void> {
+// One replay at a time: Background Sync and the page's "back online" message
+// can arrive together, and sending a Start twice gets the second refused.
+let replaying: Promise<void> | null = null;
+
+function replayQueuedTaskUpdates(): Promise<void> {
+    replaying ??= replayOnce().finally(() => { replaying = null; });
+    return replaying;
+}
+
+async function replayOnce(): Promise<void> {
     const db = await openOfflineDB();
     const queue = await db.getAll("task-updates");
+    let synced = 0;
     for (const item of queue) {
         try {
             const res = await fetch(item.url, {
-                method: "PUT",
+                // Piece counts are POSTs; Start/Pause/Done (and items queued
+                // before methods were recorded) are PUTs.
+                method: item.method ?? "PUT",
                 headers: {
                     "Content-Type": "application/json",
                     Authorization: `Bearer ${item.token}`,
                 },
                 body: JSON.stringify(item.body),
             });
-            if (res.ok) await db.delete("task-updates", item.id);
+            // A queued sign-out (offlineQueue.ts) revokes the token once the
+            // updates before it are in. It is not the tailor's work, so it is
+            // neither counted nor reported; a refusal means the token is
+            // already gone, which is the goal.
+            const isSignOut = item.url === "/api/v1/admin/auth/logout";
+            if (isSignOut && (res.ok || isFinalRefusal(res.status))) {
+                await db.delete("task-updates", item.id);
+            } else if (res.ok) {
+                await db.delete("task-updates", item.id);
+                synced++;
+            } else if (isFinalRefusal(res.status)) {
+                // The server said no (stage still blocked, order sent to QC,
+                // task moved to someone else, sign-in expired). Replaying the
+                // same request can only get the same answer, so retrying it
+                // forever just kept it stuck in the queue. Drop it and tell
+                // the open My Tasks page why.
+                await db.delete("task-updates", item.id);
+                await notifyClients({
+                    type: "task-update-refused",
+                    message: await refusalMessage(res),
+                });
+            }
+            // 5xx, 408, 429: transient — retry on next sync.
         } catch {
-            // Retry on next sync
+            // Network failure — retry on next sync
         }
     }
+    if (synced > 0) {
+        await notifyClients({
+            type: "task-updates-synced",
+            // Not "your": after a shared-tablet sign-out (offlineQueue.ts) the
+            // update may be the previous tailor's, and this reaches whoever
+            // is signed in now.
+            message: synced === 1 ? "An offline update has synced." : `${synced} offline updates have synced.`,
+        });
+    }
+}
+
+/** A 4xx other than timeout/rate-limit: the same request will never succeed. */
+function isFinalRefusal(status: number): boolean {
+    return status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
+async function refusalMessage(res: Response): Promise<string> {
+    try {
+        const body = await res.json();
+        if (body?.message) return `An offline update was not saved: ${body.message}`;
+    } catch {
+        // Not JSON — fall through
+    }
+    return "An offline update was not saved - please check the task and try again.";
+}
+
+async function notifyClients(message: { type: string; message: string }): Promise<void> {
+    const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const client of clients) client.postMessage(message);
 }
 
 async function replayQueuedPosSales(): Promise<void> {
@@ -327,7 +426,7 @@ async function replayQueuedPosSales(): Promise<void> {
 
 interface OfflineDB {
     getAll: (store: string) => Promise<
-        Array<{ id: IDBValidKey; url: string; token: string; body: unknown }>
+        Array<{ id: IDBValidKey; url: string; method?: string; token: string; body: unknown }>
     >;
     delete: (store: string, id: IDBValidKey) => Promise<void>;
 }

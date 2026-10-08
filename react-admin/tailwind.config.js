@@ -47,11 +47,12 @@ export default {
           // used ~1178x, much of it on text, and 2.40:1 fails AA outright.
           // 3.13:1 clears the 3:1 bar for UI and large text.
           400: '#8c9489',
-          // 4.57:1 on white. This is the secondary-text token and it must clear
-          // AA: at #757d72 it measured 4.26:1, and the palette sweep moved ~31
-          // body-text sites here from stock gray-500 (4.83:1), so leaving it
-          // would have been a real regression rather than a neutral rename.
-          500: '#70786d',
+          // This is the secondary-text token and it must clear AA. At #757d72
+          // it measured 4.26:1 on white; #70786d fixed white (4.57:1) but not
+          // the tinted card fills it also sits on (4.0-4.4:1 on surface-50,
+          // canvas, brand-50, success-50; axe, Production Cycle 8, Oct 2026).
+          // #646b61 clears all of them: 5.5 white, 4.94 canvas, 4.5 danger-light.
+          500: '#646b61',
           600: '#565c54',
           700: '#434741',
           800: '#2c2e2b',

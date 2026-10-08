@@ -55,7 +55,8 @@ function Kpi({ label, value, sub }: { label: string; value: string | number; sub
     );
 }
 
-export default function CustomerGeographyPage() {
+/** `embedded`: shown as the Geography tab of Customers & Neema — no page title of its own. */
+export default function CustomerGeographyPage({ embedded = false }: { embedded?: boolean } = {}) {
     const { data, isLoading } = useQuery({
         queryKey: ["intelligence", "geography"],
         queryFn:  intelligenceApi.customerGeography,
@@ -78,10 +79,14 @@ export default function CustomerGeographyPage() {
 
     return (
         <div className="space-y-5 animate-fade-in">
-            <div className="page-header">
-                <h1 className="page-title">Customer Geography</h1>
-                <p className="page-subtitle">Which countries your customers are in — resolved from order countries and phone numbers.</p>
-            </div>
+            {embedded ? (
+                <p className="text-sm text-surface-500">Which countries your customers are in — resolved from order countries and phone numbers.</p>
+            ) : (
+                <div className="page-header">
+                    <h1 className="page-title">Customer Geography</h1>
+                    <p className="page-subtitle">Which countries your customers are in — resolved from order countries and phone numbers.</p>
+                </div>
+            )}
 
             {isLoading ? <div className="py-16 flex justify-center"><Spinner /></div> : (
                 <>

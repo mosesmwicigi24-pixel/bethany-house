@@ -78,6 +78,9 @@ class User extends Authenticatable
         'last_login_at'              => 'datetime',
         'deleted_at'                 => 'datetime',
         'two_factor_setup_started_at'=> 'datetime',
+        'locked_until'               => 'datetime',
+        'locked_at'                  => 'datetime',
+        'unlocked_at'                => 'datetime',
     ];
 
     /**
@@ -94,6 +97,17 @@ class User extends Authenticatable
 
             if (empty($user->user_type)) {
                 $user->user_type = UserType::CUSTOMER;
+            }
+        });
+
+        // Leaving "active" signs the person out everywhere. Production
+        // deactivated staff through the edit form, which never revoked, so
+        // their tokens outlived the decision. Revoking here covers every
+        // Eloquent writer; query-builder bulk writers revoke explicitly.
+        // Reactivating does not bring an old token back.
+        static::updated(function ($user) {
+            if ($user->wasChanged('status') && $user->status !== 'active') {
+                $user->tokens()->delete();
             }
         });
     }
@@ -193,6 +207,22 @@ class User extends Authenticatable
     public function canAccessAdmin(): bool
     {
         return $this->isSystem() || $this->isStaff();
+    }
+
+    /**
+     * A named machine integration (config security.service_accounts) — exact
+     * email, active only. Lets it past the /admin/* staff gate and nothing
+     * else: canAccessAdmin() (console sign-in, 2FA, session limits) is
+     * deliberately untouched, and its roles/permissions still decide every
+     * route it may call.
+     */
+    public function isServiceAccount(): bool
+    {
+        $email = strtolower(trim((string) $this->email));
+
+        return $email !== ''
+            && $this->isActive()
+            && in_array($email, (array) config('security.service_accounts', []), true);
     }
 
     public function isActive(): bool

@@ -1,4 +1,5 @@
 import { get, post, put, del } from "./client";
+import type { Proposal } from "@/api/proposals";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -10,13 +11,14 @@ export interface RawMaterial {
     category: string | null; // actual DB column
     material_type: string | null; // alias = category
     unit_of_measure: string;
-    unit_cost: number; // actual DB column
-    cost_per_unit: number; // alias = unit_cost
+    // The three cost fields are sent only to products.view_cost holders (4D).
+    unit_cost?: number; // actual DB column
+    cost_per_unit?: number; // alias = unit_cost
     reorder_point: number;
     is_active: boolean;
     total_stock: number;
     stock_status: "in_stock" | "low_stock" | "out_of_stock";
-    stock_value: number;
+    stock_value?: number;
     supplier: null; // column doesn't exist in DB
     inventory?: MaterialInventoryRecord[];
     created_at: string;
@@ -107,7 +109,8 @@ export const rawMaterialsApi = {
             is_active: boolean;
         }>,
     ) =>
-        put<{ message: string; material: RawMaterial }>(
+        // Phase 3C: a unit-cost change past 5% comes back as a waiting proposal.
+        put<{ message: string; material: RawMaterial; proposal?: Proposal | null }>(
             `/v1/admin/inventory/materials/${id}`,
             data,
         ),
@@ -130,7 +133,7 @@ export const rawMaterialsApi = {
             reference?: string;
         },
     ) =>
-        post<{ message: string; inventory: MaterialInventoryRecord }>(
+        post<{ message: string; inventory: MaterialInventoryRecord; proposal?: Proposal | null }>(
             `/v1/admin/inventory/materials/${id}/receive`,
             data,
         ),

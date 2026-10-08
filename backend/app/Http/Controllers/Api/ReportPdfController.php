@@ -27,14 +27,11 @@ use Carbon\Carbon;
  */
 class ReportPdfController extends Controller
 {
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    use \App\Http\Controllers\Api\Concerns\ReportsMoneyInKes;
+    use \App\Http\Controllers\Api\Concerns\ResolvesReportWindow;
+    use \App\Http\Controllers\Api\Concerns\IdentifiesBuyers;
 
-    private function dateRange(Request $request): array
-    {
-        $start = $request->get('start_date', now()->subDays(29)->format('Y-m-d'));
-        $end   = $request->get('end_date',   now()->format('Y-m-d'));
-        return [$start, $end . ' 23:59:59'];
-    }
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private function fmt(float $amount, string $currency = 'KES'): string
     {
@@ -238,11 +235,16 @@ HTML;
                                    ->orWhereIn("{$a}payment_status", \App\Models\Order::SETTLED_PAYMENT_STATUSES));
     }
 
+    /**
+     * These two predate the shared concern and are kept because the sales and
+     * financial data methods call them by name. They now DELEGATE to it, so
+     * this file holds one currency rule rather than two that happen to agree —
+     * which is how the customers and procurement pages came to disagree with
+     * the sales page in the same controller.
+     */
     private function currencyGuard($q, string $currency, string $col)
     {
-        return strtoupper($currency) === 'KES'
-            ? $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter($col))
-            : $q->whereRaw("UPPER({$col}) = ?", [strtoupper($currency)]);
+        return $this->onlyStatableCurrencies($q, strtoupper($currency) === 'KES', strtoupper($currency), $col);
     }
 
     private function moneyExpr(string $currency, string $amountCol, string $currencyCol): string
@@ -278,7 +280,7 @@ HTML;
                 COALESCE(AVG({$amt('total_amount', 'currency_code')}), 0) AS avg_order_value,
                 COALESCE(SUM({$amt('tax_amount', 'currency_code')}), 0)   AS total_tax,
                 COALESCE(SUM({$amt('discount_amount', 'currency_code')}), 0) AS total_discounts,
-                COUNT(DISTINCT COALESCE(user_id::text, normalize_phone(customer_phone), NULLIF(lower(btrim(customer_email)), ''))) AS unique_customers
+                COUNT(DISTINCT " . \App\Support\BuyerIdentity::sql('orders') . ") AS unique_customers
             ")->first();
 
         // By product (top 20)
@@ -439,18 +441,7 @@ HTML;
                 COUNT(*) FILTER (WHERE COALESCE(oi.cost_price, pr.cost_price) IS NULL)         AS unpriced_lines
             FROM order_items oi
             JOIN orders o ON o.id = oi.order_id
-            LEFT JOIN LATERAL (
-                SELECT pp.cost_price
-                FROM product_prices pp
-                WHERE UPPER(pp.currency_code) = 'KES'
-                  AND pp.cost_price IS NOT NULL
-                  AND (
-                        (oi.product_variant_id IS NOT NULL AND pp.product_variant_id = oi.product_variant_id)
-                     OR (pp.product_id = oi.product_id AND pp.product_variant_id IS NULL)
-                  )
-                ORDER BY pp.product_variant_id IS NULL
-                LIMIT 1
-            ) pr ON TRUE
+            LEFT JOIN LATERAL (SELECT " . \App\Support\CostBasis::bookCostSql('oi') . " AS cost_price) pr ON TRUE
             WHERE o.created_at BETWEEN ? AND ?
               AND o.status NOT IN ('cancelled','voided','refunded')
               AND (o.status IN ('confirmed','processing','shipped','delivered','completed')
@@ -662,12 +653,19 @@ HTML;
     {
         [$start, $end] = $this->dateRange($request);
 
+        // Every purchase order is in shillings today (52 of 52), so these sums
+        // were right by luck. The screen version was converted in #382; this
+        // one is the printed copy of the same figures and must agree with it.
+        [$amtKes] = $this->reportingMoney($request, 'purchase_orders.currency_code');
+        $poTotal  = $amtKes('purchase_orders.total_amount');
+        $poItem   = $amtKes('purchase_order_items.total_price');
+
         $summary = DB::table('purchase_orders')
             ->whereBetween('created_at', [$start, $end])
             ->selectRaw("
                 COUNT(*) AS total_orders,
-                COALESCE(SUM(total_amount), 0) AS total_value,
-                COALESCE(AVG(total_amount), 0) AS avg_po_value,
+                COALESCE(SUM({$poTotal}), 0) AS total_value,
+                COALESCE(AVG({$poTotal}), 0) AS avg_po_value,
                 COUNT(CASE WHEN status = 'received' THEN 1 END) AS received_count,
                 COUNT(CASE WHEN status = 'cancelled' THEN 1 END) AS cancelled_count,
                 COUNT(CASE WHEN status IN ('pending_approval','approved','ordered') THEN 1 END) AS pending_count
@@ -681,8 +679,8 @@ HTML;
                 suppliers.name,
                 suppliers.email,
                 COUNT(*) AS order_count,
-                COALESCE(SUM(purchase_orders.total_amount), 0) AS total_value,
-                COALESCE(AVG(purchase_orders.total_amount), 0) AS avg_value,
+                COALESCE(SUM({$poTotal}), 0) AS total_value,
+                COALESCE(AVG({$poTotal}), 0) AS avg_value,
                 COUNT(CASE WHEN purchase_orders.status = 'received' THEN 1 END) AS received_count
             ")
             ->orderByDesc('total_value')
@@ -691,7 +689,7 @@ HTML;
         $byStatus = DB::table('purchase_orders')
             ->whereBetween('created_at', [$start, $end])
             ->groupBy('status')
-            ->selectRaw("status, COUNT(*) AS count, COALESCE(SUM(total_amount), 0) AS total")
+            ->selectRaw("status, COUNT(*) AS count, COALESCE(SUM({$poTotal}), 0) AS total")
             ->get();
 
         $topItems = DB::table('purchase_order_items')
@@ -706,7 +704,7 @@ HTML;
             ->selectRaw("
                 COALESCE(product_translations.name, products.sku, 'Unknown') AS item_name,
                 SUM(purchase_order_items.quantity) AS total_qty,
-                COALESCE(SUM(purchase_order_items.total_price), 0) AS total_cost,
+                COALESCE(SUM({$poItem}), 0) AS total_cost,
                 COUNT(DISTINCT purchase_orders.id) AS po_count
             ")
             ->orderByDesc('total_cost')
@@ -715,7 +713,7 @@ HTML;
 
         $monthly = DB::table('purchase_orders')
             ->whereBetween('created_at', [$start, $end])
-            ->selectRaw("TO_CHAR(created_at, 'YYYY-MM') AS month, COUNT(*) AS orders, COALESCE(SUM(total_amount), 0) AS spend")
+            ->selectRaw("TO_CHAR(created_at, 'YYYY-MM') AS month, COUNT(*) AS orders, COALESCE(SUM({$poTotal}), 0) AS spend")
             ->groupBy(DB::raw("TO_CHAR(created_at, 'YYYY-MM')"))
             ->orderBy('month')
             ->get();
@@ -883,10 +881,24 @@ HTML;
     // GET /api/v1/admin/reports/pdf/customers
     // =========================================================================
 
-    public function customers(Request $request): Response
+    /**
+     * The customer PDF's numbers, extracted so a test can assert them without
+     * parsing a rendered PDF.
+     *
+     * Not an accident of style: the two pages in this controller that HAD data
+     * methods (sales, financial) were the two that were correct, and the four
+     * that returned a Response directly were never tested. The top-customers
+     * table here printed empty and the lifetime-value figures read 0 for as
+     * long as the report has existed.
+     */
+    public function customersData(Request $request): array
     {
         [$start, $end] = $this->dateRange($request);
         $currency = strtoupper($request->get('currency', 'KES'));
+
+        // The printed report states money in one unit, exactly as the screens
+        // do — the same trait, so the two cannot drift apart again.
+        [$amtKes, $inKes, $reportCurrency] = $this->reportingMoney($request);
 
         $summary = DB::table('customers')
             ->selectRaw("
@@ -895,23 +907,27 @@ HTML;
             ", [$start, $end])
             ->first();
 
+        // This table PRINTED EMPTY. It required orders.user_id, and not one of
+        // the 623 paid orders has a login — so the "top 30 customers" page of
+        // the exported PDF has always been blank, in the document that gets
+        // carried into meetings. Keyed on the buyer now, and in shillings.
+        $buyer      = $this->buyerKey('orders');
+        $spentKes   = $amtKes('orders.total_amount');
+
         $topCustomers = DB::table('orders')
-            ->leftJoin('customers', function ($join) {
-                $join->on('customers.user_id', '=', 'orders.user_id')
-                     ->whereNotNull('orders.user_id');
-            })
             ->whereBetween('orders.created_at', [$start, $end])
             ->where('orders.payment_status', 'paid')
-            ->whereNotNull('orders.user_id')
-            ->groupBy('orders.user_id', 'customers.first_name', 'customers.last_name', 'customers.email', 'orders.customer_first_name', 'orders.customer_last_name', 'orders.customer_email')
+            ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $reportCurrency))
+            ->whereRaw("{$buyer} IS NOT NULL")
+            ->groupByRaw($buyer)
             ->selectRaw("
-                COALESCE(customers.first_name, orders.customer_first_name, 'Guest') || ' ' ||
-                COALESCE(customers.last_name,  orders.customer_last_name,  '')       AS customer_name,
-                COALESCE(customers.email, orders.customer_email)                     AS email,
-                COUNT(orders.id)                             AS order_count,
-                COALESCE(SUM(orders.total_amount), 0)        AS total_spent,
-                COALESCE(AVG(orders.total_amount), 0)        AS avg_order,
-                MAX(orders.created_at::date)                 AS last_order_date
+                MAX(COALESCE(orders.customer_first_name, 'Guest') || ' ' ||
+                    COALESCE(orders.customer_last_name,  ''))    AS customer_name,
+                MAX(orders.customer_email)                       AS email,
+                COUNT(orders.id)                                 AS order_count,
+                COALESCE(SUM({$spentKes}), 0)                    AS total_spent,
+                COALESCE(AVG({$spentKes}), 0)                    AS avg_order,
+                MAX(orders.created_at::date)                     AS last_order_date
             ")
             ->orderByDesc('total_spent')
             ->limit(30)
@@ -925,18 +941,48 @@ HTML;
             ->orderBy('month')
             ->get();
 
-        // Avg LTV — group by user_id (orders have no customer_id)
+        // The comment that used to sit here read "group by user_id (orders have
+        // no customer_id)". That was true when it was written; the column was
+        // added and backfilled later and nothing came back to re-derive this.
+        // Both figures therefore read 0.
         $ltvStats = DB::table('orders')
             ->where('payment_status', 'paid')
-            ->whereNotNull('user_id')
-            ->groupBy('user_id')
-            ->selectRaw("COALESCE(SUM(total_amount), 0) AS lifetime_value")
+            ->tap(fn ($q) => $this->onlyStatableCurrencies($q, $inKes, $reportCurrency))
+            ->whereRaw("{$buyer} IS NOT NULL")
+            ->groupByRaw($buyer)
+            ->selectRaw("COALESCE(SUM({$spentKes}), 0) AS lifetime_value")
             ->get();
 
-        $avgLtv    = $ltvStats->avg('lifetime_value') ?? 0;
-        $maxLtv    = $ltvStats->max('lifetime_value') ?? 0;
+        return [
+            'start'         => $start,
+            'end'           => $end,
+            'currency'      => $currency,
+            'summary'       => $summary,
+            'top_customers' => $topCustomers,
+            'acquisition'   => $acquisition,
+            'avg_ltv'       => (float) ($ltvStats->avg('lifetime_value') ?? 0),
+            'max_ltv'       => (float) ($ltvStats->max('lifetime_value') ?? 0),
+        ];
+    }
 
-        $cur = $currency;
+    public function customers(Request $request): Response
+    {
+        $d = $this->customersData($request);
+
+        // Contacts need customers.view (owner, cycle 9). A rendered PDF cannot
+        // be redacted afterwards the way RedactsCustomerContacts redacts JSON
+        // and CSV, so the rows are stripped before they reach the page.
+        if (! $request->user()?->can('customers.view')) {
+            $d['top_customers'] = collect($d['top_customers'])
+                ->map(fn ($c) => \App\Support\CustomerContacts::redactRow($c));
+        }
+
+        [$start, $end, $summary, $topCustomers, $acquisition] =
+            [$d['start'], $d['end'], $d['summary'], $d['top_customers'], $d['acquisition']];
+        $avgLtv = $d['avg_ltv'];
+        $maxLtv = $d['max_ltv'];
+
+        $cur = $d['currency'];
         $kpis = $this->kpiGrid([
             ['label' => 'Total Customers',   'value' => number_format($summary->total_customers)],
             ['label' => 'New (This Period)', 'value' => number_format($summary->new_customers)],
@@ -946,7 +992,7 @@ HTML;
 
         $topTable = $this->table(
             [['label'=>'Customer'],['label'=>'Email'],['label'=>'Orders','right'=>true],['label'=>'Total Spent','right'=>true],['label'=>'Avg Order','right'=>true],['label'=>'Last Order']],
-            $topCustomers->map(fn($c) => [$c->customer_name, $c->email, number_format($c->order_count), $this->fmt((float)$c->total_spent, $cur), $this->fmt((float)$c->avg_order, $cur), $c->last_order_date ?? '—'])->toArray()
+            $topCustomers->map(fn($c) => [$c->customer_name, $c->email ?? '—', number_format($c->order_count), $this->fmt((float)$c->total_spent, $cur), $this->fmt((float)$c->avg_order, $cur), $c->last_order_date ?? '—'])->toArray()
         );
 
         $acqTable = $this->table(

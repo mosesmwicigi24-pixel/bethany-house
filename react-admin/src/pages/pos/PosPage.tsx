@@ -28,7 +28,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
-import { posApi } from "@/api/pos";
+import { posApi, REVEAL_REASONS } from "@/api/pos";
+import type { RevealReason } from "@/api/pos";
 import { get } from "@/api/client";
 import { paymentMethodsApi } from "@/api/setup";
 import type {
@@ -40,10 +41,13 @@ import type {
     PosSale,
     PosShippingMethod,
     PosSuggestion,
+    CashRegister,
 } from "@/api/pos";
+import { Link } from "react-router-dom";
 import type { SplitPayment as ModalSplitPayment, ConfiguredMethod } from "./components/PaymentModal";
 import { useToastStore } from "@/store/toast.store";
 import { useAuthStore } from "@/store/auth.store";
+import { clampCartDiscount, clampDiscount, discountCapHint, useDiscountCap } from "@/lib/discountCap";
 import { Spinner } from "@/components/ui/Spinner";
 import RegisterModal from "./components/RegisterModal";
 import PaymentModal from "./components/PaymentModal";
@@ -248,6 +252,8 @@ interface CartDraft {
     cartDiscVal:          number;
     attachedCustomer:     AttachedCustomer | null;
     customerCountryCode:  string;
+    orderNote?:           string;
+    pendingOrderNote?:    string;
     shippingAmount:       number;
     selectedShippingId:   number | null;
     shippingAddress:      string;
@@ -586,14 +592,61 @@ aria-label="Close">
 // CustomerSearchPanel - typeahead to attach a known customer to the order
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Phase 4A: a cashier is served the attached customer's phone MASKED
+ * (07••••1853). When the sale exists on the server (held, resumed, part-paid)
+ * she can reveal it for that sale, with a reason — audited, 20 an hour. Before
+ * the sale is saved there is no sale to tie the reveal to, and the till does
+ * not need the number: M-Pesa prompts go to the phone on file server-side.
+ */
+function RevealPhone({ customerId, saleId }: { customerId: number; saleId: number | null }) {
+    const toast = useToastStore();
+    const [reason, setReason] = useState<RevealReason>("payment_follow_up");
+    const [value, setValue] = useState<string | null>(null);
+    const [asking, setAsking] = useState(false);
+    const reveal = useMutation({
+        mutationFn: () => posApi.revealCustomerContact(customerId, {
+            field: "phone", reason, context: { type: "order", id: saleId! },
+        }),
+        onSuccess: (res) => { setValue(typeof res.value === "string" ? res.value : null); setAsking(false); },
+        onError: (e: { message?: string }) => toast.error(e?.message ?? "Could not reveal the number."),
+    });
+
+    if (value) {
+        return <span className="text-2xs font-semibold text-brand-700 select-all">{value}</span>;
+    }
+    if (!saleId) {
+        return <span className="text-2xs text-surface-400" title="Save or hold the sale to reveal the number for it">(masked)</span>;
+    }
+    if (!asking) {
+        return (
+            <button type="button" onClick={() => setAsking(true)}
+                className="text-2xs text-brand-600 hover:underline font-medium">Show</button>
+        );
+    }
+    return (
+        <span className="inline-flex items-center gap-1">
+            <select value={reason} onChange={(e) => setReason(e.target.value as RevealReason)}
+                aria-label="Reason for revealing the number" className="text-2xs border border-surface-200 rounded px-1 py-0.5">
+                {REVEAL_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </select>
+            <button type="button" onClick={() => reveal.mutate()} disabled={reveal.isPending}
+                className="text-2xs text-brand-600 hover:underline font-medium">Reveal</button>
+        </span>
+    );
+}
+
 function CustomerSearchPanel({
     attached,
     onAttach,
     onClear,
+    saleId = null,
 }: {
     attached: AttachedCustomer | null;
     onAttach: (c: AttachedCustomer) => void;
     onClear: () => void;
+    /** The open sale on the server, if any — the reveal is tied to it. */
+    saleId?: number | null;
 }) {
     const [q, setQ] = useState("");
     const [open, setOpen] = useState(false);
@@ -611,7 +664,8 @@ function CustomerSearchPanel({
     const { data, isFetching } = useQuery({
         queryKey: ["pos-customer-search", q],
         queryFn: () => posApi.searchCustomers(q),
-        enabled: q.trim().length >= 2,
+        // The server refuses fewer than 3 characters (anti-scraping, Phase 4A).
+        enabled: q.trim().length >= 3,
         staleTime: 10_000,
     });
 
@@ -622,7 +676,7 @@ function CustomerSearchPanel({
         setQ(val);
         clearTimeout(searchTimer.current);
         searchTimer.current = setTimeout(() => {
-            if (val.trim().length >= 2) setOpen(true);
+            if (val.trim().length >= 3) setOpen(true);
         }, 250);
     };
 
@@ -655,8 +709,11 @@ function CustomerSearchPanel({
                             <span className="shrink-0 text-2xs bg-brand-100 text-brand-700 font-bold px-1.5 py-0.5 rounded-md">New</span>
                         )}
                     </div>
-                    <p className="text-2xs text-brand-500 truncate">
-                        {attached.phone ?? attached.email ?? "Walk-in"}
+                    <p className="text-2xs text-brand-500 truncate flex items-center gap-1.5">
+                        <span className="truncate">{attached.phone ?? attached.email ?? "Walk-in"}</span>
+                        {attached.id > 0 && attached.phone?.includes("•") && (
+                            <RevealPhone customerId={attached.id} saleId={saleId} />
+                        )}
                     </p>
                 </div>
                 <button onClick={onClear} className="text-brand-400 hover:text-danger transition-colors shrink-0"
@@ -673,7 +730,11 @@ aria-label="Close" title="Remove customer">
         const nameParts = manualName.trim().split(" ");
         const firstName = nameParts[0] ?? "";
         const lastName  = nameParts.slice(1).join(" ");
-        const canSave   = firstName.trim().length > 0 && manualPhone.trim().length > 0;
+        // Letters mean a note, not a number — say so here, before checkout. The
+        // server (App\Rules\CustomerPhone) is the authority on everything else.
+        const phoneIsNote = /[A-Za-z]/.test(manualPhone);
+        const phoneDigits = manualPhone.replace(/\D/g, "").length;
+        const canSave   = firstName.trim().length > 0 && manualPhone.trim().length > 0 && !phoneIsNote;
         return (
             <div className="space-y-2 px-3 py-2.5 border border-brand-200 rounded-xl bg-brand-50/60">
                 <div className="flex items-center justify-between">
@@ -694,9 +755,15 @@ aria-label="Close" title="Remove customer">
                         onChange={e => setManualName(`${firstName} ${e.target.value}`.trim())}
                         className="input text-xs py-1.5" />
                 </div>
-                <input type="tel" placeholder="Phone number *"
+                <input type="tel" placeholder="Phone number * (0722 123 456 or +256 …)"
                     value={manualPhone} onChange={e => setManualPhone(e.target.value)}
-                    className="input text-xs py-1.5 w-full" />
+                    aria-invalid={phoneIsNote}
+                    className={clsx("input text-xs py-1.5 w-full", phoneIsNote && "border-danger focus:ring-danger/20")} />
+                {phoneIsNote ? (
+                    <p className="text-2xs text-danger">That looks like a note, not a phone number. Put it in the order note, and enter the customer&apos;s phone here.</p>
+                ) : manualPhone.trim() !== "" && phoneDigits < 9 ? (
+                    <p className="text-2xs text-surface-500">Enter the full number — with + and the country code if it isn&apos;t Kenyan.</p>
+                ) : null}
                 <input type="email" placeholder="Email address (optional)"
                     value={manualEmail} onChange={e => setManualEmail(e.target.value)}
                     className="input text-xs py-1.5 w-full" />
@@ -802,7 +869,7 @@ aria-label="Close" title="Remove customer">
                 <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white border border-surface-200 rounded-xl shadow-xl overflow-hidden">
                     {hits.length === 0 &&
                     !isFetching &&
-                    q.trim().length >= 2 ? (
+                    q.trim().length >= 3 ? (
                         <div className="px-4 py-3 text-xs text-surface-500 flex items-center justify-between">
                             <span>No customer found for "{q}"</span>
                             <button
@@ -1249,6 +1316,8 @@ function CartRow({
     onPriceOverride: (i: number, price: number) => void;
     currency?: string;
 }) {
+    // The owner's 5% maximum (null for the super_admin); the server enforces it.
+    const discountCap = useDiscountCap();
     const [showDisc, setShowDisc] = useState(false);
     const [showPriceEdit, setShowPriceEdit] = useState(false);
     const [priceInput, setPriceInput] = useState<string>("");
@@ -1478,10 +1547,14 @@ function CartRow({
                     {item.discount_type !== "none" && (
                         <input
                             type="number" min={0}
+                            max={item.discount_type === "percent" && discountCap !== null ? discountCap : undefined}
                             value={item.discount_value}
                             onChange={(e) => onDiscount(index, item.discount_type, parseFloat(e.target.value) || 0)}
                             className="w-16 text-2xs border border-surface-200 rounded px-2 py-1 focus:outline-none focus:border-brand-400"
                         />
+                    )}
+                    {item.discount_type !== "none" && discountCap !== null && (
+                        <span className="text-2xs text-surface-400" title="Larger discounts are set by the owner.">{discountCapHint(discountCap)}</span>
                     )}
                     <button onClick={() => { onDiscount(index, "none", 0); setShowDisc(false); }} className="text-2xs text-danger ml-auto">Clear</button>
                 </div>
@@ -1533,11 +1606,14 @@ function RegisterGate({
     selectedOutletId,
     onSelectOutlet,
     onOpenRegister,
+    lastRegister,
 }: {
     outlets: PosOutlet[];
     selectedOutletId: number | null;
     onSelectOutlet: (id: number) => void;
     onOpenRegister: () => void;
+    /** Her most recent till here, to say where it stands (Phase 4B). */
+    lastRegister?: CashRegister | null;
 }) {
     const selected = outlets.find((o) => o.id === selectedOutletId);
 
@@ -1587,6 +1663,14 @@ function RegisterGate({
                         : `Open the register at ${selected?.name ?? "this outlet"} to start.`}
                 </p>
             </div>
+
+            {/* Where her last till stands. Blind: no figures, only the stage. */}
+            {lastRegister?.stage === "awaiting_verification" && (
+                <div className="w-full rounded-xl border border-info/40 bg-info-light px-4 py-3 text-xs text-surface-700">
+                    Your last till was counted and is awaiting your outlet manager's verification.{" "}
+                    <Link to="/pos/tills" className="font-semibold text-brand-600 hover:underline">View my tills</Link>
+                </div>
+            )}
 
             {/* Outlet cards */}
             {outlets.length > 1 && (
@@ -1820,6 +1904,8 @@ export default function PosPage() {
     const [cart, setCart] = useState<ExtCartItem[]>(_draft?.cart ?? []);
     const [cartDiscType, setCartDiscType] = useState<"none" | "flat" | "percent">(_draft?.cartDiscType ?? "none");
     const [cartDiscVal, setCartDiscVal] = useState(_draft?.cartDiscVal ?? 0);
+    // The owner's 5% maximum on any discount given here; null for the super_admin.
+    const discountCap = useDiscountCap();
     // ── Checkout config: tax settings + app_country ─────────────────────────────
     // Uses the POS-scoped /pos/checkout-config endpoint (pos.access
     // permission), NOT settingsApi.get() -> /v1/admin/settings, which
@@ -1868,6 +1954,14 @@ export default function PosPage() {
     // Customer country code - drives currency for international POS orders.
     // Declared here (before earlyCountryObj) to avoid temporal dead zone.
     const [customerCountryCode, setCustomerCountryCode] = useState<string>(_draft?.customerCountryCode ?? "");
+    // The order's own note — the place for "referred by I&M", measurements, how
+    // they paid. Without it the phone box was the only free-text field on a sale.
+    const [orderNote, setOrderNote] = useState<string>(_draft?.orderNote ?? "");
+    // The note the pending order was last saved with. A note edited after the
+    // order exists updates that order IN PLACE — the item signature stays
+    // items-only, so a note never voids an order or mints a new number.
+    const [pendingOrderNote, setPendingOrderNote] = useState<string>(_draft?.pendingOrderNote ?? "");
+    const noteChanged = orderNote.trim() !== pendingOrderNote;
 
     // ── Early currency derivation for product queries ─────────────────────────
     // Needed before selectedOutlet is declared so it can go into React Query keys.
@@ -2062,6 +2156,7 @@ export default function PosPage() {
         setPendingOrderId(incomingId);
         setPendingOrderData(openPendingData);
         setPendingOrderCartSig(cartSignature(cart));
+        setPendingOrderNote(((openPendingData as any).notes ?? "").trim());
         toast.info(`Resuming order ${openPendingData.order_number} — press Charge to continue.`);
     }, [openPendingData]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2217,10 +2312,12 @@ export default function PosPage() {
         (i: number, t: "none" | "flat" | "percent", v: number) =>
             setCart((p) => {
                 const u = [...p];
-                u[i] = { ...u[i], discount_type: t, discount_value: v };
+                // Stops at the owner's 5% of the line (no ceiling for the super_admin).
+                const value = clampDiscount(t, v, u[i].price * u[i].quantity, discountCap);
+                u[i] = { ...u[i], discount_type: t, discount_value: value };
                 return u;
             }),
-        [],
+        [discountCap],
     );
 
     const updatePriceOverride = useCallback(
@@ -2304,6 +2401,8 @@ export default function PosPage() {
             cartDiscVal,
             attachedCustomer,
             customerCountryCode,
+            orderNote,
+            pendingOrderNote,
             shippingAmount,
             selectedShippingId,
             shippingAddress,
@@ -2313,7 +2412,7 @@ export default function PosPage() {
             isResumedOrder,
         });
     }, [ // eslint-disable-line react-hooks/exhaustive-deps
-        cart, cartDiscType, cartDiscVal, attachedCustomer, customerCountryCode,
+        cart, cartDiscType, cartDiscVal, attachedCustomer, customerCountryCode, orderNote, pendingOrderNote,
         shippingAmount, selectedShippingId, shippingAddress,
         pendingOrderId, pendingOrderData, pendingOrderCartSig, isResumedOrder,
         selectedOutletId,
@@ -2345,6 +2444,8 @@ export default function PosPage() {
         setShowShippingPanel(false);
         setAttachedCustomer(null);
         setCustomerCountryCode("");
+        setOrderNote("");
+        setPendingOrderNote("");
         setMobilePanel("products");
         setRaisedProdOrders([]);
         setPendingOrderId(null);
@@ -2485,6 +2586,9 @@ export default function PosPage() {
         [selectedOutletId, currencyForQuery, handleProductClick, addingSuggestion],
     );
 
+    // The order's gross before any discount — the owner's 5% is of this, for
+    // the line discounts and the order discount together.
+    const cartGross = useMemo(() => cart.reduce((s, i) => s + i.price * i.quantity, 0), [cart]);
     const totals = useMemo(
         () => calcTotals(cart, cartDiscType, cartDiscVal, shippingFeeFromMethod || shippingAmount, taxInclusive),
         [cart, cartDiscType, cartDiscVal, shippingFeeFromMethod, shippingAmount, taxInclusive],
@@ -2571,6 +2675,7 @@ export default function PosPage() {
             ...(attachedCustomer?.id === -1 && attachedCustomer.new_customer_data ? { new_customer: attachedCustomer.new_customer_data } : {}),
             // Country drives currency resolution on the backend
             ...(customerCountryCode ? { customer_country_code: customerCountryCode } : {}),
+            ...(orderNote.trim() ? { notes: orderNote.trim() } : {}),
             // MTO items must NOT appear in items[] — the backend stock check
             // would reject them immediately (they have zero stock by definition).
             // They are represented solely via production_items[]; the backend
@@ -2589,7 +2694,7 @@ export default function PosPage() {
             ...(selectedShippingId ? { shipping_method_id: selectedShippingId } : {}),
             ...(productionItems.length > 0 ? { production_items: productionItems } : {}),
         };
-    }, [cart, selectedOutletId, attachedCustomer, customerCountryCode, cartDiscType, cartDiscVal, shippingAmount, shippingFeeFromMethod, selectedShippingId]);
+    }, [cart, selectedOutletId, attachedCustomer, customerCountryCode, orderNote, cartDiscType, cartDiscVal, shippingAmount, shippingFeeFromMethod, selectedShippingId]);
 
     // Step 1 mutation - create pending order
     const pendingOrderMutation = useMutation({
@@ -2597,6 +2702,7 @@ export default function PosPage() {
         onSuccess: (res) => {
             setPendingOrderId(res.order_id);
             setPendingOrderData(res);
+            setPendingOrderNote(orderNote.trim());
             setIsResumedOrder(false);
             // Snapshot the cart fingerprint at order-creation time.
             // The mismatch warning compares against this - not against server totals -
@@ -2622,6 +2728,7 @@ export default function PosPage() {
         onSuccess: (res) => {
             setPendingOrderData(res);
             setPendingOrderCartSig(cartSignature(cart));
+            setPendingOrderNote(orderNote.trim());
             // Keep isResumedOrder true - still a resumed order
         },
         onError: (err: { message: string }) => {
@@ -2648,7 +2755,7 @@ export default function PosPage() {
         // If there's already a pending order with no cart changes, just clear
         // locally — no need to create a duplicate.
         if (pendingOrderId && pendingOrderCartSig !== "" &&
-            cartSignature(cart) === pendingOrderCartSig) {
+            cartSignature(cart) === pendingOrderCartSig && !noteChanged) {
             const orderNum = pendingOrderData?.order_number ?? pendingOrderData?.order?.order_number ?? "";
             toast.success(`Order ${orderNum} is already saved — find it in Sales History.`);
             // Dismiss so auto-resume never re-attaches this order on return
@@ -2656,9 +2763,11 @@ export default function PosPage() {
             clearCart();
             return;
         }
-        // If this is a resumed order (restored from history), UPDATE it in place
-        // rather than creating a duplicate pending order.
-        if (isResumedOrder && pendingOrderId) {
+        // If this is a resumed order (restored from history) — or only its note
+        // changed — UPDATE it in place rather than creating a duplicate.
+        const onlyNoteChanged = !!pendingOrderId && pendingOrderCartSig !== ""
+            && cartSignature(cart) === pendingOrderCartSig && noteChanged;
+        if ((isResumedOrder || onlyNoteChanged) && pendingOrderId) {
             const idToSave = pendingOrderId;
             updateOrderMutation.mutate(
                 { id: idToSave, payload: buildCartPayload() },
@@ -2693,7 +2802,7 @@ export default function PosPage() {
             },
         });
     }, [selectedOutletId, cart, pendingOrderId, pendingOrderCartSig, pendingOrderData,
-        isResumedOrder, buildCartPayload, saveOrderMutation, updateOrderMutation, clearCart, qc, toast]);
+        isResumedOrder, noteChanged, buildCartPayload, saveOrderMutation, updateOrderMutation, clearCart, qc, toast]);
 
     // Step 2 mutation - record payment against existing order
     const payMutation = useMutation({
@@ -2833,7 +2942,15 @@ export default function PosPage() {
         const cartChanged = sigChanged || totalsMismatch;
 
         // Case B — the attached order already matches the cart: pay it as-is.
+        // If only the note changed, save it onto the same order first.
         if (pendingOrderId && !cartChanged) {
+            if (noteChanged) {
+                updateOrderMutation.mutate(
+                    { id: pendingOrderId, payload: buildCartPayload() },
+                    { onSuccess: () => setShowPaymentModal(true) },
+                );
+                return;
+            }
             setShowPaymentModal(true);
             return;
         }
@@ -2866,7 +2983,7 @@ export default function PosPage() {
             onSuccess: () => setShowPaymentModal(true),
         });
     }, [selectedOutletId, cart, pendingOrderId, pendingOrderData, pendingOrderCartSig,
-        isResumedOrder, totals.total, buildCartPayload, pendingOrderMutation, updateOrderMutation]);
+        isResumedOrder, noteChanged, totals.total, buildCartPayload, pendingOrderMutation, updateOrderMutation]);
 
     const selectedOutlet = outlets.find((o) => o.id === selectedOutletId);
     // ── Effective currency / international flag ────────────────────────────────
@@ -2913,6 +3030,7 @@ export default function PosPage() {
                         clearCart();
                     }}
                     onOpenRegister={() => setShowRegisterModal(true)}
+                    lastRegister={register}
                 />
                 {showRegisterModal && (
                     <RegisterModal
@@ -3316,6 +3434,19 @@ export default function PosPage() {
                                 attached={attachedCustomer}
                                 onAttach={setAttachedCustomer}
                                 onClear={() => setAttachedCustomer(null)}
+                                saleId={pendingOrderId}
+                            />
+                        </div>
+                        {/* Order note — notes belong here, never in the phone */}
+                        <div className="px-3 pb-2">
+                            <textarea
+                                value={orderNote}
+                                onChange={e => setOrderNote(e.target.value)}
+                                rows={orderNote ? 2 : 1}
+                                maxLength={1000}
+                                placeholder="Order note — referred by, measurements, how they're paying…"
+                                aria-label="Order note"
+                                className="input text-xs py-1.5 w-full resize-none"
                             />
                         </div>
                         {/* Country picker - for international POS orders */}
@@ -3417,7 +3548,11 @@ export default function PosPage() {
                                     <span className="text-2xs text-surface-400 flex-1">Order discount</span>
                                     <select
                                         value={cartDiscType}
-                                        onChange={(e) => setCartDiscType(e.target.value as "none"|"flat"|"percent")}
+                                        onChange={(e) => {
+                                            const t = e.target.value as "none"|"flat"|"percent";
+                                            setCartDiscType(t);
+                                            setCartDiscVal((v) => clampCartDiscount(t, v, totals.subtotal, cartGross, cartGross - totals.subtotal, discountCap));
+                                        }}
                                         className="text-2xs border border-surface-200 rounded px-1.5 py-0.5 bg-white focus:outline-none focus:border-brand-400"
                                     >
                                         <option value="none">None</option>
@@ -3427,10 +3562,14 @@ export default function PosPage() {
                                     {cartDiscType !== "none" && (
                                         <input
                                             type="number" min={0}
+                                            max={cartDiscType === "percent" && discountCap !== null ? discountCap : undefined}
                                             value={cartDiscVal}
-                                            onChange={(e) => setCartDiscVal(parseFloat(e.target.value) || 0)}
+                                            onChange={(e) => setCartDiscVal(clampCartDiscount(cartDiscType, parseFloat(e.target.value) || 0, totals.subtotal, cartGross, cartGross - totals.subtotal, discountCap))}
                                             className="w-16 text-2xs border border-surface-200 rounded px-1.5 py-0.5 focus:outline-none focus:border-brand-400"
                                         />
+                                    )}
+                                    {cartDiscType !== "none" && discountCap !== null && (
+                                        <span className="text-2xs text-surface-400" title="Larger discounts are set by the owner.">{discountCapHint(discountCap)}</span>
                                     )}
                                 </div>
 
@@ -3802,6 +3941,10 @@ export default function PosPage() {
                         } else {
                             setAttachedCustomer(null);
                         }
+
+                        // ── 4b. Restore the order's note, so saving again keeps it ─────
+                        setOrderNote(sale.notes ?? "");
+                        setPendingOrderNote((sale.notes ?? "").trim());
 
                         // ── 5. Mark as resumed and reattach the order ─────────────────
                         setIsResumedOrder(true);

@@ -76,7 +76,7 @@ class AttachRatesTest extends TestCase
     {
         $user = User::factory()->create();
         $user->assignRole(Role::findOrCreate('admin', 'sanctum'));
-        $user->givePermissionTo(Permission::findOrCreate('reports.view', 'sanctum'));
+        \Tests\ReportAccess::grantPages($user);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 
@@ -253,11 +253,17 @@ class AttachRatesTest extends TestCase
         $this->assertSame(15, $global['summary']['total_baskets']);
         $this->assertNotEmpty($global['anchors']);
 
-        // …while an engine scoped to the outlet with zero orders must compute
+        // …while an engine narrowed to the outlet with zero orders must compute
         // its own empty result, not inherit the warm global cache entry.
+        //
+        // The narrowing is now an explicit outlet_id rather than the caller's
+        // assignment: reports went business-wide on 2026-09-30 (see
+        // MetricEngine::for), which does not change what this test is about —
+        // that one engine's cached answer can never be served to an engine
+        // looking at a different set of outlets.
         $scopedUser = User::factory()->create();
         $scopedUser->outlets()->attach($outletId);
-        $scoped = MetricEngine::for($scopedUser)->attachRates();
+        $scoped = MetricEngine::for($scopedUser, $outletId)->attachRates();
         $this->assertSame(0, $scoped['summary']['total_baskets']);
         $this->assertSame([], $scoped['anchors']);
 

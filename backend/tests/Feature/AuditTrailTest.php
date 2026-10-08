@@ -14,6 +14,7 @@ use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
+use Tests\Concerns\StepsUp;
 use Tests\TestCase;
 
 /**
@@ -26,7 +27,7 @@ use Tests\TestCase;
  */
 class AuditTrailTest extends TestCase
 {
-    use RefreshDatabase;
+    use RefreshDatabase, StepsUp;
 
     private function superAdmin(): User
     {
@@ -389,6 +390,7 @@ class AuditTrailTest extends TestCase
     {
         $admin = $this->superAdmin();
         Sanctum::actingAs($admin);
+        $this->stepUp($admin);   // settings edits are a step-up route (Phase 4C)
         DB::table('settings')->updateOrInsert(['key' => 'maintenance_mode'], ['value' => '0']);
 
         $this->putJson('/api/v1/admin/settings', ['maintenance_mode' => true])->assertSuccessful();

@@ -36,6 +36,20 @@ class AppServiceProvider extends ServiceProvider
             $catalogModel::observe(\App\Observers\CatalogObserver::class);
         }
 
+        // A queue job has no route: mark the audit channel 'job' for its
+        // duration (a sync-queue job inside a request restores the request's).
+        $jobChannel = [];
+        \Illuminate\Support\Facades\Event::listen(\Illuminate\Queue\Events\JobProcessing::class, function () use (&$jobChannel) {
+            $ctx = app(\App\Support\Audit\AuditContext::class);
+            $jobChannel[] = $ctx->channel();
+            $ctx->setChannel('job');
+        });
+        $restore = function () use (&$jobChannel) {
+            app(\App\Support\Audit\AuditContext::class)->setChannel($jobChannel === [] ? null : array_pop($jobChannel));
+        };
+        \Illuminate\Support\Facades\Event::listen(\Illuminate\Queue\Events\JobProcessed::class, $restore);
+        \Illuminate\Support\Facades\Event::listen(\Illuminate\Queue\Events\JobExceptionOccurred::class, $restore);
+
         // The audit trail: before-and-after of every write to a business
         // record, whichever controller, job or webhook made it (config/audit.php).
         foreach ((array) config('audit.observed_models', []) as $audited) {

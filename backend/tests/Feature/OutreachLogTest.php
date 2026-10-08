@@ -37,7 +37,15 @@ class OutreachLogTest extends TestCase
     {
         $user = User::factory()->create(['first_name' => 'Amani', 'last_name' => 'Clerk']);
         $user->assignRole(Role::findOrCreate('admin', 'sanctum'));
-        $user->givePermissionTo(Permission::findOrCreate('reports.view', 'sanctum'));
+        \Tests\ReportAccess::grantPages($user);
+        // Cycle 9: customer contacts need customers.view, recording outreach
+        // needs customers.insights, stock at cost needs reports.financial.
+        // This user works the feature under test, so holds what it needs.
+        $user->givePermissionTo(Permission::findOrCreate('customers.view', 'sanctum'));
+        $user->givePermissionTo(Permission::findOrCreate('customers.insights', 'sanctum'));
+        // Taking a FILE needs reports.export as well as reports.view — the
+        // ?export= door used to bypass it (#384).
+        $user->givePermissionTo(Permission::findOrCreate('reports.export', 'sanctum'));
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 

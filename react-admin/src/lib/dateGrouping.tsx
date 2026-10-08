@@ -119,7 +119,7 @@ export function DateGroupHeaderRow({
         <tr className="bg-surface-50/80">
             <td
                 colSpan={colSpan}
-                className="px-4 py-2 text-2xs font-semibold text-surface-400 uppercase tracking-wide sticky left-0"
+                className="px-4 py-2 text-2xs font-semibold text-surface-500 uppercase tracking-wide sticky left-0"
             >
                 {label}
                 {typeof count === "number" && (

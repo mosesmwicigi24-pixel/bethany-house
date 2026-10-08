@@ -1,9 +1,9 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { clsx } from "clsx";
 import { customersApi } from "@/api/customers";
-import { currenciesApi, languagesApi } from "@/api/setup";
+import { get } from "@/api/client";
 import type {
     Customer,
     CustomerFormData,
@@ -11,6 +11,7 @@ import type {
 } from "@/api/customers";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useCustomerSearchTerm } from "@/hooks/useCustomerSearchTerm";
 import { Spinner } from "@/components/ui/Spinner";
 import { Modal } from "@/components/ui/Modal";
 import { Field, useFieldAriaProps, FieldInput, FieldSelect, FieldTextarea } from "@/components/setup/FormComponents";
@@ -82,14 +83,17 @@ function CustomerFormModal({
     const isEdit = !!customer;
 
     // ── Load languages + currencies from DB ───────────────────────────────────
+    // The public, active-only lists (the storefront's). The Setup management
+    // endpoints need settings.view, which the people adding customers — outlet
+    // managers — do not hold.
     const { data: langsData } = useQuery({
-        queryKey: ["languages-list"],
-        queryFn: () => languagesApi.list(),
+        queryKey: ["public-languages"],
+        queryFn: () => get<{ data: any[] }>("/v1/settings/languages"),
         staleTime: 5 * 60 * 1000,
     });
     const { data: cxData } = useQuery({
-        queryKey: ["currencies-list"],
-        queryFn: () => currenciesApi.list(),
+        queryKey: ["public-currencies"],
+        queryFn: () => get<{ data: any[] }>("/v1/settings/currencies"),
         staleTime: 5 * 60 * 1000,
     });
     const languages = langsData?.data ?? [];
@@ -354,6 +358,17 @@ export default function CustomersPage() {
         [setPage],
     );
 
+    // Phase 4A: the search box sends nothing under 3 real characters and
+    // waits for typing to settle (the server allows 30 searches a minute).
+    const [searchInput, setSearchInput] = useState("");
+    const searchTerm = useCustomerSearchTerm(searchInput);
+    useEffect(() => {
+        setFilters((prev) =>
+            (prev.search ?? "") === searchTerm ? prev : { ...prev, search: searchTerm || undefined },
+        );
+        setPage(1);
+    }, [searchTerm]);
+
     const { data, isLoading, isFetching } = useQuery({
         queryKey: ["customers", filters, page],
         queryFn: () => customersApi.list({ ...filters, page }),
@@ -482,8 +497,8 @@ export default function CustomersPage() {
                 <input
                     className="input input-sm w-56"
                     placeholder="Search name, email, phone…"
-                    value={filters.search ?? ""}
-                    onChange={(e) => updateFilter("search", e.target.value)}
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
                 />
                 <select
                     className="input input-sm w-32"

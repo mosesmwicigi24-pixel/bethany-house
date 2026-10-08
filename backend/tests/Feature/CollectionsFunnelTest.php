@@ -35,7 +35,7 @@ class CollectionsFunnelTest extends TestCase
     {
         $user = User::factory()->create();
         $user->assignRole(Role::findOrCreate('admin', 'sanctum'));
-        $user->givePermissionTo(Permission::findOrCreate('reports.view', 'sanctum'));
+        \Tests\ReportAccess::grantPages($user);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 

@@ -36,7 +36,7 @@ export function MaterialShortageAlert({ productId, quantity }: Props) {
     const shortages = data?.shortages ?? [];
 
     if (isLoading) return (
-        <div className="flex items-center gap-2 text-xs text-surface-400 py-1">
+        <div className="flex items-center gap-2 text-xs text-surface-500 py-1">
             <div className="w-3 h-3 border border-surface-300 border-t-brand-500 rounded-full animate-spin"/>
             Checking material availability…
         </div>

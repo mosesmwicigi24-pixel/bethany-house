@@ -1,6 +1,6 @@
 // src/pages/reports/InventoryReportPage.tsx
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { reportsApi } from "@/api/reports";
 import { fmtKes } from "@/api/expenses";
@@ -10,9 +10,6 @@ import dayjs from "dayjs";
 import {
     BarChart,
     Bar,
-    PieChart,
-    Pie,
-    Cell,
     LineChart,
     Line,
     XAxis,
@@ -25,6 +22,9 @@ import {
 import {
     KPI_GRID,
     KpiCard,
+    tablistKeys,
+    ShareBars,
+    EmptyNote,
     ReportPdfButton,
     SectionHeader,
     TableWrapper,
@@ -39,6 +39,8 @@ import {
     CHART_COLORS,
     TH,
     TH_R,
+    useReportOutlet,
+    useReportTab,
 } from "./reportShared";
 
 // Movement type classification
@@ -51,34 +53,28 @@ const OUT_TYPES = new Set([
     "return_to_supplier",
 ]);
 
-const INVENTORY_TABS = ["overview", "stock", "movements", "intelligence"] as const;
+const INVENTORY_TABS = ["overview", "stock", "aging", "movements", "intelligence"] as const;
 type InventoryTab = (typeof INVENTORY_TABS)[number];
 
 export default function InventoryReportPage() {
     const dr = useDateRange("this_month");
     const [lowOnly, setLowOnly] = useState(false);
-    // Honour deep-links like /reports/inventory?tab=intelligence (the
-    // attention feed sends users here) — read once on mount, same pattern as
-    // CustomersReportPage; after that the tab buttons own the state.
-    const [searchParams] = useSearchParams();
-    const [activeTab, setActiveTab] = useState<InventoryTab>(() => {
-        const t = searchParams.get("tab");
-        return INVENTORY_TABS.includes(t as InventoryTab)
-            ? (t as InventoryTab)
-            : "overview";
-    });
+    // The tab lives in the URL (?tab=), so deep links from the attention feed,
+    // refreshes and shared links all land on it.
+    const [activeTab, setActiveTab] = useReportTab<InventoryTab>(INVENTORY_TABS, "overview");
     const [movTypeFilter, setMovTypeFilter] = useState("");
 
+    const outletId = useReportOutlet();
     const stockQuery = useQuery({
-        queryKey: ["report-stock", lowOnly],
-        queryFn: () => reportsApi.stockOnHand({ low_stock_only: lowOnly }),
+        queryKey: ["outlet", outletId, "report-stock", lowOnly],
+        queryFn: () => reportsApi.stockOnHand({ low_stock_only: lowOnly, ...(outletId ? { outlet_id: outletId } : {}) }),
     });
     const valuationQuery = useQuery({
-        queryKey: ["report-valuation"],
-        queryFn: () => reportsApi.inventoryValuationBreakdown(),
+        queryKey: ["outlet", outletId, "report-valuation"],
+        queryFn: () => reportsApi.inventoryValuationBreakdown(outletId),
     });
     const movementQuery = useQuery({
-        queryKey: ["report-movement", dr.start, dr.end],
+        queryKey: ["report-movement", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.inventoryMovement(dr.params),
         enabled: !!dr.start && !!dr.end,
     });
@@ -201,7 +197,7 @@ export default function InventoryReportPage() {
     return (
         <div className="space-y-6 animate-fade-in">
             <ReportPageHeader
-                title="Inventory Report"
+                title="Inventory"
                 subtitle="Stock health, outlet distribution, low-stock alerts, and movement history."
                 reportType="inventory"
                 exportPath="inventory/stock-on-hand"
@@ -212,23 +208,25 @@ export default function InventoryReportPage() {
                 onPresetChange={dr.handlePreset}
                 onStartChange={dr.setStart}
                 onEndChange={dr.setEnd}
+                outlet={dr.outlet}
+                onOutletChange={dr.setOutlet}
             />
 
             {/* KPIs */}
             <div className={KPI_GRID}>
                 <KpiCard label="Total SKUs" value={t.total_items ?? 0} />
                 <KpiCard
-                    label="In Stock"
+                    label="In stock"
                     value={inStockCount}
                     color="text-success"
                 />
                 <KpiCard
-                    label="Low Stock"
+                    label="Low stock"
                     value={t.low_stock_count ?? 0}
                     color="text-warning"
                 />
                 <KpiCard
-                    label="Out of Stock"
+                    label="Out of stock"
                     value={t.out_of_stock_count ?? 0}
                     color="text-danger"
                 />
@@ -236,12 +234,12 @@ export default function InventoryReportPage() {
 
             {/* Tabs */}
             <div className="border-b border-line overflow-x-auto no-scrollbar">
-                <nav className="flex gap-1 -mb-px">
-                    {(["overview", "stock", "movements", "intelligence"] as const).map(
+                <nav className="flex gap-1 -mb-px" role="tablist" aria-label="Report sections" onKeyDown={tablistKeys}>
+                    {INVENTORY_TABS.map(
                         (tab) => (
                             <button
                                 key={tab}
-                                onClick={() => setActiveTab(tab)}
+                                onClick={() => setActiveTab(tab)} role="tab" aria-selected={activeTab === tab}
                                 className={clsx(
                                     "px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap shrink-0 transition-colors capitalize",
                                     activeTab === tab
@@ -256,6 +254,8 @@ export default function InventoryReportPage() {
                 </nav>
             </div>
 
+            {activeTab === "aging" && <StockAgingTab outlet={dr.outlet} />}
+
             {/* ── OVERVIEW TAB ── */}
             {activeTab === "intelligence" && (
                 <InventoryIntelligence start={dr.start} end={dr.end} />
@@ -263,32 +263,16 @@ export default function InventoryReportPage() {
 
             {activeTab === "overview" && (
                 <div className="space-y-6">
+                    {stockQuery.data && !(Number(t.total_items) > 0) && (
+                        <EmptyNote title={dr.outlet ? "No stock recorded at this outlet." : "No stock recorded yet."}
+                            hint="Stock appears here once items are received or counted in." />
+                    )}
                     {/* Health pie + category distribution */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {statusPie.length > 0 && (
                             <div className="card p-5">
-                                <SectionHeader title="Stock Health" />
-                                <ResponsiveContainer width="100%" height={200}>
-                                    <PieChart>
-                                        <Pie
-                                            data={statusPie}
-                                            dataKey="value"
-                                            nameKey="name"
-                                            cx="50%"
-                                            cy="50%"
-                                            outerRadius={75}
-                                            label={({ name, percent }: any) =>
-                                                `${name} ${(percent * 100).toFixed(0)}%`
-                                            }
-                                            labelLine={false}
-                                        >
-                                            {statusPie.map((d, i) => (
-                                                <Cell key={i} fill={d.color} />
-                                            ))}
-                                        </Pie>
-                                        <Tooltip />
-                                    </PieChart>
-                                </ResponsiveContainer>
+                                <SectionHeader title="Stock health" />
+                                <ShareBars rows={(statusPie ?? []).map((d: any) => ({ label: String(d.name ?? "—"), value: Number(d.value ?? 0) }))} />
                                 <div className="grid grid-cols-1 gap-3 mt-4 sm:grid-cols-3">
                                     {[
                                         {
@@ -330,7 +314,7 @@ export default function InventoryReportPage() {
 
                         {byCategory.length > 0 && (
                             <div className="card p-5">
-                                <SectionHeader title="Available Units by Category" />
+                                <SectionHeader title="Available units by category" />
                                 <ResponsiveContainer width="100%" height={240}>
                                     <BarChart
                                         data={byCategory}
@@ -367,7 +351,7 @@ export default function InventoryReportPage() {
                     {/* Outlet distribution */}
                     {outletQtyData.length > 0 && (
                         <div className="card p-5">
-                            <SectionHeader title="Stock Distribution by Outlet" />
+                            <SectionHeader title="Stock distribution by outlet" />
                             <ResponsiveContainer width="100%" height={200}>
                                 <BarChart data={outletQtyData}>
                                     <CartesianGrid
@@ -402,7 +386,7 @@ export default function InventoryReportPage() {
                     {urgentItems.length > 0 && (
                         <div className="card overflow-hidden">
                             <div className="px-5 pt-5 pb-4">
-                                <SectionHeader title="🔴 Critical Stock Alerts">
+                                <SectionHeader title="Critical stock alerts">
                                     <ExportCsvButton
                                         path="inventory/stock-on-hand"
                                         params={{ low_stock_only: true }}
@@ -531,7 +515,7 @@ export default function InventoryReportPage() {
                 <div className="space-y-4">
                     <div className="card overflow-hidden">
                         <div className="px-5 pt-5 pb-4">
-                            <SectionHeader title="Stock on Hand">
+                            <SectionHeader title="Stock on hand">
                                 <div className="flex items-center gap-3">
                                     <label className="flex items-center gap-2 text-sm text-surface-600 cursor-pointer select-none">
                                         <input
@@ -716,7 +700,7 @@ export default function InventoryReportPage() {
                         if (byCat.length === 0) return null;
                         return (
                             <div className="card p-5">
-                                <SectionHeader title="Stock Value by Category" />
+                                <SectionHeader title="Stock value by category" />
                                 <ResponsiveContainer width="100%" height={240}>
                                     <BarChart data={byCat.sort((a: any, b: any) => b.value - a.value).slice(0, 12)} layout="vertical">
                                         <CartesianGrid strokeDasharray="3 3" stroke="#f2f3f2" horizontal={false} />
@@ -734,7 +718,7 @@ export default function InventoryReportPage() {
                     {byOutlet.length > 0 && (
                         <div className="card overflow-hidden">
                             <div className="px-5 pt-5 pb-4">
-                                <SectionHeader title="Inventory by Outlet" />
+                                <SectionHeader title="Inventory by outlet" />
                             </div>
                             <TableWrapper>
                                 <table className="w-full">
@@ -788,7 +772,7 @@ export default function InventoryReportPage() {
                     {byType.length > 0 && (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="card p-5">
-                                <SectionHeader title="Movement by Type" />
+                                <SectionHeader title="Movement by type" />
                                 <div className="space-y-3 mt-2">
                                     {byType.map((bt: any, i: number) => {
                                         const maxUnits = Math.max(
@@ -855,7 +839,7 @@ export default function InventoryReportPage() {
 
                             {movTrendData.length > 0 && (
                                 <div className="card p-5">
-                                    <SectionHeader title="Daily Movement Trend" />
+                                    <SectionHeader title="Daily movement trend" />
                                     <ResponsiveContainer
                                         width="100%"
                                         height={200}
@@ -901,7 +885,7 @@ export default function InventoryReportPage() {
                     {/* Transactions table */}
                     <div className="card overflow-hidden">
                         <div className="px-5 pt-5 pb-4">
-                            <SectionHeader title="Movement Log">
+                            <SectionHeader title="Movement log">
                                 <div className="flex items-center gap-2">
                                     <select
                                         className="input w-40 text-sm"
@@ -1028,9 +1012,10 @@ export default function InventoryReportPage() {
 // ABC classes with days-of-cover, stockout risks, dead stock, material health.
 
 function InventoryIntelligence({ start, end }: { start: string; end: string }) {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["inventory-intelligence", start, end],
-        queryFn: () => reportsApi.inventoryIntelligence(start, end),
+        queryKey: ["outlet", outletId, "inventory-intelligence", start, end],
+        queryFn: () => reportsApi.inventoryIntelligence(start, end, outletId),
         enabled: !!start && !!end,
         staleTime: 60_000,
     });
@@ -1041,17 +1026,21 @@ function InventoryIntelligence({ start, end }: { start: string; end: string }) {
     return (
         <div className="space-y-6">
             <div className={KPI_GRID}>
-                <KpiCard label="Stock at Cost" value={fmtKes(health.cost_value)} sub={`${health.units} units · ${health.skus} SKUs`} />
-                <KpiCard label="Stock at Retail" value={fmtKes(health.retail_value)} sub="if everything sold at list" />
-                <KpiCard label="Low / Out" value={`${health.low_stock} / ${health.out_of_stock}`} color={health.out_of_stock > 0 ? "text-danger" : "text-warning"} sub="low stock / out of stock" />
-                <KpiCard label="Material Stock" value={fmtKes(materials.cost_value)} sub={`${materials.materials} materials at unit cost`} />
+                {/* cost_value is null without reports.financial (cycle 9): say so,
+                    rather than printing KES 0 as though the stock were free. */}
+                <KpiCard label="Stock at cost" value={health.cost_value == null ? "—" : fmtKes(health.cost_value)}
+                         sub={health.cost_value == null ? "needs financial access" : `${health.units} units · ${health.skus} SKUs`} />
+                <KpiCard label="Stock at retail" value={fmtKes(health.retail_value)} sub="if everything sold at list" />
+                <KpiCard label="Low / out" value={`${health.low_stock} / ${health.out_of_stock}`} color={health.out_of_stock > 0 ? "text-danger" : "text-warning"} sub="low stock / out of stock" />
+                <KpiCard label="Material stock" value={materials.cost_value == null ? "—" : fmtKes(materials.cost_value)}
+                         sub={materials.cost_value == null ? "needs financial access" : `${materials.materials} materials at unit cost`} />
             </div>
 
             <StockoutLosses />
 
             {stockout_risks.length > 0 && (
                 <div className="card card-body border border-danger-200 bg-danger-50/40">
-                    <SectionHeader title="⚠ Stockout risk — best sellers running dry" />
+                    <SectionHeader title="Stockout risk — best sellers running dry" />
                     <div className="space-y-1.5 mt-1">
                         {stockout_risks.map((r: any) => (
                             <div key={r.product_id} className="flex items-center gap-3 text-xs">
@@ -1183,9 +1172,10 @@ function InventoryIntelligence({ start, end }: { start: string; end: string }) {
 // right now. Trailing-window metric — independent of the page date range.
 
 function StockoutLosses() {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["stockout-loss"],
-        queryFn: () => reportsApi.stockoutLoss(),
+        queryKey: ["outlet", outletId, "stockout-loss"],
+        queryFn: () => reportsApi.stockoutLoss(outletId),
         staleTime: 60_000,
     });
     if (isLoading || !data) return null;
@@ -1199,7 +1189,7 @@ function StockoutLosses() {
             </SectionHeader>
             <div className={clsx(KPI_GRID, "mt-2 mb-4")}>
                 <KpiCard
-                    label="Bleeding now"
+                    label="Lost to empty shelves"
                     value={`${fmtKes(summary.est_daily_loss_now)}/day`}
                     color={summary.est_daily_loss_now > 0 ? "text-danger" : undefined}
                     sub="products out right now, at their usual pace"
@@ -1289,6 +1279,96 @@ function StockoutLosses() {
                     </tbody>
                 </table>
             </TableWrapper>
+        </div>
+    );
+}
+
+// ─── Stock aging ──────────────────────────────────────────────────────────────
+// How long since each stock line last MOVED — a sale, a count, an adjustment,
+// a receipt (MetricEngine::stockAging). Dead stock on Intelligence asks "unsold
+// for 90 days"; this asks "untouched". Cost is a financial figure: without
+// reports.financial the backend sends none, and the page says so.
+function StockAgingTab({ outlet }: { outlet?: string }) {
+    const navigate = useNavigate();
+    const { data, isLoading, isError } = useQuery({
+        queryKey: ["report-stock-aging", outlet],
+        queryFn: () => reportsApi.stockAging(outlet ? { outlet_id: Number(outlet) } : {}),
+    });
+    if (isLoading) return <div className="flex justify-center py-16"><Spinner /></div>;
+    if (isError || !data) return <div className="card card-body text-sm text-danger">Stock aging could not be loaded.</div>;
+
+    const showCost = data.totals.cost_value != null;
+    const maxUnits = Math.max(1, ...data.buckets.map((b) => b.units));
+
+    return (
+        <div className="space-y-6">
+            <div className={KPI_GRID}>
+                <KpiCard label="Stock lines on hand" value={data.totals.lines.toLocaleString()} sub={`${data.totals.units.toLocaleString()} units`} />
+                <KpiCard label="Stock at cost" value={showCost ? fmtKes(data.totals.cost_value!) : "—"}
+                    sub={showCost ? (data.totals.uncosted_lines ? `${data.totals.uncosted_lines} lines have no cost — counted at zero` : "every line costed") : "needs financial access"} />
+                <KpiCard label="Untouched 60+ days" value={data.buckets.filter((b) => ["61_90", "90_plus", "never"].includes(b.key)).reduce((a, b) => a + b.lines, 0).toLocaleString()}
+                    sub="lines no sale, count or adjustment has moved" />
+                <KpiCard label="Turnover (90 days)" value={data.turnover.ratio != null ? `${data.turnover.ratio}×` : "—"}
+                    sub={`${data.turnover.sold_90_days.toLocaleString()} sold ÷ ${data.turnover.on_hand.toLocaleString()} on hand`} />
+            </div>
+
+            <div className="card p-5">
+                <SectionHeader title="Time since stock last moved" />
+                <p className="text-xs text-surface-500 -mt-2 mb-4">{data.turnover.note}</p>
+                <div className="space-y-3">
+                    {data.buckets.map((b) => (
+                        <div key={b.key} className="grid grid-cols-[8rem_1fr_auto] items-center gap-3 text-sm">
+                            <span className="text-surface-600">{b.label}</span>
+                            <div className="h-2 rounded-full bg-surface-100">
+                                <div className={clsx("h-2 rounded-full", b.key === "0_30" ? "bg-success" : b.key === "31_60" ? "bg-warning" : "bg-danger")}
+                                    style={{ width: `${(b.units / maxUnits) * 100}%` }} />
+                            </div>
+                            <span className="tabular-nums text-right text-surface-700 whitespace-nowrap">
+                                {b.lines} lines · {b.units.toLocaleString()} units{showCost && b.cost_value != null ? ` · ${fmtKes(b.cost_value)}` : ""}
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            <div className="card overflow-hidden">
+                <div className="px-5 pt-5 pb-3">
+                    <SectionHeader title="Stock not moved in 30 days" />
+                    <p className="text-xs text-surface-500 -mt-2">{showCost ? "Largest value first." : "Values need financial access."}</p>
+                </div>
+                <TableWrapper>
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr>
+                                <th className={TH}>Product</th>
+                                <th className={TH}>Outlet</th>
+                                <th className={TH_R}>Units</th>
+                                <th className={TH_R}>Last moved</th>
+                                {showCost && <th className={TH_R}>At cost</th>}
+                                <th className={TH_R}></th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-line">
+                            {data.slow_items.length === 0 ? (
+                                <tr><td colSpan={6} className="px-5 py-10 text-center text-xs text-surface-400">Everything on hand moved in the last 30 days.</td></tr>
+                            ) : data.slow_items.map((r) => (
+                                <tr key={`${r.id}-${r.detail}`} className="hover:bg-surface-50">
+                                    <td className="px-5 py-2.5 font-medium text-surface-800">{r.ref}</td>
+                                    <td className="px-5 py-2.5 text-surface-600">{r.detail}</td>
+                                    <td className="px-5 py-2.5 text-right tabular-nums">{r.units}</td>
+                                    <td className="px-5 py-2.5 text-right text-surface-600">{r.days_since_moved != null ? `${r.days_since_moved} days ago` : "never"}</td>
+                                    {showCost && <td className="px-5 py-2.5 text-right tabular-nums">{r.amount != null ? fmtKes(r.amount) : "—"}</td>}
+                                    <td className="px-5 py-2.5 text-right">
+                                        {r.links.product && (
+                                            <button onClick={() => navigate(r.links.product)} className="text-xs font-medium text-brand-600 hover:underline">Product →</button>
+                                        )}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </TableWrapper>
+            </div>
         </div>
     );
 }

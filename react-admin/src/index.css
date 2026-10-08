@@ -116,6 +116,17 @@
         @apply btn p-0 aspect-square min-h-[44px] min-w-[44px];
     }
 
+    /* ─── Dropdown menu items ─────────────────────────────────── */
+    /* One item per row in a row-actions menu. The class was used by the
+       Expenses row menu but never defined, so its <button>s rendered inline
+       and ran together ("View DetailsMark as Paid"). A colour utility on the
+       element (text-danger, text-success) still wins over the default. */
+    .dropdown-item {
+        @apply flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-surface-700
+           transition-colors hover:bg-surface-50 focus-visible:bg-surface-50 focus-visible:outline-none
+           disabled:cursor-not-allowed disabled:opacity-50;
+    }
+
     /* ─── Cards ───────────────────────────────────────────────── */
     /* Flat white on the grey canvas — the reference cards carry NO shadow and
        no border; separation comes from the canvas tint alone. */

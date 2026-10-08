@@ -47,20 +47,30 @@ class GlobalSearchController extends Controller
         }
 
         $results = [];
+        $user    = $request->user();
 
-        if (in_array('products', $types)) {
+        // Each type answers only to the permission that opens its records.
+        // The route is open to every staff login (the palette is everyone's),
+        // so this is the boundary, not the sidebar. Orders additionally run
+        // through Order's ViewerScope — but DataScopeResolver answers "all"
+        // when NO role grants orders.view, so the permission check must come
+        // first or a role without the permission sees the whole order book.
+        if (in_array('products', $types) && $user->can('products.view')) {
             $results = array_merge($results, $this->searchProducts($q));
         }
-        if (in_array('orders', $types)) {
+        if (in_array('orders', $types) && $user->can('orders.view')) {
             $results = array_merge($results, $this->searchOrders($q));
         }
-        if (in_array('customers', $types)) {
+        // Customers obey the anti-scraping rules (App\Support\CustomerSearch):
+        // 3 real characters, wildcards literal, scope before matching.
+        if (in_array('customers', $types) && $user->can('customers.view')
+            && mb_strlen(preg_replace('/[\s%_*?]+/u', '', $q) ?? '') >= \App\Support\CustomerSearch::MIN) {
             $results = array_merge($results, $this->searchCustomers($q));
         }
-        if (in_array('suppliers', $types)) {
+        if (in_array('suppliers', $types) && $user->can('procurement.view')) {
             $results = array_merge($results, $this->searchSuppliers($q));
         }
-        if (in_array('purchase_orders', $types)) {
+        if (in_array('purchase_orders', $types) && $user->can('procurement.view')) {
             $results = array_merge($results, $this->searchPurchaseOrders($q));
         }
 
@@ -123,13 +133,15 @@ class GlobalSearchController extends Controller
 
     private function searchCustomers(string $q): array
     {
-        $rows = Customer::where(function ($w) use ($q) {
-                $w->where('first_name',  'ILIKE', "%{$q}%")
-                  ->orWhere('last_name',  'ILIKE', "%{$q}%")
-                  ->orWhere('email',      'ILIKE', "%{$q}%")
-                  ->orWhere('phone',      'ILIKE', "%{$q}%")
-                  ->orWhere('company',    'ILIKE', "%{$q}%")
-                  ->orWhere(\DB::raw("CONCAT(first_name, ' ', last_name)"), 'ILIKE', "%{$q}%");
+        // Phase 4A: the caller's customers only, bounded before matching.
+        $like = \App\Support\CustomerSearch::contains($q);
+        $rows = Customer::visibleTo(request()->user())->where(function ($w) use ($like) {
+                $w->where('first_name',  'ILIKE', $like)
+                  ->orWhere('last_name',  'ILIKE', $like)
+                  ->orWhere('email',      'ILIKE', $like)
+                  ->orWhere('phone',      'ILIKE', $like)
+                  ->orWhere('company',    'ILIKE', $like)
+                  ->orWhere(\DB::raw("CONCAT(first_name, ' ', last_name)"), 'ILIKE', $like);
             })
             ->select('id', 'first_name', 'last_name', 'email', 'phone', 'company', 'status')
             ->orderByDesc('created_at')

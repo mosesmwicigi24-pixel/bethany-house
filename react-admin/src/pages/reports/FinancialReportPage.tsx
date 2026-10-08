@@ -13,9 +13,6 @@ import {
     Bar,
     LineChart,
     Line,
-    PieChart,
-    Pie,
-    Cell,
     XAxis,
     YAxis,
     CartesianGrid,
@@ -26,6 +23,10 @@ import {
 import {
     KPI_GRID,
     KpiCard,
+    tablistKeys,
+    LoadFailed,
+    ReportPending,
+    ShareBars,
     ReportPdfButton,
     SectionHeader,
     TableWrapper,
@@ -42,19 +43,22 @@ import {
     TH,
     TH_R,
     ChangeBadge,
+    useReportOutlet,
+    useReportTab,
 } from "./reportShared";
 
 export default function FinancialReportPage() {
     const { can } = usePermissions();
     const dr = useDateRange("last_30_days");
     const [compare, setCompare] = useState(false);
-    const [activeTab, setActiveTab] = useState<"pl" | "expenses" | "trends" | "tax" | "cashflow" | "intelligence">(
-        "pl",
+    const [activeTab, setActiveTab] = useReportTab<"pl" | "expenses" | "trends" | "tax" | "cashflow" | "intelligence">(
+        ["pl", "expenses", "trends", "tax", "cashflow", "intelligence"], "pl",
     );
     const [expStatus, setExpStatus] = useState("");
 
     const plQuery = useQuery({
-        queryKey: ["report-pl", dr.start, dr.end, compare],
+        queryKey: ["report-pl", dr.start, dr.end, dr.outlet, compare],
+        placeholderData: (prev) => prev,   // keep the figures while a new period loads — no blank page
         queryFn: () =>
             reportsApi.profitLoss({
                 ...dr.params,
@@ -63,7 +67,7 @@ export default function FinancialReportPage() {
         enabled: !!dr.start && !!dr.end,
     });
     const expQuery = useQuery({
-        queryKey: ["report-expenses", dr.start, dr.end, expStatus],
+        queryKey: ["report-expenses", dr.start, dr.end, dr.outlet, expStatus],
         queryFn: () =>
             reportsApi.expenses({
                 ...dr.params,
@@ -72,27 +76,27 @@ export default function FinancialReportPage() {
         enabled: !!dr.start && !!dr.end,
     });
     const revQuery = useQuery({
-        queryKey: ["report-revenue", dr.start, dr.end],
+        queryKey: ["report-revenue", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.revenue(dr.params),
         enabled: !!dr.start && !!dr.end,
     });
     const taxQuery = useQuery({
-        queryKey: ["report-tax", dr.start, dr.end],
+        queryKey: ["report-tax", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.taxReport(dr.params),
         enabled: !!dr.start && !!dr.end && activeTab === "tax",
     });
     const cashFlowQuery = useQuery({
-        queryKey: ["report-cashflow", dr.start, dr.end],
+        queryKey: ["report-cashflow", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.cashFlow(dr.params),
         enabled: !!dr.start && !!dr.end && activeTab === "cashflow",
     });
 
-    if (plQuery.isLoading)
-        return (
-            <div className="flex justify-center py-20">
-                <Spinner />
-            </div>
-        );
+    // Kept figures are the PREVIOUS period's: on failure they must not stand
+    // under this period's heading.
+    if (plQuery.isError && (!plQuery.data || plQuery.isPlaceholderData))
+        return <LoadFailed what="Finance & Cash" onRetry={() => plQuery.refetch()} />;
+    if (!plQuery.data)
+        return <ReportPending paused={plQuery.fetchStatus === "paused"} />;
 
     const pl = plQuery.data ?? {};
     const cmp = pl.comparison;
@@ -134,7 +138,10 @@ export default function FinancialReportPage() {
     );
 
     const plRows = [
-        { label: "Revenue", value: revenue, indent: 0, bold: false },
+        // "Revenue" alone meant three different figures across this section
+        // until 2026-09-30. This line is what was SOLD; what was COLLECTED is
+        // stated under the chart below, with the difference named.
+        { label: "Revenue (sold in the period)", value: revenue, indent: 0, bold: false },
         {
             label: "(–) Cost of Goods Sold",
             value: cogs,
@@ -169,7 +176,7 @@ export default function FinancialReportPage() {
     return (
         <div className="space-y-6 animate-fade-in">
             <ReportPageHeader
-                title="Financial Report"
+                title="Finance & Cash"
                 subtitle="Analytical P&L view — profit & loss, expenses, tax, and cash flow."
                 reportType="financial"
                 exportPath="financial/profit-loss"
@@ -180,6 +187,8 @@ export default function FinancialReportPage() {
                 onPresetChange={dr.handlePreset}
                 onStartChange={dr.setStart}
                 onEndChange={dr.setEnd}
+                outlet={dr.outlet}
+                onOutletChange={dr.setOutlet}
                 compare={compare}
                 onCompareChange={setCompare}
                 extra={
@@ -196,20 +205,24 @@ export default function FinancialReportPage() {
 
             {/* KPIs */}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {/* Recognised sales, not "paid": this figure is confirmed-or-paid
+                    orders, the same basis as the sales page (it said "Gross paid
+                    sales", which it has not been since cycle 5). */}
                 <KpiCard
-                    label="Revenue"
+                    label="Sold (recognised)"
+                    drill="revenue"
                     value={fmtKes(revenue)}
-                    sub="Gross paid sales"
+                    sub="Confirmed or paid orders"
                     comparison={cmp?.revenue_change_pct}
                 />
                 <KpiCard
-                    label="Gross Profit"
+                    label="Gross profit"
                     value={fmtKes(grossProfit)}
                     sub={`${grossMargin}% margin`}
                     color={grossProfit >= 0 ? "text-success" : "text-danger"}
                 />
                 <KpiCard
-                    label="Net Profit"
+                    label="Net profit"
                     value={fmtKes(netProfit)}
                     sub={`${netMargin}% net margin`}
                     color={netProfit >= 0 ? "text-success" : "text-danger"}
@@ -218,22 +231,24 @@ export default function FinancialReportPage() {
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <KpiCard
-                    label="Opex"
+                    label="Operating expenses"
+                    drill="expenses"
                     value={fmtKes(opex)}
                     color="text-danger"
                     comparison={cmp?.opex_change_pct}
                 />
                 <KpiCard
-                    label="Tax Collected"
+                    label="Tax on sales"
                     value={fmtKes(pl.tax_collected)}
+                    sub="charged on this period's sales"
                 />
                 <KpiCard
-                    label="Discounts Given"
+                    label="Discounts given"
                     value={fmtKes(pl.discounts_given)}
                     color="text-warning"
                 />
                 <KpiCard
-                    label="Expense Count"
+                    label="Expense count"
                     value={expQuery.data?.expenses?.length ?? "-"}
                     sub="Approved + paid"
                 />
@@ -241,11 +256,11 @@ export default function FinancialReportPage() {
 
             {/* Tabs */}
             <div className="border-b border-line overflow-x-auto no-scrollbar">
-                <nav className="flex gap-1 -mb-px">
+                <nav className="flex gap-1 -mb-px" role="tablist" aria-label="Report sections" onKeyDown={tablistKeys}>
                     {(["pl", "expenses", "trends", "tax", "cashflow", "intelligence"] as const).map((tab) => (
                         <button
                             key={tab}
-                            onClick={() => setActiveTab(tab)}
+                            onClick={() => setActiveTab(tab)} role="tab" aria-selected={activeTab === tab}
                             className={clsx(
                                 "px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap shrink-0 transition-colors",
                                 activeTab === tab
@@ -253,11 +268,11 @@ export default function FinancialReportPage() {
                                     : "border-transparent text-surface-500 hover:text-surface-700",
                             )}
                         >
-                            {tab === "pl" ? "P&L Statement"
+                            {tab === "pl" ? "P&L statement"
                                 : tab === "expenses" ? "Expenses"
                                 : tab === "trends" ? "Trends"
                                 : tab === "tax" ? "Tax"
-                                : tab === "cashflow" ? "Cash Flow"
+                                : tab === "cashflow" ? "Cash flow"
                                 : "Intelligence"}
                         </button>
                     ))}
@@ -272,7 +287,7 @@ export default function FinancialReportPage() {
             {activeTab === "pl" && (
                 <div className="space-y-6">
                     <div className="card p-6">
-                        <SectionHeader title="Profit & Loss Statement">
+                        <SectionHeader title="Profit & loss statement">
                             <ExportCsvButton
                                 path="financial/profit-loss"
                                 params={dr.params}
@@ -369,6 +384,22 @@ export default function FinancialReportPage() {
                                             </p>
                                         </div>
                                     )}
+                                {/* Spending awaiting approval is not in net
+                                    profit (it is not spend yet) — but a net
+                                    figure silent about it reads as more than
+                                    the business will keep (cycle 9). */}
+                                {row.label === "(–) Operating Expenses" &&
+                                    Number(pl.expenses_pending_approval?.count ?? 0) > 0 && (
+                                        <div className="flex items-start gap-2 mb-3 ml-6 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+                                            <span aria-hidden="true">⏳</span>
+                                            <p className="text-xs text-amber-800">
+                                                {Number(pl.expenses_pending_approval.count).toLocaleString()}{" "}
+                                                expense{Number(pl.expenses_pending_approval.count) === 1 ? "" : "s"}{" "}
+                                                ({fmtKes(pl.expenses_pending_approval.amount)}) awaiting approval{" "}
+                                                {Number(pl.expenses_pending_approval.count) === 1 ? "is" : "are"} not counted here.
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -378,48 +409,11 @@ export default function FinancialReportPage() {
                     {expCats.length > 0 && (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="card p-5">
-                                <SectionHeader title="Expenses by Category" />
-                                <ResponsiveContainer width="100%" height={220}>
-                                    <PieChart>
-                                        <Pie
-                                            data={expCats}
-                                            dataKey="total"
-                                            nameKey="category"
-                                            cx="50%"
-                                            cy="50%"
-                                            outerRadius={80}
-                                            label={({
-                                                category,
-                                                percent,
-                                            }: any) =>
-                                                `${category} ${(percent * 100).toFixed(0)}%`
-                                            }
-                                            labelLine={false}
-                                        >
-                                            {expCats.map(
-                                                (_: any, i: number) => (
-                                                    <Cell
-                                                        key={i}
-                                                        fill={
-                                                            CHART_COLORS[
-                                                                i %
-                                                                    CHART_COLORS.length
-                                                            ]
-                                                        }
-                                                    />
-                                                ),
-                                            )}
-                                        </Pie>
-                                        <Tooltip
-                                            formatter={(v) =>
-                                                fmtKes(v as number)
-                                            }
-                                        />
-                                    </PieChart>
-                                </ResponsiveContainer>
+                                <SectionHeader title="Expenses by category" />
+                                <ShareBars rows={(expCats ?? []).map((d: any) => ({ label: String(d.category ?? "—"), value: Number(d.total ?? 0) }))} money />
                             </div>
                             <div className="card p-5">
-                                <SectionHeader title="Category Breakdown" />
+                                <SectionHeader title="Category breakdown" />
                                 <div className="space-y-3 mt-2">
                                     {expCats.map((c: any, i: number) => {
                                         const pct =
@@ -620,7 +614,28 @@ export default function FinancialReportPage() {
                 <div className="space-y-6">
                     {chartData.length > 0 && (
                         <div className="card p-5">
-                            <SectionHeader title="Revenue vs Expenses (Monthly)" />
+                            <SectionHeader title="Revenue vs expenses (monthly)" />
+                            {/* Sold and collected are different questions and
+                                this is where a reader can see both, plus what
+                                the gap is: the movement in what customers owe. */}
+                            {revQuery.data?.sold && revQuery.data?.collected && (
+                                <div className="px-4 pt-2 flex flex-wrap gap-x-6 gap-y-1 text-2xs text-surface-500">
+                                    <span>
+                                        Sold <span className="font-semibold text-surface-800 tabular-nums">{fmtKes(Number(revQuery.data.sold.total))}</span>
+                                        <span className="text-surface-400"> · {revQuery.data.sold.basis}</span>
+                                    </span>
+                                    <span>
+                                        Collected <span className="font-semibold text-surface-800 tabular-nums">{fmtKes(Number(revQuery.data.collected.total))}</span>
+                                        <span className="text-surface-400"> · {revQuery.data.collected.basis}</span>
+                                    </span>
+                                    {revQuery.data.receivable_movement && (
+                                        <span title={revQuery.data.receivable_movement.note}>
+                                            Change in what customers owe{" "}
+                                            <span className="font-semibold text-surface-800 tabular-nums">{fmtKes(Number(revQuery.data.receivable_movement.amount))}</span>
+                                        </span>
+                                    )}
+                                </div>
+                            )}
                             <ResponsiveContainer width="100%" height={280}>
                                 <BarChart data={chartData}>
                                     <CartesianGrid
@@ -662,7 +677,7 @@ export default function FinancialReportPage() {
                     {/* Profit trend (derived) */}
                     {chartData.length > 0 && (
                         <div className="card p-5">
-                            <SectionHeader title="Net Profit Trend" />
+                            <SectionHeader title="Net profit trend" />
                             <ResponsiveContainer width="100%" height={200}>
                                 <LineChart
                                     data={chartData.map((d) => ({
@@ -713,10 +728,10 @@ export default function FinancialReportPage() {
                             {/* Tax KPIs */}
                             {(taxQuery.data?.totals) && (
                                 <div className={KPI_GRID}>
-                                    <KpiCard label="Total Tax Collected" value={fmtKes(taxQuery.data.totals.total_tax_collected)} color="text-brand-600" />
-                                    <KpiCard label="Taxable Revenue" value={fmtKes(taxQuery.data.totals.total_taxable_amount)} />
-                                    <KpiCard label="Effective Tax Rate" value={`${taxQuery.data.totals.effective_rate ?? 0}%`} />
-                                    <KpiCard label="Tax-Exempt Revenue" value={fmtKes(taxQuery.data.totals.exempt_amount)} />
+                                    <KpiCard label="Total tax collected" value={fmtKes(taxQuery.data.totals.total_tax_collected)} color="text-brand-600" />
+                                    <KpiCard label="Taxable revenue" value={fmtKes(taxQuery.data.totals.total_taxable_amount)} />
+                                    <KpiCard label="Effective tax rate" value={`${taxQuery.data.totals.effective_rate ?? 0}%`} />
+                                    <KpiCard label="Tax-exempt revenue" value={fmtKes(taxQuery.data.totals.exempt_amount)} />
                                 </div>
                             )}
 
@@ -724,7 +739,7 @@ export default function FinancialReportPage() {
                             {(taxQuery.data?.by_tax_rate ?? []).length > 0 && (
                                 <div className="card overflow-hidden">
                                     <div className="px-5 pt-5 pb-4">
-                                        <SectionHeader title="Tax by Rate">
+                                        <SectionHeader title="Tax by rate">
                                             <ExportCsvButton path="financial/tax" params={dr.params} />
                                         </SectionHeader>
                                     </div>
@@ -789,14 +804,14 @@ export default function FinancialReportPage() {
                         return (
                             <>
                                 <div className="grid grid-cols-3 gap-3">
-                                    <KpiCard label="Total Inflows"  value={fmtKes(totalIn)}  color="text-success" />
-                                    <KpiCard label="Total Outflows" value={fmtKes(totalOut)} color="text-danger" />
-                                    <KpiCard label="Net Cash Flow"  value={fmtKes(totalIn - totalOut)} color={totalIn >= totalOut ? "text-success" : "text-danger"} />
+                                    <KpiCard label="Total inflows"  value={fmtKes(totalIn)}  color="text-success" />
+                                    <KpiCard label="Total outflows" value={fmtKes(totalOut)} color="text-danger" />
+                                    <KpiCard label="Net cash flow"  value={fmtKes(totalIn - totalOut)} color={totalIn >= totalOut ? "text-success" : "text-danger"} />
                                 </div>
 
                                 {cfData.length > 0 && (
                                     <div className="card p-5">
-                                        <SectionHeader title="Monthly Cash Flow" />
+                                        <SectionHeader title="Monthly cash flow" />
                                         <ResponsiveContainer width="100%" height={280}>
                                             <BarChart data={cfData}>
                                                 <CartesianGrid strokeDasharray="3 3" stroke="#f2f3f2" />
@@ -813,7 +828,7 @@ export default function FinancialReportPage() {
 
                                 {cfData.length > 0 && (
                                     <div className="card p-5">
-                                        <SectionHeader title="Net Cash Flow Trend" />
+                                        <SectionHeader title="Net cash flow trend" />
                                         <ResponsiveContainer width="100%" height={200}>
                                             <LineChart data={cfData}>
                                                 <CartesianGrid strokeDasharray="3 3" stroke="#f2f3f2" />
@@ -834,7 +849,7 @@ export default function FinancialReportPage() {
                                     });
                                     return (
                                         <div className="card p-5">
-                                            <SectionHeader title="Inflows by Payment Method" />
+                                            <SectionHeader title="Inflows by payment method" />
                                             <div className="space-y-3 mt-2">
                                                 {Object.entries(byMethod).sort((a,b) => b[1]-a[1]).map(([method, total], i) => (
                                                     <div key={method}>
@@ -864,9 +879,10 @@ export default function FinancialReportPage() {
 // and per-rail reconciliation net of refunds.
 
 function FinancialIntelligence({ start, end }: { start: string; end: string }) {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["financial-intelligence", start, end],
-        queryFn: () => reportsApi.financialIntelligence(start, end),
+        queryKey: ["outlet", outletId, "financial-intelligence", start, end],
+        queryFn: () => reportsApi.financialIntelligence(start, end, outletId),
         enabled: !!start && !!end,
         staleTime: 60_000,
     });
@@ -878,15 +894,17 @@ function FinancialIntelligence({ start, end }: { start: string; end: string }) {
         <div className="space-y-6">
             {/* Earned P&L: the waterfall in four cards */}
             <div className={KPI_GRID}>
-                <KpiCard label="Earned Revenue" value={fmtKes(pnl.earned_revenue)}
+                <KpiCard label="Earned revenue" value={fmtKes(pnl.earned_revenue)}
                     sub={`${pnl.earned_orders} orders fully paid in period`} />
                 <KpiCard label="COGS (est.)" value={fmtKes(pnl.cogs_estimate)}
                     sub={pnl.unpriced_lines > 0 ? `${pnl.unpriced_lines} lines missing cost price` : "from the price book"} />
-                <KpiCard label="Gross Profit" value={fmtKes(pnl.gross_profit)}
+                <KpiCard label="Gross profit" value={fmtKes(pnl.gross_profit)}
                     sub={pnl.gross_margin_pct != null ? `${pnl.gross_margin_pct}% margin` : ""}
                     color={pnl.gross_profit >= 0 ? "text-success" : "text-danger"} />
-                <KpiCard label="Net After Expenses" value={fmtKes(pnl.net_profit)}
-                    sub={`${fmtKes(pnl.expenses)} expenses`}
+                <KpiCard label="Net after expenses" value={fmtKes(pnl.net_profit)}
+                    sub={(pnl.expenses_pending_approval?.count ?? 0) > 0
+                        ? `${fmtKes(pnl.expenses)} expenses · ${fmtKes(pnl.expenses_pending_approval.amount)} awaiting approval, not counted`
+                        : `${fmtKes(pnl.expenses)} expenses`}
                     color={pnl.net_profit >= 0 ? "text-success" : "text-danger"} />
             </div>
             <p className="text-2xs text-surface-400 -mt-3">

@@ -49,12 +49,12 @@ export function TailorWorkloadPanel({ onSelect, selectedId }: Props) {
     if (isLoading) return (
         <div className="py-4 flex items-center justify-center">
             <Spinner size="sm" />
-            <span className="ml-2 text-xs text-surface-400">Loading workloads…</span>
+            <span className="ml-2 text-xs text-surface-500">Loading workloads…</span>
         </div>
     );
 
     if (tailors.length === 0) return (
-        <p className="text-xs text-surface-400 py-2">No active tailors found.</p>
+        <p className="text-xs text-surface-500 py-2">No active tailors found.</p>
     );
 
     return (
@@ -84,7 +84,7 @@ export function TailorWorkloadPanel({ onSelect, selectedId }: Props) {
                         {/* Name + tasks */}
                         <div className="flex-1 min-w-0">
                             <p className="text-xs font-semibold text-surface-900 truncate">{t.name}</p>
-                            <p className="text-2xs text-surface-400">
+                            <p className="text-2xs text-surface-500">
                                 {t.active_tasks} active
                                 {t.overdue_tasks > 0 && (
                                     <span className="text-danger font-semibold"> · {t.overdue_tasks} overdue</span>

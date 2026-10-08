@@ -166,6 +166,16 @@ class UserController extends Controller
             'send_welcome_email'   => 'sometimes|boolean',
         ]);
 
+        // Roles are the owner's to give (see assertMayAssignRoles). Refuse up
+        // front so a refused role never leaves a half-made account behind.
+        if (!empty($validated['role_ids']) && !$request->user()?->hasRole('super_admin')) {
+            return response()->json(['message' => 'Only a super administrator can give a new account its roles. Create it without roles; the owner assigns them.'], 403);
+        }
+        // Granting roles is a role change: step-up (Phase 4C).
+        if (!empty($validated['role_ids'])) {
+            app(\App\Services\Auth\StepUp::class)->ensure($request);
+        }
+
         // Create the user — no wrapping transaction; DB::beginTransaction() was
         // causing silent rollbacks in PostgreSQL due to a nested transaction issue.
         try {
@@ -251,6 +261,18 @@ class UserController extends Controller
             'password_confirmation'=> 'required_with:password|same:password',
         ]);
 
+        // Nobody widens their own reach: their outlet assignment and their own
+        // 2FA requirement are someone else's to change (role plan, 12.2).
+        if ((int) $user->id === (int) $request->user()->id) {
+            $outletChanges = array_key_exists('outlet_id', $validated)
+                && (int) ($validated['outlet_id'] ?? 0) !== (int) ($user->primaryOutlet()?->id ?? 0);
+            $twoFaChanges = array_key_exists('must_setup_2fa', $validated)
+                && (bool) $validated['must_setup_2fa'] !== (bool) $user->must_setup_2fa;
+            if ($outletChanges || $twoFaChanges) {
+                return response()->json(['message' => 'You cannot change your own outlet or two-step sign-in requirement.'], 403);
+            }
+        }
+
         // ── Lockout guards ────────────────────────────────────────────────────
         // Zero roles is now a legal save (owner, 2026-08-27: deactivating staff
         // must not force a role, and unselect-all must save). What must stay
@@ -280,6 +302,20 @@ class UserController extends Controller
                     ], 422);
                 }
             }
+        }
+
+        // A refused role change must refuse the whole save, not land the other
+        // fields and then fail (the role sync runs after the transaction).
+        $rolesChange = isset($validated['role_ids'])
+            && $this->assertMayAssignRoles($user->id, $validated['role_ids']);
+
+        // Changing who holds which role, or whether a person must use
+        // two-step sign-in, needs a fresh step-up (Phase 4C, plan §12.3).
+        // Other edits to the same form do not.
+        $twoFaRequirementChange = array_key_exists('must_setup_2fa', $validated)
+            && (bool) $validated['must_setup_2fa'] !== (bool) $user->must_setup_2fa;
+        if ($rolesChange || $twoFaRequirementChange) {
+            app(\App\Services\Auth\StepUp::class)->ensure($request);
         }
 
         DB::beginTransaction();
@@ -399,10 +435,8 @@ class UserController extends Controller
         $oldStatus = $user->status;
         $user->update(['status' => $validated['status']]);
 
-        // Revoke all tokens if suspending
-        if ($validated['status'] === 'suspended') {
-            DB::table('personal_access_tokens')->where('tokenable_id', $user->id)->delete();
-        }
+        // Tokens are revoked by the User `updated` hook for every status but
+        // active (it used to be suspended only).
 
         // Notify the affected user of meaningful status changes
         try {
@@ -554,16 +588,34 @@ class UserController extends Controller
 
     /**
      * Get users by Spatie role name.
+     *
+     * Open to every staff login (assignee pickers), so by default it answers
+     * with who and where only: id, name, outlet. Email and phone are staff
+     * contact details and stay with users.view — the permission that opens
+     * the staff list itself.
      */
-    public function byRole($role)
+    public function byRole(Request $request, $role)
     {
+        $withContacts = $request->user()->can('users.view');
+
         $users = User::whereHas('roles', fn ($q) => $q->where('name', $role))
             ->where('status', 'active')
             ->select('id', 'first_name', 'last_name', 'email', 'phone')
             ->get()
-            ->map(function ($user) {
-                $user->outlet = $user->primaryOutlet();
-                return $user;
+            ->map(function ($user) use ($withContacts) {
+                $outlet = $user->primaryOutlet();
+
+                if ($withContacts) {
+                    $user->outlet = $outlet;
+                    return $user;
+                }
+
+                return [
+                    'id'         => $user->id,
+                    'first_name' => $user->first_name,
+                    'last_name'  => $user->last_name,
+                    'outlet'     => $outlet ? ['id' => $outlet->id, 'name' => $outlet->name] : null,
+                ];
             });
 
         return response()->json(['data' => $users]);
@@ -592,11 +644,18 @@ class UserController extends Controller
 
         User::whereIn('id', $userIds)->update(['status' => $validated['status']]);
 
+        // A query-builder write skips the User `updated` hook, so revoke here:
+        // any status but active signs these people out (it used to be
+        // suspended only, leaving inactive accounts their tokens).
+        if ($validated['status'] !== 'active') {
+            DB::table('personal_access_tokens')->where('tokenable_type', User::class)->whereIn('tokenable_id', $userIds)->delete();
+        }
         if ($validated['status'] === 'suspended') {
-            DB::table('personal_access_tokens')->whereIn('tokenable_id', $userIds)->delete();
-            try {
-                NotificationService::bulkUsersSuspended($userIds);
-            } catch (\Exception) {}
+            foreach ($userIds as $suspendedId) {
+                try {
+                    NotificationService::userSuspended($suspendedId, $validated['reason'] ?? '');
+                } catch (\Throwable) {}
+            }
         }
 
         $this->logActivity($request, 'bulk_status_update',
@@ -756,21 +815,9 @@ class UserController extends Controller
 
     private function logActivity(Request $request, string $action, string $description): void
     {
-        try {
-            DB::table('activity_log')->insert([
-                'causer_type' => \App\Models\User::class,
-                'causer_id'   => $request->user()->id,
-                'action'      => $action,
-                'description' => $description,
-                'ip_address'  => $request->ip(),
-                'created_at'  => now(),
-            ]);
-        } catch (\Exception $e) {
-            // Non-fatal by design — but never silent again: the old empty
-            // catch hid a wrong column name (user_id vs causer_id) for months
-            // and the audit trail was dead without anyone knowing.
-            \Illuminate\Support\Facades\Log::warning('activity_log write failed', ['error' => $e->getMessage()]);
-        }
+        // Through the one audit writer (4D): request id, role(s), token,
+        // channel and outcome, inside a savepoint, never failing the request.
+        \App\Services\ActivityLogService::log($action, null, [], $description, $request->user());
     }
 
     /**
@@ -807,25 +854,43 @@ class UserController extends Controller
         }
     }
 
-    private function assertMayAssignRoles(int $targetUserId, array $roleIds): void
+    /** @return bool whether the request changes the person's roles at all */
+    private function assertMayAssignRoles(int $targetUserId, array $roleIds): bool
     {
         $actor = auth()->user();
-        if (! $actor || $actor->hasRole('super_admin')) {
-            return;
+        if (! $actor) {
+            return true;   // console / seeders
         }
 
-        $superAdminRoleId = DB::table('roles')->where('name', 'super_admin')->value('id');
-        $grantsSuperAdmin = $superAdminRoleId
-            && in_array((int) $superAdminRoleId, array_map('intval', $roleIds), true);
-        $targetIsSuperAdmin = User::find($targetUserId)?->hasRole('super_admin') ?? false;
-
-        if ($grantsSuperAdmin || $targetIsSuperAdmin) {
-            abort(403, 'Only a super administrator can assign or modify the super administrator role.');
+        // The edit form re-sends every role on any save; an unchanged set is
+        // not a role change, so renaming a person or fixing a phone still works.
+        $current   = DB::table('model_has_roles')->where('model_type', User::class)->where('model_id', $targetUserId)
+            ->pluck('role_id')->map(fn ($id) => (int) $id)->sort()->values()->all();
+        $requested = collect($roleIds)->map(fn ($id) => (int) $id)->unique()->sort()->values()->all();
+        if ($current === $requested) {
+            return false;
         }
+
+        // Owner decision, 2026-10-02: "I will set the roles for each person."
+        // Who holds which role is the owner's call — a super administrator's —
+        // and nobody changes their own roles (hard-deny list, Section 12.2 of
+        // the role plan; it applies to super administrators too). Before this,
+        // anyone with users.edit could give themselves or anyone else any role
+        // except super_admin.
+        if (! $actor->hasRole('super_admin')) {
+            abort(403, 'Only a super administrator can change who holds which role.');
+        }
+        if ((int) $actor->id === $targetUserId) {
+            abort(403, 'Nobody can change their own roles — another super administrator must make this change.');
+        }
+
+        return true;
     }
 
     private function syncUserRoles(int $userId, array $roleIds): void
     {
+        $before = DB::table('model_has_roles')->where('model_id', $userId)->where('model_type', User::class)
+            ->pluck('role_id')->map(fn ($id) => (int) $id)->sort()->values()->all();
         $this->assertMayAssignRoles($userId, $roleIds);
 
         $modelType = (new \App\Models\User())->getMorphClass();
@@ -851,5 +916,19 @@ class UserController extends Controller
         try {
             app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
         } catch (\Exception) {}
+
+        // Removing a role ends every session the person holds (plan §17: an
+        // old session reused after a role is removed → 401); the next sign-in
+        // is evaluated against the remaining roles. ADDING a role does not:
+        // the owner assigns roles himself, and permissions are re-read on
+        // every request anyway, so a cashier is not signed out mid-shift each
+        // time the owner gives them another role.
+        $after = collect($roleIds)->map(fn ($id) => (int) $id)->unique()->sort()->values()->all();
+        if (array_diff($before, $after) !== []) {
+            DB::table('personal_access_tokens')
+                ->where('tokenable_type', (new User())->getMorphClass())
+                ->where('tokenable_id', $userId)
+                ->delete();
+        }
     }
 }

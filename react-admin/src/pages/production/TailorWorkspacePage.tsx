@@ -16,15 +16,17 @@
  * COMPLETION FLOW, NOTE/SPECS DRAWERS, OFFLINE QUEUE — unchanged.
  */
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
+import { PriorityBadge, DueBadge, daysUntil, orderMeasurements } from "@/components/production/productionUi";
+import { businessToday } from "@/lib/businessDate";
 import { get, put, post } from "@/api/client";
 import { useToastStore } from "@/store/toast.store";
 import { Spinner } from "@/components/ui/Spinner";
 import { PullRefreshIndicator } from "@/components/pwa/PullRefreshIndicator";
 import { usePullToRefresh } from "@/lib/usePullToRefresh";
-import { tokenStorage } from "@/api/client";
+import { enqueueOffline, isNetworkFailure, requestReplay } from "@/lib/offlineQueue";
 import type { ApiError } from "@/types";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -43,6 +45,8 @@ interface MyTask {
     notes?: string | null;
     /** Name of the unfinished earlier stage gating this one (null = free to start). */
     blocked_by_stage?: string | null;
+    /** Position of this stage in the order's pipeline (snapshot at confirmation). */
+    sequence?: number | null;
     stage: { id: number; name: string; slug: string; description?: string };
     production_order: {
         id: number;
@@ -51,6 +55,8 @@ interface MyTask {
         due_date: string;
         status: string;
         quantity: number;
+        /** The WHOLE order's progress (every bench), as numbers only. */
+        progress?: { percent: number; finished: number; stages: number } | null;
         specifications?: Record<string, string> | null;
         measurements?: Record<string, string> | null;
         customer_preferences?: Record<string, string> | null;
@@ -60,7 +66,7 @@ interface MyTask {
             translations?: { name: string }[];
             images?: { image_url: string }[];
         };
-        customer?: { first_name: string; last_name: string } | null;
+        customer?: { first_name: string; last_name?: string } | null;
         /** Colourway batches — quantities sum to the order quantity. */
         batches?: { id: number; label: string; quantity: number; attributes?: Record<string, string> | null }[];
         material_allocations?: {
@@ -92,8 +98,6 @@ type TabId = "focus" | "queue";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const daysUntil = (d: string) =>
-    Math.ceil((new Date(d).getTime() - Date.now()) / 86_400_000);
 
 function getProductName(task: MyTask) {
     return (
@@ -109,7 +113,8 @@ function getCustomerName(task: MyTask) {
     const label = (task.production_order as { customer_label?: string | null }).customer_label;
     if (label) return label;
     const c = task.production_order.customer;
-    return c ? `${c.first_name} ${c.last_name}`.trim() : null;
+    // last_name is absent for roles without customers.view (first name only).
+    return c ? [c.first_name, c.last_name].filter(Boolean).join(" ").trim() || null : null;
 }
 
 // Status priority for picking the "active task" within an order group.
@@ -134,18 +139,24 @@ function groupTasksByOrder(tasks: MyTask[]): OrderGroup[] {
     const groups: OrderGroup[] = [];
     for (const [orderId, orderTasks] of map) {
         const rep = orderTasks[0];
+        // The checklist reads in the order the garment is made — Cutting before
+        // Finishing — not by status. Unsequenced (older) tasks go last.
         const sorted = [...orderTasks].sort(
             (a, b) =>
-                (TASK_STATUS_PRIORITY[a.status] ?? 99) -
-                (TASK_STATUS_PRIORITY[b.status] ?? 99)
+                (a.sequence ?? Number.MAX_SAFE_INTEGER) - (b.sequence ?? Number.MAX_SAFE_INTEGER) ||
+                (TASK_STATUS_PRIORITY[a.status] ?? 99) - (TASK_STATUS_PRIORITY[b.status] ?? 99) ||
+                a.id - b.id
         );
+        // The stage to work on: one already under way, else the first that is
+        // free to start — a stage still waiting on another bench is not
+        // "active" just because it is pending.
+        const open = (t: MyTask) => t.status === "pending" || t.status === "paused";
+        const blocked = (t: MyTask) => !!t.blocked_by_stage && !t.started_at;
         const activeTask =
-            sorted.find(
-                (t) =>
-                    t.status === "in_progress" ||
-                    t.status === "paused" ||
-                    t.status === "pending"
-            ) ?? null;
+            sorted.find((t) => t.status === "in_progress") ??
+            sorted.find((t) => open(t) && !blocked(t)) ??
+            sorted.find(open) ??
+            null;
         const completedCount = orderTasks.filter(
             (t) => t.status === "completed"
         ).length;
@@ -166,21 +177,19 @@ function groupTasksByOrder(tasks: MyTask[]): OrderGroup[] {
         });
     }
 
-    // Sort groups: fully-done last; within active groups, the one with an
-    // in_progress task comes first, then by due date.
-    return groups.sort((a, b) => {
-        const aDone = a.completedCount === a.totalCount;
-        const bDone = b.completedCount === b.totalCount;
-        if (aDone !== bDone) return aDone ? 1 : -1;
-        const aActive =
-            a.activeTask?.status === "in_progress" ? 0 : 1;
-        const bActive =
-            b.activeTask?.status === "in_progress" ? 0 : 1;
-        if (aActive !== bActive) return aActive - bActive;
-        return (
-            new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
-        );
-    });
+    // Keep the server's order — it ranks by risk of missing the deadline
+    // (Intelligence #9), and re-sorting here by due date threw that away, so
+    // Tailor Home's #1 was not the Focus #1. Only fully-done orders move last.
+    // (Map preserves first-seen order, i.e. the server's.)
+    return groups
+        .map((g, i) => ({ g, i }))
+        .sort((a, b) => {
+            const aDone = a.g.completedCount === a.g.totalCount;
+            const bDone = b.g.completedCount === b.g.totalCount;
+            if (aDone !== bDone) return aDone ? 1 : -1;
+            return a.i - b.i;
+        })
+        .map(({ g }) => g);
 }
 
 // ── Offline queue helper ───────────────────────────────────────────────────────
@@ -190,10 +199,13 @@ function groupTasksByOrder(tasks: MyTask[]): OrderGroup[] {
 // one lane, and the lanes are ordered the way work actually flows. "What should
 // I work on next?" is answered by the first non-empty lane.
 
-type WorkflowState = "in_progress" | "ready" | "waiting" | "qc" | "done";
+type WorkflowState = "in_progress" | "qc_failed" | "ready" | "waiting" | "qc" | "done";
 
 const WORKFLOW_SECTIONS: { id: WorkflowState; label: string; tone: string; hint: string }[] = [
     { id: "in_progress", label: "In progress",       tone: "text-brand-700 bg-brand-50 border-brand-200",     hint: "Pick up where you left off" },
+    // Second, not buried in Completed: a garment she finished came back from
+    // inspection. Nothing to tap yet; her manager decides the rework.
+    { id: "qc_failed",   label: "Failed QC",         tone: "text-danger-700 bg-danger-light border-danger/30",     hint: "Your manager will decide the rework — nothing to do yet" },
     { id: "ready",       label: "Ready to start",    tone: "text-success-700 bg-success-50 border-success-200", hint: "Nothing is blocking these" },
     { id: "waiting",     label: "Waiting",           tone: "text-amber-700 bg-amber-50 border-amber-200",     hint: "Blocked by an earlier stage or missing materials" },
     { id: "qc",          label: "Ready for QC",      tone: "text-accent-700 bg-accent-50 border-accent-200",  hint: "Your part is done — awaiting quality check" },
@@ -211,6 +223,7 @@ function materialShortfalls(group: OrderGroup) {
 function workflowStateOf(group: OrderGroup): WorkflowState {
     const orderStatus = group.tasks[0]?.production_order?.status;
     if (orderStatus === "qc_pending") return "qc";
+    if (orderStatus === "qc_failed") return "qc_failed";
     if (group.completedCount === group.totalCount && group.totalCount > 0) return "done";
     if (group.tasks.some((t) => t.status === "in_progress" || t.status === "paused")) return "in_progress";
 
@@ -221,35 +234,6 @@ function workflowStateOf(group: OrderGroup): WorkflowState {
     if (materialShortfalls(group).length > 0 && !group.tasks.some((t) => t.started_at)) return "waiting";
 
     return "ready";
-}
-
-async function queueOfflineTaskUpdate(
-    taskId: number,
-    action: string,
-    body: object
-): Promise<void> {
-    return new Promise((resolve, reject) => {
-        const req = indexedDB.open("bh-offline-queue", 1);
-        req.onsuccess = () => {
-            const db = req.result;
-            const tx = db.transaction("task-updates", "readwrite");
-            tx.objectStore("task-updates").add({
-                url: `/api/v1/tailor/tasks/${taskId}/status`,
-                token: tokenStorage.get() ?? "",
-                body,
-            });
-            tx.oncomplete = () => {
-                resolve();
-                navigator.serviceWorker?.ready.then((reg) => {
-                    (reg as any).sync
-                        ?.register("task-status-update")
-                        .catch(() => {});
-                });
-            };
-            tx.onerror = () => reject(tx.error);
-        };
-        req.onerror = () => reject(req.error);
-    });
 }
 
 // ── Elapsed timer hook ────────────────────────────────────────────────────────
@@ -276,59 +260,8 @@ function useElapsedTimer(task: MyTask | null): string | null {
 
 // ── Badges ────────────────────────────────────────────────────────────────────
 
-function PriorityBadge({ priority }: { priority: string }) {
-    const cfgs: Record<string, string> = {
-        urgent: "bg-danger-light text-danger border border-danger/30",
-        high: "bg-warning-light text-warning-dark border border-warning/30",
-        normal: "bg-brand-50 text-brand-700 border border-brand-200",
-        low: "bg-surface-100 text-surface-500 border border-surface-200",
-    };
-    const labels: Record<string, string> = {
-        urgent: "🔴 Urgent",
-        high: "🟠 High",
-        normal: "Normal",
-        low: "Low",
-    };
-    return (
-        <span
-            className={clsx(
-                "text-2xs font-bold px-2 py-0.5 rounded-full uppercase tracking-wide",
-                cfgs[priority] ?? cfgs.normal
-            )}
-        >
-            {labels[priority] ?? priority}
-        </span>
-    );
-}
-
-function DueBadge({ date }: { date: string }) {
-    const d = daysUntil(date);
-    if (d < 0)
-        return (
-            <span className="text-2xs font-semibold text-danger">
-                Overdue {Math.abs(d)}d
-            </span>
-        );
-    if (d === 0)
-        return (
-            <span className="text-2xs font-semibold text-warning-dark">
-                Due today
-            </span>
-        );
-    if (d <= 2)
-        return (
-            <span className="text-2xs font-semibold text-warning-dark">
-                Due in {d}d
-            </span>
-        );
-    return (
-        <span className="text-2xs text-surface-400">
-            {new Date(date).toLocaleDateString("en-KE", {
-                dateStyle: "medium",
-            })}
-        </span>
-    );
-}
+// Priority and due badges: the shared Production design language
+// (components/production/productionUi) — the same words on every surface.
 
 // ── Right drawer ──────────────────────────────────────────────────────────────
 
@@ -393,6 +326,117 @@ function RightDrawer({
     );
 }
 
+// ── Pause ─────────────────────────────────────────────────────────────────────
+// A tailor stopping for a break, the end of a shift or missing materials can
+// say so: the stage shows as paused (amber) until Resume. The server already
+// supported it; My Tasks had no button.
+
+function PauseButton({ onPause, disabled }: { onPause: () => void; disabled: boolean }) {
+    return (
+        <button
+            onClick={() => {
+                navigator.vibrate?.(30);
+                onPause();
+            }}
+            disabled={disabled}
+            aria-label="Pause this stage"
+            className="flex items-center justify-center gap-1.5 min-h-12 px-4 rounded-xl bg-warning-light text-warning-dark border border-warning text-sm font-bold active:bg-warning/20 transition-colors disabled:opacity-50"
+        >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5" />
+            </svg>
+            Pause
+        </button>
+    );
+}
+
+// ── Piece counts ──────────────────────────────────────────────────────────────
+// A tap shows at once and is never lost. The server takes an ABSOLUTE count,
+// so the screen keeps one "wanted" number per stage (and batch) and sends the
+// latest one; taps made while a send is in flight fold into the next send.
+// Before this, each tap sent "server value + step" from a number that had not
+// refreshed yet, so two quick +1s were recorded as one (audit F2).
+
+const countKey = (taskId: number, batchId?: number) => `${taskId}:${batchId ?? 0}`;
+
+function usePieceCounts(onRefused: (message: string) => void, onQueued: () => void) {
+    const qc = useQueryClient();
+    const [overlay, setOverlay] = useState<Record<string, number>>({});
+    const wanted = useRef<Record<string, number>>({});
+    const sending = useRef<Set<string>>(new Set());
+
+    const forget = (key: string) => {
+        delete wanted.current[key];
+        setOverlay((o) => {
+            const { [key]: _gone, ...rest } = o;
+            return rest;
+        });
+    };
+
+    const flush = async (key: string, taskId: number, batchId?: number) => {
+        sending.current.add(key);
+        try {
+            let sent: number | undefined;
+            while (wanted.current[key] !== undefined && wanted.current[key] !== sent) {
+                sent = wanted.current[key];
+                await post(`/v1/tailor/tasks/${taskId}/progress`, { quantity_done: sent, batch_id: batchId });
+                // Refresh before letting go of the shown number, so the card
+                // never flashes back to the stale count.
+                if (wanted.current[key] === sent) {
+                    await qc.invalidateQueries({ queryKey: ["my-tasks"] });
+                }
+            }
+            forget(key);
+        } catch (e: any) {
+            if (isNetworkFailure(e) && wanted.current[key] !== undefined) {
+                // No connection: the count is kept on this device and sent
+                // when it comes back. The number stays on screen meanwhile
+                // (the overlay is cleared once the worker reports the sync).
+                try {
+                    await enqueueOffline({
+                        url: `/api/v1/tailor/tasks/${taskId}/progress`,
+                        method: "POST",
+                        body: { quantity_done: wanted.current[key], batch_id: batchId },
+                        dedupeKey: `progress:${key}`,
+                    });
+                    onQueued();
+                    return;
+                } catch {
+                    // Could not even store it: fall through to the refusal.
+                }
+            }
+            // Refused (gate, ceiling, order closed) or failed: show the
+            // server's own reason and fall back to the true count.
+            forget(key);
+            onRefused(e?.message ?? "Could not record progress");
+            qc.invalidateQueries({ queryKey: ["my-tasks"] });
+        } finally {
+            sending.current.delete(key);
+        }
+    };
+
+    const record = (task: MyTask, next: number, batchId?: number) => {
+        const key = countKey(task.id, batchId);
+        wanted.current[key] = next;
+        setOverlay((o) => ({ ...o, [key]: next }));
+        navigator.vibrate?.(30);
+        if (!sending.current.has(key)) void flush(key, task.id, batchId);
+    };
+
+    /** The count to show: the tailor's latest tap, else the server's. */
+    const shown = (taskId: number, batchId: number | undefined, server: number) =>
+        overlay[countKey(taskId, batchId)] ?? server;
+
+    /** After an offline sync: let the refreshed server counts show again. */
+    const clearSettled = () => {
+        for (const key of Object.keys(wanted.current)) {
+            if (!sending.current.has(key)) forget(key);
+        }
+    };
+
+    return { record, shown, clearSettled };
+}
+
 // ── Note drawer ───────────────────────────────────────────────────────────────
 
 function NoteDrawer({
@@ -414,16 +458,15 @@ function NoteDrawer({
         if (!text.trim()) return;
         setSaving(true);
         try {
-            await post(
-                `/v1/production-orders/${task.production_order.id}/note`,
-                { note: text.trim() }
-            );
-            toast.success("Note saved");
+            // Lands in the order's chat thread, where the team already talks
+            // about this job (the old route did not exist).
+            await post(`/v1/tailor/tasks/${task.id}/note`, { note: text.trim() });
+            toast.success("Note added to the order chat");
             setText("");
             onSaved();
             onClose();
-        } catch {
-            toast.error("Failed to save note");
+        } catch (e: any) {
+            toast.error(e?.message ?? "Failed to save note");
         } finally {
             setSaving(false);
         }
@@ -433,11 +476,12 @@ function NoteDrawer({
         <RightDrawer open={open} onClose={onClose} title="Add note">
             <div className="p-4 space-y-3">
                 <p className="text-xs text-surface-500">
-                    Note will be attached to{" "}
+                    Posted to the chat for{" "}
                     <span className="font-semibold text-surface-700">
                         {task.production_order.order_number}
                     </span>
-                    .
+                    {task.stage?.name ? ` as a ${task.stage.name} note` : ""}, so
+                    everyone on this order sees it.
                 </p>
                 <textarea
                     className="input resize-none w-full"
@@ -480,8 +524,10 @@ function SpecsDrawer({
     onClose: () => void;
 }) {
     const order = task.production_order;
-    const hasMeasurements =
-        order.measurements && Object.keys(order.measurements).length > 0;
+    // Same order as the Focus card: the clergy sheet's, gender as a line of
+    // its own rather than a tile.
+    const { gender, body: measurementRows } = orderMeasurements(order.measurements);
+    const hasMeasurements = measurementRows.length > 0;
     const hasSpecs =
         order.specifications && Object.keys(order.specifications).length > 0;
     const hasPrefs =
@@ -494,19 +540,19 @@ function SpecsDrawer({
         <RightDrawer open={open} onClose={onClose} title="Order specs">
             <div className="p-4 space-y-5">
                 <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-mono text-xs text-surface-400">
+                    <span className="font-mono text-xs text-surface-500">
                         {order.order_number}
                     </span>
                     <PriorityBadge priority={order.priority} />
                     <DueBadge date={order.due_date} />
-                    <span className="text-xs text-surface-400">
+                    <span className="text-xs text-surface-500">
                         Qty: {order.quantity}
                     </span>
                 </div>
 
                 {task.stage.description && (
                     <div className="rounded-xl bg-brand-50 border border-brand-100 p-3">
-                        <p className="text-2xs font-bold text-brand-600 uppercase tracking-widest mb-1">
+                        <p className="text-2xs font-bold text-brand-700 uppercase tracking-widest mb-1">
                             Stage notes
                         </p>
                         <p className="text-xs text-brand-900">
@@ -517,17 +563,17 @@ function SpecsDrawer({
 
                 {hasMeasurements && (
                     <div>
-                        <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2">
-                            Measurements
+                        <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest mb-2">
+                            Measurements{gender ? ` · ${gender}` : ""}
                         </p>
                         <div className="grid grid-cols-2 gap-2">
-                            {Object.entries(order.measurements!).map(
+                            {measurementRows.map(
                                 ([k, v]) => (
                                     <div
                                         key={k}
                                         className="rounded-xl bg-surface-50 border border-line px-3 py-2.5 flex flex-col gap-0.5"
                                     >
-                                        <span className="text-2xs text-surface-400 uppercase tracking-wide">
+                                        <span className="text-2xs text-surface-500 uppercase tracking-wide">
                                             {k}
                                         </span>
                                         <span className="text-xl font-bold text-surface-900 leading-none">
@@ -542,7 +588,7 @@ function SpecsDrawer({
 
                 {hasSpecs && (
                     <div>
-                        <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2">
+                        <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest mb-2">
                             Specifications
                         </p>
                         <div className="card p-3 space-y-2">
@@ -567,7 +613,7 @@ function SpecsDrawer({
 
                 {hasPrefs && (
                     <div>
-                        <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2">
+                        <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest mb-2">
                             Customer preferences
                         </p>
                         <div className="card p-3 space-y-2">
@@ -592,24 +638,33 @@ function SpecsDrawer({
 
                 {hasMaterials && (
                     <div>
-                        <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2">
-                            Materials allocated
+                        <p className="text-2xs font-bold text-surface-500 uppercase tracking-widest mb-2">
+                            Materials
                         </p>
+                        {/* Allocated / required, as on the Focus card — the
+                            drawer showed only "required", so a short job read
+                            as fully supplied. */}
                         <div className="card p-3 space-y-2">
-                            {order.material_allocations!.map((a, i) => (
-                                <div
-                                    key={i}
-                                    className="flex justify-between gap-2 border-b border-surface-50 last:border-0 pb-2 last:pb-0"
-                                >
-                                    <span className="text-xs text-surface-500">
-                                        {a.material.name}
-                                    </span>
-                                    <span className="text-xs font-semibold text-surface-900">
-                                        {a.quantity_required}{" "}
-                                        {a.material.unit_of_measure}
-                                    </span>
-                                </div>
-                            ))}
+                            {order.material_allocations!.map((a, i) => {
+                                const req   = Number(a.quantity_required ?? 0);
+                                const alloc = Number(a.quantity_allocated ?? 0);
+                                const short = req > alloc;
+                                return (
+                                    <div
+                                        key={i}
+                                        className="flex justify-between gap-2 border-b border-surface-50 last:border-0 pb-2 last:pb-0"
+                                    >
+                                        <span className="text-xs text-surface-500">
+                                            {a.material.name}
+                                        </span>
+                                        <span className={clsx("text-xs font-semibold tabular-nums",
+                                            short ? "text-amber-700" : "text-surface-900")}>
+                                            {alloc}/{req} {a.material.unit_of_measure}
+                                            {short && " · short"}
+                                        </span>
+                                    </div>
+                                );
+                            })}
                         </div>
                     </div>
                 )}
@@ -618,7 +673,7 @@ function SpecsDrawer({
                     !hasSpecs &&
                     !hasPrefs &&
                     !hasMaterials && (
-                        <p className="text-sm text-surface-400 text-center py-6">
+                        <p className="text-sm text-surface-500 text-center py-6">
                             No specifications recorded for this order.
                         </p>
                     )}
@@ -665,9 +720,9 @@ function CompletionScreen({
                     </svg>
                 </div>
                 <p className="text-xl font-bold text-surface-900">
-                    Task complete!
+                    Stage done!
                 </p>
-                <p className="text-xs text-surface-400 mt-1">
+                <p className="text-xs text-surface-500 mt-1">
                     {getProductName(completedTask)} ·{" "}
                     {completedTask.stage.name}
                 </p>
@@ -699,7 +754,7 @@ function CompletionScreen({
                                         {nextGroup.productName}
                                     </p>
                                     <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                        <span className="text-xs font-medium text-brand-600">
+                                        <span className="text-xs font-medium text-brand-700">
                                             {nextTask.stage.name}
                                         </span>
                                         <DueBadge date={nextGroup.dueDate} />
@@ -724,7 +779,7 @@ function CompletionScreen({
                         <p className="font-bold text-surface-900">
                             All tasks done!
                         </p>
-                        <p className="text-xs text-surface-400 mt-1">
+                        <p className="text-xs text-surface-500 mt-1">
                             You've cleared your queue.
                         </p>
                     </div>
@@ -777,7 +832,7 @@ function InlineDetail({
                 <span className="text-2xs font-bold text-surface-600 uppercase tracking-widest">
                     {label}
                 </span>
-                <span className="text-2xs font-semibold text-surface-400">
+                <span className="text-2xs font-semibold text-surface-500">
                     {count}
                 </span>
                 {alert && (
@@ -787,7 +842,7 @@ function InlineDetail({
                 )}
                 <svg
                     className={clsx(
-                        "w-3.5 h-3.5 text-surface-400 ml-auto transition-transform",
+                        "w-3.5 h-3.5 text-surface-500 ml-auto transition-transform",
                         open && "rotate-180"
                     )}
                     fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
@@ -826,6 +881,7 @@ function FocusCard({
     group,
     onAction,
     onProgress,
+    countOf,
     isActing,
     onNoteOpen,
     onSpecsOpen,
@@ -833,6 +889,8 @@ function FocusCard({
     group: OrderGroup;
     onAction: (task: MyTask, action: "start" | "complete" | "pause") => void;
     onProgress: (task: MyTask, quantityDone: number, batchId?: number) => void;
+    /** Shown count: the tailor's latest tap while it is being saved, else the server's. */
+    countOf: (taskId: number, batchId: number | undefined, server: number) => number;
     isActing: boolean;
     onNoteOpen: () => void;
     onSpecsOpen: () => void;
@@ -843,6 +901,7 @@ function FocusCard({
 
     const elapsed = useElapsedTimer(group.activeTask);
     const order = group.activeTask?.production_order ?? null;
+    const orderProgress = (group.activeTask ?? group.tasks[0])?.production_order.progress ?? null;
     const isOverdue =
         daysUntil(group.dueDate) < 0 &&
         group.completedCount < group.totalCount;
@@ -866,11 +925,9 @@ function FocusCard({
     // Gender is an identity fact, not a body measurement — it belongs beside the
     // garment name, and repeating it as a measurement tile wasted a slot in the
     // grid. Pulled out here and excluded from the list below.
-    const genderEntry = Object.entries(order?.measurements ?? {}).find(
-        ([k, v]) => k.toLowerCase().replace(/[^a-z]/g, "") === "gender" && v);
-    const gender = genderEntry?.[1];
-    const bodyMeasurements = Object.entries(order?.measurements ?? {}).filter(
-        ([k]) => k.toLowerCase().replace(/[^a-z]/g, "") !== "gender");
+    // In the clergy sheet's order (Neck, Shoulders, Sleeves, …), as the shop
+    // measures — not the order the keys happened to be typed in.
+    const { gender, body: bodyMeasurements } = orderMeasurements(order?.measurements);
     const hasMeasurements = bodyMeasurements.length > 0;
 
     // The rest of the drawer's content, ready for the inline sections below.
@@ -912,22 +969,22 @@ function FocusCard({
                                 </p>
                                 <p className="text-[13px] font-medium text-surface-600 leading-snug truncate">
                                     {group.productName}
-                                    {gender && <span className="text-surface-400"> · {gender}</span>}
+                                    {gender && <span className="text-surface-500"> · {gender}</span>}
                                 </p>
                             </>
                         ) : (
                             <p className="font-bold text-surface-900 text-base leading-snug truncate">
                                 {group.productName}
-                                {gender && <span className="text-surface-400 font-medium"> · {gender}</span>}
+                                {gender && <span className="text-surface-500 font-medium"> · {gender}</span>}
                             </p>
                         )}
-                        <p className="font-mono text-2xs text-surface-400 mt-0.5">
+                        <p className="font-mono text-2xs text-surface-500 mt-0.5">
                             {group.orderNumber}
                         </p>
                         <div className="flex items-center gap-2 flex-wrap mt-1.5">
                             <PriorityBadge priority={group.priority} />
                             <DueBadge date={group.dueDate} />
-                            <span className="text-2xs text-surface-400">
+                            <span className="text-2xs text-surface-500">
                                 Qty {group.quantity}
                             </span>
                         </div>
@@ -936,10 +993,10 @@ function FocusCard({
                     {/* Timer */}
                     {elapsed && (
                         <div className="shrink-0 flex flex-col items-end">
-                            <span className="text-lg font-bold font-mono text-brand-600 leading-none tabular-nums">
+                            <span className="text-lg font-bold font-mono text-brand-700 leading-none tabular-nums">
                                 {elapsed}
                             </span>
-                            <span className="text-2xs text-surface-400 mt-0.5">
+                            <span className="text-2xs text-surface-500 mt-0.5">
                                 on task
                             </span>
                         </div>
@@ -952,7 +1009,7 @@ function FocusCard({
                         <svg className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
                         </svg>
-                        <p className="text-xs text-amber-800 leading-relaxed">
+                        <p className="text-xs text-amber-800 leading-relaxed whitespace-pre-line">
                             {order.notes}
                         </p>
                     </div>
@@ -1035,25 +1092,34 @@ function FocusCard({
             <div className="card overflow-hidden">
                 {/* Progress header */}
                 <div className="px-3 pt-3 pb-2">
-                    <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-2xs font-bold text-surface-400 uppercase tracking-widest">
-                            Stages
+                    <div className="flex items-baseline justify-between gap-2 mb-1.5">
+                        <span className="text-2xs font-bold text-surface-500 uppercase tracking-widest whitespace-nowrap">
+                            Your stages
                         </span>
-                        <span className="text-2xs font-semibold text-surface-500">
+                        <span className="text-2xs font-semibold text-surface-500 whitespace-nowrap">
                             {group.completedCount}/{group.totalCount} done
                         </span>
                     </div>
-                    {/* Progress bar */}
+                    {/* Progress bar: the WHOLE order (every bench), not just
+                        this tailor's stages — "2/2 done" could show on an
+                        order that was far from finished. */}
                     <div className="h-1 w-full bg-surface-100 rounded-full overflow-hidden">
                         <div
                             className="h-full bg-brand-500 rounded-full transition-all duration-500"
                             style={{
-                                width: `${group.totalCount > 0
-                                    ? (group.completedCount / group.totalCount) * 100
-                                    : 0}%`,
+                                width: `${orderProgress
+                                    ? orderProgress.percent
+                                    : group.totalCount > 0
+                                        ? (group.completedCount / group.totalCount) * 100
+                                        : 0}%`,
                             }}
                         />
                     </div>
+                    {orderProgress && (
+                        <p className="mt-1.5 text-2xs font-semibold text-surface-600">
+                            Whole order {orderProgress.percent}% · {orderProgress.finished}/{group.quantity} finished
+                        </p>
+                    )}
                 </div>
 
                 {/* Task rows */}
@@ -1143,7 +1209,7 @@ function FocusCard({
                                                     onAction(task, "start");
                                                 }}
                                                 disabled={isActing}
-                                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-brand-500 text-white text-[11px] font-bold active:bg-brand-600 transition-colors disabled:opacity-50"
+                                                className="flex items-center justify-center gap-1.5 min-h-12 px-4 rounded-xl bg-brand-500 text-white text-sm font-bold active:bg-brand-600 transition-colors disabled:opacity-50"
                                             >
                                                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
@@ -1153,20 +1219,29 @@ function FocusCard({
                                                     : "Start"}
                                             </button>
                                         )}
-                                        {(order?.quantity ?? 1) > 1 && (task.status === "in_progress" || task.status === "pending" || task.status === "paused") && (() => {
+                                        {isInProgress && (
+                                            <PauseButton
+                                                disabled={isActing}
+                                                onPause={() => onAction(task, "pause")}
+                                            />
+                                        )}
+                                        {(order?.quantity ?? 1) > 1 && !isBlocked && (task.status === "in_progress" || task.status === "pending" || task.status === "paused") && (() => {
                                             // Batched orders count per colourway: pick a batch
                                             // chip, then the same +1/+5/+10 apply to it. The
                                             // task total stays derived — blue + green = overall.
                                             const batches = order?.batches ?? [];
-                                            const doneOf = (bid: number) =>
+                                            const serverDoneOf = (bid: number) =>
                                                 task.batch_progress?.find((r) => r.production_order_batch_id === bid)?.quantity_done ?? 0;
+                                            const doneOf = (bid: number) => countOf(task.id, bid, serverDoneOf(bid));
                                             const batch = batches.length
                                                 ? (batches.find((b) => b.id === activeBatchId)
                                                     ?? batches.find((b) => doneOf(b.id) < b.quantity)
                                                     ?? batches[0])
                                                 : null;
                                             const cap  = batch ? batch.quantity : order!.quantity;
-                                            const done = batch ? doneOf(batch.id) : (task.quantity_done ?? 0);
+                                            const done = batch ? doneOf(batch.id) : countOf(task.id, undefined, task.quantity_done ?? 0);
+                                            // Overall = server total + this batch's unsaved taps.
+                                            const overall = (task.quantity_done ?? 0) + (batch ? done - serverDoneOf(batch.id) : 0);
                                             return (
                                                 <div className="space-y-1.5">
                                                     {batches.length > 0 && (
@@ -1191,10 +1266,10 @@ function FocusCard({
                                                     )}
                                                     <div className="flex items-center gap-1 flex-wrap">
                                                         <span className="text-xs font-bold tabular-nums text-surface-700">
-                                                            {done}<span className="text-surface-400 font-medium">/{cap}</span>
+                                                            {done}<span className="text-surface-500 font-medium">/{cap}</span>
                                                             {batch && (
-                                                                <span className="text-2xs text-surface-400 font-medium ml-1.5">
-                                                                    overall {task.quantity_done ?? 0}/{order!.quantity}
+                                                                <span className="text-2xs text-surface-500 font-medium ml-1.5">
+                                                                    overall {overall}/{order!.quantity}
                                                                 </span>
                                                             )}
                                                         </span>
@@ -1202,7 +1277,7 @@ function FocusCard({
                                                             <button key={step}
                                                                 onClick={() => onProgress(task, Math.min(cap, done + step), batch?.id)}
                                                                 disabled={isActing || done >= cap}
-                                                                className="px-1.5 py-1 rounded-md bg-brand-50 border border-brand-200 text-brand-700 text-[11px] font-bold active:bg-brand-100 transition-colors disabled:opacity-40">
+                                                                className="min-h-12 min-w-12 px-3 rounded-xl bg-brand-50 border border-brand-200 text-brand-700 text-sm font-bold active:bg-brand-100 transition-colors disabled:opacity-40">
                                                                 +{step}
                                                             </button>
                                                         ))}
@@ -1210,7 +1285,7 @@ function FocusCard({
                                                             onClick={() => onProgress(task, Math.max(0, done - 1), batch?.id)}
                                                             disabled={isActing || done <= 0}
                                                             title="Correct the count down by one"
-                                                            className="px-1.5 py-1 rounded-md bg-surface-100 border border-surface-200 text-surface-500 text-[11px] font-bold active:bg-surface-200 transition-colors disabled:opacity-40">
+                                                            className="min-h-12 min-w-12 px-3 rounded-xl bg-surface-100 border border-surface-200 text-surface-500 text-sm font-bold active:bg-surface-200 transition-colors disabled:opacity-40">
                                                             −1
                                                         </button>
                                                     </div>
@@ -1224,12 +1299,12 @@ function FocusCard({
                                                     onAction(task, "complete");
                                                 }}
                                                 disabled={isActing}
-                                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-success text-white text-[11px] font-bold active:bg-success-700 transition-colors disabled:opacity-50"
+                                                className="flex items-center justify-center gap-1.5 min-h-12 px-4 rounded-xl bg-success text-white text-sm font-bold active:bg-success-700 transition-colors disabled:opacity-50"
                                             >
                                                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                                                 </svg>
-                                                Done
+                                                Mark done
                                             </button>
                                         )}
                                     </div>
@@ -1254,7 +1329,7 @@ function FocusCard({
                 <div className="flex border-t border-line">
                     <button
                         onClick={onNoteOpen}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-semibold text-surface-500 active:bg-surface-50 transition-colors border-r border-line"
+                        className="flex-1 flex items-center justify-center gap-1.5 min-h-12 text-xs font-semibold text-surface-500 active:bg-surface-50 transition-colors border-r border-line"
                     >
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
@@ -1263,7 +1338,7 @@ function FocusCard({
                     </button>
                     <button
                         onClick={onSpecsOpen}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-semibold text-surface-500 active:bg-surface-50 transition-colors"
+                        className="flex-1 flex items-center justify-center gap-1.5 min-h-12 text-xs font-semibold text-surface-500 active:bg-surface-50 transition-colors"
                     >
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" />
@@ -1286,19 +1361,18 @@ function FocusCard({
 // a floor supervisor does.
 
 function DeliveryWeekStrip({ groups }: { groups: OrderGroup[] }) {
-    const days = Array.from({ length: 7 }, (_, i) => {
-        const d = new Date();
-        d.setDate(d.getDate() + i);
-        return d;
-    });
-    const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+    // Seven days from TODAY ON THE BUSINESS CALENDAR (Africa/Nairobi), not the
+    // device's: a tablet left on another zone used to file an order under the
+    // wrong day. Each order sits on the day `daysUntil` says it is due.
+    const [by, bm, bd] = businessToday().split("-").map(Number);
+    const days = Array.from({ length: 7 }, (_, i) => new Date(Date.UTC(by, bm - 1, bd + i, 12)));
     const open = groups.filter((g) => g.completedCount < g.totalCount);
     const overdue = open.filter((g) => daysUntil(g.dueDate) < 0).length;
 
     return (
         <div className="card px-3 py-2.5">
             <div className="flex items-center justify-between mb-2">
-                <p className="text-2xs font-bold uppercase tracking-wide text-surface-400">Delivery week</p>
+                <p className="text-2xs font-bold uppercase tracking-wide text-surface-500">Delivery week</p>
                 {overdue > 0 && (
                     <span className="text-2xs font-bold text-danger bg-danger-light rounded-full px-2 py-0.5">
                         {overdue} overdue
@@ -1307,18 +1381,18 @@ function DeliveryWeekStrip({ groups }: { groups: OrderGroup[] }) {
             </div>
             <div className="grid grid-cols-7 gap-1">
                 {days.map((d, i) => {
-                    const due = open.filter((g) => g.dueDate && sameDay(new Date(g.dueDate), d));
+                    const due = open.filter((g) => g.dueDate && daysUntil(g.dueDate) === i);
                     const isToday = i === 0;
                     return (
                         <div key={i} className={clsx(
                             "rounded-lg py-1.5 text-center border",
                             isToday ? "border-brand-300 bg-brand-50" : "border-line bg-surface-50",
                         )}>
-                            <p className="text-2xs text-surface-400 leading-none">
-                                {d.toLocaleDateString("en-KE", { weekday: "short" })}
+                            <p className="text-2xs text-surface-500 leading-none">
+                                {d.toLocaleDateString("en-KE", { weekday: "short", timeZone: "UTC" })}
                             </p>
                             <p className={clsx("text-xs font-bold mt-0.5", isToday ? "text-brand-700" : "text-surface-700")}>
-                                {d.getDate()}
+                                {d.getUTCDate()}
                             </p>
                             <div className="flex justify-center gap-0.5 mt-1 min-h-[6px]">
                                 {due.slice(0, 3).map((g) => (
@@ -1327,7 +1401,7 @@ function DeliveryWeekStrip({ groups }: { groups: OrderGroup[] }) {
                                         daysUntil(g.dueDate) < 0 ? "bg-danger" : "bg-brand-500",
                                     )} />
                                 ))}
-                                {due.length > 3 && <span className="text-2xs leading-none text-surface-400">+</span>}
+                                {due.length > 3 && <span className="text-2xs leading-none text-surface-500">+</span>}
                             </div>
                         </div>
                     );
@@ -1358,8 +1432,12 @@ function QueueOrderGroup({
         daysUntil(group.dueDate) < 0 && !allDone;
     const isFocusedOrder = focusedOrderId === group.orderId;
 
-    const progressPct =
-        group.totalCount > 0
+    // Same measure as the Focus header: the whole order across every bench,
+    // so "0/1" never reads as "nothing done" on an order half sewn by others.
+    const orderProgress = (group.activeTask ?? group.tasks[0])?.production_order.progress ?? null;
+    const progressPct = orderProgress
+        ? orderProgress.percent
+        : group.totalCount > 0
             ? (group.completedCount / group.totalCount) * 100
             : 0;
 
@@ -1400,7 +1478,7 @@ function QueueOrderGroup({
                             {group.productName}
                         </span>
                         {isFocusedOrder && (
-                            <span className="text-2xs font-bold text-brand-600 bg-brand-100 px-1.5 py-0.5 rounded-full">
+                            <span className="text-2xs font-bold text-brand-700 bg-brand-100 px-1.5 py-0.5 rounded-full">
                                 Active
                             </span>
                         )}
@@ -1412,7 +1490,7 @@ function QueueOrderGroup({
                         )}
                     </div>
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                        <span className="font-mono text-2xs text-surface-400">
+                        <span className="font-mono text-2xs text-surface-500">
                             {group.orderNumber}
                         </span>
                         <DueBadge date={group.dueDate} />
@@ -1428,8 +1506,10 @@ function QueueOrderGroup({
                                 style={{ width: `${progressPct}%` }}
                             />
                         </div>
-                        <span className="text-2xs text-surface-400 shrink-0">
-                            {group.completedCount}/{group.totalCount}
+                        <span className="text-2xs text-surface-500 shrink-0">
+                            {orderProgress
+                                ? `${orderProgress.percent}%`
+                                : `${group.completedCount}/${group.totalCount}`}
                         </span>
                     </div>
                 </div>
@@ -1529,23 +1609,32 @@ function QueueOrderGroup({
                                                 onQuickAction(task, "start");
                                             }}
                                             disabled={isActing}
-                                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-brand-500 text-white text-xs font-bold active:bg-brand-600 transition-colors disabled:opacity-50"
+                                            className="flex items-center justify-center gap-1.5 min-h-12 px-4 rounded-xl bg-brand-500 text-white text-sm font-bold active:bg-brand-600 transition-colors disabled:opacity-50"
                                         >
                                             {task.status === "paused"
                                                 ? "Resume"
                                                 : "Start"}
                                         </button>
                                     )}
-                                    {canComplete && (
+                                    {isInProgress && (
+                                        <PauseButton
+                                            disabled={isActing}
+                                            onPause={() => onQuickAction(task, "pause")}
+                                        />
+                                    )}
+                                    {/* Done only for a single garment, as on Focus: a
+                                        multi-piece stage finishes itself when its last
+                                        piece is counted. */}
+                                    {canComplete && group.quantity === 1 && (
                                         <button
                                             onClick={() => {
                                                 navigator.vibrate?.([40, 30, 80]);
                                                 onQuickAction(task, "complete");
                                             }}
                                             disabled={isActing}
-                                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-success text-white text-xs font-bold active:bg-success-700 transition-colors disabled:opacity-50"
+                                            className="flex items-center justify-center gap-1.5 min-h-12 px-4 rounded-xl bg-success text-white text-sm font-bold active:bg-success-700 transition-colors disabled:opacity-50"
                                         >
-                                            Done
+                                            Mark done
                                         </button>
                                     )}
                                     {isDone && task.completed_at && (
@@ -1602,19 +1691,22 @@ export default function TailorWorkspacePage() {
             get<MyTask[]>(
                 queueFilter === "all"
                     ? "/v1/tailor/tasks?include_completed=true"
-                    : "/v1/tailor/tasks"
+                    : "/v1/tailor/tasks?include_order_context=true"
             ),
         staleTime: 20_000,
         refetchInterval: 30_000,
     });
 
     // Groups used in the Focus tab: only orders that have at least one active task
-    const activeGroups = useMemo(() => {
-        const activeTasks = rawTasks.filter(
-            (t) => t.status !== "completed" && t.status !== "failed"
-        );
-        return groupTasksByOrder(activeTasks);
-    }, [rawTasks]);
+    // Orders she still has a stage to work on. Built from ALL her tasks on
+    // those orders (the server sends her finished stages with them), so the
+    // checklist can read "Your stages 1/2 done" — filtering finished tasks out
+    // first made every order read 0/N.
+    const activeGroups = useMemo(
+        () => groupTasksByOrder(rawTasks).filter((g) =>
+            g.tasks.some((t) => t.status !== "completed" && t.status !== "failed")),
+        [rawTasks]
+    );
 
     // Groups used in the Queue tab: all tasks grouped
     const allGroups = useMemo(
@@ -1622,13 +1714,58 @@ export default function TailorWorkspacePage() {
         [rawTasks]
     );
 
-    const queueGroups = queueFilter === "all" ? allGroups : activeGroups;
+    // An order waiting on, or sent back from, inspection holds none of her
+    // open tasks — yet its outcome is hers to know. Keep it in the Active
+    // queue (its own lane) instead of only under "All".
+    const queueGroups = useMemo(() => {
+        if (queueFilter === "all") return allGroups;
+        const awaitingOutcome = allGroups.filter((g) =>
+            ["qc_pending", "qc_failed"].includes(g.tasks[0]?.production_order?.status ?? "")
+            && !activeGroups.some((a) => a.orderId === g.orderId));
+        return [...activeGroups, ...awaitingOutcome];
+    }, [queueFilter, allGroups, activeGroups]);
 
     const clampedFocusIndex = Math.min(
         focusIndex,
         Math.max(0, activeGroups.length - 1)
     );
     const focusedGroup = activeGroups[clampedFocusIndex] ?? null;
+
+    // Focus follows the ORDER, not the slot (Production Cycle 10). Counting the
+    // last piece finishes a stage without the "Mark done" screen, and the order
+    // then leaves Focus: the index used to stay put and silently land her on
+    // whatever job slid into that slot. Now: if the order only moved in the
+    // ranking, keep it in focus; if her stages on it are all done, say where it
+    // went and open her most urgent job.
+    const focusedOrderRef = useRef<number | null>(null);
+    // She moved (Next/Prev, a queue tap): remember the order she is on.
+    useEffect(() => {
+        focusedOrderRef.current = focusedGroup?.orderId ?? null;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [focusIndex]);
+    // The list changed under her: follow the order, or move on when it is gone.
+    useEffect(() => {
+        const prev = focusedOrderRef.current;
+        if (prev == null) {
+            focusedOrderRef.current = focusedGroup?.orderId ?? null;
+            return;
+        }
+        const now = activeGroups.findIndex((g) => g.orderId === prev);
+        if (now >= 0) {
+            if (now !== clampedFocusIndex) setFocusIndex(now);
+            return;
+        }
+        const gone = allGroups.find((g) => g.orderId === prev);
+        if (gone && !showCompletion) {
+            const status = gone.tasks[0]?.production_order?.status;
+            toast.success(status === "qc_pending"
+                ? `Your stages on ${gone.orderNumber} are done — it's with Quality Control`
+                : `Your stages on ${gone.orderNumber} are done`);
+        }
+        focusedOrderRef.current = activeGroups[0]?.orderId ?? null;
+        setFocusIndex(0);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeGroups]);
     // The task to pass to Note/Specs drawers is the active task of the focused group
     const drawerTask = focusedGroup?.activeTask ?? null;
 
@@ -1658,17 +1795,19 @@ export default function TailorWorkspacePage() {
                 navigator.vibrate?.([50, 30, 100, 30, 200]);
             } else {
                 toast.success(
-                    vars.action === "pause" ? "Task paused" : "Task started!"
+                    vars.action === "pause" ? "Stage paused" : "Stage started"
                 );
                 if (vars.action === "start") navigator.vibrate?.(40);
             }
             qc.invalidateQueries({ queryKey: ["my-tasks"] });
         },
         onError: async (e: ApiError, vars) => {
-            if (!isOnline || e.message?.includes("Network")) {
+            if (!isOnline || isNetworkFailure(e)) {
                 try {
-                    await queueOfflineTaskUpdate(vars.taskId, vars.action, {
-                        action: vars.action,
+                    await enqueueOffline({
+                        url: `/api/v1/tailor/tasks/${vars.taskId}/status`,
+                        method: "PUT",
+                        body: { action: vars.action },
                     });
                     toast.info(
                         "You're offline – update queued and will sync when reconnected."
@@ -1685,22 +1824,43 @@ export default function TailorWorkspacePage() {
     // Piece progress: absolute cumulative count, server-validated against the
     // pipeline (ceiling: earlier stages; floor: later stages). The 422 message
     // names the colliding stage, so surface it verbatim.
-    const progressMutation = useMutation({
-        mutationFn: ({ taskId, quantityDone, batchId }: { taskId: number; quantityDone: number; batchId?: number }) =>
-            post(`/v1/tailor/tasks/${taskId}/progress`, { quantity_done: quantityDone, batch_id: batchId }),
-        onSuccess: () => {
-            qc.invalidateQueries({ queryKey: ["my-tasks"] });
+    // Say it once per offline spell, not on every tap.
+    const toldQueued = useRef(0);
+    const pieceCounts = usePieceCounts(
+        (message) => toast.error(message),
+        () => {
+            if (Date.now() - toldQueued.current < 60_000) return;
+            toldQueued.current = Date.now();
+            toast.info("You're offline – counts are saved on this device and will sync when you reconnect.");
         },
-        onError: (e: any) => toast.error(e?.message ?? "Could not record progress"),
-    });
-
-    const handleProgress = useCallback(
-        (task: MyTask, quantityDone: number, batchId?: number) => {
-            navigator.vibrate?.(30);
-            progressMutation.mutate({ taskId: task.id, quantityDone, batchId });
-        },
-        [progressMutation]
     );
+
+    // The service worker drops an offline update the server refused and says
+    // why — show it, and refresh so the card shows the true state.
+    useEffect(() => {
+        const sw = navigator.serviceWorker;
+        if (!sw) return;
+        const onMessage = (event: MessageEvent) => {
+            if (event.data?.type === "task-update-refused") {
+                toast.error(event.data.message);
+                qc.invalidateQueries({ queryKey: ["my-tasks"] });
+            }
+            if (event.data?.type === "task-updates-synced") {
+                toast.success(event.data.message);
+                qc.invalidateQueries({ queryKey: ["my-tasks"] }).then(() => pieceCounts.clearSettled());
+            }
+        };
+        sw.addEventListener("message", onMessage);
+        // Back online: replay whatever waited, even where the browser has no
+        // Background Sync to do it.
+        window.addEventListener("online", requestReplay);
+        requestReplay();
+        return () => {
+            sw.removeEventListener("message", onMessage);
+            window.removeEventListener("online", requestReplay);
+        };
+    }, [qc, toast]);
+    const handleProgress = pieceCounts.record;
 
     const handleAction = useCallback(
         (task: MyTask, action: "start" | "complete" | "pause") => {
@@ -1735,7 +1895,12 @@ export default function TailorWorkspacePage() {
         setShowCompletion(false);
         setCompletedTask(null);
         focusGroup(group);
-        if (group.activeTask) handleAction(group.activeTask, "start");
+        // Only start what is free to start; a stage still waiting on another
+        // bench just gets focused, with its padlock showing why.
+        const next = group.activeTask;
+        if (next && next.status !== "in_progress" && !(next.blocked_by_stage && !next.started_at)) {
+            handleAction(next, "start");
+        }
     };
 
     const handleBackToQueue = () => {
@@ -1747,12 +1912,15 @@ export default function TailorWorkspacePage() {
     // Next group after completion: first group (excluding completed order) that
     // still has a pending/paused task
     const completedOrderId = completedTask?.production_order.id;
+    // Prefer work that is free to start now — including this tailor's next
+    // stage on the order just finished — over a stage still waiting.
+    const startable = (g: OrderGroup) =>
+        !!g.activeTask && !(g.activeTask.blocked_by_stage && !g.activeTask.started_at);
     const nextGroupAfterCompletion =
-        activeGroups.find(
-            (g) =>
-                g.orderId !== completedOrderId &&
-                g.activeTask !== null
-        ) ?? null;
+        activeGroups.find((g) => g.orderId !== completedOrderId && startable(g)) ??
+        activeGroups.find((g) => g.orderId === completedOrderId && startable(g)) ??
+        activeGroups.find((g) => g.orderId !== completedOrderId && g.activeTask !== null) ??
+        null;
 
     // ── Loading ───────────────────────────────────────────────────────────────
 
@@ -1768,15 +1936,9 @@ export default function TailorWorkspacePage() {
 
     return (
         <div className="flex flex-col h-full animate-fade-in">
-            {/* Offline banner */}
-            {!isOnline && (
-                <div className="mx-4 mb-2 flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-medium">
-                    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 5.636a9 9 0 010 12.728M15.536 8.464a5 5 0 010 7.072M8.464 8.464a5 5 0 000 7.072M5.636 5.636a9 9 0 000 12.728" />
-                    </svg>
-                    Offline – updates will sync when reconnected
-                </div>
-            )}
+            {/* No offline banner of its own: the app-wide one (PWAInstallBanner)
+                already says changes will sync, and two stacked banners said it
+                twice (Production Cycle 9). */}
 
             <PullRefreshIndicator
                 progress={pullProgress}
@@ -1792,8 +1954,8 @@ export default function TailorWorkspacePage() {
                         className={clsx(
                             "relative py-3 px-1 mr-6 text-sm font-semibold transition-colors",
                             activeTab === tab
-                                ? "text-brand-600"
-                                : "text-surface-400"
+                                ? "text-brand-700"
+                                : "text-surface-500"
                         )}
                     >
                         {tab === "focus" ? "Focus" : "Queue"}
@@ -1825,14 +1987,18 @@ export default function TailorWorkspacePage() {
                 )}
 
                 {/* ── FOCUS TAB ─────────────────────────────────────────── */}
+                {/* One job at a time reads best as a workbench card, not a
+                    banner: on a landscape tablet (Tab S9 Ultra ≈ 1480px) the card
+                    stretched so far that each measurement's value sat a hand-span
+                    from its name. Capped and centred; phones are unaffected. */}
                 {!showCompletion && activeTab === "focus" && (
-                    <div className="p-4 space-y-4">
+                    <div className="p-4 space-y-4 w-full max-w-3xl mx-auto">
                         {focusedGroup ? (
                             <>
                                 {/* Order position indicator */}
                                 {activeGroups.length > 1 && (
                                     <div className="flex items-center justify-between">
-                                        <p className="text-xs text-surface-400">
+                                        <p className="text-xs text-surface-500">
                                             Order {clampedFocusIndex + 1} of{" "}
                                             {activeGroups.length}
                                         </p>
@@ -1844,8 +2010,10 @@ export default function TailorWorkspacePage() {
                                                         setFocusIndex(i)
                                                     }
                                                     aria-label={`Order ${i + 1}`}
+                                                    // A 44px-tall hit area around a small dot.
                                                     style={{
-                                                        padding: "6px 3px",
+                                                        padding: "18px 6px",
+                                                        margin: "-12px 0",
                                                         background: "none",
                                                         border: "none",
                                                         cursor: "pointer",
@@ -1882,6 +2050,7 @@ export default function TailorWorkspacePage() {
                                     group={focusedGroup}
                                     onAction={handleAction}
                                     onProgress={handleProgress}
+                                    countOf={pieceCounts.shown}
                                     isActing={mutation.isPending}
                                     onNoteOpen={() => setNoteDrawerOpen(true)}
                                     onSpecsOpen={() =>
@@ -1932,7 +2101,7 @@ export default function TailorWorkspacePage() {
                                 )}
                             </>
                         ) : (
-                            <div className="flex flex-col items-center justify-center py-24 text-surface-400">
+                            <div className="flex flex-col items-center justify-center py-24 text-surface-500">
                                 <div className="w-16 h-16 rounded-2xl bg-surface-100 flex items-center justify-center mb-4">
                                     <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
                                         <path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" />
@@ -1980,7 +2149,7 @@ export default function TailorWorkspacePage() {
                         </div>
 
                         {queueGroups.length === 0 ? (
-                            <div className="card flex flex-col items-center justify-center py-16 text-surface-400">
+                            <div className="card flex flex-col items-center justify-center py-16 text-surface-500">
                                 <p className="text-sm font-medium">
                                     {queueFilter === "active"
                                         ? "No active tasks right now"
@@ -2005,7 +2174,7 @@ export default function TailorWorkspacePage() {
                                                 <span className={clsx("text-2xs font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border", section.tone)}>
                                                     {section.label} · {inLane.length}
                                                 </span>
-                                                {section.hint && <span className="text-2xs text-surface-400">{section.hint}</span>}
+                                                {section.hint && <span className="text-2xs text-surface-500">{section.hint}</span>}
                                             </div>
                                             <div className="space-y-3">
                                                 {inLane.map((group, i) => (

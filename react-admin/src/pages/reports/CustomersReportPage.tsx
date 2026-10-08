@@ -12,15 +12,13 @@ import {
 } from "@/api/reports";
 import { fmtKes } from "@/api/expenses";
 import { openWhatsApp } from "@/lib/whatsapp";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
 import {
     BarChart,
     Bar,
     LineChart,
     Line,
-    PieChart,
-    Pie,
-    Cell,
     XAxis,
     YAxis,
     CartesianGrid,
@@ -32,6 +30,10 @@ import dayjs from "dayjs";
 import {
     KPI_GRID,
     KpiCard,
+    tablistKeys,
+    LoadFailed,
+    ReportPending,
+    EmptyNote,
     ReportPdfButton,
     SectionHeader,
     TableWrapper,
@@ -45,20 +47,33 @@ import {
     CHART_COLORS,
     TH,
     TH_R,
+    useReportOutlet,
+    useReportTab,
 } from "./reportShared";
+import { NeemaTab } from "./NeemaReport";
+import ChannelEngagementPage from "@/pages/intelligence/ChannelEngagementPage";
+import CustomerGeographyPage from "@/pages/intelligence/CustomerGeographyPage";
 
-type CustomersTab = "overview" | "secondpurchase" | "ltv" | "retention" | "intelligence" | "replenishment" | "winback" | "institutions" | "outreachlog";
-const CUSTOMERS_TABS: readonly CustomersTab[] = ["overview", "secondpurchase", "ltv", "retention", "intelligence", "replenishment", "winback", "institutions", "outreachlog"];
+// Neema, Channels and Geography joined from Sales and the Intelligence menu
+// (reports consolidation, 2026-10-01). Channels and Geography keep the
+// intelligence.view permission their old pages had.
+type CustomersTab = "overview" | "secondpurchase" | "ltv" | "retention" | "intelligence" | "replenishment" | "winback" | "institutions" | "outreachlog" | "neema" | "channels" | "geography";
+const CUSTOMERS_TABS: readonly CustomersTab[] = ["overview", "secondpurchase", "ltv", "retention", "intelligence", "replenishment", "winback", "institutions", "outreachlog", "neema", "channels", "geography"];
 
 export default function CustomersReportPage() {
     const dr = useDateRange("this_month");
     // Honour deep-links like /reports/customers?tab=replenishment (the
     // attention feed sends users here) — read once on mount, same pattern as
     // ProductionPage's ?status=; after that the tab buttons own the state.
-    const [searchParams] = useSearchParams();
-    const [activeTab, setActiveTab] = useState<CustomersTab>(() => {
-        const t = searchParams.get("tab");
-        return CUSTOMERS_TABS.includes(t as CustomersTab) ? (t as CustomersTab) : "overview";
+    const { can } = usePermissions();
+    const visibleTabs = CUSTOMERS_TABS.filter((t) => (t !== "channels" && t !== "geography") || can("intelligence.view"));
+    const [activeTab, setActiveTab] = useReportTab(visibleTabs, "overview");
+
+    // Neema (AI agent) — loaded only on its tab.
+    const neemaQuery = useQuery({
+        queryKey: ["report-neema", dr.start, dr.end, dr.outlet],
+        queryFn: () => reportsApi.salesNeema(dr.params),
+        enabled: !!dr.start && !!dr.end && activeTab === "neema",
     });
 
     const periodDays = Math.max(
@@ -67,43 +82,45 @@ export default function CustomersReportPage() {
     );
 
     const summaryQuery = useQuery({
-        queryKey: ["report-customers-summary", dr.start, dr.end],
+        queryKey: ["report-customers-summary", dr.start, dr.end, dr.outlet],
+        placeholderData: (prev) => prev,   // keep the figures while a new period loads — no blank page
         queryFn: () => reportsApi.customerSummary(dr.params),
         enabled: !!dr.start && !!dr.end,
     });
     const ltvQuery = useQuery({
-        queryKey: ["report-customers-ltv", dr.start, dr.end],
+        queryKey: ["report-customers-ltv", dr.start, dr.end, dr.outlet],
         queryFn: () =>
             reportsApi.customerLifetimeValue({ ...dr.params, limit: 30 }),
         enabled: !!dr.start && !!dr.end,
     });
     const analyticsQuery = useQuery({
-        queryKey: ["report-customers-analytics", periodDays],
+        queryKey: ["report-customers-analytics", periodDays, dr.outlet],
         queryFn: () =>
-            reportsApi.customerAnalytics({ period: periodDays } as any),
+            reportsApi.customerAnalytics({ period: periodDays, ...(dr.outlet ? { outlet_id: Number(dr.outlet) } : {}) } as any),
     });
     const retentionQuery = useQuery({
-        queryKey: ["report-customers-retention", dr.start, dr.end],
+        queryKey: ["report-customers-retention", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.customerRetention(dr.params),
         enabled: !!dr.start && !!dr.end && activeTab === "retention",
     });
 
-    if (summaryQuery.isLoading)
-        return (
-            <div className="flex justify-center py-20">
-                <Spinner />
-            </div>
-        );
+    // Kept figures are the PREVIOUS period's: on failure they must not stand
+    // under this period's heading.
+    if (summaryQuery.isError && (!summaryQuery.data || summaryQuery.isPlaceholderData))
+        return <LoadFailed what="Customers & Neema" onRetry={() => summaryQuery.refetch()} />;
+    if (!summaryQuery.data)
+        return <ReportPending paused={summaryQuery.fetchStatus === "paused"} />;
 
     const summary = summaryQuery.data ?? {};
     const analytics = analyticsQuery.data ?? {};
 
+    // Zero-sized slices drew an empty pie; only segments with customers in them.
     const segmentData = Object.entries(analytics.segments ?? {}).map(
         ([name, value]) => ({
             name,
             value: Number(value),
         }),
-    );
+    ).filter((d) => d.value > 0);
     const spendBrackets = Object.entries(analytics.spend_brackets ?? {}).map(
         ([bracket, count]) => ({
             bracket,
@@ -122,7 +139,7 @@ export default function CustomersReportPage() {
     return (
         <div className="space-y-6 animate-fade-in">
             <ReportPageHeader
-                title="Customers Report"
+                title="Customers & Neema"
                 subtitle="Customer growth, segments, lifetime value, and retention."
                 reportType="customers"
                 exportPath="customers/lifetime-value"
@@ -133,12 +150,14 @@ export default function CustomersReportPage() {
                 onPresetChange={dr.handlePreset}
                 onStartChange={dr.setStart}
                 onEndChange={dr.setEnd}
+                outlet={dr.outlet}
+                onOutletChange={dr.setOutlet}
             />
 
             {/* KPIs */}
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Total Customers"
+                    label="Total customers"
                     value={
                         summary.total_customers ??
                         analytics.stats?.total_customers ??
@@ -146,41 +165,44 @@ export default function CustomersReportPage() {
                     }
                 />
                 <KpiCard
-                    label="New (Period)"
+                    label="New (period)"
+                    drill="new_customers"
                     value={summary.new_customers ?? 0}
                     color="text-success"
                     sub="Registered in range"
                 />
                 <KpiCard
-                    label="Unique Buyers"
+                    label="Buyers"
                     value={summary.unique_buyers ?? 0}
-                    sub="Placed ≥ 1 order"
+                    sub={`people who ordered · ${summary.new_buyers ?? 0} first-time, ${summary.returning_buyers ?? 0} returning`}
                 />
                 <KpiCard
-                    label="Repeat Purchase Rate"
+                    label="Bought twice or more"
                     value={`${summary.repeat_purchase_rate ?? 0}%`}
-                    sub={`${summary.repeat_buyers ?? 0} repeat buyers`}
+                    sub={`${summary.repeat_buyers ?? 0} of this period's buyers ordered again within it`}
                     color="text-brand-600"
                 />
             </div>
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="New Buyers"
+                    label="First-time buyers"
                     value={summary.new_buyers ?? 0}
+                    sub="first order ever, this period"
                     color="text-success"
                 />
                 <KpiCard
-                    label="Returning Buyers"
+                    label="Returning buyers"
                     value={summary.returning_buyers ?? 0}
+                    sub="had bought before this period"
                     color="text-info"
                 />
                 <KpiCard
-                    label="Active Customers"
+                    label="Active customers"
                     value={analytics.stats?.active_customers ?? 0}
                     sub={`Ordered in last ${periodDays}d`}
                 />
                 <KpiCard
-                    label="VIP Customers"
+                    label="VIP customers"
                     value={analytics.segments?.VIP ?? 0}
                     sub="10+ lifetime orders"
                     color="text-brand-600"
@@ -189,11 +211,11 @@ export default function CustomersReportPage() {
 
             {/* Tabs */}
             <div className="border-b border-line overflow-x-auto no-scrollbar">
-                <nav className="flex gap-1 -mb-px">
-                    {CUSTOMERS_TABS.map((tab) => (
+                <nav className="flex gap-1 -mb-px" role="tablist" aria-label="Report sections" onKeyDown={tablistKeys}>
+                    {visibleTabs.map((tab) => (
                         <button
                             key={tab}
-                            onClick={() => setActiveTab(tab)}
+                            onClick={() => setActiveTab(tab)} role="tab" aria-selected={activeTab === tab}
                             className={clsx(
                                 "px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap shrink-0 transition-colors capitalize",
                                 activeTab === tab
@@ -201,10 +223,16 @@ export default function CustomersReportPage() {
                                     : "border-transparent text-surface-500 hover:text-surface-700",
                             )}
                         >
-                            {tab === "secondpurchase"
-                                ? "Second Purchase"
+                            {tab === "neema"
+                                ? "Neema"
+                                : tab === "channels"
+                                ? "Channels"
+                                : tab === "geography"
+                                ? "Geography"
+                                : tab === "secondpurchase"
+                                ? "Second purchase"
                                 : tab === "ltv"
-                                ? "Lifetime Value"
+                                ? "Lifetime value"
                                 : tab === "replenishment"
                                   ? "Replenishment"
                                   : tab === "winback"
@@ -251,46 +279,23 @@ export default function CustomersReportPage() {
                    proactive contact: automated radar pings + manual win-back
                    outreach, newest first, with outcome attribution. ── */}
             {activeTab === "outreachlog" && <OutreachLogTab />}
+            {activeTab === "neema" && <NeemaTab query={neemaQuery} />}
+            {activeTab === "channels" && <ChannelEngagementPage embedded />}
+            {activeTab === "geography" && <CustomerGeographyPage embedded />}
 
             {activeTab === "overview" && (
                 <div className="space-y-6">
                     {/* Segments + spend brackets */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {segmentData.length === 0 && (
+                            <EmptyNote title="No customer segments for this period." hint="Segments fill in as customers buy." />
+                        )}
                         {segmentData.length > 0 && (
                             <div className="card p-5">
-                                <SectionHeader title="Customer Segments" />
-                                <ResponsiveContainer width="100%" height={200}>
-                                    <PieChart>
-                                        <Pie
-                                            data={segmentData}
-                                            dataKey="value"
-                                            nameKey="name"
-                                            cx="50%"
-                                            cy="50%"
-                                            outerRadius={75}
-                                            label={({ name, percent }: any) =>
-                                                `${name} ${(percent * 100).toFixed(0)}%`
-                                            }
-                                            labelLine={false}
-                                        >
-                                            {segmentData.map(
-                                                (_: any, i: number) => (
-                                                    <Cell
-                                                        key={i}
-                                                        fill={
-                                                            CHART_COLORS[
-                                                                i %
-                                                                    CHART_COLORS.length
-                                                            ]
-                                                        }
-                                                    />
-                                                ),
-                                            )}
-                                        </Pie>
-                                        <Tooltip />
-                                    </PieChart>
-                                </ResponsiveContainer>
-                                <div className="space-y-2 mt-3">
+                                <SectionHeader title="Customer segments" />
+                                {/* No pie: a single segment drew a 100% arc the browser renders as
+                                    nothing, and the list below already gives every share. */}
+                                <div className="space-y-2 mt-1">
                                     {segmentData.map((seg, i) => {
                                         const total = segmentData.reduce(
                                             (s, x) => s + x.value,
@@ -331,7 +336,7 @@ export default function CustomersReportPage() {
 
                         {spendBrackets.length > 0 && (
                             <div className="card p-5">
-                                <SectionHeader title="Lifetime Spend Brackets" />
+                                <SectionHeader title="Lifetime spend brackets" />
                                 <ResponsiveContainer width="100%" height={200}>
                                     <BarChart
                                         data={spendBrackets}
@@ -368,7 +373,7 @@ export default function CustomersReportPage() {
                     {/* Acquisition trend */}
                     {acquisitionTrend.length > 0 && (
                         <div className="card p-5">
-                            <SectionHeader title="New Customer Acquisition (Monthly)" />
+                            <SectionHeader title="New customer acquisition (monthly)" />
                             <ResponsiveContainer width="100%" height={220}>
                                 <LineChart data={acquisitionTrend}>
                                     <CartesianGrid
@@ -400,14 +405,14 @@ export default function CustomersReportPage() {
             {activeTab === "ltv" && (
                 <div className="card overflow-hidden">
                     <div className="px-5 pt-5 pb-4">
-                        <SectionHeader title="Top Customers by Lifetime Spend">
+                        <SectionHeader title="Top customers by lifetime spend">
                             <ExportCsvButton
                                 path="customers/lifetime-value"
                                 params={dr.params}
                             />
                         </SectionHeader>
                     </div>
-                    <TableWrapper>
+                    <TableWrapper ranked>
                         <table className="w-full">
                             <thead>
                                 <tr className="border-y border-line bg-surface-50/50">
@@ -507,7 +512,7 @@ export default function CustomersReportPage() {
             {activeTab === "retention" && (
                 <div className="space-y-6">
                     <div className="card p-5">
-                        <SectionHeader title="Monthly Cohort Retention" />
+                        <SectionHeader title="Monthly cohort retention" />
                         <p className="text-sm text-surface-500 mb-4">
                             Each row is a cohort of customers acquired in that
                             month. Numbers show how many placed an order in each
@@ -650,9 +655,10 @@ function CustomerIntelligence({
     end: string;
     onOpenWinBack: () => void;
 }) {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["customer-intelligence", start, end],
-        queryFn: () => reportsApi.customerIntelligence(start, end),
+        queryKey: ["outlet", outletId, "customer-intelligence", start, end],
+        queryFn: () => reportsApi.customerIntelligence(start, end, outletId),
         enabled: !!start && !!end,
         staleTime: 60_000,
     });
@@ -661,23 +667,23 @@ function CustomerIntelligence({
 
     // Human labels + tone for the RFM segments (order comes from the API).
     const RFM_META: Record<string, { label: string; tone: string }> = {
-        champions:       { label: "🏆 Champions",       tone: "text-success" },
-        loyal:           { label: "💚 Loyal",           tone: "text-success" },
-        promising:       { label: "🌱 Promising",       tone: "text-surface-800" },
-        needs_attention: { label: "👀 Needs attention", tone: "text-surface-800" },
-        at_risk:         { label: "⚠️ At risk",         tone: "text-amber-700" },
-        cant_lose:       { label: "🚨 Can't lose",      tone: "text-danger" },
-        hibernating:     { label: "😴 Hibernating",     tone: "text-surface-500" },
+        champions:       { label: "Champions",       tone: "text-success" },
+        loyal:           { label: "Loyal",           tone: "text-success" },
+        promising:       { label: "Promising",       tone: "text-surface-800" },
+        needs_attention: { label: "Needs attention", tone: "text-surface-800" },
+        at_risk:         { label: "At risk",         tone: "text-amber-700" },
+        cant_lose:       { label: "Can't lose",      tone: "text-danger" },
+        hibernating:     { label: "Hibernating",     tone: "text-surface-500" },
     };
 
     return (
         <div className="space-y-6">
             <div className={KPI_GRID}>
-                <KpiCard label="Returning Revenue" value={fmtKes(nvr.returning?.revenue ?? 0)}
+                <KpiCard label="Returning revenue" value={fmtKes(nvr.returning?.revenue ?? 0)}
                     sub={`${nvr.returning?.customers ?? 0} customers came back`} color="text-success" />
-                <KpiCard label="New-Customer Revenue" value={fmtKes(nvr.new?.revenue ?? 0)}
+                <KpiCard label="New-customer revenue" value={fmtKes(nvr.new?.revenue ?? 0)}
                     sub={`${nvr.new?.customers ?? 0} first-time buyers`} />
-                <KpiCard label="Walk-in / Anonymous" value={fmtKes(nvr.anonymous?.revenue ?? 0)}
+                <KpiCard label="Walk-in / anonymous" value={fmtKes(nvr.anonymous?.revenue ?? 0)}
                     sub={`${nvr.anonymous?.orders ?? 0} orders with no identity — capture phones!`} />
             </div>
 
@@ -702,7 +708,7 @@ function CustomerIntelligence({
                         <div className="mt-4 rounded-lg border border-danger-200 bg-danger-50/30 p-3">
                             <div className="flex items-center justify-between gap-2 mb-2">
                                 <p className="text-xs font-semibold text-danger">
-                                    💸 Win-back list — at-risk & can't-lose customers, biggest money first
+                                    Win-back list — at-risk & can't-lose customers, biggest money first
                                 </p>
                                 <button
                                     onClick={onOpenWinBack}
@@ -729,7 +735,7 @@ function CustomerIntelligence({
 
             {dormant.length > 0 && (
                 <div className="card card-body border border-amber-200 bg-amber-50/40">
-                    <SectionHeader title="📞 Worth a call — top customers gone quiet (60+ days)" />
+                    <SectionHeader title="Worth a call — top customers gone quiet (60+ days)" />
                     <div className="space-y-1.5 mt-1">
                         {dormant.map((d: any) => (
                             <div key={d.phone ?? d.name} className="flex items-center gap-3 text-xs">
@@ -787,9 +793,10 @@ function CustomerIntelligence({
 // WhatsApp ping so the shop reaches out BEFORE the customer remembers.
 
 function ReplenishmentRadarTab() {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["replenishment-radar"],
-        queryFn: () => reportsApi.replenishmentRadar(),
+        queryKey: ["outlet", outletId, "replenishment-radar"],
+        queryFn: () => reportsApi.replenishmentRadar(outletId),
         staleTime: 60_000,
     });
 
@@ -824,12 +831,12 @@ function ReplenishmentRadarTab() {
 
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Customers Due"
+                    label="Customers due"
                     value={summary.due_customers}
                     sub="Reorder window open now"
                 />
                 <KpiCard
-                    label="Expected Revenue"
+                    label="Expected revenue"
                     value={fmtKes(summary.expected_revenue)}
                     sub={`Across ${summary.due_pairs} product reorder${summary.due_pairs === 1 ? "" : "s"}`}
                     color="text-brand-600"
@@ -999,9 +1006,10 @@ function ReplenishmentRadarTab() {
 // the summary can attribute orders placed within 30 days of an outreach.
 
 function SecondPurchaseTab() {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["second-purchase"],
-        queryFn: () => reportsApi.secondPurchase(),
+        queryKey: ["outlet", outletId, "second-purchase"],
+        queryFn: () => reportsApi.secondPurchase(outletId ? { outlet_id: outletId } : undefined),
         staleTime: 60_000,
     });
 
@@ -1163,10 +1171,13 @@ function SecondPurchaseTab() {
 function WinBackTab() {
     const queryClient = useQueryClient();
     const [loggingKey, setLoggingKey] = useState<string | null>(null);
+    const { can } = usePermissions();
+    const canLogOutreach = can("customers.insights");
 
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["win-back-economics"],
-        queryFn: () => reportsApi.winBack(),
+        queryKey: ["outlet", outletId, "win-back-economics"],
+        queryFn: () => reportsApi.winBack(outletId),
         staleTime: 60_000,
     });
 
@@ -1191,6 +1202,9 @@ function WinBackTab() {
         row: WinBackCustomerRow,
         channel: "whatsapp" | "call",
     ) => {
+        // Recording a contact needs customers.insights (cycle 9); without it
+        // the WhatsApp link still opens, it just is not logged.
+        if (!canLogOutreach) return;
         setLoggingKey(row.ckey);
         try {
             await reportsApi.logWinBackOutreach({
@@ -1223,7 +1237,7 @@ function WinBackTab() {
 
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Value at Risk"
+                    label="Value at risk"
                     value={fmtKes(summary.annual_value_at_risk)}
                     sub={`${summary.customers_at_risk} customer${summary.customers_at_risk === 1 ? "" : "s"} gone quiet`}
                     color="text-danger"
@@ -1234,7 +1248,7 @@ function WinBackTab() {
                     sub="Outreach logged"
                 />
                 <KpiCard
-                    label="Won Back (90d)"
+                    label="Won back (90d)"
                     value={summary.won_back_90d}
                     sub="Ordered within 30d of outreach"
                     color="text-success"
@@ -1246,7 +1260,7 @@ function WinBackTab() {
                     color="text-success"
                 />
                 <KpiCard
-                    label="Win-back Rate"
+                    label="Win-back rate"
                     value={`${summary.win_back_rate_pct}%`}
                     sub="Of customers contacted (90d)"
                     color="text-brand-600"
@@ -1399,6 +1413,7 @@ function WinBackTab() {
                                                         WhatsApp
                                                     </button>
                                                 )}
+                                                {canLogOutreach && (
                                                 <button
                                                     onClick={() =>
                                                         void logOutreach(
@@ -1414,6 +1429,7 @@ function WinBackTab() {
                                                 >
                                                     Log call
                                                 </button>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>
@@ -1436,9 +1452,10 @@ function WinBackTab() {
 function InstitutionsTab() {
     const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["institutional-accounts"],
-        queryFn: () => reportsApi.institutionalAccounts(),
+        queryKey: ["outlet", outletId, "institutional-accounts"],
+        queryFn: () => reportsApi.institutionalAccounts(outletId),
         staleTime: 60_000,
     });
 
@@ -1468,13 +1485,13 @@ function InstitutionsTab() {
                     sub="Churches & business accounts"
                 />
                 <KpiCard
-                    label="Their Revenue Share"
+                    label="Their revenue share"
                     value={`${summary.share_of_total_revenue_pct}%`}
                     sub={`${fmtKes(summary.revenue_365_total)} of the last 365d`}
                     color="text-brand-600"
                 />
                 <KpiCard
-                    label="At Risk"
+                    label="At risk"
                     value={summary.at_risk_count}
                     sub="Quiet 60+ days, KES 10k+ value"
                     color={
@@ -1484,7 +1501,7 @@ function InstitutionsTab() {
                     }
                 />
                 <KpiCard
-                    label="At-risk Value"
+                    label="At-risk value"
                     value={fmtKes(summary.at_risk_value)}
                     sub="Annual revenue gone quiet"
                     color={
@@ -1743,7 +1760,7 @@ function OutreachLogTab() {
                     sub="Automated WhatsApp reminders sent"
                 />
                 <KpiCard
-                    label="Manual Outreach (30d)"
+                    label="Manual outreach (30d)"
                     value={summary.outreach_30d}
                     sub="Win-back contacts logged"
                 />
@@ -1758,7 +1775,7 @@ function OutreachLogTab() {
                     }
                 />
                 <KpiCard
-                    label="Won Back (30d)"
+                    label="Won back (30d)"
                     value={summary.won_back_30d}
                     sub="Outreach followed by an order"
                     color="text-success"

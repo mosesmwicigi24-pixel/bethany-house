@@ -8,6 +8,7 @@ use App\Models\Payment;
 use App\Services\ActivityLogService;
 use App\Services\NotificationService;
 use App\Services\ReceiptService;
+use App\Support\MakerChecker;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -59,6 +60,7 @@ class PaymentApprovalController extends Controller
         // every pending payment in the group, with the customer names and
         // amounts attached.
         $this->constrainToViewer($query, $request->user(), 'o');
+        $this->requireOrderVisibility($query, $request->user());
 
         if ($request->filled('search')) {
             $s = $request->search;
@@ -117,6 +119,7 @@ class PaymentApprovalController extends Controller
             ->where('p.requires_approval', true)
             ->where('p.approval_status', 'pending_review');
         $this->constrainToViewer($totalQuery, $request->user(), 'o');
+        $this->requireOrderVisibility($totalQuery, $request->user());
         $total = $totalQuery->count();
 
         return response()->json([
@@ -128,6 +131,19 @@ class PaymentApprovalController extends Controller
             ],
             'pending_count' => $total,
         ]);
+    }
+
+    /**
+     * constrainToViewer narrows by the caller's data scope — but the scope
+     * resolver answers "all" when NO role grants orders.view, so a role with
+     * payments.view and no orders.view at all (procurement) would see every
+     * pending payment. Without orders.view the inbox is empty.
+     */
+    private function requireOrderVisibility(\Illuminate\Database\Query\Builder $query, $user): void
+    {
+        if (!$user || !$user->can('orders.view')) {
+            $query->whereRaw('1 = 0');
+        }
     }
 
     // =========================================================================
@@ -257,6 +273,24 @@ class PaymentApprovalController extends Controller
             return response()->json(['message' => 'Payment is already approved.'], 422);
         }
 
+        // Maker ≠ checker (role hardening Phase 1B): whoever recorded the
+        // payment does not approve it. The recorder is payments.recorded_by,
+        // stamped by every creation path since 4D (null for the public pay
+        // page and webhooks — no staff member recorded those).
+        //
+        // Rows from before the column, until the owner-approved backfill
+        // (2026_10_03_480003) fills them, fall back to the audit trail's
+        // 'created' entry, as Phase 1B did. That fallback still FAILS OPEN when
+        // the entry is missing too; it never blocks the wrong person.
+        $recordedBy = $payment->recorded_by ?? DB::table('activity_log')
+            ->where('subject_type', Payment::class)
+            ->where('subject_id', $payment->id)
+            ->where('event', 'created')
+            ->where('causer_type', \App\Models\User::class)
+            ->orderBy('id')
+            ->value('causer_id');
+        MakerChecker::assertNotMaker($request->user(), 'payment.approve', $payment, $recordedBy);
+
         // Proof of payment is encouraged but not required — the admin may approve
         // without it at their own discretion (e.g. verbal/in-person confirmation).
         $approvedWithoutProof = empty($payment->proof_of_payment_path);
@@ -315,7 +349,10 @@ class PaymentApprovalController extends Controller
 
             // Append note to order
             $note = "Payment {$payment->payment_number} approved by " . $request->user()->first_name . '.';
-            if ($validated['notes']) {
+            // notes is optional (nullable): absent, it is not a key at all —
+            // reading it bare was an "Undefined array key" 500 that rolled the
+            // whole approval back (4D).
+            if (!empty($validated['notes'])) {
                 $note .= ' Note: ' . $validated['notes'];
             }
             $order->update(['notes' => ($order->notes ? $order->notes . "\n\n" : '') . $note]);
@@ -429,13 +466,22 @@ class PaymentApprovalController extends Controller
     // =========================================================================
     // GET /admin/payments/{id}/proof
     //
-    // Returns a short-lived signed URL to download the proof file.
-    // Only accessible to admin users - enforced via route middleware.
+    // Issues a signed link to the proof, valid ≤5 minutes (App\Support\SignedFiles),
+    // after the order-visibility check below.
     // =========================================================================
 
     public function serveProof($id)
     {
         $payment = Payment::findOrFail($id);
+
+        // A proof is a customer's bank slip or M-Pesa screenshot. It is
+        // served only to someone who could open the order it pays for —
+        // payments.view alone reaches every cashier and both procurement
+        // roles. 404, so a guessed id says nothing.
+        if (!$payment->order_id
+            || !\App\Services\RecordVisibility::canView(request()->user(), \App\Models\Order::class, (int) $payment->order_id)) {
+            return response()->json(['message' => 'Not found.'], 404);
+        }
 
         if (!$payment->proof_of_payment_path) {
             return response()->json(['message' => 'No proof of payment on file.'], 404);
@@ -445,17 +491,10 @@ class PaymentApprovalController extends Controller
             return response()->json(['message' => 'Proof file not found on storage.'], 404);
         }
 
-        // Always stream the raw file bytes so the frontend can load them
-        // directly as a blob URL - works with any storage driver and avoids
-        // the JSON-wrapping / signed-URL approach that breaks image rendering.
-        $content  = Storage::disk('local')->get($payment->proof_of_payment_path);
-        $mime     = Storage::disk('local')->mimeType($payment->proof_of_payment_path) ?: 'application/octet-stream';
-        $filename = basename($payment->proof_of_payment_path);
-
-        return response($content, 200)
-            ->header('Content-Type',        $mime)
-            ->header('Content-Disposition', 'inline; filename="' . $filename . '"')
-            ->header('Cache-Control',       'private, max-age=300');
+        // A signed link valid ≤5 minutes, not the bytes (4D): the check above
+        // is the issuer's whole job; the file route trusts only the signature.
+        return \App\Support\SignedFiles::issue(request(), 'files.payment-proof',
+            ['payment' => $payment->id], basename($payment->proof_of_payment_path));
     }
 
     // =========================================================================

@@ -19,6 +19,9 @@ import {
 } from "@/components/setup/FormComponents";
 import type { TaxRate } from "@/types/setup";
 import type { ApiError } from "@/types";
+import { usePermissions } from "@/hooks/usePermissions";
+import { PendingChanges, NeedsApprovalHint, PROPOSALS_QUERY_KEY } from "@/components/approvals/PendingChanges";
+import { waitsForApproval } from "@/api/proposals";
 
 const schema = z.object({
     name: z.string().min(1, "Name is required"),
@@ -92,6 +95,11 @@ export default function TaxRatesPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<TaxRate | null>(null);
     const [deleting, setDeleting] = useState<TaxRate | null>(null);
+    // Phase 3C: what a rate charges is proposed (finance) and signed by the
+    // super admin; the rest of a tax rate is the super admin's to edit.
+    const { can } = usePermissions();
+    const canEdit = can("settings.edit");
+    const [effectiveFrom, setEffectiveFrom] = useState("");
 
     const { data, isLoading } = useQuery({
         queryKey: ["tax-rates"],
@@ -119,6 +127,7 @@ export default function TaxRatesPage() {
         setModalOpen(true);
     };
     const openEdit = (t: TaxRate) => {
+        setEffectiveFrom("");
         reset({
             name: t.name,
             code: t.code,
@@ -135,10 +144,14 @@ export default function TaxRatesPage() {
 
     const saveMutation = useMutation({
         mutationFn: (v: FormValues) =>
-            editing ? taxRatesApi.update(editing.id, v) : taxRatesApi.create(v),
-        onSuccess: () => {
+            editing
+                ? taxRatesApi.update(editing.id, { ...v, effective_from: effectiveFrom ? new Date(effectiveFrom).toISOString() : null })
+                : taxRatesApi.create(v),
+        onSuccess: (res) => {
             qc.invalidateQueries({ queryKey: ["tax-rates"] });
-            toast.success(editing ? "Tax rate updated." : "Tax rate added.");
+            qc.invalidateQueries({ queryKey: [PROPOSALS_QUERY_KEY] });
+            if (waitsForApproval(res)) toast.info(res.message);
+            else toast.success(editing ? "Tax rate updated." : "Tax rate added.");
             setModalOpen(false);
         },
         onError: (err: ApiError) => toast.error(err.message),
@@ -146,7 +159,11 @@ export default function TaxRatesPage() {
 
     const toggleMutation = useMutation({
         mutationFn: (id: number) => taxRatesApi.toggle(id),
-        onSuccess: () => qc.invalidateQueries({ queryKey: ["tax-rates"] }),
+        onSuccess: (res) => {
+            qc.invalidateQueries({ queryKey: ["tax-rates"] });
+            qc.invalidateQueries({ queryKey: [PROPOSALS_QUERY_KEY] });
+            if (res.proposal && res.proposal.status !== "applied") toast.info(res.message);
+        },
         onError: (err: ApiError) => toast.error(err.message),
     });
 
@@ -170,10 +187,14 @@ export default function TaxRatesPage() {
                         POS sales. Zero-rated items should use 0%.
                     </p>
                 </div>
-                <button onClick={openCreate} className="btn-primary shrink-0 self-start sm:self-auto">
-                    + Add Tax Rate
-                </button>
+                {canEdit && (
+                    <button onClick={openCreate} className="btn-primary shrink-0 self-start sm:self-auto">
+                        + Add Tax Rate
+                    </button>
+                )}
             </div>
+
+            <PendingChanges subjectType="tax_rate" subjectIds={taxRates.map((t) => t.id)} />
 
             <Section title="Configured Tax Rates">
                 {isLoading ? (
@@ -257,7 +278,7 @@ export default function TaxRatesPage() {
                                     >
                                         <EditIcon />
                                     </button>
-                                    {!tax.is_default && (
+                                    {canEdit && !tax.is_default && (
                                         <button
                                             onClick={() => setDeleting(tax)}
                                             className="btn-ghost btn-sm text-danger hover:bg-danger-light"
@@ -363,6 +384,12 @@ export default function TaxRatesPage() {
                                 max={100}
                                 {...register("rate")}
                             />
+                            {editing && (
+                                <NeedsApprovalHint>
+                                    A change to the rate, or to whether it is active or the default,
+                                    needs approval from the super admin.
+                                </NeedsApprovalHint>
+                            )}
                         </Field>
                         <Field label="Type">
                             <FieldSelect className="input" {...register("type")}>
@@ -408,6 +435,28 @@ export default function TaxRatesPage() {
                             label="Set as default tax rate"
                         />
                     </div>
+
+                    {editing && (
+                        <div className="pt-2 border-t border-line">
+                            <Field
+                                label="Takes effect"
+                                hint="Leave empty for 'when approved'. Never earlier than now: a tax change is not retroactive."
+                            >
+                                <FieldInput
+                                    className="input"
+                                    type="datetime-local"
+                                    value={effectiveFrom}
+                                    onChange={(e) => setEffectiveFrom(e.target.value)}
+                                />
+                            </Field>
+                            {!canEdit && (
+                                <p className="text-2xs text-surface-500 mt-2">
+                                    You can propose the rate, active and default; the name, code, type,
+                                    country and scope are the super admin&apos;s to edit.
+                                </p>
+                            )}
+                        </div>
+                    )}
                 </div>
             </Modal>
 

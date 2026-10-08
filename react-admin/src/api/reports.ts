@@ -21,24 +21,26 @@ export const reportsApi = {
         get<any>(`${BASE}/dashboard/kpis`, { params: { days } }),
 
     // Executive dashboard — the MetricEngine-backed command centre.
-    executive: (period: string, outletId?: number) =>
-        get<any>(`${BASE}/executive`, { params: { period, ...(outletId ? { outlet_id: outletId } : {}) } }),
+    // The Executive figures for a window (periodParams: a known preset by name,
+    // so an in-progress period compares like for like; anything else as dates).
+    executive: (params: Record<string, string | number>) =>
+        get<any>(`${BASE}/executive`, { params }),
 
     // Production intelligence: cycle times, bottlenecks, tailors, QC, capacity, materials.
-    productionIntelligence: (from: string, to: string) =>
-        get<any>(`${BASE}/production-intelligence`, { params: { period: "custom", from, to } }),
+    productionIntelligence: (from: string, to: string, outletId?: number) =>
+        get<any>(`${BASE}/production-intelligence`, { params: { period: "custom", from, to, ...(outletId ? { outlet_id: outletId } : {}) } }),
 
     // Inventory intelligence: valuation, ABC + cover days, dead stock, materials.
-    inventoryIntelligence: (from: string, to: string) =>
-        get<any>(`${BASE}/inventory-intelligence`, { params: { period: "custom", from, to } }),
+    inventoryIntelligence: (from: string, to: string, outletId?: number) =>
+        get<any>(`${BASE}/inventory-intelligence`, { params: { period: "custom", from, to, ...(outletId ? { outlet_id: outletId } : {}) } }),
 
     // Procurement intelligence: supplier scorecard, purchase suggestions, open POs.
-    procurementIntelligence: (from: string, to: string) =>
-        get<any>(`${BASE}/procurement-intelligence`, { params: { period: "custom", from, to } }),
+    procurementIntelligence: (from: string, to: string, outletId?: number) =>
+        get<any>(`${BASE}/procurement-intelligence`, { params: { period: "custom", from, to, ...(outletId ? { outlet_id: outletId } : {}) } }),
 
     // Customer intelligence: segments, new vs returning, top + dormant customers.
-    customerIntelligence: (from: string, to: string) =>
-        get<any>(`${BASE}/customer-intelligence`, { params: { period: "custom", from, to } }),
+    customerIntelligence: (from: string, to: string, outletId?: number) =>
+        get<any>(`${BASE}/customer-intelligence`, { params: { period: "custom", from, to, ...(outletId ? { outlet_id: outletId } : {}) } }),
 
     // Replenishment radar — per-customer product reorder cycles, "as of now"
     // (no date range: due/overdue only means anything against today).
@@ -135,8 +137,37 @@ export const reportsApi = {
         }),
 
     // Financial intelligence (reports.financial): earned P&L, budgets, cash flow, rails.
-    financialIntelligence: (from: string, to: string) =>
-        get<any>(`${BASE}/financial-intelligence`, { params: { period: "custom", from, to } }),
+    financialIntelligence: (from: string, to: string, outletId?: number) =>
+        get<any>(`${BASE}/financial-intelligence`, { params: { period: "custom", from, to, ...(outletId ? { outlet_id: outletId } : {}) } }),
+
+    // Row-level drill with the PAGE's own filters (dates as start_date/end_date
+    // or a period, outlet_id) — so the rows answer for exactly the scope of the
+    // headline that opened them. The backend states what the number is
+    // (`definition`) and where each row may lead (`links`); nothing is guessed here.
+    drillWith: (metric: string, params: Record<string, any>) =>
+        get<any>(`${BASE}/drill/${metric}`, { params }),
+
+    // Staff, Outlets & Performance: outlets and salespeople, this window vs the previous.
+    // params from periodParams(): a known preset by name (like-for-like previous period), else dates.
+    performance: (params: Record<string, string | number>) =>
+        get<PerformanceReport>(`${BASE}/performance`, { params }),
+
+    // Where the period's orders went: sold / unconfirmed / lost / refunded, and who lost them.
+    outcomes: (params: Record<string, any>) => get<OrderOutcomes>(`${BASE}/outcomes`, { params }),
+    // Stock by time since it last moved, at cost (cost needs reports.financial).
+    stockAging: (params: Record<string, any>) => get<StockAging>(`${BASE}/inventory/aging`, { params }),
+
+    // Business Explorer: any measure by any dimension, narrowed by f_<dimension> filters.
+    explorer: (params: Record<string, any>) => get<ExplorerReport>(`${BASE}/explorer`, { params }),
+    // The orders (or payments, by method) behind one Explorer row.
+    explorerOrders: (params: Record<string, any>) => get<any>(`${BASE}/explorer/orders`, { params }),
+
+    // Audit & Data Quality: where the records behind the figures are incomplete.
+    dataQuality: (params: Record<string, string | number>) =>
+        get<DataQualityReport>(`${BASE}/data-quality`, { params }),
+
+    // Outlets a report can be filtered by (any report page; no POS access needed).
+    outlets: () => get<{ data: { id: number; name: string }[] }>(`${BASE}/outlets`),
 
     // Row-level drill-down: the same query as the KPI, aggregation removed.
     drill: (metric: string, period: string, opts?: { page?: number; bucket?: string; outletId?: number }) =>
@@ -212,7 +243,8 @@ export const reportsApi = {
         get<any>(`${BASE}/customers/retention`, { params }),
 
     // Inventory
-    inventoryValuationBreakdown: () => get<any>(`${BASE}/inventory/valuation`),
+    inventoryValuationBreakdown: (outletId?: number) =>
+        get<any>(`${BASE}/inventory/valuation`, { params: { ...(outletId ? { outlet_id: outletId } : {}) } }),
 
     stockOnHand: (
         params: DateRangeParams & {
@@ -432,6 +464,8 @@ export function datePresetRange(preset: DatePreset): {
 } {
     const fmt = (d: dayjs.Dayjs) => d.format("YYYY-MM-DD");
     const now = dayjs();
+    // "This week/month/quarter/year" run to TODAY: ending on the 31st showed days
+    // that have not happened and made every comparison look like a collapse.
 
     switch (preset) {
         case "today":
@@ -447,7 +481,7 @@ export function datePresetRange(preset: DatePreset): {
         case "this_week":
             return {
                 start: fmt(now.startOf("week")),
-                end: fmt(now.endOf("week")),
+                end: fmt(now.endOf("day")),
             };
         case "last_week":
             return {
@@ -477,7 +511,7 @@ export function datePresetRange(preset: DatePreset): {
         case "this_month":
             return {
                 start: fmt(now.startOf("month")),
-                end: fmt(now.endOf("month")),
+                end: fmt(now.endOf("day")),
             };
         case "last_month":
             return {
@@ -487,7 +521,7 @@ export function datePresetRange(preset: DatePreset): {
         case "this_quarter":
             return {
                 start: fmt(now.startOf("quarter")),
-                end: fmt(now.endOf("quarter")),
+                end: fmt(now.endOf("day")),
             };
         case "last_quarter":
             return {
@@ -497,7 +531,7 @@ export function datePresetRange(preset: DatePreset): {
         case "this_year":
             return {
                 start: fmt(now.startOf("year")),
-                end: fmt(now.endOf("year")),
+                end: fmt(now.endOf("day")),
             };
         case "last_year":
             return {
@@ -515,19 +549,19 @@ export function datePresetRange(preset: DatePreset): {
 export const DATE_PRESETS: { value: DatePreset; label: string }[] = [
     { value: "today", label: "Today" },
     { value: "yesterday", label: "Yesterday" },
-    { value: "this_week", label: "This Week" },
-    { value: "last_week", label: "Last Week" },
-    { value: "last_7_days", label: "Last 7 Days" },
-    { value: "last_30_days", label: "Last 30 Days" },
-    { value: "last_60_days", label: "Last 60 Days" },
-    { value: "last_90_days", label: "Last 90 Days" },
-    { value: "this_month", label: "This Month" },
-    { value: "last_month", label: "Last Month" },
-    { value: "this_quarter", label: "This Quarter" },
-    { value: "last_quarter", label: "Last Quarter" },
-    { value: "this_year", label: "This Year" },
-    { value: "last_year", label: "Last Year" },
-    { value: "custom", label: "Custom Range" },
+    { value: "this_week", label: "This week" },
+    { value: "last_week", label: "Last week" },
+    { value: "last_7_days", label: "Last 7 days" },
+    { value: "last_30_days", label: "Last 30 days" },
+    { value: "last_60_days", label: "Last 60 days" },
+    { value: "last_90_days", label: "Last 90 days" },
+    { value: "this_month", label: "This month" },
+    { value: "last_month", label: "Last month" },
+    { value: "this_quarter", label: "This quarter" },
+    { value: "last_quarter", label: "Last quarter" },
+    { value: "this_year", label: "This year" },
+    { value: "last_year", label: "Last year" },
+    { value: "custom", label: "Custom range" },
 ];
 
 // ── Sales ledger ──────────────────────────────────────────────────────────────
@@ -542,7 +576,8 @@ export interface LedgerFigures {
 export interface LedgerBucket {
     period: string;
     total: LedgerFigures;
-    by_channel: Record<"till" | "web" | "chat" | "quoted", LedgerFigures>;
+    /** Keyed by Order::REPORTING_CHANNELS — chat splits into the two apps. */
+    by_channel: Record<"till" | "web" | "whatsapp" | "messenger" | "chat" | "quoted", LedgerFigures>;
 }
 // ── Second-purchase engine ────────────────────────────────────────────────────
 
@@ -615,7 +650,9 @@ export interface OrderPipelineReport {
         currency: string;
     };
     aging: { key: "fresh" | "recent" | "stale" | "dormant"; label: string; orders: number; value: number }[];
-    by_channel: { channel: "till" | "web" | "chat" | "quoted"; label: string; orders: number; value: number }[];
+    /** Chat splits into the two apps the business sells on; "chat" itself
+     *  appears only when an order names neither (Order::REPORTING_CHANNELS). */
+    by_channel: { channel: "till" | "web" | "whatsapp" | "messenger" | "chat" | "quoted"; label: string; orders: number; value: number }[];
     orders: PipelineOrder[];
 }
 
@@ -635,7 +672,7 @@ export interface SalesLedger {
     /** Unconfirmed carts. Reportable, never income. */
     pipeline: {
         total: { orders: number; sales: number };
-        by_channel: Record<"till" | "web" | "chat" | "quoted", { orders: number; sales: number }>;
+        by_channel: Record<"till" | "web" | "whatsapp" | "messenger" | "chat" | "quoted", { orders: number; sales: number }>;
     };
     /** recognised + pipeline = gross. Bridges this report to older printouts. */
     reconciliation: {
@@ -1157,4 +1194,98 @@ export interface NeemaSalesReport {
         /** Date daily snapshots began collecting; period figures before this are structurally zero. */
         daily_since: string | null;
     };
+}
+
+// ─── Staff, Outlets & Performance ────────────────────────────────────────────
+export interface PerformanceRow {
+    id: number | null;
+    name: string;
+    sold: number;
+    sold_previous: number;
+    orders: number;
+    orders_previous: number;
+    aov: number | null;
+    buyers: number;
+    collected: number;
+    unconfirmed_carts: number;
+    unconfirmed_value: number;
+}
+// ─── Order outcomes & stock aging ─────────────────────────────────────────────
+export interface OutcomeBucket { orders: number; value: number }
+export interface OrderOutcomes {
+    sold: OutcomeBucket;
+    unconfirmed: OutcomeBucket;
+    lost: OutcomeBucket & {
+        previous_value: number; previous_orders: number; share_pct: number | null;
+        by_salesperson: { id: number | null; name: string; orders: number; value: number }[];
+    };
+    refunded: OutcomeBucket;
+    other: OutcomeBucket;
+}
+export interface StockAging {
+    buckets: { key: string; label: string; lines: number; units: number; cost_value: number | null }[];
+    slow_items: { id: number; ref: string; detail: string; units: number; amount: number | null; days_since_moved: number | null; bucket: string; links: Record<string, string> }[];
+    totals: { lines: number; units: number; cost_value: number | null; uncosted_lines: number };
+    turnover: { sold_90_days: number; on_hand: number; ratio: number | null; note: string };
+}
+
+// ─── Business Explorer ────────────────────────────────────────────────────────
+export type ExplorerMeasure = "sold" | "orders" | "buyers" | "aov" | "collected" | "line_value" | "units";
+export interface ExplorerRow extends Partial<Record<ExplorerMeasure, number | null>> {
+    key: string;
+    label: string;
+}
+export interface ExplorerReport {
+    dimension: string;
+    level: "order" | "item" | "payment";
+    measures: ExplorerMeasure[];
+    rows: ExplorerRow[];
+    row_count: number;
+    totals: Partial<Record<ExplorerMeasure, number | null>>;
+    dimensions: Record<string, { label: string; level: string }>;
+    filters: Record<string, string>;
+    row_limit: number;
+}
+
+// ─── Audit & Data Quality ─────────────────────────────────────────────────────
+export type DataQualityLinks = Partial<Record<"order" | "customer" | "payment" | "production" | "expense" | "product", string>>;
+export interface DataQualityRow {
+    kind: "order" | "customer" | "payment" | "expense" | "product" | "currency";
+    id: number | null;
+    ref?: string | null;
+    customer?: string | null;
+    detail?: string | null;
+    date?: string | null;
+    amount?: number | null;
+    records?: number;
+    lines?: number;
+    phone_field?: string | null;
+    links: DataQualityLinks;
+}
+export interface DataQualityCheck {
+    key: string;
+    group: "sales" | "money" | "customers";
+    scope: "period" | "current";
+    outlet: boolean;
+    severity: "high" | "medium" | "low";
+    title: string;
+    affects: string;
+    fix: { label: string; to: string | null };
+    count: number;
+    value: number | null;
+    rows: DataQualityRow[];
+}
+export interface DataQualityReport {
+    period: { key: string; start: string; end: string };
+    checks: DataQualityCheck[];
+    gaps: { key: string; title: string; detail: string; metrics: string[] }[];
+    coverage: { orders: number; buyer_identified: number | null; lines: number; lines_costed: number | null };
+    row_limit: number;
+}
+
+export interface PerformanceReport {
+    period: { start: string; end: string; previous_start: string; previous_end: string };
+    outlets: PerformanceRow[];
+    salespeople: PerformanceRow[];
+    totals: { sold: number; orders: number; collected: number };
 }

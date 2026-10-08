@@ -332,6 +332,7 @@
                             <label class="block text-xs font-semibold text-primary-400 uppercase tracking-wide mb-1.5">Phone</label>
                             <input wire:model="phone" type="text"
                                    class="w-full border border-primary-100 rounded-xl px-3.5 py-2.5 text-sm text-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/15 focus:border-primary-300 transition" />
+                            @error('phone')<p class="text-xs text-danger-500 mt-1">{{ $message }}</p>@enderror
                         </div>
                     </div>
                     <div class="grid grid-cols-2 gap-4">

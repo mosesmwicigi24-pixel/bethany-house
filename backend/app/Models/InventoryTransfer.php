@@ -52,4 +52,19 @@ class InventoryTransfer extends Model
     public function scopePending($query)   { return $query->where('status', 'pending'); }
     public function scopeApproved($query)  { return $query->where('status', 'approved'); }
     public function scopeCompleted($query) { return $query->where('status', 'completed'); }
+
+    /**
+     * Transfers this user may see (Phase 4A). A transfer touches two outlets;
+     * it is in scope when EITHER side is one of the caller's — the sending
+     * manager dispatches it, the receiving manager receives it.
+     */
+    public function scopeVisibleTo($query, ?\App\Models\User $user)
+    {
+        \App\Services\DataScopeResolver::boundToOutlets(
+            $query, $user, 'inventory.view',
+            ['inventory_transfers.from_outlet_id', 'inventory_transfers.to_outlet_id'],
+        );
+
+        return $query;
+    }
 }

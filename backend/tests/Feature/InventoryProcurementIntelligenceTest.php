@@ -32,7 +32,11 @@ class InventoryProcurementIntelligenceTest extends TestCase
     {
         $user = User::factory()->create();
         $user->assignRole(Role::findOrCreate('inventory_manager', 'sanctum'));
-        $user->givePermissionTo(Permission::findOrCreate('reports.view', 'sanctum'));
+        \Tests\ReportAccess::grantPages($user);
+        // Cycle 9: customer contacts need customers.view, recording outreach
+        // needs customers.insights, stock at cost needs reports.financial.
+        // This user works the feature under test, so holds what it needs.
+        $user->givePermissionTo(Permission::findOrCreate('reports.financial', 'sanctum'));
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 

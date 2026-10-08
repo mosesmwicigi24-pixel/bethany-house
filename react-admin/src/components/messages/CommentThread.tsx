@@ -103,7 +103,7 @@ function MentionDropdown({ query, onSelect }: MentionDropdownProps) {
                     </div>
                     <div className="min-w-0">
                         <p className="text-xs font-medium text-surface-800 truncate">{u.name}</p>
-                        <p className="text-2xs text-surface-400 truncate">{u.email}</p>
+                        {u.email && <p className="text-2xs text-surface-400 truncate">{u.email}</p>}
                     </div>
                 </button>
             ))}

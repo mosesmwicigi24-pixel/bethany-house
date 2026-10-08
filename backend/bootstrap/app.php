@@ -61,6 +61,31 @@ return Application::configure(basePath: dirname(__DIR__))
             // included — reached every admin route lacking a per-route
             // permission gate.
             'ensure.staff' => EnsureStaff::class,
+            // One date contract for Reports, whichever spelling the caller
+            // knows — see the class docblock (D4).
+            'report.window' => \App\Http\Middleware\NormalisesReportWindow::class,
+            // Every figure on a report from the same instant (cycle 8).
+            'report.snapshot' => \App\Http\Middleware\ReadsOneSnapshot::class,
+            // Customer phones and emails need customers.view (owner, cycle 9).
+            'report.contacts' => \App\Http\Middleware\RedactsCustomerContacts::class,
+            // One permission per report page, and the export rule for that
+            // page (role hardening 3A) — see App\Support\ReportPages.
+            'report.page'   => \App\Http\Middleware\RequiresReportPage::class,
+            'report.export' => \App\Http\Middleware\RequiresReportExport::class,
+            // Reports are business-wide for whoever may read them (owner,
+            // 2026-10-03): lifts the Phase 4A outlet/own row scope for the
+            // section, nothing else.
+            'report.business_wide' => \App\Http\Middleware\ReportsAreBusinessWide::class,
+            // Customer phones, emails and addresses by role on the
+            // operational screens (Phase 4A) — see CustomerContacts::policyFor.
+            'contacts.mask' => \App\Http\Middleware\MasksCustomerContacts::class,
+            // The owner's accounts never work the till (role hardening 1B).
+            // A route middleware, because Gate::before lets super_admin past
+            // every permission — see the class docblock.
+            'owner.no_transact' => \App\Http\Middleware\OwnerDoesNotTransact::class,
+            // Privileged actions need a recent re-confirmation of identity on
+            // this session (Phase 4C, role plan §12.3).
+            'step.up' => \App\Http\Middleware\RequireStepUp::class,
         ]);
 
         // Every staff API call → request_logs (who looked at what). Staff-only
@@ -71,6 +96,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->api(append: [
             \App\Http\Middleware\AuditStaffRequests::class,
             \App\Http\Middleware\DownloadGate::class,
+            // A 403 on a sensitive route → activity_log authorization_denied (4D).
+            \App\Http\Middleware\RecordsDeniedAuthorizations::class,
         ]);
 
         // Configure authentication redirects
@@ -88,9 +115,12 @@ return Application::configure(basePath: dirname(__DIR__))
         \App\Console\Commands\PurgeOldActivityLogs::class,
         \App\Console\Commands\RunScheduledBackups::class,
         \App\Console\Commands\SealAuditTrail::class,
+        \App\Console\Commands\MergeDuplicateCustomers::class,
+        \App\Console\Commands\UnmergeCustomers::class,
         \App\Console\Commands\VerifyAuditTrail::class,
         \App\Console\Commands\SendAuditDigest::class,
         \App\Console\Commands\PruneDownloadArchive::class,
+        \App\Console\Commands\UnlockAccount::class,
     ])
     ->withSchedule(function (\Illuminate\Console\Scheduling\Schedule $schedule): void {
         // EoD report delivery — runs every minute, command handles time-of-day
@@ -123,5 +153,33 @@ return Application::configure(basePath: dirname(__DIR__))
             ->withoutOverlapping();
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // A record that is not there — usually because someone deleted it
+        // while another tab still had it open. The bare Laravel text ("No
+        // query results for model [App\\Models\\Product] 130") told nobody
+        // anything (owner, 2026-10-06). Same 404, words a person can act on:
+        // when it was deleted and where to restore it, or that it is gone.
+        $exceptions->render(function (\Symfony\Component\HttpKernel\Exception\NotFoundHttpException $e, \Illuminate\Http\Request $request) {
+            $missing = $e->getPrevious();
+            if (! $missing instanceof \Illuminate\Database\Eloquent\ModelNotFoundException
+                || ! ($request->expectsJson() || $request->is('api/*'))) {
+                return null;
+            }
+
+            return \App\Support\MissingRecordMessage::response($missing);
+        });
+
+        // SQLSTATE 57014 = a query cancelled by statement_timeout — the ceiling
+        // ReadsOneSnapshot puts on a report (cycle 9). It is not a server fault
+        // to be hidden behind "Server Error": it is an answer the reader can
+        // act on. 503, because the same request on a narrower window will work.
+        $exceptions->render(function (\Illuminate\Database\QueryException $e, \Illuminate\Http\Request $request) {
+            if ((string) ($e->errorInfo[0] ?? $e->getCode()) !== '57014') {
+                return null;
+            }
+
+            return response()->json([
+                'message' => 'This report took too long to produce. Narrow the date range and try again.',
+                'reason'  => 'report_timeout',
+            ], 503);
+        });
     })->create();

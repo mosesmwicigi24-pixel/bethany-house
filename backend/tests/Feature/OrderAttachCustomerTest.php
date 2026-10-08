@@ -69,18 +69,18 @@ class OrderAttachCustomerTest extends TestCase
             'status'              => 'completed',
             'customer_first_name' => 'Original',
             'customer_last_name'  => 'Buyer',
-            'customer_phone'      => '+254700000000',
+            'customer_phone'      => '+254720456193',
         ]);
 
         $this->attach($order->id, [
-            'new_customer' => ['first_name' => 'Someone', 'last_name' => 'Else', 'phone' => '+254711111111'],
+            'new_customer' => ['first_name' => 'Someone', 'last_name' => 'Else', 'phone' => '+254711234987'],
         ])->assertStatus(422)
           ->assertJsonPath('reason', 'customer_locked');
 
         // Untouched.
         $order->refresh();
         $this->assertSame('Original', $order->customer_first_name);
-        $this->assertSame('+254700000000', $order->customer_phone);
+        $this->assertSame('+254720456193', $order->customer_phone);
     }
 
     public function test_a_phone_only_capture_still_locks_the_order(): void
@@ -92,11 +92,11 @@ class OrderAttachCustomerTest extends TestCase
             'status'              => 'processing',
             'customer_first_name' => null,
             'customer_last_name'  => null,
-            'customer_phone'      => '+254733333333',
+            'customer_phone'      => '+254733148562',
         ]);
 
         $this->attach($order->id, [
-            'new_customer' => ['first_name' => 'Late', 'last_name' => 'Name', 'phone' => '+254744444444'],
+            'new_customer' => ['first_name' => 'Late', 'last_name' => 'Name', 'phone' => '+254744512863'],
         ])->assertStatus(422)
           ->assertJsonPath('reason', 'customer_locked');
     }

@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Api\Concerns\ExportsCsv;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * The three reports that are served from this class rather than ReportController.
@@ -31,6 +31,13 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class EnhancedReportController extends Controller
 {
+    // The section's one export door (cycle 9): these two endpoints had their
+    // own `export === 'csv'` branch and handed a file to anyone with
+    // reports.view, never asking for reports.export.
+    use ExportsCsv;
+    // The report's outlet filter at the query layer (reports build, 2026-10-01).
+    use \App\Http\Controllers\Api\Concerns\RecognisesIncome;
+
     // =========================================================================
     // INVENTORY
     // =========================================================================
@@ -43,25 +50,53 @@ class EnhancedReportController extends Controller
      */
     public function inventoryValuation(Request $request)
     {
-        $rows = DB::table('inventory_items')
-            ->join('product_variants', 'inventory_items.product_variant_id', '=', 'product_variants.id')
-            ->join('products', 'product_variants.product_id', '=', 'products.id')
-            ->leftJoin('categories', 'products.category_id', '=', 'categories.id')
-            ->leftJoin('outlets', 'inventory_items.outlet_id', '=', 'outlets.id')
-            ->leftJoin('product_prices', function($join) {
-                $join->on('product_prices.product_variant_id', '=', 'product_variants.id')
-                     ->where('product_prices.currency_code', '=', 'KES');
-            })
-            ->whereRaw('(inventory_items.quantity_on_hand - inventory_items.quantity_reserved) > 0')
+        // Stock hangs off inventory_items.product_id, which is never null; the
+        // variant is optional. Joining product_variants INNER therefore valued
+        // only the catalogue's variant stock and silently dropped every simple
+        // product: 91 of 164 SKUs and 47,264 of 50,967 available units on
+        // 2026-09-29, reporting KES 26.6m against the engine's 86.7m. Join the
+        // product, and let the variant be optional as the data has it.
+        //
+        // Price follows the house rule (CurrencyPricing): the variant's own KES
+        // row when the line is a variant, otherwise the product-level KES row.
+        $rows = DB::table('inventory_items as ii')
+            ->join('products as p', 'p.id', '=', 'ii.product_id')
+            ->leftJoin('categories', 'categories.id', '=', 'p.category_id')
+            ->leftJoin('outlets', 'outlets.id', '=', 'ii.outlet_id')
+            // One price row per key, guaranteed. `unique_product_price` covers
+            // (product_id, product_variant_id, currency_code), but Postgres
+            // treats NULLs as distinct, so it does NOT stop a second
+            // product-level row — the same NULL hole the inventory_items unique
+            // index was rebuilt to close. None exists today (checked
+            // 2026-09-30); joining raw would silently multiply the units of any
+            // product that grew one.
+            ->leftJoin(DB::raw("(SELECT product_variant_id, MAX(regular_price) AS regular_price
+                                   FROM product_prices
+                                  WHERE currency_code = 'KES' AND product_variant_id IS NOT NULL
+                               GROUP BY product_variant_id) AS vprice"),
+                'vprice.product_variant_id', '=', 'ii.product_variant_id')
+            ->leftJoin(DB::raw("(SELECT product_id, MAX(regular_price) AS regular_price
+                                   FROM product_prices
+                                  WHERE currency_code = 'KES' AND product_variant_id IS NULL
+                               GROUP BY product_id) AS pprice"),
+                'pprice.product_id', '=', 'ii.product_id')
+            ->whereRaw('(ii.quantity_on_hand - ii.quantity_reserved) > 0')
             ->selectRaw("
                 COALESCE(categories.name_en, 'Uncategorised') AS category_name,
                 COALESCE(outlets.name, 'Warehouse') AS outlet_name,
                 COUNT(*) AS sku_count,
-                SUM(inventory_items.quantity_on_hand - inventory_items.quantity_reserved) AS total_units,
+                SUM(ii.quantity_on_hand - ii.quantity_reserved) AS total_units,
                 SUM(
-                    (inventory_items.quantity_on_hand - inventory_items.quantity_reserved)
-                    * COALESCE(product_prices.regular_price, 0)
-                ) AS total_retail_value
+                    (ii.quantity_on_hand - ii.quantity_reserved)
+                    * COALESCE(vprice.regular_price, pprice.regular_price, 0)
+                ) AS total_retail_value,
+                -- On-hand beside available, because the engine's inventory
+                -- health values on-hand and the two could not be reconciled
+                -- without it. The headline stays available: that is what the
+                -- report has always meant and changing it is the owner's call.
+                SUM(ii.quantity_on_hand) AS total_units_on_hand,
+                SUM(ii.quantity_on_hand * COALESCE(vprice.regular_price, pprice.regular_price, 0))
+                    AS total_retail_value_on_hand
             ")
             ->groupBy('categories.name_en', 'outlets.name')
             ->orderBy('categories.name_en')
@@ -71,11 +106,15 @@ class EnhancedReportController extends Controller
             'total_retail_value' => $rows->sum('total_retail_value'),
             'total_sku_count'    => $rows->sum('sku_count'),
             'total_units'        => $rows->sum('total_units'),
+            'basis'              => 'available (on hand less reserved)',
+            'total_units_on_hand'        => $rows->sum('total_units_on_hand'),
+            'total_retail_value_on_hand' => $rows->sum('total_retail_value_on_hand'),
         ];
 
-        if ($request->get('export') === 'csv') {
-            return $this->csvResponse('inventory_valuation', $rows->toArray(),
-                ['category_name', 'outlet_name', 'sku_count', 'total_units', 'total_retail_value']);
+        if ($this->wantsExport($request)) {
+            return $this->csvTable('inventory_valuation', $rows->toArray(),
+                ['category_name', 'outlet_name', 'sku_count', 'total_units', 'total_retail_value',
+                 'total_units_on_hand', 'total_retail_value_on_hand']);
         }
 
         return response()->json(['breakdown' => $rows, 'grand_totals' => $grand]);
@@ -93,17 +132,32 @@ class EnhancedReportController extends Controller
      *
      * Tax rates are assigned per-product via product_tax_rates pivot.
      * There is no tax_rate_id on order_items - we join through product_tax_rates.
+     *
+     * BASIS (owner delegated the decision, 2026-10-02): the SOLD basis —
+     * recognised orders, the same scope as every sales figure — not only the
+     * orders money has reached. VAT falls due on the supply or the invoice,
+     * whichever is first; a confirmed sale awaiting payment is still taxable.
+     * The paid-only basis left out KES 33,500 of September's confirmed sales.
+     *
+     * ONE RATE PER LINE: a product carrying two rates (product 108 is tagged
+     * both VAT 16% and No Tax) was counted once under EACH, so its line was in
+     * the taxable total twice. It now counts once, under its higher rate — the
+     * cautious reading for a VAT return — and is named in
+     * `conflicting_rate_products` so the product's tax setup is corrected.
+     * Rated currencies only, like every KES figure.
      */
     public function taxReport(Request $request)
     {
         $p = $this->params($request);
-
-        $rows = DB::table('orders')
-            ->join('order_items', 'orders.id', '=', 'order_items.order_id')
-            ->leftJoin('product_tax_rates', 'order_items.product_id', '=', 'product_tax_rates.product_id')
-            ->leftJoin('tax_rates', 'product_tax_rates.tax_rate_id', '=', 'tax_rates.id')
+        $lineRate = '(SELECT ptr.tax_rate_id FROM product_tax_rates ptr JOIN tax_rates trx ON trx.id = ptr.tax_rate_id
+                      WHERE ptr.product_id = order_items.product_id ORDER BY trx.rate DESC, ptr.tax_rate_id LIMIT 1)';
+        $base = fn () => $this->recognisedOrders(DB::table('orders')
+                ->join('order_items', 'orders.id', '=', 'order_items.order_id'))
             ->whereBetween('orders.created_at', [$p['start'], $p['end']])
-            ->whereIn('orders.payment_status', ['paid', 'partial', 'deposit'])->whereNotIn('orders.status', ['cancelled', 'refunded', 'voided'])
+            ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code'));
+
+        $rows = $base()
+            ->leftJoin('tax_rates', DB::raw('tax_rates.id'), '=', DB::raw($lineRate))
             ->selectRaw("
                 COALESCE(tax_rates.name, 'No Tax / Default') AS tax_name,
                 COALESCE(tax_rates.rate, 0) AS tax_rate,
@@ -115,6 +169,12 @@ class EnhancedReportController extends Controller
             ->orderByDesc('tax_collected')
             ->get();
 
+        $conflicting = $base()
+            ->whereIn('order_items.product_id', DB::table('product_tax_rates')->select('product_id')
+                ->groupBy('product_id')->havingRaw('COUNT(*) > 1'))
+            ->distinct()->orderBy('order_items.product_id')
+            ->pluck('order_items.product_id')->map(fn ($id) => (int) $id)->all();
+
         $totals = [
             'total_taxable'  => $rows->sum('taxable_amount'),
             'total_tax'      => $rows->sum('tax_collected'),
@@ -123,12 +183,13 @@ class EnhancedReportController extends Controller
                 : 0,
         ];
 
-        if ($request->get('export') === 'csv') {
-            return $this->csvResponse('tax_report', $rows->toArray(),
+        if ($this->wantsExport($request)) {
+            return $this->csvTable('tax_report', $rows->toArray(),
                 ['tax_name', 'tax_rate', 'order_count', 'taxable_amount', 'tax_collected']);
         }
 
-        return response()->json(['period' => $p, 'by_tax_rate' => $rows, 'totals' => $totals]);
+        return response()->json(['period' => $p, 'by_tax_rate' => $rows, 'totals' => $totals,
+            'basis' => 'sold', 'conflicting_rate_products' => $conflicting]);
     }
 
     /**
@@ -142,22 +203,28 @@ class EnhancedReportController extends Controller
     {
         $p = $this->params($request);
 
-        // Inflows: completed payments grouped by month
-        // Every rail converts at the REPORTING rate before summing — a USD
-        // payment added at face value understates silently, the exact defect
-        // the 2026-08 audit found on the Collected tile. Rate-less currencies
-        // stay out of the sum rather than entering at a guess.
-        $inflows = DB::table('payments')
-            ->whereBetween('created_at', [$p['start'], $p['end']])
-            ->where('status', 'paid')
-            ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('currency_code'))
-            ->selectRaw("TO_CHAR(created_at, 'YYYY-MM') AS month, SUM(" . \App\Support\ReportingCurrency::kes('amount', 'currency_code') . ") AS inflow, payment_method")
+        // Inflows ARE Collected (owner delegated the decision, 2026-10-02):
+        // settled payments, approved where approval applies, by PAYMENT date,
+        // net of refunds, in KES at the reporting rate — so a month's inflow
+        // is that month's Collected tile. It read the record's creation date
+        // and the gross amount, so a refund never left the cash flow and a
+        // payment recorded in one month and settled in the next sat in the
+        // wrong one (July 2026: 500 apart). Rate-less currencies stay out of
+        // the sum rather than entering at a guess.
+        $paidAt  = 'COALESCE(payments.paid_at, payments.created_at)';
+        $inflows = \App\Support\SettledPayment::where(DB::table('payments'))
+            ->when($this->reportOutletId(), fn ($q, $outlet) => $q->whereIn('order_id',
+                DB::table('orders')->where('outlet_id', $outlet)->select('id')))
+            ->whereBetween(DB::raw($paidAt), [$p['start'], $p['end']])
+            ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('payments.currency_code'))
+            ->selectRaw("TO_CHAR({$paidAt}, 'YYYY-MM') AS month, SUM(" . \App\Support\ReportingCurrency::kes('payments.amount - COALESCE(payments.refund_amount, 0)', 'payments.currency_code') . ") AS inflow, payment_method")
             ->groupBy('month', 'payment_method')
             ->orderBy('month')
             ->get();
 
         // Outflows: approved/paid expenses grouped by month
         $outflows = DB::table('expenses')
+            ->tap(fn ($q) => $this->inOutlet($q, 'expenses.outlet_id'))
             ->whereBetween('expense_date', [$p['start'], $p['end']])
             ->whereIn('status', ['approved', 'paid'])
             ->selectRaw("TO_CHAR(expense_date, 'YYYY-MM') AS month, SUM(amount_kes) AS outflow")
@@ -200,27 +267,19 @@ class EnhancedReportController extends Controller
     }
 
     /**
-     * Stream a CSV response for the given data and columns.
+     * Pick the named columns, title the headers, and hand them to the shared
+     * ExportsCsv::csvResponse — the same in-memory file every other report
+     * produces (BOM, no-store), instead of a stream of its own.
      */
-    private function csvResponse(string $filename, array $data, array $columns): StreamedResponse
+    private function csvTable(string $filename, array $data, array $columns): \Illuminate\Http\Response
     {
-        $headers = [
-            'Content-Type'        => 'text/csv',
-            'Content-Disposition' => "attachment; filename=\"{$filename}_" . date('Y-m-d') . ".csv\"",
-            'Cache-Control'       => 'no-cache, no-store, must-revalidate',
-        ];
+        $headers = array_map(fn ($c) => str_replace('_', ' ', ucwords($c, '_')), $columns);
+        $rows    = array_map(function ($row) use ($columns) {
+            $row = (array) $row;
 
-        return response()->stream(function () use ($data, $columns) {
-            $handle = fopen('php://output', 'w');
+            return array_map(fn ($c) => $row[$c] ?? '', $columns);
+        }, $data);
 
-            fputcsv($handle, array_map(fn($c) => str_replace('_', ' ', ucwords($c, '_')), $columns));
-
-            foreach ($data as $row) {
-                $row = (array) $row;
-                fputcsv($handle, array_map(fn($c) => $row[$c] ?? '', $columns));
-            }
-
-            fclose($handle);
-        }, 200, $headers);
+        return $this->csvResponse($headers, $rows, $filename);
     }
 }

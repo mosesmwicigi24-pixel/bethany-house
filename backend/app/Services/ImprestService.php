@@ -191,15 +191,22 @@ class ImprestService
             throw ValidationException::withMessages(['amount' => 'The imprest is already at its float.']);
         }
 
-        $req = ImprestTopupRequest::create([
-            'uuid'               => (string) Str::uuid(),
-            'imprest_account_id' => $account->id,
-            'status'             => ImprestTopupRequest::PENDING,
-            'requested_by'       => $by->id,
-            'requested_amount'   => self::money($asked),
-            'balance_at_request' => $account->balance,
-            'reason'             => $reason,
-        ]);
+        $req = DB::transaction(function () use ($account, $by, $asked, $reason) {
+            $req = ImprestTopupRequest::create([
+                'uuid'               => (string) Str::uuid(),
+                'imprest_account_id' => $account->id,
+                'status'             => ImprestTopupRequest::PENDING,
+                'requested_by'       => $by->id,
+                'requested_amount'   => self::money($asked),
+                'balance_at_request' => $account->balance,
+                'reason'             => $reason,
+            ]);
+            // Finance approves a top-up (≤ KES 100,000; above, + super admin)
+            // before the super admin sends it (Phase 3B).
+            app(\App\Services\Approvals\ApprovalEngine::class)->submit('imprest_topup', $req, $by);
+
+            return $req;
+        });
 
         ActivityLogService::log('imprest_topup_requested', $req, [
             'amount' => $req->requested_amount, 'balance' => $account->balance, 'reason' => $reason,
@@ -215,9 +222,21 @@ class ImprestService
         return $req;
     }
 
-    /** The super admin says the money went (to an existing request, or a direct load). */
+    /**
+     * The super admin says the money went (to an existing request, or a direct load).
+     *
+     * A requested top-up goes only once the approval engine has its
+     * signatures (Phase 3B). Within the finance band the super admin's send
+     * IS the signature — he may stand in for finance there, never for his own
+     * request (maker ≠ checker). Above it, finance signs first: he cannot
+     * spend his top-band signature on the finance band.
+     */
     public function markSent(ImprestAccount $account, ?ImprestTopupRequest $req, array $data, User $by): ImprestTopupRequest
     {
+        if ($req && $req->status === ImprestTopupRequest::PENDING) {
+            $this->assertCleared($req, $by);
+        }
+
         return DB::transaction(function () use ($account, $req, $data, $by) {
             if ($req && $req->status !== ImprestTopupRequest::PENDING) {
                 throw ValidationException::withMessages(['status' => "This request is already {$req->status}."]);
@@ -310,9 +329,18 @@ class ImprestService
         if ($req->status !== ImprestTopupRequest::PENDING) {
             throw ValidationException::withMessages(['status' => "This request is already {$req->status}."]);
         }
-        $req->forceFill(['status' => ImprestTopupRequest::DECLINED, 'declined_by' => $by->id, 'declined_at' => now(), 'decline_reason' => $reason])->save();
-        ActivityLogService::log('imprest_topup_declined', $req, ['reason' => $reason], 'Imprest top-up declined', $by);
-        $req->requester?->notify(new ImprestNotification('Imprest top-up declined', $reason, '/expenses/imprest'));
+        $engine = app(\App\Services\Approvals\ApprovalEngine::class);
+        $open = $engine->openRequest('imprest_topup', $req);
+        if ($open === null && $engine->latestRequest('imprest_topup', $req)?->status === \App\Models\ApprovalRequest::APPROVED) {
+            // Approved, not yet sent: the super admin may still decide not to send it.
+            $req->forceFill(['status' => ImprestTopupRequest::DECLINED, 'declined_by' => $by->id, 'declined_at' => now(), 'decline_reason' => $reason])->save();
+            ActivityLogService::log('imprest_topup_declined', $req, ['reason' => $reason], 'Imprest top-up declined', $by);
+            $req->requester?->notify(new ImprestNotification('Imprest top-up declined', $reason, '/expenses/imprest'));
+
+            return;
+        }
+        // A decision at the band it waits on; ImprestTopupHandler declines it.
+        $engine->sign($engine->openOrAdopt('imprest_topup', $req), $by, \App\Models\ApprovalSignature::REJECTED, $reason, $req->id);
     }
 
     public function cancel(ImprestTopupRequest $req, User $by): void
@@ -321,7 +349,27 @@ class ImprestService
             throw ValidationException::withMessages(['status' => 'Only your own request, before it is sent, can be cancelled.']);
         }
         $req->forceFill(['status' => ImprestTopupRequest::CANCELLED])->save();
+        app(\App\Services\Approvals\ApprovalEngine::class)->cancelOpen('imprest_topup', $req, $by, 'Cancelled by the requester.');
         ActivityLogService::log('imprest_topup_cancelled', $req, [], 'Imprest top-up request cancelled', $by);
+    }
+
+    /** A pending top-up may be sent only once approved — see markSent(). */
+    private function assertCleared(ImprestTopupRequest $req, User $by): void
+    {
+        $engine = app(\App\Services\Approvals\ApprovalEngine::class);
+        $latest = $engine->latestRequest('imprest_topup', $req);
+        if ($latest?->status === \App\Models\ApprovalRequest::APPROVED) {
+            return;
+        }
+
+        $open = $engine->openOrAdopt('imprest_topup', $req);
+        $remaining = collect($open->bands)->filter(fn ($b) => (int) $b['order'] >= (int) $open->current_band)->count();
+        if ($remaining > 1 || !$engine->canSignNow($by, $open)) {
+            // The maker is refused as a maker; anyone else is told what is missing.
+            \App\Support\MakerChecker::assertNotMaker($by, 'imprest_topup.approve', $req, $req->requested_by);
+            throw ValidationException::withMessages(['status' => 'Finance must approve this top-up before it is sent.']);
+        }
+        $engine->sign($open, $by, \App\Models\ApprovalSignature::APPROVED, 'Approved and sent by the super admin.', $req->id);
     }
 
     // ── counting ──────────────────────────────────────────────────────────────

@@ -1,11 +1,15 @@
 // src/pages/reports/reportShared.tsx
 // Shared components, constants, types, and hooks used across all report tab pages.
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { tokenStorage } from "@/api/client";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
+import { canExportReport, reportPageOfEndpoint, type ReportPage } from "@/lib/reportPages";
 import { clsx } from "clsx";
+import { Spinner } from "@/components/ui/Spinner";
+import { fmtKes } from "@/api/expenses";
 import dayjs from "dayjs";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -26,7 +30,9 @@ import { heldFromFetch } from "@/api/downloads";
 // phones, 4-up on laptops; on big displays auto-fit packs as many ~210px
 // cards as fit (8+ across) and stretches a short row to fill the width —
 // no ghost columns either way.
-export const KPI_GRID = "grid grid-cols-2 md:grid-cols-4 2xl:grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-3";
+// Two-up until the content area is wide enough for four: at 768 px the sidebar
+// leaves ~500 px, and four cards of ~115 px overflowed "KES 20,395.31".
+export const KPI_GRID = "grid grid-cols-2 lg:grid-cols-4 2xl:grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-3";
 
 export const CHART_COLORS = [
     // Derived from the design tokens, so a palette change happens in
@@ -112,21 +118,45 @@ export function KpiCard({
     sub,
     color = "",
     comparison,
+    drill,
 }: {
     label: string;
     value: string | number;
     sub?: string;
     color?: string;
     comparison?: number | null;
+    /** A metric the backend can drill (MetricEngine::drill). Only pass one whose
+     *  definition is the SAME as this card's figure — a drill that lists other
+     *  rows than the number sums is worse than none. */
+    drill?: string;
 }) {
+    const [, setSp] = useSearchParams();
+    const open = drill
+        ? () => setSp(prev => { const p = new URLSearchParams(prev); p.set("drill", drill); return p; })
+        : undefined;
+    // A zero never wears an alarm (or a success) colour: "QC Failed 0" in red
+    // drew the eye to nothing. Colour is for figures that say something.
+    const isZero = /^(KES\s*)?0(\.0+)?%?$/.test(String(value).trim());
     return (
-        <div className="card card-body flex flex-col gap-1">
-            <p className="text-xs text-surface-500">{label}</p>
+        <div
+            className={clsx("card card-body flex flex-col gap-1", open && "cursor-pointer hover:ring-1 hover:ring-brand-300 transition")}
+            onClick={open}
+            role={open ? "button" : undefined}
+            tabIndex={open ? 0 : undefined}
+            onKeyDown={open ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } } : undefined}
+            title={open ? "Show the records behind this number" : undefined}
+        >
+            <div className="flex items-start justify-between gap-2">
+                <p className="text-xs text-surface-500">{label}</p>
+                {/* Visible, not hover-only: on a phone there is no hover, and a
+                    figure nobody knows they can open is a dead end. */}
+                {open && <span className="shrink-0 text-2xs font-medium text-brand-600" aria-hidden="true">records ›</span>}
+            </div>
             <div className="flex items-baseline gap-2 flex-wrap">
                 <p
                     className={clsx(
-                        "text-xl font-bold tabular-nums",
-                        color || "text-surface-900",
+                        "text-[clamp(1.05rem,4.4vw,1.25rem)] leading-tight font-bold tabular-nums break-words",
+                        isZero ? "text-surface-400" : (color || "text-surface-900"),
                     )}
                 >
                     {value}
@@ -138,8 +168,126 @@ export function KpiCard({
     );
 }
 
-export function TableWrapper({ children }: { children: React.ReactNode }) {
-    return <div className="overflow-x-auto">{children}</div>;
+/**
+ * What an empty section says instead of nothing: what is missing, and what to
+ * try. A blank card under a tab read as a broken page.
+ */
+export function EmptyNote({ title, hint }: { title: string; hint?: string }) {
+    return (
+        <div className="card card-body text-center py-10">
+            <p className="text-sm font-medium text-surface-700">{title}</p>
+            {hint && <p className="text-xs text-surface-500 mt-1">{hint}</p>}
+        </div>
+    );
+}
+
+/**
+ * Arrow keys move between a tab list's tabs (Home/End to the ends) — the
+ * keyboard pattern screen-reader users expect of role="tablist".
+ */
+export function tablistKeys(e: React.KeyboardEvent<HTMLElement>) {
+    const tabs = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')];
+    const i = tabs.indexOf(document.activeElement as HTMLElement);
+    if (i < 0) return;
+    const next = e.key === "ArrowRight" ? (i + 1) % tabs.length
+        : e.key === "ArrowLeft" ? (i - 1 + tabs.length) % tabs.length
+        : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : -1;
+    if (next < 0) return;
+    e.preventDefault();
+    tabs[next].focus();
+    tabs[next].click();
+}
+
+/**
+ * No figures for this period yet. Gate on THAT, never on isLoading: when the
+ * browser drops offline React Query pauses — pending but not fetching — so
+ * isLoading is false and every page fell through to "KES 0" cards. Offline says
+ * so; otherwise a spinner.
+ */
+export function ReportPending({ paused }: { paused: boolean }) {
+    // React Query also pauses retries while the tab is in the background —
+    // that is not "offline"; only say offline when the browser says so.
+    const offline = paused && typeof navigator !== "undefined" && !navigator.onLine;
+    return offline ? (
+        <div className="card card-body text-center py-12 space-y-1" role="status">
+            <p className="text-sm font-medium text-surface-800">You're offline.</p>
+            <p className="text-xs text-surface-500">The figures will load as soon as the connection is back — nothing below is shown as zero meanwhile.</p>
+        </div>
+    ) : (
+        <div className="flex justify-center py-20"><Spinner /></div>
+    );
+}
+
+/**
+ * A report whose figures failed to load says so, and hides them — a failed
+ * request used to fall through to "KES 0" cards a manager would believe (or,
+ * on Executive, a spinner that never ended).
+ */
+export function LoadFailed({ what, onRetry }: { what: string; onRetry: () => void }) {
+    return (
+        <div className="card card-body text-center py-12 space-y-3" role="alert">
+            <p className="text-sm font-medium text-surface-800">{what} could not be loaded.</p>
+            <p className="text-xs text-surface-500">The figures are hidden rather than shown as zero. Check your connection and try again.</p>
+            <div className="flex justify-center gap-3">
+                <button onClick={onRetry} className="btn-primary btn-sm">Try again</button>
+                <Link to="/reports" className="btn-secondary btn-sm">All reports</Link>
+            </div>
+        </div>
+    );
+}
+
+/** A rate is only a rate when there is something to measure: "—" and why, never a red 0%. */
+export function rateOrDash(numerator: number, denominator: number, digits = 0): string {
+    return denominator > 0 ? `${(Math.round((numerator / denominator) * 100 * 10 ** digits) / 10 ** digits).toFixed(digits)}%` : "—";
+}
+
+/**
+ * Shares as ranked bars, not a pie: a single slice drew a 100% arc the browser
+ * renders as nothing (Customer Segments, Expenses by Category), and lengths
+ * compare faster than angles. Largest first, each with its value and share.
+ */
+export function ShareBars({ rows, money = false }: { rows: { label: string; value: number }[]; money?: boolean }) {
+    const shown = rows.filter((r) => r.value > 0).sort((a, b) => b.value - a.value);
+    const total = shown.reduce((a, r) => a + r.value, 0);
+    if (shown.length === 0) return <p className="text-xs text-surface-400 py-6 text-center">Nothing to show for this period.</p>;
+    return (
+        <div className="space-y-2.5">
+            {shown.map((r) => (
+                <div key={r.label} className="grid grid-cols-[minmax(6rem,9rem)_1fr_auto] items-center gap-3 text-sm">
+                    <span className="text-surface-700 capitalize truncate" title={r.label}>{r.label.replace(/_/g, " ")}</span>
+                    <div className="h-2 rounded-full bg-surface-100">
+                        <div className="h-2 rounded-full bg-brand-400" style={{ width: `${(r.value / Math.max(total, 1)) * 100}%` }} />
+                    </div>
+                    <span className="tabular-nums text-surface-700 whitespace-nowrap">
+                        {money ? fmtKes(r.value) : r.value.toLocaleString()}
+                        <span className="text-2xs text-surface-400"> · {Math.round((r.value / Math.max(total, 1)) * 100)}%</span>
+                    </span>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+/**
+ * Every report table scrolls sideways when it must, and its first column — the
+ * row's name (customer, product, week) — stays put while the numbers scroll:
+ * on a phone, an 11-column table lost which customer a row belonged to. The
+ * frozen cell keeps the row's hover, so a row still lights up as one.
+ */
+export function TableWrapper({ children, ranked = false }: {
+    children: React.ReactNode;
+    /** The first column is a "#" rank: pin it to a fixed width and freeze the
+     *  name beside it too — freezing a rank alone kept "1" and lost the name. */
+    ranked?: boolean;
+}) {
+    return (
+        <div className={clsx(
+            "overflow-x-auto [&_tr>*:first-child]:sticky [&_tr>*:first-child]:left-0 [&_tr>*:first-child]:z-[1] [&_tr>*:first-child]:bg-white [&_tbody_tr:hover>*:first-child]:bg-surface-50",
+            ranked && "[&_tr>*:first-child:not([colspan])]:w-10 [&_tr>*:first-child:not([colspan])]:min-w-10 [&_tr>*:first-child:not([colspan])]:max-w-10 [&_tr>*:first-child:not([colspan])]:px-2 [&_tr>*:nth-child(2)]:sticky [&_tr>*:nth-child(2)]:left-10 [&_tr>*:nth-child(2)]:z-[1] [&_tr>*:nth-child(2)]:bg-white [&_tbody_tr:hover>*:nth-child(2)]:bg-surface-50",
+        )}>
+            {children}
+        </div>
+    );
 }
 
 export function EmptyRow({
@@ -178,6 +326,7 @@ export function ExportCsvButton({
 }) {
     const [loading, setLoading] = useState(false);
     const toast = useToastStore();
+    const { can } = usePermissions();
 
     const download = useCallback(async () => {
         setLoading(true);
@@ -190,6 +339,12 @@ export function ExportCsvButton({
             setLoading(false);
         }
     }, [path, params, toast]);
+
+    // The server refuses a file without the export right for the page this
+    // endpoint belongs to (reports.export, or reports.export_supply on
+    // Inventory / Procurement — Phase 3A); a button that can only fail
+    // ("CSV export failed") is worse than no button.
+    if (!canExportReport(can, reportPageOfEndpoint(path))) return null;
 
     return (
         <button
@@ -411,7 +566,8 @@ export function ScheduleModal({
 export function SchedulesList({ reportType }: { reportType: ReportType }) {
     const qc = useQueryClient();
     const { can } = usePermissions();
-    const canExport = can("reports.export");
+    // A schedule mails a file: that report page's export right (Phase 3A).
+    const canExport = canExportReport(can, reportType as ReportPage);
     const { data } = useQuery({
         queryKey: ["report-schedules"],
         queryFn: () => reportsApi.listSchedules(),
@@ -493,7 +649,8 @@ export function ReportActionBar({
     const [showSchedule, setShowSchedule] = useState(false);
     const [showSchedules, setShowSchedules] = useState(false);
     const { can } = usePermissions();
-    const canExport = can("reports.export");
+    // A schedule mails a file: that report page's export right (Phase 3A).
+    const canExport = canExportReport(can, reportType as ReportPage);
 
     return (
         <>
@@ -597,7 +754,7 @@ export function ReportActionBar({
 //   divider
 //   bottom   — action buttons (export, pdf, print, schedule)
 
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
 export function ReportPageHeader({
     title,
@@ -617,57 +774,95 @@ export function ReportPageHeader({
     onCompareChange,
     // Optional extra right-side controls
     extra,
+    // Outlet filter (from useDateRange) — omit on a page whose endpoints are not outlet-scoped
+    outlet,
+    onOutletChange,
 }: {
     title: string;
     subtitle: string;
-    reportType: ReportType;
-    exportPath: string;
-    params: Record<string, any>;
-    preset: DatePreset;
-    start: string;
-    end: string;
-    onPresetChange: (p: DatePreset) => void;
-    onStartChange: (d: string) => void;
-    onEndChange: (d: string) => void;
+    /** Omit for a page with no printed (PDF) version — no button that cannot work. */
+    reportType?: ReportType;
+    /** Omit for a page with nothing to export. */
+    exportPath?: string;
+    params?: Record<string, any>;
+    /** Omit the four date props for a page that describes the present, not a period (Signals). */
+    preset?: DatePreset;
+    start?: string;
+    end?: string;
+    onPresetChange?: (p: DatePreset) => void;
+    onStartChange?: (d: string) => void;
+    onEndChange?: (d: string) => void;
     compare?: boolean;
     onCompareChange?: (v: boolean) => void;
     extra?: React.ReactNode;
+    outlet?: string;
+    onOutletChange?: (id: string) => void;
 }) {
     const [showSchedule, setShowSchedule] = useState(false);
     const [showSchedules, setShowSchedules] = useState(false);
+    // On a phone the filters fold into one line ("1 Sep – 30 Sep 2026 · All
+    // outlets · Change"): seven controls stacked above the figures pushed every
+    // number below the first screen. From sm up they are always shown.
+    const [filtersOpen, setFiltersOpen] = useState(false);
+    const atOverview = useLocation().pathname.replace(/\/+$/, "") === "/reports";
+    const { data: outletList } = useQuery({ queryKey: ["report-outlets"], queryFn: () => reportsApi.outlets(), staleTime: 300_000, enabled: !!onOutletChange });
+    const outletName = outlet ? outletList?.data?.find((o) => String(o.id) === String(outlet))?.name : null;
     const { can } = usePermissions();
-    const canExport = can("reports.export");
+    // A schedule mails a file: the export right for THIS page (Phase 3A) —
+    // reports.export, or reports.export_supply on Inventory / Procurement.
+    const canExport = reportType ? canExportReport(can, reportType as ReportPage) : false;
+    const dated = !!(preset && start && end && onPresetChange && onStartChange && onEndChange);
+    const hasFilters = dated || !!onOutletChange;
 
     return (
         <div className="card overflow-hidden">
             {/* ── Top row: title + controls ── */}
-            <div className="px-5 pt-4 pb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            {/* Title above the controls until the screen is wide: beside them at
+                medium widths the outlet + date controls squeezed the title into
+                one word per line (seen in the preview, 2026-10-01). */}
+            <div className="px-5 pt-4 pb-3 flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                 {/* Left: breadcrumb + title */}
                 <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 mb-1.5">
-                        <Link
-                            to="/reports"
-                            className="text-xs text-surface-400 hover:text-brand-500 transition-colors"
-                        >
-                            Reports
+                    {/* The way back to the overview. It used to repeat the title,
+                        which the top bar and the heading already say — three
+                        times on a phone. The overview itself needs no link. */}
+                    {/* Offered only to those who may open the overview — since
+                        Phase 3A an accountant or outlet manager reads pages
+                        without it. */}
+                    {!atOverview && can("reports.executive") && (
+                        <Link to="/reports"
+                            className="inline-flex items-center gap-1 mb-1.5 text-xs text-surface-400 hover:text-brand-500 transition-colors">
+                            <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                            </svg>
+                            Executive overview
                         </Link>
-                        <svg className="w-3 h-3 text-surface-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                        </svg>
-                        <span className="text-xs text-surface-600 font-medium">{title}</span>
-                    </div>
+                    )}
                     <h1 className="text-lg font-semibold text-surface-900 leading-tight">{title}</h1>
                     <p className="text-sm text-surface-400 mt-0.5">{subtitle}</p>
                 </div>
 
+                {/* Phone: the filters as one line, opened on tap */}
+                {hasFilters && <button type="button" onClick={() => setFiltersOpen((o) => !o)} aria-expanded={filtersOpen}
+                    className="sm:hidden flex items-center justify-between gap-2 w-full rounded-lg border border-line px-3 py-2 text-left text-sm">
+                    <span className="min-w-0 truncate text-surface-700 tabular-nums">
+                        {dated ? `${dayjs(start).format("D MMM")} – ${dayjs(end).format("D MMM YYYY")}` : ""}
+                        {onOutletChange && <span className="text-surface-500">{dated ? " · " : ""}{outletName ?? "All outlets"}</span>}
+                    </span>
+                    <span className="shrink-0 text-xs font-medium text-brand-600">{filtersOpen ? "Done" : "Change"}</span>
+                </button>}
+
                 {/* Right: date picker + compare + extras */}
-                <div className="flex flex-col items-start gap-2 sm:items-end shrink-0">
+                <div className={clsx("flex-col items-start gap-2 xl:items-end xl:shrink-0", filtersOpen ? "flex" : "hidden sm:flex")}>
                     {/* Date picker row */}
                     <div className="flex items-center gap-2 flex-wrap">
+                        {onOutletChange && <OutletSelect value={outlet ?? ""} onChange={onOutletChange} />}
+                        {dated && <>
                         <select
-                            className="input input-sm w-36 text-sm"
+                            className="input input-sm w-40 text-sm"
+                            aria-label="Period"
                             value={preset}
-                            onChange={e => onPresetChange(e.target.value as DatePreset)}
+                            onChange={e => onPresetChange!(e.target.value as DatePreset)}
                         >
                             {DATE_PRESETS.map(p => (
                                 <option key={p.value} value={p.value}>{p.label}</option>
@@ -675,15 +870,16 @@ export function ReportPageHeader({
                         </select>
                         {preset === "custom" ? (
                             <>
-                                <input type="date" className="input input-sm w-36 text-sm" value={start} onChange={e => onStartChange(e.target.value)} />
+                                <input type="date" className="input input-sm w-36 text-sm" aria-label="From" value={start} onChange={e => onStartChange!(e.target.value)} />
                                 <span className="text-surface-400 text-sm">to</span>
-                                <input type="date" className="input input-sm w-36 text-sm" value={end} onChange={e => onEndChange(e.target.value)} />
+                                <input type="date" className="input input-sm w-36 text-sm" aria-label="To" value={end} onChange={e => onEndChange!(e.target.value)} />
                             </>
                         ) : (
                             <span className="text-sm text-surface-500 whitespace-nowrap tabular-nums">
                                 {dayjs(start).format("D MMM YYYY")} – {dayjs(end).format("D MMM YYYY")}
                             </span>
                         )}
+                        </>}
                     </div>
 
                     {/* Compare toggle + extras on same row */}
@@ -709,14 +905,14 @@ export function ReportPageHeader({
             {/* ── Divider + action toolbar ── */}
             <div className="border-t border-line px-4 py-2 flex items-center gap-0.5 flex-wrap">
                 {/* Export CSV */}
-                <ExportCsvButton
+                {exportPath && <ExportCsvButton
                     path={exportPath}
-                    params={params}
+                    params={params ?? {}}
                     label="Export CSV"
-                />
+                />}
 
                 {/* Download PDF */}
-                <ReportPdfButton type={reportType as any} params={params} compact />
+                {reportType && <ReportPdfButton type={reportType as any} params={params ?? {}} compact />}
 
                 {/* Print */}
                 <button
@@ -732,11 +928,11 @@ export function ReportPageHeader({
                 {/* Divider */}
                 <span className="w-px h-4 bg-surface-200 mx-1" aria-hidden />
 
-                {/* Schedule */}
-                {canExport && (
+                {/* Schedule — only for a report the scheduler can produce */}
+                {canExport && reportType && (
                 <button
                     onClick={() => setShowSchedule(true)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-surface-600 hover:bg-surface-100 hover:text-surface-900 transition-colors"
+                    className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-surface-600 hover:bg-surface-100 hover:text-surface-900 transition-colors"
                 >
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -745,30 +941,47 @@ export function ReportPageHeader({
                 </button>
                 )}
 
+                {reportType && (
                 <button
                     onClick={() => setShowSchedules(s => !s)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-surface-600 hover:bg-surface-100 hover:text-surface-900 transition-colors"
+                    className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-surface-600 hover:bg-surface-100 hover:text-surface-900 transition-colors"
                 >
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
                     </svg>
                     Schedules {showSchedules ? "▲" : "▼"}
                 </button>
+                )}
+
+                {/* Currency: the slot the shell reserves for it. Every figure
+                    is stated in KES at the owner's REPORTING rates (never a
+                    customer's pricing rate), so there is one basis to choose;
+                    a currency's own business is a slice, in the Explorer. */}
+                <Link
+                    to="/reports/explorer?by=currency"
+                    className="ml-auto inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs text-surface-500 hover:bg-surface-100 hover:text-surface-800 transition-colors"
+                    title="USD, GBP and ZMW are converted at the reporting rates set in Settings → Currencies"
+                >
+                    KES · reporting rates <span className="text-brand-600 font-medium">By currency →</span>
+                </Link>
             </div>
 
             {/* Schedules list (inline) */}
             {showSchedules && (
                 <div className="border-t border-line px-5 py-4 bg-surface-50/60">
                     <p className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-3">Active Schedules</p>
-                    <SchedulesList reportType={reportType} />
+                    {reportType && <SchedulesList reportType={reportType} />}
                 </div>
             )}
 
+            {/* The drill panel for every clickable number on this page */}
+            {dated && <DrillHost start={start!} end={end!} outlet={outlet} />}
+
             {/* Schedule create modal */}
-            {showSchedule && (
+            {showSchedule && reportType && (
                 <ScheduleModal
                     reportType={reportType}
-                    params={params}
+                    params={params ?? {}}
                     onClose={() => setShowSchedule(false)}
                 />
             )}
@@ -833,32 +1046,288 @@ export function DateRangePicker({
 }
 
 /**
- * Self-contained date filter hook - each report section owns its own date range.
+ * The report's filters, held in the URL (reports build, 2026-10-01):
+ * `?preset=` or `?preset=custom&from=&to=`, and `?outlet=`. A refresh or a
+ * shared link reproduces the investigation; every section of a page reads the
+ * same keys, so a headline and the table under it cannot answer for different
+ * windows or shops. `params` carries exactly what the report endpoints accept.
  */
+/** The period and outlet a reader last chose, for this browser session. */
+const REPORT_FILTERS_KEY = "bh-report-filters";
+type RememberedFilters = { preset?: string; from?: string; to?: string; outlet?: string };
+function rememberedFilters(): RememberedFilters {
+    try { return JSON.parse(sessionStorage.getItem(REPORT_FILTERS_KEY) ?? "{}") ?? {}; } catch { return {}; }
+}
+
 export function useDateRange(defaultPreset: DatePreset = "this_month") {
-    const initial = datePresetRange(defaultPreset);
-    const [preset, setPreset] = useState<DatePreset>(defaultPreset);
-    const [start, setStart] = useState(initial.start);
-    const [end, setEnd] = useState(initial.end);
+    const [sp, setSp] = useSearchParams();
+    const known = (p: string | null | undefined): p is DatePreset => !!p && DATE_PRESETS.some((d) => d.value === p);
+
+    // The period follows the reader from page to page: a report opened from the
+    // menu (no dates in its link) uses the period and outlet last chosen in this
+    // session, not each page's own default — September on Sales stayed
+    // September on Customers. A link that carries its own dates still wins.
+    const urlHasPeriod = sp.has("preset") || sp.has("from");
+    const memo = urlHasPeriod ? {} : rememberedFilters();
+    const urlPreset = sp.get("preset") ?? memo.preset ?? null;
+    const preset: DatePreset = known(urlPreset) ? urlPreset : (sp.get("from") ?? memo.from) ? "custom" : defaultPreset;
+    const fallback = datePresetRange(preset === "custom" ? defaultPreset : preset);
+    const rawStart = preset === "custom" ? (sp.get("from") ?? memo.from ?? fallback.start) : fallback.start;
+    const rawEnd   = preset === "custom" ? (sp.get("to") ?? memo.to ?? fallback.end) : fallback.end;
+    // A range typed backwards (end before start) is read the right way round:
+    // sent as typed, the older reports answered with an empty window — every
+    // figure zero, nothing saying why.
+    const [start, end] = rawStart <= rawEnd ? [rawStart, rawEnd] : [rawEnd, rawStart];
+    const wantedOutlet = sp.get("outlet") ?? (sp.has("outlet") ? "" : rememberedFilters().outlet ?? "");
+    // Only an outlet that exists: a remembered (or linked) outlet that was
+    // closed — or mistyped — was applied to every report, which then queried a
+    // shop that is not there (zeros on some pages, a refusal on others) while
+    // the header said "All outlets".
+    const { data: outletList } = useQuery({ queryKey: ["report-outlets"], queryFn: () => reportsApi.outlets(), staleTime: 300_000 });
+    const outlet = wantedOutlet && outletList?.data && !outletList.data.some((o) => String(o.id) === wantedOutlet) ? "" : wantedOutlet;
+
+    try {
+        sessionStorage.setItem(REPORT_FILTERS_KEY, JSON.stringify({
+            preset, ...(preset === "custom" ? { from: start, to: end } : {}), outlet,
+        }));
+    } catch { /* private mode: the period simply doesn't follow */ }
+
+    const patch = (next: Record<string, string | null>) =>
+        setSp((prev) => {
+            const p = new URLSearchParams(prev);
+            Object.entries(next).forEach(([k, v]) => (v ? p.set(k, v) : p.delete(k)));
+            return p;
+        }, { replace: true });
 
     function handlePreset(p: DatePreset) {
-        setPreset(p);
-        if (p !== "custom") {
-            const r = datePresetRange(p);
-            setStart(r.start);
-            setEnd(r.end);
-        }
+        if (p === "custom") patch({ preset: "custom", from: start, to: end });
+        else patch({ preset: p, from: null, to: null });
     }
 
     return {
         preset,
         start,
         end,
-        setStart,
-        setEnd,
+        outlet,
+        setStart: (d: string) => patch({ preset: "custom", from: d, to: end }),
+        setEnd: (d: string) => patch({ preset: "custom", from: start, to: d }),
+        setOutlet: (id: string) => patch({ outlet: id || null }),
         handlePreset,
-        params: { start_date: start, end_date: end },
+        params: {
+            start_date: start,
+            end_date: end,
+            ...(outlet ? { outlet_id: Number(outlet) } : {}),
+        } as { start_date: string; end_date: string; outlet_id?: number },
     };
+}
+
+/**
+ * The active tab, held in the URL (`?tab=`) — read on every render and written
+ * on every change, so a refresh, the back button or a shared link lands on the
+ * same tab. An unknown or forbidden tab falls back to `fallback`.
+ */
+export function useReportTab<T extends string>(tabs: readonly T[], fallback: T): [T, (t: T) => void] {
+    const [sp, setSp] = useSearchParams();
+    const t = sp.get("tab") as T | null;
+    const active = t && tabs.includes(t) ? t : fallback;
+    const set = (next: T) => setSp((prev) => {
+        const p = new URLSearchParams(prev);
+        if (next === fallback) p.delete("tab"); else p.set("tab", next);
+        p.delete("drill");   // a drill belongs to the tab it was opened from
+        return p;
+    }, { replace: true });
+    return [active, set];
+}
+
+/** The page's outlet filter, from the URL — for sections that call the engine directly. */
+export function useReportOutlet(): number | undefined {
+    const [sp] = useSearchParams();
+    const v = sp.get("outlet");
+    return v ? Number(v) : undefined;
+}
+
+// ─── Outlet filter ────────────────────────────────────────────────────────────
+// Reports are business-wide (owner, 2026-09-30); an outlet narrows every query
+// on the page at the database, never by hiding rows here.
+
+/**
+ * The window as the backend should hear it. A preset the backend knows is sent
+ * by NAME, so an in-progress period is compared like for like (this month so
+ * far against the same days last month); anything else as dates.
+ */
+const BACKEND_PERIODS: Partial<Record<DatePreset, string>> = {
+    today: "today", yesterday: "yesterday", last_7_days: "last_7", last_30_days: "last_30",
+    this_month: "this_month", last_month: "last_month", this_quarter: "this_quarter", this_year: "this_year",
+};
+export function periodParams(preset: DatePreset, start: string, end: string, outlet?: string): Record<string, string | number> {
+    const key = BACKEND_PERIODS[preset];
+    return {
+        ...(key ? { period: key } : { period: "custom", from: start, to: end }),
+        ...(outlet ? { outlet_id: Number(outlet) } : {}),
+    };
+}
+
+export function OutletSelect({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+    const { data } = useQuery({ queryKey: ["report-outlets"], queryFn: () => reportsApi.outlets(), staleTime: 300_000 });
+    const outlets = data?.data ?? [];
+    if (outlets.length < 2 && !value) return null; // one shop: a filter with one choice is noise
+    return (
+        <select className="input input-sm w-44 text-sm" value={value} onChange={(e) => onChange(e.target.value)}
+            aria-label="Outlet">
+            <option value="">All outlets</option>
+            {outlets.map((o) => <option key={o.id} value={String(o.id)}>{o.name}</option>)}
+        </select>
+    );
+}
+
+// ─── Drill-down ───────────────────────────────────────────────────────────────
+// The rows behind a number. The backend says what the number IS (`definition`)
+// and where each row may lead (`links`, already filtered by the viewer's
+// permissions); this panel only renders them. Opened by `?drill=<metric>` so a
+// refresh keeps it open and the rows always use the page's own filters.
+
+const LINK_LABEL: Record<string, string> = {
+    order: "Order", customer: "Customer", payment: "Payment", production: "Job", expense: "Expense",
+};
+
+export function DrillPanel({ metric, query, onClose, title, load }: {
+    metric: string; query: Record<string, any>; onClose: () => void; title?: string;
+    /** Another backend list in the same shape (the Explorer's rows); defaults to the metric drill. */
+    load?: (query: Record<string, any>) => Promise<any>;
+}) {
+    const navigate = useNavigate();
+    const [page, setPage] = useState(1);
+    // Keyboard: Escape closes; focus moves into the panel on open and goes back
+    // to the figure that opened it on close — a keyboard user was left behind
+    // on the page underneath with no way to dismiss it.
+    const closeRef = useRef<HTMLButtonElement>(null);
+    useEffect(() => {
+        const opener = document.activeElement as HTMLElement | null;
+        closeRef.current?.focus();
+        const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+        window.addEventListener("keydown", onKey);
+        return () => { window.removeEventListener("keydown", onKey); opener?.focus?.(); };
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    const { data, isLoading, isError } = useQuery({
+        queryKey: ["drill", metric, query, page],
+        queryFn: () => (load ?? ((q: Record<string, any>) => reportsApi.drillWith(metric, q)))({ ...query, page }),
+        staleTime: 60_000,
+    });
+    const rows: any[] = data?.rows ?? [];
+    const pages = data ? Math.max(1, Math.ceil(data.total / data.per_page)) : 1;
+    // The records keep their context: which period and outlet they belong to,
+    // so a list opened from a figure never floats free of the figure.
+    const { data: outletList } = useQuery({ queryKey: ["report-outlets"], queryFn: () => reportsApi.outlets(), staleTime: 300_000, enabled: !!query.outlet_id });
+    const PERIOD_WORDS: Record<string, string> = {
+        today: "Today", yesterday: "Yesterday", last_7: "Last 7 days", last_30: "Last 30 days", this_month: "This month",
+        last_month: "Last month", this_quarter: "This quarter", this_year: "This year",
+    };
+    const when = query.from && query.to
+        ? `${dayjs(query.from).format("D MMM")} – ${dayjs(query.to).format("D MMM YYYY")}`
+        : PERIOD_WORDS[query.period] ?? null;
+    const where = query.outlet_id
+        ? outletList?.data?.find((o) => String(o.id) === String(query.outlet_id))?.name ?? "One outlet"
+        : null;
+    const context = [when, where].filter(Boolean).join(" · ");
+    const money = rows.some((r) => r.currency);
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-6" onClick={onClose}>
+            <div className="bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[85vh] flex flex-col"
+                onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title ? `Records behind ${title}` : "Records behind this number"}>
+                <div className="px-4 py-3 border-b border-line flex items-start gap-3">
+                    <div className="min-w-0">
+                        <p className="text-sm font-bold text-surface-900">
+                            {title ? `${title} · ` : ""}
+                            {data ? `${data.total.toLocaleString()} record${data.total === 1 ? "" : "s"}` : "Loading…"}
+                        </p>
+                        {context && <p className="text-2xs font-medium text-surface-600 mt-0.5">{context}</p>}
+                        {data?.definition && <p className="text-2xs text-surface-500 mt-0.5">{data.definition}</p>}
+                    </div>
+                    <button ref={closeRef} onClick={onClose} aria-label="Close (Esc)"
+                        className="ml-auto w-9 h-9 rounded-lg flex items-center justify-center text-surface-400 hover:bg-surface-100">✕</button>
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                    {isLoading ? (
+                        <p className="text-center text-xs text-surface-400 py-12">Loading…</p>
+                    ) : isError ? (
+                        <p className="text-center text-xs text-danger py-12">These records could not be loaded.</p>
+                    ) : rows.length === 0 ? (
+                        <p className="text-center text-xs text-surface-400 py-12">No records for these filters.</p>
+                    ) : (
+                        <div className="divide-y divide-line">
+                            {rows.map((r) => (
+                                <div key={`${r.kind}-${r.id}`} className="flex items-center gap-3 px-4 py-2.5">
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-semibold text-surface-800 font-mono truncate">{r.ref}</p>
+                                        <p className="text-2xs text-surface-400 truncate">
+                                            {dayjs(r.at ?? r.date).format("D MMM YYYY")}
+                                            {(r.who ?? r.customer) ? ` · ${r.who ?? r.customer}` : ""}{r.detail ? ` · ${r.detail}` : ""}
+                                        </p>
+                                        {r.links && Object.keys(r.links).length > 0 && (
+                                            <div className="flex gap-2 mt-1">
+                                                {Object.entries(r.links as Record<string, string>).map(([k, to]) => (
+                                                    <button key={k} onClick={() => navigate(to)}
+                                                        className="text-2xs font-medium text-brand-600 hover:underline">
+                                                        {LINK_LABEL[k] ?? k} →
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                    {r.amount != null && (
+                                        <span className="text-right shrink-0">
+                                            <span className="block text-xs font-bold tabular-nums text-surface-800">
+                                                {money || load ? `KES ${Number(r.amount).toLocaleString()}` : Number(r.amount).toLocaleString()}
+                                            </span>
+                                            {r.currency && r.currency !== "KES" && r.amount_original != null && (
+                                                <span className="block text-2xs text-surface-400 tabular-nums">
+                                                    {r.currency} {Number(r.amount_original).toLocaleString()}
+                                                </span>
+                                            )}
+                                        </span>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+                {pages > 1 && (
+                    <div className="px-4 py-2.5 border-t border-line flex items-center gap-2">
+                        <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}
+                            className="btn-secondary text-2xs px-2.5 py-1 disabled:opacity-40">← Prev</button>
+                        <span className="text-2xs text-surface-400 tabular-nums">{page} / {pages}</span>
+                        <button disabled={page >= pages} onClick={() => setPage((p) => p + 1)}
+                            className="btn-secondary text-2xs px-2.5 py-1 disabled:opacity-40">Next →</button>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+/**
+ * Opens the drill named in `?drill=` with THIS page's own window and outlet —
+ * passed in, never recomputed, so a page defaulting to the last 30 days cannot
+ * drill over this month. One per page (ReportPageHeader renders it).
+ */
+/** What each drillable figure is called, so its records panel says whose records they are. */
+const DRILL_TITLES: Record<string, string> = {
+    revenue: "Sold", orders: "Orders", collected: "Collected", outstanding: "Outstanding",
+    new_customers: "New customers", production_completed: "Production completed",
+    production_overdue: "Overdue production", expenses: "Expenses", lost: "Lost sales",
+};
+
+export function DrillHost({ start, end, outlet }: { start: string; end: string; outlet?: string }) {
+    const [sp, setSp] = useSearchParams();
+    const metric = sp.get("drill");
+    if (!metric) return null;
+    const close = () => setSp((prev) => { const p = new URLSearchParams(prev); p.delete("drill"); return p; }, { replace: true });
+    return (
+        <DrillPanel metric={metric} title={DRILL_TITLES[metric]}
+            query={{ period: "custom", from: start, to: end, ...(outlet ? { outlet_id: Number(outlet) } : {}) }}
+            onClose={close} />
+    );
 }
 
 // ─── Status Pills ─────────────────────────────────────────────────────────────
@@ -1043,6 +1512,12 @@ export function ReportPdfButton({
     compact?: boolean;
 }) {
     const { download, loading } = useReportPdf();
+    const { can } = usePermissions();
+
+    // A PDF is a file out of the building, like a CSV (owner, 2026-10-01):
+    // the export right for the page it prints (Phase 3A). The server refuses
+    // it without; so does the button.
+    if (!canExportReport(can, type as ReportPage)) return null;
 
     return (
         <button

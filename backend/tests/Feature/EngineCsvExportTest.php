@@ -42,7 +42,10 @@ class EngineCsvExportTest extends TestCase
     {
         $user = User::factory()->create();
         $user->assignRole(Role::findOrCreate('admin', 'sanctum'));
-        $user->givePermissionTo(Permission::findOrCreate('reports.view', 'sanctum'));
+        \Tests\ReportAccess::grantPages($user);
+        // Taking a FILE needs reports.export as well as reports.view — the
+        // ?export= door used to bypass it (#384).
+        $user->givePermissionTo(Permission::findOrCreate('reports.export', 'sanctum'));
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 
@@ -134,6 +137,24 @@ class EngineCsvExportTest extends TestCase
             ->assertOk()
             ->assertHeader('Content-Type', 'application/json')
             ->assertJsonStructure(['summary' => ['money_on_table']]);
+    }
+
+    public function test_looking_is_reports_view_but_taking_a_file_is_reports_export(): void
+    {
+        // The ?export= door honoured reports.view alone across twenty-two
+        // endpoints, while four explicit export routes required
+        // reports.export — so the permission was bypassable with a query
+        // parameter. Two roles sat on the wrong side of it.
+        $viewer = User::factory()->create();
+        \Tests\ReportAccess::grantPages($viewer);
+        app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
+        Sanctum::actingAs($viewer);
+
+        // Reading the report on screen: allowed.
+        $this->getJson('/api/v1/admin/reports/collections')->assertOk();
+
+        // Taking the same figures away as a file: not without reports.export.
+        $this->getJson('/api/v1/admin/reports/collections?export=csv')->assertStatus(403);
     }
 
     public function test_csv_export_is_gated_by_reports_view(): void

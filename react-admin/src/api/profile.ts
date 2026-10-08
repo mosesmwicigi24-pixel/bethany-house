@@ -139,7 +139,7 @@ export const profileApi = {
     // not the pre-auth /2fa/verify route used during login - that one needs
     // a user_id and is a different flow entirely).
     verify2fa: (code: string) =>
-        post<{ message: string }>("/v1/admin/auth/2fa/confirm", { code }),
+        post<{ message: string; recovery_codes?: string[] }>("/v1/admin/auth/2fa/confirm", { code }),
 
     disable2fa: (password: string) =>
         post<{ message: string }>("/v1/admin/auth/2fa/disable", { password }),

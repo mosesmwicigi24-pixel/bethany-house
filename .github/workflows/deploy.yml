@@ -81,9 +81,26 @@ jobs:
         working-directory: backend
         run: php artisan test
 
+  frontend-checks:
+    name: Console checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Navigation follows permission (Role Hardening Plan §16): the sidebar,
+      # the command palette and the App.tsx route guards must agree. No
+      # dependencies — it reads the source files — so no npm install.
+      - name: Check navigation gates
+        working-directory: react-admin
+        run: node scripts/check-nav-gates.mjs
+
   build:
     name: Build ${{ matrix.service }}
-    needs: test
+    needs: [test, frontend-checks]
     # Only build/deploy on pushes to main (and manual dispatch); PRs run tests only.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest

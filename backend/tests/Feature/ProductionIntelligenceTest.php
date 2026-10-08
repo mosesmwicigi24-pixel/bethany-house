@@ -33,7 +33,7 @@ class ProductionIntelligenceTest extends TestCase
     {
         $user = User::factory()->create();
         $user->assignRole(Role::findOrCreate('production_manager', 'sanctum'));
-        $user->givePermissionTo(Permission::findOrCreate('reports.view', 'sanctum'));
+        \Tests\ReportAccess::grantPages($user);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 

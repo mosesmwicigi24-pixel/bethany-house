@@ -24,9 +24,6 @@ import {
     BarChart,
     Bar,
     ComposedChart,
-    PieChart,
-    Pie,
-    Cell,
     XAxis,
     YAxis,
     CartesianGrid,
@@ -39,6 +36,10 @@ import dayjs from "dayjs";
 import {
     KPI_GRID,
     KpiCard,
+    tablistKeys,
+    LoadFailed,
+    ReportPending,
+    ShareBars,
     ReportPdfButton,
     SectionHeader,
     TableWrapper,
@@ -55,7 +56,11 @@ import {
     TH_R,
     fmtPct,
     ChangeBadge,
+    useReportOutlet,
+    useReportTab,
+    DrillPanel,
 } from "./reportShared";
+import OrderPipelinePage from "./OrderPipelinePage";
 
 const DOW_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -65,12 +70,14 @@ type SalesTab =
     | "customers"
     | "channels"
     | "patterns"
-    | "neema"
+    | "unconfirmed"
     | "collections"
     | "basket"
     | "international";
+// Neema moved to Customers & Neema; unconfirmed orders (the old separate page)
+// are a tab here — reports consolidation, 2026-10-01.
 const SALES_TABS: readonly SalesTab[] = [
-    "overview", "products", "customers", "channels", "patterns", "neema", "collections", "basket", "international",
+    "overview", "unconfirmed", "products", "customers", "channels", "patterns", "collections", "basket", "international",
 ];
 
 export default function SalesReportPage() {
@@ -79,14 +86,11 @@ export default function SalesReportPage() {
     // Honour deep-links like /reports/sales?tab=collections (the attention
     // feed sends users here) — read once on mount, same pattern as
     // CustomersReportPage's ?tab=; after that the tab buttons own the state.
-    const [searchParams] = useSearchParams();
-    const [activeTab, setActiveTab] = useState<SalesTab>(() => {
-        const t = searchParams.get("tab");
-        return SALES_TABS.includes(t as SalesTab) ? (t as SalesTab) : "overview";
-    });
+    const [activeTab, setActiveTab] = useReportTab(SALES_TABS, "overview");
 
     const summaryQuery = useQuery({
-        queryKey: ["report-sales-summary", dr.start, dr.end, compare],
+        queryKey: ["report-sales-summary", dr.start, dr.end, dr.outlet, compare],
+        placeholderData: (prev) => prev,   // keep the figures while a new period loads — no blank page
         queryFn: () =>
             reportsApi.salesSummary({
                 ...dr.params,
@@ -95,17 +99,17 @@ export default function SalesReportPage() {
         enabled: !!dr.start && !!dr.end,
     });
     const byProductQuery = useQuery({
-        queryKey: ["report-sales-products", dr.start, dr.end],
+        queryKey: ["report-sales-products", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.salesByProduct({ ...dr.params, limit: 30 }),
         enabled: !!dr.start && !!dr.end,
     });
     const byCatQuery = useQuery({
-        queryKey: ["report-sales-category", dr.start, dr.end],
+        queryKey: ["report-sales-category", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.salesByCategory(dr.params),
         enabled: !!dr.start && !!dr.end,
     });
     const byCustomerQuery = useQuery({
-        queryKey: ["report-sales-customers", dr.start, dr.end],
+        queryKey: ["report-sales-customers", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.salesByCustomer({ ...dr.params, limit: 25 }),
         enabled: !!dr.start && !!dr.end && activeTab === "customers",
     });
@@ -113,23 +117,17 @@ export default function SalesReportPage() {
     // only on the Channels tab — it is three grouped aggregations and there is
     // no reason to pay for them while the user is reading Overview.
     const ledgerQuery = useQuery({
-        queryKey: ["report-sales-ledger", dr.start, dr.end],
+        queryKey: ["report-sales-ledger", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.salesLedger(dr.params),
         enabled: !!dr.start && !!dr.end && activeTab === "channels",
     });
 
     const returnsQuery = useQuery({
-        queryKey: ["report-sales-returns", dr.start, dr.end],
+        queryKey: ["report-sales-returns", dr.start, dr.end, dr.outlet],
         queryFn: () => reportsApi.salesReturns(dr.params),
         enabled: !!dr.start && !!dr.end,
     });
 
-    // Neema (AI agent) performance — loaded only on its tab.
-    const neemaQuery = useQuery({
-        queryKey: ["report-sales-neema", dr.start, dr.end],
-        queryFn: () => reportsApi.salesNeema(dr.params),
-        enabled: !!dr.start && !!dr.end && activeTab === "neema",
-    });
 
     const s = summaryQuery.data?.summary ?? {};
     const daily = (summaryQuery.data?.daily_breakdown ?? []).map((d: any) => ({
@@ -145,12 +143,12 @@ export default function SalesReportPage() {
     const hourly = summaryQuery.data?.by_hour ?? [];
     const byDow = summaryQuery.data?.by_day_of_week ?? [];
 
-    if (summaryQuery.isLoading)
-        return (
-            <div className="flex justify-center py-20">
-                <Spinner />
-            </div>
-        );
+    // Kept figures are the PREVIOUS period's: on failure they must not stand
+    // under this period's heading.
+    if (summaryQuery.isError && (!summaryQuery.data || summaryQuery.isPlaceholderData))
+        return <LoadFailed what="Sales & Orders" onRetry={() => summaryQuery.refetch()} />;
+    if (!summaryQuery.data)
+        return <ReportPending paused={summaryQuery.fetchStatus === "paused"} />;
 
     const maxRevProduct = Math.max(
         ...(byProductQuery.data?.products ?? []).map((p: any) =>
@@ -162,7 +160,7 @@ export default function SalesReportPage() {
     return (
         <div className="space-y-6 animate-fade-in">
             <ReportPageHeader
-                title="Sales Report"
+                title="Sales & Orders"
                 subtitle="Revenue, orders, products, channels, and patterns."
                 reportType="sales"
                 exportPath="sales/summary"
@@ -173,52 +171,22 @@ export default function SalesReportPage() {
                 onPresetChange={dr.handlePreset}
                 onStartChange={dr.setStart}
                 onEndChange={dr.setEnd}
+                outlet={dr.outlet}
+                onOutletChange={dr.setOutlet}
                 compare={compare}
                 onCompareChange={setCompare}
             />
 
-            {/* KPIs row 1 */}
+            {/* Headline: what was sold and what arrived — read together, so side
+                by side — then who bought and the typical order. */}
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Total Revenue"
+                    label="Sold"
+                    drill="revenue"
                     value={fmtKes(s.total_revenue)}
-                    sub={`${s.total_orders ?? 0} orders (sales truth)`}
+                    sub={`${s.total_orders ?? 0} orders · confirmed or paid`}
                     comparison={cmp?.revenue_change_pct}
                 />
-                <KpiCard
-                    label="Avg Order Value"
-                    value={fmtKes(s.average_order_value)}
-                    comparison={cmp?.aov_change_pct}
-                />
-                <KpiCard
-                    label="Unique Customers"
-                    value={s.unique_customers ?? 0}
-                    sub="Placed ≥ 1 order"
-                />
-                <KpiCard
-                    label="Discount Rate"
-                    value={`${Number(s.discount_rate_percent ?? 0).toFixed(1)}%`}
-                    sub={`${fmtKes(s.total_discounts)} given`}
-                />
-            </div>
-
-            {/* KPIs row 2 */}
-            <div className={KPI_GRID}>
-                {/* The four queues, and they SUM to Total Revenue — the old
-                    Online/POS pair covered only two of them, so the page
-                    showed 245 orders against a 248 total and nobody could
-                    say where the rest went. */}
-                <KpiCard label="Till Sales" value={fmtKes(s.till_revenue ?? 0)}
-                         sub={`${s.till_count ?? 0} orders`} />
-                <KpiCard label="Web Orders" value={fmtKes(s.web_revenue ?? 0)}
-                         sub={`${s.web_count ?? 0} orders`} />
-                <KpiCard label="Chat Orders" value={fmtKes(s.chat_revenue ?? 0)}
-                         sub={`${s.chat_count ?? 0} orders`} />
-                <KpiCard label="Quoted Sales" value={fmtKes(s.quoted_revenue ?? 0)}
-                         sub={`${s.quoted_count ?? 0} orders`} />
-                {/* Accrued on this period's sales, by order date — not cash
-                    received. The old label said "Collected" and it never was. */}
-                <KpiCard label="Tax on sales" value={fmtKes(s.total_tax)} />
                 {/* "Collected" and the ledger's "Paid" are DIFFERENT questions and
                     are not meant to match: this is money that ARRIVED in the
                     period whatever period its order belongs to (treasury), while
@@ -230,27 +198,64 @@ export default function SalesReportPage() {
                     value={fmtKes(s.total_collected)}
                     sub="money received in this period, by payment date"
                 />
+                <KpiCard
+                    label="Buyers"
+                    value={s.unique_customers ?? 0}
+                    sub="people who ordered"
+                />
+                <KpiCard
+                    label="Avg order"
+                    value={fmtKes(s.average_order_value)}
+                    comparison={cmp?.aov_change_pct}
+                />
+            </div>
+
+            {/* The channels, as ONE breakdown that adds up to Sold. Five separate
+                cards (three usually KES 0) read as five headlines. Chat is two
+                channels the business judges apart — WhatsApp through Neema, and
+                Messenger; any chat order naming no app still sums in. */}
+            <ChannelSplit
+                total={Number(s.total_revenue ?? 0)}
+                rows={[
+                    ["Till", s.till_revenue, s.till_count],
+                    ["Web", s.web_revenue, s.web_count],
+                    ["WhatsApp", s.whatsapp_revenue, s.whatsapp_count],
+                    ["Messenger", s.messenger_revenue, s.messenger_count],
+                    ...((s.other_chat_count ?? 0) > 0 ? [["Other chat", s.other_chat_revenue, s.other_chat_count] as const] : []),
+                    ["Quoted", s.quoted_revenue, s.quoted_count],
+                ]}
+            />
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <KpiCard
+                    label="Discounts"
+                    value={`${Number(s.discount_rate_percent ?? 0).toFixed(1)}%`}
+                    sub={`${fmtKes(s.total_discounts)} given`}
+                />
+                {/* Accrued on this period's sales, by order date — not cash
+                    received. The old label said "Collected" and it never was. */}
+                <KpiCard label="Tax on sales" value={fmtKes(s.total_tax)} sub="charged on this period's sales" />
             </div>
 
             {/* Tabs */}
             <div className="border-b border-line overflow-x-auto no-scrollbar">
-                <nav className="flex gap-1 -mb-px">
+                <nav className="flex gap-1 -mb-px" role="tablist" aria-label="Report sections" onKeyDown={tablistKeys}>
                     {(
                         [
                             ["overview", "Overview"],
+                            ["unconfirmed", "Unconfirmed"],
                             ["products", "Products"],
                             ["customers", "Customers"],
                             ["channels", "Channels"],
                             ["patterns", "Patterns"],
-                            ["neema", "Neema (AI agent)"],
                             ["collections", "Collections"],
-                            ["basket", "Basket Intel"],
+                            ["basket", "Basket insights"],
                             ["international", "International"],
                         ] as const
                     ).map(([tab, label]) => (
                         <button
                             key={tab}
-                            onClick={() => setActiveTab(tab)}
+                            onClick={() => setActiveTab(tab)} role="tab" aria-selected={activeTab === tab}
                             className={clsx(
                                 "px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap shrink-0 transition-colors",
                                 activeTab === tab
@@ -267,10 +272,12 @@ export default function SalesReportPage() {
             {/* ── OVERVIEW TAB ── */}
             {activeTab === "overview" && (
                 <div className="space-y-6">
+                    <OutcomesCard start={dr.start} end={dr.end} outlet={dr.outlet} />
+
                     {/* Daily revenue chart */}
                     {daily.length > 0 && (
                         <div className="card p-5">
-                            <SectionHeader title="Daily Revenue">
+                            <SectionHeader title="Daily revenue">
                                 <ChangeBadge pct={cmp?.revenue_change_pct} />
                             </SectionHeader>
                             <ResponsiveContainer width="100%" height={280}>
@@ -340,51 +347,14 @@ export default function SalesReportPage() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {(byCatQuery.data?.categories ?? []).length > 0 && (
                             <div className="card p-5">
-                                <SectionHeader title="Revenue by Category" />
-                                <ResponsiveContainer width="100%" height={220}>
-                                    <PieChart>
-                                        <Pie
-                                            data={byCatQuery.data.categories}
-                                            dataKey="total_revenue"
-                                            nameKey="category_name"
-                                            cx="50%"
-                                            cy="50%"
-                                            outerRadius={80}
-                                            label={({
-                                                category_name,
-                                                percent,
-                                            }: any) =>
-                                                `${category_name} ${(percent * 100).toFixed(0)}%`
-                                            }
-                                            labelLine={false}
-                                        >
-                                            {byCatQuery.data.categories.map(
-                                                (_: any, i: number) => (
-                                                    <Cell
-                                                        key={i}
-                                                        fill={
-                                                            CHART_COLORS[
-                                                                i %
-                                                                    CHART_COLORS.length
-                                                            ]
-                                                        }
-                                                    />
-                                                ),
-                                            )}
-                                        </Pie>
-                                        <Tooltip
-                                            formatter={(v) =>
-                                                fmtKes(v as number)
-                                            }
-                                        />
-                                    </PieChart>
-                                </ResponsiveContainer>
+                                <SectionHeader title="Revenue by category" />
+                                <ShareBars rows={(byCatQuery.data.categories ?? []).map((d: any) => ({ label: String(d.category_name ?? "—"), value: Number(d.total_revenue ?? 0) }))} money />
                             </div>
                         )}
 
                         {pmData.length > 0 && (
                             <div className="card p-5">
-                                <SectionHeader title="Payment Methods" />
+                                <SectionHeader title="Payment methods" />
                                 <div className="space-y-3 mt-2">
                                     {pmData.map((pm: any, i: number) => {
                                         const pct =
@@ -454,7 +424,7 @@ export default function SalesReportPage() {
                     {/* Returns summary */}
                     {returnsQuery.data?.summary && (
                         <div className="card p-5">
-                            <SectionHeader title="Returns & Refunds">
+                            <SectionHeader title="Returns & refunds">
                                 <ExportCsvButton
                                     path="sales/returns"
                                     params={dr.params}
@@ -462,7 +432,7 @@ export default function SalesReportPage() {
                             </SectionHeader>
                             <div className={KPI_GRID}>
                                 <KpiCard
-                                    label="Total Returns"
+                                    label="Total returns"
                                     value={
                                         returnsQuery.data.summary
                                             .total_returns ?? 0
@@ -470,7 +440,7 @@ export default function SalesReportPage() {
                                     color="text-danger"
                                 />
                                 <KpiCard
-                                    label="Total Refunded"
+                                    label="Total refunded"
                                     value={fmtKes(
                                         returnsQuery.data.summary
                                             .total_refunded,
@@ -478,13 +448,13 @@ export default function SalesReportPage() {
                                     color="text-danger"
                                 />
                                 <KpiCard
-                                    label="Avg Refund"
+                                    label="Avg refund"
                                     value={fmtKes(
                                         returnsQuery.data.summary.avg_refund,
                                     )}
                                 />
                                 <KpiCard
-                                    label="Customers Affected"
+                                    label="Customers affected"
                                     value={
                                         returnsQuery.data.summary
                                             .unique_customers ?? 0
@@ -532,14 +502,14 @@ export default function SalesReportPage() {
                 <div className="space-y-6">
                     <div className="card overflow-hidden">
                         <div className="px-5 pt-5 pb-4">
-                            <SectionHeader title="Top Products by Revenue">
+                            <SectionHeader title="Top products by revenue">
                                 <ExportCsvButton
                                     path="sales/by-product"
                                     params={dr.params}
                                 />
                             </SectionHeader>
                         </div>
-                        <TableWrapper>
+                        <TableWrapper ranked>
                             <table className="w-full">
                                 <thead>
                                     <tr className="border-y border-line bg-surface-50/50">
@@ -629,7 +599,7 @@ export default function SalesReportPage() {
                     {(byCatQuery.data?.categories ?? []).length > 0 && (
                         <div className="card overflow-hidden">
                             <div className="px-5 pt-5 pb-4">
-                                <SectionHeader title="Revenue by Category">
+                                <SectionHeader title="Revenue by category">
                                     <ExportCsvButton
                                         path="sales/by-category"
                                         params={dr.params}
@@ -692,14 +662,14 @@ export default function SalesReportPage() {
                 <div className="space-y-6">
                     <div className="card overflow-hidden">
                         <div className="px-5 pt-5 pb-4">
-                            <SectionHeader title="Top Customers by Revenue">
+                            <SectionHeader title="Top customers by revenue">
                                 <ExportCsvButton
                                     path="sales/by-customer"
                                     params={dr.params}
                                 />
                             </SectionHeader>
                         </div>
-                        <TableWrapper>
+                        <TableWrapper ranked>
                             <table className="w-full">
                                 <thead>
                                     <tr className="border-y border-line bg-surface-50/50">
@@ -753,7 +723,7 @@ export default function SalesReportPage() {
             )}
 
             {/* ── NEEMA (AI AGENT) TAB ── */}
-            {activeTab === "neema" && <NeemaTab query={neemaQuery} />}
+            {activeTab === "unconfirmed" && <OrderPipelinePage embedded />}
 
             {/* ── COLLECTIONS TAB ── */}
             {activeTab === "collections" && <CollectionsTab />}
@@ -802,7 +772,7 @@ export default function SalesReportPage() {
                     {/* Hourly heatmap */}
                     {hourly.length > 0 && (
                         <div className="card p-5">
-                            <SectionHeader title="Orders by Hour of Day" />
+                            <SectionHeader title="Orders by hour of day" />
                             <div className="flex gap-1 mt-2 flex-wrap">
                                 {Array.from({ length: 24 }, (_, h) => {
                                     const d = hourly.find(
@@ -853,7 +823,7 @@ export default function SalesReportPage() {
                     {/* Day of week */}
                     {byDow.length > 0 && (
                         <div className="card p-5">
-                            <SectionHeader title="Orders by Day of Week" />
+                            <SectionHeader title="Orders by day of week" />
                             <ResponsiveContainer width="100%" height={200}>
                                 <BarChart
                                     data={byDow.map((d: any) => ({
@@ -895,7 +865,7 @@ export default function SalesReportPage() {
 
 function SalesByOutletTable({ params }: { params: Record<string, any> }) {
     const { data, isLoading } = useQuery({
-        queryKey: ["report-sales-outlet", params.start_date, params.end_date],
+        queryKey: ["report-sales-outlet", params.start_date, params.end_date, params.outlet_id],
         queryFn: () => reportsApi.salesByOutlet(params),
         enabled: !!params.start_date && !!params.end_date,
     });
@@ -905,7 +875,7 @@ function SalesByOutletTable({ params }: { params: Record<string, any> }) {
     return (
         <div className="card overflow-hidden">
             <div className="px-5 pt-5 pb-4">
-                <SectionHeader title="Sales by Outlet">
+                <SectionHeader title="Sales by outlet">
                     <ExportCsvButton path="sales/by-outlet" params={params} />
                 </SectionHeader>
             </div>
@@ -962,8 +932,16 @@ function SalesByOutletTable({ params }: { params: Record<string, any> }) {
 // landed in (see ReportController::salesLedger). Read "balance" as "still owed
 // on what we sold then", not "money that has not arrived yet".
 
-const CHANNEL_KEYS = ["till", "web", "chat", "quoted"] as const;
-const CHANNEL_LABEL: Record<string, string> = { till: "Till Sales", web: "Web Orders", chat: "Chat Orders", quoted: "Quoted Sales" };
+/** Mirrors Order::REPORTING_CHANNELS. Chat is two apps the business sells on
+ *  and judges separately; the ledger showed one "Chat Orders" column while the
+ *  summary above it had split them since #381, so one page said two things.
+ *  "Other chat" exists only for an order that names neither app — it is kept in
+ *  the list so the columns still add up to the row total. */
+const CHANNEL_KEYS = ["till", "web", "whatsapp", "messenger", "chat", "quoted"] as const;
+const CHANNEL_LABEL: Record<string, string> = {
+    till: "Till Sales", web: "Web Orders", whatsapp: "WhatsApp", messenger: "Messenger",
+    chat: "Other Chat", quoted: "Quoted Sales",
+};
 
 /** Balance is the number a manager is chasing, so it earns colour; zero does not. */
 function Owed({ value }: { value: number }) {
@@ -1262,279 +1240,12 @@ function LedgerTab({ query }: { query: { data?: SalesLedger; isLoading: boolean 
 }
 
 // ── Neema (AI agent) performance ──────────────────────────────────────────────
-// The agent's sales funnel for the period: leads captured, how many became an
-// order within 14 days (matched by phone — read conversion as a floor, since a
-// lead who ordered under a different number is not counted), WhatsApp-channel
-// revenue under the SAME rule as the ledger, contact growth and message volume
-// per messaging platform.
-
-const PLATFORM_LABEL: Record<string, string> = {
-    whatsapp: "WhatsApp",
-    messenger: "Messenger",
-    instagram: "Instagram",
-    facebook: "Facebook",
-};
-
-const LEAD_STATUSES = ["new", "assigned", "quoted", "won", "lost"] as const;
-const LEAD_STATUS_LABEL: Record<string, string> = {
-    new: "New",
-    assigned: "Assigned",
-    quoted: "Quoted",
-    won: "Won",
-    lost: "Lost",
-};
-
-function NeemaTab({
-    query,
-}: {
-    query: { data?: NeemaSalesReport; isLoading: boolean };
-}) {
-    const d = query.data;
-    if (query.isLoading)
-        return (
-            <div className="flex justify-center py-12">
-                <Spinner />
-            </div>
-        );
-    if (!d) return null;
-
-    const newContacts = d.contacts.reduce((a, c) => a + c.new_contacts, 0);
-    const maxStatus = Math.max(
-        ...LEAD_STATUSES.map((s) => d.leads.by_status[s] ?? 0),
-        1,
-    );
-    const maxIntent = Math.max(...d.leads.by_intent.map((i) => i.count), 1);
-
-    return (
-        <div className="space-y-6">
-            {/* KPI row */}
-            <div className={KPI_GRID}>
-                <KpiCard
-                    label="Leads"
-                    value={d.leads.total}
-                    sub="captured by Neema in this period"
-                />
-                <KpiCard
-                    label="Lead → Order"
-                    value={fmtPct(d.lead_conversion.conversion_rate)}
-                    sub={`${d.lead_conversion.converted} of ${d.leads.total} ordered within ${d.lead_conversion.window_days} days · ${fmtKes(d.lead_conversion.revenue)}`}
-                />
-                <KpiCard
-                    label="WhatsApp Revenue"
-                    value={fmtKes(d.whatsapp_sales.revenue)}
-                    sub={`${d.whatsapp_sales.orders} orders · ${fmtKes(d.whatsapp_sales.paid)} paid`}
-                />
-                <KpiCard
-                    label="New Contacts"
-                    value={newContacts}
-                    sub="first seen this period, all platforms"
-                />
-            </div>
-
-            {/* Leads funnel: status mix + top intents */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="card p-5">
-                    <SectionHeader title="Leads by Status" />
-                    {d.leads.total === 0 ? (
-                        <p className="text-sm text-surface-500">
-                            No leads in this range.
-                        </p>
-                    ) : (
-                        <div className="space-y-3 mt-2">
-                            {LEAD_STATUSES.map((s, i) => (
-                                <div key={s}>
-                                    <div className="flex justify-between text-sm mb-1">
-                                        <span className="text-surface-700">
-                                            {LEAD_STATUS_LABEL[s]}
-                                        </span>
-                                        <span className="font-semibold tabular-nums">
-                                            {d.leads.by_status[s] ?? 0}
-                                        </span>
-                                    </div>
-                                    <ProgressBar
-                                        value={d.leads.by_status[s] ?? 0}
-                                        max={maxStatus}
-                                        color={
-                                            CHART_COLORS[
-                                                i % CHART_COLORS.length
-                                            ]
-                                        }
-                                    />
-                                </div>
-                            ))}
-                            <p className="text-xs text-surface-500 pt-2 border-t border-line">
-                                Won rate: {fmtPct(d.leads.won_rate)} of leads in
-                                this period.
-                            </p>
-                        </div>
-                    )}
-                </div>
-
-                <div className="card p-5">
-                    <SectionHeader title="Top Intents" />
-                    {d.leads.by_intent.length === 0 ? (
-                        <p className="text-sm text-surface-500">
-                            No leads in this range.
-                        </p>
-                    ) : (
-                        <div className="space-y-3 mt-2">
-                            {d.leads.by_intent.map((row, i) => (
-                                <div key={row.intent}>
-                                    <div className="flex justify-between text-sm mb-1">
-                                        <span className="text-surface-700 capitalize">
-                                            {row.intent.replace(/_/g, " ")}
-                                        </span>
-                                        <span className="font-semibold tabular-nums">
-                                            {row.count}
-                                        </span>
-                                    </div>
-                                    <ProgressBar
-                                        value={row.count}
-                                        max={maxIntent}
-                                        color={
-                                            CHART_COLORS[
-                                                i % CHART_COLORS.length
-                                            ]
-                                        }
-                                    />
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {/* Contacts per platform */}
-            <div className="card overflow-hidden">
-                <div className="px-5 pt-5 pb-4">
-                    <SectionHeader title="Contacts by Platform" />
-                    <p className="text-xs text-surface-500 -mt-2">
-                        New = first seen in this period. Active = messaged in
-                        this period. Matched = linked to a hub customer by
-                        phone.
-                    </p>
-                </div>
-                <TableWrapper>
-                    <table className="w-full">
-                        <thead>
-                            <tr className="border-y border-line bg-surface-50/50">
-                                <th className={TH}>Platform</th>
-                                <th className={TH_R}>New</th>
-                                <th className={TH_R}>Active</th>
-                                <th className={TH_R}>All-time Contacts</th>
-                                <th className={TH_R}>Matched</th>
-                                <th className={TH_R}>Match Rate</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-line">
-                            {d.contacts.map((c) => (
-                                <tr
-                                    key={c.channel}
-                                    className="hover:bg-surface-50/50 transition-colors"
-                                >
-                                    <td className="px-4 py-3 font-medium text-surface-900">
-                                        {PLATFORM_LABEL[c.channel] ?? c.channel}
-                                    </td>
-                                    <td className="px-4 py-3 text-right tabular-nums">
-                                        {c.new_contacts}
-                                    </td>
-                                    <td className="px-4 py-3 text-right tabular-nums">
-                                        {c.active_contacts}
-                                    </td>
-                                    <td className="px-4 py-3 text-right tabular-nums text-surface-600">
-                                        {c.contacts}
-                                    </td>
-                                    <td className="px-4 py-3 text-right tabular-nums text-surface-600">
-                                        {c.matched}
-                                    </td>
-                                    <td className="px-4 py-3 text-right tabular-nums">
-                                        {c.match_rate == null
-                                            ? "—"
-                                            : fmtPct(c.match_rate)}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </TableWrapper>
-            </div>
-
-            {/* Message volume per platform */}
-            <div className="card overflow-hidden">
-                <div className="px-5 pt-5 pb-4">
-                    <SectionHeader title="Message Volume by Platform" />
-                    <p className="text-xs text-surface-500 -mt-2">
-                        Period figures come from daily snapshots
-                        {d.message_volume.daily_since
-                            ? ` collected since ${dayjs(d.message_volume.daily_since).format("D MMM YYYY")}`
-                            : ""}
-                        . Daily message history collects from deploy onward —
-                        the totals on the right are all-time.
-                    </p>
-                </div>
-                <TableWrapper>
-                    <table className="w-full">
-                        <thead>
-                            <tr className="border-y border-line bg-surface-50/50">
-                                <th className={TH}>Platform</th>
-                                <th className={TH_R}>Messages (period)</th>
-                                <th className={TH_R}>Inbound (period)</th>
-                                <th className={TH_R}>Messages (all-time)</th>
-                                <th className={TH_R}>Inbound (all-time)</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-line">
-                            {d.message_volume.channels.map((c) => (
-                                <tr
-                                    key={c.channel}
-                                    className="hover:bg-surface-50/50 transition-colors"
-                                >
-                                    <td className="px-4 py-3 font-medium text-surface-900">
-                                        {PLATFORM_LABEL[c.channel] ?? c.channel}
-                                    </td>
-                                    <td className="px-4 py-3 text-right font-semibold tabular-nums">
-                                        {c.period.messages}
-                                    </td>
-                                    <td className="px-4 py-3 text-right tabular-nums">
-                                        {c.period.inbound}
-                                    </td>
-                                    <td className="px-4 py-3 text-right tabular-nums text-surface-500">
-                                        {c.all_time.messages}
-                                    </td>
-                                    <td className="px-4 py-3 text-right tabular-nums text-surface-500">
-                                        {c.all_time.inbound}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </TableWrapper>
-            </div>
-
-            <p className="text-xs text-surface-400">
-                Lead → order conversion is matched by phone number and is a
-                floor, not an exact figure — a lead who ordered under a
-                different number is not counted. WhatsApp revenue follows the
-                same channel rule as the Channels tab, so the numbers agree.
-            </p>
-        </div>
-    );
-}
-
-// ─── Collections tab ──────────────────────────────────────────────────────────
-// The collections funnel: every shilling promised but not collected, staged —
-// open quotes, stalled deposits (money already down, then silence — the
-// warmest calls in the business), and unpaid balances. Balance figures come
-// from the same MetricEngine base as the executive Overview, so the two
-// surfaces always agree. Each row carries a one-click WhatsApp follow-up;
-// order rows fetch the order's public payment link first so the customer can
-// settle straight from the chat.
-
 function CollectionsTab() {
     const toast = useToastStore();
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["collections-funnel"],
-        queryFn: () => reportsApi.collectionsFunnel(),
+        queryKey: ["outlet", outletId, "collections-funnel"],
+        queryFn: () => reportsApi.collectionsFunnel(outletId),
         staleTime: 60_000,
     });
     // Which order row is currently fetching its payment link ("stalled-12").
@@ -1622,18 +1333,18 @@ function CollectionsTab() {
             {/* Headline: the money */}
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Money on the Table"
+                    label="Open quotes & balances"
                     value={fmtKes(summary.money_on_table)}
                     sub="Open quotes + all unpaid balances"
                     color="text-brand-600"
                 />
                 <KpiCard
-                    label="Open Quotes"
+                    label="Open quotes"
                     value={fmtKes(summary.open_quotes.value)}
                     sub={`${summary.open_quotes.count} quote${summary.open_quotes.count === 1 ? "" : "s"} · avg ${Math.round(summary.open_quotes.avg_age_days)}d old`}
                 />
                 <KpiCard
-                    label="Stalled Deposits"
+                    label="Stalled deposits"
                     value={fmtKes(summary.stalled_deposits.balance_due)}
                     sub={`${summary.stalled_deposits.count} order${summary.stalled_deposits.count === 1 ? "" : "s"} · ${fmtKes(summary.stalled_deposits.deposit_held)} already paid`}
                     color={
@@ -1643,7 +1354,7 @@ function CollectionsTab() {
                     }
                 />
                 <KpiCard
-                    label="Unpaid Balances"
+                    label="Unpaid balances"
                     value={fmtKes(summary.unpaid_balances.value)}
                     sub={`${summary.unpaid_balances.count} open order${summary.unpaid_balances.count === 1 ? "" : "s"}`}
                 />
@@ -1652,7 +1363,7 @@ function CollectionsTab() {
             {/* Funnel speed strip */}
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Quote → Order (90d)"
+                    label="Quote → order (90d)"
                     value={
                         conv.quotes_converted_rate_90d == null
                             ? "—"
@@ -1661,7 +1372,7 @@ function CollectionsTab() {
                     sub="Of quotes raised in the last 90 days"
                 />
                 <KpiCard
-                    label="Avg Days Quote → Order"
+                    label="Avg days quote → order"
                     value={
                         conv.avg_days_quote_to_order == null
                             ? "—"
@@ -1670,7 +1381,7 @@ function CollectionsTab() {
                     sub="Quote raised to order placed"
                 />
                 <KpiCard
-                    label="Avg Days Deposit → Paid"
+                    label="Avg days deposit → paid"
                     value={
                         conv.avg_days_deposit_to_paid == null
                             ? "—"
@@ -1982,9 +1693,10 @@ function CollectionsTab() {
 // expected-value estimates, labelled as such — not booked money.
 
 function BasketIntelTab() {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["attach-rates"],
-        queryFn: () => reportsApi.attachRates(),
+        queryKey: ["outlet", outletId, "attach-rates"],
+        queryFn: () => reportsApi.attachRates(outletId),
         staleTime: 60_000,
     });
     // Which anchor rows are expanded to show their companion breakdown.
@@ -2014,23 +1726,23 @@ function BasketIntelTab() {
 
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Missed Revenue Opportunity"
+                    label="Add-ons not sold"
                     value={fmtKes(summary.missed_revenue_estimate_total)}
                     sub="Estimate — if missed baskets attached at the observed rate"
                     color="text-brand-600"
                 />
                 <KpiCard
-                    label="Multi-item Baskets"
+                    label="Multi-item baskets"
                     value={`${summary.multi_item_pct}%`}
                     sub={`Of ${summary.total_baskets.toLocaleString()} baskets (180 days)`}
                 />
                 <KpiCard
-                    label="Avg Items / Basket"
+                    label="Avg items / basket"
                     value={summary.avg_basket_items}
                     sub="Distinct products per order"
                 />
                 <KpiCard
-                    label="Best Pair"
+                    label="Best pair"
                     value={
                         summary.top_pair
                             ? `${summary.top_pair.attach_rate}%`
@@ -2163,9 +1875,10 @@ function fmtNative(currency: string, amount: number) {
 }
 
 function InternationalTab() {
+    const outletId = useReportOutlet();
     const { data, isLoading } = useQuery({
-        queryKey: ["international-corridor"],
-        queryFn: () => reportsApi.internationalCorridor(),
+        queryKey: ["outlet", outletId, "international-corridor"],
+        queryFn: () => reportsApi.internationalCorridor(outletId),
         staleTime: 60_000,
     });
 
@@ -2191,18 +1904,18 @@ function InternationalTab() {
 
             <div className={KPI_GRID}>
                 <KpiCard
-                    label="Corridor Orders"
+                    label="Corridor orders"
                     value={summary.corridor_orders.toLocaleString()}
                     sub={`Last ${data.window_days} days — non-KES or shipped abroad`}
                     color="text-brand-600"
                 />
                 <KpiCard
-                    label="Corridor Customers"
+                    label="Corridor customers"
                     value={summary.corridor_customers.toLocaleString()}
                     sub="Distinct buyers across the corridor"
                 />
                 <KpiCard
-                    label="Currencies Active"
+                    label="Currencies active"
                     value={summary.currencies_active}
                     sub={
                         summary.kes_equivalent_total != null
@@ -2211,7 +1924,7 @@ function InternationalTab() {
                     }
                 />
                 <KpiCard
-                    label="Share of All Orders"
+                    label="Share of all orders"
                     value={`${summary.share_of_all_orders_pct}%`}
                     sub="Corridor share of every order in the window"
                 />
@@ -2429,6 +2142,115 @@ function InternationalTab() {
                     </ComposedChart>
                 </ResponsiveContainer>
             </div>
+        </div>
+    );
+}
+
+// ─── Where the orders went ────────────────────────────────────────────────────
+// Every order raised in the window, in exactly one bucket (MetricEngine::
+// orderOutcomes): Sold is the Sold tile; lost = cancelled or voided — value
+// the business quoted and did not keep, shown against the previous period and
+// by who raised it, with the orders one click away.
+const OUTCOME_ROWS: { key: "sold" | "unconfirmed" | "lost" | "refunded" | "other"; label: string; tone: string }[] = [
+    { key: "sold", label: "Sold", tone: "bg-success" },
+    { key: "unconfirmed", label: "Unconfirmed carts", tone: "bg-warning" },
+    { key: "lost", label: "Lost — cancelled or voided", tone: "bg-danger" },
+    { key: "refunded", label: "Refunded", tone: "bg-surface-400" },
+    { key: "other", label: "Other", tone: "bg-surface-300" },
+];
+
+function OutcomesCard({ start, end, outlet }: { start: string; end: string; outlet?: string }) {
+    const [openLost, setOpenLost] = useState(false);
+    const query = { period: "custom", from: start, to: end, ...(outlet ? { outlet_id: Number(outlet) } : {}) };
+    const { data } = useQuery({
+        queryKey: ["report-outcomes", start, end, outlet],
+        queryFn: () => reportsApi.outcomes(query),
+    });
+    if (!data) return null;
+
+    const total = OUTCOME_ROWS.reduce((a, r) => a + data[r.key].value, 0);
+    const lost = data.lost;
+    const lostChange = lost.previous_value > 0 ? Math.round(((lost.value - lost.previous_value) / lost.previous_value) * 1000) / 10 : null;
+
+    return (
+        <div className="card p-5 space-y-4">
+            <SectionHeader title="Where the orders went" />
+            <p className="text-xs text-surface-500 -mt-2">
+                Every order raised in this period, in one place each — so the sold figure, the carts nobody confirmed and the sales lost add up to the whole order book.
+            </p>
+            <div className="flex h-2.5 overflow-hidden rounded-full bg-surface-100">
+                {OUTCOME_ROWS.map((r) => data[r.key].value > 0 && (
+                    <div key={r.key} className={r.tone} style={{ width: `${(data[r.key].value / Math.max(total, 1)) * 100}%` }} title={r.label} />
+                ))}
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {OUTCOME_ROWS.filter((r) => r.key !== "other" || data.other.orders > 0).map((r) => (
+                    <div key={r.key} className="space-y-0.5">
+                        <div className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wide text-surface-500">
+                            <span className={clsx("h-2 w-2 rounded-full", r.tone)} />{r.label}
+                        </div>
+                        <div className="text-sm font-semibold tabular-nums text-surface-800">{fmtKes(data[r.key].value)}</div>
+                        <div className="text-2xs text-surface-400">{data[r.key].orders} order{data[r.key].orders === 1 ? "" : "s"}</div>
+                    </div>
+                ))}
+            </div>
+            {lost.orders > 0 && (
+                <div className="rounded-xl border border-line p-4 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm text-surface-700">
+                            <span className="font-semibold">{fmtKes(lost.value)}</span> lost on {lost.orders} order{lost.orders === 1 ? "" : "s"}
+                            {lost.share_pct != null && <span className="text-surface-500"> · {lost.share_pct}% of everything raised</span>}
+                            {lostChange != null && <span className="text-surface-500"> · {lostChange > 0 ? "up" : "down"} {Math.abs(lostChange)}% on the previous period</span>}
+                        </p>
+                        <button onClick={() => setOpenLost(true)} className="text-xs font-medium text-brand-600 hover:underline">Orders →</button>
+                    </div>
+                    {lost.by_salesperson.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                            {lost.by_salesperson.map((p) => (
+                                <span key={p.id ?? "none"} className="rounded-full bg-surface-100 px-2.5 py-0.5 text-2xs text-surface-600">
+                                    {p.name}: {fmtKes(p.value)} · {p.orders}
+                                </span>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+            {openLost && <DrillPanel metric="lost" title="Lost sales" query={query} onClose={() => setOpenLost(false)} />}
+        </div>
+    );
+}
+
+// ─── Sold, by channel ─────────────────────────────────────────────────────────
+function ChannelSplit({ total, rows }: { total: number; rows: readonly (readonly [string, number | undefined, number | undefined])[] }) {
+    const max = Math.max(1, ...rows.map(([, v]) => Number(v ?? 0)));
+    const idle = rows.filter(([, v]) => !(Number(v ?? 0) > 0)).map(([label]) => label);
+    return (
+        <div className="card card-body">
+            <div className="flex items-baseline justify-between gap-2 mb-3">
+                <p className="text-xs text-surface-500">Sold, by channel</p>
+                <p className="text-2xs text-surface-400">adds up to Sold · {fmtKes(total)}</p>
+            </div>
+            <div className="grid gap-x-8 gap-y-2 sm:grid-cols-2">
+                {rows.map(([label, value, count]) => {
+                    const v = Number(value ?? 0);
+                    return (
+                        // A phone shows the channels that sold; the empty ones fold
+                        // into one line below instead of a column of KES 0 rows.
+                        <div key={label} className={clsx("grid-cols-[6.5rem_1fr_auto] items-center gap-3 text-sm", v > 0 ? "grid" : "hidden sm:grid")}>
+                            <span className={v > 0 ? "text-surface-700" : "text-surface-400"}>{label}</span>
+                            <div className="h-1.5 rounded-full bg-surface-100">
+                                {v > 0 && <div className="h-1.5 rounded-full bg-brand-400" style={{ width: `${(v / max) * 100}%` }} />}
+                            </div>
+                            <span className={clsx("tabular-nums text-right whitespace-nowrap", v > 0 ? "text-surface-800" : "text-surface-400")}>
+                                {fmtKes(v)} <span className="text-2xs text-surface-400">· {Number(count ?? 0)}</span>
+                            </span>
+                        </div>
+                    );
+                })}
+            </div>
+            {idle.length > 0 && (
+                <p className="sm:hidden mt-2 text-2xs text-surface-400">Nothing sold via {idle.join(", ")}.</p>
+            )}
         </div>
     );
 }

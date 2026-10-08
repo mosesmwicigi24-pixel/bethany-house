@@ -6,6 +6,7 @@ import { z } from "zod";
 import { usersApi, rolesApi, outletsApi } from "@/api/setup";
 import { useToastStore } from "@/store/toast.store";
 import { useTableState } from "@/hooks/useTableState";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { DataTable, Pagination } from "@/components/ui/DataTable";
@@ -22,6 +23,13 @@ import {
 import type { UserSetup, UserFormData } from "@/types/setup";
 import type { ApiError } from "@/types";
 import { clsx } from "clsx";
+import { useAuthStore } from "@/store/auth.store";
+import {
+    UserSecurityModal,
+    canAdministerSignIn,
+    canResetClerkPin,
+    lockLabel,
+} from "@/components/security/UserSecurityModal";
 
 // ── Schemas ────────────────────────────────────────────────────────────────────
 
@@ -41,7 +49,9 @@ const baseUserSchema = z.object({
 
 const createSchema = baseUserSchema
     .extend({
-        role_ids: z.array(z.number()).min(1, "Assign at least one role"),
+        // Roles are the owner's to give (2026-10-02): an account may be created
+        // without any, and a super administrator assigns them.
+        role_ids: z.array(z.number()),
         password: z.string().min(8, "Minimum 8 characters"),
         password_confirmation: z.string().min(1, "Please confirm the password"),
     })
@@ -103,15 +113,22 @@ interface RolePickerProps {
     onToggle: (id: number) => void;
     error?: string;
     required?: boolean;
+    /** Only a super administrator changes who holds which role (owner, 2026-10-02). */
+    readOnly?: boolean;
 }
 
-function RolePicker({ roles, roleIds, onToggle, error, required = false }: RolePickerProps) {
+function RolePicker({ roles, roleIds, onToggle, error, required = false, readOnly = false }: RolePickerProps) {
     return (
         <div className="border-t border-line pt-4">
             <p className="label mb-2">
                 Roles {required && <span className="text-danger">*</span>}
                 {error && <span className="field-error ml-2">{error}</span>}
-                {!required && roleIds.length === 0 && (
+                {readOnly && (
+                    <span className="text-surface-400 text-xs ml-2 font-normal">
+                        Only the owner (a super administrator) changes roles.
+                    </span>
+                )}
+                {!readOnly && !required && roleIds.length === 0 && (
                     <span className="text-surface-400 text-xs ml-2 font-normal">
                         No roles — this user will have no access until roles are assigned.
                     </span>
@@ -124,7 +141,8 @@ function RolePicker({ roles, roleIds, onToggle, error, required = false }: RoleP
                         <label
                             key={role.id}
                             className={clsx(
-                                "flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors",
+                                "flex items-start gap-2.5 p-2.5 rounded-lg border transition-colors",
+                                readOnly ? "cursor-default opacity-70" : "cursor-pointer",
                                 roleIds.includes(role.id)
                                     ? "border-brand-300 bg-brand-50"
                                     : "border-surface-200 hover:border-surface-300",
@@ -133,6 +151,7 @@ function RolePicker({ roles, roleIds, onToggle, error, required = false }: RoleP
                             <input
                                 type="checkbox"
                                 checked={roleIds.includes(role.id)}
+                                disabled={readOnly}
                                 onChange={() => onToggle(role.id)}
                                 className="accent-brand-500 mt-0.5 shrink-0"
                             />
@@ -168,6 +187,10 @@ export default function UsersPage() {
     const [editingUser, setEditingUser] = useState<UserSetup | null>(null);
     const [pwUser, setPwUser] = useState<UserSetup | null>(null);
     const [promoteUser, setPromoteUser] = useState<UserSetup | null>(null);
+    // Sign-in security for another person (Phase 4C)
+    const [securityUser, setSecurityUser] = useState<UserSetup | null>(null);
+    const me = useAuthStore((s) => s.user);
+    const myRoles = (me?.roles ?? []).map((r) => r.name);
 
     // Data
     const { data, isLoading } = useQuery({
@@ -183,8 +206,13 @@ export default function UsersPage() {
         queryFn: () => outletsApi.list(),
     });
 
+    // Write controls follow the server's user permissions, so a read-only
+    // viewer (admin) sees no buttons that would only fail.
+    const { can: canDo, hasRole } = usePermissions();
     const roles = rolesData?.data ?? [];
     const outlets = outletsData?.data ?? [];
+    // Mirrors the server rule: only a super administrator changes roles.
+    const canAssignRoles = hasRole("super_admin");
     const users = data?.data ?? [];
     const meta = data?.meta;
 
@@ -356,12 +384,14 @@ export default function UsersPage() {
                         going live.
                     </p>
                 </div>
-                <button
-                    onClick={openCreate}
-                    className="btn-primary shrink-0 self-start sm:self-auto"
-                >
-                    + Create User
-                </button>
+                {canDo("users.create") && (
+                    <button
+                        onClick={openCreate}
+                        className="btn-primary shrink-0 self-start sm:self-auto"
+                    >
+                        + Create User
+                    </button>
+                )}
             </div>
 
             {/* Search - state lives in table hook, never touches form state */}
@@ -465,14 +495,20 @@ export default function UsersPage() {
                         {
                             key: "status",
                             label: "Status",
-                            render: (u) => (
-                                <StatusBadge
-                                    active={
-                                        (u as unknown as UserSetup).status ===
-                                        "active"
-                                    }
-                                />
-                            ),
+                            render: (u) => {
+                                const lock = lockLabel(u as unknown as UserSetup);
+                                return (
+                                    <div className="flex flex-col items-start gap-1">
+                                        <StatusBadge
+                                            active={
+                                                (u as unknown as UserSetup).status ===
+                                                "active"
+                                            }
+                                        />
+                                        {lock && <span className="badge text-2xs bg-danger-light text-danger">{lock}</span>}
+                                    </div>
+                                );
+                            },
                         },
                         {
                             key: "last_login_at",
@@ -494,11 +530,28 @@ export default function UsersPage() {
                         {
                             key: "id",
                             label: "",
-                            width: "140px",
+                            width: "176px",
                             render: (u) => {
                                 const user = u as unknown as UserSetup;
+                                const showSecurity =
+                                    canAdministerSignIn(myRoles, me?.id, user) ||
+                                    canResetClerkPin(myRoles, me?.id, me?.outlet?.id, user);
                                 return (
                                     <div className="flex items-center gap-1">
+                                        {showSecurity && (
+                                            <button
+                                                title="Sign-in security"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setSecurityUser(user);
+                                                }}
+                                                className={clsx("btn-ghost btn-sm", lockLabel(user) && "text-danger")}
+                                                aria-label="Sign-in security"
+                                            >
+                                                <ShieldIcon />
+                                            </button>
+                                        )}
+                                        {canDo("users.edit") && (<>
                                         <button
                                             title="Change password"
                                             onClick={(e) => {
@@ -520,7 +573,8 @@ export default function UsersPage() {
                                         >
                                             <EditIcon />
                                         </button>
-                                        {user.user_type === "customer" && (
+                                        </>)}
+                                        {user.user_type === "customer" && canDo("users.edit") && (
                                             <button
                                                 title="Promote to staff"
                                                 onClick={(e) => {
@@ -534,6 +588,7 @@ export default function UsersPage() {
                                                 <PromoteIcon />
                                             </button>
                                         )}
+                                        {canDo("users.delete") && (
                                         <button
                                             title="Delete user"
                                             onClick={(e) => {
@@ -545,6 +600,7 @@ export default function UsersPage() {
                                         >
                                             <TrashIcon />
                                         </button>
+                                        )}
                                     </div>
                                 );
                             },
@@ -715,7 +771,7 @@ export default function UsersPage() {
                         roles={roles}
                         roleIds={createForm.watch("role_ids")}
                         onToggle={toggleCreateRole}
-                        required
+                        readOnly={!canAssignRoles}
                         error={
                             createForm.formState.errors.role_ids
                                 ?.message as string
@@ -847,6 +903,7 @@ export default function UsersPage() {
                         roles={roles}
                         roleIds={editForm.watch("role_ids")}
                         onToggle={toggleEditRole}
+                        readOnly={!canAssignRoles}
                         error={
                             editForm.formState.errors.role_ids
                                 ?.message as string
@@ -950,6 +1007,8 @@ export default function UsersPage() {
             </Modal>
 
             {/* PROMOTE TO STAFF modal */}
+            <UserSecurityModal user={securityUser} onClose={() => setSecurityUser(null)} />
+
             <PromoteToStaffModal
                 open={promoteOpen}
                 user={promoteUser}
@@ -976,6 +1035,12 @@ export default function UsersPage() {
         </div>
     );
 }
+
+const ShieldIcon = () => (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z" />
+    </svg>
+);
 
 const EditIcon = () => (
     <svg

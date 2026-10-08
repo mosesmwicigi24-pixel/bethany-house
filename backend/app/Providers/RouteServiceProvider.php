@@ -99,6 +99,21 @@ class RouteServiceProvider extends ServiceProvider
         // Very strict for expensive search queries
         // ═══════════════════════════════════════════════════════════════════════
         
+        // Phase 4A anti-scraping: every door onto the customer book (the
+        // till's autocomplete, the customers list, the search palette)
+        // shares ONE bucket per user — 30 a minute (App\Support\CustomerSearch).
+        RateLimiter::for('customer-search', function (Request $request) {
+            return Limit::perMinute(\App\Support\CustomerSearch::PER_MINUTE)
+                ->by('customer-search:' . ($request->user()?->id ?? $request->ip()))
+                ->response(function (Request $request, array $headers) {
+                    return response()->json([
+                        'message'             => 'Too many customer searches. Wait a minute and try again.',
+                        'code'                => 'customer_search_rate_limit',
+                        'retry_after_seconds' => $headers['Retry-After'] ?? 60,
+                    ], 429, $headers);
+                });
+        });
+
         RateLimiter::for('search', function (Request $request) {
             return Limit::perMinute(20)
                 ->by($request->ip())
