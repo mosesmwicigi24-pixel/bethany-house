@@ -54,6 +54,34 @@ final class SignedFiles
         ])->header('Cache-Control', 'no-store');
     }
 
+    /**
+     * The Content-Type served for each known extension. DECLARED, never
+     * sniffed: mimeType() reads file CONTENT, so an HTML payload wearing a
+     * .jpg name sniffs as text/html and — served inline on this origin —
+     * executes with the viewer's session. nosniff alone cannot help there:
+     * it only stops the browser OVERRIDING the declared type, and sniffing
+     * made the declared type the malicious one. The extension decides;
+     * anything unknown (legacy .svg uploads included — SVG is a script
+     * container wearing an image extension) is an opaque download.
+     */
+    private const MIME_BY_EXT = [
+        'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png',
+        'gif' => 'image/gif', 'webp' => 'image/webp', 'heic' => 'image/heic',
+        'heif' => 'image/heif', 'bmp' => 'image/bmp',
+        'mp4' => 'video/mp4', 'mov' => 'video/quicktime', 'm4v' => 'video/x-m4v',
+        'webm' => 'video/webm', '3gp' => 'video/3gpp', '3gpp' => 'video/3gpp',
+        'avi' => 'video/x-msvideo', 'mkv' => 'video/x-matroska',
+        'mp3' => 'audio/mpeg', 'm4a' => 'audio/mp4', 'wav' => 'audio/wav',
+        'aac' => 'audio/aac', 'ogg' => 'audio/ogg', 'oga' => 'audio/ogg',
+        'opus' => 'audio/opus', 'amr' => 'audio/amr', 'flac' => 'audio/flac',
+        'weba' => 'audio/webm',
+        'pdf' => 'application/pdf', 'txt' => 'text/plain', 'csv' => 'text/csv',
+        'doc' => 'application/msword',
+        'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'xls' => 'application/vnd.ms-excel',
+        'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ];
+
     /** Stream a file from a private disk — inline unless ?download=1 was signed in. */
     public static function stream(Request $request, string $disk, string $path, ?string $name = null)
     {
@@ -62,11 +90,16 @@ final class SignedFiles
             return response()->json(['message' => 'File not found.'], 404);
         }
 
-        $disposition = $request->boolean('download') ? 'attachment' : 'inline';
+        $ext      = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        $mime     = self::MIME_BY_EXT[$ext] ?? 'application/octet-stream';
+        // An unknown type never renders inline: a download cannot script,
+        // whatever is inside it.
+        $inline      = array_key_exists($ext, self::MIME_BY_EXT) && !$request->boolean('download');
+        $disposition = $inline ? 'inline' : 'attachment';
         $filename    = str_replace(['"', "\r", "\n"], '', $name ?: basename($path));
 
         return response($store->get($path), 200, [
-            'Content-Type'           => $store->mimeType($path) ?: 'application/octet-stream',
+            'Content-Type'           => $mime,
             'Content-Disposition'    => $disposition . '; filename="' . $filename . '"',
             // The link is short-lived; a cached copy must not outlive it.
             'Cache-Control'          => 'private, max-age=' . (self::minutes() * 60) . ', no-transform',

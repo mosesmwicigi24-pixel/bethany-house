@@ -254,6 +254,15 @@ function parseBody(body: string): ParsedBody {
 
 // ─── File type helpers ────────────────────────────────────────────────────────
 
+/** A file picked into the composer, tracked from selection to uploaded. */
+interface PendingUpload {
+    key: string;
+    file: File;
+    previewUrl: string | null; // local object URL (images only)
+    status: "uploading" | "ready" | "failed";
+    att?: ChannelAttachment;   // set once the server has it
+}
+
 type FileKind = "image" | "video" | "audio" | "pdf" | "text" | "csv" | "word" | "excel" | "other";
 
 function getFileKind(name: string, mime?: string): FileKind {
@@ -1109,12 +1118,15 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
     const [enterToSend, setEnterToSend] = useState(!isCoarsePointer);
     // Pending non-member mention — shows the add-member prompt before inserting
     const [pendingMention, setPendingMention] = useState<MentionUser | null>(null);
-    const [attachments, setAttachments] = useState<ChannelAttachment[]>([]);
-    const [previews, setPreviews]       = useState<string[]>([]);  // local blob URLs for composer preview
-    const [uploading, setUploading]     = useState(false);
+    // Each picked file is its own little state machine: uploading → ready,
+    // or failed with a visible retry. Failure used to be a console.error and
+    // a silently vanished file — the sender only found out when the recipient
+    // asked where the photo was.
+    const [pending, setPending] = useState<PendingUpload[]>([]);
     const textareaRef                   = useRef<HTMLTextAreaElement>(null);
     const fileInputRef                  = useRef<HTMLInputElement>(null);
     const { user }                      = useAuthStore();
+    const toast                         = useToastStore();
 
     // ── Phase 5: keyboard handling ────────────────────────────────────────────
     // visualViewport tracks the true visible area - shrinks when keyboard opens.
@@ -1146,9 +1158,13 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
     const previewsRef = useRef<string[]>([]);
     useEffect(() => () => { previewsRef.current.forEach(URL.revokeObjectURL); }, []);
 
+    const readyAttachments = pending.filter(p => p.status === "ready" && p.att).map(p => p.att!);
+    const anyUploading     = pending.some(p => p.status === "uploading");
+    const anyFailed        = pending.some(p => p.status === "failed");
+
     const sendMutation = useMutation({
         mutationFn: () => {
-            const attachmentMarkdown = attachments.map(a =>
+            const attachmentMarkdown = readyAttachments.map(a =>
                 a.is_image
                     ? `![${a.name}](${a.url})`
                     : `[📎 ${a.name}](${a.url})`
@@ -1166,8 +1182,7 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
         onSuccess: data => {
             setBody("");
             setTokenMap({});
-            setAttachments([]);
-            setPreviews([]);
+            setPending([]);
             if (textareaRef.current) {
                 textareaRef.current.style.height = "auto";
                 textareaRef.current.style.height = "20px";
@@ -1175,50 +1190,62 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
             onSent(data.message);
             onClearReply?.();
         },
+        // The draft is untouched on failure — body and attachments are only
+        // cleared above — so "try again" is just pressing send again.
+        onError: () => toast.error("Message didn't send — check your connection and try again."),
     });
 
-    const canSend = (body.trim().length > 0 || attachments.length > 0) && !uploading;
+    // isPending guards the double-tap: two quick taps on Send used to fire the
+    // mutation twice and post the message twice. Failed uploads block sending
+    // rather than being silently dropped — retry them or remove them first.
+    const canSend = (body.trim().length > 0 || readyAttachments.length > 0)
+        && !anyUploading && !anyFailed && !sendMutation.isPending;
 
-    const handleFiles = async (files: FileList | null) => {
-        if (!files || files.length === 0) return;
-        setUploading(true);
-        const uploaded: ChannelAttachment[] = [];
-        const newPreviews: string[] = [];
-        for (const file of Array.from(files).slice(0, 5)) {
-            // Create local preview immediately from the File object (no auth needed)
-            const previewUrl = URL.createObjectURL(file);
-            previewsRef.current.push(previewUrl);
-            newPreviews.push(previewUrl);
-            try {
-                // Compress images before upload (WebP, ≤6MB) — same optimiser as
-                // product photos — so big phone shots go up fast at good quality.
-                let toUpload: File = file;
-                if (file.type.startsWith("image/")) {
-                    const { smartCompressImage } = await import("@/utils/compressImage");
-                    toUpload = await smartCompressImage(file);
-                }
-                const att = await channelApi.uploadAttachment(toUpload);
-                uploaded.push(att);
-            } catch (e) {
-                console.error("Upload failed for", file.name, e);
-                newPreviews.pop(); // remove preview for failed upload
-                URL.revokeObjectURL(previewUrl);
-                previewsRef.current = previewsRef.current.filter(u => u !== previewUrl);
+    /** Upload one picked file, tracking its chip through the states. */
+    const uploadOne = async (key: string, file: File) => {
+        try {
+            // Compress images before upload (WebP, ≤6MB) — same optimiser as
+            // product photos — so big phone shots go up fast at good quality.
+            let toUpload: File = file;
+            if (file.type.startsWith("image/")) {
+                const { smartCompressImage } = await import("@/utils/compressImage");
+                toUpload = await smartCompressImage(file);
             }
+            const att = await channelApi.uploadAttachment(toUpload);
+            setPending(prev => prev.map(p => p.key === key ? { ...p, status: "ready", att } : p));
+        } catch (e) {
+            console.error("Upload failed for", file.name, e);
+            setPending(prev => prev.map(p => p.key === key ? { ...p, status: "failed" } : p));
         }
-        setAttachments(prev => [...prev, ...uploaded].slice(0, 10));
-        setPreviews(prev => [...prev, ...newPreviews].slice(0, 10));
-        setUploading(false);
     };
 
-    const removeAttachment = (idx: number) => {
-        const previewUrl = previews[idx];
-        if (previewUrl) {
-            URL.revokeObjectURL(previewUrl);
-            previewsRef.current = previewsRef.current.filter(u => u !== previewUrl);
+    const handleFiles = (files: FileList | null) => {
+        if (!files || files.length === 0) return;
+        const room = Math.max(0, 10 - pending.length);
+        for (const file of Array.from(files).slice(0, room)) {
+            const key = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            // Local preview immediately from the File object (no auth needed)
+            const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
+            if (previewUrl) previewsRef.current.push(previewUrl);
+            setPending(prev => [...prev, { key, file, previewUrl, status: "uploading" }]);
+            void uploadOne(key, file);
         }
-        setAttachments(prev => prev.filter((_, i) => i !== idx));
-        setPreviews(prev => prev.filter((_, i) => i !== idx));
+    };
+
+    const retryUpload = (key: string) => {
+        const entry = pending.find(p => p.key === key);
+        if (!entry) return;
+        setPending(prev => prev.map(p => p.key === key ? { ...p, status: "uploading" } : p));
+        void uploadOne(key, entry.file);
+    };
+
+    const removeUpload = (key: string) => {
+        const entry = pending.find(p => p.key === key);
+        if (entry?.previewUrl) {
+            URL.revokeObjectURL(entry.previewUrl);
+            previewsRef.current = previewsRef.current.filter(u => u !== entry.previewUrl);
+        }
+        setPending(prev => prev.filter(p => p.key !== key));
     };
 
     const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -1335,44 +1362,69 @@ aria-label="Delete">✕</button>
             )}
 
             {/* Attachment previews */}
-            {attachments.length > 0 && (
+            {pending.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-2">
-                    {attachments.map((att, idx) => {
-                        const kind = getFileKind(att.name);
+                    {pending.map(p => {
+                        const kind = getFileKind(p.att?.name ?? p.file.name);
                         const meta = KIND_META[kind];
                         return (
-                            <div key={idx} className="relative group/att">
-                                {kind === "image" ? (
-                                    <div className="w-16 h-16 rounded-xl overflow-hidden border border-surface-200 bg-surface-100">
-                                        <img src={previews[idx] ?? att.url} alt={att.name}
-                                            className="w-full h-full object-contain" />
+                            <div key={p.key} className="relative group/att">
+                                {kind === "image" && p.previewUrl ? (
+                                    <div className={clsx(
+                                        "w-16 h-16 rounded-xl overflow-hidden border bg-surface-100",
+                                        p.status === "failed" ? "border-danger" : "border-surface-200",
+                                    )}>
+                                        <img src={p.previewUrl} alt={p.file.name}
+                                            className={clsx("w-full h-full object-contain", p.status !== "ready" && "opacity-50")} />
                                     </div>
                                 ) : (
-                                    <div className="flex items-center gap-2 border border-surface-200 rounded-xl px-2.5 py-2 max-w-[160px]">
+                                    <div className={clsx(
+                                        "flex items-center gap-2 border rounded-xl px-2.5 py-2 max-w-[160px]",
+                                        p.status === "failed" ? "border-danger bg-danger-light/30" : "border-surface-200",
+                                    )}>
                                         <div className={clsx("w-7 h-7 rounded-lg flex items-center justify-center shrink-0", meta.bg)}>
                                             <FileKindIcon kind={kind} className="w-4 h-4" />
                                         </div>
                                         <div className="min-w-0">
-                                            <p className="text-2xs text-surface-700 font-medium truncate">{att.name}</p>
-                                            <p className={clsx("text-2xs", meta.text)}>{meta.label}</p>
+                                            <p className="text-2xs text-surface-700 font-medium truncate">{p.file.name}</p>
+                                            <p className={clsx("text-2xs", p.status === "failed" ? "text-danger font-semibold" : meta.text)}>
+                                                {p.status === "uploading" ? "Uploading…" : p.status === "failed" ? "Failed" : meta.label}
+                                            </p>
                                         </div>
                                     </div>
                                 )}
-                                <button onClick={() => removeAttachment(idx)}
-                                    className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-danger text-white text-2xs flex items-center justify-center opacity-0 group-hover/att:opacity-100 transition-opacity leading-none">
+
+                                {/* Per-file spinner while its upload is in flight */}
+                                {p.status === "uploading" && (
+                                    <div className="absolute inset-0 rounded-xl bg-white/40 flex items-center justify-center pointer-events-none">
+                                        <svg className="w-5 h-5 animate-spin text-brand-600" viewBox="0 0 24 24" fill="none">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                                        </svg>
+                                    </div>
+                                )}
+
+                                {/* Failed: retry front and centre — a vanished photo is a
+                                    lost message; the sender must SEE it failed. */}
+                                {p.status === "failed" && (
+                                    <button onClick={() => retryUpload(p.key)} title="Retry upload"
+                                        className="absolute inset-0 rounded-xl bg-danger/10 flex items-center justify-center">
+                                        <span className="w-7 h-7 rounded-full bg-danger text-white flex items-center justify-center shadow">
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                                            </svg>
+                                        </span>
+                                    </button>
+                                )}
+
+                                {/* Always tappable on touch — hover-only made it unreachable on phones */}
+                                <button onClick={() => removeUpload(p.key)} title="Remove"
+                                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-surface-700 text-white text-2xs flex items-center justify-center leading-none shadow sm:opacity-0 sm:group-hover/att:opacity-100 transition-opacity">
                                     ✕
                                 </button>
                             </div>
                         );
                     })}
-                    {uploading && (
-                        <div className="w-16 h-16 rounded-xl border border-surface-200 bg-surface-50 flex items-center justify-center">
-                            <svg className="w-5 h-5 animate-spin text-brand-500" viewBox="0 0 24 24" fill="none">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                            </svg>
-                        </div>
-                    )}
                 </div>
             )}
 
@@ -1386,7 +1438,7 @@ aria-label="Delete">✕</button>
                 <div className="flex items-center gap-1 sm:gap-1.5 bg-white rounded-xl border border-surface-200 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200 px-1.5 sm:px-3 py-2">
                     {/* Attach */}
                     <button onClick={() => fileInputRef.current?.click()} title="Attach file or image"
-                        disabled={uploading}
+                        disabled={pending.length >= 10}
                         className="shrink-0 w-9 h-9 sm:w-7 sm:h-7 flex items-center justify-center rounded-lg text-surface-400 hover:text-brand-600 hover:bg-surface-100 disabled:opacity-40 transition-colors">
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
@@ -1484,7 +1536,7 @@ aria-label="Delete">✕</button>
                     </button>
                 </div>
                 {/* Shortcut hints - visible when composer is empty */}
-                {!body && !attachments.length && (
+                {!body && pending.length === 0 && (
                     <div className="flex items-center gap-3 px-1 pt-1.5 pb-0.5">
                         <span className="flex items-center gap-1 text-2xs text-surface-500">
                             <kbd className="px-1 py-0.5 rounded bg-surface-100 text-surface-400 font-mono text-2xs border border-surface-200 leading-none">@</kbd>
@@ -1609,72 +1661,74 @@ function MessageContent({ body, isOwn, linkedEntities, entityPreviews, timeLabel
     const hasAttachments = images.length > 0 || files.length > 0;
     const chips          = linkedEntities ?? [];
 
+    // ONE message, ONE card. An image and its caption used to render as a
+    // bare floating picture with a separate text bubble — two things on
+    // screen for one thing said, and attachment-only messages carried no
+    // timestamp or ticks at all. Now every message is a single bubble:
+    // media at the top, caption beneath it, entity chips, then the meta row
+    // (time + ticks) — WhatsApp's shape in this app's own colours.
+    const media = [
+        ...images.map(x => ({ url: x.url, name: x.name, kind: "image" as FileKind })),
+        ...files.map(x  => ({ url: x.url, name: x.name, kind: getFileKind(x.name) })),
+    ];
+    const visuals = media.filter(m => m.kind === "image" || m.kind === "video");
+    const audios  = media.filter(m => m.kind === "audio");
+    const docs    = media.filter(m => !["image", "video", "audio"].includes(m.kind));
+    const cols    = visuals.length > 1;
+
+    const meta = timeLabel && (
+        <div className={clsx(
+            "flex items-center justify-end gap-1.5 mt-1 text-2xs tabular-nums",
+            isOwn ? "text-white/60" : "text-surface-500",
+        )}>{timeLabel}{ticks}</div>
+    );
+
     return (
-        <div className="flex flex-col gap-1">
-            {/* Coloured bubble - only rendered when there is text */}
-            {hasText && (
-                <div className={clsx(
-                    "rounded-2xl px-3.5 py-2 text-sm leading-relaxed break-words",
-                    // Nuru's card colours: own = the dark neutral (their navy → our
-                    // surface-900), everyone else = a white card on the tinted canvas.
-                    // The brand amber stays an ACCENT (send, chips, reply rule) and is
-                    // never a bubble fill — a page of amber blocks is what went wrong.
-                    // shadow-sm + the deeper border keep the white card legible even
-                    // on washed-out outdoor phone screens where the tint flattens.
-                    isOwn
-                        ? "bg-surface-900 text-white shadow-sm"
-                        : "bg-white border border-surface-300/80 text-surface-900 shadow-sm",
-                    // Tail on the BOTTOM corner, pointing at the speaker's side.
-                    isOwn ? "rounded-br-[5px]" : "rounded-bl-[5px]",
-                )}>
-                    <RenderTextOnly body={textContent} isOwn={isOwn} />
-                    {/* Entity chips inside the bubble */}
-                    {chips.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-1.5 overflow-x-auto">
-                            {chips.map((e, i) => <EntityChipWithPreview key={i} entity={e} isOwn={isOwn} />)}
-                        </div>
-                    )}
-                    {timeLabel && (
-                        <div className={clsx(
-                            "flex items-center justify-end gap-1.5 mt-1 text-2xs tabular-nums",
-                            isOwn ? "text-white/60" : "text-surface-500",
-                        )}>{timeLabel}{ticks}</div>
-                    )}
+        <div className={clsx(
+            "rounded-2xl text-sm leading-relaxed break-words w-fit max-w-full",
+            // Nuru's card colours: own = the dark neutral (their navy → our
+            // surface-900), everyone else = a white card on the tinted canvas.
+            // The brand amber stays an ACCENT (send, chips, reply rule) and is
+            // never a bubble fill — a page of amber blocks is what went wrong.
+            // shadow-sm + the deeper border keep the white card legible even
+            // on washed-out outdoor phone screens where the tint flattens.
+            isOwn
+                ? "bg-surface-900 text-white shadow-sm"
+                : "bg-white border border-surface-300/80 text-surface-900 shadow-sm",
+            // Tail on the BOTTOM corner, pointing at the speaker's side.
+            isOwn ? "rounded-br-[5px]" : "rounded-bl-[5px]",
+            // Media cards hug their content with a thin frame, WhatsApp-style;
+            // text-only bubbles keep the classic padding.
+            hasAttachments ? "p-1.5" : "px-3.5 py-2",
+            isOwn && "ml-auto",
+        )}>
+            {/* Media grid — the picture leads */}
+            {visuals.length > 0 && (
+                <div className={clsx("grid gap-1 max-w-[280px] overflow-hidden rounded-xl", cols ? "grid-cols-2" : "grid-cols-1")}>
+                    {visuals.map((m, i) => m.kind === "image"
+                        ? <AuthImage key={`v${i}`} url={m.url} alt={m.name} isOwn={isOwn} grid={cols} />
+                        : <AuthVideo key={`v${i}`} url={m.url} name={m.name} isOwn={isOwn} grid={cols} />)}
                 </div>
             )}
-
-            {/* Entity chips when message is attachment-only (no text bubble) */}
-            {!hasText && chips.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                    {chips.map((e, i) => <EntityChipWithPreview key={i} entity={e} isOwn={isOwn} />)}
-                </div>
-            )}
-
-            {/* Attachments — classified by kind: images + videos in a thumbnail
-                grid (click to enlarge / play inline), audio inline, docs as cards. */}
-            {hasAttachments && (() => {
-                const media = [
-                    ...images.map(x => ({ url: x.url, name: x.name, kind: "image" as FileKind })),
-                    ...files.map(x  => ({ url: x.url, name: x.name, kind: getFileKind(x.name) })),
-                ];
-                const visuals = media.filter(m => m.kind === "image" || m.kind === "video");
-                const audios  = media.filter(m => m.kind === "audio");
-                const docs    = media.filter(m => !["image", "video", "audio"].includes(m.kind));
-                const cols    = visuals.length > 1;
-                return (
-                <div className="flex flex-col gap-1.5">
-                    {visuals.length > 0 && (
-                        <div className={clsx("grid gap-1 max-w-[280px]", cols ? "grid-cols-2" : "grid-cols-1")}>
-                            {visuals.map((m, i) => m.kind === "image"
-                                ? <AuthImage key={`v${i}`} url={m.url} alt={m.name} isOwn={isOwn} grid={cols} />
-                                : <AuthVideo key={`v${i}`} url={m.url} name={m.name} isOwn={isOwn} grid={cols} />)}
-                        </div>
-                    )}
+            {(audios.length > 0 || docs.length > 0) && (
+                <div className={clsx("flex flex-col gap-1.5", visuals.length > 0 && "mt-1.5")}>
                     {audios.map((m, i) => <AuthAudio    key={`a${i}`} url={m.url} name={m.name} isOwn={isOwn} />)}
                     {docs.map((m, i)   => <AuthFileLink key={`d${i}`} url={m.url} name={m.name} isOwn={isOwn} />)}
                 </div>
-                );
-            })()}
+            )}
+
+            {/* Caption + chips + meta share the card with the media */}
+            {(hasText || chips.length > 0 || timeLabel) && (
+                <div className={clsx(hasAttachments && "px-2 pt-1.5 pb-1")}>
+                    {hasText && <RenderTextOnly body={textContent} isOwn={isOwn} />}
+                    {chips.length > 0 && (
+                        <div className={clsx("flex flex-wrap gap-1 overflow-x-auto", hasText && "mt-1.5")}>
+                            {chips.map((e, i) => <EntityChipWithPreview key={i} entity={e} isOwn={isOwn} />)}
+                        </div>
+                    )}
+                    {meta}
+                </div>
+            )}
         </div>
     );
 }
