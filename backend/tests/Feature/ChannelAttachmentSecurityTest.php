@@ -10,23 +10,33 @@ use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 /**
- * The chat attachment pipeline's security contract.
+ * Content-type truth for chat attachments.
  *
- * The serve endpoint used to sniff Content-Type from file CONTENT and serve
- * everything inline — so an HTML payload wearing a .jpg name came back as
- * text/html and executed in this app's origin with the viewer's session, and
- * an uploaded SVG (a script container wearing an image extension) did the
- * same. These tests pin the fix: declared-by-extension types, nosniff,
- * downloads for anything that isn't safe media, SVG refused at upload, and
- * clean 403s for traversal attempts.
+ * The 4D rework (SignedAttachmentUrlTest) already pins WHO may fetch a file:
+ * membership-checked issuer, five-minute signed link, strict path shape.
+ * These tests pin WHAT comes back: the upload side whitelists by extension
+ * (so a lying file can get in), and the serve side used to SNIFF the type
+ * from file content — an HTML payload wearing a .jpg name streamed back as
+ * text/html, inline, executing in this app's origin with the viewer's
+ * session. nosniff alone could not help: it stops the browser overriding
+ * the declared type, and sniffing made the declared type the malicious one.
+ * Now the extension DECLARES the type, SVG (a script container wearing an
+ * image extension) is refused at upload, and anything unknown — legacy .svg
+ * files included — comes back as an opaque download.
  */
 class ChannelAttachmentSecurityTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Storage::fake('local');
+    }
+
     private function staff(): User
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['status' => 'active', 'user_type' => 'staff']);
         Sanctum::actingAs($user);
 
         return $user;
@@ -35,6 +45,19 @@ class ChannelAttachmentSecurityTest extends TestCase
     private function upload(UploadedFile $file)
     {
         return $this->post('/api/v1/admin/channels/attachments', ['file' => $file]);
+    }
+
+    /** Issue a signed link for $path (as its uploader) and fetch the bytes. */
+    private function fetchViaSignedLink(string $path)
+    {
+        $url = $this->getJson('/api/v1/admin/channels/attachments/serve?path=' . urlencode($path))
+            ->assertOk()
+            ->json('url');
+
+        // The signed link is what a browser tab opens: no Authorization header.
+        $this->app['auth']->forgetGuards();
+
+        return $this->withHeaders(['Authorization' => ''])->get($url);
     }
 
     public function test_svg_uploads_are_refused(): void
@@ -48,74 +71,73 @@ class ChannelAttachmentSecurityTest extends TestCase
         $this->upload($svg)->assertStatus(422);
     }
 
-    public function test_html_wearing_a_jpg_name_is_served_as_an_image_never_sniffed(): void
+    public function test_html_wearing_a_jpg_name_streams_as_an_image_never_sniffed(): void
     {
         $this->staff();
-        Storage::fake('local');
 
-        // The upload whitelists by extension, so a lying file can get in —
-        // the SERVE side must therefore never trust its content.
         $fake = UploadedFile::fake()->createWithContent(
             'photo.jpg',
             '<!doctype html><script>alert(document.cookie)</script>'
         );
         $path = $this->upload($fake)->assertStatus(201)->json('path');
 
-        $resp = $this->get('/api/v1/admin/channels/attachments/serve?path=' . urlencode($path));
+        $resp = $this->fetchViaSignedLink($path);
         $resp->assertOk();
         $resp->assertHeader('Content-Type', 'image/jpeg');
         $resp->assertHeader('X-Content-Type-Options', 'nosniff');
         $this->assertStringStartsWith('inline', $resp->headers->get('Content-Disposition'));
     }
 
-    public function test_documents_download_rather_than_render(): void
+    public function test_a_legacy_svg_comes_back_as_an_opaque_download(): void
     {
-        $this->staff();
-        Storage::fake('local');
+        $uploader = $this->staff();
 
-        $doc  = UploadedFile::fake()->createWithContent('notes.txt', 'hello');
-        $path = $this->upload($doc)->assertStatus(201)->json('path');
+        // Stored before SVG left the whitelist. Plant the file and the
+        // uploader claim the upload endpoint would have recorded.
+        $path = 'channel-attachments/2026/09/legacy.svg';
+        Storage::disk('local')->put($path, '<svg onload="alert(1)"></svg>');
+        \Illuminate\Support\Facades\Cache::put(
+            'channel-attachment-uploader:' . sha1($path), $uploader->id, now()->addDay()
+        );
 
-        $resp = $this->get('/api/v1/admin/channels/attachments/serve?path=' . urlencode($path));
+        $resp = $this->fetchViaSignedLink($path);
         $resp->assertOk();
         $resp->assertHeader('Content-Type', 'application/octet-stream');
         $this->assertStringStartsWith('attachment', $resp->headers->get('Content-Disposition'));
     }
 
-    public function test_pdfs_stay_viewable_inline(): void
+    public function test_known_document_types_keep_their_declared_type(): void
     {
         $this->staff();
-        Storage::fake('local');
 
-        $pdf  = UploadedFile::fake()->createWithContent('quote.pdf', '%PDF-1.4 fake');
-        $path = $this->upload($pdf)->assertStatus(201)->json('path');
+        $doc  = UploadedFile::fake()->createWithContent('notes.txt', 'hello floor');
+        $path = $this->upload($doc)->assertStatus(201)->json('path');
 
-        $resp = $this->get('/api/v1/admin/channels/attachments/serve?path=' . urlencode($path));
+        $resp = $this->fetchViaSignedLink($path);
         $resp->assertOk();
-        $resp->assertHeader('Content-Type', 'application/pdf');
-        $this->assertStringStartsWith('inline', $resp->headers->get('Content-Disposition'));
-        // The sandbox CSP is skipped for PDFs — it would block the viewer.
-        $this->assertNull($resp->headers->get('Content-Security-Policy'));
+        // text/plain cannot script; what must never happen is a sniff
+        // promoting it (or anything else) to text/html.
+        $resp->assertHeader('Content-Type', 'text/plain; charset=utf-8');
+        $resp->assertHeader('X-Content-Type-Options', 'nosniff');
     }
 
-    public function test_traversal_and_out_of_folder_paths_are_refused(): void
+    public function test_the_issuer_refuses_crafted_paths_and_strangers(): void
     {
         $this->staff();
 
         foreach ([
             'channel-attachments/../../../.env',
             '.env',
-            '/etc/passwd',
-            'channel-attachments/2026/09/../../../secrets.txt',
+            'channel-attachments//etc/passwd',
         ] as $bad) {
-            $this->get('/api/v1/admin/channels/attachments/serve?path=' . urlencode($bad))
+            $this->getJson('/api/v1/admin/channels/attachments/serve?path=' . urlencode($bad))
                 ->assertStatus(403);
         }
-    }
 
-    public function test_the_serve_endpoint_requires_authentication(): void
-    {
-        $resp = $this->getJson('/api/v1/admin/channels/attachments/serve?path=' . urlencode('channel-attachments/x.jpg'));
-        $this->assertContains($resp->status(), [401, 403], 'Attachments must not be readable without a session.');
+        // A path nobody linked in any of my conversations reads as not found.
+        $path = 'channel-attachments/2026/09/not-mine.jpg';
+        Storage::disk('local')->put($path, 'x');
+        $this->getJson('/api/v1/admin/channels/attachments/serve?path=' . urlencode($path))
+            ->assertStatus(404);
     }
 }

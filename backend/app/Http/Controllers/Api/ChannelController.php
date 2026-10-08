@@ -482,7 +482,11 @@ class ChannelController extends Controller
     // Media + docs staff share in chat. Whitelisted by EXTENSION (not server MIME)
     // because phone uploads — iPhone .mov/.heic, Android .3gp voice notes — are
     // frequently mislabelled by finfo, which would wrongly reject legitimate media.
-    private const ATTACHMENT_IMAGE_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp', 'svg'];
+    // SVG is deliberately absent: it is a script container wearing an image
+    // extension, and rendering one inline executes it in this app's origin.
+    // (Legacy .svg files already stored now come back as opaque downloads —
+    // SignedFiles::stream serves unknown extensions as attachments.)
+    private const ATTACHMENT_IMAGE_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp'];
     private const ATTACHMENT_VIDEO_EXT = ['mp4', 'mov', 'm4v', 'webm', '3gp', '3gpp', 'avi', 'mkv'];
     private const ATTACHMENT_AUDIO_EXT = ['mp3', 'm4a', 'wav', 'aac', 'ogg', 'oga', 'opus', 'amr', 'flac', 'weba'];
     private const ATTACHMENT_DOC_EXT   = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt', 'csv'];
