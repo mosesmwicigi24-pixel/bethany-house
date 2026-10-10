@@ -39,7 +39,7 @@ class DiscountMaximumTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const SENTENCE = 'The most anyone can give is 5%. Larger discounts are set by the owner.';
+    private const SENTENCE = 'Your discount limit is 5% — a super admin can give more.';
 
     private Outlet $outlet;
 
@@ -48,6 +48,11 @@ class DiscountMaximumTest extends TestCase
         parent::setUp();
         Cache::flush();
         config(['pos.discount_cap_percent' => 5.0]);
+        // This suite pins the GLOBAL rule: with no per-role limits every role
+        // is held to pos.discount_cap_percent. The seeded per-role limits
+        // (pos_clerk 10, admin 15) are covered by RoleDiscountLimitsTest.
+        DB::table('role_discount_caps')->delete();
+        \App\Support\RoleDiscountCaps::forget();
         $this->outlet = Outlet::factory()->create();
     }
 

@@ -3596,11 +3596,11 @@ export default function OrderDetailPage() {
     const canEditItems = canDo("orders.edit_items")
         && !["cancelled", "refunded", "voided"].includes(order?.status ?? "");
     const [itemsDraft, setItemsDraft]     = useState<DraftLine[] | null>(null);
-    // The owner's 5% maximum on a line's discount; null for the super_admin.
+    // This person's discount limit on a line (their role's); null for the super_admin.
     // The server enforces it (and measures a lowered unit price as well).
     const discountCap = useDiscountCap();
-    // What one staged line may still take off: 5% of the line, and no more
-    // than the ORDER has left — 5% of its gross, less the order discount and
+    // What one staged line may still take off: the limit of the line, and no more
+    // than the ORDER has left — the limit of its gross, less the order discount and
     // the other lines' discounts. (Infinity for the super_admin.)
     const lineDiscountRoom = (l: DraftLine): number => {
         if (discountCap === null) return Infinity;

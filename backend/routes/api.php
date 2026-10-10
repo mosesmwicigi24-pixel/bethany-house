@@ -1706,6 +1706,17 @@ Route::prefix('v1')->group(function () {
                 Route::get('/explorer/orders', [\App\Http\Controllers\Api\ExecutiveReportController::class, 'explorerOrders']);
             });
 
+            // ── Discount limits (owner, 2026-10-10) ─────────────────────────
+            // The most each role may give as a discount when they choose to.
+            // The super_admin's alone, by ROLE (owner.only — the same test as
+            // DiscountRule::isOwner(), not role:super_admin, which reads only a
+            // person's first role); a save needs a fresh step-up. Outside the
+            // settings.view group below on purpose: no permission opens it.
+            Route::middleware('owner.only')->prefix('settings/discount-limits')->group(function () {
+                Route::get('/', [\App\Http\Controllers\Api\DiscountLimitController::class, 'index']);
+                Route::put('/', [\App\Http\Controllers\Api\DiscountLimitController::class, 'update'])->middleware('step.up');
+            });
+
             // ── Settings ────────────────────────────────────────────────────
             // Was hardcoded to role:super_admin|admin, which meant granting
             // settings.view / settings.edit to any other role (e.g. via a

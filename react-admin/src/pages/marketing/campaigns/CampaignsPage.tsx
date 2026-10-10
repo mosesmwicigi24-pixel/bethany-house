@@ -6,7 +6,7 @@ import { z } from "zod";
 import { promotionsApi, type Promotion } from "@/api/marketing";
 import type { ApiError } from "@/types";
 import { useToastStore } from "@/store/toast.store";
-import { discountCapMessage, useDiscountCap } from "@/lib/discountCap";
+import { promotionCapMessage, usePromotionCap } from "@/lib/discountCap";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import {
@@ -26,7 +26,8 @@ import {
 
    The owner's rule (2026-10-03): a campaign worth more than 5% is the
    super_admin's alone to create, raise or switch on. Everyone else is stopped
-   here at 5% for a percentage; a fixed amount is checked by the server against
+   here at 5% (the GLOBAL ceiling — a role's till limit never lifts it) for a
+   percentage; a fixed amount is checked by the server against
    the cheapest item it reaches, and refused with the same sentence. */
 
 const makeSchema = (cap: number | null) =>
@@ -47,7 +48,7 @@ const makeSchema = (cap: number | null) =>
         })
         .refine((v) => cap === null || v.discount_type !== "percentage" || v.discount_value <= cap, {
             path: ["discount_value"],
-            message: discountCapMessage(cap),
+            message: promotionCapMessage(cap),
         });
 
 const schema = makeSchema(null);
@@ -75,8 +76,9 @@ export default function CampaignsPage() {
     const [editing, setEditing] = useState<Promotion | null>(null);
     const [deleting, setDeleting] = useState<Promotion | null>(null);
 
-    // The owner's 5% maximum; null for the super_admin, who sets larger ones.
-    const discountCap = useDiscountCap();
+    // The global 5% ceiling on campaigns (not the role's till limit); null for
+    // the super_admin, who sets larger ones.
+    const discountCap = usePromotionCap();
     const capSchema = useMemo(() => makeSchema(discountCap), [discountCap]);
     const defaults = useMemo<FormValues>(
         () => ({ ...DEFAULTS, discount_value: discountCap === null ? DEFAULTS.discount_value : discountCap }),
@@ -258,7 +260,7 @@ export default function CampaignsPage() {
                         <Field
                             label="Discount value"
                             error={errors.discount_value?.message}
-                            hint={discountCap === null ? undefined : `At most ${discountCap}% (a fixed amount: ${discountCap}% of the cheapest item it reaches). Larger campaigns are set by the owner.`}
+                            hint={discountCap === null ? undefined : `At most ${discountCap}% (a fixed amount: ${discountCap}% of the cheapest item it reaches). Larger campaigns are set by a super admin.`}
                             required
                         >
                             <FieldInput

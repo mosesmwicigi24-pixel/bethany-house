@@ -763,11 +763,17 @@ class AuthController extends Controller
         $user->two_factor_required = app(TwoFactor::class)->requiredFor($user);
         $user->recovery_codes_left = $user->two_factor_enabled ? app(TwoFactor::class)->recoveryCodesLeft($user) : null;
 
-        // The most this user may discount, in percent — null for the owner,
-        // who has no ceiling. The console reads it to show the maximum on
-        // every discount input; the server enforces it regardless
-        // (App\Support\DiscountRule).
+        // The most this user may discount at the till, on an order or on a
+        // quotation, in percent — their role's limit (Setup → Discount
+        // limits), null for the owner, who has no ceiling. The console reads
+        // it to show "up to N%" on every discount input; the server enforces
+        // it regardless (App\Support\DiscountRule).
         $user->discount_cap_percent = \App\Support\DiscountRule::capFor($user);
+        // Promotions, coupons and sale prices stay on the GLOBAL maximum
+        // whatever the role's till limit (null for the owner).
+        $user->promotion_cap_percent = \App\Support\DiscountRule::isOwner($user)
+            ? null
+            : \App\Support\DiscountRule::capPercent();
 
         return $user;
     }

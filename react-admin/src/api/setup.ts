@@ -348,3 +348,28 @@ export const shippingApi = {
     deleteMethod: (id: number) =>
         del<{ message: string }>(`/v1/admin/shipping/methods/${id}`),
 };
+// ─── Discount limits (super admin only) ───────────────────────────────────────
+// The most each role may give as a discount when they choose to (owner,
+// 2026-10-10). cap_percent null = the role uses the default (global) limit.
+
+export interface DiscountLimit {
+    role: string;
+    display_name: string;
+    cap_percent: number | null;
+    effective_percent: number;
+    updated_at: string | null;
+    updated_by: { id: number; name: string } | null;
+}
+
+export interface DiscountLimitsPayload {
+    default_percent: number;
+    limits: DiscountLimit[];
+}
+
+export const discountLimitsApi = {
+    get: () => get<DiscountLimitsPayload>("/v1/admin/settings/discount-limits"),
+
+    /** Saving needs a recent step-up; the client asks for it and retries. */
+    save: (limits: { role: string; cap_percent: number | null }[]) =>
+        put<DiscountLimitsPayload & { message: string }>("/v1/admin/settings/discount-limits", { limits }),
+};

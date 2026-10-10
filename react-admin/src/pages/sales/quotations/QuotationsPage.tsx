@@ -293,7 +293,7 @@ interface LineRow {
     quantity: string;
     unit_price: string;
     /** The catalogue's price for this line in the quotation's currency, when known —
-     *  what a typed price is measured against (the owner's 5% rule). */
+     *  what a typed price is measured against (the person's discount limit). */
     catalogue_price?: number | null;
 }
 
@@ -465,7 +465,7 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
 
     const subtotal = rows.reduce((sum, r) => sum + num(r.quantity) * num(r.unit_price), 0);
 
-    // The owner's 5% rule: a catalogue line may be quoted at most 5% under its
+    // The person's discount limit: a catalogue line may be quoted at most that far under its
     // catalogue price (no ceiling for the super_admin). The server enforces it;
     // this says so beside the price and stops the save before a round trip.
     const discountCap = useDiscountCap();

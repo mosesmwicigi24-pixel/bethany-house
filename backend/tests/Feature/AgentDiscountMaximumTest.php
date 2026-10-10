@@ -33,7 +33,7 @@ class AgentDiscountMaximumTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const SENTENCE = 'The most anyone can give is 5%. Larger discounts are set by the owner.';
+    private const SENTENCE = 'Your discount limit is 5% — a super admin can give more.';
 
     private Outlet $outlet;
 

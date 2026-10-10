@@ -246,7 +246,8 @@ class NewSale extends Component
         // (App\Rules\CustomerPhone, the same rule as the main till).
         $this->validate(['customerPhone' => ['nullable', 'string', 'max:30', new \App\Rules\CustomerPhone()]]);
 
-        // The owner's 5% rule (App\Support\DiscountRule), on each line and on
+        // The owner's discount rule (App\Support\DiscountRule — the person's own
+        // limit, per role), on each line and on
         // the order discount, before anything is written. This older till took
         // any discount from anyone; the cart is a public property, so the
         // figures are re-read here rather than trusted from the screen.
@@ -263,9 +264,9 @@ class NewSale extends Component
             $this->addError('orderDiscount', $message);
             return;
         }
-        // The lines and the order discount together: at most 5% of the gross.
+        // The lines and the order discount together: at most the person's limit of the gross.
         if ($field = $tally->amount((float) $this->orderDiscount, 'orderDiscount')->tippingField(auth()->user())) {
-            $this->addError($field, DiscountRule::message());
+            $this->addError($field, DiscountRule::staffMessage(auth()->user()));
             return;
         }
 

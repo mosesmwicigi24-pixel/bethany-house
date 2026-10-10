@@ -17,8 +17,9 @@ use App\Support\DiscountRule;
  * Two rules, applied identically to a line discount and to a cart discount:
  *
  *   1. No `pos.discount`, no discount. At all. (403 — a missing permission.)
- *   2. With it, at most what App\Support\DiscountRule allows: 5% of whatever
- *      the discount is applied to, for everyone but a super_admin. (422.)
+ *   2. With it, at most what App\Support\DiscountRule allows: the person's
+ *      own limit (per role since 2026-10-10; 5% without a role limit) of
+ *      whatever the discount is applied to; none for a super_admin. (422.)
  *
  * `pos.discount_override` used to lift rule 2. Since the owner's rule of
  * 2026-10-03 it lifts nothing; the slug stays so existing grants and the Roles
@@ -42,7 +43,7 @@ final class PosDiscountPolicy
      * @param  float   $promotionSaving What a running promotion already took off this line
      *                                  (hub-priced lines only). The asked-for discount comes
      *                                  on top of it: the two together may not pass
-     *                                  max(5%, the promotion). See DiscountRule::refusal().
+     *                                  max(the person's limit, the promotion). See DiscountRule::refusal().
      */
     public static function assertAllowed(?User $user, float $discount, float $base, string $field, float $promotionSaving = 0.0): void
     {

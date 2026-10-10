@@ -21,40 +21,50 @@ use App\Services\PromotionService;
  * them rather than deciding for itself:
  *
  *   1. STAFF. Any discount a person gives — a till line or cart, a pending
- *      order, a quotation line, an edit to an order's lines — is at most
- *      config('pos.discount_cap_percent') (5) of whatever it is applied to,
- *      for every role. `pos.discount_override` used to lift that for outlet
- *      managers and admins; it no longer lifts anything. Only a holder of the
- *      super_admin role goes further. The cap is measured on the RESOLVED
+ *      order, a quotation line, an edit to an order's lines — is at most THAT
+ *      PERSON'S limit (capFor()) of whatever it is applied to. Since the
+ *      owner's word of 2026-10-10 ("clerks at 10% and Admins up to 15% …
+ *      when needed a clerk can give up to") the limit is per role: the
+ *      highest row among the person's roles in role_discount_caps (set by the
+ *      super admin at Setup → Discount limits), else
+ *      config('pos.discount_cap_percent') (5). The sales agent's service
+ *      account stays on the 5% whatever role it holds. Nothing is applied by
+ *      itself: the limit only bounds what a person chooses to give.
+ *      `pos.discount_override` lifts nothing. Only a holder of the
+ *      super_admin role has no limit. The cap is measured on the RESOLVED
  *      amount, so a flat discount cannot walk around a percentage: 500 off a
  *      1,000 line is 50% however it was typed. And a unit price TYPED below
  *      the catalogue's selling price is a discount by another name, so the
- *      shortfall counts toward the same 5% (assertLineWithin()).
+ *      shortfall counts toward the same limit (assertLineWithin()).
  *
  *   2. PROMOTIONS, CAMPAIGNS, COUPONS. A promotion runs by itself for every
  *      customer until it ends, so the rule bites where it is SET. Creating,
  *      raising or switching on one worth more than 5% is the super_admin's
- *      alone. Once he has set it, it applies at his value — the storefront
+ *      alone — measured against the GLOBAL 5%, never a role's till limit (a
+ *      promotion runs by itself; a till limit bounds a choice). Once he has
+ *      set it, it applies at his value — the storefront
  *      and Neema both honour it. Worth, for a fixed amount, is measured against
  *      the cheapest thing it can reach (see promotionPercent()).
  *
  *   3. NEEMA, and any line a promotion covers. The hub applies a running
  *      promotion by itself, so anything asked for on that line comes ON TOP
  *      of it: the line's whole reduction (promotion + discount) is at most
- *      max(5%, the promotion's value). Without a promotion, 5% in all. The
- *      sales agent is held exactly like everyone else; `pos.discount_campaign`
+ *      max(the seller's limit, the promotion's value). Without a promotion,
+ *      the seller's limit in all — 5% for the sales agent, whose service
+ *      account never takes a role's till limit; `pos.discount_campaign`
  *      no longer lifts anything. The hub cannot see who typed a campaign into
  *      Neema's own dashboard; it can see its own promotions, and only the
  *      owner can set one above 5%.
  *
  *   4. THE ORDER AS A WHOLE. Line discounts, the cart/order discount and any
- *      typed-price shortfall together are at most 5% of the order's gross
- *      before any discount (DiscountTally) — "the max is 5%" is about the
- *      sale, not each discount on it.
+ *      typed-price shortfall together are at most the person's limit of the
+ *      order's gross before any discount (DiscountTally) — the limit is about
+ *      the sale, not each discount on it.
  *
- *   5. SALE PRICES. A product or variant sale_price more than 5% under its
- *      regular price is the super_admin's to save (salePriceRefusal(), on the
- *      ProductPrice model so every screen and import is covered).
+ *   5. SALE PRICES. A product or variant sale_price more than 5% (the GLOBAL
+ *      maximum) under its regular price is the super_admin's to save
+ *      (salePriceRefusal(), on the ProductPrice model so every screen and
+ *      import is covered).
  *
  * Nothing here reprices history. Orders, promotions and coupons that already
  * carry more than 5% are left exactly as they are; the rule stops a discount
@@ -63,6 +73,7 @@ use App\Services\PromotionService;
  * @see \Tests\Feature\DiscountMaximumTest
  * @see \Tests\Feature\PromotionDiscountMaximumTest
  * @see \Tests\Feature\AgentDiscountMaximumTest
+ * @see \Tests\Feature\RoleDiscountLimitsTest
  */
 final class DiscountRule
 {
@@ -104,7 +115,11 @@ final class DiscountRule
         }
     }
 
-    /** The single number. */
+    /**
+     * The GLOBAL maximum: the limit of every role without a row in
+     * role_discount_caps, of the sales agent, and the ceiling on promotions,
+     * coupons and sale prices that anyone but the super_admin sets.
+     */
     public static function capPercent(): float
     {
         return (float) config('pos.discount_cap_percent', 5.0);
@@ -121,19 +136,51 @@ final class DiscountRule
         return $user !== null && $user->hasRole(self::OWNER_ROLE);
     }
 
-    /** The most this caller may give, as a percentage. Null: no ceiling (the owner). */
+    /**
+     * The most this caller may give as a discount at the till, on an order or
+     * on a quotation, in percent. Null: no ceiling (the owner).
+     *
+     * The sales agent's service account (User::isServiceAccount()) is held to
+     * the global maximum whatever role it holds — Neema's account carries
+     * pos_clerk for its permissions, not for a clerk's discretion. Everyone
+     * else: the highest limit among their roles' rows, else the global
+     * maximum (App\Support\RoleDiscountCaps — which also answers the global
+     * maximum, never "no limit", when the table cannot be read).
+     */
     public static function capFor(?User $user): ?float
     {
-        return self::isOwner($user) ? null : self::capPercent();
+        if (self::isOwner($user)) {
+            return null;
+        }
+        if ($user === null || $user->isServiceAccount()) {
+            return self::capPercent();
+        }
+
+        return RoleDiscountCaps::capForRoles($user->getRoleNames()->all(), self::capPercent());
     }
 
-    /** The plain sentence every refusal says. */
+    /**
+     * The sentence a promotion, coupon or sale price above the GLOBAL maximum
+     * is refused with (rules 2 and 5).
+     */
     public static function message(): string
     {
         return sprintf(
-            'The most anyone can give is %s%%. Larger discounts are set by the owner.',
+            'Promotions, coupons and sale prices above %s%% are set by a super admin.',
             self::formatPercent(self::capPercent()),
         );
+    }
+
+    /** The sentence a staff discount above $cap is refused with: the person's own limit. */
+    public static function limitMessage(float $cap): string
+    {
+        return sprintf('Your discount limit is %s%% — a super admin can give more.', self::formatPercent($cap));
+    }
+
+    /** limitMessage() for this caller's own limit. */
+    public static function staffMessage(?User $user): string
+    {
+        return self::limitMessage(self::capFor($user) ?? self::capPercent());
     }
 
     // ── Staff discounts ───────────────────────────────────────────────────────
@@ -145,27 +192,31 @@ final class DiscountRule
      *                                  raw input), plus any promotion the hub already applied
      * @param  float  $base             what it is applied to: the line's gross, or the cart's subtotal
      * @param  float  $promotionSaving  what a running owner-set promotion already took off this
-     *                                  line; the line may lose that much if it is more than 5%
+     *                                  line; the line may lose that much if it is more than the limit
      */
     public static function refusal(?User $user, float $discount, float $base, float $promotionSaving = 0.0): ?string
     {
         $discount = round($discount, 2);
 
         // No discount, nothing to decide — the ordinary sale stays free of any lookup.
-        if ($discount <= 0.0 || self::isOwner($user)) {
+        if ($discount <= 0.0) {
+            return null;
+        }
+        $cap = self::capFor($user);
+        if ($cap === null) {
             return null;
         }
 
         // Rounded to the money column before comparing, so float noise in
-        // ($base * 5 / 100) cannot refuse a discount that is exactly at the
-        // maximum. A base of zero gives a ceiling of zero.
-        $ceiling = round(max(0.0, $base) * self::capPercent() / 100, 2);
+        // ($base * cap / 100) cannot refuse a discount that is exactly at the
+        // limit. A base of zero gives a ceiling of zero.
+        $ceiling = round(max(0.0, $base) * $cap / 100, 2);
 
         if ($promotionSaving > 0) {
             $ceiling = max($ceiling, round($promotionSaving, 2));
         }
 
-        return $discount > $ceiling ? self::message() : null;
+        return $discount > $ceiling ? self::limitMessage($cap) : null;
     }
 
     /** 422 naming $field unless refusal() is null. */
@@ -195,7 +246,7 @@ final class DiscountRule
     /**
      * A whole line under the rule: a unit price typed below the catalogue's
      * selling price is a discount by another name, so the shortfall counts
-     * toward the same 5% together with any discount on the line, measured
+     * toward the same limit together with any discount on the line, measured
      * against the line at the catalogue price.
      *
      * Throws on $priceField when there is a shortfall (that is the unusual

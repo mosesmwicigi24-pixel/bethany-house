@@ -29,7 +29,7 @@ class SalePriceMaximumTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const SENTENCE = 'The most anyone can give is 5%. Larger discounts are set by the owner.';
+    private const SENTENCE = 'Promotions, coupons and sale prices above 5% are set by a super admin.';
 
     protected function setUp(): void
     {

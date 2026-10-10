@@ -8,13 +8,15 @@ use App\Models\User;
 /**
  * One order's reductions, measured together (App\Support\DiscountRule).
  *
- * "The max is 5%" is a statement about the ORDER. Capping each line and the
- * cart separately let a sale lose nearly 9.75% (5% off the lines, then 5% off
- * what was left). A tally adds up everything taken off — line discounts, the
- * shortfall of a typed price under the catalogue, a promotion the hub applied,
- * the cart or order discount — and holds the total to the sum of each line's
- * own ceiling: 5% of the order's gross before any discount, plus whatever a
- * running owner-set promotion is worth above 5% on the lines it covers.
+ * The limit is a statement about the ORDER. Capping each line and the cart
+ * separately let a sale lose nearly 9.75% at a 5% limit (5% off the lines,
+ * then 5% off what was left). A tally adds up everything taken off — line
+ * discounts, the shortfall of a typed price under the catalogue, a promotion
+ * the hub applied, the cart or order discount — and holds the total to the sum
+ * of each line's own ceiling: the person's limit (DiscountRule::capFor(), per
+ * role since 2026-10-10) of the order's gross before any discount, plus
+ * whatever a running owner-set promotion is worth above that on the lines it
+ * covers. The limit is read when the tally is judged, for the person judged.
  *
  * Entries are counted in the order they are added, and the one that pushes the
  * running total over is the field named in the refusal. Callers add what was
@@ -25,19 +27,20 @@ final class DiscountTally
 {
     /** @var list<array{0: float, 1: string}> [given, field] */
     private array $entries = [];
-    private float $ceiling = 0.0;
+    /** @var list<array{0: float, 1: float}> [base, promotion saving] */
+    private array $lines   = [];
     private float $gross   = 0.0;
     private float $given   = 0.0;
 
     /**
      * A line: what it gives away, what it is worth before any reduction, and
-     * the promotion saving it may carry above 5%.
+     * the promotion saving it may carry above the limit.
      */
     public function line(float $given, float $base, string $field, float $promotionSaving = 0.0): self
     {
         $base = max(0.0, $base);
         $this->gross   += $base;
-        $this->ceiling += max($base * DiscountRule::capPercent() / 100, $promotionSaving);
+        $this->lines[]  = [$base, $promotionSaving];
 
         return $this->amount($given, $field);
     }
@@ -61,11 +64,19 @@ final class DiscountTally
     /** Null when the order is within its ceiling (or the caller is the owner), else the field that tipped it. */
     public function tippingField(?User $user): ?string
     {
-        if (DiscountRule::isOwner($user)) {
-            return null;
-        }
+        $cap = DiscountRule::capFor($user);
 
-        $ceiling = round($this->ceiling, 2);
+        return $cap === null ? null : $this->tippingFieldAt($cap);
+    }
+
+    /** The field that tipped the order over $cap percent, or null. */
+    private function tippingFieldAt(float $cap): ?string
+    {
+        $ceiling = 0.0;
+        foreach ($this->lines as [$base, $promotionSaving]) {
+            $ceiling += max($base * $cap / 100, $promotionSaving);
+        }
+        $ceiling = round($ceiling, 2);
         $running = 0.0;
         foreach ($this->entries as [$given, $field]) {
             $running = round($running + $given, 2);
@@ -77,11 +88,12 @@ final class DiscountTally
         return null;
     }
 
-    /** 422 naming the field that tipped the order over its 5%. */
+    /** 422 naming the field that tipped the order over the person's limit, in their limit's words. */
     public function assert(?User $user): void
     {
-        if ($field = $this->tippingField($user)) {
-            throw new DiscountAboveMaximum($field, DiscountRule::message());
+        $cap = DiscountRule::capFor($user);
+        if ($cap !== null && ($field = $this->tippingFieldAt($cap))) {
+            throw new DiscountAboveMaximum($field, DiscountRule::limitMessage($cap));
         }
     }
 }
