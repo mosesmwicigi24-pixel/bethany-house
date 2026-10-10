@@ -31,8 +31,11 @@ export interface User {
   locked_at?: string | null
   locked_until?: string | null
   lock_reason?: string | null
-  /** The most this user may discount, in percent; null = no ceiling (super_admin). */
+  /** The most this user may discount at the till / on an order / on a quotation, in percent —
+   *  their role's limit (Setup → Discount limits); null = no ceiling (super_admin). */
   discount_cap_percent?: number | null
+  /** The global ceiling on promotions, coupons and sale prices this user may set; null = super_admin. */
+  promotion_cap_percent?: number | null
 }
 
 export interface AuthState {

@@ -57,6 +57,9 @@ const ProfilePage = lazy(() => import("@/pages/profile/ProfilePage"));
 const ShippingSettingsPage = lazy(
     () => import("@/pages/setup/shipping/ShippingSettingsPage"),
 );
+const DiscountLimitsPage = lazy(
+    () => import("@/pages/setup/discount-limits/DiscountLimitsPage"),
+);
 const DatabaseManagementPage = lazy(
     () => import("@/pages/setup/database/DatabaseManagementPage"),
 );
@@ -1300,6 +1303,17 @@ export default function App() {
                                 <ProtectedRoute permission="users.view">
                                 <Suspense fallback={<PageLoader />}>
                                     <UsersPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        {/* The API is the super_admin's by role (owner.only). */}
+                        <Route
+                            path="/settings/discount-limits"
+                            element={
+                                <ProtectedRoute superAdminOnly>
+                                <Suspense fallback={<PageLoader />}>
+                                    <DiscountLimitsPage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }

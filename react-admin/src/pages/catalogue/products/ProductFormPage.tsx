@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm, useFieldArray, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { discountCapHint, useDiscountCap, withSalePriceCap } from "@/lib/discountCap";
+import { discountCapHint, usePromotionCap, withSalePriceCap } from "@/lib/discountCap";
 import { z } from "zod";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -1404,8 +1404,9 @@ function EditVariantModal({
     // cost_price and ignores one on save, so the box would only ever be empty.
     const { can } = usePermissions();
     const canSeeCost = can("products.view_cost");
-    // The owner's 5% rule on sale prices (null for the super_admin).
-    const discountCap = useDiscountCap();
+    // The owner's 5% rule on sale prices — the GLOBAL ceiling, never a role's
+    // till limit (null for the super_admin).
+    const discountCap = usePromotionCap();
     const capRef  = useRef(discountCap);
     capRef.current = discountCap;
     const formRef = useRef<any>(null);
@@ -2218,8 +2219,9 @@ const PriceRows = React.memo(function PriceRows({
     // cost_price for everyone else and leaves the stored value untouched.
     const { can } = usePermissions();
     const canSeeCost = can("products.view_cost");
-    // The owner's 5% rule on sale prices (null for the super_admin).
-    const discountCap = useDiscountCap();
+    // The owner's 5% rule on sale prices — the GLOBAL ceiling, never a role's
+    // till limit (null for the super_admin).
+    const discountCap = usePromotionCap();
 
     // Typing a price in the default currency fills in every other currency.
     //
@@ -2623,8 +2625,9 @@ export default function ProductFormPage() {
 
     // ── Form ──────────────────────────────────────────────────────────────────
 
-    // The owner's 5% rule on sale prices (null for the super_admin).
-    const discountCap = useDiscountCap();
+    // The owner's 5% rule on sale prices — the GLOBAL ceiling, never a role's
+    // till limit (null for the super_admin).
+    const discountCap = usePromotionCap();
     const capRef  = useRef(discountCap);
     capRef.current = discountCap;
     const formRef = useRef<any>(null);

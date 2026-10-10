@@ -1316,7 +1316,7 @@ function CartRow({
     onPriceOverride: (i: number, price: number) => void;
     currency?: string;
 }) {
-    // The owner's 5% maximum (null for the super_admin); the server enforces it.
+    // This person's discount limit (their role's; null for the super_admin); the server enforces it.
     const discountCap = useDiscountCap();
     const [showDisc, setShowDisc] = useState(false);
     const [showPriceEdit, setShowPriceEdit] = useState(false);
@@ -1554,7 +1554,7 @@ function CartRow({
                         />
                     )}
                     {item.discount_type !== "none" && discountCap !== null && (
-                        <span className="text-2xs text-surface-400" title="Larger discounts are set by the owner.">{discountCapHint(discountCap)}</span>
+                        <span className="text-2xs text-surface-400" title="Your discount limit — a super admin can give more.">{discountCapHint(discountCap)}</span>
                     )}
                     <button onClick={() => { onDiscount(index, "none", 0); setShowDisc(false); }} className="text-2xs text-danger ml-auto">Clear</button>
                 </div>
@@ -1904,7 +1904,7 @@ export default function PosPage() {
     const [cart, setCart] = useState<ExtCartItem[]>(_draft?.cart ?? []);
     const [cartDiscType, setCartDiscType] = useState<"none" | "flat" | "percent">(_draft?.cartDiscType ?? "none");
     const [cartDiscVal, setCartDiscVal] = useState(_draft?.cartDiscVal ?? 0);
-    // The owner's 5% maximum on any discount given here; null for the super_admin.
+    // This person's discount limit on any discount given here (their role's); null for the super_admin.
     const discountCap = useDiscountCap();
     // ── Checkout config: tax settings + app_country ─────────────────────────────
     // Uses the POS-scoped /pos/checkout-config endpoint (pos.access
@@ -2312,7 +2312,7 @@ export default function PosPage() {
         (i: number, t: "none" | "flat" | "percent", v: number) =>
             setCart((p) => {
                 const u = [...p];
-                // Stops at the owner's 5% of the line (no ceiling for the super_admin).
+                // Stops at the person's limit of the line (no ceiling for the super_admin).
                 const value = clampDiscount(t, v, u[i].price * u[i].quantity, discountCap);
                 u[i] = { ...u[i], discount_type: t, discount_value: value };
                 return u;
@@ -2586,7 +2586,7 @@ export default function PosPage() {
         [selectedOutletId, currencyForQuery, handleProductClick, addingSuggestion],
     );
 
-    // The order's gross before any discount — the owner's 5% is of this, for
+    // The order's gross before any discount — the person's limit is of this, for
     // the line discounts and the order discount together.
     const cartGross = useMemo(() => cart.reduce((s, i) => s + i.price * i.quantity, 0), [cart]);
     const totals = useMemo(
@@ -3569,7 +3569,7 @@ export default function PosPage() {
                                         />
                                     )}
                                     {cartDiscType !== "none" && discountCap !== null && (
-                                        <span className="text-2xs text-surface-400" title="Larger discounts are set by the owner.">{discountCapHint(discountCap)}</span>
+                                        <span className="text-2xs text-surface-400" title="Your discount limit — a super admin can give more.">{discountCapHint(discountCap)}</span>
                                     )}
                                 </div>
 
