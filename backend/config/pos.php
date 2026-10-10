@@ -16,7 +16,12 @@ return [
     | promotion covers may lose that promotion's value, never more and never
     | stacked. `pos.discount_override` and `pos.discount_campaign` lift nothing. See App\Support\DiscountRule, the one place it is read.
     |
-    | This is the single number. Raising it is the owner's decision.
+    | Since 2026-10-10 it is the DEFAULT for staff discounts: a role may carry
+    | its own limit (table role_discount_caps — seeded pos_clerk 10, admin 15
+    | — set by the super admin at Setup → Discount limits). A role without
+    | one, and the sales agent's service account whatever its role, stay here.
+    | Promotions, coupons and sale prices are always measured against this.
+    | Raising it is the owner's decision.
     |
     */
 

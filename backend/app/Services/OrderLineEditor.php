@@ -515,7 +515,7 @@ class OrderLineEditor
             }
 
             $field = $short && (float) $row['unit_price'] < (float) $line->unit_price ? 'unit_price' : 'discount_amount';
-            throw new DiscountAboveMaximum("items.{$row['index']}.{$field}", DiscountRule::message());
+            throw new DiscountAboveMaximum("items.{$row['index']}.{$field}", DiscountRule::staffMessage($actor));
         }
 
         foreach ($add as $row) {
@@ -535,7 +535,7 @@ class OrderLineEditor
 
     /**
      * The order as a whole: its order-level discount plus everything the
-     * lines give away is at most 5% of the order's gross. Counted in the
+     * lines give away is at most the actor's limit of the order's gross. Counted in the
      * order "already there → asked for": the order discount, then lines that
      * did not move, then lines that moved, then new lines — so the field
      * named is the one that tipped it. An order that was already over before
@@ -592,7 +592,7 @@ class OrderLineEditor
             return;
         }
 
-        throw new DiscountAboveMaximum($field, DiscountRule::message());
+        throw new DiscountAboveMaximum($field, DiscountRule::staffMessage($actor));
     }
 
     /**

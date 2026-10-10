@@ -157,7 +157,7 @@ class PosDiscountPolicyTest extends TestCase
         // pos.discount is still a 403 — that is a permission, this is a limit.
         $this->postSale($payload)
             ->assertStatus(422)
-            ->assertJsonPath('message', 'The most anyone can give is 5%. Larger discounts are set by the owner.');
+            ->assertJsonPath('message', 'Your discount limit is 5% — a super admin can give more.');
     }
 
     /**

@@ -156,10 +156,10 @@ class SyncPermissions extends Command
 
         // ── POS ─────────────────────────────────────────────────────────────
         'pos.access'           => ['POS Access',           'Use the point-of-sale terminal',              'POS'],
-        'pos.discount'         => ['Apply Discounts',      'Apply manual discounts at POS, up to the 5% maximum', 'POS'],
+        'pos.discount'         => ['Apply Discounts',      'Apply manual discounts at POS, up to the role\'s discount limit (Setup → Discount limits)', 'POS'],
         // Kept so existing grants keep working; since the owner's rule of
         // 2026-10-03 it lifts nothing — only a super_admin exceeds 5%.
-        'pos.discount_override' => ['Discount Beyond the Ceiling (retired)', 'No longer has any effect: nobody but the super admin may give more than 5%', 'POS'],
+        'pos.discount_override' => ['Discount Beyond the Ceiling (retired)', 'No longer has any effect: each role\'s discount limit is set by the super admin (Setup → Discount limits)', 'POS'],
         // Kept on the agent's account so nothing that names it breaks; since
         // 2026-10-03 the agent is held exactly like everyone else.
         'pos.discount_campaign' => ['Pass Through a Campaign Discount (retired)', 'No longer has any effect: the sales agent is held to 5%, or to a running promotion the owner set, like everyone else. For the sales agent\'s service account, not for people.', 'POS'],

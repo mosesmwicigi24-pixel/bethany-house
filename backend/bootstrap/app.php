@@ -86,6 +86,9 @@ return Application::configure(basePath: dirname(__DIR__))
             // Privileged actions need a recent re-confirmation of identity on
             // this session (Phase 4C, role plan §12.3).
             'step.up' => \App\Http\Middleware\RequireStepUp::class,
+            // The super_admin's alone, by role — the same test as
+            // DiscountRule::isOwner() (see the class docblock).
+            'owner.only' => \App\Http\Middleware\RequiresOwnerRole::class,
         ]);
 
         // Every staff API call → request_logs (who looked at what). Staff-only
