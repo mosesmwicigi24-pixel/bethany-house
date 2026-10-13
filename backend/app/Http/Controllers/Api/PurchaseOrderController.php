@@ -132,7 +132,9 @@ class PurchaseOrderController extends Controller
             'items'                   => 'required|array|min:1',
             'items.*.type'            => 'required|in:product,material',
             'items.*.item_id'         => 'required|integer',
-            'items.*.quantity'        => 'required|numeric|min:0.001',
+            // Materials are bought by the metre (0.25, 0.5, 0.75); the columns
+            // are decimal(12,2), so 2 places is the precision that survives.
+            'items.*.quantity'        => 'required|numeric|min:0.01|decimal:0,2',
             'items.*.unit_price'      => 'required|numeric|min:0',
         ]);
 
@@ -145,6 +147,10 @@ class PurchaseOrderController extends Controller
             // Pre-validate all items before creating anything
             $itemDetails = [];
             foreach ($validated['items'] as $item) {
+                if ($item['type'] === 'product' && !self::isWhole($item['quantity'])) {
+                    DB::rollBack();
+                    return response()->json(['message' => 'Products are ordered in whole pieces — only materials take fractional quantities.'], 422);
+                }
                 if ($item['type'] === 'product') {
                     $product = Product::find($item['item_id']);
                     if (!$product) {
@@ -609,7 +615,7 @@ class PurchaseOrderController extends Controller
         $validated = $request->validate([
             'items'                       => 'required|array|min:1',
             'items.*.po_item_id'          => 'required|exists:purchase_order_items,id',
-            'items.*.quantity_received'   => 'required|numeric|min:0.001',
+            'items.*.quantity_received'   => 'required|numeric|min:0.01|decimal:0,2',
             'items.*.quality_status'      => 'nullable|in:passed,rejected',
             'items.*.notes'               => 'nullable|string',
             'outlet_id'                   => 'nullable|exists:outlets,id',
@@ -652,8 +658,17 @@ class PurchaseOrderController extends Controller
                     return response()->json(['message' => 'Purchase order item not found.'], 404);
                 }
 
-                $remaining = $poItem->quantity - $poItem->quantity_received;
-                if ($item['quantity_received'] > $remaining) {
+                if ($poItem->item_type === 'product' && !self::isWhole($item['quantity_received'])) {
+                    DB::rollBack();
+                    return response()->json(['message' => "Products are received in whole pieces: {$poItem->description}"], 422);
+                }
+
+                // In whole hundredths, not floats: ordered 0.30 less received
+                // 0.10 is 0.19999999999999998 as a float, which refused the
+                // final legitimate 0.20 m as "exceeds remaining".
+                $remainingH = self::hundredths($poItem->quantity) - self::hundredths($poItem->quantity_received);
+                $remaining  = $remainingH / 100;
+                if (self::hundredths($item['quantity_received']) > $remainingH) {
                     DB::rollBack();
                     return response()->json([
                         'message'   => "Quantity received exceeds remaining quantity for item: {$poItem->description}",
@@ -748,7 +763,7 @@ class PurchaseOrderController extends Controller
         $validated = $request->validate([
             'items'              => 'required|array|min:1',
             'items.*.po_item_id' => 'required|exists:purchase_order_items,id',
-            'items.*.quantity'   => 'required|numeric|min:0.001',
+            'items.*.quantity'   => 'required|numeric|min:0.01|decimal:0,2',
             'items.*.reason'     => 'required|string|max:500',
             'notes'              => 'nullable|string',
         ]);
@@ -778,7 +793,12 @@ class PurchaseOrderController extends Controller
                     return response()->json(['message' => 'Purchase order item not found.'], 404);
                 }
 
-                if ($item['quantity'] > $poItem->quantity_received) {
+                if ($poItem->item_type === 'product' && !self::isWhole($item['quantity'])) {
+                    DB::rollBack();
+                    return response()->json(['message' => "Products are returned in whole pieces: {$poItem->description}"], 422);
+                }
+
+                if (self::hundredths($item['quantity']) > self::hundredths($poItem->quantity_received)) {
                     DB::rollBack();
                     return response()->json([
                         'message' => "Cannot return more than received for: {$poItem->description}",
@@ -1619,5 +1639,21 @@ class PurchaseOrderController extends Controller
             Material::where('id', $poItem->material_id)
                 ->update(['unit_cost' => $poItem->unit_price]);
         }
+    }
+
+    /**
+     * A quantity in whole hundredths. Material quantities carry 2 decimals
+     * (0.25 m), and float subtraction on those is inexact — comparisons and
+     * remaining-balance checks are done on these integers instead.
+     */
+    private static function hundredths($qty): int
+    {
+        return (int) round(((float) $qty) * 100);
+    }
+
+    /** Products are counted in pieces: 2.5 of a product is never valid. */
+    private static function isWhole($qty): bool
+    {
+        return self::hundredths($qty) % 100 === 0;
     }
 }

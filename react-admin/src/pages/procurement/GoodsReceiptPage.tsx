@@ -12,11 +12,14 @@ import type { ApiError } from "@/types";
 import { clsx } from "clsx";
 import { get } from "@/api/client";
 import { groupRowsByDate, DateGroupHeaderRow } from "@/lib/dateGrouping";
+import { parseQty, qtyNum, qtyStep, fmtQty } from "@/lib/quantity";
 
 // ─── GRN Form modal ───────────────────────────────────────────────────────────
 
 interface GRNItemState {
     po_item_id: number;
+    /** "material" lines accept 2 decimals (0.25 m); products are whole pieces. */
+    kind: string;
     name: string;
     ordered: number;
     pending: number;
@@ -56,10 +59,11 @@ function GRNFormModal({
     const initItems = (items: POItem[]) => {
         const init: Record<number, GRNItemState> = {};
         items.forEach((item) => {
-            const pending = item.quantity - item.quantity_received;
+            const pending = qtyNum(qtyNum(item.quantity) - qtyNum(item.quantity_received));
             if (pending > 0) {
                 init[item.id] = {
                     po_item_id: item.id,
+                    kind: item.item_type,
                     name:
                         item.product?.name ??
                         item.material?.name ??
@@ -77,7 +81,7 @@ function GRNFormModal({
 
     const items = detail?.items ?? [];
     const pendingItems = items.filter(
-        (i) => i.quantity - i.quantity_received > 0,
+        (i) => qtyNum(qtyNum(i.quantity) - qtyNum(i.quantity_received)) > 0,
     );
 
     const states =
@@ -100,18 +104,19 @@ function GRNFormModal({
     });
     const outlets = outletsData?.data ?? [];
 
-    const totalReceiving = Object.values(states).reduce(
-        (sum, i) => sum + (parseInt(i.quantity_received) || 0),
+    // Rounded: 0.1 + 0.2 must read 0.3, not 0.30000000000000004.
+    const totalReceiving = qtyNum(Object.values(states).reduce(
+        (sum, i) => sum + parseQty(i.quantity_received, i.kind),
         0,
-    );
+    ));
 
     const mutation = useMutation({
         mutationFn: () => {
             const receiveItems = Object.values(states)
-                .filter((i) => (parseInt(i.quantity_received) || 0) > 0)
+                .filter((i) => parseQty(i.quantity_received, i.kind) > 0)
                 .map((i) => ({
                     po_item_id: i.po_item_id,
-                    quantity_received: parseInt(i.quantity_received) || 0,
+                    quantity_received: parseQty(i.quantity_received, i.kind),
                     quality_status: i.quality_status,
                     notes: i.notes || undefined,
                 }));
@@ -243,7 +248,7 @@ function GRNFormModal({
                             {pendingItems.map((item) => {
                                 const state = states[item.id] ?? {
                                     quantity_received: String(
-                                        item.quantity - item.quantity_received,
+                                        qtyNum(qtyNum(item.quantity) - qtyNum(item.quantity_received)),
                                     ),
                                     quality_status: "passed",
                                     notes: "",
@@ -252,8 +257,8 @@ function GRNFormModal({
                                     item.product?.name ??
                                     item.material?.name ??
                                     `Item #${item.item_id}`;
-                                const pending =
-                                    item.quantity - item.quantity_received;
+                                const pending = qtyNum(
+                                    qtyNum(item.quantity) - qtyNum(item.quantity_received));
 
                                 return (
                                     <div
@@ -275,21 +280,19 @@ function GRNFormModal({
                                                     <span>
                                                         Ordered:{" "}
                                                         <strong>
-                                                            {item.quantity}
+                                                            {fmtQty(item.quantity, item.item_type)}
                                                         </strong>
                                                     </span>
                                                     <span>
                                                         Received so far:{" "}
                                                         <strong className="text-success">
-                                                            {
-                                                                item.quantity_received
-                                                            }
+                                                            {fmtQty(item.quantity_received, item.item_type)}
                                                         </strong>
                                                     </span>
                                                     <span>
                                                         Pending:{" "}
                                                         <strong className="text-warning">
-                                                            {pending}
+                                                            {fmtQty(pending, item.item_type)}
                                                         </strong>
                                                     </span>
                                                 </div>
@@ -306,6 +309,8 @@ function GRNFormModal({
                                                     type="number"
                                                     min="0"
                                                     max={pending}
+                                                    step={qtyStep(item.item_type)}
+                                                    inputMode={item.item_type === "material" ? "decimal" : "numeric"}
                                                     className="input"
                                                     value={
                                                         state.quantity_received
@@ -319,7 +324,7 @@ function GRNFormModal({
                                                     }
                                                 />
                                                 <p className="text-2xs text-surface-400 mt-1">
-                                                    Max: {pending} units
+                                                    Max: {fmtQty(pending, item.item_type)} {item.item_type === "material" ? "" : "units"}
                                                 </p>
                                             </Field>
                                             <Field label="Quality Check">
@@ -776,8 +781,10 @@ export default function GoodsReceiptPage() {
                                         const totalItems = po.items?.length ?? 0;
                                         const receivedItems =
                                             po.items?.filter(
+                                                // Numbers, not strings: "5.00" >= "10.00" is TRUE
+                                                // alphabetically, which marked half-received lines done.
                                                 (i) =>
-                                                    i.quantity_received >= i.quantity,
+                                                    qtyNum(i.quantity_received) >= qtyNum(i.quantity),
                                             ).length ?? 0;
                                         return (
                                             <div key={po.id} className="p-4 space-y-3">
@@ -864,13 +871,13 @@ export default function GoodsReceiptPage() {
                                             {orders.map((po) => {
                                                 const totalQty =
                                                     po.items?.reduce(
-                                                        (sum, i) => sum + i.quantity,
+                                                        (sum, i) => sum + qtyNum(i.quantity),
                                                         0,
                                                     ) ?? 0;
                                                 const receivedQty =
                                                     po.items?.reduce(
                                                         (sum, i) =>
-                                                            sum + i.quantity_received,
+                                                            sum + qtyNum(i.quantity_received),
                                                         0,
                                                     ) ?? 0;
                                                 const pct =
