@@ -13,6 +13,7 @@ import { clsx } from "clsx";
 import { get } from "@/api/client";
 import { Fragment } from "react";
 import { groupRowsByDate, DateGroupHeaderRow } from "@/lib/dateGrouping";
+import { parseQty, qtyNum, qtyStep, qtyMin, fmtQty } from "@/lib/quantity";
 
 // ─── Status config ────────────────────────────────────────────────────────────
 
@@ -182,10 +183,12 @@ function POFormModal({ onClose }: { onClose: () => void }) {
     const removeItem = (id: string) =>
         setItems((prev) => prev.filter((i) => i.id !== id));
 
+    // The preview multiplies the SAME quantity the submit sends (parseQty),
+    // so the subtotal on screen is the one the supplier's PO carries.
     const subtotal = items.reduce(
         (sum, i) =>
             sum +
-            (parseFloat(i.quantity) || 0) * (parseFloat(i.unit_price) || 0),
+            parseQty(i.quantity, i.type) * (parseFloat(i.unit_price) || 0),
         0,
     );
     const total =
@@ -204,7 +207,7 @@ function POFormModal({ onClose }: { onClose: () => void }) {
                 items: items.map((i) => ({
                     type: i.type,
                     item_id: parseInt(i.item_id),
-                    quantity: parseInt(i.quantity),
+                    quantity: parseQty(i.quantity, i.type),
                     unit_price: parseFloat(i.unit_price),
                 })),
             }),
@@ -233,7 +236,10 @@ function POFormModal({ onClose }: { onClose: () => void }) {
                     <button
                         className="btn-primary btn-sm"
                         onClick={() => mutation.mutate()}
-                        disabled={mutation.isPending || items.length === 0}
+                        // A blank or zero quantity would reach the server as 0 —
+                        // refused there, but better never offered.
+                        disabled={mutation.isPending || items.length === 0
+                            || items.some((i) => parseQty(i.quantity, i.type) <= 0)}
                     >
                         {mutation.isPending ? (
                             <Spinner size="sm" />
@@ -421,7 +427,7 @@ function POFormModal({ onClose }: { onClose: () => void }) {
                                 <tbody>
                                     {items.map((item) => {
                                         const lineTotal =
-                                            (parseFloat(item.quantity) || 0) *
+                                            parseQty(item.quantity, item.type) *
                                             (parseFloat(item.unit_price) || 0);
                                         return (
                                             <tr key={item.id}>
@@ -434,10 +440,14 @@ function POFormModal({ onClose }: { onClose: () => void }) {
                                                     </span>
                                                 </td>
                                                 <td className="text-center">
+                                                    {/* Materials are bought by the metre (0.25, 0.5,
+                                                        0.75…); products by the piece. */}
                                                     <input
                                                         type="number"
-                                                        min="1"
-                                                        className="input w-20 text-center text-sm py-1"
+                                                        inputMode={item.type === "material" ? "decimal" : "numeric"}
+                                                        min={qtyMin(item.type)}
+                                                        step={qtyStep(item.type)}
+                                                        className="input w-24 text-center text-sm py-1"
                                                         value={item.quantity}
                                                         onChange={(e) =>
                                                             updateItem(
@@ -789,11 +799,11 @@ function PODetailModal({
                                             item.product?.name ??
                                             item.material?.name ??
                                             `#${item.item_id}`;
+                                        const ordered  = qtyNum(item.quantity);
+                                        const received = qtyNum(item.quantity_received);
                                         const pct =
-                                            item.quantity > 0
-                                                ? (item.quantity_received /
-                                                      item.quantity) *
-                                                  100
+                                            ordered > 0
+                                                ? (received / ordered) * 100
                                                 : 0;
                                         return (
                                             <tr key={item.id}>
@@ -813,25 +823,22 @@ function PODetailModal({
                                                     </span>
                                                 </td>
                                                 <td className="text-center tabular-nums">
-                                                    {item.quantity}
+                                                    {fmtQty(item.quantity, item.item_type)}
                                                 </td>
                                                 <td className="text-center">
                                                     <div className="flex flex-col items-center gap-1">
                                                         <span
                                                             className={clsx(
                                                                 "tabular-nums text-sm font-semibold",
-                                                                item.quantity_received >=
-                                                                    item.quantity
+                                                                // Numbers: "5.00" >= "10.00" is true as strings.
+                                                                received >= ordered
                                                                     ? "text-success"
-                                                                    : item.quantity_received >
-                                                                        0
+                                                                    : received > 0
                                                                       ? "text-warning"
                                                                       : "text-surface-400",
                                                             )}
                                                         >
-                                                            {
-                                                                item.quantity_received
-                                                            }
+                                                            {fmtQty(item.quantity_received, item.item_type)}
                                                         </span>
                                                         <div className="w-16 h-1 bg-surface-100 rounded-full overflow-hidden">
                                                             <div

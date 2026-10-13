@@ -9,6 +9,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
 import { Modal } from "@/components/ui/Modal";
 import { PdfDownloadButton } from "@/hooks/usePdfDownload";
+import { parseQty, qtyNum, qtyStep, fmtQty } from "@/lib/quantity";
 
 // ── Status config ─────────────────────────────────────────────────────────────
 
@@ -145,7 +146,7 @@ function ReceiveModal({ po, onClose, onDone }: {
     const [items, setItems] = useState<Array<{ po_item_id: number; quantity_received: number; quality_status: "passed" | "rejected"; notes: string }>>(
         (po.items ?? []).map((i: any) => ({
             po_item_id: i.id,
-            quantity_received: Math.max(0, (i.quantity - i.quantity_received)),
+            quantity_received: Math.max(0, qtyNum(qtyNum(i.quantity) - qtyNum(i.quantity_received))),
             quality_status: "passed" as const,
             notes: "",
         }))
@@ -215,19 +216,20 @@ function ReceiveModal({ po, onClose, onDone }: {
                         </thead>
                         <tbody className="divide-y divide-line">
                             {(po.items ?? []).map((poItem: any, idx: number) => {
-                                const remaining = poItem.quantity - poItem.quantity_received;
+                                const remaining = Math.max(0, qtyNum(qtyNum(poItem.quantity) - qtyNum(poItem.quantity_received)));
                                 const entry = items[idx];
                                 if (!entry) return null;
                                 return (
                                     <tr key={poItem.id}>
                                         <td className="px-3 py-2 font-medium text-surface-800">{poItem.description}</td>
-                                        <td className="px-3 py-2 text-center text-surface-600">{poItem.quantity}</td>
-                                        <td className="px-3 py-2 text-center text-surface-600">{poItem.quantity_received}</td>
+                                        <td className="px-3 py-2 text-center text-surface-600">{fmtQty(poItem.quantity, poItem.item_type)}</td>
+                                        <td className="px-3 py-2 text-center text-surface-600">{fmtQty(poItem.quantity_received, poItem.item_type)}</td>
                                         <td className="px-3 py-2">
                                             <input
-                                                type="number" min={0} max={remaining} step={0.001}
+                                                type="number" min={0} max={remaining} step={qtyStep(poItem.item_type)}
+                                                inputMode={poItem.item_type === "material" ? "decimal" : "numeric"}
                                                 value={entry.quantity_received}
-                                                onChange={(e) => setItems(prev => prev.map((it, i) => i === idx ? { ...it, quantity_received: parseFloat(e.target.value) || 0 } : it))}
+                                                onChange={(e) => setItems(prev => prev.map((it, i) => i === idx ? { ...it, quantity_received: parseQty(e.target.value, poItem.item_type) } : it))}
                                                 className="input text-center w-20 py-1 text-xs"
                                             />
                                         </td>
@@ -481,7 +483,7 @@ export default function PurchaseOrderDetailPage() {
                                         </thead>
                                         <tbody className="divide-y divide-line">
                                             {(po.items ?? []).map((item: any) => {
-                                                const outstanding = item.quantity - item.quantity_received;
+                                                const outstanding = qtyNum(qtyNum(item.quantity) - qtyNum(item.quantity_received));
                                                 const fullyReceived = outstanding <= 0;
                                                 return (
                                                     <tr key={item.id} className={clsx(fullyReceived && "opacity-60")}>
@@ -495,10 +497,10 @@ export default function PurchaseOrderDetailPage() {
                                                                 {item.item_type}
                                                             </span>
                                                         </td>
-                                                        <td className="px-3 py-2.5 text-right tabular-nums">{item.quantity}</td>
-                                                        <td className="px-3 py-2.5 text-right tabular-nums text-success-700">{item.quantity_received}</td>
+                                                        <td className="px-3 py-2.5 text-right tabular-nums">{fmtQty(item.quantity, item.item_type)}</td>
+                                                        <td className="px-3 py-2.5 text-right tabular-nums text-success-700">{fmtQty(item.quantity_received, item.item_type)}</td>
                                                         <td className={clsx("px-3 py-2.5 text-right tabular-nums font-semibold", outstanding > 0 ? "text-amber-700" : "text-surface-400")}>
-                                                            {outstanding > 0 ? outstanding : "✓"}
+                                                            {outstanding > 0 ? fmtQty(outstanding, item.item_type) : "✓"}
                                                         </td>
                                                         <td className="px-3 py-2.5 text-right tabular-nums text-surface-600">{fmt(item.unit_price, currency)}</td>
                                                         <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-surface-800">{fmt(item.total_price, currency)}</td>
@@ -592,8 +594,8 @@ export default function PurchaseOrderDetailPage() {
                             <SectionLabel>Summary</SectionLabel>
                             <div className="space-y-0">
                                 <InfoRow label="Items" value={(po.items ?? []).length} />
-                                <InfoRow label="Total Ordered" value={(po.items ?? []).reduce((s: number, i: any) => s + i.quantity, 0)} />
-                                <InfoRow label="Total Received" value={(po.items ?? []).reduce((s: number, i: any) => s + i.quantity_received, 0)} />
+                                <InfoRow label="Total Ordered" value={qtyNum((po.items ?? []).reduce((s: number, i: any) => s + qtyNum(i.quantity), 0)).toLocaleString("en-KE", { maximumFractionDigits: 2 })} />
+                                <InfoRow label="Total Received" value={qtyNum((po.items ?? []).reduce((s: number, i: any) => s + qtyNum(i.quantity_received), 0)).toLocaleString("en-KE", { maximumFractionDigits: 2 })} />
                                 <InfoRow label="Currency" value={currency} />
                                 <InfoRow label="Payment Terms" value={po.payment_terms} />
                                 <InfoRow label="Payment Status" value={

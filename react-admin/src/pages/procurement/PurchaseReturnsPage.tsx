@@ -12,6 +12,7 @@ import { clsx } from "clsx";
 import { get } from "@/api/client";
 import { Fragment } from "react";
 import { groupRowsByDate, DateGroupHeaderRow } from "@/lib/dateGrouping";
+import { parseQty, qtyNum, qtyStep, fmtQty } from "@/lib/quantity";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -268,6 +269,8 @@ function ReturnDetailModal({
 
 interface ReturnItemState {
     po_item_id: number;
+    /** "material" lines accept 2 decimals (0.25 m); products are whole pieces. */
+    kind: string;
     name: string;
     max_qty: number;
     quantity: string;
@@ -302,18 +305,19 @@ function CreateReturnModal({ onClose }: { onClose: () => void }) {
     });
     const selectedPO = detailData?.purchase_order;
     const receivedItems =
-        selectedPO?.items.filter((i) => i.quantity_received > 0) ?? [];
+        selectedPO?.items.filter((i) => qtyNum(i.quantity_received) > 0) ?? [];
 
     const initReturnItems = () => {
         const init: Record<number, ReturnItemState> = {};
         receivedItems.forEach((item) => {
             init[item.id] = {
                 po_item_id: item.id,
+                kind: item.item_type,
                 name:
                     item.product?.name ??
                     item.material?.name ??
                     `Item #${item.item_id}`,
-                max_qty: item.quantity_received,
+                max_qty: qtyNum(item.quantity_received),
                 quantity: "0",
                 reason: "",
             };
@@ -332,10 +336,10 @@ function CreateReturnModal({ onClose }: { onClose: () => void }) {
             [id]: { ...(prev[id] ?? states[id]), [key]: value },
         }));
 
-    const totalReturning = Object.values(states).reduce(
-        (sum, i) => sum + (parseInt(i.quantity) || 0),
+    const totalReturning = qtyNum(Object.values(states).reduce(
+        (sum, i) => sum + parseQty(i.quantity, i.kind),
         0,
-    );
+    ));
 
     const RETURN_REASONS = [
         "Defective / Damaged",
@@ -350,10 +354,10 @@ function CreateReturnModal({ onClose }: { onClose: () => void }) {
     const mutation = useMutation({
         mutationFn: () => {
             const items = Object.values(states)
-                .filter((i) => (parseInt(i.quantity) || 0) > 0)
+                .filter((i) => parseQty(i.quantity, i.kind) > 0)
                 .map((i) => ({
                     po_item_id: i.po_item_id,
-                    quantity: parseInt(i.quantity),
+                    quantity: parseQty(i.quantity, i.kind),
                     reason: i.reason,
                 }));
             return purchaseOrderApi.createReturn(parseInt(selectedPOId), {
@@ -505,7 +509,7 @@ function CreateReturnModal({ onClose }: { onClose: () => void }) {
                                     item.product?.name ??
                                     item.material?.name ??
                                     `Item #${item.item_id}`;
-                                const qty = parseInt(state.quantity) || 0;
+                                const qty = parseQty(state.quantity, item.item_type);
                                 const hasQty = qty > 0;
 
                                 return (
@@ -531,9 +535,9 @@ function CreateReturnModal({ onClose }: { onClose: () => void }) {
                                                 <p className="text-xs text-surface-500 mt-1">
                                                     Received:{" "}
                                                     <strong>
-                                                        {item.quantity_received}
+                                                        {fmtQty(item.quantity_received, item.item_type)}
                                                     </strong>{" "}
-                                                    units available to return
+                                                    {item.item_type === "material" ? "available to return" : "units available to return"}
                                                 </p>
                                             </div>
                                             <span className="badge badge-neutral capitalize flex-shrink-0">
@@ -546,7 +550,9 @@ function CreateReturnModal({ onClose }: { onClose: () => void }) {
                                                 <FieldInput
                                                     type="number"
                                                     min="0"
-                                                    max={item.quantity_received}
+                                                    max={qtyNum(item.quantity_received)}
+                                                    step={qtyStep(item.item_type)}
+                                                    inputMode={item.item_type === "material" ? "decimal" : "numeric"}
                                                     className={clsx(
                                                         "input",
                                                         hasQty &&

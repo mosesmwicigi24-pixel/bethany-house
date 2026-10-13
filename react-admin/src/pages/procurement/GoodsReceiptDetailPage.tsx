@@ -8,6 +8,7 @@ import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
 import { PdfDownloadButton } from "@/hooks/usePdfDownload";
+import { qtyNum } from "@/lib/quantity";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -113,9 +114,11 @@ export default function GoodsReceiptDetailPage() {
 
     const grn = data.grn;
     const items = grn.items ?? [];
-    const totalAccepted = items.reduce((s, i) => s + i.quantity_received - i.quantity_rejected, 0);
-    const totalRejected = items.reduce((s, i) => s + i.quantity_rejected, 0);
-    const totalValue    = items.reduce((s, i) => s + (i.quantity_received - i.quantity_rejected) * (i.purchase_order_item?.unit_price ?? 0), 0);
+    // qtyNum, never raw `+`: GRN quantities arrive as strings ("5.00"), and
+    // `s + "5.00"` concatenates — totals used to read 51.00 for 5 + 1.
+    const totalAccepted = qtyNum(items.reduce((s, i) => s + qtyNum(i.quantity_received) - qtyNum(i.quantity_rejected), 0));
+    const totalRejected = qtyNum(items.reduce((s, i) => s + qtyNum(i.quantity_rejected), 0));
+    const totalValue    = items.reduce((s, i) => s + (qtyNum(i.quantity_received) - qtyNum(i.quantity_rejected)) * Number(i.purchase_order_item?.unit_price ?? 0), 0);
     const receivedByName = grn.received_by
         ? `${grn.received_by.first_name} ${grn.received_by.last_name}`.trim()
         : "-";
@@ -232,8 +235,8 @@ export default function GoodsReceiptDetailPage() {
                                     </thead>
                                     <tbody className="divide-y divide-line">
                                         {items.map((item) => {
-                                            const accepted = item.quantity_received - item.quantity_rejected;
-                                            const lineValue = accepted * (item.purchase_order_item?.unit_price ?? 0);
+                                            const accepted = qtyNum(qtyNum(item.quantity_received) - qtyNum(item.quantity_rejected));
+                                            const lineValue = accepted * Number(item.purchase_order_item?.unit_price ?? 0);
                                             const hasRejection = item.quantity_rejected > 0;
                                             return (
                                                 <tr key={item.id} className={clsx(hasRejection && "bg-danger-50/30")}>
@@ -367,7 +370,7 @@ export default function GoodsReceiptDetailPage() {
                             <InfoRow label="Line Items" value={items.length} />
                             <InfoRow label="Units Received" value={
                                 <span className="tabular-nums">
-                                    {items.reduce((s, i) => s + i.quantity_received, 0)}
+                                    {qtyNum(items.reduce((s, i) => s + qtyNum(i.quantity_received), 0)).toLocaleString("en-KE", { maximumFractionDigits: 2 })}
                                 </span>
                             } />
                             <InfoRow label="Units Accepted" value={
