@@ -21,7 +21,9 @@ use Tests\TestCase;
  *
  *  3. "Worked on the order" for the own-work QC rule (Policy 4) is anyone who
  *     ever held a stage or counted its pieces, plus order-level assignees,
- *     not only whoever holds a stage today.
+ *     not only whoever holds a stage today. (15 Oct 2026: assignees attached
+ *     only to oversee — observer, QC inspector, production manager, … — are
+ *     not makers.)
  *  4. The second QC route (POST /approvals) gets the same checks as QC:
  *     visibility, own-work rule, and agreement with the order's status.
  *  5. The calendar shows a tailor her own jobs, not the whole floor.
@@ -146,6 +148,39 @@ class ProductionQcTrustTest extends TestCase
         $this->toQc();
 
         $this->passAs($lead)->assertStatus(403)->assertJsonPath('code', 'SELF_APPROVAL');
+    }
+
+    public function test_an_oversight_assignee_can_still_pass_the_order(): void
+    {
+        // Owner decision 15 Oct 2026: auto-assignee rules attach observers,
+        // QC inspectors and the production manager to every order. They
+        // watch; they do not make — and must not be barred from inspecting.
+        $pm       = $this->user('production_manager');
+        $observer = $this->user('admin');
+        $sewing   = $this->user('admin');
+        foreach ([[$pm, 'production_manager'], [$observer, 'observer'], [$sewing, 'tailor']] as [$u, $role]) {
+            ProductionOrderAssignee::create(['production_order_id' => $this->order->id, 'user_id' => $u->id, 'role_in_order' => $role]);
+        }
+        $this->toQc();
+
+        // A tailor attached at order level is still a maker.
+        $this->passAs($sewing)->assertStatus(403)->assertJsonPath('code', 'SELF_APPROVAL');
+        // …but an oversight role is not, and the PM can sign off.
+        $this->assertNotContains($observer->id, \App\Support\OrderMakers::ids($this->order->fresh()));
+        $this->passAs($pm)->assertSuccessful();
+    }
+
+    public function test_an_oversight_assignee_who_counted_pieces_is_still_a_maker(): void
+    {
+        // The exemption covers the attachment, not the work: an observer who
+        // counted pieces on the stage made them.
+        $watcher = $this->user('admin');
+        ProductionOrderAssignee::create(['production_order_id' => $this->order->id, 'user_id' => $watcher->id, 'role_in_order' => 'observer']);
+        Sanctum::actingAs($watcher, ['*']);
+        $this->postJson("/api/v1/tailor/tasks/{$this->task->id}/progress", ['quantity_done' => 2])->assertOk();
+        $this->toQc();
+
+        $this->passAs($watcher)->assertStatus(403)->assertJsonPath('code', 'SELF_APPROVAL');
     }
 
     public function test_the_manager_who_sent_it_back_can_inspect_the_redo(): void
