@@ -94,6 +94,68 @@ class PurchaseOrderController extends Controller
     }
 
     // =========================================================================
+    // GET /api/v1/admin/purchase-orders/item-costs/{productId}?currency=KES
+    // =========================================================================
+
+    /**
+     * What the New Purchase Order form pre-fills when a product is picked: the
+     * product's variants (for the "Add all variants" grid) and, for the
+     * product and each variant, the KES cost from the price book and that cost
+     * stated in the PO's currency.
+     *
+     * The cost is the canonical book cost (CostBasis::unitCostFor — the
+     * variant's KES row, else the product's), so the PO starts from the same
+     * figure COGS uses. A foreign PO converts at the REPORTING rate: that is
+     * the rate the approval engine turns the PO back into KES with
+     * (PurchaseOrderHandler::amount), so a PO pre-filled at cost bands at that
+     * cost. A currency with no reporting rate gets no figure — never a guess.
+     * No cost on the book, or a viewer without products.view_cost: null, and
+     * the form asks for the price instead of using 0.
+     */
+    public function itemCosts(Request $request, $productId)
+    {
+        $validated = $request->validate([
+            'currency' => 'nullable|in:KES,USD,EUR,GBP',
+        ]);
+        $currency = $validated['currency'] ?? 'KES';
+
+        $product = Product::with(['translations' => fn ($q) => $q->where('language_code', 'en')])->findOrFail($productId);
+        $variants = ProductVariant::where('product_id', $product->id)
+            ->where('is_active', true)
+            ->orderBy('id')
+            ->get(['id', 'sku', 'variant_name', 'attributes']);
+
+        $seesCost = \App\Support\CostVisibility::allows($request->user());
+        $rate     = \App\Support\ReportingCurrency::rates()[$currency] ?? null;
+        $line = function (?int $variantId) use ($product, $seesCost, $rate): array {
+            $kes = $seesCost ? \App\Support\CostBasis::unitCostFor($product->id, $variantId) : null;
+
+            return [
+                'kes_cost'   => $kes,
+                'unit_price' => ($kes === null || $rate === null) ? null : round($kes / $rate, 2),
+            ];
+        };
+
+        return response()->json([
+            'product' => [
+                'id'   => $product->id,
+                'sku'  => $product->sku,
+                'name' => $product->translations->first()?->name ?? $product->sku,
+            ] + $line(null),
+            'currency'     => $currency,
+            'rate_to_kes'  => $rate,
+            'rate_missing' => $rate === null,
+            'cost_visible' => $seesCost,
+            'variants'     => $variants->map(fn ($v) => [
+                'id'           => $v->id,
+                'sku'          => $v->sku,
+                'variant_name' => $v->variant_name,
+                'attributes'   => $v->attributes ?? (object) [],
+            ] + $line($v->id))->values(),
+        ]);
+    }
+
+    // =========================================================================
     // GET /api/v1/admin/purchase-orders/{id}
     // =========================================================================
 
@@ -132,6 +194,9 @@ class PurchaseOrderController extends Controller
             'items'                   => 'required|array|min:1',
             'items.*.type'            => 'required|in:product,material',
             'items.*.item_id'         => 'required|integer',
+            // A product line may name one of the product's variants; stock is
+            // then received onto that variant (receiveProductInventory).
+            'items.*.product_variant_id' => 'nullable|integer',
             // Materials are bought by the metre (0.25, 0.5, 0.75); the columns
             // are decimal(12,2), so 2 places is the precision that survives.
             'items.*.quantity'        => 'required|numeric|min:0.01|decimal:0,2',
@@ -144,9 +209,21 @@ class PurchaseOrderController extends Controller
             $taxAmount      = $validated['tax'] ?? 0;
             $subtotal       = 0;
 
-            // Pre-validate all items before creating anything
+            // Pre-validate all items before creating anything.
+            //
+            // A variant line must be one of ITS product's variants, and a
+            // variant appears on the order once: the same variant sent twice
+            // at the same price is one line with the quantities added (the
+            // "Add all variants" grid can be used again for the same product);
+            // at two different prices it is refused — which price stands is
+            // the buyer's call, not ours. Product lines without a variant and
+            // material lines keep their old rule (repeats allowed).
             $itemDetails = [];
+            $variantLine = [];   // variant id => index in $itemDetails
             foreach ($validated['items'] as $item) {
+                $variantId = isset($item['product_variant_id']) ? (int) $item['product_variant_id'] : null;
+                $item['product_variant_id'] = $variantId;
+
                 if ($item['type'] === 'product' && !self::isWhole($item['quantity'])) {
                     DB::rollBack();
                     return response()->json(['message' => 'Products are ordered in whole pieces — only materials take fractional quantities.'], 422);
@@ -157,8 +234,37 @@ class PurchaseOrderController extends Controller
                         DB::rollBack();
                         return response()->json(['message' => "Product ID {$item['item_id']} not found."], 422);
                     }
-                    $itemDetails[] = array_merge($item, ['label' => $product->sku ?? "Product #{$item['item_id']}"]);
+                    $label = $product->sku ?? "Product #{$item['item_id']}";
+                    if ($variantId !== null) {
+                        $variant = ProductVariant::whereKey($variantId)->where('product_id', $product->id)->first();
+                        if (!$variant) {
+                            DB::rollBack();
+                            return response()->json([
+                                'message' => "Variant #{$variantId} is not a variant of {$label}.",
+                                'errors'  => ['items' => ["Variant #{$variantId} is not a variant of {$label}."]],
+                            ], 422);
+                        }
+                        $sku   = $variant->sku ?: $label;
+                        $label = mb_substr($variant->variant_name ? "{$sku} — {$variant->variant_name}" : $sku, 0, 255);
+
+                        if (isset($variantLine[$variantId])) {
+                            $idx = $variantLine[$variantId];
+                            if ((int) round((float) $itemDetails[$idx]['unit_price'] * 100) !== (int) round((float) $item['unit_price'] * 100)) {
+                                DB::rollBack();
+                                $msg = "{$label} is on the order twice at different unit prices. Keep one line per variant.";
+                                return response()->json(['message' => $msg, 'errors' => ['items' => [$msg]]], 422);
+                            }
+                            $itemDetails[$idx]['quantity'] = (self::hundredths($itemDetails[$idx]['quantity']) + self::hundredths($item['quantity'])) / 100;
+                            continue;
+                        }
+                        $variantLine[$variantId] = count($itemDetails);
+                    }
+                    $itemDetails[] = array_merge($item, ['label' => $label]);
                 } else {
+                    if ($variantId !== null) {
+                        DB::rollBack();
+                        return response()->json(['message' => 'A material line cannot name a product variant.'], 422);
+                    }
                     $material = Material::find($item['item_id']);
                     if (!$material) {
                         DB::rollBack();
@@ -166,6 +272,8 @@ class PurchaseOrderController extends Controller
                     }
                     $itemDetails[] = array_merge($item, ['label' => $material->name]);
                 }
+            }
+            foreach ($itemDetails as $item) {
                 $subtotal += $item['quantity'] * $item['unit_price'];
             }
 
@@ -198,6 +306,7 @@ class PurchaseOrderController extends Controller
                     'purchase_order_id'  => $purchaseOrder->id,
                     'item_type'          => $item['type'],
                     'product_id'         => $item['type'] === 'product' ? $item['item_id'] : null,
+                    'product_variant_id' => $item['type'] === 'product' ? $item['product_variant_id'] : null,
                     'material_id'        => $item['type'] === 'material' ? $item['item_id'] : null,
                     'description'        => $item['label'],
                     'quantity'           => $item['quantity'],

@@ -1211,6 +1211,9 @@ Route::prefix('v1')->group(function () {
                 Route::prefix('purchase-orders')->group(function () {
                     Route::get('/',              [PurchaseOrderController::class, 'index']);
                     Route::get('/statistics',    [PurchaseOrderController::class, 'statistics']);
+                    // The New PO form's pre-fill: a product's variants and its KES cost in the PO's currency.
+                    Route::get('/item-costs/{productId}', [PurchaseOrderController::class, 'itemCosts'])
+                        ->middleware('permission:procurement.create,sanctum');
                     Route::get('/{id}',          [PurchaseOrderController::class, 'show']);
                     Route::get('/{id}/audit-log',[PurchaseOrderController::class, 'auditLog']);
                     Route::post('/',             [PurchaseOrderController::class, 'store'])

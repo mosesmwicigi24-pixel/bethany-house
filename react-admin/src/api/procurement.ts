@@ -266,7 +266,31 @@ export const supplierApi = {
 
 // ─── Purchase Order API ───────────────────────────────────────────────────────
 
+/** What the New PO form pre-fills for a picked product (PurchaseOrderController::itemCosts). */
+export interface POItemCostLine {
+    /** The price book's KES cost (variant's, else the product's); null = none, or not visible to you. */
+    kes_cost: number | null;
+    /** That cost in the PO's currency at the reporting rate; null when there is no cost or no rate. */
+    unit_price: number | null;
+}
+export interface POItemCosts {
+    product: POItemCostLine & { id: number; sku: string; name: string };
+    currency: string;
+    rate_to_kes: number | null;
+    rate_missing: boolean;
+    cost_visible: boolean;
+    variants: Array<POItemCostLine & {
+        id: number;
+        sku: string;
+        variant_name: string | null;
+        attributes: Record<string, string>;
+    }>;
+}
+
 export const purchaseOrderApi = {
+    itemCosts: (productId: number, currency: string) =>
+        get<POItemCosts>(`/v1/admin/purchase-orders/item-costs/${productId}`, { params: { currency } }),
+
     list: (params?: Record<string, string | number>) =>
         get<PaginatedResponse<PurchaseOrder>>("/v1/admin/purchase-orders", {
             params,
@@ -291,6 +315,8 @@ export const purchaseOrderApi = {
         items: Array<{
             type: "product" | "material";
             item_id: number;
+            /** One of the product's variants — stock is received onto it. */
+            product_variant_id?: number | null;
             quantity: number;
             unit_price: number;
         }>;
