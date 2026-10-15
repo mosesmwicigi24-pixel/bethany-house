@@ -534,6 +534,31 @@ class SyncPermissions extends Command
      */
     const EXTRA_ROLES = [
 
+        // Runs the production floor (owner's ask, 2026-10-15): decides who
+        // sews what, keeps the queue moving, inspects and signs off quality.
+        // Floor-wide — no data scope, so every production order, not only
+        // the ones they raised (ProductionOrder::visibleTo opens on
+        // manage_assignees / confirm_order). Production and nothing else:
+        // no sales orders, payments, customers' records, procurement, stock
+        // ledgers, expenses or finance. Withheld inside production:
+        //   production.view_bom      — BOMs carry material unit costs;
+        //   production.delete_order  — an owner-level call;
+        //   production.worker        — they run the floor, they don't sew
+        //                              (and the QC rule refuses whoever sews).
+        // raise_order brings products.view with it (the product picker).
+        'production_manager' => [
+            '@self', '@workspace',
+            'production.view',
+            'production.raise_order', 'production.confirm_order',
+            'production.manage_assignees',
+            'production.submit_qc', 'production.approve_qc',
+            // Auto-assignee rules and the stage catalogue: who is assigned
+            // what by default is exactly this role's job.
+            'production.configure_auto_assignees',
+            // The production report page; no files (reports.export withheld).
+            'reports.production',
+        ],
+
         // The procurement checker: approves POs, returns and stock movements
         // (maker≠checker per record still applies), and owns BOMs.
         'procurement_manager' => [

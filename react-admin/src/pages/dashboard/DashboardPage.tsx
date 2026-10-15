@@ -597,6 +597,7 @@ function roleSubtitle(roles: string[], floorWorker: boolean): string {
     if (floorWorker)                            return "Check your assigned tasks and stay on top of your production work.";
     if (roles.includes("pos_clerk"))            return "Open a register and start serving customers.";
     if (roles.includes("procurement_officer"))  return "Manage purchase orders, suppliers, and incoming stock.";
+    if (roles.includes("production_manager"))   return "Here's the production floor today — what's queued, moving, and late.";
     if (roles.includes("outlet_manager"))       return "Here's what's happening at your outlet today.";
     return "Here's what's happening across your business today.";
 }
@@ -655,6 +656,28 @@ function RoleStatGrid({
                 <StatCard label="Notifications"   value={stats?.unread_notifications}
                     loading={isLoading} color="bg-warning-light text-warning-dark"
                     href="/notifications" badge={stats?.unread_notifications} icon={<PaymentIcon />} />
+            </div>
+        );
+    }
+
+    // ── Production Manager view — the floor, nothing else. These counts are
+    // over the orders visibleTo() opens, which for this role is the whole
+    // floor (it holds manage_assignees). ─────────────────────────────────────
+    if (roles.includes("production_manager")) {
+        return (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                <StatCard label="Overdue"        value={stats?.production_overdue}
+                    loading={isLoading} color="bg-danger-light text-danger"
+                    href="/production/orders?status=overdue" icon={<AlertIcon />} />
+                <StatCard label="In Queue"       value={stats?.production_queue}
+                    loading={isLoading} color="bg-brand-50 text-brand-600"
+                    href="/production/orders?status=pending" icon={<ClipboardIcon />} />
+                <StatCard label="In Progress"    value={stats?.production_in_progress}
+                    loading={isLoading} color="bg-info-light text-info"
+                    href="/production/wip" icon={<ClockIcon />} />
+                <StatCard label="Awaiting QC"    value={stats?.production_qc_pending}
+                    loading={isLoading} color="bg-accent-50 text-accent-600"
+                    href="/production/qc" icon={<BoxIcon />} />
             </div>
         );
     }
@@ -1027,6 +1050,18 @@ function useQuickActions(
             { label: "Suppliers",        href: "/procurement/suppliers",       icon: "customer"   },
             { label: "Notifications",    href: "/notifications",               icon: "bell",      badge: stats?.unread_notifications },
             { label: "Reports",          href: "/reports",                     icon: "report"     },
+        ];
+    }
+
+    // ── Production Manager ───────────────────────────────────────────────────
+    if (roles.includes("production_manager")) {
+        return [
+            { label: "Production Orders", href: "/production/orders",   icon: "production", highlight: true },
+            { label: "Work In Progress",  href: "/production/wip",      icon: "scissors"   },
+            { label: "Quality Control",   href: "/production/qc",       icon: "check"      },
+            { label: "Calendar",          href: "/production/calendar", icon: "clipboard"  },
+            { label: "Messages",          href: "/comms",               icon: "message"    },
+            { label: "Notifications",     href: "/notifications",       icon: "bell",       badge: stats?.unread_notifications },
         ];
     }
 

@@ -172,6 +172,9 @@ class NotificationService
     private const OWNERS      = ['super_admin', 'admin'];
     private const FINANCE     = ['super_admin', 'admin', 'finance_manager'];
     private const PROCUREMENT = ['super_admin', 'admin', 'procurement_manager', 'procurement_officer'];
+    // The floor's own events — orders arriving, stages finishing, deadlines
+    // slipping, QC outcomes — go to whoever runs the floor as well as the owners.
+    private const PRODUCTION  = ['super_admin', 'admin', 'production_manager'];
 
     /** User ids (Collection) holding ANY of the given roles, on the sanctum guard. */
     private static function userIdsForRoles(array $roles): Collection
@@ -533,7 +536,7 @@ class NotificationService
         string $productName
     ): void {
         self::send(
-            self::resolve(self::OWNERS),
+            self::resolve(self::PRODUCTION),
             new ProductionStageCompletedNotification(
                 $productionOrderId, $orderNumber, $stageName, $productName
             )
@@ -551,7 +554,7 @@ class NotificationService
         array $assignedUserIds = []
     ): void {
         self::send(
-            self::resolve(self::OWNERS, null, $assignedUserIds),
+            self::resolve(self::PRODUCTION, null, $assignedUserIds),
             new ProductionOverdueNotification($productionOrderId, $orderNumber, $productName, $dueDate)
         );
     }
@@ -877,7 +880,7 @@ class NotificationService
         int $quantity
     ): void {
         self::send(
-            self::resolve(self::OWNERS),
+            self::resolve(self::PRODUCTION),
             new InAppNotification(
                 title:     "Production order {$orderNumber} created",
                 body:      "{$quantity}x {$productName} added to production queue.",
@@ -898,7 +901,7 @@ class NotificationService
         int $quantity
     ): void {
         self::send(
-            self::resolve(self::OWNERS),
+            self::resolve(self::PRODUCTION),
             new InAppNotification(
                 title:     "Production order {$orderNumber} completed",
                 body:      "{$quantity}x {$productName} completed and ready.",
@@ -919,7 +922,7 @@ class NotificationService
         int $passedQuantity
     ): void {
         self::send(
-            self::resolve(self::OWNERS),
+            self::resolve(self::PRODUCTION),
             new InAppNotification(
                 title:     "QC passed for {$orderNumber}",
                 body:      "{$passedQuantity}x {$productName} passed quality control.",
@@ -1001,7 +1004,7 @@ class NotificationService
         string $notes = ''
     ): void {
         self::send(
-            self::resolve(self::OWNERS),
+            self::resolve(self::PRODUCTION),
             new InAppNotification(
                 title:     "QC failed for {$orderNumber}",
                 body:      "{$failedQuantity}x {$productName} failed quality control." . ($notes ? " Notes: {$notes}" : ''),

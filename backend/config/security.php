@@ -137,6 +137,7 @@ return [
         'outlet_manager'      => 2,
         'accountant'          => 2,
         'procurement_manager' => 2,
+        'production_manager'  => 2,
         'pos_clerk'           => 3,
         'tailor'              => 3,
         'procurement_officer' => 3,

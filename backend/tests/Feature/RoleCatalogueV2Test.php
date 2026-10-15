@@ -219,6 +219,16 @@ class RoleCatalogueV2Test extends TestCase
             // 3C (2026_10_03_530001): proposes cost changes.
             'products.edit_cost',
         ],
+        // A role added after v2 (owner's ask, 2026-10-15) — created by sync,
+        // so its whole shape lives here. products.view arrives as
+        // production.raise_order's dependency (the product picker).
+        'production_manager' => [
+            'dashboard.view', 'notifications.view', 'profile.edit', 'profile.view',
+            'production.approve_qc', 'production.configure_auto_assignees',
+            'production.confirm_order', 'production.manage_assignees',
+            'production.raise_order', 'production.submit_qc', 'production.view',
+            'products.view', 'reports.production',
+        ],
     ];
 
     /**
@@ -450,7 +460,8 @@ class RoleCatalogueV2Test extends TestCase
         );
 
         $roles = Role::where('guard_name', 'sanctum')->orderBy('name')->pluck('name')->all();
-        $expected = array_keys(self::SPEC);
+        // The v2 catalogue's roles plus any role added after it (LATER_GRANTS).
+        $expected = array_keys(self::withLater(self::SPEC));
         sort($expected);
         $this->assertSame($expected, $roles, 'sync seeds exactly the catalogue\'s roles');
     }

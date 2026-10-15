@@ -143,7 +143,8 @@ final class CustomerContacts
     // browser, this decides what the caller's ROLES allow:
     //
     //   phone/email  full    super_admin, admin, finance_manager, outlet_manager
-    //                masked  accountant, pos_clerk   (07••••1853, n•••82@gmail.com)
+    //                masked  accountant, pos_clerk, production_manager
+    //                        (07••••1853, n•••82@gmail.com)
     //                omitted procurement_*, tailor, system_admin
     //   address      masked  finance_manager, pos_clerk, accountant
     //                omitted wherever contacts are omitted
@@ -164,6 +165,10 @@ final class CustomerContacts
         'admin'               => [self::FULL, self::FULL],
         'finance_manager'     => [self::FULL, self::MASKED],
         'outlet_manager'      => [self::FULL, self::FULL],
+        // Sees whose job it is (the name is never masked); a phone or email
+        // only masked — the floor rarely calls a customer, and the shop that
+        // took the order holds the full contact. No delivery address.
+        'production_manager'  => [self::MASKED, self::OMITTED],
         'accountant'          => [self::MASKED, self::MASKED],
         'pos_clerk'           => [self::MASKED, self::MASKED],
         'procurement_officer' => [self::OMITTED, self::OMITTED],

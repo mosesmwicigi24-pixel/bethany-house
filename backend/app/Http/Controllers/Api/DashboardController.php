@@ -294,8 +294,10 @@ class DashboardController extends Controller
             } catch (\Exception) {}
         }
 
-        // Overdue production orders — admins, managers, and tailors
-        if ($isAdmin || $isManager || $isTailor) {
+        // Overdue production orders — admins, managers, tailors, and whoever
+        // runs the floor (the key, not a role name: a production manager or
+        // any custom role that assigns the work).
+        if ($isAdmin || $isManager || $isTailor || $user->can('production.manage_assignees')) {
             try {
                 // The same orders the Overdue tile counts (buildStats), so the
                 // banner and the tile can never disagree.
