@@ -10,6 +10,7 @@ use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 use Livewire\WithFileUploads;
+use App\Support\ServerError;
 
 class BulkImport extends Component
 {
@@ -176,7 +177,7 @@ class BulkImport extends Component
         } catch (\Exception $e) {
             fclose($handle);
             DB::rollBack();
-            $this->flashMessage = 'Import failed: ' . $e->getMessage();
+            $this->flashMessage = ServerError::message($e, 'Import failed.');
             $this->flashType    = 'error';
             $this->step         = 'upload';
         }

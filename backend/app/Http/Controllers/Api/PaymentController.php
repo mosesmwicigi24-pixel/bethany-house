@@ -13,6 +13,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use App\Support\ServerError;
 
 class PaymentController extends Controller
 {
@@ -194,9 +195,7 @@ class PaymentController extends Controller
                 'payment_id' => $paymentId,
                 'error'      => $e->getMessage(),
             ]);
-            return response()->json([
-                'message' => 'Verification failed: ' . $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Verification failed.');
         }
     }
 
@@ -295,9 +294,7 @@ class PaymentController extends Controller
                 'payment_id' => $paymentId,
                 'error'      => $e->getMessage(),
             ]);
-            return response()->json([
-                'message' => 'Verification failed: ' . $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Verification failed.');
         }
     }
 
@@ -357,9 +354,7 @@ class PaymentController extends Controller
                 'order_id' => $order->id,
                 'error'    => $e->getMessage(),
             ]);
-            return response()->json([
-                'message' => 'Failed to initiate M-Pesa payment. ' . $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to initiate M-Pesa payment.');
         }
     }
 
@@ -426,7 +421,7 @@ class PaymentController extends Controller
 
         } catch (\Exception $e) {
             Log::error('Paystack payment error', ['order_id' => $order->id, 'error' => $e->getMessage()]);
-            return response()->json(['message' => 'Failed to initiate payment. ' . $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to initiate payment.');
         }
     }
 
@@ -485,7 +480,7 @@ class PaymentController extends Controller
 
         } catch (\Exception $e) {
             Log::error('Flutterwave payment error', ['order_id' => $order->id, 'error' => $e->getMessage()]);
-            return response()->json(['message' => 'Failed to initiate payment. ' . $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to initiate payment.');
         }
     }
 

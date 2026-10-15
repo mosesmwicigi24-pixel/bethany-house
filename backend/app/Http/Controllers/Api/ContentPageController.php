@@ -7,6 +7,7 @@ use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use App\Support\ServerError;
 
 // ==================== CONTENT PAGE CONTROLLER ====================
 
@@ -127,7 +128,7 @@ class ContentPageController extends Controller
             return response()->json(['message' => 'Page created', 'id' => $pageId], 201);
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed');
         }
     }
 
@@ -173,7 +174,7 @@ class ContentPageController extends Controller
             return response()->json(['message' => 'Page deleted']);
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed');
         }
     }
 
@@ -227,7 +228,7 @@ class ContentPageController extends Controller
             return response()->json(['message' => 'Page duplicated', 'id' => $newId], 201);
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed');
         }
     }
 }

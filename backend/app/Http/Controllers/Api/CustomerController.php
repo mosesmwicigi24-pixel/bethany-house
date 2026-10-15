@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use App\Support\SortResolver;
+use App\Support\ServerError;
 
 class CustomerController extends Controller
 {
@@ -336,10 +337,7 @@ class CustomerController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to create customer',
-                'error' => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to create customer');
         }
     }
 
@@ -410,10 +408,7 @@ class CustomerController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to update customer',
-                'error' => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to update customer');
         }
     }
 
@@ -458,10 +453,7 @@ class CustomerController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to delete customer',
-                'error' => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to delete customer');
         }
     }
 
@@ -602,10 +594,7 @@ class CustomerController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to add address',
-                'error' => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to add address');
         }
     }
 
@@ -652,10 +641,7 @@ class CustomerController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to update address',
-                'error' => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to update address');
         }
     }
 
@@ -832,10 +818,7 @@ class CustomerController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to create customer.',
-                'error'   => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to create customer.');
         }
     }
 
@@ -884,10 +867,7 @@ class CustomerController extends Controller
                 DB::commit();
             } catch (\Exception $e) {
                 DB::rollBack();
-                return response()->json([
-                    'message' => 'Failed to create portal account.',
-                    'error'   => $e->getMessage(),
-                ], 500);
+                return ServerError::respond($e, 'Failed to create portal account.');
             }
         } else {
             $user = $customer->user;
@@ -897,10 +877,7 @@ class CustomerController extends Controller
         try {
             \Illuminate\Support\Facades\Password::sendResetLink(['email' => $user->email]);
         } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Portal account ready but invite email failed to send. Please retry.',
-                'error'   => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Portal account ready but invite email failed to send. Please retry.');
         }
 
         try {

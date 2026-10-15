@@ -7,6 +7,7 @@ use App\Models\Outlet;
 use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Support\ServerError;
 
 class OutletController extends Controller
 {
@@ -257,7 +258,7 @@ class OutletController extends Controller
             return response()->json(['message' => 'Outlet deleted successfully.']);
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to delete outlet.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to delete outlet.');
         }
     }
 

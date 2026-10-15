@@ -8,6 +8,7 @@ use App\Models\ProductionStage;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use App\Support\ServerError;
 
 class ProductStageController extends Controller
 {
@@ -130,7 +131,7 @@ class ProductStageController extends Controller
             return response()->json(['message' => 'Stages reordered']);
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to reorder.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to reorder.');
         }
     }
 }

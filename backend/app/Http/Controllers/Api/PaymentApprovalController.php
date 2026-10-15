@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use App\Support\ServerError;
 
 /**
  * Phase 5 - International Payment Approval
@@ -388,7 +389,7 @@ class PaymentApprovalController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to approve payment.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to approve payment.');
         }
     }
 
@@ -459,7 +460,7 @@ class PaymentApprovalController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to reject payment.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to reject payment.');
         }
     }
 

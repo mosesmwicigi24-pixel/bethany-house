@@ -15,6 +15,7 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\Validate;
 use Livewire\Component;
 use Livewire\WithFileUploads;
+use App\Support\ServerError;
 
 class ProductCreate extends Component
 {
@@ -374,7 +375,7 @@ class ProductCreate extends Component
         } catch (\Exception $e) {
             DB::rollBack();
             $this->saving       = false;
-            $this->flashMessage = 'Failed to save product: ' . $e->getMessage();
+            $this->flashMessage = ServerError::message($e, 'Failed to save product.');
             $this->flashType    = 'error';
         }
     }

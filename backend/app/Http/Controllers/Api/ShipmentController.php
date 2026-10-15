@@ -14,6 +14,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use App\Support\ServerError;
 
 /**
  * Phase 3 - Shipment & Delivery Tracking
@@ -324,7 +325,7 @@ class ShipmentController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to create shipment.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to create shipment.');
         }
     }
 
@@ -484,7 +485,7 @@ class ShipmentController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to add tracking event.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to add tracking event.');
         }
     }
 
@@ -753,7 +754,7 @@ class ShipmentController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to mark as delivered.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to mark as delivered.');
         }
     }
 
@@ -814,7 +815,7 @@ class ShipmentController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to cancel shipment.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to cancel shipment.');
         }
     }
 
