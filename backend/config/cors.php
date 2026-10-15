@@ -24,6 +24,8 @@ return [
         'X-Requested-With',
         'X-API-Key', // For API key auth
         'X-Background-Request', // console polling: not activity for the idle limit (Phase 4C)
+        'X-Device-Id',    // the console's device key (named sign-in devices)
+        'X-Device-Touch', // touch points: tells an iPad from a Mac
     ],
 
     'exposed_headers' => [

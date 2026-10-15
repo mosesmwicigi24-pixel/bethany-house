@@ -27,6 +27,8 @@ export interface User {
   terminal_pin_set?: boolean
   two_factor_required?: boolean
   recovery_codes_left?: number | null
+  /** The named device this session is on (null when the console sent no device key). */
+  current_device?: DeviceInfo | null
   // Account lock state (Users screen)
   locked_at?: string | null
   locked_until?: string | null
@@ -41,6 +43,29 @@ export interface User {
   money_view?: { range: 'business' | 'outlet' | 'team' | 'own' | 'none'; period: 'any' | 'today'; label: string }
   /** The line manager this person reports to (user id), if any. */
   reports_to?: number | null
+}
+
+/** A device someone has signed in on (named sign-in devices). */
+export interface DeviceInfo {
+  id: number
+  name: string | null
+  kind: string
+  kind_label: string
+  browser: string | null
+  /** "iPhone · Chrome" — what the browser reports. */
+  facts: string
+  /** "Moses' MacBook (Mac · Chrome)", or the facts when unnamed. */
+  label: string
+  name_source: 'self' | 'admin' | null
+  named_by: string | null
+  needs_name: boolean
+}
+
+export interface DeviceRow extends DeviceInfo {
+  first_seen: string
+  last_seen: string
+  active_sessions: number
+  is_current: boolean
 }
 
 export interface AuthState {

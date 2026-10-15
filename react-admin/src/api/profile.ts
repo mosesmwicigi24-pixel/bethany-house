@@ -1,5 +1,6 @@
-import { get, post, put } from "./client";
+import { del, get, post, put } from "./client";
 import type { UserSetup } from "@/types/setup";
+import type { DeviceInfo, DeviceRow } from "@/types";
 
 export interface ProfileData {
     id: number;
@@ -114,10 +115,18 @@ export const profileApi = {
                 id: string;
                 ip: string;
                 agent: string;
+                device: DeviceInfo | null;
                 last_used: string;
                 is_current: boolean;
             }[];
         }>("/v1/admin/profile/sessions"),
+
+    // Named sign-in devices: my list, naming one, removing one (its sessions end)
+    devices: () => get<{ data: DeviceRow[] }>("/v1/admin/profile/devices"),
+    renameDevice: (deviceId: number, name: string | null) =>
+        put<{ message: string; device: DeviceInfo }>(`/v1/admin/profile/devices/${deviceId}`, { name }),
+    removeDevice: (deviceId: number) =>
+        del<{ message: string }>(`/v1/admin/profile/devices/${deviceId}`),
 
     // Revoke a session
     revokeSession: (tokenId: string) =>

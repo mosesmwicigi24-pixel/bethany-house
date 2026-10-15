@@ -1,4 +1,5 @@
-import { get, post } from "./client";
+import { del, get, post, put } from "./client";
+import type { DeviceInfo, DeviceRow } from "@/types";
 
 // Acting on another person's sign-in (Phase 4C). The server decides who may:
 // system_admin for managers and operators, super_admin for anyone else;
@@ -8,6 +9,7 @@ export interface AdminSessionRow {
     id: string;
     ip: string;
     agent: string;
+    device: DeviceInfo | null;
     signed_in: string;
     last_used: string;
     last_active: string | null;
@@ -29,6 +31,16 @@ export const userSecurityApi = {
 
     revokeAllSessions: (userId: number) =>
         post<{ message: string; revoked_count: number }>(`/v1/admin/users/${userId}/sessions/revoke-all`),
+
+    // Named sign-in devices: an administrator's name wins over the person's own.
+    devices: (userId: number) =>
+        get<{ data: DeviceRow[] }>(`/v1/admin/users/${userId}/devices`),
+
+    renameDevice: (userId: number, deviceId: number, name: string | null) =>
+        put<{ message: string; device: DeviceInfo }>(`/v1/admin/users/${userId}/devices/${deviceId}`, { name }),
+
+    removeDevice: (userId: number, deviceId: number) =>
+        del<{ message: string }>(`/v1/admin/users/${userId}/devices/${deviceId}`),
 
     resetTerminalPin: (userId: number) =>
         post<{ message: string }>(`/v1/admin/users/${userId}/terminal-pin/reset`),

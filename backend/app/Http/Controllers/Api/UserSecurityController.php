@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\ActivityLogService;
 use App\Services\Auth\AccountLockout;
+use App\Services\Auth\Devices;
 use App\Services\Auth\StaffAuthority;
 use App\Services\Auth\TerminalPin;
 use App\Services\Auth\TwoFactor;
@@ -58,6 +59,7 @@ class UserSecurityController extends Controller
                 'id'          => (string) $t->id,
                 'ip'          => $t->ip_address ?? '-',
                 'agent'       => $t->user_agent ? \App\Services\Auth\LoginDevices::agentFamily($t->user_agent) : ($t->name ?? 'Admin panel'),
+                'device'      => $t->device_id ? app(Devices::class)->presentById((int) $t->device_id) : null,
                 'signed_in'   => $t->created_at,
                 'last_used'   => $t->last_used_at ?? $t->created_at,
                 'last_active' => $t->last_active_at,
@@ -92,6 +94,43 @@ class UserSecurityController extends Controller
             "Session #{$tokenId} ended for {$target->email}", $request->user());
 
         return response()->json(['message' => 'Session ended.']);
+    }
+
+    /** GET /api/v1/admin/users/{id}/devices — the devices this person has signed in on. */
+    public function devices(Request $request, int $id, Devices $devices)
+    {
+        $target = $this->administrable($request, $id);
+
+        return response()->json(['data' => $devices->listFor($target)]);
+    }
+
+    /**
+     * PUT /api/v1/admin/users/{id}/devices/{deviceId} — name a device (a shop
+     * till, a work laptop). An administrator's name wins: the person cannot
+     * change it. A blank name clears it.
+     */
+    public function renameDevice(Request $request, int $id, int $deviceId, Devices $devices)
+    {
+        $validated = $request->validate(['name' => 'nullable|string|min:2|max:60']);
+        $target = $this->administrable($request, $id);
+
+        return $devices->rename($target, $deviceId, $validated['name'] ?? null, $request->user(), true) === null
+            ? response()->json(['message' => 'Device named.', 'device' => $devices->presentById($deviceId)])
+            : response()->json(['message' => 'Device not found.'], 404);
+    }
+
+    /**
+     * DELETE /api/v1/admin/users/{id}/devices/{deviceId} — their sessions on
+     * it end and their next sign-in on it raises the new-device alarm again.
+     */
+    public function removeDevice(Request $request, int $id, int $deviceId, Devices $devices)
+    {
+        $target = $this->administrable($request, $id);
+        $ended  = $devices->remove($target, $deviceId, $request->user());
+
+        return $ended === null
+            ? response()->json(['message' => 'Device not found.'], 404)
+            : response()->json(['message' => "Device removed. {$ended} session(s) on it ended."]);
     }
 
     /**

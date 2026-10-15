@@ -30,6 +30,8 @@ class PersonalAccessToken extends SanctumPersonalAccessToken
             $request = request();
             $token->ip_address ??= $request->ip();
             $token->user_agent ??= mb_substr((string) $request->userAgent(), 0, 512) ?: null;
+            // The named device just signed in on (Devices::register), if any.
+            $token->device_id ??= $request->attributes->get('device_id');
             // Signing in is activity: the idle clock starts now.
             $token->last_active_at ??= now();
         });

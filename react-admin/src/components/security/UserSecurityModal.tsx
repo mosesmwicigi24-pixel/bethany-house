@@ -5,6 +5,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { useToastStore } from "@/store/toast.store";
 import { useAuthStore } from "@/store/auth.store";
 import { userSecurityApi, tierOf } from "@/api/userSecurity";
+import { DeviceList } from "./DeviceList";
 import type { UserSetup } from "@/types/setup";
 import type { ApiError } from "@/types";
 
@@ -52,10 +53,17 @@ export function UserSecurityModal({ user, onClose }: { user: UserSetup | null; o
         enabled: !!user && administer,
     });
 
+    const devices = useQuery({
+        queryKey: ["user-devices", user?.id],
+        queryFn: () => userSecurityApi.devices(user!.id),
+        enabled: !!user && administer,
+    });
+
     const done = (msg: string) => {
         toast.success(msg);
         qc.invalidateQueries({ queryKey: ["admin-users"] });
         qc.invalidateQueries({ queryKey: ["user-sessions", user?.id] });
+        qc.invalidateQueries({ queryKey: ["user-devices", user?.id] });
     };
     const failed = (err: ApiError) => { if (err.reason !== "step_up_cancelled") toast.error(err.message); };
 
@@ -67,6 +75,11 @@ export function UserSecurityModal({ user, onClose }: { user: UserSetup | null; o
     });
     const endOne = useMutation({ mutationFn: (id: string) => userSecurityApi.revokeSession(user!.id, id), onSuccess: (r) => done(r.message), onError: failed });
     const endAll = useMutation({ mutationFn: () => userSecurityApi.revokeAllSessions(user!.id), onSuccess: (r) => done(r.message), onError: failed });
+    const renameDevice = useMutation({
+        mutationFn: ({ id, name }: { id: number; name: string | null }) => userSecurityApi.renameDevice(user!.id, id, name),
+        onSuccess: (r) => done(r.message), onError: failed,
+    });
+    const removeDevice = useMutation({ mutationFn: (id: number) => userSecurityApi.removeDevice(user!.id, id), onSuccess: (r) => done(r.message), onError: failed });
     const resetPin = useMutation({ mutationFn: () => userSecurityApi.resetTerminalPin(user!.id), onSuccess: (r) => done(r.message), onError: failed });
 
     const lock = user ? lockLabel(user) : null;
@@ -127,7 +140,7 @@ export function UserSecurityModal({ user, onClose }: { user: UserSetup | null; o
                                     {rows.map((s) => (
                                         <li key={s.id} className="flex items-center justify-between gap-3 p-3">
                                             <div className="min-w-0">
-                                                <p className="font-medium text-surface-800 truncate">{s.agent}{s.locked && <span className="badge badge-neutral text-2xs ml-2">PIN-locked</span>}</p>
+                                                <p className="font-medium text-surface-800 truncate">{s.device?.label ?? s.agent}{s.locked && <span className="badge badge-neutral text-2xs ml-2">PIN-locked</span>}</p>
                                                 <p className="text-xs text-surface-500">{s.ip} · signed in {new Date(s.signed_in).toLocaleString()} · last used {new Date(s.last_used).toLocaleString()}</p>
                                             </div>
                                             <button onClick={() => endOne.mutate(s.id)} disabled={endOne.isPending} className="btn-ghost btn-sm text-danger shrink-0">End</button>
@@ -135,6 +148,24 @@ export function UserSecurityModal({ user, onClose }: { user: UserSetup | null; o
                                     ))}
                                 </ul>
                             )}
+                        </section>
+                    )}
+
+                    {administer && (
+                        <section className="space-y-2">
+                            <h4 className="text-xs font-semibold uppercase tracking-wider text-surface-500">Devices</h4>
+                            <p className="text-xs text-surface-500">
+                                Name a device (a work laptop, a shop till) and sign-in alerts use that name. Your name wins over theirs.
+                                Removing a device ends their sessions on it; its next sign-in is treated as a new device.
+                            </p>
+                            <DeviceList
+                                rows={devices.data?.data ?? []}
+                                loading={devices.isLoading}
+                                asAdmin
+                                busy={renameDevice.isPending || removeDevice.isPending}
+                                onRename={(id, name) => renameDevice.mutate({ id, name })}
+                                onRemove={(id) => removeDevice.mutate(id)}
+                            />
                         </section>
                     )}
 

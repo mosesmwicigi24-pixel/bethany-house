@@ -25,6 +25,41 @@ export const tokenStorage = {
     remove: () => localStorage.removeItem(TOKEN_KEY),
 };
 
+// ─── Device key (named sign-in devices) ───────────────────────────────────────
+// A website cannot read a device's own name, so the console keeps a random key
+// in this browser and sends it with every request; the hub stores only its
+// hash and lets the person (or an administrator) name the device. It survives
+// signing out on purpose — it identifies the machine, not the session.
+// The touch-point count tells an iPad (whose Safari poses as a Mac) from a Mac.
+
+const DEVICE_KEY = "bh_device_id";
+let deviceKeyCache: string | null | undefined;
+
+function randomKey(): string {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export function deviceKey(): string | null {
+    if (deviceKeyCache !== undefined) return deviceKeyCache;
+    try {
+        let key = localStorage.getItem(DEVICE_KEY);
+        if (!key || !/^[A-Za-z0-9-]{16,64}$/.test(key)) {
+            key = randomKey();
+            localStorage.setItem(DEVICE_KEY, key);
+        }
+        deviceKeyCache = key;
+    } catch {
+        // Storage blocked (private mode): no stable key, so no named device.
+        deviceKeyCache = null;
+    }
+    return deviceKeyCache;
+}
+
+const touchPoints = typeof navigator !== "undefined" ? String(Math.min(20, navigator.maxTouchPoints || 0)) : "0";
+
 // ─── Activity (idle limits) ───────────────────────────────────────────────────
 // The server ends (or, for a clerk, PIN-locks) a session that has been idle
 // past its role's limit (Phase 4C). Screens poll in the background, which must
@@ -62,6 +97,11 @@ function createApiClient(): AxiosInstance {
             const token = tokenStorage.get();
             if (token) {
                 config.headers.Authorization = `Bearer ${token}`;
+            }
+            const key = deviceKey();
+            if (key) {
+                config.headers["X-Device-Id"] = key;
+                config.headers["X-Device-Touch"] = touchPoints;
             }
             if (Date.now() - lastInteraction > BACKGROUND_AFTER_MS) {
                 config.headers["X-Background-Request"] = "1";

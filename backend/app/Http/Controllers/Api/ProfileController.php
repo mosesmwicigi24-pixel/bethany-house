@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\Auth\Devices;
 use App\Services\ImageService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\{DB, Hash, Storage};
@@ -162,6 +163,7 @@ class ProfileController extends Controller
                 'agent'      => !empty($t->user_agent)
                     ? \App\Services\Auth\LoginDevices::agentFamily($t->user_agent)
                     : $this->parseAgent($t->name ?? ''),
+                'device'     => $t->device_id ? app(Devices::class)->presentById((int) $t->device_id) : null,
                 'last_used'  => $t->last_used_at ?? $t->created_at,
                 'is_current' => $t->token === $currentToken,
             ]);
@@ -208,6 +210,44 @@ class ProfileController extends Controller
             'message'      => "All other sessions revoked ({$deleted} sessions terminated).",
             'revoked_count'=> $deleted,
         ]);
+    }
+
+    /**
+     * GET /api/v1/admin/profile/devices — the devices this person has signed
+     * in on (named sign-in devices).
+     */
+    public function devices(Request $request, Devices $devices)
+    {
+        $user = $request->user();
+
+        return response()->json(['data' => $devices->listFor($user, $devices->currentId($user, $request))]);
+    }
+
+    /** PUT /api/v1/admin/profile/devices/{deviceId} — name one of my devices. */
+    public function renameDevice(Request $request, Devices $devices, int $deviceId)
+    {
+        $validated = $request->validate(['name' => 'nullable|string|min:2|max:60']);
+        $refusal = $devices->rename($request->user(), $deviceId, $validated['name'] ?? null, $request->user(), false);
+
+        return match ($refusal) {
+            null        => response()->json(['message' => 'Device named.', 'device' => $devices->presentById($deviceId)]),
+            'not_found' => response()->json(['message' => 'Device not found.'], 404),
+            default     => response()->json(['message' => $refusal], 403),
+        };
+    }
+
+    /** DELETE /api/v1/admin/profile/devices/{deviceId} — remove a device (a lost phone): its sessions end. */
+    public function removeDevice(Request $request, Devices $devices, int $deviceId)
+    {
+        $user = $request->user();
+        if ($devices->currentId($user, $request) === $deviceId) {
+            return response()->json(['message' => 'This is the device you are using. Sign out instead.'], 422);
+        }
+        $ended = $devices->remove($user, $deviceId, $user);
+
+        return $ended === null
+            ? response()->json(['message' => 'Device not found.'], 404)
+            : response()->json(['message' => "Device removed. {$ended} session(s) on it ended."]);
     }
 
     /**

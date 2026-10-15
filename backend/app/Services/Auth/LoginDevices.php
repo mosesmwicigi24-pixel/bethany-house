@@ -63,9 +63,16 @@ class LoginDevices
             return false;
         }
 
+        // The browser's own device key, if this account has completed a
+        // sign-in on it before: the same machine on a network not seen
+        // before. Named for the email, still flagged — a key is not proof.
+        $known = app(Devices::class)->knownTo($user, $request);
+
         ActivityLogService::log('suspicious_sign_in', $user, [
-            'flag'    => 'new_device',
+            'flag'    => $known ? 'new_network' : 'new_device',
             'device'  => $d['agent'],
+            'device_id'   => $known?->id,
+            'device_name' => $known?->name,
             'network' => $d['network'],
             'country' => $d['country'],
             'ip'      => $request->ip(),
@@ -75,10 +82,13 @@ class LoginDevices
             if ($user->email) {
                 Mail::to($user->email)->queue(new NewSignInDeviceMail(
                     name:    $user->first_name ?: $user->email,
-                    device:  $d['agent'],
+                    device:  $known ? Devices::present($known)['label'] : Devices::facts((string) $request->userAgent(), Devices::touchPoints($request)),
                     ip:      (string) $request->ip(),
                     country: $d['country'],
                     at:      now()->timezone(config('app.timezone'))->format('j M Y, H:i'),
+                    account: trim("{$user->first_name} {$user->last_name}") . " ({$user->email})",
+                    knownDevice: $known !== null,
+                    namedByAdmin: $known?->name_source === 'admin',
                 ));
             }
         } catch (\Throwable $e) {
@@ -110,20 +120,17 @@ class LoginDevices
                 'last_seen_at'  => $now,
             ]);
         }
+
+        // The named device (when the console sent its key), linked so that
+        // removing the device makes its next sign-in raise the alarm again.
+        if ($deviceId = app(Devices::class)->register($user, $request)) {
+            DB::table('login_devices')->where('user_id', $user->id)->where('fingerprint', $d['fingerprint'])
+                ->update(['device_id' => $deviceId]);
+        }
     }
 
     public static function agentFamily(string $ua): string
     {
-        $browser = match (true) {
-            str_contains($ua, 'Edg/')                                       => 'Edge',
-            str_contains($ua, 'OPR/') || str_contains($ua, 'Opera')         => 'Opera',
-            str_contains($ua, 'SamsungBrowser')                             => 'Samsung Internet',
-            str_contains($ua, 'Firefox/') || str_contains($ua, 'FxiOS')     => 'Firefox',
-            str_contains($ua, 'Chrome/') || str_contains($ua, 'CriOS')      => 'Chrome',
-            str_contains($ua, 'Safari/')                                    => 'Safari',
-            $ua === ''                                                      => 'Unknown browser',
-            default                                                         => 'Other browser',
-        };
         $os = match (true) {
             str_contains($ua, 'iPhone') || str_contains($ua, 'iPad')        => 'iOS',
             str_contains($ua, 'Android')                                    => 'Android',
@@ -134,7 +141,21 @@ class LoginDevices
             default                                                         => 'unknown system',
         };
 
-        return "{$browser} on {$os}";
+        return self::browserFamily($ua) . " on {$os}";
+    }
+
+    public static function browserFamily(string $ua): string
+    {
+        return match (true) {
+            str_contains($ua, 'Edg/')                                       => 'Edge',
+            str_contains($ua, 'OPR/') || str_contains($ua, 'Opera')         => 'Opera',
+            str_contains($ua, 'SamsungBrowser')                             => 'Samsung Internet',
+            str_contains($ua, 'Firefox/') || str_contains($ua, 'FxiOS')     => 'Firefox',
+            str_contains($ua, 'Chrome/') || str_contains($ua, 'CriOS')      => 'Chrome',
+            str_contains($ua, 'Safari/')                                    => 'Safari',
+            $ua === ''                                                      => 'Unknown browser',
+            default                                                         => 'Other browser',
+        };
     }
 
     public static function network(string $ip): ?string
