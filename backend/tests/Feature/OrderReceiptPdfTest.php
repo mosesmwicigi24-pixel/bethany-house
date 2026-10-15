@@ -118,6 +118,61 @@ class OrderReceiptPdfTest extends TestCase
         $this->assertStringNotContainsString('Balance Due', $html);
     }
 
+    /** What the invoice says: its figures, and the page they are drawn into. */
+    private function invoice(Order $o): array
+    {
+        $data = \App\Http\Controllers\Api\DocumentPdfController::orderData($o->fresh(), true);
+
+        return [$data, \App\Services\PdfService::order($data, true)];
+    }
+
+    public function test_an_unpaid_invoice_asks_for_the_amount_due_and_lists_no_unsettled_money(): void
+    {
+        $this->person('admin');
+        $o = $this->order(9_000);
+        $this->pay($o, 9_000, 'pending', 0, 'bank_transfer');   // awaiting approval: not received
+        $this->pay($o, 4_000, 'failed');
+
+        [$data, $html] = $this->invoice($o);
+        $this->assertSame(0.0, (float) $data['total_paid']);
+        $this->assertSame(9_000.0, (float) $data['balance_due']);
+        $this->assertStringContainsString('Amount Due', $html);
+        $this->assertStringContainsString('Please pay the amount due', $html);
+        $this->assertStringContainsString($o->order_number, $html);
+        $this->assertStringContainsString('No payment received yet.', $html);
+        $this->assertStringNotContainsString('4,000.00', $html, 'a failed payment is not listed as received');
+        $this->assertStringContainsString('Invoice', $html);
+    }
+
+    public function test_the_invoice_and_the_receipt_agree_on_a_part_paid_order(): void
+    {
+        $this->person('admin');
+        $o = $this->order(20_000);
+        $this->pay($o, 6_000);
+        $this->pay($o, 1_000, 'paid', 250, 'mpesa');
+        $this->pay($o, 5_000, 'pending', 0, 'bank_transfer');
+
+        // Independent arithmetic: 6,000 + (1,000 − 250) = 6,750 paid; 13,250 due.
+        [$inv, $invHtml] = $this->invoice($o);
+        [$rec, $recHtml] = $this->receipt($o);
+        foreach ([[$inv, $invHtml], [$rec, $recHtml]] as [$data, $html]) {
+            $this->assertSame(6_750.0, (float) $data['total_paid']);
+            $this->assertSame(13_250.0, (float) $data['balance_due']);
+            $this->assertStringContainsString('13,250.00', $html);
+            $this->assertStringNotContainsString('5,000.00', $html, 'pending money is not received');
+        }
+    }
+
+    public function test_the_invoice_endpoint_still_answers_a_pdf(): void
+    {
+        $this->person('admin');
+        $o = $this->order(3_000);
+
+        $res = $this->get("/api/v1/admin/pdf/orders/{$o->id}/invoice")->assertOk();
+        $this->assertStringStartsWith('%PDF', (string) $res->getContent());
+        $this->get("/api/v1/admin/pdf/orders/{$o->id}")->assertOk();   // the internal Sales Order PDF too
+    }
+
     public function test_nothing_paid_means_no_receipt_send_the_invoice(): void
     {
         $this->person('admin');

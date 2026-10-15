@@ -608,7 +608,21 @@ HTML;
         ];
 
         $extra = '';
-        if (!empty($order['payments'])) {
+        if ($isInvoice && array_key_exists('balance_due', $order)) {
+            // An invoice asks to be paid (owner, 2026-10-15): only money that
+            // has SETTLED is shown as received, and what is still owed says so.
+            $due    = (float) $order['balance_due'];
+            $extra  = self::paymentsReceivedHtml($order['settled_payments'] ?? [], $currency)
+                . '<table class="totals-table" style="margin-top:8px">'
+                . '<tr><td class="tl">Total Paid</td><td class="tv">' . self::money((float) ($order['total_paid'] ?? 0), $currency) . '</td></tr>'
+                . ($due < 0.01
+                    ? '<tr class="total-line"><td class="tl">PAID IN FULL</td><td class="tv">' . self::money(0, $currency) . ' due</td></tr>'
+                    : '<tr class="total-line"><td class="tl">Amount Due</td><td class="tv">' . self::money($due, $currency) . '</td></tr>')
+                . '</table>'
+                . ($due < 0.01 ? '' : '<div class="notes-box" style="margin-top:10px">Please pay the amount due of <strong>'
+                    . self::money($due, $currency) . '</strong>, quoting order <strong>'
+                    . htmlspecialchars((string) ($order['order_number'] ?? '')) . '</strong>. Thank you.</div>');
+        } elseif (!empty($order['payments'])) {
             $payRows = '';
             foreach ($order['payments'] as $p) {
                 $method  = htmlspecialchars(ucfirst(str_replace('_', ' ', $p['payment_method'] ?? '—')));
@@ -629,6 +643,33 @@ HTML;
 
         return self::page($title, $order['order_number'] ?? '—', $order['status'] ?? 'pending',
             $meta, $parties, self::itemsTable($columns, $rows), $totals, $extra);
+    }
+
+    /**
+     * "Payments received" for a customer document — the receipt and the
+     * invoice share it so they can never disagree. Rows are SETTLED payments
+     * only (status paid); a refund on one is shown as its own negative row.
+     */
+    protected static function paymentsReceivedHtml(array $payments, string $currency): string
+    {
+        $rows = '';
+        foreach ($payments as $p) {
+            $method   = htmlspecialchars(ucfirst(str_replace('_', ' ', $p['payment_method'] ?? '—')));
+            $ref      = htmlspecialchars((string) ($p['provider_reference'] ?? ''));
+            $ref      = $ref !== '' ? $ref : '—';
+            $dt       = self::date($p['paid_at'] ?? ($p['created_at'] ?? null));
+            $refunded = (float) ($p['refund_amount'] ?? 0);
+            $rows    .= "<tr><td>{$dt}</td><td>{$method}</td><td>{$ref}</td><td class=\"tr\">"
+                . self::money((float) ($p['amount'] ?? 0), $currency) . '</td></tr>';
+            if ($refunded > 0.005) {
+                $rows .= "<tr><td>{$dt}</td><td>Refund</td><td>{$ref}</td><td class=\"tr\">- "
+                    . self::money($refunded, $currency) . '</td></tr>';
+            }
+        }
+
+        return '<div class="pay-title">Payments received</div>'
+            . '<table class="pay-table"><thead><tr><th>Date</th><th>Paid By</th><th>Reference</th><th class="tr">Amount</th></tr></thead>'
+            . '<tbody>' . ($rows !== '' ? $rows : '<tr><td colspan="4">No payment received yet.</td></tr>') . '</tbody></table>';
     }
 
     public static function invoice(array $order): string
@@ -819,23 +860,7 @@ HTML;
             'currency' => $currency,
         ];
 
-        $payRows = '';
-        foreach ($order['settled_payments'] ?? [] as $p) {
-            $method   = htmlspecialchars(ucfirst(str_replace('_', ' ', $p['payment_method'] ?? '—')));
-            $ref      = htmlspecialchars((string) ($p['provider_reference'] ?? ''));
-            $dt       = self::date($p['paid_at'] ?? ($p['created_at'] ?? null));
-            $amount   = (float) ($p['amount'] ?? 0);
-            $refunded = (float) ($p['refund_amount'] ?? 0);
-            $payRows .= "<tr><td>{$dt}</td><td>{$method}</td><td>" . ($ref !== '' ? $ref : '—') . '</td><td class="tr">'
-                . self::money($amount, $currency) . '</td></tr>';
-            if ($refunded > 0.005) {
-                $payRows .= "<tr><td>{$dt}</td><td>Refund</td><td>" . ($ref !== '' ? $ref : '—') . '</td><td class="tr">- '
-                    . self::money($refunded, $currency) . '</td></tr>';
-            }
-        }
-        $extra = '<div class="pay-title">Payments received</div>'
-            . '<table class="pay-table"><thead><tr><th>Date</th><th>Paid By</th><th>Reference</th><th class="tr">Amount</th></tr></thead>'
-            . '<tbody>' . ($payRows !== '' ? $payRows : '<tr><td colspan="4">No payment received yet.</td></tr>') . '</tbody></table>'
+        $extra = self::paymentsReceivedHtml($order['settled_payments'] ?? [], $currency)
             . '<table class="totals-table" style="margin-top:8px">'
             . '<tr><td class="tl">Order Total</td><td class="tv">' . self::money((float) ($order['total_amount'] ?? 0), $currency) . '</td></tr>'
             . '<tr><td class="tl">Total Paid</td><td class="tv">' . self::money((float) ($order['total_paid'] ?? 0), $currency) . '</td></tr>'
