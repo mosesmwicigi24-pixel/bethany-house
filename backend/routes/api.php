@@ -1379,9 +1379,9 @@ Route::prefix('v1')->group(function () {
                     // reversing a payment you are already handling is a
                     // different job from reading every payment in the group.
                     Route::middleware('permission:payments.transactions,sanctum')->group(function () {
-                        Route::get('/',          [PaymentController::class, 'allTransactions']);
-                        Route::get('/analytics', [PaymentController::class, 'transactionAnalytics']);
-                        Route::get('/export',    [PaymentController::class, 'exportTransactions'])->middleware('step.up');
+                        Route::get('/',          [PaymentController::class, 'allTransactions'])->middleware('money.today');
+                        Route::get('/analytics', [PaymentController::class, 'transactionAnalytics'])->middleware('money.today');
+                        Route::get('/export',    [PaymentController::class, 'exportTransactions'])->middleware(['step.up', 'money.today']);
                         Route::get('/{id}',      [PaymentController::class, 'transactionDetails']);
                     });
                     Route::post('/{id}/refund',    [PaymentController::class, 'refundTransaction'])
@@ -1410,7 +1410,7 @@ Route::prefix('v1')->group(function () {
                     // Same mistake as the transactions ledger, missed the first
                     // time because only the payment-transactions prefix moved.
                     Route::get('/cash-report',               [PaymentApprovalController::class, 'cashReport'])
-                        ->middleware('permission:payments.transactions,sanctum');
+                        ->middleware(['permission:payments.transactions,sanctum', 'money.today']);
                     Route::get('/{id}/proof',                [PaymentApprovalController::class, 'serveProof']);
                     Route::post('/{id}/upload-proof',        [PaymentApprovalController::class, 'uploadProof'])
                         ->middleware('permission:payments.upload_proof,sanctum');

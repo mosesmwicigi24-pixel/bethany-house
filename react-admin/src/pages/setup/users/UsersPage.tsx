@@ -44,6 +44,9 @@ const baseUserSchema = z.object({
     // requires one — see createSchema.
     role_ids: z.array(z.number()),
     outlet_id: z.number().nullable(),
+    // Who this person reports to. Their manager then sees their work too
+    // (her own plus her direct reports', today) — owner, 2026-10-15.
+    reports_to: z.number().nullable(),
     must_setup_2fa: z.boolean(),
 });
 
@@ -86,6 +89,7 @@ const CREATE_DEFAULTS: CreateFormValues = {
     status: "active",
     role_ids: [],
     outlet_id: null,
+    reports_to: null,
     must_setup_2fa: false,
 };
 
@@ -97,6 +101,7 @@ const EDIT_DEFAULTS: EditFormValues = {
     status: "active",
     role_ids: [],
     outlet_id: null,
+    reports_to: null,
     must_setup_2fa: false,
 };
 
@@ -205,6 +210,13 @@ export default function UsersPage() {
         queryKey: ["outlets"],
         queryFn: () => outletsApi.list(),
     });
+    // Possible line managers: active staff, by first name.
+    const { data: managersData } = useQuery({
+        queryKey: ["admin-users", "managers"],
+        queryFn: () => usersApi.list({ exclude_type: "customer", status: "active", per_page: "100", sort_by: "first_name", sort_order: "asc" }),
+        staleTime: 5 * 60_000,
+    });
+    const managers = managersData?.data ?? [];
 
     // Write controls follow the server's user permissions, so a read-only
     // viewer (admin) sees no buttons that would only fail.
@@ -246,6 +258,7 @@ export default function UsersPage() {
                 status: (u.status as "active" | "inactive") ?? "active",
                 role_ids: u.roles.map((r) => r.id),
                 outlet_id: u.outlet?.id ?? null,
+                reports_to: u.reports_to ?? null,
                 must_setup_2fa: u.must_setup_2fa ?? false,
             });
             setEditingUser(u);
@@ -896,6 +909,27 @@ export default function UsersPage() {
                                         {o.name}
                                     </option>
                                 ))}
+                            </FieldSelect>
+                        </Field>
+                        <Field label="Reports to">
+                            <FieldSelect
+                                className="input"
+                                value={editForm.watch("reports_to") ?? ""}
+                                onChange={(e) =>
+                                    editForm.setValue(
+                                        "reports_to",
+                                        e.target.value ? Number(e.target.value) : null,
+                                    )
+                                }
+                            >
+                                <option value="">- No line manager -</option>
+                                {managers
+                                    .filter((m) => m.id !== editingUser?.id)
+                                    .map((m) => (
+                                        <option key={m.id} value={m.id}>
+                                            {m.first_name} {m.last_name}
+                                        </option>
+                                    ))}
                             </FieldSelect>
                         </Field>
                     </div>

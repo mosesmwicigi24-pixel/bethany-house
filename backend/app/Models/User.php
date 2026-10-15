@@ -49,6 +49,7 @@ class User extends Authenticatable
         'avatar_url',
         'last_login_at',
         'last_login_ip',
+        'reports_to',
     ];
 
     /**
@@ -327,6 +328,37 @@ class User extends Authenticatable
                     ->wherePivot('is_primary', true)
                     ->first()
             ?? $this->outlets()->first();
+    }
+
+    /** The line manager this person reports to (owner, 2026-10-15). */
+    public function reportsTo()
+    {
+        return $this->belongsTo(User::class, 'reports_to');
+    }
+
+    /** The people who report directly to this person. */
+    public function directReports()
+    {
+        return $this->hasMany(User::class, 'reports_to');
+    }
+
+    /** @var list<int>|null memo for teamIds() — ViewerScope asks per query */
+    private ?array $teamIdsMemo = null;
+
+    /**
+     * Whose records an own-scoped view covers: this person, plus — for a
+     * line manager — her DIRECT reports (not theirs). "Line managers should
+     * only see what they have done, or those who are under them."
+     *
+     * @return list<int>
+     */
+    public function teamIds(): array
+    {
+        return $this->teamIdsMemo ??= array_values(array_unique(array_merge(
+            [(int) $this->id],
+            \Illuminate\Support\Facades\DB::table('users')->where('reports_to', $this->id)
+                ->pluck('id')->map(fn ($id) => (int) $id)->all(),
+        )));
     }
 
     /**

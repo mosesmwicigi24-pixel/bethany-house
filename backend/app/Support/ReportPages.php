@@ -74,7 +74,15 @@ final class ReportPages
 
     public static function canView(?User $user, string $page): bool
     {
-        return (bool) $user?->can(self::slug($page));
+        if (! $user?->can(self::slug($page))) {
+            return false;
+        }
+
+        // The money pages are the owner's (Finance & Cash also finance's),
+        // whatever page permission a role carries — owner, 2026-10-15. One
+        // check here covers every route, PDF, CSV, drill and schedule.
+        return ! in_array($page, FinancialVisibility::MONEY_PAGES, true)
+            || FinancialVisibility::mayOpenMoneyPage($user, $page);
     }
 
     public static function canViewAny(?User $user, array $pages): bool

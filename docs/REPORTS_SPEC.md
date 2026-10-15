@@ -72,6 +72,20 @@ RBAC decides which *reports* a role can open; **outlet scoping decides which
   cross-outlet comparison is an admin/finance view. Hiding a menu item is
   presentation; the query filter is the security.
 
+**Superseded in part — owner, 2026-10-15 (`App\Support\FinancialVisibility`).**
+The report pages that carry the business's money — Executive, Sales & Orders,
+Customers, Finance & Cash, Performance, Explorer — are the owner's (super admin).
+Finance roles (holders of `reports.financial`) keep Finance & Cash and the
+payments ledger for any period. Everyone else sees money only on the dashboard,
+for **today** (Nairobi) and **their range**: the business (admin), their outlet
+(outlet manager), themselves and their direct reports (a line manager —
+`users.reports_to`), or themselves. The page permissions stay on the roles; the
+rule is applied in `ReportPages::canView` (every report route, PDF, CSV, drill
+and schedule) and in the permission list the console receives. The payments
+ledger, its analytics/export and the cash report answer non-finance staff for
+today only (`money.today`). Operational pages (Production, Inventory,
+Procurement, Data Quality) are unchanged.
+
 ### 6. Time always has a mirror
 
 Every period figure carries its comparison: same length, immediately preceding

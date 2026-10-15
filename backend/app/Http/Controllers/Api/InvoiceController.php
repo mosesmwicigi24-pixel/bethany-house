@@ -45,7 +45,7 @@ class InvoiceController extends Controller
 
         match ($scope) {
             DataScope::All    => null,
-            DataScope::Own    => $query->where('created_by', $request->user()->id),
+            DataScope::Own    => $query->whereIn('created_by', $request->user()->teamIds()),
             DataScope::Outlet => $query->where('documentable_type', Order::class)
                 ->whereIn('documentable_id', Order::query()->select('orders.id')),
             DataScope::None   => $query->whereRaw('1 = 0'),

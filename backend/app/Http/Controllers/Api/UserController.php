@@ -257,9 +257,19 @@ class UserController extends Controller
             'role_ids'             => 'sometimes|array',
             'role_ids.*'           => 'integer|exists:roles,id',
             'outlet_id'            => 'nullable|exists:outlets,id',
+            // The line manager this person reports to (owner, 2026-10-15). It
+            // widens what that MANAGER sees (her own work plus her direct
+            // reports'), so it is guarded like a role change below.
+            'reports_to'           => 'nullable|integer|exists:users,id',
             'password'             => 'sometimes|string|min:8',
             'password_confirmation'=> 'required_with:password|same:password',
         ]);
+
+        $reportsToChange = array_key_exists('reports_to', $validated)
+            && (int) ($validated['reports_to'] ?? 0) !== (int) ($user->reports_to ?? 0);
+        if ($reportsToChange && ($refusal = $this->refuseReportsTo($user, $validated['reports_to'] ?? null, $request->user()))) {
+            return $refusal;
+        }
 
         // Nobody widens their own reach: their outlet assignment and their own
         // 2FA requirement are someone else's to change (role plan, 12.2).
@@ -314,7 +324,7 @@ class UserController extends Controller
         // Other edits to the same form do not.
         $twoFaRequirementChange = array_key_exists('must_setup_2fa', $validated)
             && (bool) $validated['must_setup_2fa'] !== (bool) $user->must_setup_2fa;
-        if ($rolesChange || $twoFaRequirementChange) {
+        if ($rolesChange || $twoFaRequirementChange || $reportsToChange) {
             app(\App\Services\Auth\StepUp::class)->ensure($request);
         }
 
@@ -336,6 +346,10 @@ class UserController extends Controller
                 $updates['password'] = Hash::make($validated['password']);
                 // Invalidate all existing sessions when password changes
                 DB::table('personal_access_tokens')->where('tokenable_id', $user->id)->delete();
+            }
+
+            if ($reportsToChange) {
+                $updates['reports_to'] = $validated['reports_to'] ?: null;
             }
 
             $user->update($updates);
@@ -378,6 +392,42 @@ class UserController extends Controller
             'message' => 'User updated successfully',
             'user'    => $user,
         ]);
+    }
+
+    /**
+     * Why this "reports to" cannot be saved, or null when it can.
+     *
+     * Nobody sets their own manager (it decides who sees their work), a
+     * person cannot report to themselves, the manager must be active staff,
+     * and no loop: the new manager may not already report up to this person.
+     */
+    private function refuseReportsTo(User $user, mixed $managerId, User $actor): ?\Illuminate\Http\JsonResponse
+    {
+        if ((int) $user->id === (int) $actor->id) {
+            return response()->json(['message' => 'You cannot change who you report to.'], 403);
+        }
+        if (! $managerId) {
+            return null;
+        }
+        if ((int) $managerId === (int) $user->id) {
+            return response()->json(['message' => 'A person cannot report to themselves.'], 422);
+        }
+
+        $manager = User::find((int) $managerId);
+        if (! $manager || $manager->status !== 'active' || ! $manager->isStaff()) {
+            return response()->json(['message' => 'The manager must be an active staff member.'], 422);
+        }
+
+        // Walk up from the new manager; meeting this person means a loop.
+        $seen = [];
+        for ($id = $manager->reports_to; $id && ! isset($seen[$id]); $id = User::whereKey($id)->value('reports_to')) {
+            if ((int) $id === (int) $user->id) {
+                return response()->json(['message' => "{$manager->first_name} already reports to {$user->first_name}, directly or through someone else."], 422);
+            }
+            $seen[$id] = true;
+        }
+
+        return null;
     }
 
     /**
