@@ -238,23 +238,29 @@ class PurchaseOrderVariantLinesTest extends TestCase
         ProductPrice::create(['product_id' => $product->id, 'product_variant_id' => $variants[1]->id, 'currency_code' => 'USD', 'regular_price' => 30, 'cost_price' => 99]);
         Sanctum::actingAs($this->officer);
 
-        $kes = $this->getJson("/api/v1/admin/purchase-orders/item-costs/{$product->id}?currency=KES")->assertOk();
-        $kes->assertJsonPath('product.kes_cost', 1100.0)->assertJsonPath('product.unit_price', 1100.0)
+        // JSON drops a whole float's ".0", so money is compared by value.
+        $kes = $this->getJson("/api/v1/admin/purchase-orders/item-costs/{$product->id}?currency=KES")->assertOk()
             ->assertJsonPath('cost_visible', true)->assertJsonCount(6, 'variants')
-            ->assertJsonPath('variants.0.kes_cost', 1280.0)->assertJsonPath('variants.0.unit_price', 1280.0)
-            ->assertJsonPath('variants.1.kes_cost', 1100.0)
             ->assertJsonPath('variants.5.attributes.Colour', 'Grey');
+        $this->assertEquals(1100, $kes->json('product.kes_cost'));
+        $this->assertEquals(1100, $kes->json('product.unit_price'));
+        $this->assertEquals(1280, $kes->json('variants.0.kes_cost'));
+        $this->assertEquals(1280, $kes->json('variants.0.unit_price'));
+        $this->assertEquals(1100, $kes->json('variants.1.kes_cost'), 'a variant row with no cost falls back to the product');
+        $this->assertEquals(1100, $kes->json('variants.5.kes_cost'));
 
         // USD at the reporting rate (128 KES): 1,280 / 128 = 10.00; 1,100 / 128 = 8.59.
         // That is the rate the approval engine reads the PO back into KES with.
         $usd = $this->getJson("/api/v1/admin/purchase-orders/item-costs/{$product->id}?currency=USD")->assertOk();
-        $usd->assertJsonPath('rate_to_kes', 128.0)->assertJsonPath('variants.0.unit_price', 10.0)
-            ->assertJsonPath('variants.1.unit_price', 8.59);
+        $this->assertEquals(128, $usd->json('rate_to_kes'));
+        $this->assertEquals(10.00, $usd->json('variants.0.unit_price'));
+        $this->assertEquals(8.59, $usd->json('variants.1.unit_price'));
 
         // EUR has no reporting rate here: no figure, never a guess.
-        $this->getJson("/api/v1/admin/purchase-orders/item-costs/{$product->id}?currency=EUR")->assertOk()
-            ->assertJsonPath('rate_missing', true)->assertJsonPath('variants.0.kes_cost', 1280.0)
+        $eur = $this->getJson("/api/v1/admin/purchase-orders/item-costs/{$product->id}?currency=EUR")->assertOk()
+            ->assertJsonPath('rate_missing', true)
             ->assertJsonPath('variants.0.unit_price', null);
+        $this->assertEquals(1280, $eur->json('variants.0.kes_cost'));
     }
 
     public function test_the_prefill_gives_no_cost_to_a_viewer_who_may_not_see_cost(): void

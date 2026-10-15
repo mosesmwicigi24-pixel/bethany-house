@@ -175,7 +175,8 @@ class ProductCostKesOnlyTest extends TestCase
         Sanctum::actingAs($this->owner);
 
         $id = $this->postJson('/api/v1/admin/products', [
-            'sku' => 'KES-ONLY-1', 'product_type' => 'variable', 'status' => 'draft',
+            // tax_class as the console sends it (the column is NOT NULL).
+            'sku' => 'KES-ONLY-1', 'product_type' => 'variable', 'status' => 'draft', 'tax_class' => 'standard',
             'translations' => [['language_code' => 'en', 'name' => 'Single Sided Stole', 'description' => 'Stole']],
             'prices' => $this->everyRow(1100, 7.37),
         ])->assertCreated()->json('product.id');
