@@ -14,7 +14,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { Modal } from "@/components/ui/Modal";
 import type { ApiError } from "@/types";
 import { ShipmentSection } from "@/components/orders/ShipmentSection";
-import { usePdfDownload } from "@/hooks/usePdfDownload";
+import { usePdfDownload, saveFile } from "@/hooks/usePdfDownload";
 import { useCustomerSearchTerm } from "@/hooks/useCustomerSearchTerm";
 import { channelApi, type Channel, type ChannelMessage, type LinkedEntity, type EntitySearchResult } from "@/api/channels";
 import { parseBodyToNodes } from "@/pages/comms/CommsHub";
@@ -517,7 +517,7 @@ function StatusUpdateModal({ order, onClose, onUpdated }: {
     );
     const totalPaid = (order as any).payments
         ?.filter((p: any) => p.status === "paid")
-        .reduce((s: number, p: any) => s + Number(p.amount), 0) ?? 0;
+        .reduce((s: number, p: any) => s + Number(p.amount) - Number(p.refund_amount ?? 0), 0) ?? 0;
     const hasUnpaidBalance = totalPaid < (order.total_amount ?? 0) - 0.01;
 
     // Payments that are pending admin approval block all order progression
@@ -806,7 +806,7 @@ function SetShippingFeeModal({ order, onClose, onDone }: {
     // moves; the amount already paid and the product prices never change.
     const paid = (order.payments ?? [])
         .filter((p: any) => p.status === "paid")
-        .reduce((s: number, p: any) => s + Number(p.amount), 0);
+        .reduce((s: number, p: any) => s + Number(p.amount) - Number(p.refund_amount ?? 0), 0);
     const oldShipping = order.shipping_amount ?? 0;
     const newTotal    = Math.max(0, order.total_amount - oldShipping + effectiveAmount);
     const newBalance  = Math.max(0, newTotal - paid);
@@ -1272,7 +1272,7 @@ function AddPaymentModal({ order, onClose, onDone }: {
     const toast = useToastStore();
     const totalPaid = order.payments
         ?.filter((p: any) => p.status === "paid")
-        .reduce((s: number, p: any) => s + Number(p.amount), 0) ?? 0;
+        .reduce((s: number, p: any) => s + Number(p.amount) - Number(p.refund_amount ?? 0), 0) ?? 0;
     const outstanding = Math.max(0, order.total_amount - totalPaid);
 
     const [method, setMethod]                     = useState("");
@@ -2071,7 +2071,7 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
     const selectedPayment = selectedPaymentId ? payments.find((p: any) => p.id === selectedPaymentId) : null;
     const cc = order.currency_code ?? "KES";
 
-    const totalPaid = paidPayments.reduce((s: number, p: any) => s + Number(p.amount), 0);
+    const totalPaid = paidPayments.reduce((s: number, p: any) => s + Number(p.amount) - Number(p.refund_amount ?? 0), 0);
     const outstanding = Math.max(0, Number(order.total_amount ?? 0) - totalPaid);
 
     // Derived receipt values
@@ -3520,7 +3520,9 @@ aria-label="Close">
 }
 
 export default function OrderDetailPage() {
-    const { download: downloadPdf, loading: pdfLoading } = usePdfDownload();
+    const { download: downloadPdf, fetchFile: fetchPdfFile, loading: pdfLoading } = usePdfDownload();
+    // A prepared PDF waiting for a fresh tap to open the phone's share sheet.
+    const [readyPdf, setReadyPdf] = useState<File | null>(null);
     const { id }   = useParams<{ id: string }>();
     const navigate = useNavigate();
     const toast    = useToastStore();
@@ -3766,7 +3768,7 @@ export default function OrderDetailPage() {
     // Payment summary
     const totalPaid = order.payments
         ?.filter((p: any) => p.status === "paid")
-        .reduce((s: number, p: any) => s + Number(p.amount), 0) ?? 0;
+        .reduce((s: number, p: any) => s + Number(p.amount) - Number(p.refund_amount ?? 0), 0) ?? 0;
     const outstanding = Math.max(0, order.total_amount - totalPaid);
     const canAddPayment = outstanding > 0 && !["cancelled", "voided", "refunded"].includes(order.status);
 
@@ -3800,14 +3802,39 @@ export default function OrderDetailPage() {
         outstanding > 0 ? `Balance due: ${fmt(outstanding, cc)}` : "Paid in full ✓",
         "Thank you for shopping with us!",
     ].filter(Boolean).join("\n");
-    // Prefer WhatsApp straight to the customer; fall back to the native share
-    // sheet, then to copying the summary.
+    // The customer's document (owner, 2026-10-15): once any money is in, the
+    // receipt PDF (items, every settled payment, balance or PAID IN FULL);
+    // before that, the invoice PDF showing what is due.
+    const hasPayment  = totalPaid > 0.005;
+    const docSubtype  = hasPayment ? "receipt" : "invoice";
+    const docLabel    = hasPayment ? "Receipt" : "Invoice";
+    const downloadCustomerDoc = () => downloadPdf("orders", order.id, docSubtype);
+
+    /** Opens the phone's share sheet with the PDF attached. True when handled (sent or cancelled). */
+    const sharePdfFile = async (file: File): Promise<boolean> => {
+        if (!navigator.canShare?.({ files: [file] })) return false;
+        try {
+            await navigator.share({ files: [file], title: `${docLabel} ${order.order_number}`, text: receiptSummary() });
+            return true;
+        } catch (e: any) {
+            return e?.name === "AbortError";   // she closed the sheet: done, not a failure
+        }
+    };
+
+    // Share sends the PDF itself, not text. On a phone: the share sheet, with
+    // the file attached — pick WhatsApp and the customer. Where a browser
+    // cannot attach files (a desktop), the PDF downloads and WhatsApp opens
+    // with a short message, so the file can be dropped into the chat.
     const shareReceipt = async () => {
-        const text = receiptSummary();
+        const file = await fetchPdfFile("orders", order.id, docSubtype);
+        if (!file) return;
+        if (await sharePdfFile(file)) return;
+        // Preparing the file took long enough that the phone wants a fresh tap.
+        if (navigator.canShare?.({ files: [file] })) { setReadyPdf(file); return; }
+        saveFile(file);
         const wa = waNumber(order.customer_phone);
-        if (wa) { window.open(`https://wa.me/${wa}?text=${encodeURIComponent(text)}`, "_blank"); return; }
-        if (navigator.share) { try { await navigator.share({ title: order.order_number, text }); return; } catch { /* cancelled */ } }
-        try { await navigator.clipboard.writeText(text); toast.success("Receipt summary copied"); } catch { toast.error("Could not share"); }
+        if (wa) window.open(`https://wa.me/${wa}?text=${encodeURIComponent(receiptSummary())}`, "_blank");
+        toast.success(`${docLabel} PDF downloaded${wa ? " — attach it in the WhatsApp chat" : ""}.`);
     };
     const copyOrderNumber = () => {
         navigator.clipboard.writeText(order.order_number)
@@ -3828,10 +3855,14 @@ export default function OrderDetailPage() {
                 {canUpdateStatus && (
                     <button onClick={() => setShowStatusModal(true)} className="flex-1 btn-secondary btn-sm justify-center">Status</button>
                 )}
-                {canAddPayment ? (
+                <button onClick={downloadCustomerDoc} disabled={pdfLoading}
+                    className={clsx("flex-1 btn-sm justify-center rounded-lg font-medium",
+                        canAddPayment ? "btn-secondary" : "bg-brand-600 text-white hover:bg-brand-700")}
+                    title={`Download the ${docLabel.toLowerCase()} PDF to print or save`}>
+                    {pdfLoading ? <Spinner size="xs" /> : docLabel}
+                </button>
+                {canAddPayment && (
                     <button onClick={() => setShowPaymentModal(true)} className="flex-1 btn-sm justify-center bg-success text-white hover:bg-success/90 rounded-lg font-medium">+ Payment</button>
-                ) : (
-                    <button onClick={() => setShowReceiptModal(true)} className="flex-1 btn-sm justify-center bg-brand-600 text-white hover:bg-brand-700 rounded-lg font-medium">Receipt</button>
                 )}
             </div>
 
@@ -3915,9 +3946,14 @@ export default function OrderDetailPage() {
                         )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                        <button onClick={shareReceipt} className="btn-secondary btn-sm gap-1.5" title="Share the receipt with the customer">
+                        <button onClick={shareReceipt} disabled={pdfLoading} className="btn-secondary btn-sm gap-1.5" title={`Send the ${docLabel.toLowerCase()} PDF to the customer`}>
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" /></svg>
                             Share
+                        </button>
+                        <button onClick={downloadCustomerDoc} disabled={pdfLoading} className="btn-secondary btn-sm gap-1.5"
+                            title={`Download the ${docLabel.toLowerCase()} PDF to print or save`}>
+                            {pdfLoading ? <Spinner size="xs" /> : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>}
+                            {docLabel} PDF
                         </button>
                         {canUpdateStatus && (
                             <button onClick={() => setShowStatusModal(true)} className="btn-secondary btn-sm">Update Status</button>
@@ -4998,6 +5034,15 @@ export default function OrderDetailPage() {
             )}
             {showAuditLog      && <OrderAuditLog        orderId={order.id}                                        onClose={() => setShowAuditLog(false)} />}
             {showReceiptModal  && <ReceiptModal         order={order} onClose={() => setShowReceiptModal(false)}                      />}
+            {readyPdf && (
+                <Modal open title={`${docLabel} ready`} onClose={() => setReadyPdf(null)} size="sm">
+                    <p className="text-sm text-surface-600">{readyPdf.name} is ready to send.</p>
+                    <div className="flex gap-2 mt-4">
+                        <button className="btn-secondary flex-1" onClick={() => { saveFile(readyPdf); setReadyPdf(null); }}>Download</button>
+                        <button className="btn-primary flex-1" onClick={async () => { await sharePdfFile(readyPdf); setReadyPdf(null); }}>Send PDF</button>
+                    </div>
+                </Modal>
+            )}
             {showShippingModal && <SetShippingFeeModal  order={order} onClose={() => setShowShippingModal(false)} onDone={refresh}    />}
             {showDepositModal  && <SetDepositModal      order={order} onClose={() => setShowDepositModal(false)}  onDone={refresh}    />}
 

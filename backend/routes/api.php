@@ -1770,6 +1770,9 @@ Route::prefix('v1')->group(function () {
                 Route::get('/orders/{id}/invoice',   [DocumentPdfController::class, 'invoice'])
                     ->middleware('permission:orders.view,sanctum')
                     ->name('invoice');
+                Route::get('/orders/{id}/receipt',   [DocumentPdfController::class, 'orderReceipt'])
+                    ->middleware('permission:orders.view,sanctum')
+                    ->name('order-receipt');
                 Route::get('/quotations/{id}',       [DocumentPdfController::class, 'quotation'])
                     ->middleware('permission:quotations.view,sanctum')
                     ->name('quotation');

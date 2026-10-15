@@ -254,6 +254,8 @@ return [
             'DocumentPdfController@invoice',
             'DocumentPdfController@quotation',
             'DocumentPdfController@receipt',
+            // One receipt for a whole order (2026-10-15) — a customer document like the others.
+            'DocumentPdfController@orderReceipt',
             'PosController@printReceipt',
             'PosController@emailReceipt',
             'ExpenseController@downloadReceipt',

@@ -201,14 +201,24 @@ class DocumentPdfController extends Controller
 
     public function order(int $id, bool $isInvoice = false): Response
     {
-        $order = Order::with([
+        $order  = Order::findOrFail($id);   // ViewerScope: a sale she cannot see is not found
+        $html   = PdfService::order($this->masked(self::orderData($order, $isInvoice), 'orders.view'), $isInvoice);
+        $prefix = $isInvoice ? 'Invoice' : 'Order';
+
+        return $this->makePdf($html, "{$prefix}-{$order->order_number}");
+    }
+
+    /** What the order / invoice PDF says, before contacts are masked. */
+    public static function orderData(Order $order, bool $isInvoice = false): array
+    {
+        $order->loadMissing([
             'user:id,first_name,last_name,email,phone',
             'items',
             'items.variant:id,sku,variant_name',
             'outlet:id,name',
             'payments',
             'creator:id,first_name,last_name',
-        ])->findOrFail($id);
+        ]);
 
         $data                  = $order->toArray();
         $guestName = trim(($order->customer_first_name ?? '') . ' ' . ($order->customer_last_name ?? ''));
@@ -221,15 +231,82 @@ class DocumentPdfController extends Controller
         // "Associate" on the printed order falls back to the outlet name when
         // this is missing, which named the shop rather than the person.
         $data['cashier_name']   = $order->creator?->name ?: null;
+        if ($isInvoice) {
+            // The invoice asks to be paid: settled money and what is still due,
+            // from the order's own figures (Order::totalPaid / outstandingBalance).
+            $data['settled_payments'] = self::settledPayments($order);
+            $data['total_paid']       = round($order->totalPaid(), 2);
+            $data['balance_due']      = round($order->outstandingBalance(), 2);
+        }
 
-        $html = PdfService::order($this->masked($data, 'orders.view'), $isInvoice);
-        $prefix = $isInvoice ? 'Invoice' : 'Order';
-        return $this->makePdf($html, "{$prefix}-{$order->order_number}");
+        return $data;
     }
 
     public function invoice(int $id): Response
     {
         return $this->order($id, true);
+    }
+
+    /**
+     * GET /pdf/orders/{id}/receipt — one receipt for the whole order (owner,
+     * 2026-10-15): items, every settled payment, balance or PAID IN FULL.
+     * The money is Order::totalPaid / outstandingBalance — the figures the
+     * order screen shows — so the file and the screen cannot disagree. An
+     * order with nothing paid gets no receipt (422): send its invoice.
+     * Same door as the order PDF: orders.view, the order's ViewerScope,
+     * contacts masked, downloads gated.
+     */
+    public function orderReceipt(int $id): Response
+    {
+        $order = Order::findOrFail($id);   // ViewerScope: a sale she cannot see is not found
+
+        if (round($order->totalPaid(), 2) < 0.01) {
+            abort(422, 'Nothing has been paid on this order yet — send the invoice instead.');
+        }
+
+        $html = PdfService::orderReceipt($this->masked(self::orderReceiptData($order), 'orders.view'));
+
+        return $this->makePdf($html, "Receipt-{$order->order_number}");
+    }
+
+    /**
+     * What the receipt says, before contacts are masked. The money is
+     * Order::totalPaid / outstandingBalance (settled payments, net of
+     * refunds) — the order screen's figures — and only settled payments
+     * are listed.
+     */
+    public static function orderReceiptData(Order $order): array
+    {
+        $order->loadMissing([
+            'user:id,first_name,last_name,email,phone',
+            'items',
+            'outlet:id,name',
+            'creator:id,first_name,last_name',
+        ]);
+
+        $data      = $order->toArray();
+        $guestName = trim(($order->customer_first_name ?? '') . ' ' . ($order->customer_last_name ?? ''));
+        $data['customer_name']  = $order->user
+            ? trim($order->user->first_name . ' ' . $order->user->last_name)
+            : ($guestName ?: 'Walk-in Customer');
+        $data['customer_email'] = $order->user?->email ?? $order->customer_email;
+        $data['customer_phone'] = $order->user?->phone ?? $order->customer_phone;
+        $data['outlet_name']    = $order->outlet?->name;
+        $data['cashier_name']   = $order->creator?->name ?: null;
+        $data['settled_payments'] = self::settledPayments($order);
+        $data['total_paid']  = round($order->totalPaid(), 2);
+        $data['balance_due'] = round($order->outstandingBalance(), 2);
+
+        return $data;
+    }
+
+    /** Money received on an order: settled payments (status paid), oldest first — what Order::totalPaid sums. */
+    private static function settledPayments(Order $order): array
+    {
+        return $order->payments()->where('status', 'paid')
+            ->orderBy('paid_at')->orderBy('id')
+            ->get(['id', 'payment_method', 'provider_reference', 'amount', 'refund_amount', 'paid_at', 'created_at'])
+            ->toArray();
     }
 
     // ─── Quotation ────────────────────────────────────────────────────────────
