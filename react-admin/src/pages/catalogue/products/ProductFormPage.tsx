@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useForm, useFieldArray, Controller } from "react-hook-form";
+import { useForm, useFieldArray, useWatch, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { discountCapHint, usePromotionCap, withSalePriceCap } from "@/lib/discountCap";
 import { z } from "zod";
@@ -777,7 +777,9 @@ function VariantGenerator({
                     currency_code: c.code,
                     regular_price: productPrice ? Number(productPrice.regular_price) : 0,
                     sale_price: productPrice?.sale_price ? Number(productPrice.sale_price) : null,
-                    cost_price: productPrice?.cost_price ? Number(productPrice.cost_price) : null,
+                    // No cost: a new variant uses the product's KES cost until it
+                    // is given its own (CostBasis), so a later product cost change
+                    // reaches it. Copying it here would pin today's figure.
                 };
             }),
         }));
@@ -1068,6 +1070,9 @@ function VariantGenerator({
                                 Prices pre-filled from the product — adjust per variant if needed.
                             </span>
                         )}
+                        <span className="block mt-1 text-surface-500">
+                            Cost: every variant uses the product's KES cost until you give it its own (edit the variant).
+                        </span>
                     </p>
                     <div className="max-h-96 overflow-y-auto space-y-3 pr-1">
                         {generatedVariants.map((v, vi) => (
@@ -1466,9 +1471,14 @@ function EditVariantModal({
                     sale_price: p?.sale_price
                         ? Number(p.sale_price)
                         : (fallback?.sale_price ? Number(fallback.sale_price) : null),
-                    cost_price: p?.cost_price
+                    // Cost: the variant's own KES cost only. Blank means it
+                    // uses the product's (CostBasis) — copying the product's
+                    // figure in here would pin it, and a later product cost
+                    // change would no longer reach this variant. Other
+                    // currencies never hold a cost.
+                    cost_price: c.code === COST_CURRENCY && p?.cost_price != null
                         ? Number(p.cost_price)
-                        : (fallback?.cost_price ? Number(fallback.cost_price) : null),
+                        : null,
                 };
             }),
         });
@@ -1483,11 +1493,11 @@ function EditVariantModal({
                 weight: v.weight ?? null,
                 is_default: v.is_default,
                 is_active: v.is_active,
-                prices: v.prices.map((p) => ({
+                prices: withCostOnKesOnly(v.prices.map((p) => ({
                     ...p,
                     sale_price: p.sale_price ?? null,
                     cost_price: p.cost_price ?? null,
-                })),
+                }))),
             }),
         onSuccess: (res) => {
             // Phase 3C: a price change past the maker's band waits for approval.
@@ -1500,6 +1510,15 @@ function EditVariantModal({
     });
 
     const attrs = watch("attributes") ?? {};
+
+    // The product's KES cost — what this variant uses while its own is blank.
+    const productKesCostRaw = productPrices.find((x) => x.currency_code === COST_CURRENCY)?.cost_price;
+    const productKesCost = productKesCostRaw != null && Number.isFinite(Number(productKesCostRaw)) ? Number(productKesCostRaw) : null;
+    const kesIdx = currencies.findIndex((c: any) => c.code === COST_CURRENCY);
+    const ownKesCostRaw = kesIdx >= 0 ? watch(`prices.${kesIdx}.cost_price` as any) : null;
+    const ownKesCost = ownKesCostRaw === null || ownKesCostRaw === undefined || ownKesCostRaw === "" || !Number.isFinite(Number(ownKesCostRaw))
+        ? null : Number(ownKesCostRaw);
+    const effectiveKesCost = ownKesCost ?? productKesCost;
 
     // Re-pull the main product's prices for every currency — one tap to undo a
     // per-variant override that has drifted. Missing currencies are derived from
@@ -1521,10 +1540,15 @@ function EditVariantModal({
             const sale = fallback
                 ? (fallback.sale_price != null ? Number(fallback.sale_price) : null)
                 : (baseProd?.sale_price != null ? convert(Number(baseProd.sale_price), rate) : null);
-            const cost = fallback?.cost_price != null ? Number(fallback.cost_price) : null;
             setValue(`prices.${i}.regular_price` as any, reg, { shouldDirty: true });
             setValue(`prices.${i}.sale_price` as any, sale as any, { shouldDirty: true });
-            setValue(`prices.${i}.cost_price` as any, cost as any, { shouldDirty: true });
+            if (c.code !== COST_CURRENCY) return;
+            // Cost, KES row only: a variant with its own cost is set to the
+            // product's figure; one without keeps using the product's (blank).
+            const own = editing.prices?.find((x) => x.currency_code === COST_CURRENCY)?.cost_price;
+            if (own != null && productKesCost != null) {
+                setValue(`prices.${i}.cost_price` as any, productKesCost as any, { shouldDirty: true });
+            }
         });
         toast.success("Prices reset to the product price");
     };
@@ -1681,18 +1705,24 @@ function EditVariantModal({
                                         placeholder="-"
                                     />
                                 </Field>
-                                {canSeeCost && (
-                                <Field label="Cost">
+                                {canSeeCost && (currency.code === COST_CURRENCY ? (
+                                <Field label="Cost" hint={ownKesCost === null && productKesCost !== null ? "Blank = uses the product's cost" : undefined}>
                                     <FieldInput
                                         className="input text-sm"
                                         type="number"
                                         step="0.01"
                                         min="0"
-                                        {...register(`prices.${i}.cost_price`)}
-                                        placeholder="-"
+                                        // A cleared box is "no cost of its own" (null), never 0 —
+                                        // z.coerce would turn "" into a 0 that shadows the product's cost.
+                                        {...register(`prices.${i}.cost_price`, { setValueAs: (v: any) => (v === "" || v === null || v === undefined ? null : Number(v)) })}
+                                        placeholder={productKesCost !== null ? `${kesFmt(productKesCost)} (product)` : "-"}
                                     />
                                 </Field>
-                                )}
+                                ) : (
+                                <Field label="Cost">
+                                    <ConvertedCost kesCost={effectiveKesCost} code={currency.code} currencies={currencies} inherited={ownKesCost === null && productKesCost !== null} />
+                                </Field>
+                                ))}
                             </div>
                         );
                     })}
@@ -2115,6 +2145,69 @@ function MeasurementsTab({
     );
 }
 
+// ── Cost: one figure, on the KES row ─────────────────────────────────────────
+// What an item costs us is kept ONCE, in shillings, on the KES price row (the
+// product's, or the variant's — a variant with none uses the product's). COGS,
+// the reports and the cost-change bands all read that one figure; the server
+// drops a cost sent on any other currency's row (PriceRowWriter). So the other
+// rows SHOW the cost converted at their rate and never hold one of their own.
+// The form used to send cost_price on every row — null, or a figure loaded
+// from an old USD/ZMW row — and from Phase 3C every such save was refused with
+// "Cost is kept on the KES price row only."
+const COST_CURRENCY = "KES";
+
+/** The KES cost stated in another currency at its pricing rate — the same
+ *  conversion the regular-price cascade uses. null when it cannot be stated. */
+function convertCost(kesCost: number | null | undefined, code: string, currencies: any[]): number | null {
+    if (kesCost === null || kesCost === undefined || !Number.isFinite(Number(kesCost))) return null;
+    const base = currencies.find((c: any) => c.is_base || c.is_default);
+    const kes  = configuredRate(currencies.find((c: any) => c.code === COST_CURRENCY), base);
+    const rate = configuredRate(currencies.find((c: any) => c.code === code), base);
+    if (kes === null || rate === null) return null;
+
+    return Math.round((Number(kesCost) / kes) * rate * 100) / 100;
+}
+
+/** Price rows as the API should receive them: cost_price on the KES row only. */
+function withCostOnKesOnly<T extends { currency_code: string; cost_price?: number | null }>(prices: T[]): T[] {
+    return prices.map((p) => {
+        if (p.currency_code === COST_CURRENCY) return p;
+        const { cost_price: _dropped, ...rest } = p;
+        return rest as T;
+    });
+}
+
+const kesFmt = (v: number) => v.toLocaleString("en-KE", { maximumFractionDigits: 2 });
+
+/** The read-only cost on a non-KES row: "≈ GBP 7.37 · from KES 1,100". */
+function ConvertedCost({ kesCost, code, currencies, inherited }: {
+    kesCost: number | null | undefined; code: string; currencies: any[]; inherited?: boolean;
+}) {
+    const converted = convertCost(kesCost, code, currencies);
+    const hasKes    = kesCost !== null && kesCost !== undefined && Number.isFinite(Number(kesCost));
+
+    return (
+        <div
+            className="input text-sm bg-surface-50 text-surface-600 cursor-default select-text flex flex-col justify-center leading-tight min-h-[2.25rem]"
+            aria-readonly="true"
+            title={`Cost is kept in ${COST_CURRENCY} only — change it on the ${COST_CURRENCY} row`}
+        >
+            {!hasKes ? (
+                <span className="text-surface-400">— set on the {COST_CURRENCY} row</span>
+            ) : converted === null ? (
+                <span className="text-amber-700 text-xs">No {code} rate · {COST_CURRENCY} {kesFmt(Number(kesCost))}</span>
+            ) : (
+                <>
+                    <span className="tabular-nums">≈ {code} {kesFmt(converted)}</span>
+                    <span className="text-2xs text-surface-400">
+                        from {COST_CURRENCY} {kesFmt(Number(kesCost))}{inherited ? " (product)" : ""}
+                    </span>
+                </>
+            )}
+        </div>
+    );
+}
+
 // ── PriceRows ─────────────────────────────────────────────────────────────────
 // All currency price rows rendered together so the base row can hold refs to
 // the other rows' inputs and update them directly via DOM — zero re-renders,
@@ -2219,6 +2312,10 @@ const PriceRows = React.memo(function PriceRows({
     // cost_price for everyone else and leaves the stored value untouched.
     const { can } = usePermissions();
     const canSeeCost = can("products.view_cost");
+    // The one cost (KES row), watched so every other row's converted figure
+    // follows it as it is typed.
+    const kesIdx  = fields.findIndex((f: any) => f.currency_code === COST_CURRENCY);
+    const kesCost = useWatch({ control, name: `prices.${Math.max(kesIdx, 0)}.cost_price` as any }) as unknown as number | null | undefined;
     // The owner's 5% rule on sale prices — the GLOBAL ceiling, never a role's
     // till limit (null for the super_admin).
     const discountCap = usePromotionCap();
@@ -2343,8 +2440,8 @@ const PriceRows = React.memo(function PriceRows({
                                 )}
                             />
                         </Field>
-                        {canSeeCost && (
-                        <Field label="Cost Price">
+                        {canSeeCost && (field.currency_code === COST_CURRENCY ? (
+                        <Field label="Cost Price" hint="Kept in KES only — the other currencies show it converted">
                             <Controller control={control} name={`prices.${i}.cost_price`}
                                 render={({ field: f }) => (
                                     <MoneyInput
@@ -2355,7 +2452,11 @@ const PriceRows = React.memo(function PriceRows({
                                 )}
                             />
                         </Field>
-                        )}
+                        ) : (
+                        <Field label="Cost Price">
+                            <ConvertedCost kesCost={kesIdx >= 0 ? kesCost : null} code={field.currency_code} currencies={currencies} />
+                        </Field>
+                        ))}
                         <Field label="Sale From">
                             <Controller control={control} name={`prices.${i}.sale_start_date`}
                                 render={({ field: f }) => (
@@ -2774,7 +2875,9 @@ export default function ProductFormPage() {
                     sale_price: basePrices[c.code]?.sale_price
                         ? Number(basePrices[c.code].sale_price)
                         : null,
-                    cost_price: basePrices[c.code]?.cost_price
+                    // Cost is the KES row's alone; an old figure on another
+                    // row is neither shown nor sent back.
+                    cost_price: c.code === COST_CURRENCY && basePrices[c.code]?.cost_price != null
                         ? Number(basePrices[c.code].cost_price)
                         : null,
                     sale_start_date:
@@ -2911,6 +3014,7 @@ export default function ProductFormPage() {
             };
             const normalizedPayload = {
                 ...payload,
+                prices: withCostOnKesOnly(payload.prices ?? []),
                 translations: payload.translations?.map((t) => ({
                     ...t,
                     short_description: t.short_description ?? "",

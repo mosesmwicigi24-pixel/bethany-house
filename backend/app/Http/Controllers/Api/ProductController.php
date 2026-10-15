@@ -430,8 +430,9 @@ class ProductController extends Controller
                 ]);
             }
 
-            // Base prices
-            foreach ($validated['prices'] as $price) {
+            // Base prices. Cost is kept on the KES row only — a cost sent on
+            // another currency's row is dropped (PriceRowWriter).
+            foreach (\App\Services\Approvals\PriceRowWriter::withCostOnKesOnly($validated['prices']) as $price) {
                 ProductPrice::create([
                     'product_id'         => $product->id,
                     'product_variant_id' => null,
@@ -1038,7 +1039,8 @@ class ProductController extends Controller
                 'is_active'    => $validated['is_active'] ?? true,
             ]);
 
-            foreach ($validated['prices'] as $price) {
+            // Cost on the KES row only, as on the product (PriceRowWriter).
+            foreach (\App\Services\Approvals\PriceRowWriter::withCostOnKesOnly($validated['prices']) as $price) {
                 ProductPrice::create([
                     'product_id'         => $productId,
                     'product_variant_id' => $variant->id,

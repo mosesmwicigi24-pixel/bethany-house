@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { purchaseOrderApi, supplierApi } from "@/api/procurement";
-import type { PurchaseOrder, POStatus } from "@/api/procurement";
+import type { PurchaseOrder, POStatus, POItemCosts } from "@/api/procurement";
+import { VariantGridPanel, type VariantPick } from "./VariantGridPanel";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Modal } from "@/components/ui/Modal";
@@ -76,17 +77,25 @@ function POFormModal({ onClose }: { onClose: () => void }) {
     const [notes, setNotes] = useState("");
     const [errors, setErrors] = useState<Record<string, string[]>>({});
 
-    // Line items
+    // Line items. A product line may be one of its variants (variant_id);
+    // a product's price starts from its KES book cost in the PO's currency
+    // (kes_cost kept so a currency change can re-state it while untouched).
     const [items, setItems] = useState<
         Array<{
             id: string;
             type: "product" | "material";
             item_id: string;
+            variant_id: number | null;
             name: string;
             quantity: string;
             unit_price: string;
+            kes_cost: number | null;
+            price_auto: boolean;
         }>
     >([]);
+    // The "Add all variants" panel for the product just picked.
+    const [variantPanel, setVariantPanel] = useState<POItemCosts | null>(null);
+    const [picking, setPicking] = useState<number | null>(null);
     const [itemSearch, setItemSearch] = useState("");
     const [itemType, setItemType] = useState<"product" | "material">("product");
     const [searchResults, setSearchResults] = useState<
@@ -155,20 +164,99 @@ function POFormModal({ onClose }: { onClose: () => void }) {
         }
     };
 
-    const addItem = (item: { id: number; name: string }) => {
-        setItems((prev) => [
-            ...prev,
-            {
-                id: Math.random().toString(36).slice(2),
-                type: itemType,
-                item_id: String(item.id),
-                name: item.name,
-                quantity: "1",
-                unit_price: "0",
-            },
-        ]);
+    type Line = (typeof items)[number];
+    const newId = () => Math.random().toString(36).slice(2);
+
+    // Same item (and variant) again = more of the existing line, never a
+    // second line: the quantities add up and the line keeps its price.
+    const mergeLines = (incoming: Line[]) => {
+        let merged = 0;
+        setItems((prev) => {
+            const next = [...prev];
+            for (const line of incoming) {
+                const at = next.findIndex((i) =>
+                    i.type === line.type && i.item_id === line.item_id && (i.variant_id ?? null) === (line.variant_id ?? null));
+                if (at >= 0) {
+                    merged++;
+                    const sum = parseQty(next[at].quantity, line.type) + parseQty(line.quantity, line.type);
+                    next[at] = { ...next[at], quantity: String(sum) };
+                } else {
+                    next.push(line);
+                }
+            }
+            return next;
+        });
+        return merged;
+    };
+
+    const priceString = (v: number | null) => (v === null ? "" : v.toFixed(2));
+
+    const addItem = async (item: { id: number; name: string }) => {
         setItemSearch("");
         setSearchResults([]);
+        if (itemType === "material") {
+            mergeLines([{
+                id: newId(), type: "material", item_id: String(item.id), variant_id: null,
+                name: item.name, quantity: "1", unit_price: "0", kes_cost: null, price_auto: false,
+            }]);
+            return;
+        }
+        // A product: its variants and KES cost decide what is offered.
+        setPicking(item.id);
+        try {
+            const costs = await purchaseOrderApi.itemCosts(item.id, currency);
+            if (costs.variants.length > 0) {
+                setVariantPanel(costs);
+                return;
+            }
+            const merged = mergeLines([{
+                id: newId(), type: "product", item_id: String(item.id), variant_id: null,
+                name: item.name, quantity: "1",
+                unit_price: priceString(costs.product.unit_price),
+                kes_cost: costs.product.kes_cost,
+                price_auto: costs.product.unit_price !== null,
+            }]);
+            if (merged) toast.info(`${item.name} was already on the order — quantity increased.`);
+        } catch (e) {
+            toast.error((e as ApiError)?.message ?? "Could not load the product's variants and cost.");
+        } finally {
+            setPicking(null);
+        }
+    };
+
+    const addVariants = (picks: VariantPick[]) => {
+        if (!variantPanel) return;
+        const productId = String(variantPanel.product.id);
+        const merged = mergeLines(picks.map((p) => ({
+            id: newId(), type: "product" as const, item_id: productId, variant_id: p.variantId,
+            name: p.label, quantity: String(p.quantity), unit_price: p.unitPrice.toFixed(2),
+            kes_cost: p.kesCost, price_auto: p.priceAuto,
+        })));
+        toast.success(merged
+            ? `${picks.length - merged} line(s) added; ${merged} already on the order — quantities increased.`
+            : `${picks.length} variant line(s) added.`);
+        setVariantPanel(null);
+    };
+
+    // A new PO currency re-states every price still at its book cost (the
+    // server converts at the reporting rate); a price typed by hand stays.
+    const changeCurrency = async (next: string) => {
+        setCurrency(next);
+        setVariantPanel(null);
+        const productIds = Array.from(new Set(items.filter((i) => i.type === "product" && i.price_auto).map((i) => Number(i.item_id))));
+        for (const pid of productIds) {
+            try {
+                const costs = await purchaseOrderApi.itemCosts(pid, next);
+                setItems((prev) => prev.map((i) => {
+                    if (i.type !== "product" || !i.price_auto || Number(i.item_id) !== pid) return i;
+                    const src = i.variant_id === null ? costs.product : costs.variants.find((v) => v.id === i.variant_id);
+                    const up  = src?.unit_price ?? null;
+                    return { ...i, unit_price: priceString(up), price_auto: up !== null };
+                }));
+            } catch {
+                toast.error("Could not re-price the lines in the new currency — check the unit prices.");
+            }
+        }
     };
 
     const updateItem = (
@@ -177,8 +265,13 @@ function POFormModal({ onClose }: { onClose: () => void }) {
         value: string,
     ) =>
         setItems((prev) =>
-            prev.map((i) => (i.id === id ? { ...i, [key]: value } : i)),
+            prev.map((i) => (i.id === id
+                ? { ...i, [key]: value, ...(key === "unit_price" ? { price_auto: false } : {}) }
+                : i)),
         );
+
+    // A line with no price is never sent as 0 — the buyer types one.
+    const unpricedLines = items.filter((i) => i.unit_price.trim() === "" || !Number.isFinite(Number(i.unit_price)));
 
     const removeItem = (id: string) =>
         setItems((prev) => prev.filter((i) => i.id !== id));
@@ -207,6 +300,7 @@ function POFormModal({ onClose }: { onClose: () => void }) {
                 items: items.map((i) => ({
                     type: i.type,
                     item_id: parseInt(i.item_id),
+                    product_variant_id: i.type === "product" ? i.variant_id : null,
                     quantity: parseQty(i.quantity, i.type),
                     unit_price: parseFloat(i.unit_price),
                 })),
@@ -239,7 +333,9 @@ function POFormModal({ onClose }: { onClose: () => void }) {
                         // A blank or zero quantity would reach the server as 0 —
                         // refused there, but better never offered.
                         disabled={mutation.isPending || items.length === 0
-                            || items.some((i) => parseQty(i.quantity, i.type) <= 0)}
+                            || items.some((i) => parseQty(i.quantity, i.type) <= 0)
+                            || unpricedLines.length > 0}
+                        title={unpricedLines.length > 0 ? "Enter a unit price on every line" : undefined}
                     >
                         {mutation.isPending ? (
                             <Spinner size="sm" />
@@ -288,7 +384,7 @@ function POFormModal({ onClose }: { onClose: () => void }) {
                         <FieldSelect
                             className="input"
                             value={currency}
-                            onChange={(e) => setCurrency(e.target.value)}
+                            onChange={(e) => changeCurrency(e.target.value)}
                         >
                             <option value="KES">KES - Kenyan Shilling</option>
                             <option value="USD">USD - US Dollar</option>
@@ -319,8 +415,20 @@ function POFormModal({ onClose }: { onClose: () => void }) {
                         </p>
                     </div>
 
+                    {variantPanel && (
+                        <div className="mb-3">
+                            <VariantGridPanel
+                                key={`${variantPanel.product.id}-${variantPanel.currency}`}
+                                data={variantPanel}
+                                currency={currency}
+                                onAdd={addVariants}
+                                onCancel={() => setVariantPanel(null)}
+                            />
+                        </div>
+                    )}
+
                     {/* Item search */}
-                    <div className="flex gap-2 mb-3">
+                    <div className={clsx("flex gap-2 mb-3", variantPanel && "hidden")}>
                         <select
                             className="input w-32 flex-shrink-0"
                             value={itemType}
@@ -343,8 +451,13 @@ function POFormModal({ onClose }: { onClose: () => void }) {
                                     searchItems(e.target.value);
                                 }}
                             />
-                            {(searching || searchResults.length > 0) && (
+                            {(searching || picking !== null || searchResults.length > 0) && (
                                 <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white rounded-xl border border-surface-200 shadow-xl max-h-72 overflow-auto">
+                                    {picking !== null && (
+                                        <div className="px-3 py-2 text-xs text-surface-400">
+                                            Loading variants and cost...
+                                        </div>
+                                    )}
                                     {searching && (
                                         <div className="px-3 py-2 text-xs text-surface-400">
                                             Searching...
@@ -353,6 +466,8 @@ function POFormModal({ onClose }: { onClose: () => void }) {
                                     {searchResults.map((r) => (
                                         <button
                                             key={r.id}
+                                            type="button"
+                                            disabled={picking !== null}
                                             className="w-full text-left px-3 py-2.5 hover:bg-surface-50 flex items-center gap-3 border-b border-surface-50 last:border-0 transition-colors"
                                             onClick={() => addItem(r)}
                                         >
@@ -463,7 +578,10 @@ function POFormModal({ onClose }: { onClose: () => void }) {
                                                         type="number"
                                                         min="0"
                                                         step="0.01"
-                                                        className="input w-28 text-right text-sm py-1"
+                                                        aria-label={`Unit price — ${item.name}`}
+                                                        placeholder={item.type === "product" && item.unit_price === "" ? "No cost — enter" : undefined}
+                                                        title={item.unit_price === "" ? "No cost on file — enter the unit price" : undefined}
+                                                        className={clsx("input w-28 text-right text-sm py-1", item.unit_price.trim() === "" && "input-error")}
                                                         value={item.unit_price}
                                                         onChange={(e) =>
                                                             updateItem(
@@ -504,6 +622,12 @@ function POFormModal({ onClose }: { onClose: () => void }) {
                         <div className="border-2 border-dashed border-surface-200 rounded-lg py-8 text-center text-surface-400 text-sm">
                             Search and add items above to build the order
                         </div>
+                    )}
+                    {unpricedLines.length > 0 && (
+                        <p className="mt-2 text-xs text-danger">
+                            No cost on file for {unpricedLines.map((i) => i.name).join(", ")} — enter the unit price
+                            {unpricedLines.length === 1 ? "" : "s"} before creating the order.
+                        </p>
                     )}
                 </div>
 
