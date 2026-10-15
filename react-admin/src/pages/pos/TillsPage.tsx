@@ -165,6 +165,7 @@ export default function TillsPage() {
                                             <td className="px-4 py-2.5">
                                                 <p className="font-semibold text-surface-900">#{t.id} · {t.outlet_name}</p>
                                                 {t.legacy && <p className="text-2xs text-warning-dark">Opened before verification existed</p>}
+                                                {t.left_open_overnight && <p className="text-2xs text-warning-dark">Left open overnight</p>}
                                             </td>
                                             <td className="px-4 py-2.5 hidden md:table-cell">{t.opened_by ?? "—"}</td>
                                             <td className="px-4 py-2.5 hidden md:table-cell">{when(t.opened_at)}</td>
@@ -292,6 +293,7 @@ function TillDrawer({ id, onClose }: { id: number; onClose: () => void }) {
                         <div className="flex flex-wrap items-center gap-2">
                             <StageBadge stage={till.stage} />
                             {till.legacy && <span className="text-2xs text-warning-dark font-medium">Opened before verification existed</span>}
+                            {till.left_open_overnight && <span className="text-2xs text-warning-dark font-medium">Left open overnight — counted on a later day</span>}
                         </div>
 
                         <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5">

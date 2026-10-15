@@ -66,6 +66,8 @@ export interface Till {
     status: "open" | "counted" | "closed";
     stage: TillStage;
     legacy: boolean;
+    /** Counted on a later day than it opened, or still open past midnight. */
+    left_open_overnight?: boolean;
     blind: boolean;
     opened_by_id: number | null;
     opened_by: string | null;

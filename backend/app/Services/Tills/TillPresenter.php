@@ -72,6 +72,11 @@ final class TillPresenter
             'opened_at'         => $r->opened_at?->toIso8601String(),
             'closed_at'         => $r->closed_at?->toIso8601String(),
             'finalized_at'      => $r->finalized_at?->toIso8601String(),
+            // Ran past its trading day (the morning check, 2026-10-15): counted
+            // on a later day than it opened, or still open after midnight. The
+            // verifier should know the drawer sat unattended overnight.
+            'left_open_overnight' => $r->opened_at !== null
+                && $r->opened_at->toDateString() < ($r->closed_at ?? now())->toDateString(),
             'opening_cash'      => (float) ($r->opening_balance ?? 0),
             'transaction_count' => (int) ($r->transaction_count ?? 0),
             // Her own count is hers to see; it is not the expected figure.

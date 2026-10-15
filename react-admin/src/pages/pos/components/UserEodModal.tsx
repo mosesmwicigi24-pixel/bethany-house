@@ -22,6 +22,7 @@ import { clsx } from "clsx";
 import { get, post } from "@/api/client";
 import { useToastStore } from "@/store/toast.store";
 import { Spinner } from "@/components/ui/Spinner";
+import { businessToday } from "@/lib/businessDate";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -78,6 +79,9 @@ interface Props {
      *  The parent (PosPage) should set eodSubmitted=true so the
      *  Register modal's close-mode unblocks. */
     onSubmitSuccess: () => void;
+    /** Pin the report to this day ("YYYY-MM-DD"): the morning check writes
+     *  the report for the day a till left open overnight was opened. */
+    fixedDate?: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -181,10 +185,13 @@ export default function UserEodModal({
     registerId,
     onClose,
     onSubmitSuccess,
+    fixedDate,
 }: Props) {
     const toast = useToastStore();
-    const today = new Date().toISOString().split("T")[0];
-    const [date, setDate] = useState(today);
+    // Nairobi's calendar, not UTC's: toISOString() read 00:00–03:00 as the
+    // previous day, so a late report was filed against the wrong date.
+    const today = businessToday();
+    const [date, setDate] = useState(fixedDate ?? today);
 
     // Per-order notes keyed by order id string
     const [orderNotes, setOrderNotes] = useState<Record<string, string>>({});
@@ -298,6 +305,7 @@ export default function UserEodModal({
                                     setSubmitted(false);
                                 }}
                                 max={today}
+                                disabled={!!fixedDate}
                                 className="input text-xs py-1"
                             />
                             <button

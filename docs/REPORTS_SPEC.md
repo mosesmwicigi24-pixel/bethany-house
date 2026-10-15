@@ -102,6 +102,16 @@ a rewrite. (The duplicate-payment cleanup of 18 Jul 2026 followed this rule: row
 backed up, deletions audit-logged on each order, historical closed registers left
 untouched.)
 
+A till is one trading day (owner, 2026-10-15 — "the morning check"). No sale or
+POS payment, of any tender, is taken unless the seller's till is open and was
+opened today (Nairobi); a till left open overnight must have its report written
+for the day it opened and its drawer counted before she sells again, so one
+day's drawer never absorbs the next day's takings. The system never closes a
+till itself — a count cannot be invented — it reminds the cashier at 21:30 and
+lists overnight tills for the owner and outlet manager at 07:45, and marks a
+late-counted till `left_open_overnight` for its verifier. See
+`App\Services\Tills\TillGate`; off switch `pos.same_day_till_required`.
+
 ### 9. Exceptions get their own page
 
 A healthy report hides problems inside averages. The exceptions surface — voids,

@@ -36,4 +36,13 @@ return [
      */
     'agent_user_email' => env('POS_AGENT_USER_EMAIL', 'neema-bot@bethanyhouse.co.ke'),
 
+    /*
+     * The morning check (owner, 2026-10-15): no sale or POS payment, of any
+     * tender, unless the seller's till is open AND was opened today; a till
+     * left open from an earlier day must be reported on and counted first.
+     * See App\Services\Tills\TillGate. Set false to switch the gate off
+     * without a deploy of code (the pop-up then never appears either).
+     */
+    'same_day_till_required' => (bool) env('POS_SAME_DAY_TILL_REQUIRED', true),
+
 ];

@@ -46,6 +46,19 @@ class PosPaymentReplayGuardTest extends TestCase
     }
 
     /**
+     * Money is taken into today's open till (the morning check, 2026-10-15):
+     * a payment with none is refused before the replay guard is reached.
+     */
+    private function openTillToday(Outlet $outlet): void
+    {
+        \App\Models\CashRegister::create([
+            'outlet_id' => $outlet->id, 'register_name' => 'Till', 'status' => 'open',
+            'currency_code' => 'KES', 'opening_balance' => 0, 'expected_cash' => 0,
+            'opened_by' => auth()->id(), 'user_id' => auth()->id(), 'opened_at' => now(),
+        ]);
+    }
+
+    /**
      * @param float $total recordPosPay demands a payment cover the outstanding
      *   balance exactly, so each test sizes the order to make its amount valid.
      */
@@ -67,6 +80,7 @@ class PosPaymentReplayGuardTest extends TestCase
         $this->actingWithPermissions(['pos.access']);
         $outlet = Outlet::factory()->create();
         auth()->user()?->outlets()->syncWithoutDetaching([$outlet->id]);
+        $this->openTillToday($outlet);
         $order  = $this->pendingPosOrder($outlet);
 
         Payment::factory()->create([
@@ -97,6 +111,7 @@ class PosPaymentReplayGuardTest extends TestCase
         $this->actingWithPermissions(['pos.access']);
         $outlet = Outlet::factory()->create();
         auth()->user()?->outlets()->syncWithoutDetaching([$outlet->id]);
+        $this->openTillToday($outlet);
         $order  = $this->pendingPosOrder($outlet, 15500); // 15,500 - 8,000 = 7,500 outstanding
 
         Payment::factory()->create([
@@ -127,6 +142,7 @@ class PosPaymentReplayGuardTest extends TestCase
         $this->actingWithPermissions(['pos.access']);
         $outlet = Outlet::factory()->create();
         auth()->user()?->outlets()->syncWithoutDetaching([$outlet->id]);
+        $this->openTillToday($outlet);
         $order  = $this->pendingPosOrder($outlet, 16000); // 16,000 - 8,000 = 8,000 outstanding
 
         Payment::factory()->create([
