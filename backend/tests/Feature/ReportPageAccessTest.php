@@ -214,7 +214,14 @@ class ReportPageAccessTest extends TestCase
 
     private function mayView(string $role, string $page): bool
     {
-        return in_array($role, self::PAGES[$page]['roles'], true);
+        if (! in_array($role, self::PAGES[$page]['roles'], true)) {
+            return false;
+        }
+
+        // Owner, 2026-10-15 (FinancialVisibility): the money pages are the
+        // owner's, whatever page permission a role carries — Finance & Cash
+        // also for the roles that hold reports.financial (the grant above).
+        return ! in_array($page, \App\Support\FinancialVisibility::MONEY_PAGES, true) || $page === 'financial';
     }
 
     private function mayExport(string $role, string $page): bool
@@ -330,10 +337,12 @@ class ReportPageAccessTest extends TestCase
         ]);
     }
 
-    public function test_accountant_views_six_pages_and_exports_none(): void
+    public function test_accountant_views_four_pages_and_exports_none(): void
     {
+        // Six page grants; Sales and Performance are money pages, the owner's
+        // since 2026-10-15. Finance & Cash stays — it is her work.
         $this->actAs('accountant');
-        foreach (['sales', 'production', 'inventory', 'procurement', 'performance', 'financial'] as $page) {
+        foreach (['production', 'inventory', 'procurement', 'financial'] as $page) {
             foreach (self::PAGES[$page]['view'] as $url) {
                 $this->assertAllowed('GET', $url, "accountant views {$page}");
             }
@@ -344,7 +353,7 @@ class ReportPageAccessTest extends TestCase
                 $this->assertRefused('GET', '/api/v1/admin/reports/pdf/' . self::PAGES[$page]['pdf'], "accountant prints {$page}");
             }
         }
-        foreach (['executive', 'customers', 'signals', 'data_quality', 'explorer'] as $page) {
+        foreach (['executive', 'sales', 'customers', 'performance', 'signals', 'data_quality', 'explorer'] as $page) {
             $this->assertRefused('GET', self::PAGES[$page]['view'][0], "accountant views {$page}");
         }
     }
@@ -473,10 +482,15 @@ class ReportPageAccessTest extends TestCase
 
     public function test_dashboard_kpis_follow_the_sales_report(): void
     {
+        // The multi-day revenue row is the Sales report's — the owner's since
+        // 2026-10-15. An outlet manager's money is today's, on the dashboard
+        // stats (test_dashboard_revenue_follows_the_sales_report).
         $this->actAs('outlet_manager');
-        $this->assertAllowed('GET', '/api/v1/admin/reports/dashboard/kpis', 'OM dashboard kpis');
+        $this->assertRefused('GET', '/api/v1/admin/reports/dashboard/kpis', 'OM dashboard kpis');
         $this->actAs('procurement_manager');
         $this->assertRefused('GET', '/api/v1/admin/reports/dashboard/kpis', 'PM dashboard kpis');
+        $this->actAs('super_admin');
+        $this->assertAllowed('GET', '/api/v1/admin/reports/dashboard/kpis', 'owner dashboard kpis');
     }
 
     // ── the migration ────────────────────────────────────────────────────────
