@@ -37,7 +37,7 @@ export const userSecurityApi = {
 /** Mirrors App\Services\Auth\StaffAuthority::tierOf — for showing buttons only; the server decides. */
 const TIERS: Record<string, number> = {
     super_admin: 0, admin: 1, finance_manager: 1, system_admin: 1,
-    outlet_manager: 2, accountant: 2, procurement_manager: 2,
+    outlet_manager: 2, accountant: 2, procurement_manager: 2, production_manager: 2,
     pos_clerk: 3, tailor: 3, procurement_officer: 3,
 };
 

@@ -82,6 +82,11 @@ const SYSTEM_ROLES = [
         display: "Procurement Officer",
         desc: "Purchase orders, suppliers, GRN.",
     },
+    {
+        name: "production_manager",
+        display: "Production Manager",
+        desc: "Runs the floor: assigns tailors, confirms orders, QC. No BOM costs.",
+    },
 ];
 
 export default function RolesPage() {

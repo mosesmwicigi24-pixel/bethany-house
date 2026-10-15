@@ -2023,6 +2023,14 @@ Route::prefix('v1')->group(function () {
         // while this list did the real work — so granting it to a custom role
         // changed nothing, which is how permissions rot. admin keeps access via
         // an explicit grant in the catalogue; super_admin via the wildcard.
+        // Manager-only: allow a stage to run in parallel with its predecessors.
+        // Same URL the order screen calls, but OUTSIDE the floor-worker group:
+        // inside it the route also demanded production.worker, which no
+        // manager role holds — so only admin (production.*) could ever unlock
+        // a stage, and outlet and production managers got a 403.
+        Route::post('tailor/tasks/{id}/unlock', [ProductionController::class, 'unlockTask'])
+            ->middleware('permission:production.manage_assignees,sanctum');
+
         Route::middleware(['permission:production.worker,sanctum'])->prefix('tailor')->group(function () {
             Route::get('/tasks',                  [ProductionController::class, 'myTasks']);
             Route::get('/tasks/{id}',             [ProductionController::class, 'taskDetails']);
@@ -2030,9 +2038,6 @@ Route::prefix('v1')->group(function () {
             Route::put('/tasks/{id}/status',      [ProductionController::class, 'updateTaskStatus']);
             // Piece progress: "how many have passed through me?" — assignee action.
             Route::post('/tasks/{id}/progress',   [ProductionController::class, 'updateTaskProgress']);
-            // Manager-only: allow a stage to run in parallel with its predecessors.
-            Route::post('/tasks/{id}/unlock',     [ProductionController::class, 'unlockTask'])
-                ->middleware('permission:production.manage_assignees,sanctum');
             Route::post('/tasks/{id}/note',       [ProductionController::class, 'addTaskNote']);
         });
     });

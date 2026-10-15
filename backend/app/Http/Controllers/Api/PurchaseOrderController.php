@@ -786,7 +786,13 @@ class PurchaseOrderController extends Controller
             ]);
 
             foreach ($validated['items'] as $item) {
-                $poItem = PurchaseOrderItem::find($item['po_item_id']);
+                // Locked for the rest of the transaction. Raising a return
+                // lowers quantity_received, and the next return is checked
+                // against what is left — but without the lock two submits at
+                // the same moment (a double tap, two staff on one PO) both
+                // read the old count and both pass, returning the same goods
+                // twice. The second now waits and sees the first's decrement.
+                $poItem = PurchaseOrderItem::whereKey($item['po_item_id'])->lockForUpdate()->first();
 
                 if (!$poItem || $poItem->purchase_order_id != $purchaseOrder->id) {
                     DB::rollBack();
@@ -1078,12 +1084,17 @@ class PurchaseOrderController extends Controller
 
         MakerChecker::assertNotMaker($user, 'purchase_return.approve', $return, $return->created_by);
 
-        $return->update([
+        // Conditional on still being pending: an approve racing a reject must
+        // not land on a return whose stock the reject has just put back.
+        $moved = PurchaseReturn::whereKey($return->id)->where('status', 'pending')->update([
             'status'      => 'approved',
             'approved_by' => $user->id,
             'approved_at' => now(),
             'notes'       => $validated['notes'] ?? $return->notes,
         ]);
+        if ($moved === 0) {
+            return response()->json(['message' => 'This return was already decided by someone else.'], 409);
+        }
 
         return response()->json([
             'message' => "Purchase return {$return->return_number} approved.",
@@ -1107,10 +1118,29 @@ class PurchaseOrderController extends Controller
 
         $return = PurchaseReturn::where('status', 'pending')->findOrFail($id);
 
-        $return->update([
-            'status' => 'rejected',
-            'notes'  => "REJECTED: {$validated['reason']}\n\n" . ($return->notes ?? ''),
-        ]);
+        // Raising a return took the goods out of stock and lowered the PO
+        // line's received count straight away. Rejecting used to change only
+        // the status, so goods that never left the building vanished from
+        // stock for good. Reverse exactly what was taken, inside one
+        // transaction, with the return row locked so it can only happen once.
+        DB::transaction(function () use ($return, $validated, $user) {
+            $locked = PurchaseReturn::whereKey($return->id)->lockForUpdate()->first();
+            if (!$locked || $locked->status !== 'pending') {
+                abort(response()->json(['message' => 'This return was already decided by someone else.'], 409));
+            }
+
+            $this->reverseReturnStock($locked, $user->id);
+
+            $locked->update([
+                'status' => 'rejected',
+                'notes'  => "REJECTED: {$validated['reason']}\n\n" . ($locked->notes ?? ''),
+            ]);
+        });
+
+        ActivityLogService::log('purchase_return_rejected', $return, [
+            'return_number' => $return->return_number,
+            'reason'        => $validated['reason'],
+        ], "Purchase return {$return->return_number} rejected; stock and received quantities restored");
 
         return response()->json([
             'message' => "Purchase return {$return->return_number} rejected.",
@@ -1655,5 +1685,57 @@ class PurchaseOrderController extends Controller
     private static function isWhole($qty): bool
     {
         return self::hundredths($qty) % 100 === 0;
+    }
+
+    /**
+     * Undo what raising $return did to stock and to the PO lines.
+     *
+     * Driven by the LEDGER, not re-derived: every stock movement the return
+     * made was logged against it (inventory_transactions with reference
+     * PurchaseReturn::class, material_transactions with reference
+     * 'purchase_return'), so the reversal is the exact negation of those rows
+     * — including the cases where raising the return skipped a decrement
+     * (no stock row, or not enough on hand), which have nothing to reverse.
+     * The legacy inventories mirror follows the same ledger figures.
+     */
+    private function reverseReturnStock(PurchaseReturn $return, int $userId): void
+    {
+        $productMoves = \App\Models\InventoryTransaction::where('reference_type', PurchaseReturn::class)
+            ->where('reference_id', $return->id)
+            ->where('transaction_type', 'purchase_return')
+            ->get();
+
+        foreach ($productMoves as $move) {
+            $inv = InventoryItem::whereKey($move->inventory_item_id)->lockForUpdate()->first();
+            if (!$inv) {
+                continue;
+            }
+            $qty = (int) -$move->quantity_change;   // logged negative
+            $inv->adjustQuantity($qty, 'purchase_return_reversed', PurchaseReturn::class, $return->id, $userId);
+
+            Inventory::where('product_id', $inv->product_id)
+                ->where('inventory_type', 'product')
+                ->when($inv->product_variant_id, fn ($q) => $q->where('product_variant_id', $inv->product_variant_id))
+                ->increment('quantity_on_hand', $qty);
+        }
+
+        $materialMoves = MaterialTransaction::where('reference_type', 'purchase_return')
+            ->where('reference_id', $return->id)
+            ->where('transaction_type', 'purchase_return')
+            ->get();
+
+        foreach ($materialMoves as $move) {
+            $inv = MaterialInventory::whereKey($move->material_inventory_id)->lockForUpdate()->first();
+            if ($inv) {
+                $inv->adjustQuantity(-(float) $move->quantity_change, 'purchase_return_reversed', 'purchase_return', $return->id, $userId);
+            }
+        }
+
+        // Raising the return lowered each line's received count; restore it.
+        $lines = DB::table('purchase_return_items')->where('return_id', $return->id)->get();
+        foreach ($lines as $line) {
+            PurchaseOrderItem::whereKey($line->po_item_id)->lockForUpdate()->first()
+                ?->increment('quantity_received', $line->quantity);
+        }
     }
 }

@@ -12,7 +12,8 @@ use Illuminate\Support\Facades\DB;
  * come from someone other than (owner's Policy 4, MakerChecker).
  *
  * Owner decision 5 Oct 2026: not only whoever holds a stage now, but anyone
- * who ever held one or counted pieces on it, plus the order's own assignees.
+ * who ever held one or counted pieces on it, plus the order's own assignees
+ * (except those attached only to oversee — see OVERSIGHT_ROLES).
  * Before, a tailor moved off a stage she had sewn (by reassignment or by a
  * rework send-back), or an order-level assignee, could pass the order's QC.
  *
@@ -27,6 +28,9 @@ final class OrderMakers
     /** Events whose causer worked on the task named in properties.task_id. */
     private const WORK_EVENTS = ['production_task_progress', 'production_task_status_updated'];
 
+    /** Order-assignee roles that watch or sign off rather than make. */
+    public const OVERSIGHT_ROLES = ['observer', 'store_manager', 'admin', 'qc_inspector', 'production_manager'];
+
     /** @return list<int> */
     public static function ids(ProductionOrder $order): array
     {
@@ -35,8 +39,16 @@ final class OrderMakers
             ->get(['id', 'assigned_to']);
         $taskIds = $tasks->pluck('id')->map(fn ($id) => (string) $id)->all();
 
+        // Order-level assignees count unless they were attached to oversee
+        // (owner decision 15 Oct 2026): an Observer, QC Inspector or
+        // Production Manager put on every order by an auto-assignee rule
+        // made nothing, and counting them would bar the very people meant to
+        // inspect. Anything else — 'assignee', 'tailor', or a free-text
+        // role — stays a maker, so an unrecognised role errs strict.
         $ids = $tasks->pluck('assigned_to')
-            ->merge(ProductionOrderAssignee::where('production_order_id', $order->id)->pluck('user_id'));
+            ->merge(ProductionOrderAssignee::where('production_order_id', $order->id)
+                ->whereNotIn('role_in_order', self::OVERSIGHT_ROLES)
+                ->pluck('user_id'));
 
         // Counted pieces on, started, paused or finished one of its stages.
         // Those events are filed under the order (an indexed subject), so this
