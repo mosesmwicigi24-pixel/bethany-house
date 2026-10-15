@@ -217,6 +217,11 @@ re-verify, then fix the appendix.
   canonical business metrics are computed — derived at read time, never stored,
   outlet scope enforced in the query. Reuse it; never re-aggregate in a
   controller, export, or PDF.
+- `backend/app/Support/FinancialVisibility.php` decides who sees money, how
+  widely and for how long (owner, 2026-10-15): money report pages are the
+  super admin's (Finance & Cash also finance's); everyone else sees today,
+  in their range (business / outlet / team via `users.reports_to` / own).
+  Applied through `ReportPages::canView`; don't add a second copy of the rule.
 
 ### Recognised-sales buckets (§7)
 

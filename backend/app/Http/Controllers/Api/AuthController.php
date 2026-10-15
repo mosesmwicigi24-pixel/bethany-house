@@ -745,11 +745,21 @@ class AuthController extends Controller
     {
         $user->load('roles.permissions');
 
-        $user->permissions = $user->roles
-            ->flatMap(fn ($role) => $role->permissions)
-            ->pluck('name')
-            ->unique()
-            ->values();
+        // Effective, not merely granted: a money report page this person may
+        // not open (FinancialVisibility, owner 2026-10-15) is left out, so the
+        // console's sidebar, routes and dashboard follow the server's rule.
+        $effective = \App\Support\FinancialVisibility::effectivePermissions(
+            $user,
+            $user->roles->flatMap(fn ($role) => $role->permissions)->pluck('name')->unique()->values()->all(),
+        );
+        // Whose figures the dashboard shows, and for how long — for its labels.
+        $moneyView = \App\Support\FinancialVisibility::describe($user);
+
+        // Asking can() above loads Spatie's direct-permissions RELATION, which
+        // would replace this list when the user is serialised.
+        $user->unsetRelation('permissions');
+        $user->permissions = collect($effective);
+        $user->money_view  = $moneyView;
 
         // primaryOutlet() returns null if the outlet_user pivot has no rows
         // for this user - handled gracefully by the React admin.

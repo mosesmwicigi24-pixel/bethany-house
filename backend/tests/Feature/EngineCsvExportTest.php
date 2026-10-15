@@ -145,16 +145,21 @@ class EngineCsvExportTest extends TestCase
         // endpoints, while four explicit export routes required
         // reports.export — so the permission was bypassable with a query
         // parameter. Two roles sat on the wrong side of it.
+        //
+        // Shown on an operational page: since 2026-10-15 a money page such as
+        // Collections is the owner's, and the owner holds every export.
         $viewer = User::factory()->create();
-        \Tests\ReportAccess::grantPages($viewer);
+        foreach (\Tests\ReportAccess::PAGES as $slug) {
+            $viewer->givePermissionTo(\Spatie\Permission\Models\Permission::findOrCreate($slug, 'sanctum'));
+        }
         app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($viewer);
 
         // Reading the report on screen: allowed.
-        $this->getJson('/api/v1/admin/reports/collections')->assertOk();
+        $this->getJson('/api/v1/admin/reports/inventory/stock-on-hand')->assertOk();
 
         // Taking the same figures away as a file: not without reports.export.
-        $this->getJson('/api/v1/admin/reports/collections?export=csv')->assertStatus(403);
+        $this->getJson('/api/v1/admin/reports/inventory/stock-on-hand?export=csv')->assertStatus(403);
     }
 
     public function test_csv_export_is_gated_by_reports_view(): void

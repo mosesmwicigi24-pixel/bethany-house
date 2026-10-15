@@ -9,7 +9,11 @@ use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Reports are business-wide for everyone who may read them (owner,
- * 2026-09-30, restated for Phase 4A on 2026-10-03).
+ * 2026-09-30, restated for Phase 4A on 2026-10-03). Since 2026-10-15 the
+ * report pages that carry money are only reached by the owner (and Finance &
+ * Cash by finance) — App\Support\FinancialVisibility, enforced in
+ * ReportPages::canView before this runs — so "everyone who may read them"
+ * is now a much smaller set for those pages.
  *
  * Order, Quotation, Expense and ProductionTask carry a viewer scope, and from
  * Phase 4A an outlet manager is bounded to their outlets. The legacy report

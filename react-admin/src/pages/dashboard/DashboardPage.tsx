@@ -593,11 +593,14 @@ function ProductionSummaryCard({ stats, loading }: { stats?: DashboardStats; loa
 
 // ── Role-aware greeting subtitle ──────────────────────────────────────────────
 
-function roleSubtitle(roles: string[], floorWorker: boolean): string {
+// `moneyLabel` is the server's account of whose figures this dashboard shows
+// and for how long ("today, at your outlet") — FinancialVisibility::describe.
+function roleSubtitle(roles: string[], floorWorker: boolean, moneyLabel?: string): string {
     if (floorWorker)                            return "Check your assigned tasks and stay on top of your production work.";
     if (roles.includes("pos_clerk"))            return "Open a register and start serving customers.";
     if (roles.includes("procurement_officer"))  return "Manage purchase orders, suppliers, and incoming stock.";
     if (roles.includes("production_manager"))   return "Here's the production floor today — what's queued, moving, and late.";
+    if (moneyLabel && moneyLabel !== "across your business") return `Figures shown are ${moneyLabel}.`;
     if (roles.includes("outlet_manager"))       return "Here's what's happening at your outlet today.";
     return "Here's what's happening across your business today.";
 }
@@ -646,7 +649,7 @@ function RoleStatGrid({
         // had a very quiet day.
         return (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                <CashTodayCard />
+                {can("payments.transactions") && <CashTodayCard />}
                 <StatCard label="Your Sales Today"   value={fmtCurrency(stats?.today_sales)}
                     loading={isLoading} color="bg-success-light text-success"
                     href="/sales/orders" icon={<CoinIcon />} />
@@ -706,7 +709,7 @@ function RoleStatGrid({
     if (roles.includes("outlet_manager")) {
         return (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                <CashTodayCard />
+                {can("payments.transactions") && <CashTodayCard />}
                 <StatCard label="Today's Sales"   value={fmtCurrency(stats?.today_sales)}
                     loading={isLoading} color="bg-success-light text-success"
                     href="/sales/orders" icon={<CoinIcon />} />
@@ -737,7 +740,7 @@ function RoleStatGrid({
         <div className="space-y-2.5">
             {/* Today's trading — tinted so each number is findable by colour. */}
             <div className="grid grid-cols-3 lg:grid-cols-6 gap-2">
-                <CashTodayCard compact />
+                {can("payments.transactions") && <CashTodayCard compact />}
                 <KpiTile label="Today's Sales"   value={fmtCompact(stats?.today_sales)}
                     tone="text-success-700" bg="bg-success-50"
                     loading={isLoading} href="/sales/orders" />
@@ -852,7 +855,7 @@ export default function DashboardPage() {
             <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div>
                     <h1 className="page-title">{greeting}, {user?.first_name ?? "there"}</h1>
-                    <p className={clsx("page-subtitle", floorWorker && "hidden sm:block")}>{roleSubtitle(roles, floorWorker)}</p>
+                    <p className={clsx("page-subtitle", floorWorker && "hidden sm:block")}>{roleSubtitle(roles, floorWorker, user?.money_view?.label)}</p>
                 </div>
     {!hideFinancials && (
                     <div className="flex items-center gap-1 bg-surface-100 rounded-xl p-1">

@@ -52,6 +52,7 @@ class ReportDrillLinksTest extends TestCase
         foreach ($perms as $p) {
             $u->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
+        \Tests\ReportAccess::ownerIfMoney($u, $perms);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($u);
     }
@@ -78,9 +79,12 @@ class ReportDrillLinksTest extends TestCase
 
     public function test_a_drill_never_offers_a_door_the_viewer_cannot_open(): void
     {
-        $this->actAs([...\Tests\ReportAccess::PAGES]);
+        // A finance role (not the owner, who opens everything): it reaches the
+        // revenue drill through Finance & Cash, and holds no orders.view,
+        // customers.view or payments.transactions.
+        $this->actAs(['reports.financial']);
 
-        $row = $this->drill('collected')['rows'][0];
+        $row = $this->drill('revenue')['rows'][0];
         $this->assertSame([], $row['links'] ?? [], 'no orders.view, customers.view or payments.transactions — no links');
         $this->assertSame('DL-1', $row['ref'], 'the evidence is still listed');
     }

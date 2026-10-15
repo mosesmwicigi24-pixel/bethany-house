@@ -37,9 +37,12 @@ class ViewerScope implements Scope
         match ($scope) {
             // A staff member none of whose roles grants the capability.
             DataScope::None => $builder->whereRaw('1 = 0'),
-            DataScope::Own => $builder->where(
+            // Her own records — and, for a line manager, her direct reports'
+            // (users.reports_to, owner 2026-10-15). Nobody reporting to her:
+            // exactly the single-owner filter it always was.
+            DataScope::Own => $builder->whereIn(
                 $builder->getModel()->getTable() . '.' . $model->ownerColumn(),
-                $user->id,
+                $user->teamIds(),
             ),
             // An EMPTY assignment means nothing, never everything — the
             // same rule the POS outlet guard had inverted. The model decides

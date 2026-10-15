@@ -273,6 +273,8 @@ export interface UserSetup {
     created_at: string;
     roles: { id: number; name: string; display_name: string }[];
     outlet: { id: number; name: string } | null;
+    /** The line manager this person reports to (owner, 2026-10-15). */
+    reports_to?: number | null;
     // Account lock after failed sign-ins (Phase 4C)
     locked_at?: string | null;
     locked_until?: string | null;

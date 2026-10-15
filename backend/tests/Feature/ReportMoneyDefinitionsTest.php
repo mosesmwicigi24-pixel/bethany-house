@@ -38,6 +38,7 @@ class ReportMoneyDefinitionsTest extends TestCase
         foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial'] as $p) {
             $u->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
+        \Tests\ReportAccess::asOwner($u);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($u);
     }

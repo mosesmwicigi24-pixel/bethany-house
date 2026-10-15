@@ -36,6 +36,11 @@ export interface User {
   discount_cap_percent?: number | null
   /** The global ceiling on promotions, coupons and sale prices this user may set; null = super_admin. */
   promotion_cap_percent?: number | null
+  /** Whose money figures this person sees and for how long (owner, 2026-10-15):
+   *  'any' period only for the owner; everyone else sees today, in their range. */
+  money_view?: { range: 'business' | 'outlet' | 'team' | 'own' | 'none'; period: 'any' | 'today'; label: string }
+  /** The line manager this person reports to (user id), if any. */
+  reports_to?: number | null
 }
 
 export interface AuthState {

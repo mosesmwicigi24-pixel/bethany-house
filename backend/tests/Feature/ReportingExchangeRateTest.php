@@ -55,6 +55,7 @@ class ReportingExchangeRateTest extends TestCase
         foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial'] as $p) {
             $user->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
+        \Tests\ReportAccess::asOwner($user);
 
         return $user;
     }

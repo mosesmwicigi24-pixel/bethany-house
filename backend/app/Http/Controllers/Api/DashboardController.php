@@ -26,6 +26,8 @@ use Illuminate\Support\Facades\DB;
  */
 class DashboardController extends Controller
 {
+    use \App\Http\Controllers\Api\Concerns\ConstrainsRawQueriesToViewer;
+
     public function index(Request $request)
     {
         return response()->json([
@@ -81,10 +83,7 @@ class DashboardController extends Controller
         } catch (\Exception) { $badges['stock_transfers'] = 0; }
 
         try {
-            $badges['low_stock'] = DB::table('inventories')
-                ->whereColumn('quantity', '<=', 'low_stock_threshold')
-                ->where('low_stock_threshold', '>', 0)
-                ->count();
+            $badges['low_stock'] = $this->lowStockCount($request->user());
         } catch (\Exception) { $badges['low_stock'] = 0; }
 
         try {
@@ -160,19 +159,13 @@ class DashboardController extends Controller
                     ->where('payment_status', 'paid')
                     ->sum('total_amount');
                 // Phase 5
-                $stats['pending_payment_approvals'] = DB::table('payments')
-                    ->where('requires_approval', true)
-                    ->where('approval_status', 'pending_review')
-                    ->count();
+                $stats['pending_payment_approvals'] = $this->pendingApprovalCount($user);
             }
         } catch (\Exception) {}
 
         try {
             $stats['total_products']     = Product::where('status', 'active')->count();
-            $stats['low_stock_products'] = DB::table('inventories')
-                ->whereColumn('quantity', '<=', 'low_stock_threshold')
-                ->where('low_stock_threshold', '>', 0)
-                ->count();
+            $stats['low_stock_products'] = $this->lowStockCount($user);
         } catch (\Exception) {}
 
         // Phase 3 - shipment tracking
@@ -280,10 +273,7 @@ class DashboardController extends Controller
         // Payment approvals — admins and outlet managers only
         if ($isAdmin || $isManager) {
             try {
-                $n = DB::table('payments')
-                    ->where('requires_approval', true)
-                    ->where('approval_status', 'pending_review')
-                    ->count();
+                $n = $this->pendingApprovalCount($user);
                 if ($n > 0) $alerts[] = [
                     'type'         => 'warning',
                     'icon'         => 'payment',
@@ -319,10 +309,7 @@ class DashboardController extends Controller
         // Low stock — admins, managers, and procurement officers
         if ($isAdmin || $isManager || $isProcurement) {
             try {
-                $n = DB::table('inventories')
-                    ->whereColumn('quantity', '<=', 'low_stock_threshold')
-                    ->where('low_stock_threshold', '>', 0)
-                    ->count();
+                $n = $this->lowStockCount($user);
                 if ($n > 0) $alerts[] = [
                     'type'         => 'warning',
                     'icon'         => 'stock',
@@ -395,5 +382,42 @@ class DashboardController extends Controller
         } catch (\Exception) {
             return [];
         }
+    }
+
+    /**
+     * Stock lines at or below their reorder point — the Low Stock page's own
+     * rule (InventoryController::lowStock), within the viewer's outlets.
+     *
+     * These three counts read `inventories.quantity` and
+     * `low_stock_threshold`, columns that table does not have: every call
+     * failed inside its try/catch, so the tile, badge and alert were blank.
+     */
+    private function lowStockCount(?User $user): int
+    {
+        return \App\Models\InventoryItem::query()
+            ->tap(fn ($q) => DataScopeResolver::boundToOutlets($q, $user, 'inventory.view', 'inventory_items.outlet_id'))
+            ->lowStock()
+            ->where('quantity_on_hand', '>', 0)
+            ->count();
+    }
+
+    /**
+     * Payments waiting for approval that THIS person can see — the same
+     * boundary as the approvals page (PaymentApprovalController::
+     * pendingApprovals), so an outlet manager's count is her outlet's, not
+     * every outlet's (it was counted across the whole business).
+     */
+    private function pendingApprovalCount(?User $user): int
+    {
+        $query = DB::table('payments as p')
+            ->join('orders as o', 'p.order_id', '=', 'o.id')
+            ->where('p.requires_approval', true)
+            ->where('p.approval_status', 'pending_review');
+        $this->constrainToViewer($query, $user, 'o');
+        if (! $user?->can('orders.view')) {
+            $query->whereRaw('1 = 0');
+        }
+
+        return $query->count();
     }
 }

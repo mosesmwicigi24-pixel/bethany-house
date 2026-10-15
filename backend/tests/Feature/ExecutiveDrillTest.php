@@ -26,6 +26,23 @@ class ExecutiveDrillTest extends TestCase
     use RefreshDatabase;
     use FreezesClockMidMonth;
 
+    /**
+     * Every report page granted, but NOT the owner — since 2026-10-15 such a
+     * person is refused the money pages (FinancialVisibility).
+     */
+    private function nonOwnerViewer(array $extraPerms = []): User
+    {
+        $user = User::factory()->create();
+        $user->assignRole(Role::findOrCreate('sales_manager', 'sanctum'));
+        foreach (array_merge([...\Tests\ReportAccess::PAGES], $extraPerms) as $perm) {
+            $user->givePermissionTo(Permission::findOrCreate($perm, 'sanctum'));
+        }
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        Sanctum::actingAs($user);
+
+        return $user;
+    }
+
     private function viewer(array $extraPerms = []): User
     {
         $user = User::factory()->create();
@@ -33,6 +50,7 @@ class ExecutiveDrillTest extends TestCase
         foreach (array_merge([...\Tests\ReportAccess::PAGES], $extraPerms) as $perm) {
             $user->givePermissionTo(Permission::findOrCreate($perm, 'sanctum'));
         }
+        \Tests\ReportAccess::asOwner($user);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 
@@ -154,10 +172,11 @@ class ExecutiveDrillTest extends TestCase
     public function test_expenses_drill_requires_reports_financial(): void
     {
         Outlet::factory()->create();
-        $this->viewer();
+        $this->nonOwnerViewer();
         $this->getJson('/api/v1/admin/reports/drill/expenses')->assertStatus(403);
 
-        $this->viewer(['reports.financial']);
+        // A finance role (not the owner) keeps the Finance & Cash drill.
+        $this->nonOwnerViewer(['reports.financial']);
         $this->getJson('/api/v1/admin/reports/drill/expenses')->assertOk();
     }
 

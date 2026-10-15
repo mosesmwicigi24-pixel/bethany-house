@@ -76,6 +76,7 @@ return Application::configure(basePath: dirname(__DIR__))
             // 2026-10-03): lifts the Phase 4A outlet/own row scope for the
             // section, nothing else.
             'report.business_wide' => \App\Http\Middleware\ReportsAreBusinessWide::class,
+            'money.today' => \App\Http\Middleware\LimitsMoneyWindowToToday::class,
             // Customer phones, emails and addresses by role on the
             // operational screens (Phase 4A) — see CustomerContacts::policyFor.
             'contacts.mask' => \App\Http\Middleware\MasksCustomerContacts::class,

@@ -1986,6 +1986,11 @@ class PosController extends Controller
             ->when($outletId, fn ($q) => $q->where('r.outlet_id', $outletId))
             ->when($userId,   fn ($q) => $q->where('r.user_id', $userId));
 
+        // A reviewer reads her own outlets' reports, not every outlet's
+        // (owner, 2026-10-15): an outlet manager is bounded to her outlets;
+        // the owner, admin and finance (role scope all) are not.
+        \App\Services\DataScopeResolver::boundToOutlets($query, $request->user(), 'pos.eod_review', 'r.outlet_id');
+
         // FIX: paginate the raw query BEFORE the expensive per-row KPI mapping
         // below. Each row's KPI calculation issues its own DB query (orders +
         // payments), so pagination must happen here - paginating the post-
@@ -2061,6 +2066,7 @@ class PosController extends Controller
             ->whereBetween('r.report_date', [$from, $to])
             ->whereNotNull('r.submitted_at')
             ->when($outletId, fn ($q) => $q->where('r.outlet_id', $outletId))
+            ->where(fn ($q) => \App\Services\DataScopeResolver::boundToOutlets($q, $request->user(), 'pos.eod_review', 'r.outlet_id'))
             ->distinct()
             ->select([
                 'r.user_id as id',
@@ -2083,9 +2089,10 @@ class PosController extends Controller
             'users' => $users->values(),
             // The outlet filter. Served here because a reviewer need not hold
             // a till (finance does not), and /admin/pos/outlets is pos.access.
-            // A reviewer reads every outlet's reports, so the names are no
-            // wider than the list itself.
-            'outlets' => DB::table('outlets')->where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            // Only the outlets this reviewer reads (owner, 2026-10-15), so the
+            // names are no wider than the list itself.
+            'outlets' => tap(DB::table('outlets')->where('is_active', true), fn ($q) => \App\Services\DataScopeResolver::boundToOutlets($q, $request->user(), 'pos.eod_review', 'id'))
+                ->orderBy('name')->get(['id', 'name']),
         ]);
     }
 
@@ -2135,7 +2142,8 @@ class PosController extends Controller
         }
 
         return (int) $report->user_id === (int) $user->id
-            || $user->can('pos.eod_review');
+            || ($user->can('pos.eod_review')
+                && \App\Services\DataScopeResolver::allowsOutlet($user, 'pos.eod_review', (int) $report->outlet_id));
     }
 
     /**
@@ -2153,6 +2161,10 @@ class PosController extends Controller
         }
 
         $user = $request->user();
+
+        if (!\App\Services\DataScopeResolver::allowsOutlet($user, 'pos.eod_review', (int) $report->outlet_id)) {
+            return response()->json(['message' => 'Report not found.'], 404);
+        }
 
         // The author acknowledging their own report would be a meaningless tick.
         if ((int) $report->user_id === (int) $user->id) {
@@ -2240,6 +2252,9 @@ class PosController extends Controller
             ->join('users as u',   'u.id', '=', 'r.user_id')
             ->join('outlets as o', 'o.id', '=', 'r.outlet_id')
             ->where('r.id', $id)
+            // Same outlet boundary as the list: another outlet's report is
+            // not found, rather than read by guessing its id.
+            ->where(fn ($q) => \App\Services\DataScopeResolver::boundToOutlets($q, $request->user(), 'pos.eod_review', 'r.outlet_id'))
             ->select([
                 'r.*',
                 'o.name as outlet_name',

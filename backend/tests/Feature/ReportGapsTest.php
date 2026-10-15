@@ -37,11 +37,15 @@ class ReportGapsTest extends TestCase
         $this->ann = User::factory()->create(['first_name' => 'Ann', 'last_name' => 'K']);
     }
 
-    private function actingWith(array $perms): void
+    /** $asOwner false: a non-owner holding exactly these grants. */
+    private function actingWith(array $perms, bool $asOwner = true): void
     {
         $u = User::factory()->create();
         foreach ($perms as $p) {
             $u->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
+        }
+        if ($asOwner) {
+            \Tests\ReportAccess::ownerIfMoney($u, $perms);
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($u);
@@ -100,8 +104,10 @@ class ReportGapsTest extends TestCase
         $this->assertCount(1, $earned['limits']);
         $this->assertStringContainsString('1 line sold with no cost', $earned['limits'][0]);
 
-        $this->actingWith([...\Tests\ReportAccess::PAGES]);
-        $this->assertNull($this->getJson('/api/v1/admin/reports/executive?period=this_month')->json('kpis.financial'), 'profit stays behind reports.financial');
+        // Without reports.financial: since 2026-10-15 a non-owner does not
+        // reach the Executive page at all, so profit cannot leak through it.
+        $this->actingWith([...\Tests\ReportAccess::PAGES], false);
+        $this->getJson('/api/v1/admin/reports/executive?period=this_month')->assertForbidden();
     }
 
     public function test_stock_aging_buckets_add_up_to_the_stock_value_and_cost_needs_financial(): void
@@ -139,7 +145,8 @@ class ReportGapsTest extends TestCase
         $this->assertSame(4, $aging['turnover']['sold_90_days'], 'the 120-day-old sale is outside the 90 days');
         $this->assertSame(3, count($aging['slow_items']), 'everything not moved in 30 days is listed');
 
-        $this->actingWith([...\Tests\ReportAccess::PAGES]);
+        // A non-owner on the (operational) Inventory page, without reports.financial.
+        $this->actingWith([...\Tests\ReportAccess::PAGES], false);
         $plain = $this->getJson('/api/v1/admin/reports/inventory/aging')->assertOk()->json();
         $this->assertNull($plain['totals']['cost_value'], 'stock at cost is a financial figure');
         $this->assertNull($plain['buckets'][0]['cost_value']);

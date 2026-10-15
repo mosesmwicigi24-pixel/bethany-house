@@ -87,6 +87,7 @@ class PdfReportAlignmentTest extends TestCase
         foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial'] as $p) {
             $viewer->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
+        \Tests\ReportAccess::asOwner($viewer);
         $page = $this->actingAs($viewer, 'sanctum')
             ->getJson('/api/v1/admin/reports/financial/profit-loss?start_date='
                 . now()->subDay()->toDateString() . '&end_date=' . now()->addDay()->toDateString())
@@ -114,6 +115,7 @@ class PdfReportAlignmentTest extends TestCase
         foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial'] as $p) {
             $viewer->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
+        \Tests\ReportAccess::asOwner($viewer);
         $page = $this->actingAs($viewer, 'sanctum')
             ->getJson('/api/v1/admin/reports/financial/profit-loss?start_date='
                 . now()->subDay()->toDateString() . '&end_date=' . now()->addDay()->toDateString())

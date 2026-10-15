@@ -66,6 +66,7 @@ class ReportPerformanceTest extends TestCase
         foreach ([...\Tests\ReportAccess::PAGES, 'orders.view'] as $p) {
             $u->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
+        \Tests\ReportAccess::asOwner($u);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($u);
     }

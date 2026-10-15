@@ -71,6 +71,7 @@ class ReportOutletFilterTest extends TestCase
         foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial', 'customers.view'] as $p) {
             $u->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
+        \Tests\ReportAccess::asOwner($u);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($u);
     }

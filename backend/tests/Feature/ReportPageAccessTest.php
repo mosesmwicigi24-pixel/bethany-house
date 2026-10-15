@@ -214,7 +214,14 @@ class ReportPageAccessTest extends TestCase
 
     private function mayView(string $role, string $page): bool
     {
-        return in_array($role, self::PAGES[$page]['roles'], true);
+        if (! in_array($role, self::PAGES[$page]['roles'], true)) {
+            return false;
+        }
+
+        // Owner, 2026-10-15 (FinancialVisibility): the money pages are the
+        // owner's, whatever page permission a role carries — Finance & Cash
+        // also for the roles that hold reports.financial (the grant above).
+        return ! in_array($page, \App\Support\FinancialVisibility::MONEY_PAGES, true) || $page === 'financial';
     }
 
     private function mayExport(string $role, string $page): bool
@@ -330,10 +337,12 @@ class ReportPageAccessTest extends TestCase
         ]);
     }
 
-    public function test_accountant_views_six_pages_and_exports_none(): void
+    public function test_accountant_views_four_pages_and_exports_none(): void
     {
+        // Six page grants; Sales and Performance are money pages, the owner's
+        // since 2026-10-15. Finance & Cash stays — it is her work.
         $this->actAs('accountant');
-        foreach (['sales', 'production', 'inventory', 'procurement', 'performance', 'financial'] as $page) {
+        foreach (['production', 'inventory', 'procurement', 'financial'] as $page) {
             foreach (self::PAGES[$page]['view'] as $url) {
                 $this->assertAllowed('GET', $url, "accountant views {$page}");
             }
@@ -344,7 +353,7 @@ class ReportPageAccessTest extends TestCase
                 $this->assertRefused('GET', '/api/v1/admin/reports/pdf/' . self::PAGES[$page]['pdf'], "accountant prints {$page}");
             }
         }
-        foreach (['executive', 'customers', 'signals', 'data_quality', 'explorer'] as $page) {
+        foreach (['executive', 'sales', 'customers', 'performance', 'signals', 'data_quality', 'explorer'] as $page) {
             $this->assertRefused('GET', self::PAGES[$page]['view'][0], "accountant views {$page}");
         }
     }
@@ -371,8 +380,10 @@ class ReportPageAccessTest extends TestCase
 
     public function test_an_export_permission_without_the_page_opens_nothing(): void
     {
-        $this->actWith(['reports.export', 'reports.export_supply', 'reports.sales']);
-        $this->assertAllowed('GET', '/api/v1/admin/reports/sales/summary?export=csv', 'sales held');
+        // An operational page (Sales is a money page — the owner's since
+        // 2026-10-15 — so it would prove nothing about the export rule).
+        $this->actWith(['reports.export', 'reports.export_supply', 'reports.production']);
+        $this->assertAllowed('GET', '/api/v1/admin/reports/pdf/production', 'production held');
         $this->assertRefused('GET', '/api/v1/admin/reports/inventory/stock-on-hand?export=csv', 'inventory not held');
         $this->assertRefused('GET', '/api/v1/admin/reports/pdf/procurement', 'procurement not held');
     }
@@ -390,11 +401,17 @@ class ReportPageAccessTest extends TestCase
             }
         }
 
-        // A single page carries its drills and no others.
+        // A single page carries its drills and no others — Finance & Cash, the
+        // one money page a non-owner (a finance role) still opens.
+        $this->actWith(['reports.financial']);
+        $this->assertAllowed('GET', '/api/v1/admin/reports/drill/revenue', 'financial → revenue');
+        $this->assertAllowed('GET', '/api/v1/admin/reports/drill/expenses', 'financial → expenses');
+        $this->assertRefused('GET', '/api/v1/admin/reports/drill/orders', 'financial → orders');
+        $this->assertRefused('GET', '/api/v1/admin/reports/drill/new_customers', 'financial → new customers');
+
+        // A money page's drills are the owner's, whatever page a role holds.
         $this->actWith(['reports.performance']);
-        $this->assertAllowed('GET', '/api/v1/admin/reports/drill/revenue', 'performance → revenue');
-        $this->assertRefused('GET', '/api/v1/admin/reports/drill/orders', 'performance → orders');
-        $this->assertRefused('GET', '/api/v1/admin/reports/drill/new_customers', 'performance → new customers');
+        $this->assertRefused('GET', '/api/v1/admin/reports/drill/revenue', 'performance (not the owner) → revenue');
     }
 
     public function test_the_outlet_list_follows_any_report_page(): void
@@ -473,10 +490,15 @@ class ReportPageAccessTest extends TestCase
 
     public function test_dashboard_kpis_follow_the_sales_report(): void
     {
+        // The multi-day revenue row is the Sales report's — the owner's since
+        // 2026-10-15. An outlet manager's money is today's, on the dashboard
+        // stats (test_dashboard_revenue_follows_the_sales_report).
         $this->actAs('outlet_manager');
-        $this->assertAllowed('GET', '/api/v1/admin/reports/dashboard/kpis', 'OM dashboard kpis');
+        $this->assertRefused('GET', '/api/v1/admin/reports/dashboard/kpis', 'OM dashboard kpis');
         $this->actAs('procurement_manager');
         $this->assertRefused('GET', '/api/v1/admin/reports/dashboard/kpis', 'PM dashboard kpis');
+        $this->actAs('super_admin');
+        $this->assertAllowed('GET', '/api/v1/admin/reports/dashboard/kpis', 'owner dashboard kpis');
     }
 
     // ── the migration ────────────────────────────────────────────────────────

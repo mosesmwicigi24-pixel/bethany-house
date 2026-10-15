@@ -45,7 +45,7 @@ trait ConstrainsRawQueriesToViewer
 
         match ($scope) {
             DataScope::None => $query->whereRaw('1 = 0'),
-            DataScope::Own => $query->where("{$ordersAlias}.created_by", $user->id),
+            DataScope::Own => $query->whereIn("{$ordersAlias}.created_by", $user->teamIds()),
             // An EMPTY assignment means nothing, never everything.
             DataScope::Outlet => $query->whereIn(
                 "{$ordersAlias}.outlet_id",

@@ -127,7 +127,7 @@ class Customer extends Model
             \App\Enums\DataScope::Outlet => $query->atOutlets(\App\Services\DataScopeResolver::outletIds($user)),
             \App\Enums\DataScope::Own    => $query->whereExists(fn ($o) => $o->selectRaw('1')->from('orders')
                 ->whereColumn('orders.customer_id', 'customers.id')
-                ->where('orders.created_by', $user->id)
+                ->whereIn('orders.created_by', $user->teamIds())
                 ->whereNotIn('orders.status', \App\Models\Order::DEAD_STATUSES)
                 ->where(fn ($w) => $w->where('orders.status', 'pending')
                     ->orWhereNull('orders.payment_status')

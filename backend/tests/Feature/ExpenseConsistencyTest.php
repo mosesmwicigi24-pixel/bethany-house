@@ -43,6 +43,7 @@ class ExpenseConsistencyTest extends TestCase
         foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial'] as $perm) {
             $user->givePermissionTo(Permission::findOrCreate($perm, 'sanctum'));
         }
+        \Tests\ReportAccess::asOwner($user);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 
