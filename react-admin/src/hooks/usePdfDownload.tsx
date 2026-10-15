@@ -19,7 +19,7 @@ export type PdfDocumentType =
     | "expenses"
     | "quotations";
 
-export type PdfDocumentSubtype = "invoice" | undefined;
+export type PdfDocumentSubtype = "invoice" | "receipt" | undefined;
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
@@ -29,6 +29,12 @@ interface UsePdfDownloadResult {
         id: number,
         subtype?: PdfDocumentSubtype
     ) => Promise<boolean>;
+    /** The PDF as a File (for the share sheet), or null after telling the user why. */
+    fetchFile: (
+        type: PdfDocumentType,
+        id: number,
+        subtype?: PdfDocumentSubtype
+    ) => Promise<File | null>;
     loading: boolean;
 }
 
@@ -36,12 +42,12 @@ export function usePdfDownload(): UsePdfDownloadResult {
     const [loading, setLoading] = useState(false);
     const toast = useToastStore();
 
-    const download = useCallback(
+    const fetchFile = useCallback(
         async (
             type: PdfDocumentType,
             id: number,
             subtype?: PdfDocumentSubtype
-        ): Promise<boolean> => {
+        ): Promise<File | null> => {
             setLoading(true);
             try {
                 const base =
@@ -60,19 +66,17 @@ export function usePdfDownload(): UsePdfDownloadResult {
                 });
 
                 // Held for approval: the approval dialog takes over.
-                if (await heldFromFetch(res)) return false;
+                if (await heldFromFetch(res)) return null;
 
                 if (!res.ok) {
                     const err = await res
                         .json()
                         .catch(() => ({ message: "PDF generation failed." }));
                     toast.error(err.message ?? "Failed to generate PDF.");
-                    return false;
+                    return null;
                 }
 
                 const blob = await res.blob();
-                const blobUrl = URL.createObjectURL(blob);
-
                 const filename = deriveFilename(
                     res.headers.get("Content-Disposition"),
                     type,
@@ -80,18 +84,10 @@ export function usePdfDownload(): UsePdfDownloadResult {
                     subtype
                 );
 
-                const a = document.createElement("a");
-                a.href = blobUrl;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
-
-                return true;
+                return new File([blob], filename, { type: "application/pdf" });
             } catch (err: any) {
                 toast.error(err?.message ?? "An error occurred while downloading the PDF.");
-                return false;
+                return null;
             } finally {
                 setLoading(false);
             }
@@ -99,10 +95,36 @@ export function usePdfDownload(): UsePdfDownloadResult {
         [toast]
     );
 
-    return { download, loading };
+    const download = useCallback(
+        async (
+            type: PdfDocumentType,
+            id: number,
+            subtype?: PdfDocumentSubtype
+        ): Promise<boolean> => {
+            const file = await fetchFile(type, id, subtype);
+            if (!file) return false;
+            saveFile(file);
+            return true;
+        },
+        [fetchFile]
+    );
+
+    return { download, fetchFile, loading };
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+/** Hand a file to the browser as a download (on a phone: its PDF viewer, with print and share). */
+export function saveFile(file: File): void {
+    const blobUrl = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+}
 
 function deriveFilename(
     contentDisposition: string | null,
@@ -117,6 +139,8 @@ function deriveFilename(
     const label =
         subtype === "invoice"
             ? "Invoice"
+            : subtype === "receipt"
+            ? "Receipt"
             : type
                   .split("-")
                   .map((w) => w.charAt(0).toUpperCase() + w.slice(1))

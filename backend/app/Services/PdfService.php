@@ -754,6 +754,101 @@ HTML;
             $meta, $parties, self::itemsTable($columns, $rows), [], $extra);
     }
 
+    /**
+     * One receipt for a whole order (owner, 2026-10-15): what was bought,
+     * every payment that has SETTLED (status paid, net of refunds — the same
+     * money truth as Order::totalPaid), and the balance still due, or PAID IN
+     * FULL. Built from the order as it stands, so a reprint shows today's
+     * position. Pending, rejected and voided payments are not money received
+     * and are left off. The per-payment receipt above (quote-originated
+     * invoices) is unchanged.
+     *
+     * $order needs: items, settled_payments[{paid_at, payment_method,
+     * provider_reference, amount, refund_amount}], total_paid, balance_due.
+     */
+    public static function orderReceipt(array $order): string
+    {
+        $currency = $order['currency_code'] ?? 'KES';
+        $custName = $order['customer_name'] ?? 'Customer';
+        $balance  = (float) ($order['balance_due'] ?? 0);
+        $paidUp   = $balance < 0.01;
+
+        $meta = [
+            'Order #'  => $order['order_number'] ?? '—',
+            'Date'     => self::date($order['created_at'] ?? null),
+            'Location' => $order['outlet_name'] ?? '—',
+        ];
+        if (!empty($order['cashier_name'])) {
+            $meta['Served By'] = $order['cashier_name'];
+        }
+        $meta['Issued'] = self::date(now()->toIso8601String());
+
+        $parties = self::partyRow(
+            'Received From', $custName,
+            array_filter([$order['customer_email'] ?? '', $order['customer_phone'] ?? ''])
+        );
+
+        $columns = [
+            ['key' => 'qty',        'label' => 'Qty',                   'align' => 'right', 'width' => '7%'],
+            ['key' => 'desc',       'label' => 'Product / Description'],
+            ['key' => 'unit_price', 'label' => 'Unit Price', 'align' => 'right', 'width' => '16%', 'mono' => true],
+            ['key' => 'amount',     'label' => 'Amount',     'align' => 'right', 'width' => '16%', 'mono' => true],
+        ];
+        $rows = array_map(function ($item) use ($currency) {
+            $qty   = (float) ($item['quantity'] ?? 0);
+            $price = (float) ($item['unit_price'] ?? 0);
+            $disc  = (float) ($item['discount_amount'] ?? 0);
+            $line  = (float) ($item['subtotal'] ?? ($qty * $price - $disc));
+            $var   = $item['variant_name'] ?? '';
+            $sku   = $item['sku'] ?? '';
+            return [
+                'qty'        => number_format($qty),
+                'desc'       => $item['product_name'] ?? '—',
+                'desc_sub'   => trim(($var ? "Variant: {$var}" : '') . ($sku ? " | SKU: {$sku}" : '')),
+                'unit_price' => self::money($qty > 0 ? $line / $qty : $price, $currency),
+                'amount'     => self::money($line, $currency),
+            ];
+        }, $order['items'] ?? []);
+
+        $totals = [
+            'subtotal' => $order['subtotal']        ?? 0,
+            'discount' => $order['discount_amount'] ?? 0,
+            'tax'      => $order['tax_amount']      ?? 0,
+            'shipping' => $order['shipping_amount'] ?? 0,
+            'total'    => $order['total_amount']    ?? 0,
+            'currency' => $currency,
+        ];
+
+        $payRows = '';
+        foreach ($order['settled_payments'] ?? [] as $p) {
+            $method   = htmlspecialchars(ucfirst(str_replace('_', ' ', $p['payment_method'] ?? '—')));
+            $ref      = htmlspecialchars((string) ($p['provider_reference'] ?? ''));
+            $dt       = self::date($p['paid_at'] ?? ($p['created_at'] ?? null));
+            $amount   = (float) ($p['amount'] ?? 0);
+            $refunded = (float) ($p['refund_amount'] ?? 0);
+            $payRows .= "<tr><td>{$dt}</td><td>{$method}</td><td>" . ($ref !== '' ? $ref : '—') . '</td><td class="tr">'
+                . self::money($amount, $currency) . '</td></tr>';
+            if ($refunded > 0.005) {
+                $payRows .= "<tr><td>{$dt}</td><td>Refund</td><td>" . ($ref !== '' ? $ref : '—') . '</td><td class="tr">- '
+                    . self::money($refunded, $currency) . '</td></tr>';
+            }
+        }
+        $extra = '<div class="pay-title">Payments received</div>'
+            . '<table class="pay-table"><thead><tr><th>Date</th><th>Paid By</th><th>Reference</th><th class="tr">Amount</th></tr></thead>'
+            . '<tbody>' . ($payRows !== '' ? $payRows : '<tr><td colspan="4">No payment received yet.</td></tr>') . '</tbody></table>'
+            . '<table class="totals-table" style="margin-top:8px">'
+            . '<tr><td class="tl">Order Total</td><td class="tv">' . self::money((float) ($order['total_amount'] ?? 0), $currency) . '</td></tr>'
+            . '<tr><td class="tl">Total Paid</td><td class="tv">' . self::money((float) ($order['total_paid'] ?? 0), $currency) . '</td></tr>'
+            . ($paidUp
+                ? '<tr class="total-line"><td class="tl">PAID IN FULL</td><td class="tv">' . self::money(0, $currency) . ' due</td></tr>'
+                : '<tr class="total-line"><td class="tl">Balance Due</td><td class="tv">' . self::money($balance, $currency) . '</td></tr>')
+            . '</table>'
+            . '<div class="notes-box" style="margin-top:10px;color:#666">Thank you for shopping with us.</div>';
+
+        return self::page('Receipt', $order['order_number'] ?? '—', $paidUp ? 'paid' : 'partial',
+            $meta, $parties, self::itemsTable($columns, $rows), $totals, $extra);
+    }
+
     // =========================================================================
     // SHIPMENT
     // =========================================================================
