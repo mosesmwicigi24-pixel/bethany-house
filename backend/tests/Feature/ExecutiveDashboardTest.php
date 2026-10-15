@@ -39,6 +39,7 @@ class ExecutiveDashboardTest extends TestCase
         foreach (array_merge([...\Tests\ReportAccess::PAGES], $extraPerms) as $perm) {
             $user->givePermissionTo(Permission::findOrCreate($perm, 'sanctum'));
         }
+        \Tests\ReportAccess::asOwner($user);
         if ($assignedOutlet) {
             $user->outlets()->attach($assignedOutlet->id);
         }
@@ -164,15 +165,22 @@ class ExecutiveDashboardTest extends TestCase
 
     public function test_financial_block_requires_reports_financial(): void
     {
+        // Since 2026-10-15 the Executive page is the owner's, and the owner
+        // holds reports.financial: the CFO block is always there for whoever
+        // can open the page. Anyone else — even holding every page grant and
+        // reports.financial — is refused the page itself.
         Outlet::factory()->create();
         $this->reportViewer();
-
-        $res = $this->getJson('/api/v1/admin/reports/executive')->assertOk();
-        $this->assertNull($res->json('kpis.financial'));
-
-        $this->reportViewer(['reports.financial']);
         $res = $this->getJson('/api/v1/admin/reports/executive')->assertOk();
         $this->assertNotNull($res->json('kpis.financial'));
+
+        $user = User::factory()->create();
+        foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial'] as $perm) {
+            $user->givePermissionTo(Permission::findOrCreate($perm, 'sanctum'));
+        }
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        Sanctum::actingAs($user);
+        $this->getJson('/api/v1/admin/reports/executive')->assertForbidden();
     }
 
     /**

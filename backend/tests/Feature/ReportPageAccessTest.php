@@ -380,8 +380,10 @@ class ReportPageAccessTest extends TestCase
 
     public function test_an_export_permission_without_the_page_opens_nothing(): void
     {
-        $this->actWith(['reports.export', 'reports.export_supply', 'reports.sales']);
-        $this->assertAllowed('GET', '/api/v1/admin/reports/sales/summary?export=csv', 'sales held');
+        // An operational page (Sales is a money page — the owner's since
+        // 2026-10-15 — so it would prove nothing about the export rule).
+        $this->actWith(['reports.export', 'reports.export_supply', 'reports.production']);
+        $this->assertAllowed('GET', '/api/v1/admin/reports/pdf/production', 'production held');
         $this->assertRefused('GET', '/api/v1/admin/reports/inventory/stock-on-hand?export=csv', 'inventory not held');
         $this->assertRefused('GET', '/api/v1/admin/reports/pdf/procurement', 'procurement not held');
     }
@@ -399,11 +401,17 @@ class ReportPageAccessTest extends TestCase
             }
         }
 
-        // A single page carries its drills and no others.
+        // A single page carries its drills and no others — Finance & Cash, the
+        // one money page a non-owner (a finance role) still opens.
+        $this->actWith(['reports.financial']);
+        $this->assertAllowed('GET', '/api/v1/admin/reports/drill/revenue', 'financial → revenue');
+        $this->assertAllowed('GET', '/api/v1/admin/reports/drill/expenses', 'financial → expenses');
+        $this->assertRefused('GET', '/api/v1/admin/reports/drill/orders', 'financial → orders');
+        $this->assertRefused('GET', '/api/v1/admin/reports/drill/new_customers', 'financial → new customers');
+
+        // A money page's drills are the owner's, whatever page a role holds.
         $this->actWith(['reports.performance']);
-        $this->assertAllowed('GET', '/api/v1/admin/reports/drill/revenue', 'performance → revenue');
-        $this->assertRefused('GET', '/api/v1/admin/reports/drill/orders', 'performance → orders');
-        $this->assertRefused('GET', '/api/v1/admin/reports/drill/new_customers', 'performance → new customers');
+        $this->assertRefused('GET', '/api/v1/admin/reports/drill/revenue', 'performance (not the owner) → revenue');
     }
 
     public function test_the_outlet_list_follows_any_report_page(): void

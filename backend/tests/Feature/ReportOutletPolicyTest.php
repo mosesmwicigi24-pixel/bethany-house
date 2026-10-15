@@ -19,6 +19,12 @@ use Tests\TestCase;
 /**
  * Reports are BUSINESS-WIDE, and every family agrees on that.
  *
+ * Since 2026-10-15 (owner; App\Support\FinancialVisibility) the MONEY pages
+ * are the owner's — Finance & Cash also for holders of reports.financial — so
+ * an outlet manager no longer reads Sales or Executive at all. What stays
+ * pinned below: operational pages are still business-wide for her, the
+ * outlet filter still filters (as the owner), and every family agrees.
+ *
  * Owner's decision, 2026-09-30. Before it, MetricEngine scoped a non-admin to
  * their assigned outlets while ReportController, EnhancedReportController and
  * AnalyticsController applied no scope at all — so the one scoped user read a
@@ -115,6 +121,19 @@ class ReportOutletPolicyTest extends TestCase
         ];
     }
 
+    private function owner(): User
+    {
+        $user = User::factory()->create();
+        $user->assignRole(Role::findOrCreate('super_admin', 'sanctum'));
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        Sanctum::actingAs($user);
+
+        return $user;
+    }
+
+    /** Money pages this fixture's manager is refused (her role holds reports.financial). */
+    private const REFUSED_TO_MANAGER = ['sales summary', 'sales by outlet', 'executive'];
+
     /**
      * Read twice: a cache key that varied by caller would serve the second
      * read from the first caller's answer, so warm is the interesting pass.
@@ -123,9 +142,12 @@ class ReportOutletPolicyTest extends TestCase
     public function test_a_manager_assigned_to_one_outlet_still_sees_the_whole_business(string $path): void
     {
         $this->outletManager();
+        $name = array_search([$path], self::everyReport(), true);
+        $refused = in_array($name, self::REFUSED_TO_MANAGER, true);
 
         foreach (['cold', 'warm'] as $pass) {
-            $this->getJson($path . '?' . self::WINDOW)->assertOk();
+            $status = $this->getJson($path . '?' . self::WINDOW)->status();
+            $this->assertSame($refused ? 403 : 200, $status, "{$name} ({$pass})");
         }
     }
 
@@ -137,6 +159,8 @@ class ReportOutletPolicyTest extends TestCase
         $this->assertSame(510, (int) $valuation->json('grand_totals.total_units'),
             'Nairobi 10 + Mombasa 500');
 
+        // The money figures, as the owner — the person who now reads them.
+        $this->owner();
         $summary = $this->getJson('/api/v1/admin/reports/sales/summary?' . self::WINDOW)->assertOk();
         $this->assertSame(42_200_000.0, (float) $summary->json('summary.total_revenue'),
             'both outlets, not one');
@@ -147,14 +171,12 @@ class ReportOutletPolicyTest extends TestCase
 
     public function test_an_explicit_outlet_id_filters_rather_than_failing(): void
     {
-        $this->outletManager();
+        $this->owner();
 
         $mine = $this->getJson("/api/v1/admin/reports/sales/summary?outlet_id={$this->mine->id}&" . self::WINDOW)
             ->assertOk();
         $this->assertSame(200_000.0, (float) $mine->json('summary.total_revenue'), 'Nairobi only');
 
-        // The other outlet is a filter too, not a 403: whoever may read the
-        // reports may read any of them, and the figure must be that outlet's.
         $theirs = $this->getJson("/api/v1/admin/reports/sales/summary?outlet_id={$this->theirs->id}&" . self::WINDOW)
             ->assertOk();
         $this->assertSame(42_000_000.0, (float) $theirs->json('summary.total_revenue'), 'Mombasa only');

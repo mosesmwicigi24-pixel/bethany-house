@@ -29,6 +29,23 @@ class CustomerFinancialIntelligenceTest extends TestCase
     use RefreshDatabase;
     use FreezesClockMidMonth;
 
+    /**
+     * Every report page granted, but NOT the owner — since 2026-10-15 such a
+     * person is refused the money pages (FinancialVisibility).
+     */
+    private function nonOwnerViewer(array $extraPerms = []): User
+    {
+        $user = User::factory()->create();
+        $user->assignRole(Role::findOrCreate('sales_manager', 'sanctum'));
+        foreach (array_merge([...\Tests\ReportAccess::PAGES], $extraPerms) as $perm) {
+            $user->givePermissionTo(Permission::findOrCreate($perm, 'sanctum'));
+        }
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        Sanctum::actingAs($user);
+
+        return $user;
+    }
+
     private function viewer(array $extraPerms = []): User
     {
         $user = User::factory()->create();
@@ -38,6 +55,7 @@ class CustomerFinancialIntelligenceTest extends TestCase
         foreach (array_merge([...\Tests\ReportAccess::PAGES, 'customers.view'], $extraPerms) as $perm) {
             $user->givePermissionTo(Permission::findOrCreate($perm, 'sanctum'));
         }
+        \Tests\ReportAccess::asOwner($user);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 
@@ -198,10 +216,21 @@ class CustomerFinancialIntelligenceTest extends TestCase
     public function test_financial_intelligence_requires_reports_financial(): void
     {
         Outlet::factory()->create();
-        $this->viewer();
-        $this->getJson('/api/v1/admin/reports/financial-intelligence')->assertStatus(403);
 
-        // Customer intelligence needs only reports.view.
+        // Every page but Finance & Cash, not the owner: refused both — the
+        // money pages are the owner's since 2026-10-15.
+        $this->nonOwnerViewer();
+        $this->getJson('/api/v1/admin/reports/financial-intelligence')->assertStatus(403);
+        $this->getJson('/api/v1/admin/reports/customer-intelligence')->assertStatus(403);
+
+        // A finance role keeps Finance & Cash — and only that.
+        $this->nonOwnerViewer(['reports.financial']);
+        $this->getJson('/api/v1/admin/reports/financial-intelligence')->assertOk();
+        $this->getJson('/api/v1/admin/reports/customer-intelligence')->assertStatus(403);
+
+        // The owner reads both.
+        $this->viewer();
+        $this->getJson('/api/v1/admin/reports/financial-intelligence')->assertOk();
         $this->getJson('/api/v1/admin/reports/customer-intelligence')->assertOk();
     }
 }

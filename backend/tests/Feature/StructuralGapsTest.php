@@ -41,6 +41,7 @@ class StructuralGapsTest extends TestCase
         foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial'] as $p) {
             $staff->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
+        \Tests\ReportAccess::asOwner($staff);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($staff);
     }

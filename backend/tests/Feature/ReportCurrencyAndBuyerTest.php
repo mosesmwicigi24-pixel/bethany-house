@@ -61,6 +61,7 @@ class ReportCurrencyAndBuyerTest extends TestCase
         foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial', 'customers.view', 'customers.insights'] as $p) {
             $staff->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
+        \Tests\ReportAccess::asOwner($staff);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($staff);
     }
@@ -387,6 +388,7 @@ class ReportCurrencyAndBuyerTest extends TestCase
         foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial', 'reports.export'] as $p) {
             $exporter->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
+        \Tests\ReportAccess::asOwner($exporter);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($exporter);
 

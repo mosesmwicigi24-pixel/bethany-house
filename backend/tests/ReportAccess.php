@@ -35,6 +35,29 @@ final class ReportAccess
         foreach (self::PAGES as $slug) {
             $user->givePermissionTo(Permission::findOrCreate($slug, 'sanctum'));
         }
+        self::asOwner($user);
+    }
+
+    /**
+     * Make a report-figures viewer the owner — since 2026-10-15 the person
+     * who sees the money pages. For tests that grant the pages themselves.
+     */
+    public static function asOwner(User $user): void
+    {
         $user->assignRole(Role::findOrCreate('super_admin', 'sanctum'));
+    }
+
+    /**
+     * For helpers handed a permission list: grant it, and if it names a money
+     * page other than Finance & Cash, the viewer is the owner (see above).
+     * Finance & Cash alone stays a finance role's, not the owner's.
+     */
+    public static function ownerIfMoney(User $user, array $permissions): void
+    {
+        $money = array_map(fn ($p) => \App\Support\ReportPages::PAGES[$p],
+            array_diff(\App\Support\FinancialVisibility::MONEY_PAGES, ['financial']));
+        if (array_intersect($permissions, $money)) {
+            self::asOwner($user);
+        }
     }
 }

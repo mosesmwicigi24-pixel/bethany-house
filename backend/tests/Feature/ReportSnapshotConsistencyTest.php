@@ -54,6 +54,7 @@ class ReportSnapshotConsistencyTest extends TestCase
             }
             $this->staff->givePermissionTo(Permission::findOrCreate($name, 'sanctum'));
         }
+        \Tests\ReportAccess::asOwner($this->staff);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($this->staff);
 

@@ -158,10 +158,12 @@ class OutletDataScopeTest extends TestCase
         $this->assertSame(DataScope::All, DataScopeResolver::for($customer, 'orders.view'));
     }
 
-    // ── Reports stay business-wide (owner, 2026-10-03) ───────────────────────
+    // ── Reports: business-wide, but the owner's (owner, 2026-10-15) ─────────
 
-    public function test_an_outlet_scoped_manager_still_reads_the_whole_business_in_reports(): void
+    public function test_an_outlet_manager_sees_her_outlets_money_today_not_the_sales_report(): void
     {
+        // Reversed 2026-10-15: the business-wide Sales report is the owner's.
+        // An outlet manager's money is TODAY's, at her outlet, on the dashboard.
         $this->orderAt($this->mine, ['total_amount' => 1_000, 'subtotal' => 1_000]);
         $this->orderAt($this->theirs, ['total_amount' => 9_000, 'subtotal' => 9_000]);
 
@@ -169,14 +171,17 @@ class OutletDataScopeTest extends TestCase
         $this->assertSame(DataScope::Outlet, DataScopeResolver::for($om, 'orders.view'));
 
         $window = 'start_date=2020-01-01&end_date=2030-12-31';
-        $summary = $this->getJson("/api/v1/admin/reports/sales/summary?{$window}")->assertOk();
+        $this->getJson("/api/v1/admin/reports/sales/summary?{$window}")->assertForbidden();
+        $this->assertEquals(1_000.0, (float) $this->getJson('/api/v1/admin/dashboard')->assertOk()->json('stats.today_sales'));
 
-        $this->assertSame(10_000.0, (float) $summary->json('summary.total_revenue'),
-            'reports are business-wide: both outlets, not the manager\'s one');
-
-        // …while the same manager's order list is bounded to the one outlet.
+        // …and her order list is bounded to the one outlet, as before.
         $ids = collect($this->getJson('/api/v1/admin/orders')->assertOk()->json('data'))->pluck('outlet_id')->unique();
         $this->assertSame([$this->mine->id], $ids->values()->all());
+
+        // The owner still reads the report across both outlets.
+        $this->withRole('super_admin');
+        $summary = $this->getJson("/api/v1/admin/reports/sales/summary?{$window}")->assertOk();
+        $this->assertSame(10_000.0, (float) $summary->json('summary.total_revenue'));
     }
 
     public function test_every_report_page_route_is_business_wide(): void

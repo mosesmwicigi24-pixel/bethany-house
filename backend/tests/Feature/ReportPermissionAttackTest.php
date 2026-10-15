@@ -276,11 +276,19 @@ class ReportPermissionAttackTest extends TestCase
             . ($q ? '?' . implode('&', $q) : '');
     }
 
-    private function actAs(array $perms, string $userType = 'staff', string $status = 'active'): User
+    /**
+     * $owner: since 2026-10-15 only the owner opens the money pages
+     * (FinancialVisibility), so a positive control must be the owner; every
+     * attack runs as a non-owner holding the grants it names.
+     */
+    private function actAs(array $perms, string $userType = 'staff', string $status = 'active', bool $owner = false): User
     {
         $user = User::factory()->create(['user_type' => $userType, 'status' => $status]);
         foreach ($perms as $p) {
             $user->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
+        }
+        if ($owner) {
+            \Tests\ReportAccess::asOwner($user);
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
@@ -382,6 +390,13 @@ class ReportPermissionAttackTest extends TestCase
 
         $this->assertLessThan(500, $status, "{$route}: server error — " . self::excerpt($res));
 
+        // Since 2026-10-15 a money page is refused outright to anyone but the
+        // owner — nothing to strip because nothing is sent.
+        if (in_array(self::pageOf(self::uri($route, $ids)), \App\Support\FinancialVisibility::MONEY_PAGES, true)) {
+            $this->assertSame(403, $status, "{$route}: a money page reached by a non-owner");
+            return;
+        }
+
         if (in_array($route, self::FINANCIAL_GATED, true) || in_array($route, self::FINANCIAL_IN_CONTROLLER, true)) {
             $this->assertSame(403, $status, "{$route}: financial route reached without reports.financial");
             return;
@@ -406,6 +421,19 @@ class ReportPermissionAttackTest extends TestCase
             $this->assertSame([], $keys, "{$route}: cost/profit/margin fields without reports.financial: "
                 . implode(', ', array_slice($keys, 0, 12)));
         }
+    }
+
+    /** The report page a URI belongs to, read from its route's report.page middleware. */
+    private static function pageOf(string $uri): ?string
+    {
+        $route = app('router')->getRoutes()->match(\Illuminate\Http\Request::create($uri, 'GET'));
+        foreach ($route->gatherMiddleware() as $m) {
+            if (is_string($m) && str_starts_with($m, 'report.page:')) {
+                return substr($m, strlen('report.page:'));
+            }
+        }
+
+        return null;
     }
 
     /** Dotted paths of keys that name cost / profit / margin / COGS. */
@@ -490,17 +518,12 @@ class ReportPermissionAttackTest extends TestCase
      */
     public function test_an_exporter_without_customer_access_gets_a_customers_pdf_without_contacts(): void
     {
+        // Since 2026-10-15 the Customers page is the owner's: a non-owner
+        // exporter is refused the PDF outright — the file never leaves, so
+        // there is nothing to redact. (The owner holds customer access.)
         $ids = self::seedReportFixture();
         $this->actAs([...\Tests\ReportAccess::PAGES, 'reports.export']);
-        $res = $this->get(self::uri('pdf/customers', $ids));
-        $this->assertSame(200, $res->getStatusCode());
-
-        preg_match_all('/stream\r?\n(.*?)\r?\nendstream/s', (string) $res->getContent(), $m);
-        $text = implode('', array_map(fn ($s) => (string) @gzuncompress($s), $m[1]));
-        $this->assertNotSame('', $text, 'could not inflate the PDF — the probe is blind');
-
-        $found = array_values(array_filter(self::CONTACT_MARKERS, fn ($mk) => str_contains($text, $mk)));
-        $this->assertSame([], $found, 'pdf/customers carries customer contacts for a reports.view-only user: ' . implode(', ', $found));
+        $this->assertSame(403, $this->get(self::uri('pdf/customers', $ids))->getStatusCode());
     }
 
     /**
@@ -520,14 +543,10 @@ class ReportPermissionAttackTest extends TestCase
     #[\PHPUnit\Framework\Attributes\DataProvider('customerCsvRoutes')]
     public function test_an_exporter_without_customer_access_gets_csvs_without_contacts(string $route, string $name): void
     {
+        // As above: a money page's CSV does not leave for a non-owner at all.
         $ids = self::seedReportFixture();
         $this->actAs([...\Tests\ReportAccess::PAGES, 'reports.export']);
-        $res = $this->get(self::uri($route, $ids, 'export=csv'));
-
-        $this->assertSame(200, $res->getStatusCode(), self::excerpt($res));
-        $this->assertStringContainsString('text/csv', (string) $res->headers->get('Content-Type'));
-        $this->assertNoMarkers($res, self::CONTACT_MARKERS, "{$route} CSV");
-        $this->assertStringContainsString($name, self::body($res), "{$route} CSV: names must survive the redaction");
+        $this->assertSame(403, $this->get(self::uri($route, $ids, 'export=csv'))->getStatusCode(), $route);
     }
 
     /** The control: WITH customers.view the same CSVs carry contacts — so the test above is not passing on files that never had any. */
@@ -535,7 +554,7 @@ class ReportPermissionAttackTest extends TestCase
     public function test_positive_control_customer_csvs_carry_contacts_for_customer_staff(string $route, string $name): void
     {
         $ids = self::seedReportFixture();
-        $this->actAs([...\Tests\ReportAccess::PAGES, 'reports.export', 'customers.view', 'customers.insights']);
+        $this->actAs([...\Tests\ReportAccess::PAGES, 'reports.export', 'customers.view', 'customers.insights'], owner: true);
         $body = self::body($this->get(self::uri($route, $ids, 'export=csv')));
 
         $found = array_filter(self::CONTACT_MARKERS, fn ($m) => str_contains($body, $m));
@@ -673,7 +692,7 @@ class ReportPermissionAttackTest extends TestCase
     public function test_positive_control_full_user_sees_the_data(string $route, string $marker): void
     {
         $ids = self::seedReportFixture();
-        $this->actAs([...\Tests\ReportAccess::PAGES, 'reports.financial', 'reports.export', 'customers.view', 'customers.insights']);
+        $this->actAs([...\Tests\ReportAccess::PAGES, 'reports.financial', 'reports.export', 'customers.view', 'customers.insights'], owner: true);
         $res = $this->getJson(self::uri($route, $ids))->assertOk();
         $this->assertStringContainsString($marker, (string) $res->getContent(), "{$route}: fixture did not produce {$marker}");
     }

@@ -36,6 +36,7 @@ class InventoryValuationTest extends TestCase
         foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial'] as $p) {
             $user->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
+        \Tests\ReportAccess::asOwner($user);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
         $this->outlet = Outlet::factory()->create();

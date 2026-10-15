@@ -65,6 +65,7 @@ class ReportRouteSmokeTest extends TestCase
         foreach ([...\Tests\ReportAccess::PAGES, 'reports.financial', 'reports.export', 'customers.view', 'customers.insights'] as $p) {
             $user->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
         }
+        \Tests\ReportAccess::asOwner($user);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($user);
 

@@ -40,11 +40,15 @@ class ReportFinalRebreakTest extends TestCase
         CurrencyPricing::forget();
     }
 
-    private function actAs(array $perms): User
+    /** $asOwner false: a non-owner holding these grants (an attack). */
+    private function actAs(array $perms, bool $asOwner = true): User
     {
         $u = User::factory()->create();
         foreach ($perms as $p) {
             $u->givePermissionTo(Permission::findOrCreate($p, 'sanctum'));
+        }
+        if ($asOwner) {
+            \Tests\ReportAccess::ownerIfMoney($u, $perms);
         }
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         Sanctum::actingAs($u);
@@ -181,7 +185,9 @@ class ReportFinalRebreakTest extends TestCase
             ]);
             $this->pay($o, 5_000, ['paid_at' => now()->subDays(10)]);
         }
-        $this->actAs([...\Tests\ReportAccess::PAGES, 'reports.export']);
+        // A non-owner: since 2026-10-15 these money pages refuse her outright,
+        // so no contact can ride along — the assertion below still holds.
+        $this->actAs([...\Tests\ReportAccess::PAGES, 'reports.export'], false);
 
         foreach (['sales/by-customer', 'second-purchase', 'customers/lifetime-value', 'drill/new_customers?period=last_30',
                   'drill/revenue?period=last_30', 'sales/by-customer?export=csv'] as $route) {

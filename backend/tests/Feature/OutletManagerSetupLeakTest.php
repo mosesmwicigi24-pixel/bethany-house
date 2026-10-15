@@ -49,9 +49,9 @@ class OutletManagerSetupLeakTest extends TestCase
         return $user->fresh();
     }
 
-    private function eodReport(): int
+    private function eodReport(?Outlet $outlet = null): int
     {
-        $outlet = Outlet::factory()->create();
+        $outlet ??= Outlet::factory()->create();
         $clerk  = User::factory()->create();
         $registerId = DB::table('cash_registers')->insertGetId([
             'register_number' => 'REG-' . uniqid(), 'outlet_id' => $outlet->id,
@@ -140,8 +140,11 @@ class OutletManagerSetupLeakTest extends TestCase
 
     public function test_outlet_manager_still_reviews_eod_reports(): void
     {
-        $id = $this->eodReport();
-        $this->actAs('outlet_manager');
+        // At her own outlet: since 2026-10-15 a reviewer reads her outlets'
+        // reports only (another outlet's is FinancialVisibilityTest's case).
+        $shop = Outlet::factory()->create();
+        $id = $this->eodReport($shop);
+        $this->actAs('outlet_manager')->outlets()->attach($shop->id);
 
         $this->getJson('/api/v1/admin/pos/reports/eod-admin')->assertOk()->assertJsonPath('data.0.id', $id);
         $this->getJson("/api/v1/admin/pos/reports/eod-admin/{$id}")->assertOk();
