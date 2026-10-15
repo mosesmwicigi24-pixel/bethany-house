@@ -115,6 +115,7 @@ return Application::configure(basePath: dirname(__DIR__))
         \App\Console\Commands\RunIntelligenceChecks::class,
         \App\Console\Commands\SendEodReports::class,
         \App\Console\Commands\SendOverdueProductionNotifications::class,
+        \App\Console\Commands\RemindOpenTills::class,
         \App\Console\Commands\PurgeOldActivityLogs::class,
         \App\Console\Commands\RunScheduledBackups::class,
         \App\Console\Commands\SealAuditTrail::class,
@@ -131,6 +132,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('eod:send-reports')->everyMinute();
 
         $schedule->command('notifications:overdue-production')->dailyAt('08:00');
+
+        // The morning check (owner, 2026-10-15): nudge cashiers whose till is
+        // still open at night; list tills left open overnight for managers.
+        $schedule->command('tills:remind-open --evening')->dailyAt('21:30')->withoutOverlapping();
+        $schedule->command('tills:remind-open --morning')->dailyAt('07:45')->withoutOverlapping();
         // Retention prunes request_logs only; the activity log is permanent.
         $schedule->command('logs:purge-old')->weekly();
 

@@ -99,6 +99,21 @@ export interface CartItem {
  * cash, the variance and every sales total that adds up to them — they are
  * absent, not zero — and sets `blind: true`.
  */
+/**
+ * A till left open from an earlier day (the morning check, 2026-10-15). Until
+ * it is reported on and counted, the server refuses every sale and payment
+ * with code TILL_FROM_EARLIER_DAY.
+ */
+export interface StaleTill {
+    id: number;
+    outlet_id: number;
+    outlet_name: string | null;
+    opened_at: string | null;
+    /** "YYYY-MM-DD" (Nairobi) — the day its report is written for. */
+    trading_day: string | null;
+    eod_submitted: boolean;
+}
+
 export interface CashRegister {
     id: number;
     outlet_id: number;
@@ -309,6 +324,10 @@ export const posApi = {
             register: CashRegister | null;
             has_open_register: boolean;
             eod_submitted: boolean;
+            /** The morning check is on (config pos.same_day_till_required). */
+            same_day_till_required?: boolean;
+            /** Her till left open from an earlier day, at any outlet. */
+            stale_till?: StaleTill | null;
         }>(
             "/v1/admin/pos/register/status",
             { params: { outlet_id: String(outlet_id) } },

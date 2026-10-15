@@ -291,6 +291,26 @@ class NotificationService
         self::send($recipients, $notification);
     }
 
+    /** Evening nudge to the cashier whose till is still open (TillGate). */
+    public static function tillStillOpen(User $cashier, string $outletName, string $tradingDay): void
+    {
+        self::send($cashier, new \App\Notifications\TillLeftOpenNotification('evening', $outletName, 1, [], $tradingDay));
+    }
+
+    /**
+     * Morning list of tills left open overnight at an outlet: to the owner
+     * and that outlet's manager(s) — the people who verify till counts.
+     *
+     * @param list<string> $cashierNames
+     */
+    public static function tillsLeftOpen(int $outletId, string $outletName, array $cashierNames): void
+    {
+        self::send(
+            self::resolve(['super_admin'], $outletId, [], false),
+            new \App\Notifications\TillLeftOpenNotification('morning', $outletName, count($cashierNames), $cashierNames)
+        );
+    }
+
     public static function orderPlaced(int $orderId, string $orderNumber, ?int $outletId = null): void
     {
         // Owners (all branches) + the manager(s) of the outlet the order was

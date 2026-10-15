@@ -161,7 +161,7 @@ final class EventContext
      * agent and to no role — CampaignPermissionIsServiceAccountOnlyTest).
      * Not user_type=system: that is how super admins are stored.
      */
-    private static function isAgent(mixed $causer): bool
+    public static function isAgent(mixed $causer): bool
     {
         if (!$causer) {
             return false;

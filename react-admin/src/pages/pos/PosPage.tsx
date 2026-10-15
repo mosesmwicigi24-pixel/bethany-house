@@ -54,6 +54,7 @@ import PaymentModal from "./components/PaymentModal";
 import ReceiptModal from "./components/ReceiptModal";
 import SalesHistoryDrawer from "./components/SalesHistoryDrawer";
 import UserEodModal from "./components/UserEodModal";
+import MorningCheckGate from "./components/MorningCheckGate";
 import PosReturnsModal from "./components/PosReturnsModal";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2842,7 +2843,17 @@ export default function PosPage() {
             qc.invalidateQueries({ queryKey: ["orders"] });
             qc.invalidateQueries({ queryKey: ["pos-sales"] });
         },
-        onError: (err: { message: string }) => toast.error(err.message),
+        onError: (err: { message: string; reason?: string }) => {
+            toast.error(err.message);
+            // The morning check refused it (midnight passed with the POS open,
+            // or the till was closed elsewhere): re-read the till so the gate
+            // shows. The order itself is kept and can be paid once it's open.
+            // (The API client carries the server's `code` as `reason`.)
+            if (err.reason === "TILL_FROM_EARLIER_DAY" || err.reason === "TILL_NOT_OPEN") {
+                setShowPaymentModal(false);
+                void refetchRegister();
+            }
+        },
     });
 
     // Called by PaymentModal - payment details are ready, post them
@@ -3015,6 +3026,22 @@ export default function PosPage() {
             <div className="flex items-center justify-center h-full">
                 <Spinner size="lg" />
             </div>
+        );
+    }
+
+    // ── Morning check: a till left open from an earlier day ────────────────────
+    // Comes before everything else; the server refuses every sale meanwhile.
+    const staleTill = registerData?.stale_till ?? null;
+    if (staleTill) {
+        return (
+            <MorningCheckGate
+                till={staleTill}
+                outlets={outlets}
+                onProgress={() => {
+                    clearCart();
+                    void refetchRegister();
+                }}
+            />
         );
     }
 

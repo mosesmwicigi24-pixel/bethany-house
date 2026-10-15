@@ -329,16 +329,14 @@ class PosController extends Controller
 
         $hasOpen = $register && $register->status === 'open';
 
-        // Check whether the user has submitted their EoD report for today
-        $eodSubmitted = false;
-        if ($hasOpen) {
-            $eodSubmitted = DB::table('cash_register_eod_reports')
-                ->where('register_id', $register->id)
-                ->where('user_id', $user->id)
-                ->whereDate('report_date', today())
-                ->whereNotNull('submitted_at')
-                ->exists();
-        }
+        // Has she filed the end-of-day report this till needs before closing?
+        $eodSubmitted = $hasOpen && \App\Services\Tills\TillGate::reportFiled($register, $user->id);
+
+        // The morning check: a till of hers left open from an earlier day, at
+        // any outlet. The POS shows a pop-up she cannot dismiss until it is
+        // reported on and counted; sales are refused server-side meanwhile.
+        $gateOn = (bool) config('pos.same_day_till_required', true);
+        $stale  = $gateOn ? \App\Services\Tills\TillGate::staleTill($user) : null;
 
         return response()->json([
             // Blind to its operator until finalized (Phase 4B): no expected
@@ -346,6 +344,10 @@ class PosController extends Controller
             'register'          => $register ? $this->transformRegister($register, $user) : null,
             'has_open_register' => $hasOpen,
             'eod_submitted'     => $eodSubmitted,
+            'same_day_till_required' => $gateOn,
+            'stale_till'        => $stale ? array_merge(\App\Services\Tills\TillGate::describe($stale), [
+                'eod_submitted' => \App\Services\Tills\TillGate::reportFiled($stale, $user->id),
+            ]) : null,
         ]);
     }
 
@@ -496,7 +498,8 @@ class PosController extends Controller
      * Registers opened before the lifecycle existed close through exactly
      * this path; they are not forced closed or rewritten.
      *
-     * GUARD: requires today's EoD report first (422 requires_eod:true).
+     * GUARD: requires the till's EoD report first (422 requires_eod:true) —
+     * dated its trading day or later (TillGate::reportFiled).
      */
     public function closeRegister(Request $request): JsonResponse
     {
@@ -522,15 +525,9 @@ class PosController extends Controller
             ->latest('opened_at')
             ->firstOrFail();
 
-        // Guard: EoD report must be submitted before closing
-        $eodSubmitted = DB::table('cash_register_eod_reports')
-            ->where('register_id', $register->id)
-            ->where('user_id', $user->id)
-            ->whereDate('report_date', today())
-            ->whereNotNull('submitted_at')
-            ->exists();
-
-        if (!$eodSubmitted) {
+        // Guard: EoD report must be submitted before closing — for a till left
+        // open overnight, the report for the day it was opened is what counts.
+        if (!\App\Services\Tills\TillGate::reportFiled($register, $user->id)) {
             return response()->json([
                 'message'      => 'Please submit your End of Day report before closing the register.',
                 'requires_eod' => true,
@@ -745,6 +742,12 @@ class PosController extends Controller
                 'production_orders' => [],
                 'replay'            => true,
             ], 200);
+        }
+
+        // The morning check: today's till, open, whatever the tender. After the
+        // replay path, so a double-tap of a sale made yesterday still answers.
+        if ($refusal = \App\Services\Tills\TillGate::refusal($user, $outletId)) {
+            return $refusal;
         }
 
         // Resolve payment list - normalise single-method and split-payments array
@@ -1873,9 +1876,20 @@ class PosController extends Controller
         $this->authoriseOutletAccess($user, $outletId);
 
         // Verify the register belongs to this user
-        CashRegister::where('id', $registerId)
+        $till = CashRegister::where('id', $registerId)
             ->where('opened_by', $user->id)
             ->firstOrFail();
+
+        // A report is for a day this till traded: from the day it opened to
+        // today. A future date — or one before it opened — would satisfy the
+        // close guard (TillGate::reportFiled) with a report about nothing.
+        $opened = $till->opened_at?->toDateString();
+        if ($date > today()->toDateString() || ($opened && $date < $opened)) {
+            return response()->json([
+                'message' => 'A report must be for a day this till was open'
+                    . ($opened ? " ({$opened} to today)." : '.'),
+            ], 422);
+        }
 
         // Only keep non-empty notes
         $cleanNotes = collect($validated['order_notes'] ?? [])
@@ -3977,6 +3991,12 @@ class PosController extends Controller
                            . 'Open the order, re-save it to take the stock again, then accept payment.',
                 'reason'  => 'stale_stock_hold',
             ], 422);
+        }
+
+        // The morning check, as for a sale: money taken at the POS goes into
+        // today's till, whatever the tender.
+        if ($refusal = \App\Services\Tills\TillGate::refusal($request->user(), (int) $order->outlet_id)) {
+            return $refusal;
         }
 
         $validated = $request->validate([
