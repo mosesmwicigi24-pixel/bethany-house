@@ -23,11 +23,42 @@ use App\Models\User;
  * that will stand. Each proposal applies at once inside the maker's band or
  * waits for signatures, leaving the live value untouched.
  *
+ * Cost lives on the KES row only (one figure: COGS, CostBasis, the reports and
+ * the cost bands all read it). A cost_price on any other currency's row in a
+ * save payload is DROPPED, not refused: the console used to send one on every
+ * row (null or a figure loaded from an old row), and the product_cost_change
+ * handler refuses a non-KES row outright — so from Phase 3C on, every product
+ * and variant save by a cost holder on a product with a USD/ZMW row failed
+ * with "Cost is kept on the KES price row only." The direct proposal API keeps
+ * that refusal; a save form just loses the stray field.
+ *
  * @return list<ChangeProposal> what was proposed (applied or waiting)
  */
 final class PriceRowWriter
 {
+    /** The one currency a cost is kept in. */
+    public const COST_CURRENCY = 'KES';
+
     public function __construct(private ProposalService $proposals) {}
+
+    /**
+     * A save payload's price rows with cost_price removed from every row that
+     * is not the KES row. For the create paths (product store, add variant),
+     * which write rows directly, and for write() below.
+     *
+     * @param  list<array<string, mixed>>  $prices
+     * @return list<array<string, mixed>>
+     */
+    public static function withCostOnKesOnly(array $prices): array
+    {
+        return array_map(static function (array $price): array {
+            if (strtoupper((string) ($price['currency_code'] ?? '')) !== self::COST_CURRENCY) {
+                unset($price['cost_price']);
+            }
+
+            return $price;
+        }, array_values($prices));
+    }
 
     /**
      * @param  array{currency_code: string, regular_price: mixed, sale_price?: mixed, cost_price?: mixed, sale_start_date?: mixed, sale_end_date?: mixed}  $price
@@ -36,6 +67,8 @@ final class PriceRowWriter
      */
     public function write(int $productId, ?int $variantId, array $price, User $user, bool $withDates): array
     {
+        $price = self::withCostOnKesOnly([$price])[0];
+
         $row = ProductPrice::where('product_id', $productId)
             ->when($variantId === null, fn ($q) => $q->whereNull('product_variant_id'), fn ($q) => $q->where('product_variant_id', $variantId))
             ->where('currency_code', $price['currency_code'])
