@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\{DB, Storage, Cache, Artisan};
 use App\Services\TaxCalculationService;
 use App\Services\ActivityLogService;
 use App\Services\ImageService;
+use App\Support\ServerError;
 
 class SettingController extends Controller
 {
@@ -159,7 +160,7 @@ class SettingController extends Controller
             DB::commit();
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to save settings.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to save settings.');
         }
 
         // Phase 2 - if tax-related settings changed, bust the tax calculation cache
@@ -487,7 +488,7 @@ class SettingController extends Controller
             Artisan::call('view:clear');
             Cache::forget('app_settings');
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Cache clear failed: ' . $e->getMessage()], 500);
+            return ServerError::respond($e, 'Cache clear failed.');
         }
 
         return response()->json(['message' => 'Cache cleared successfully.']);

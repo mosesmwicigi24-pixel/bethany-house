@@ -11,6 +11,7 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
+use App\Support\ServerError;
 
 class SeoIndex extends Component
 {
@@ -180,7 +181,7 @@ class SeoIndex extends Component
 
         } catch (\Exception $e) {
             DB::rollBack();
-            $this->flash('Save failed: ' . $e->getMessage(), 'error');
+            $this->flash(ServerError::message($e, 'Save failed.'), 'error');
         }
     }
 

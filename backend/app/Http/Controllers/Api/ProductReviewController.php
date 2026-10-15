@@ -7,6 +7,7 @@ use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Support\SortResolver;
+use App\Support\ServerError;
 
 class ProductReviewController extends Controller
 {
@@ -163,10 +164,7 @@ class ProductReviewController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to submit review',
-                'error' => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to submit review');
         }
     }
 
@@ -215,10 +213,7 @@ class ProductReviewController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to update review',
-                'error' => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to update review');
         }
     }
 
@@ -255,10 +250,7 @@ class ProductReviewController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to delete review',
-                'error' => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to delete review');
         }
     }
 
@@ -357,10 +349,7 @@ class ProductReviewController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to approve review',
-                'error' => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to approve review');
         }
     }
 
@@ -435,10 +424,7 @@ class ProductReviewController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'Failed to delete review',
-                'error' => $e->getMessage(),
-            ], 500);
+            return ServerError::respond($e, 'Failed to delete review');
         }
     }
 

@@ -7,6 +7,7 @@ use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use App\Support\ServerError;
 
 class LanguageController extends Controller
 {
@@ -195,7 +196,7 @@ class LanguageController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to delete language.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to delete language.');
         }
     }
 
@@ -274,7 +275,7 @@ class LanguageController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Failed to set default language.', 'error' => $e->getMessage()], 500);
+            return ServerError::respond($e, 'Failed to set default language.');
         }
     }
 }

@@ -9,6 +9,7 @@ use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 use Livewire\WithFileUploads;
+use App\Support\ServerError;
 
 class CategoryIndex extends Component
 {
@@ -235,7 +236,7 @@ class CategoryIndex extends Component
 
         } catch (\Exception $e) {
             DB::rollBack();
-            $this->flash('Save failed: ' . $e->getMessage(), 'error');
+            $this->flash(ServerError::message($e, 'Save failed.'), 'error');
         }
     }
 
