@@ -24,12 +24,18 @@
     <div class="header"><h1>New sign-in to your account</h1><p>Security · Bethany Hub</p></div>
     <div class="section">
         <p>Hello {{ $name }},</p>
+        @if($knownDevice)
+        <p>Your Bethany Hub password was just used from one of your devices, but on a network we have not seen you sign in from before.</p>
+        @else
         <p>Your Bethany Hub password was just used from a device we have not seen you sign in from before.</p>
+        @endif
         <table>
             <tr><td class="k">When</td><td>{{ $at }}</td></tr>
-            <tr><td class="k">Device</td><td>{{ $device }}</td></tr>
+            @if($account)<tr><td class="k">Account</td><td>{{ $account }}</td></tr>@endif
+            <tr><td class="k">Device</td><td>{{ $device }}@if($knownDevice && $namedByAdmin) <span style="color:#71717a">— named by an administrator</span>@elseif(!$knownDevice) <span style="color:#71717a">— not yet named</span>@endif</td></tr>
             <tr><td class="k">Address</td><td>{{ $ip }}@if($country) ({{ $country }})@endif</td></tr>
         </table>
+        <p style="font-size:12px;color:#71717a">The device type is what the browser reports; the name is the one given to it in Bethany Hub. A website cannot read a device's own name or owner.</p>
         <p>If this was you, there is nothing to do. If it was not, change your password now and tell your system administrator — they can end every session on your account.</p>
     </div>
     <div class="foot">Sent automatically by Bethany Hub. Activity on the hub is logged and reviewed.</div>

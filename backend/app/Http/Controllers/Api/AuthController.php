@@ -772,6 +772,9 @@ class AuthController extends Controller
         $user->terminal_pin_set    = app(TerminalPin::class)->isSet($user);
         $user->two_factor_required = app(TwoFactor::class)->requiredFor($user);
         $user->recovery_codes_left = $user->two_factor_enabled ? app(TwoFactor::class)->recoveryCodesLeft($user) : null;
+        // The device this session is on, so the console can ask for a name.
+        $deviceId = app(\App\Services\Auth\Devices::class)->currentId($user, request());
+        $user->current_device = $deviceId ? app(\App\Services\Auth\Devices::class)->presentById($deviceId) : null;
 
         // The most this user may discount at the till, on an order or on a
         // quotation, in percent — their role's limit (Setup → Discount

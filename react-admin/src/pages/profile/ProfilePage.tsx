@@ -16,6 +16,7 @@ import { authApi } from '@/api/auth'
 import { QrCode } from '@/components/security/QrCode'
 import { RecoveryCodes } from '@/components/security/RecoveryCodes'
 import { TerminalPinForm } from '@/components/security/TerminalPinForm'
+import { DeviceList } from '@/components/security/DeviceList'
 
 // ── Schemas ────────────────────────────────────────────────────────────────────
 
@@ -103,6 +104,12 @@ export default function ProfilePage() {
   const { data: sessionsData, refetch: refetchSessions } = useQuery({
     queryKey: ['profile-sessions'],
     queryFn:  () => profileApi.sessions(),
+    enabled:  activeTab === 'sessions',
+  })
+
+  const { data: devicesData, isLoading: devicesLoading, refetch: refetchDevices } = useQuery({
+    queryKey: ['profile-devices'],
+    queryFn:  () => profileApi.devices(),
     enabled:  activeTab === 'sessions',
   })
 
@@ -232,6 +239,25 @@ export default function ProfilePage() {
       refetchSessions()
       toast.success('Session revoked.')
     },
+    onError: (err: ApiError) => toast.error(err.message),
+  })
+
+  // Named sign-in devices: naming mine, removing a lost one (its sessions end).
+  const setUser = useAuthStore((s) => s.setUser)
+  const renameDeviceMutation = useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string | null }) => profileApi.renameDevice(id, name),
+    onSuccess: (res) => {
+      refetchDevices()
+      refetchSessions()
+      const me = useAuthStore.getState().user
+      if (me?.current_device?.id === res.device.id) setUser({ ...me, current_device: res.device })
+      toast.success(res.message)
+    },
+    onError: (err: ApiError) => toast.error(err.message),
+  })
+  const removeDeviceMutation = useMutation({
+    mutationFn: (id: number) => profileApi.removeDevice(id),
+    onSuccess: (res) => { refetchDevices(); refetchSessions(); toast.success(res.message) },
     onError: (err: ApiError) => toast.error(err.message),
   })
 
@@ -596,7 +622,7 @@ export default function ProfilePage() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <p className="text-sm font-medium text-surface-800 truncate">{s.agent || 'Unknown device'}</p>
+                          <p className="text-sm font-medium text-surface-800 truncate">{s.device?.label ?? (s.agent || 'Unknown device')}</p>
                           {s.is_current && <span className="badge badge-success text-2xs">Current</span>}
                         </div>
                         <p className="text-xs text-surface-400">{s.ip} · {timeAgo(s.last_used)}</p>
@@ -612,6 +638,25 @@ export default function ProfilePage() {
                       )}
                     </div>
                   ))}
+                </div>
+              </div>
+
+              <div className="card">
+                <div className="card-header">
+                  <h3 className="font-semibold text-sm text-surface-900">Your devices</h3>
+                  <p className="text-xs text-surface-500 mt-0.5">
+                    Name each device so sign-in alerts say whose machine it is. The type is what the browser reports.
+                  </p>
+                </div>
+                <div className="card-body">
+                  <DeviceList
+                    rows={devicesData?.data ?? []}
+                    loading={devicesLoading}
+                    asAdmin={false}
+                    busy={renameDeviceMutation.isPending || removeDeviceMutation.isPending}
+                    onRename={(id, name) => renameDeviceMutation.mutate({ id, name })}
+                    onRemove={(id) => removeDeviceMutation.mutate(id)}
+                  />
                 </div>
               </div>
             </div>

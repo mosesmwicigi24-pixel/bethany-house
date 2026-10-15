@@ -479,6 +479,10 @@ Route::prefix('v1')->group(function () {
                 Route::post('/sessions/revoke-all',       [ProfileController::class, 'revokeAllSessions']);
                 Route::post('/sessions/{tokenId}/revoke', [ProfileController::class, 'revokeSession']);
                 Route::get('/activity',                   [ProfileController::class, 'activity']);
+                // Named sign-in devices: the person's own list, names and removals.
+                Route::get('/devices',                    [ProfileController::class, 'devices']);
+                Route::put('/devices/{deviceId}',         [ProfileController::class, 'renameDevice'])->whereNumber('deviceId');
+                Route::delete('/devices/{deviceId}',      [ProfileController::class, 'removeDevice'])->whereNumber('deviceId');
                 // The person's own terminal PIN (Phase 4C) — set/change with their password.
                 Route::put('/terminal-pin',               [AccountSecurityController::class, 'setTerminalPin']);
             });
@@ -949,6 +953,9 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{id}/sessions',                   [UserSecurityController::class, 'sessions'])->whereNumber('id');
                 Route::post('/{id}/sessions/revoke-all',       [UserSecurityController::class, 'revokeAll'])->whereNumber('id');
                 Route::post('/{id}/sessions/{tokenId}/revoke', [UserSecurityController::class, 'revoke'])->whereNumber('id')->whereNumber('tokenId');
+                Route::get('/{id}/devices',                    [UserSecurityController::class, 'devices'])->whereNumber('id');
+                Route::put('/{id}/devices/{deviceId}',         [UserSecurityController::class, 'renameDevice'])->whereNumber('id')->whereNumber('deviceId');
+                Route::delete('/{id}/devices/{deviceId}',      [UserSecurityController::class, 'removeDevice'])->whereNumber('id')->whereNumber('deviceId');
                 Route::put('/{id}/status',          [UserController::class, 'updateStatus'])
                     ->middleware('permission:users.edit,sanctum');
                 Route::post('/{id}/reset-password', [UserController::class, 'resetPassword'])

@@ -67,7 +67,7 @@ class SuspiciousSignInTest extends TestCase
 
         $this->signIn($u, self::FIREFOX_WIN, '102.68.1.9', ['CF-IPCountry' => 'NG'])->assertOk();
 
-        Mail::assertQueued(NewSignInDeviceMail::class, fn ($m) => $m->hasTo($u->email) && $m->device === 'Firefox on Windows' && $m->country === 'NG');
+        Mail::assertQueued(NewSignInDeviceMail::class, fn ($m) => $m->hasTo($u->email) && $m->device === 'Windows PC · Firefox' && $m->country === 'NG');
         $this->assertDatabaseHas('activity_log', ['event' => 'suspicious_sign_in', 'subject_id' => $u->id]);
     }
 
