@@ -557,6 +557,10 @@ HTML;
             'Order #'        => $order['order_number'] ?? '—',
             'Payment Method' => ucfirst(str_replace('_', ' ', $order['payment_method'] ?? '—')),
         ];
+        // A quote-born order's issued invoice number, and its revision (2026-10-16).
+        if ($isInvoice && !empty($order['invoice_number'])) {
+            $meta = ['Invoice #' => $order['invoice_number'] . (!empty($order['invoice_revision']) ? ' · Rev ' . (int) $order['invoice_revision'] : '')] + $meta;
+        }
 
         $shipName  = '';
         $shipLines = [];
@@ -692,7 +696,7 @@ HTML;
         $custName = trim(($q['customer_first_name'] ?? '') . ' ' . ($q['customer_last_name'] ?? '')) ?: 'Customer';
 
         $meta = [
-            'Quotation #' => $q['quote_number'] ?? 'DRAFT',
+            'Quotation #' => ($q['quote_number'] ?? 'DRAFT') . (!empty($q['revision']) ? ' · Rev ' . (int) $q['revision'] : ''),
             'Date'        => self::date($q['issued_at'] ?? $q['created_at'] ?? null),
             'Valid Until' => self::date($q['valid_until'] ?? null),
             'Served By'   => $q['served_by'] ?? '—',
@@ -763,7 +767,7 @@ HTML;
         $pay      = $snap['payment'] ?? [];
 
         $meta = [
-            'Receipt #'   => $snap['receipt_number'] ?? '—',
+            'Receipt #'   => ($snap['receipt_number'] ?? '—') . (!empty($snap['revision']) ? ' · Rev ' . (int) $snap['revision'] : ''),
             'Order #'     => $snap['order_number'] ?? '—',
             'Date'        => self::date($snap['issued_at'] ?? null),
             'Paid Via'    => ucfirst(str_replace('_', ' ', $pay['method'] ?? '—')),

@@ -802,6 +802,12 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:orders.set_deposit,sanctum');
                 Route::post('/{id}/update-currency',     [OrderController::class, 'updateCurrency'])
                     ->middleware('permission:orders.edit,sanctum');
+                // Revisions of the order's issued documents (2026-10-16): the
+                // invoice copy's history; the owner's payment-detail correction
+                // (super admin only, checked in the controller).
+                Route::get('/{id}/document-revisions', [\App\Http\Controllers\Api\SalesDocumentRevisionController::class, 'index'])->whereNumber('id');
+                Route::put('/{id}/payments/{paymentId}/revise', [\App\Http\Controllers\Api\SalesDocumentRevisionController::class, 'revisePayment'])
+                    ->whereNumber('id')->whereNumber('paymentId');
                 Route::post('/{id}/shipments',           [ShipmentController::class, 'create'])
                     ->middleware('permission:shipment.create,sanctum');
                 Route::post('/{id}/payment',             [PaymentController::class, 'initiatePayment'])
@@ -865,6 +871,9 @@ Route::prefix('v1')->group(function () {
                 // so whoever may draft a quotation may ask.
                 Route::post('/reprice',  [QuotationController::class, 'reprice'])
                     ->middleware('permission:quotations.create,sanctum');
+                // Owner revision of an issued quotation (super admin, checked in the controller).
+                Route::put('/{id}/revise',    [QuotationController::class, 'revise'])->whereNumber('id');
+                Route::get('/{id}/revisions', [QuotationController::class, 'revisions'])->whereNumber('id');
                 Route::put('/{id}',      [QuotationController::class, 'update'])
                     ->middleware('permission:quotations.create,sanctum');
                 Route::delete('/{id}',   [QuotationController::class, 'destroy'])

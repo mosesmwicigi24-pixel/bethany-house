@@ -125,11 +125,20 @@ class QuotationController extends Controller
     {
         $quotation = Quotation::findOrFail($id);
 
-        // An issued quotation is frozen — corrections are made by issuing a new one.
+        // An issued quotation is frozen here — the owner revises it
+        // (revise(), which keeps the issued version as a revision).
         if ($quotation->status !== Quotation::DRAFT) {
             return response()->json(['message' => 'Only a draft quotation can be edited.'], 422);
         }
 
+        $this->applyEdit($request, $quotation);
+
+        return response()->json(['quotation' => $quotation->fresh('items')]);
+    }
+
+    /** The edit itself: the same rules for a draft edit and an owner revision. */
+    private function applyEdit(Request $request, Quotation $quotation): void
+    {
         // Phase 4A: the edit form was filled from a masked screen for a
         // masked role; a mask sent back is the value on file.
         \App\Support\CustomerContacts::restoreMasked($request, [
@@ -164,7 +173,44 @@ class QuotationController extends Controller
             $this->syncItemsAndTotals($quotation, $validated['items']);
         });
 
-        return response()->json(['quotation' => $quotation->fresh('items')]);
+    }
+
+    /**
+     * PUT /api/v1/admin/quotations/{id}/revise — the owner revises an issued
+     * quotation (until it becomes an order), with a reason. The issued
+     * version is kept as a revision; a declined or expired quote is offered
+     * again. See App\Services\Documents\SalesDocumentRevisions.
+     */
+    public function revise(Request $request, int $id): JsonResponse
+    {
+        if (!$request->user()?->hasRole('super_admin', 'sanctum')) {
+            return response()->json(['message' => 'Only the owner (super admin) revises an issued quotation.'], 403);
+        }
+        $reason = trim((string) $request->validate(['reason' => 'required|string|min:5|max:500'])['reason']);
+        $quotation = Quotation::findOrFail($id);
+
+        $doc = \App\Services\Documents\SalesDocumentRevisions::reviseQuotation(
+            $quotation, fn (Quotation $q) => $this->applyEdit($request, $q), $reason, $request->user(),
+        );
+
+        return response()->json([
+            'message'   => "Quotation revised (Rev {$doc->revision}).",
+            'quotation' => $quotation->fresh('items'),
+            'revision'  => $doc->revision,
+        ]);
+    }
+
+    /** GET /api/v1/admin/quotations/{id}/revisions — every earlier issued version, newest first. */
+    public function revisions(int $id): JsonResponse
+    {
+        $quotation = Quotation::findOrFail($id);
+        $doc = \App\Models\SalesDocument::where('type', \App\Models\SalesDocument::QUOTATION)
+            ->where('documentable_type', Quotation::class)->where('documentable_id', $quotation->id)->first();
+
+        return response()->json([
+            'current_revision' => (int) ($doc?->revision ?? 0),
+            'revisions'        => $doc ? \App\Models\DocumentRevision::listFor(\App\Models\DocumentRevision::QUOTATION, $doc->id) : [],
+        ]);
     }
 
     public function destroy(int $id): JsonResponse

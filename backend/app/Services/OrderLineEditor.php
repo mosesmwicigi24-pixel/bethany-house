@@ -267,6 +267,12 @@ class OrderLineEditor
                 ]);
             }
 
+            // Lines can change while the totals do not (a swap at the same
+            // price): the invoice copy is refreshed from the lines too.
+            \Illuminate\Support\Facades\DB::afterCommit(fn () => \App\Services\Documents\SalesDocumentRevisions::refreshInvoice(
+                $order, $actor, $opts['reason'] ?? null,
+            ));
+
             ActivityLogService::log('order_items_edited', $order, [
                 'order_number'           => $order->order_number,
                 'reason'                 => $opts['reason'] ?? null,

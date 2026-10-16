@@ -16,6 +16,8 @@ import { useToastStore } from "@/store/toast.store";
 import { useAuthStore } from "@/store/auth.store";
 import { discountCapMessage, minUnitPrice, useDiscountCap } from "@/lib/discountCap";
 import type { ApiError } from "@/types";
+import { salesRevisionApi } from "@/api/salesRevisions";
+import { RevisionRows } from "@/components/documents/SalesRevisions";
 
 interface CurrencyOption { code: string; name: string; symbol: string }
 
@@ -43,14 +45,14 @@ function customerName(q: Quotation): string {
 }
 
 export default function QuotationsPage() {
-    const { can } = usePermissions();
+    const { can, isSuperAdmin } = usePermissions();
     const toast = useToastStore();
     const qc = useQueryClient();
 
     const [page, setPage] = useState(1);
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] = useState("");
-    const [builder, setBuilder] = useState<{ open: boolean; editing: Quotation | null }>({ open: false, editing: null });
+    const [builder, setBuilder] = useState<{ open: boolean; editing: Quotation | null; revise?: boolean }>({ open: false, editing: null });
 
     const params = useMemo(() => ({
         page,
@@ -196,6 +198,12 @@ export default function QuotationsPage() {
                                                     </button>
                                                 )}
                                                 {issued && <PdfDownloadButton type="quotations" id={q.id} label="Quote PDF" />}
+                                                {isSuperAdmin && ["sent", "accepted", "declined", "expired"].includes(q.status) && (
+                                                    <button className="btn-ghost btn-sm" onClick={() => setBuilder({ open: true, editing: q, revise: true })}
+                                                        title="Change the issued quotation; the issued version is kept">
+                                                        Revise (owner)
+                                                    </button>
+                                                )}
                                                 {q.status === "converted" && q.invoice_document && (
                                                     <PdfDownloadButton type="orders" id={q.invoice_document.documentable_id} subtype="invoice" label="Invoice PDF" />
                                                 )}
@@ -234,6 +242,7 @@ export default function QuotationsPage() {
             {builder.open && (
                 <QuotationBuilder
                     editing={builder.editing}
+                    revise={builder.revise}
                     onClose={() => setBuilder({ open: false, editing: null })}
                     onSaved={() => { invalidate(); setBuilder({ open: false, editing: null }); }}
                 />
@@ -301,7 +310,14 @@ interface ProductHit { id: number; name: string; sku: string; price: number }
 
 function newKey() { return Math.random().toString(36).slice(2); }
 
-function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | null; onClose: () => void; onSaved: () => void }) {
+function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quotation | null; revise?: boolean; onClose: () => void; onSaved: () => void }) {
+    // Owner revision of an issued quotation (2026-10-16): same form, plus a reason.
+    const [reviseReason, setReviseReason] = useState("");
+    const { data: revisionsData } = useQuery({
+        queryKey: ["quotation-revisions", editing?.id],
+        queryFn: () => salesRevisionApi.quotationRevisions(editing!.id),
+        enabled: !!revise && !!editing,
+    });
     const toast = useToastStore();
     const currentUserName = useAuthStore((s) => s.user?.name ?? "");
     const [firstName, setFirstName] = useState(editing?.customer_first_name ?? "");
@@ -501,9 +517,15 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
                 notes: notes || null,
                 items,
             };
+            if (revise && editing) {
+                if (reviseReason.trim().length < 5) {
+                    return Promise.reject({ message: "Say why you are revising it (at least 5 characters)." } as ApiError);
+                }
+                return quotationApi.revise(editing.id, { ...payload, reason: reviseReason.trim() });
+            }
             return editing ? quotationApi.update(editing.id, payload) : quotationApi.create(payload);
         },
-        onSuccess: () => { toast.success(editing ? "Quotation updated." : "Quotation created."); onSaved(); },
+        onSuccess: (res: any) => { toast.success(revise ? (res?.message ?? "Quotation revised.") : editing ? "Quotation updated." : "Quotation created."); onSaved(); },
         onError: (e: ApiError) => { setErrors(e.errors ?? {}); toast.error(e.message); },
     });
 
@@ -514,17 +536,29 @@ function QuotationBuilder({ editing, onClose, onSaved }: { editing: Quotation | 
             open
             onClose={onClose}
             size="full"
-            title={editing ? `Edit Quotation ${editing.quote_number ?? "(draft)"}` : "New Quotation"}
+            title={revise && editing ? `Revise ${editing.quote_number} (owner) — Rev ${(revisionsData?.current_revision ?? 0) + 1}` : editing ? `Edit Quotation ${editing.quote_number ?? "(draft)"}` : "New Quotation"}
             footer={
                 <div className="flex justify-end gap-2">
                     <button className="btn-secondary" onClick={onClose}>Cancel</button>
                     <button className="btn-primary" disabled={!canSave} onClick={() => save.mutate()}>
-                        {save.isPending ? <Spinner size="sm" /> : editing ? "Save changes" : "Create quotation"}
+                        {save.isPending ? <Spinner size="sm" /> : revise ? `Save as Rev ${(revisionsData?.current_revision ?? 0) + 1}` : editing ? "Save changes" : "Create quotation"}
                     </button>
                 </div>
             }
         >
             <div className="space-y-5">
+                {revise && (
+                    <div className="rounded-lg border border-line bg-surface-50 p-3 space-y-2">
+                        <p className="text-xs text-surface-600">
+                            The quotation as issued is kept, and the customer's link and PDF show the new revision.
+                            A declined or expired quotation is offered again.
+                        </p>
+                        <Field label="Why are you revising it? *">
+                            <FieldInput value={reviseReason} onChange={(e) => setReviseReason(e.target.value)} placeholder="e.g. Customer asked for five instead of three" />
+                        </Field>
+                        {(revisionsData?.revisions.length ?? 0) > 0 && <RevisionRows rows={revisionsData!.revisions} label="Quotation" />}
+                    </div>
+                )}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <Field label="Customer first name" error={errors.customer_first_name?.[0]}>
                         <FieldInput value={firstName} onChange={(e) => setFirstName(e.target.value)} />

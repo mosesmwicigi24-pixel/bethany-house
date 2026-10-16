@@ -103,6 +103,10 @@ export const quotationApi = {
     update: (id: number, data: QuotationInput) =>
         put<{ quotation: Quotation }>(`/v1/admin/quotations/${id}`, data),
 
+    // The owner revises an ISSUED quotation (until it becomes an order); the issued version is kept.
+    revise: (id: number, data: QuotationInput & { reason: string }) =>
+        put<{ message: string; quotation: Quotation; revision: number }>(`/v1/admin/quotations/${id}/revise`, data),
+
     delete: (id: number) =>
         del<{ message: string }>(`/v1/admin/quotations/${id}`),
 
