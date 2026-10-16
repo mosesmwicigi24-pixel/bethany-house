@@ -158,6 +158,26 @@ class Order extends Model
                 $order->public_token_issued_at = now();
             }
         });
+
+        // An order born from a quotation carries an issued INVOICE copy. Any
+        // change to what it shows — lines and prices (via the totals),
+        // shipping, currency, a void — refreshes the copy and keeps the old
+        // one as a revision (2026-10-16), whichever editor made the change.
+        // After commit: a rolled-back edit leaves the invoice alone.
+        static::updated(function (self $order) {
+            if (!$order->wasChanged(\App\Services\Documents\SalesDocumentRevisions::ORDER_FIELDS)) {
+                return;
+            }
+            $id     = $order->id;
+            $by     = auth()->user();
+            $reason = request()?->input('reason');
+            \Illuminate\Support\Facades\DB::afterCommit(function () use ($id, $by, $reason) {
+                $fresh = self::withoutViewerScope()->find($id);
+                if ($fresh) {
+                    \App\Services\Documents\SalesDocumentRevisions::refreshInvoice($fresh, $by instanceof User ? $by : null, is_string($reason) ? $reason : null);
+                }
+            });
+        });
     }
 
     /** The capability that governs reading an order. */

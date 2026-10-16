@@ -4,6 +4,8 @@ import type { Paginated } from "@/api/quotations";
 export interface Invoice {
     id: number;
     invoice_number: string;
+    /** Rev N since it was first issued: the copy follows its order (2026-10-16). */
+    revision?: number;
     issued_at: string | null;
     due_date: string | null;
     amount: number;

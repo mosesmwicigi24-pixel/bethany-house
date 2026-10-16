@@ -221,6 +221,12 @@ class DocumentPdfController extends Controller
         ]);
 
         $data                  = $order->toArray();
+        if ($isInvoice) {
+            $inv = SalesDocument::where('type', SalesDocument::INVOICE)
+                ->where('documentable_type', Order::class)->where('documentable_id', $order->id)->first();
+            $data['invoice_number']   = $inv?->number;
+            $data['invoice_revision'] = (int) ($inv?->revision ?? 0);
+        }
         $guestName = trim(($order->customer_first_name ?? '') . ' ' . ($order->customer_last_name ?? ''));
         $data['customer_name'] = $order->user
             ? trim($order->user->first_name . ' ' . $order->user->last_name)
@@ -317,6 +323,8 @@ class DocumentPdfController extends Controller
 
         $data = $quotation->toArray();
         $data['outlet_name'] = $quotation->outlet?->name;
+        $data['revision'] = (int) SalesDocument::where('type', SalesDocument::QUOTATION)
+            ->where('documentable_type', Quotation::class)->where('documentable_id', $quotation->id)->value('revision');
 
         $html = PdfService::quotation($this->masked($data, 'quotations.view'));
         return $this->makePdf($html, 'Quotation-' . ($quotation->quote_number ?? $quotation->id));

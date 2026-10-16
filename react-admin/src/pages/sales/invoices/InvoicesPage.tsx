@@ -94,7 +94,10 @@ export default function InvoicesPage() {
                         <tbody>
                             {rows.map((inv) => (
                                 <tr key={inv.id}>
-                                    <td className="font-medium tabular-nums">{inv.invoice_number}</td>
+                                    <td className="font-medium tabular-nums">
+                                        {inv.invoice_number}
+                                        {(inv.revision ?? 0) > 0 && <span className="ml-1.5 text-2xs font-normal text-surface-500">Rev {inv.revision}</span>}
+                                    </td>
                                     <td>{inv.customer_name ?? "—"}</td>
                                     <td className="text-sm text-surface-500 tabular-nums">{inv.quotation?.number ?? "—"}</td>
                                     <td className="text-right tabular-nums">{money(inv.amount, inv.currency_code)}</td>

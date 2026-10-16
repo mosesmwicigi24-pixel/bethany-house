@@ -116,6 +116,7 @@ class InvoiceController extends Controller
         return [
             'id'             => $doc->id,
             'invoice_number' => $doc->number,
+            'revision'       => (int) $doc->revision,
             'issued_at'      => optional($doc->issued_at)->toIso8601String(),
             'due_date'       => optional($doc->due_date)->toDateString(),
             'amount'         => (float) $doc->amount,

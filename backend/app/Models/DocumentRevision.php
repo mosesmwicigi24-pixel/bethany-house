@@ -15,6 +15,9 @@ class DocumentRevision extends Model
 
     public const PURCHASE_ORDER = 'purchase_order';
     public const GOODS_RECEIPT  = 'goods_receipt';
+    public const QUOTATION      = 'quotation';    // document_id = the QUO sales_documents row
+    public const INVOICE        = 'invoice';      // document_id = the INV sales_documents row
+    public const PAYMENT        = 'payment';      // document_id = payments.id (its RCP follows)
 
     protected $fillable = ['document_type', 'document_id', 'revision', 'snapshot', 'changes', 'reason', 'created_by'];
 

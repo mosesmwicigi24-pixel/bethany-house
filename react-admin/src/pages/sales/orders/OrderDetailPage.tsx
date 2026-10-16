@@ -25,6 +25,7 @@ import { useAuthStore } from "@/store/auth.store";
 import { discountCapHint, maxDiscountAmount, useDiscountCap } from "@/lib/discountCap";
 import { RecordHistory } from "@/components/audit/AuditParts";
 import { PendingChanges, NeedsApprovalHint, PROPOSALS_QUERY_KEY } from "@/components/approvals/PendingChanges";
+import { CorrectPaymentModal, OrderDocumentHistory } from "@/components/documents/SalesRevisions";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -3559,7 +3560,9 @@ export default function OrderDetailPage() {
 
     const refresh = () => qc.invalidateQueries({ queryKey: ["order", id] });
 
-    const { can: canDo } = usePermissions();
+    const { can: canDo, isSuperAdmin } = usePermissions();
+    // The owner corrects a recorded payment's details (2026-10-16).
+    const [correctingPayment, setCorrectingPayment] = useState<any | null>(null);
 
     // Send-to-production (MTO) per line: available once payment is received, for
     // staff who can raise production. The quote→invoice→receipt flow has no POS
@@ -4671,6 +4674,11 @@ export default function OrderDetailPage() {
                                                     <td className="px-4 py-3 align-top">
                                                         <p className="font-mono text-surface-500 text-2xs">{p.payment_number ?? "-"}</p>
                                                         {p.provider_reference && <p className="text-surface-400 font-mono text-2xs">{p.provider_reference}</p>}
+                                                        {isSuperAdmin && !["voided", "failed", "cancelled"].includes(p.status) && (
+                                                            <button onClick={() => setCorrectingPayment(p)} className="mt-1 block text-2xs font-medium text-brand-600 hover:underline">
+                                                                Correct details (owner)
+                                                            </button>
+                                                        )}
                                                         {p.requires_approval && (
                                                             <span className={clsx("inline-flex items-center gap-1 text-2xs font-semibold px-2 py-0.5 rounded-full mt-1",
                                                                 p.approval_status === "approved" ? "bg-success-light text-success-dark" :
@@ -4718,6 +4726,19 @@ export default function OrderDetailPage() {
                                 </div>
                             )}
                             <PendingChanges subjectType="order" subjectIds={[order.id]} className="mt-3" />
+                            <OrderDocumentHistory orderId={order.id} version={order.updated_at} />
+                            {correctingPayment && (
+                                <CorrectPaymentModal
+                                    orderId={order.id}
+                                    payment={correctingPayment}
+                                    onClose={() => setCorrectingPayment(null)}
+                                    onSaved={() => {
+                                        setCorrectingPayment(null);
+                                        refresh();
+                                        qc.invalidateQueries({ queryKey: ["order-document-revisions", order.id] });
+                                    }}
+                                />
+                            )}
                             {outstanding > 0 && !order.deposit_amount && order.payment_status === "pending" && (
                                 <div className="mt-3 flex justify-end">
                                     <button onClick={() => setShowDepositModal(true)}
