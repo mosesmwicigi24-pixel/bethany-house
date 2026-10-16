@@ -1,5 +1,6 @@
 // src/pages/expenses/ExpenseDetailPage.tsx
-import { useState, useRef } from "react";
+import { EvidenceList } from "@/components/expenses/Evidence";
+import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { get } from "@/api/client";
@@ -645,44 +646,14 @@ export default function ExpenseDetailPage() {
     const qc = useQueryClient();
     const { can, isSuperAdmin } = usePermissions();
     const me = useAuthStore((st) => st.user);
-    const fileRef = useRef<HTMLInputElement>(null);
 
     const [editOpen, setEditOpen] = useState(false);
     const [rejectOpen, setRejectOpen] = useState(false);
     const [changesOpen, setChangesOpen] = useState(false);
     const [changesNote, setChangesNote] = useState("");
     const [markPaidOpen, setMarkPaidOpen] = useState(false);
-    const [receiptPreviewOpen, setReceiptPreviewOpen] = useState(false);
-    const [receiptBlob, setReceiptBlob] = useState<{
-        url: string;
-        mimeType: string;
-    } | null>(null);
-    const [receiptLoading, setReceiptLoading] = useState(false);
     const [rejectReason, setRejectReason] = useState("");
     const [busy, setBusy] = useState(false);
-
-    const openReceiptPreview = async () => {
-        if (!expense?.receipt_path) return;
-        setReceiptLoading(true);
-        setReceiptPreviewOpen(true);
-        try {
-            const blob = await expensesApi.fetchReceiptBlob(expense.id);
-            setReceiptBlob(blob);
-        } catch {
-            toast.error("Failed to load receipt.");
-            setReceiptPreviewOpen(false);
-        } finally {
-            setReceiptLoading(false);
-        }
-    };
-
-    const closeReceiptPreview = () => {
-        setReceiptPreviewOpen(false);
-        if (receiptBlob) {
-            URL.revokeObjectURL(receiptBlob.url);
-            setReceiptBlob(null);
-        }
-    };
 
     const { data, isLoading, refetch } = useQuery({
         queryKey: ["expense", id],
@@ -708,19 +679,6 @@ export default function ExpenseDetailPage() {
         } finally {
             setBusy(false);
         }
-    };
-
-    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        try {
-            await expensesApi.uploadReceipt(Number(id), file);
-            toast.success("Receipt uploaded.");
-            refetch();
-        } catch {
-            toast.error("Upload failed.");
-        }
-        e.target.value = "";
     };
 
     if (isLoading)
@@ -1323,79 +1281,13 @@ export default function ExpenseDetailPage() {
                             </div>
                         </SectionCard>
                     )}
-                    {/* Receipt */}
-                    <SectionCard title="Receipt">
-                        {expense.receipt_path ? (
-                            <div className="space-y-2">
-                                <button
-                                    className="btn-secondary w-full text-sm justify-center flex items-center gap-2"
-                                    onClick={openReceiptPreview}
-                                >
-                                    <svg
-                                        className="w-4 h-4"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                        strokeWidth={2}
-                                    >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
-                                        />
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                                        />
-                                    </svg>
-                                    View Receipt
-                                </button>
-                                {canCreate && (
-                                <button
-                                    className="btn-ghost w-full text-sm"
-                                    onClick={() => fileRef.current?.click()}
-                                >
-                                    Replace Receipt
-                                </button>
-                                )}
-                            </div>
-                        ) : canCreate ? (
-                            <div>
-                                <button
-                                    className="btn-ghost w-full text-sm justify-center flex items-center gap-2"
-                                    onClick={() => fileRef.current?.click()}
-                                >
-                                    <svg
-                                        className="w-4 h-4"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                        strokeWidth={2}
-                                    >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"
-                                        />
-                                    </svg>
-                                    Upload Receipt
-                                </button>
-                                <p className="text-xs text-surface-400 text-center mt-2">
-                                    JPG, PNG or PDF · Max 10MB
-                                </p>
-                            </div>
-                        ) : (
-                            <p className="text-xs text-surface-400 text-center py-2">
-                                No receipt uploaded.
-                            </p>
-                        )}
-                        <input
-                            ref={fileRef}
-                            type="file"
-                            accept=".jpg,.jpeg,.png,.pdf"
-                            className="hidden"
-                            onChange={handleFileUpload}
+                    {/* Evidence: photos of receipts, quotations, bills (append-only) */}
+                    <SectionCard title="Evidence">
+                        <EvidenceList
+                            expenseId={expense.id}
+                            attachments={expense.attachments ?? []}
+                            canAdd={canCreate}
+                            onChanged={() => refetch()}
                         />
                     </SectionCard>
 
@@ -1521,74 +1413,6 @@ export default function ExpenseDetailPage() {
                 />
             )}
 
-            {/* ── Receipt preview modal ── */}
-            {receiptPreviewOpen && (
-                <Modal
-                    open={receiptPreviewOpen}
-                    onClose={closeReceiptPreview}
-                    title={`Receipt · ${expense.reference_number}`}
-                    size="lg"
-                >
-                    <div className="flex flex-col gap-4">
-                        {receiptLoading || !receiptBlob ? (
-                            <div
-                                className="flex items-center justify-center bg-surface-50 rounded-lg border border-surface-200"
-                                style={{ height: "60vh" }}
-                            >
-                                <Spinner />
-                            </div>
-                        ) : receiptBlob.mimeType === "application/pdf" ? (
-                            <iframe
-                                src={receiptBlob.url}
-                                className="w-full rounded-lg border border-surface-200 bg-surface-50"
-                                style={{ height: "70vh" }}
-                                title="Receipt PDF"
-                            />
-                        ) : (
-                            <div
-                                className="flex items-center justify-center bg-surface-50 rounded-lg border border-surface-200 p-2"
-                                style={{ minHeight: "60vh" }}
-                            >
-                                <img
-                                    src={receiptBlob.url}
-                                    alt="Receipt"
-                                    className="max-w-full max-h-[65vh] object-contain rounded"
-                                />
-                            </div>
-                        )}
-                        {receiptBlob && (
-                            <div className="flex justify-between items-center pt-2 border-t border-line">
-                                <p className="text-xs text-surface-400">
-                                    {receiptBlob.mimeType === "application/pdf"
-                                        ? "PDF document"
-                                        : "Image"}{" "}
-                                    · {expense.reference_number}
-                                </p>
-                                <a
-                                    href={receiptBlob.url}
-                                    download={`receipt-${expense.reference_number}`}
-                                    className="btn-ghost btn-sm flex items-center gap-1.5 text-sm"
-                                >
-                                    <svg
-                                        className="w-4 h-4"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                        strokeWidth={2}
-                                    >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"
-                                        />
-                                    </svg>
-                                    Download
-                                </a>
-                            </div>
-                        )}
-                    </div>
-                </Modal>
-            )}
 
             <Modal
                 open={rejectOpen}

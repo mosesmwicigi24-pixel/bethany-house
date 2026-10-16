@@ -166,6 +166,7 @@ Route::prefix('v1')->group(function () {
         Route::get('/payment-proofs/{payment}',         [$files, 'paymentProof'])->whereNumber('payment')->name('files.payment-proof');
         Route::get('/shipment-attachments/{attachment}', [$files, 'shipmentAttachment'])->whereNumber('attachment')->name('files.shipment-attachment');
         Route::get('/expense-receipts/{expense}',        [$files, 'expenseReceipt'])->whereNumber('expense')->name('files.expense-receipt');
+        Route::get('/expense-attachments/{attachment}', [$files, 'expenseAttachment'])->whereNumber('attachment')->name('files.expense-attachment');
         Route::get('/channel-attachments',               [$files, 'channelAttachment'])->name('files.channel-attachment');
     });
 
@@ -1522,6 +1523,8 @@ Route::prefix('v1')->group(function () {
                 Route::get('/',                [ExpenseController::class, 'index']);
                 Route::get('/{id}',            [ExpenseController::class, 'show']);
                 Route::get('/{id}/receipt',    [ExpenseController::class, 'downloadReceipt']);
+                Route::get('/{id}/attachments/{attachmentId}', [ExpenseController::class, 'attachmentLink'])
+                    ->whereNumber('id')->whereNumber('attachmentId');
 
                 Route::post('/categories',     [ExpenseController::class, 'storeCategory'])
                     ->middleware('permission:expenses.budgets,sanctum');
@@ -1556,6 +1559,11 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:expenses.approve,sanctum');
                 Route::post('/{id}/receipt',   [ExpenseController::class, 'uploadReceipt'])
                     ->middleware('permission:expenses.create,sanctum');
+                // Evidence: photos and documents, append-only (2026-10-16).
+                Route::post('/{id}/attachments', [ExpenseController::class, 'storeAttachment'])->whereNumber('id')
+                    ->middleware('permission:expenses.create,sanctum');
+                Route::delete('/{id}/attachments/{attachmentId}', [ExpenseController::class, 'removeAttachment'])
+                    ->whereNumber('id')->whereNumber('attachmentId')->middleware('permission:expenses.create,sanctum');
             });
 
             // ── Reports ───────────────────────────────────────────────────────

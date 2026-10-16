@@ -35,6 +35,7 @@ import { clsx } from "clsx";
 import dayjs from "dayjs";
 import { Fragment } from "react";
 import { groupRowsByDate, DateGroupHeaderRow } from "@/lib/dateGrouping";
+import { EvidencePicker, uploadPending, type PendingEvidence } from "@/components/expenses/Evidence";
 
 // ─── Status Badge ─────────────────────────────────────────────────────────────
 
@@ -92,6 +93,8 @@ function NewExpenseModal({
     // "Pay from imprest?" — no default: once an imprest exists the answer is
     // a deliberate choice on every expense (owner decision 2026-09-22).
     const [useImprest, setUseImprest] = useState<boolean | null>(null);
+    // Photos of the receipt / quotation / bill, sent once the expense is saved.
+    const [evidence, setEvidence] = useState<PendingEvidence[]>([]);
 
     const { data: imprestData } = useQuery({
         queryKey: ["imprest"],
@@ -137,6 +140,7 @@ function NewExpenseModal({
         setDescription("");
         setNotes("");
         setUseImprest(null);
+        setEvidence([]);
     };
 
     const handleSubmit = async () => {
@@ -154,7 +158,7 @@ function NewExpenseModal({
         }
         setSubmitting(true);
         try {
-            await expensesApi.create({
+            const created = await expensesApi.create({
                 title,
                 category_id: Number(categoryId),
                 amount: Number(amount),
@@ -173,7 +177,12 @@ function NewExpenseModal({
                 notes: notes || undefined,
                 use_imprest: imprest ? useImprest : undefined,
             } as any);
+            // The expense is saved; a photo that fails is added from its page, never by saving twice.
+            const failed = evidence.length ? await uploadPending(created.expense.id, evidence) : 0;
             toast.success(useImprest ? "Expense recorded and taken off the imprest." : "Expense created.");
+            if (failed) {
+                toast.error(`${failed} file${failed === 1 ? "" : "s"} did not upload. Open the expense (${created.expense.reference_number}) to add ${failed === 1 ? "it" : "them"}.`);
+            }
             qc.invalidateQueries({ queryKey: ["imprest"] });
             qc.invalidateQueries({ queryKey: ["expenses"] });
             reset();
@@ -403,6 +412,8 @@ function NewExpenseModal({
                     />
                 </Field>
 
+                <EvidencePicker items={evidence} onChange={setEvidence} />
+
                 {/* Recurring toggle */}
                 <div className="rounded-lg border border-surface-200 overflow-hidden">
                     <label className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-surface-50 transition-colors">
@@ -519,7 +530,7 @@ function NewExpenseModal({
                 >
                     {submitting ? (
                         <>
-                            <Spinner size="sm" className="mr-1.5" /> Creating…
+                            <Spinner size="sm" className="mr-1.5" /> {evidence.length ? "Saving and uploading…" : "Creating…"}
                         </>
                     ) : (
                         "Create Expense"

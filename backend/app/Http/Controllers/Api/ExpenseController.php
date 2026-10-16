@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Api\Concerns\ScopesToAssignedOutlets;
-use App\Models\{Expense, ExpenseCategory, ExpenseBudget, ExpenseApproval, ExpenseLineItem, User};
+use App\Models\{Expense, ExpenseAttachment, ExpenseCategory, ExpenseBudget, ExpenseApproval, ExpenseLineItem, User};
 use App\Services\ActivityLogService;
 use App\Services\IntelligenceService;
 use App\Services\NotificationService;
@@ -180,7 +180,11 @@ class ExpenseController extends Controller
             'purchaseOrder:id,po_number',
             'productionOrder:id,order_number',
             'order:id,order_number',
+            'attachments.uploader:id,first_name,last_name',
+            'attachments.remover:id,first_name,last_name',
         ])->findOrFail($id);
+
+        $expense->attachments->each(fn (ExpenseAttachment $a) => $a->setAttribute('can_remove', $this->attachmentRemovalRefusal($expense, $a, $request->user()) === null));
 
         return response()->json(['expense' => $expense]);
     }
@@ -911,31 +915,142 @@ class ExpenseController extends Controller
     // =========================================================================
 
     /**
-     * POST /api/v1/admin/expenses/{id}/receipt
+     * POST /api/v1/admin/expenses/{id}/receipt — the older single-receipt
+     * upload, kept for any client still calling it. It now ADDS a receipt
+     * attachment; it used to delete the previous file, so evidence could be
+     * swapped after approval.
      */
     public function uploadReceipt(int $id, Request $request)
     {
         $request->validate([
             'receipt' => 'required|file|mimes:jpg,jpeg,png,pdf|max:10240', // 10MB
         ]);
+        $expense = $this->findScopedExpense($id, $request->user());
+
+        if ($refusal = $this->addAttachment($expense, $request->file('receipt'), 'receipt', $request->user())[1]) {
+            return response()->json(['message' => $refusal], 422);
+        }
+
+        return response()->json([
+            'message'      => 'Receipt uploaded.',
+            'receipt_path' => $expense->fresh()->receipt_path,
+        ]);
+    }
+
+    /**
+     * POST /api/v1/admin/expenses/{id}/attachments — add evidence: a photo
+     * of the receipt, the paper quotation, the bill, the meter. Append-only:
+     * adding never replaces anything, at any status.
+     */
+    public function storeAttachment(int $id, Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:jpg,jpeg,png,webp,heic,heif,pdf|max:10240', // 10MB
+            'kind' => 'required|in:' . implode(',', array_keys(ExpenseAttachment::KINDS)),
+        ]);
 
         $user    = $request->user();
         $expense = $this->findScopedExpense($id, $user);
 
-        // Delete old receipt
-        if ($expense->receipt_path) {
-            Storage::disk('private')->delete($expense->receipt_path);
+        [$attachment, $refusal] = $this->addAttachment($expense, $request->file('file'), $request->input('kind'), $user);
+        if ($refusal) {
+            return response()->json(['message' => $refusal], 422);
         }
 
-        $path = $request->file('receipt')->store("expenses/{$expense->id}/receipts", 'private');
-        $expense->update(['receipt_path' => $path]);
-
-        $this->activityLog->log('expense_receipt_uploaded', $expense, ['path' => $path], null, $user);
-
         return response()->json([
-            'message'      => 'Receipt uploaded.',
-            'receipt_path' => $path,
+            'message'    => ExpenseAttachment::KINDS[$attachment->kind] . ' added.',
+            'attachment' => $attachment->load('uploader:id,first_name,last_name')->setAttribute('can_remove', true),
+        ], 201);
+    }
+
+    /** @return array{0: ?ExpenseAttachment, 1: ?string} the new attachment, or why not */
+    private function addAttachment(Expense $expense, \Illuminate\Http\UploadedFile $file, string $kind, User $user): array
+    {
+        if ($expense->attachments()->whereNull('removed_at')->count() >= ExpenseAttachment::MAX_PER_EXPENSE) {
+            return [null, 'This expense already has ' . ExpenseAttachment::MAX_PER_EXPENSE . ' files. Remove a wrong one first.'];
+        }
+
+        $path = $file->store("expenses/{$expense->id}/evidence", 'private');
+
+        $attachment = $expense->attachments()->create([
+            'kind'          => $kind,
+            'disk'          => 'private',
+            'path'          => $path,
+            'mime_type'     => mb_substr((string) $file->getMimeType(), 0, 100),
+            'size_bytes'    => $file->getSize(),
+            'original_name' => mb_substr($file->getClientOriginalName(), 0, 255),
+            'uploaded_by'   => $user->id,
         ]);
+
+        // The old single receipt still feeds older screens: the first receipt fills it.
+        if ($attachment->kind === 'receipt' && !$expense->receipt_path) {
+            $expense->update(['receipt_path' => $path]);
+        }
+
+        $this->activityLog->log('expense_evidence_added', $expense, [
+            'attachment_id' => $attachment->id, 'kind' => $attachment->kind, 'status' => $expense->status,
+        ], null, $user);
+
+        return [$attachment, null];
+    }
+
+    /** GET /api/v1/admin/expenses/{id}/attachments/{attachmentId} — a short-lived link to the file. */
+    public function attachmentLink(int $id, int $attachmentId, Request $request)
+    {
+        $expense    = $this->findScopedExpense($id, $request->user());
+        $attachment = $expense->attachments()->whereKey($attachmentId)->firstOrFail();
+
+        return \App\Support\SignedFiles::issue($request, 'files.expense-attachment',
+            ['attachment' => $attachment->id], $attachment->original_name ?: basename($attachment->path));
+    }
+
+    /**
+     * DELETE /api/v1/admin/expenses/{id}/attachments/{attachmentId} — the
+     * uploader withdraws a wrong file before anyone has decided on the
+     * expense with it in front of them. Marked removed; the file is kept.
+     */
+    public function removeAttachment(int $id, int $attachmentId, Request $request)
+    {
+        $user       = $request->user();
+        $expense    = $this->findScopedExpense($id, $user);
+        $attachment = $expense->attachments()->whereKey($attachmentId)->firstOrFail();
+
+        if ($refusal = $this->attachmentRemovalRefusal($expense, $attachment, $user)) {
+            return response()->json(['message' => $refusal], 422);
+        }
+
+        $attachment->update(['removed_at' => now(), 'removed_by' => $user->id]);
+        if ($expense->receipt_path === $attachment->path) {
+            $next = $expense->attachments()->whereNull('removed_at')->where('kind', 'receipt')->value('path');
+            $expense->update(['receipt_path' => $next]);
+        }
+
+        $this->activityLog->log('expense_evidence_removed', $expense, [
+            'attachment_id' => $attachment->id, 'kind' => $attachment->kind,
+        ], null, $user);
+
+        return response()->json(['message' => 'File removed. It stays on record as removed.']);
+    }
+
+    /**
+     * Why this person may not withdraw this file, or null when they may.
+     * Evidence someone has already acted on — approved, rejected or sent back
+     * after it was added — stays.
+     */
+    private function attachmentRemovalRefusal(Expense $expense, ExpenseAttachment $attachment, User $user): ?string
+    {
+        if ($attachment->removed_at !== null) {
+            return 'This file is already removed.';
+        }
+        if ((int) $attachment->uploaded_by !== (int) $user->id) {
+            return 'Only the person who added a file can remove it.';
+        }
+        if (!in_array($expense->status, ['draft', 'pending_approval', 'changes_requested'], true)) {
+            return 'Files on an expense that has been decided stay as evidence.';
+        }
+        $actedOn = $expense->approvals()->where('acted_at', '>=', $attachment->created_at)->exists();
+
+        return $actedOn ? 'Someone has already acted on this expense with this file. It stays as evidence.' : null;
     }
 
     /**

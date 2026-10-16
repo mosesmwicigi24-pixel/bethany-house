@@ -69,6 +69,34 @@ export interface Expense {
   approvedBy?: { id: number; first_name: string; last_name: string }
   approvals?: ExpenseApproval[]
   lineItems?: ExpenseLineItem[]
+  /** Evidence: photos and documents, oldest first (show endpoint). */
+  attachments?: ExpenseAttachment[]
+}
+
+export type EvidenceKind = 'receipt' | 'quotation' | 'invoice' | 'meter' | 'other'
+
+export const EVIDENCE_KINDS: { value: EvidenceKind; label: string }[] = [
+  { value: 'receipt', label: 'Receipt' },
+  { value: 'quotation', label: 'Quotation' },
+  { value: 'invoice', label: 'Bill / invoice' },
+  { value: 'meter', label: 'Meter reading' },
+  { value: 'other', label: 'Other' },
+]
+
+/** One piece of evidence. Append-only: a withdrawn file stays listed as removed. */
+export interface ExpenseAttachment {
+  id: number
+  kind: EvidenceKind
+  mime_type: string | null
+  size_bytes: number | null
+  original_name: string | null
+  uploaded_by: number | null
+  uploader?: { id: number; first_name: string; last_name: string } | null
+  removed_at: string | null
+  remover?: { id: number; first_name: string; last_name: string } | null
+  created_at: string
+  /** The server's answer: may THIS viewer withdraw it now. */
+  can_remove?: boolean
 }
 
 export interface ExpenseApproval {
@@ -240,6 +268,23 @@ export const expensesApi = {
       url:      URL.createObjectURL(file.blob),
       mimeType: file.contentType,
     }
+  },
+
+  // ── Evidence (photos, quotations, bills) ─────────────────────────────────
+  addAttachment: (id: number, file: File | Blob, kind: EvidenceKind, name?: string) => {
+    const form = new FormData()
+    form.append('kind', kind)
+    form.append('file', file, name ?? (file instanceof File ? file.name : 'photo.jpg'))
+    return post<{ message: string; attachment: ExpenseAttachment }>(`${BASE}/${id}/attachments`, form)
+  },
+
+  removeAttachment: (id: number, attachmentId: number) =>
+    del<{ message: string }>(`${BASE}/${id}/attachments/${attachmentId}`),
+
+  // Issued as a short-lived signed link after the expense's scope check.
+  fetchAttachmentBlob: async (id: number, attachmentId: number): Promise<{ url: string; mimeType: string }> => {
+    const file = await fetchSignedFile(`/api${BASE}/${id}/attachments/${attachmentId}`)
+    return { url: URL.createObjectURL(file.blob), mimeType: file.contentType }
   },
 
   // ── Categories ──────────────────────────────────────────────────────────

@@ -185,6 +185,12 @@ class Expense extends Model
         return $this->hasMany(ExpenseApproval::class);
     }
 
+    /** Evidence: photos and documents, oldest first (ExpenseAttachment). */
+    public function attachments()
+    {
+        return $this->hasMany(ExpenseAttachment::class)->orderBy('id');
+    }
+
     public function lineItems()
     {
         return $this->hasMany(ExpenseLineItem::class);

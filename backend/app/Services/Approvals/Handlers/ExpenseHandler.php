@@ -75,8 +75,22 @@ final class ExpenseHandler extends ApprovalHandler
                 "{$e->currency_code} " . number_format((float) $e->amount, 2) . ($e->vendor_name ? " to {$e->vendor_name}" : ''),
                 $e->outlet ? "Outlet: {$e->outlet->name}" : 'Head office',
                 $e->isImprest() ? 'Paid from the imprest' : null,
+                // Only when there is some: the "approval waiting" notice is
+                // built before the form's photos finish uploading.
+                self::evidenceLine($e),
             ])),
         ];
+    }
+
+    private static function evidenceLine(Model $e): ?string
+    {
+        $kinds = $e->attachments()->whereNull('removed_at')->pluck('kind')->all();
+        if (!$kinds) {
+            return null;
+        }
+        $labels = array_map(fn ($k) => \App\Models\ExpenseAttachment::KINDS[$k] ?? $k, $kinds);
+
+        return 'Evidence: ' . implode(', ', array_unique($labels)) . ' (' . count($kinds) . ' file' . (count($kinds) === 1 ? '' : 's') . ')';
     }
 
     public function onApproved(ApprovalRequest $request, Model $e, User $finalSigner): void

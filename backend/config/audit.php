@@ -260,6 +260,9 @@ return [
             'PosController@emailReceipt',
             'ExpenseController@downloadReceipt',
             'SignedFileController@expenseReceipt',
+            // Expense evidence (photos of receipts, quotations, bills) — like the receipt.
+            'ExpenseController@attachmentLink',
+            'SignedFileController@expenseAttachment',
             'ProductController@exportTemplate',
         ],
 
