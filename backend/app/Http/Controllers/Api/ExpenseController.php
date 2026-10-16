@@ -10,6 +10,7 @@ use App\Services\IntelligenceService;
 use App\Services\NotificationService;
 use App\Services\Reporting\MetricEngine;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\{DB, Storage};
 use Carbon\Carbon;
 use App\Support\ServerError;
@@ -253,12 +254,7 @@ class ExpenseController extends Controller
         try {
             $user         = $request->user();
             $currencyCode = $validated['currency_code'];
-            $exchangeRate = $validated['exchange_rate'] ?? ($currencyCode === 'KES' ? 1.0 : null);
-
-            // Auto-determine exchange rate from system settings if not provided
-            if (!$exchangeRate && $currencyCode !== 'KES') {
-                $exchangeRate = DB::table('currencies')->where('code', $currencyCode)->value('rate_to_kes') ?? 1.0;
-            }
+            $exchangeRate = self::kesRate($currencyCode, $validated['exchange_rate'] ?? null);
 
             $amountKes = round($validated['amount'] * $exchangeRate, 2);
 
@@ -367,12 +363,18 @@ class ExpenseController extends Controller
             'tags'                => 'nullable|array',
         ]);
 
+        // One KES figure for both the imprest guard and the saved row: the rate
+        // the expense was booked at stays unless its currency changes, and a
+        // new rate alone re-states amount_kes too (it used not to).
+        $newKes = null;
+        if (isset($validated['amount']) || isset($validated['currency_code']) || isset($validated['exchange_rate'])) {
+            $currencyCode = $validated['currency_code'] ?? $expense->currency_code;
+            $exchangeRate = self::kesRate($currencyCode, $validated['exchange_rate']
+                ?? ($currencyCode === $expense->currency_code ? $expense->exchange_rate : null));
+            $newKes = round(($validated['amount'] ?? $expense->amount) * $exchangeRate, 2);
+        }
+
         if ($expense->isImprest()) {
-            $newKes = null;
-            if (isset($validated['amount']) || isset($validated['currency_code']) || isset($validated['exchange_rate'])) {
-                $rate   = $validated['exchange_rate'] ?? $expense->exchange_rate;
-                $newKes = round(($validated['amount'] ?? $expense->amount) * $rate, 2);
-            }
             if ($newKes !== null && \App\Services\ImprestService::cents($newKes) !== \App\Services\ImprestService::cents($expense->amount_kes)) {
                 return response()->json([
                     'message' => 'An imprest expense\'s amount can\'t change after the cash has left the box. Cancel it, mark the cash returned, and record the right amount.',
@@ -388,16 +390,8 @@ class ExpenseController extends Controller
 
         DB::beginTransaction();
         try {
-            if (isset($validated['amount']) || isset($validated['currency_code'])) {
-                $currencyCode = $validated['currency_code'] ?? $expense->currency_code;
-                $amount       = $validated['amount']        ?? $expense->amount;
-                $exchangeRate = $validated['exchange_rate'] ?? $expense->exchange_rate;
-
-                if (!$exchangeRate && $currencyCode !== 'KES') {
-                    $exchangeRate = DB::table('currencies')->where('code', $currencyCode)->value('rate_to_kes') ?? 1.0;
-                }
-
-                $validated['amount_kes']    = round($amount * $exchangeRate, 2);
+            if ($newKes !== null) {
+                $validated['amount_kes']    = $newKes;
                 $validated['exchange_rate'] = $exchangeRate;
             }
 
@@ -882,6 +876,34 @@ class ExpenseController extends Controller
         $this->activityLog->log('expense_cancelled', $expense, ['status' => 'cancelled'], null, $request->user());
 
         return response()->json(['message' => 'Expense cancelled.', 'expense' => $expense->fresh()]);
+    }
+
+    /**
+     * KES per one unit of the expense's currency, stored on the expense as
+     * its snapshot. KES is always 1. A rate given with the expense (what the
+     * bank actually charged) is kept; otherwise the REPORTING rate
+     * (App\Support\ReportingCurrency, currencies.reporting_rate_to_kes —
+     * USD 128), never the customer pricing rate. A currency with no reporting
+     * rate is refused, not converted at a guess: the old lookup read a column
+     * that does not exist, so every non-KES expense failed with a 500.
+     */
+    private static function kesRate(string $currencyCode, mixed $given): float
+    {
+        if (strtoupper($currencyCode) === 'KES') {
+            return 1.0;
+        }
+        if ($given !== null && (float) $given > 0) {
+            return (float) $given;
+        }
+
+        $rate = \App\Support\ReportingCurrency::rates()[strtoupper($currencyCode)] ?? null;
+        if ($rate === null) {
+            throw ValidationException::withMessages([
+                'currency_code' => ["There is no reporting rate for {$currencyCode}. Ask finance to set one, or record the expense in KES."],
+            ]);
+        }
+
+        return $rate;
     }
 
     // =========================================================================
