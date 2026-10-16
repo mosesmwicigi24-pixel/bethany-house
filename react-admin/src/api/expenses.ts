@@ -73,6 +73,54 @@ export interface Expense {
   attachments?: ExpenseAttachment[]
 }
 
+/** One expense that comes back — learned from history (ExpenseSuggestions). */
+export interface UsualExpense {
+  key: string
+  norm: string
+  title: string
+  title_suggestion: string
+  category_id: number
+  category_name: string | null
+  vendor_name: string | null
+  payment_method: string | null
+  outlet_id: number | null
+  outlet_name: string | null
+  department: string | null
+  currency_code: string
+  count: number
+  last_amount: number | null
+  median_amount: number | null
+  low: number | null
+  high: number | null
+  last_date: string
+  cadence: 'weekly' | 'monthly' | 'quarterly' | null
+  next_due: string | null
+  due_state: 'due' | 'soon' | 'done' | null
+}
+
+export interface RecentExpense {
+  id: number
+  reference_number: string
+  title: string
+  norm: string
+  vendor_name: string | null
+  amount: number
+  currency_code: string
+  expense_date: string
+  payment_reference: string | null
+}
+
+export interface ExpenseSuggestionsData {
+  as_of: string
+  window_days: number
+  based_on: number
+  usuals: UsualExpense[]
+  by_category: Record<string, { vendor_name: string | null; payment_method: string | null; outlet_id: number | null; department: string | null }>
+  by_vendor: Record<string, { vendor_name: string; category_id: number | null; payment_method: string | null }>
+  vendors: string[]
+  recent: RecentExpense[]
+}
+
 export type EvidenceKind = 'receipt' | 'quotation' | 'invoice' | 'meter' | 'other'
 
 export const EVIDENCE_KINDS: { value: EvidenceKind; label: string }[] = [
@@ -269,6 +317,9 @@ export const expensesApi = {
       mimeType: file.contentType,
     }
   },
+
+  // Learned from the expenses this person may see; suggestions only.
+  suggestions: () => get<ExpenseSuggestionsData>(`${BASE}/suggestions`),
 
   // ── Evidence (photos, quotations, bills) ─────────────────────────────────
   addAttachment: (id: number, file: File | Blob, kind: EvidenceKind, name?: string) => {

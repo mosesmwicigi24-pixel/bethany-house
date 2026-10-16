@@ -190,6 +190,23 @@ class ExpenseController extends Controller
     }
 
     /**
+     * GET /api/v1/admin/expenses/suggestions — what the New Expense form
+     * suggests, learned from the expenses this person may already see (the
+     * list's own scope: their outlets; their own rows where their role is
+     * scoped to them). See App\Services\Expenses\ExpenseSuggestions.
+     */
+    public function suggestions(Request $request, \App\Services\Expenses\ExpenseSuggestions $suggestions)
+    {
+        $query = Expense::query();
+        $assignedOutletIds = $this->assignedOutletIdsOrNull($request->user(), 'expenses.view');
+        if ($assignedOutletIds !== null) {
+            $query->whereIn('outlet_id', $assignedOutletIds);
+        }
+
+        return response()->json($suggestions->build($query));
+    }
+
+    /**
      * POST /api/v1/admin/expenses
      */
     public function store(Request $request)

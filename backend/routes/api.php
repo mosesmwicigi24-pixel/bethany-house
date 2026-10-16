@@ -1521,6 +1521,9 @@ Route::prefix('v1')->group(function () {
                 Route::post('/{id}/imprest-resolution', [ImprestController::class, 'resolve'])->whereNumber('id');
 
                 Route::get('/',                [ExpenseController::class, 'index']);
+                // Learned suggestions for the New Expense form (before /{id}).
+                Route::get('/suggestions',     [ExpenseController::class, 'suggestions'])
+                    ->middleware('permission:expenses.create,sanctum');
                 Route::get('/{id}',            [ExpenseController::class, 'show']);
                 Route::get('/{id}/receipt',    [ExpenseController::class, 'downloadReceipt']);
                 Route::get('/{id}/attachments/{attachmentId}', [ExpenseController::class, 'attachmentLink'])

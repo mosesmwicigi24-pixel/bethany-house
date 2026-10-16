@@ -36,6 +36,9 @@ import dayjs from "dayjs";
 import { Fragment } from "react";
 import { groupRowsByDate, DateGroupHeaderRow } from "@/lib/dateGrouping";
 import { EvidencePicker, uploadPending, type PendingEvidence } from "@/components/expenses/Evidence";
+import { GhostInput, SuggestedPick } from "@/components/expenses/GhostInput";
+import { dueLabel, findDuplicate, unusualAmount, usualFor } from "@/lib/expenseSuggestions";
+import type { UsualExpense } from "@/api/expenses";
 
 // ─── Status Badge ─────────────────────────────────────────────────────────────
 
@@ -95,6 +98,11 @@ function NewExpenseModal({
     const [useImprest, setUseImprest] = useState<boolean | null>(null);
     // Photos of the receipt / quotation / bill, sent once the expense is saved.
     const [evidence, setEvidence] = useState<PendingEvidence[]>([]);
+    // Learned suggestions (grey text): a chosen "usual", and whether the
+    // dropdowns that start with a default have been touched by hand.
+    const [template, setTemplate] = useState<UsualExpense | null>(null);
+    const [pmTouched, setPmTouched] = useState(false);
+    const [outletTouched, setOutletTouched] = useState(false);
 
     const { data: imprestData } = useQuery({
         queryKey: ["imprest"],
@@ -123,6 +131,44 @@ function NewExpenseModal({
     });
     const outlets = outletsData?.data ?? [];
 
+    const { data: learned } = useQuery({
+        queryKey: ["expense-suggestions"],
+        queryFn: () => expensesApi.suggestions(),
+        enabled: open,
+        staleTime: 5 * 60_000,
+    });
+    // What the suggestions follow: a chosen usual, else the usual the typed title matches.
+    const active = template ?? usualFor(title, learned);
+    const vendorHint = learned?.by_vendor[vendorName.trim().toLowerCase()];
+    const categoryHint = categoryId !== "" ? learned?.by_category[String(categoryId)] : undefined;
+    const sug = {
+        title: template?.title_suggestion ?? null,
+        categoryId: active?.category_id ?? vendorHint?.category_id ?? null,
+        vendor: active?.vendor_name ?? categoryHint?.vendor_name ?? null,
+        paymentMethod: active?.payment_method ?? vendorHint?.payment_method ?? categoryHint?.payment_method ?? null,
+        outletId: active?.outlet_id ?? categoryHint?.outlet_id ?? null,
+        department: active?.department ?? categoryHint?.department ?? null,
+        // The amount is shown, never filled: it needs its own tap.
+        amount: active && active.last_amount != null && active.currency_code === currency ? String(active.last_amount) : null,
+    };
+    const labelOf = {
+        category: (id: number | null) => categories.find((c) => c.id === id)?.name ?? null,
+        method: (m: string | null) => PAYMENT_METHODS.find((x) => x.value === m)?.label ?? null,
+        outlet: (id: number | null) => outlets.find((o) => o.id === id)?.name ?? null,
+    };
+    const showPm = !pmTouched && !!sug.paymentMethod && sug.paymentMethod !== paymentMethod;
+    const showOutlet = !outletTouched && sug.outletId != null && sug.outletId !== outletId && !!labelOf.outlet(sug.outletId);
+    const useAll = () => {
+        if (sug.title && !title) setTitle(sug.title);
+        if (sug.categoryId && categoryId === "") setCategoryId(sug.categoryId);
+        if (sug.vendor && !vendorName) setVendorName(sug.vendor);
+        if (showPm && sug.paymentMethod) { setPaymentMethod(sug.paymentMethod); setPmTouched(true); }
+        if (showOutlet && sug.outletId != null) { setOutletId(sug.outletId); setOutletTouched(true); }
+        if (sug.department && !department) setDepartment(sug.department);
+    };
+    const duplicate = findDuplicate({ title, amount, currency, expenseDate, vendorName, paymentRef }, learned);
+    const amountWarning = unusualAmount(active, amount, currency);
+
     const reset = () => {
         setTitle("");
         setCategoryId("");
@@ -141,6 +187,9 @@ function NewExpenseModal({
         setNotes("");
         setUseImprest(null);
         setEvidence([]);
+        setTemplate(null);
+        setPmTouched(false);
+        setOutletTouched(false);
     };
 
     const handleSubmit = async () => {
@@ -185,6 +234,7 @@ function NewExpenseModal({
             }
             qc.invalidateQueries({ queryKey: ["imprest"] });
             qc.invalidateQueries({ queryKey: ["expenses"] });
+            qc.invalidateQueries({ queryKey: ["expense-suggestions"] });
             reset();
             onSaved();
         } catch (err: any) {
@@ -225,12 +275,48 @@ function NewExpenseModal({
                     </span>
                 </div>
 
+                {(learned?.usuals.length ?? 0) > 0 && (
+                    <div>
+                        <p className="text-xs font-medium text-surface-600 mb-1.5">Your usual expenses</p>
+                        <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+                            {learned!.usuals.map((u) => {
+                                const on = template?.key === u.key;
+                                const due = dueLabel(u);
+                                return (
+                                    <button
+                                        key={u.key}
+                                        type="button"
+                                        onClick={() => setTemplate(on ? null : u)}
+                                        className={clsx(
+                                            "shrink-0 rounded-lg border px-3 py-1.5 text-left transition-colors",
+                                            on ? "border-brand-500 bg-brand-50" : "border-surface-200 hover:bg-surface-50",
+                                        )}
+                                    >
+                                        <span className="block text-sm font-medium text-surface-800 whitespace-nowrap">{u.title_suggestion}</span>
+                                        <span className="block text-2xs text-surface-500 whitespace-nowrap">
+                                            {u.median_amount != null && `usually ${u.currency_code} ${u.median_amount.toLocaleString()}`}
+                                            {due && <span className={u.due_state === "due" ? " text-warning font-semibold" : ""}> · {due}</span>}
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        {active && (
+                            <div className="mt-1.5 flex items-center justify-between gap-2">
+                                <p className="text-2xs text-surface-500">Grey italic text is a suggestion: type over it, or tap “Use”. The amount always needs its own tap.</p>
+                                <button type="button" onClick={useAll} className="btn-ghost btn-sm text-brand-700 shrink-0">Use all</button>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 <Field label="Title *">
-                    <FieldInput
+                    <GhostInput
                         id="exp-title"
                         className="input"
                         value={title}
-                        onChange={(e) => setTitle(e.target.value)}
+                        onChange={setTitle}
+                        suggestion={sug.title}
                         placeholder="e.g. Office rent – June 2025"
                     />
                 </Field>
@@ -252,6 +338,9 @@ function NewExpenseModal({
                                 </option>
                             ))}
                         </FieldSelect>
+                        {categoryId === "" && (
+                            <SuggestedPick label={labelOf.category(sug.categoryId)} onUse={() => sug.categoryId && setCategoryId(sug.categoryId)} />
+                        )}
                     </Field>
                     <Field label="Date *">
                         <FieldInput
@@ -267,22 +356,21 @@ function NewExpenseModal({
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <Field label="Amount *">
-                        <FieldInput
+                        <GhostInput
                             id="exp-amt"
                             type="number"
                             min="0.01"
                             step="0.01"
+                            inputMode="decimal"
                             className="input"
                             value={amount}
-                            onChange={(e) =>
-                                setAmount(
-                                    e.target.value === ""
-                                        ? ""
-                                        : Number(e.target.value),
-                                )
-                            }
+                            onChange={(v) => setAmount(v === "" ? "" : Number(v))}
+                            suggestion={sug.amount}
+                            ghostText={sug.amount ? `${Number(sug.amount).toLocaleString()} · last time` : undefined}
+                            acceptOnEndTap={false}
                             placeholder="0.00"
                         />
+                        {amountWarning && <p className="mt-1 text-xs text-warning font-medium">{amountWarning}</p>}
                     </Field>
                     <Field label="Currency">
                         <FieldSelect
@@ -349,7 +437,7 @@ function NewExpenseModal({
                             id="exp-pm"
                             className="input"
                             value={paymentMethod}
-                            onChange={(e) => setPaymentMethod(e.target.value)}
+                            onChange={(e) => { setPaymentMethod(e.target.value); setPmTouched(true); }}
                         >
                             {PAYMENT_METHODS.map((m) => (
                                 <option key={m.value} value={m.value}>
@@ -357,6 +445,9 @@ function NewExpenseModal({
                                 </option>
                             ))}
                         </FieldSelect>
+                        {showPm && (
+                            <SuggestedPick label={labelOf.method(sug.paymentMethod)} onUse={() => { setPaymentMethod(sug.paymentMethod!); setPmTouched(true); }} />
+                        )}
                     </Field>
                     <Field label="Payment Reference">
                         <FieldInput
@@ -375,13 +466,10 @@ function NewExpenseModal({
                             id="exp-outlet"
                             className="input"
                             value={outletId}
-                            onChange={(e) =>
-                                setOutletId(
-                                    e.target.value
-                                        ? Number(e.target.value)
-                                        : "",
-                                )
-                            }
+                            onChange={(e) => {
+                                setOutletId(e.target.value ? Number(e.target.value) : "");
+                                setOutletTouched(true);
+                            }}
                         >
                             <option value="">Company-wide</option>
                             {outlets.map((o) => (
@@ -390,26 +478,36 @@ function NewExpenseModal({
                                 </option>
                             ))}
                         </FieldSelect>
+                        {showOutlet && (
+                            <SuggestedPick label={labelOf.outlet(sug.outletId)} onUse={() => { setOutletId(sug.outletId!); setOutletTouched(true); }} />
+                        )}
                     </Field>
                     <Field label="Department">
-                        <FieldInput
+                        <GhostInput
                             id="exp-dept"
                             className="input"
                             value={department}
-                            onChange={(e) => setDepartment(e.target.value)}
+                            onChange={setDepartment}
+                            suggestion={sug.department}
                             placeholder="e.g. Operations"
                         />
                     </Field>
                 </div>
 
                 <Field label="Vendor / Supplier">
-                    <FieldInput
+                    <GhostInput
                         id="exp-vendor"
                         className="input"
                         value={vendorName}
-                        onChange={(e) => setVendorName(e.target.value)}
+                        onChange={setVendorName}
+                        suggestion={sug.vendor}
                         placeholder="Vendor name (optional)"
+                        list="exp-vendor-list"
+                        autoComplete="off"
                     />
+                    <datalist id="exp-vendor-list">
+                        {(learned?.vendors ?? []).map((v) => <option key={v} value={v} />)}
+                    </datalist>
                 </Field>
 
                 <EvidencePicker items={evidence} onChange={setEvidence} />
@@ -514,6 +612,21 @@ function NewExpenseModal({
                     />
                 </Field>
             </div>
+
+            {duplicate && (
+                <div className="mt-4 rounded-lg border border-warning/40 bg-warning-light/40 p-3 text-sm">
+                    <p className="font-medium text-surface-800">
+                        {duplicate.why === "reference" ? "This payment reference is already on an expense." : "This looks like an expense already recorded."}
+                    </p>
+                    <p className="text-xs text-surface-600 mt-0.5">
+                        <Link to={`/expenses/${duplicate.expense.id}`} className="underline font-medium" onClick={onClose}>
+                            {duplicate.expense.reference_number}
+                        </Link>{" "}
+                        · {duplicate.expense.title} · {duplicate.expense.currency_code} {duplicate.expense.amount.toLocaleString()} · {dayjs(duplicate.expense.expense_date).format("D MMM")}.
+                        {" "}Check before saving — you can still save if it is a different payment.
+                    </p>
+                </div>
+            )}
 
             <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-surface-200">
                 <button

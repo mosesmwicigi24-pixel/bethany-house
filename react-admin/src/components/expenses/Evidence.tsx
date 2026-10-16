@@ -56,10 +56,10 @@ function AddButtons({ onFiles, disabled }: { onFiles: (files: File[]) => void; d
             {/* capture opens the camera straight away on a phone; a desktop shows a file picker. */}
             <input ref={camera} type="file" accept="image/*" capture="environment" className="hidden" onChange={take} />
             <input ref={picker} type="file" accept={ACCEPT_FILES} multiple className="hidden" onChange={take} />
-            <button type="button" onClick={() => camera.current?.click()} disabled={disabled} className="btn-secondary btn-sm justify-center">
+            <button type="button" onClick={() => camera.current?.click()} disabled={disabled} className="btn-secondary btn-sm justify-center whitespace-nowrap">
                 📷 Take photo
             </button>
-            <button type="button" onClick={() => picker.current?.click()} disabled={disabled} className="btn-ghost btn-sm justify-center border border-line">
+            <button type="button" onClick={() => picker.current?.click()} disabled={disabled} className="btn-ghost btn-sm justify-center whitespace-nowrap border border-line">
                 Choose file
             </button>
         </div>
