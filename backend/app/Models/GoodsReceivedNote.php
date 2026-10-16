@@ -17,6 +17,7 @@ class GoodsReceivedNote extends Model
         'invoice_number',
         'notes',
         'received_by',
+        'revision',
     ];
 
     protected $casts = [

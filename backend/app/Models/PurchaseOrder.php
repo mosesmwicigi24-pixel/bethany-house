@@ -32,6 +32,12 @@ class PurchaseOrder extends Model
         // and the maker ≠ checker rule needs to know.
         'submitted_by',
         'submitted_at',
+        // Owner edits (2026-10-16): the revision shown as "Rev N", and the
+        // supplier's own invoice for this order.
+        'revision',
+        'supplier_invoice_number',
+        'supplier_invoice_date',
+        'supplier_invoice_amount',
     ];
 
     protected $casts = [
@@ -41,6 +47,9 @@ class PurchaseOrder extends Model
         'tax_amount' => 'decimal:2',
         'shipping_amount' => 'decimal:2',
         'total_amount' => 'decimal:2',
+        'supplier_invoice_date'   => 'date',
+        'supplier_invoice_amount' => 'decimal:2',
+        'revision'                => 'integer',
         'approved_at' => 'datetime',
         'submitted_at' => 'datetime',
     ];
