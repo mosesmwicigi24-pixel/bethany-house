@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\DownloadRequest;
 use App\Models\Expense;
+use App\Models\ExpenseAttachment;
 use App\Models\Payment;
 use App\Models\ShipmentAttachment;
 use App\Models\User;
@@ -55,6 +56,23 @@ class SignedFileController extends Controller
         $path     = (string) Expense::whereKey($expense)->value('receipt_path');
         $response = SignedFiles::stream($request, 'private', $path);
 
+        return $this->recordExempt($request, $recorder, $response, 'ExpenseController@downloadReceipt', ['expense' => $expense]);
+    }
+
+    /** Expense evidence (2026-10-16): exempt like the receipt, recorded the same way. */
+    public function expenseAttachment(Request $request, DownloadRecorder $recorder, int $attachment)
+    {
+        $row = ExpenseAttachment::find($attachment);
+        if (!$row) {
+            return response()->json(['message' => 'File not found.'], 404);
+        }
+        $response = SignedFiles::stream($request, $row->disk ?: 'private', (string) $row->path, $row->original_name);
+
+        return $this->recordExempt($request, $recorder, $response, 'ExpenseController@attachmentLink', ['attachment' => $attachment]);
+    }
+
+    private function recordExempt(Request $request, DownloadRecorder $recorder, $response, string $action, array $context)
+    {
         // If the fetch also carried a staff bearer token, DownloadGate records
         // it (this action is listed exempt) — recording here too would double it.
         if (auth('sanctum')->user()) {
@@ -67,10 +85,10 @@ class SignedFileController extends Controller
             $request->query->remove('signature');
             $request->query->remove('expires');
             try {
-                $dr = $recorder->open($request, $user, 'ExpenseController@downloadReceipt', DownloadPolicy::EXEMPT, DownloadRequest::DOWNLOADED);
+                $dr = $recorder->open($request, $user, $action, DownloadPolicy::EXEMPT, DownloadRequest::DOWNLOADED);
                 return $recorder->finalize($dr, $request, $response);
             } catch (\Throwable $e) {
-                Log::error('exempt receipt download recording failed', ['error' => $e->getMessage(), 'expense' => $expense]);
+                Log::error('exempt receipt download recording failed', ['error' => $e->getMessage()] + $context);
             }
         }
 
