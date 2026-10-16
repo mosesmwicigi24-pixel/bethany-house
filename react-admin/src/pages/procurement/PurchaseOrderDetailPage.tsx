@@ -10,6 +10,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { Modal } from "@/components/ui/Modal";
 import { PdfDownloadButton } from "@/hooks/usePdfDownload";
 import { parseQty, qtyNum, qtyStep, fmtQty } from "@/lib/quantity";
+import { RevisePurchaseOrderModal, RevisionHistory, SupplierInvoiceCard } from "./POOwnerEdit";
 
 // ── Status config ─────────────────────────────────────────────────────────────
 
@@ -284,8 +285,9 @@ export default function PurchaseOrderDetailPage() {
     const navigate = useNavigate();
     const toast = useToastStore();
     const qc = useQueryClient();
-    const [tab, setTab] = useState<"details" | "grn" | "audit">("details");
+    const [tab, setTab] = useState<"details" | "grn" | "history" | "audit">("details");
     const [showReceive, setShowReceive] = useState(false);
+    const [showRevise, setShowRevise] = useState(false);
 
     const { data, isLoading, error } = useQuery({
         queryKey: ["purchase-order", id],
@@ -297,7 +299,10 @@ export default function PurchaseOrderDetailPage() {
     const po = data?.purchase_order;
     const grnHistory = data?.receiving_history ?? [];
 
-    const refresh = () => qc.invalidateQueries({ queryKey: ["purchase-order", id] });
+    const refresh = () => {
+        qc.invalidateQueries({ queryKey: ["purchase-order", id] });
+        qc.invalidateQueries({ queryKey: ["revisions", "po", Number(id)] });
+    };
 
     const actionMutation = useMutation({
         mutationFn: ({ action, notes }: { action: string; notes?: string }) =>
@@ -329,7 +334,7 @@ export default function PurchaseOrderDetailPage() {
     // fewer hooks than the data render and React tore the whole tree down
     // ("Rendered more hooks than during the previous render") — a blank
     // white page on every direct/deep-link load of this page.
-    const { can } = usePermissions();
+    const { can, isSuperAdmin } = usePermissions();
 
     if (isLoading) return (
         <div className="flex items-center justify-center h-64"><Spinner /></div>
@@ -374,9 +379,14 @@ export default function PurchaseOrderDetailPage() {
                             <h1 className="text-2xl font-bold text-white font-mono">{po.po_number}</h1>
                             <div className="flex items-center gap-2 mt-2 flex-wrap">
                                 <StatusBadge status={po.status} />
-                                {po.invoice_number && (
-                                    <span className="text-xs bg-white/10 text-surface-500 px-2 py-0.5 rounded-full">
-                                        Invoice: {po.invoice_number}
+                                {(po.revision ?? 0) > 0 && (
+                                    <button onClick={() => setTab("history")} className="text-xs bg-white/15 text-white px-2 py-0.5 rounded-full">
+                                        Rev {po.revision}
+                                    </button>
+                                )}
+                                {po.supplier_invoice_number && (
+                                    <span className="text-xs bg-white/10 text-surface-300 px-2 py-0.5 rounded-full">
+                                        Supplier invoice: {po.supplier_invoice_number}
                                     </span>
                                 )}
                             </div>
@@ -435,6 +445,12 @@ export default function PurchaseOrderDetailPage() {
                             📦 Receive Goods
                         </button>
                     )}
+                    {isSuperAdmin && po.status !== "cancelled" && (
+                        <button onClick={() => setShowRevise(true)}
+                            className="btn-sm bg-white text-surface-800 border border-surface-300 rounded-xl px-3 py-1.5 text-xs font-semibold hover:border-surface-400 transition-colors">
+                            ✎ Edit (owner)
+                        </button>
+                    )}
                     <PdfDownloadButton type="purchase-orders" id={po.id} label="Download PDF" />
                     {canCancel && (
                         <button onClick={() => {
@@ -456,11 +472,11 @@ export default function PurchaseOrderDetailPage() {
 
                         {/* Tabs */}
                         <div className="flex border-b border-line overflow-x-auto no-scrollbar">
-                            {(["details", "grn", "audit"] as const).map((t) => (
+                            {(["details", "grn", "history", "audit"] as const).map((t) => (
                                 <button key={t} onClick={() => setTab(t)}
                                     className={clsx("px-4 py-2.5 text-xs font-semibold border-b-2 transition-all whitespace-nowrap shrink-0",
                                         tab === t ? "border-brand-500 text-brand-600" : "border-transparent text-surface-400 hover:text-surface-700")}>
-                                    {t === "details" ? "📋 Items" : t === "grn" ? `📦 Receipts (${grnHistory.length})` : "🕐 Audit Trail"}
+                                    {t === "details" ? "📋 Items" : t === "grn" ? `📦 Receipts (${grnHistory.length})` : t === "history" ? `🗂 Revisions (${po.revision ?? 0})` : "🕐 Audit Trail"}
                                 </button>
                             ))}
                         </div>
@@ -571,6 +587,7 @@ export default function PurchaseOrderDetailPage() {
                         )}
 
                         {/* Audit Trail tab */}
+                        {tab === "history" && <RevisionHistory kind="po" id={po.id} />}
                         {tab === "audit" && <AuditTrail poId={po.id} />}
                     </div>
 
@@ -588,6 +605,9 @@ export default function PurchaseOrderDetailPage() {
                                 {po.supplier?.city && <p className="text-xs text-surface-500">{po.supplier.city}</p>}
                             </div>
                         </div>
+
+                        {/* The supplier's own invoice for this order */}
+                        <SupplierInvoiceCard po={po} canEdit={canCreatePO && po.status !== "cancelled"} onSaved={refresh} />
 
                         {/* Quick stats */}
                         <div>
@@ -619,6 +639,10 @@ export default function PurchaseOrderDetailPage() {
                     </div>
                 </div>
             </div>
+
+            {showRevise && (
+                <RevisePurchaseOrderModal po={po} onClose={() => setShowRevise(false)} onSaved={() => { setShowRevise(false); refresh(); }} />
+            )}
 
             {/* Receive Modal */}
             {showReceive && (

@@ -540,7 +540,12 @@ class PurchaseOrderController extends Controller
     {
         $purchaseOrder = PurchaseOrder::findOrFail($id);
 
-        if (!in_array($purchaseOrder->status, ['draft', 'pending_approval', 'approved'])) {
+        // The supplier's invoice arrives with or after the goods: it can be
+        // recorded at any status except cancelled. Everything else keeps the
+        // old window (draft / pending / approved); the owner revises the rest.
+        $invoiceOnly = collect($request->except(['supplier_invoice_number', 'supplier_invoice_date', 'supplier_invoice_amount', 'invoice_number']))->isEmpty();
+        if (!in_array($purchaseOrder->status, ['draft', 'pending_approval', 'approved'])
+            && !($invoiceOnly && $purchaseOrder->status !== 'cancelled')) {
             return response()->json([
                 'message' => 'Purchase order cannot be edited in its current status.',
             ], 422);
@@ -553,17 +558,30 @@ class PurchaseOrderController extends Controller
             'tax'                    => 'nullable|numeric|min:0',
             'notes'                  => 'nullable|string',
             'payment_terms'          => 'nullable|string',
-            'invoice_number'         => 'nullable|string|max:100',
+            // The supplier's own invoice for this order (2026-10-16). The old
+            // invoice_number had no column and was silently dropped; it now
+            // lands in supplier_invoice_number.
+            'invoice_number'          => 'nullable|string|max:100',
+            'supplier_invoice_number' => 'nullable|string|max:100',
+            'supplier_invoice_date'   => 'nullable|date',
+            'supplier_invoice_amount' => 'nullable|numeric|min:0',
         ]);
 
         // Map frontend field names → actual DB columns
         $updateData = [];
+        foreach (['supplier_invoice_number', 'supplier_invoice_date', 'supplier_invoice_amount'] as $f) {
+            if (array_key_exists($f, $validated)) {
+                $updateData[$f] = $validated[$f] === '' ? null : $validated[$f];
+            }
+        }
+        if (!array_key_exists('supplier_invoice_number', $validated) && isset($validated['invoice_number'])) {
+            $updateData['supplier_invoice_number'] = $validated['invoice_number'];
+        }
 
         if (isset($validated['supplier_id']))            $updateData['supplier_id']            = $validated['supplier_id'];
         if (isset($validated['expected_delivery_date'])) $updateData['expected_delivery_date'] = $validated['expected_delivery_date'];
         if (isset($validated['notes']))                  $updateData['notes']                  = $validated['notes'];
         if (isset($validated['payment_terms']))          $updateData['payment_terms']           = $validated['payment_terms'];
-        if (isset($validated['invoice_number']))         $updateData['invoice_number']          = $validated['invoice_number'];
 
         // Recalculate total if costs changed
         $shippingAmount = isset($validated['shipping_cost']) ? $validated['shipping_cost'] : $purchaseOrder->shipping_amount;
@@ -1623,6 +1641,117 @@ class PurchaseOrderController extends Controller
             ]);
 
         return response()->json(['logs' => $logs]);
+    }
+
+    // =========================================================================
+    // Owner edits: revisions (2026-10-16)
+    // =========================================================================
+
+    /**
+     * PUT /api/v1/admin/purchase-orders/{id}/revise — the owner edits the
+     * whole order (header and lines) at any status but cancelled, with a
+     * reason. The order as it was is kept as a revision. See
+     * App\Services\Procurement\PurchaseDocumentEditor.
+     */
+    public function revise(Request $request, $id, \App\Services\Procurement\PurchaseDocumentEditor $editor)
+    {
+        $this->assertOwner($request);
+        $validated = $request->validate([
+            'reason'                     => 'required|string|min:5|max:500',
+            'supplier_id'                => 'sometimes|exists:suppliers,id',
+            'expected_delivery_date'     => 'sometimes|date',
+            'payment_terms'              => 'nullable|string',
+            'notes'                      => 'nullable|string',
+            'shipping_cost'              => 'nullable|numeric|min:0',
+            'tax'                        => 'nullable|numeric|min:0',
+            'supplier_invoice_number'    => 'nullable|string|max:100',
+            'supplier_invoice_date'      => 'nullable|date',
+            'supplier_invoice_amount'    => 'nullable|numeric|min:0',
+            'items'                      => 'required|array|min:1',
+            'items.*.id'                 => 'nullable|integer',
+            'items.*.type'               => 'required|in:product,material',
+            'items.*.item_id'            => 'required|integer',
+            'items.*.product_variant_id' => 'nullable|integer',
+            'items.*.quantity'           => 'required|numeric|min:0.01|decimal:0,2',
+            'items.*.unit_price'         => 'required|numeric|min:0',
+        ]);
+
+        $result = $editor->revisePurchaseOrder(PurchaseOrder::findOrFail($id), $validated, $request->user());
+
+        return response()->json([
+            'message'        => 'Purchase order revised (Rev ' . $result['purchase_order']->revision . ').',
+            'purchase_order' => $result['purchase_order'],
+            'changes'        => $result['changes'],
+            'notes'          => $result['notes'],
+        ]);
+    }
+
+    /** GET /api/v1/admin/purchase-orders/{id}/revisions — every earlier version, newest first. */
+    public function revisions($id)
+    {
+        $po = PurchaseOrder::findOrFail($id);
+
+        return response()->json([
+            'current_revision' => (int) $po->revision,
+            'revisions'        => \App\Models\DocumentRevision::listFor(\App\Models\DocumentRevision::PURCHASE_ORDER, $po->id),
+        ]);
+    }
+
+    /**
+     * POST /api/v1/admin/grn/{id}/corrections — the owner corrects received
+     * quantities. Stock moves by the difference (with serials), the order's
+     * received counts and status follow, and the receipt as it was is kept.
+     */
+    public function correctGrn(Request $request, $id, \App\Services\Procurement\PurchaseDocumentEditor $editor)
+    {
+        $this->assertOwner($request);
+        $validated = $request->validate([
+            'reason'                    => 'required|string|min:5|max:500',
+            'lines'                     => 'required|array|min:1',
+            'lines.*.grn_item_id'       => 'required|integer',
+            'lines.*.quantity_received' => 'required|numeric|min:0|decimal:0,2',
+        ]);
+
+        $result = $editor->correctGoodsReceipt(GoodsReceivedNote::findOrFail($id), $validated['lines'], $validated['reason'], $request->user());
+
+        return response()->json([
+            'message' => 'Goods receipt corrected (Rev ' . $result['grn']->revision . ').',
+            'grn'     => $result['grn'],
+            'changes' => $result['changes'],
+        ]);
+    }
+
+    /** GET /api/v1/admin/grn/{id}/revisions */
+    public function grnRevisions($id)
+    {
+        $grn = GoodsReceivedNote::findOrFail($id);
+
+        return response()->json([
+            'current_revision' => (int) $grn->revision,
+            'revisions'        => \App\Models\DocumentRevision::listFor(\App\Models\DocumentRevision::GOODS_RECEIPT, $grn->id),
+        ]);
+    }
+
+    /**
+     * GET /grn/{id}/pdf and POST /grn/{id}/print were routed to methods that
+     * never existed (a 500 on every press). Both now answer the receipt's PDF,
+     * the same document as /pdf/grn/{id}.
+     */
+    public function grnPDF($id)
+    {
+        return app(\App\Http\Controllers\Api\DocumentPdfController::class)->grn((int) $id);
+    }
+
+    public function printGRN($id)
+    {
+        return $this->grnPDF($id);
+    }
+
+    private function assertOwner(Request $request): void
+    {
+        if (!$request->user()?->hasRole('super_admin', 'sanctum')) {
+            abort(response()->json(['message' => 'Only the owner (super admin) edits issued purchase documents.'], 403));
+        }
     }
 
     // =========================================================================

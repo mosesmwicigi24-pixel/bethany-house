@@ -1246,6 +1246,9 @@ Route::prefix('v1')->group(function () {
                         ->middleware('permission:procurement.receive,sanctum');
                     Route::patch('/{id}/status', [PurchaseOrderController::class, 'updateStatus'])
                         ->middleware('permission:procurement.approve,sanctum');
+                    // Owner revisions (2026-10-16): the controller allows super_admin only.
+                    Route::put('/{id}/revise',    [PurchaseOrderController::class, 'revise'])->whereNumber('id');
+                    Route::get('/{id}/revisions', [PurchaseOrderController::class, 'revisions'])->whereNumber('id');
                 });
 
                 Route::prefix('grn')->group(function () {
@@ -1253,6 +1256,8 @@ Route::prefix('v1')->group(function () {
                     Route::get('/{id}',          [PurchaseOrderController::class, 'grnShow']);
                     Route::get('/{id}/pdf',      [PurchaseOrderController::class, 'grnPDF']);
                     Route::get('/{id}/audit-log',[PurchaseOrderController::class, 'grnAuditLog']);
+                    Route::get('/{id}/revisions',   [PurchaseOrderController::class, 'grnRevisions'])->whereNumber('id');
+                    Route::post('/{id}/corrections',[PurchaseOrderController::class, 'correctGrn'])->whereNumber('id');
                     Route::post('/{id}/print',   [PurchaseOrderController::class, 'printGRN'])
                         ->middleware('permission:procurement.receive,sanctum');
                 });

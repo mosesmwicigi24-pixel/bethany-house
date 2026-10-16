@@ -371,10 +371,15 @@ HTML;
         $meta = [
             'Order Date'        => self::date($po['order_date'] ?? null),
             'Expected Delivery' => self::date($po['expected_delivery_date'] ?? null),
-            'PO Number'         => $po['po_number'] ?? '—',
+            'PO Number'         => ($po['po_number'] ?? '—') . (!empty($po['revision']) ? ' · Rev ' . (int) $po['revision'] : ''),
             'Payment Terms'     => $po['payment_terms'] ?? '—',
             'Payment Status'    => ucfirst(str_replace('_', ' ', $po['payment_status'] ?? '—')),
         ];
+        // The supplier's own invoice, once recorded (2026-10-16).
+        if (!empty($po['supplier_invoice_number'])) {
+            $meta['Supplier Invoice'] = $po['supplier_invoice_number']
+                . (!empty($po['supplier_invoice_date']) ? ' · ' . self::date($po['supplier_invoice_date']) : '');
+        }
 
         $parties = self::partyRow(
             'From', $s['app_name'] ?? 'Bethany House',
@@ -434,7 +439,7 @@ HTML;
         $sup = $grn['purchase_order']['supplier'] ?? [];
 
         $meta = [
-            'GRN Number'    => $grn['grn_number'] ?? '—',
+            'GRN Number'    => ($grn['grn_number'] ?? '—') . (!empty($grn['revision']) ? ' · Rev ' . (int) $grn['revision'] : ''),
             'PO Reference'  => $grn['purchase_order']['po_number'] ?? '—',
             'Received Date' => self::date($grn['received_date'] ?? null),
             'Received By'   => trim(($grn['received_by']['first_name'] ?? '') . ' ' . ($grn['received_by']['last_name'] ?? '')) ?: '—',

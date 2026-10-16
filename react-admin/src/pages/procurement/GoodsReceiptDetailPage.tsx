@@ -9,6 +9,8 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
 import { PdfDownloadButton } from "@/hooks/usePdfDownload";
 import { qtyNum } from "@/lib/quantity";
+import { useQueryClient } from "@tanstack/react-query";
+import { CorrectGoodsReceiptModal, RevisionHistory } from "./POOwnerEdit";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -87,9 +89,11 @@ export default function GoodsReceiptDetailPage() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
     const toast = useToastStore();
-    const { can } = usePermissions();
+    const { can, isSuperAdmin } = usePermissions();
     const canReceive = can("procurement.receive");
-    const [tab, setTab] = useState<"items" | "audit">("items");
+    const [tab, setTab] = useState<"items" | "history" | "audit">("items");
+    const [showCorrect, setShowCorrect] = useState(false);
+    const qc = useQueryClient();
 
     const { data, isLoading } = useQuery({
         queryKey: ["grn", id],
@@ -98,11 +102,6 @@ export default function GoodsReceiptDetailPage() {
         staleTime: 30_000,
     });
 
-    const printMutation = useMutation({
-        mutationFn: () => post<any>(`/v1/admin/grn/${id}/print`, {}),
-        onSuccess: () => toast.success("GRN sent to print"),
-        onError: (e: any) => toast.error(e?.message ?? "Print failed"),
-    });
 
     if (isLoading) return <div className="flex items-center justify-center h-64"><Spinner /></div>;
     if (!data?.grn) return (
@@ -142,7 +141,10 @@ export default function GoodsReceiptDetailPage() {
                             <p className="text-success-300 text-xs font-semibold uppercase tracking-widest mb-1">
                                 Goods Received Note
                             </p>
-                            <h1 className="text-2xl font-bold text-white font-mono">{grn.grn_number}</h1>
+                            <h1 className="text-2xl font-bold text-white font-mono">
+                                {grn.grn_number}
+                                {(grn.revision ?? 0) > 0 && <span className="ml-2 align-middle text-xs font-sans bg-white/15 px-2 py-0.5 rounded-full">Rev {grn.revision}</span>}
+                            </h1>
                             <div className="flex items-center gap-2 mt-2 flex-wrap">
                                 <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-success-100 text-success-800">
                                     Received
@@ -182,13 +184,14 @@ export default function GoodsReceiptDetailPage() {
 
                 {/* Action bar */}
                 <div className="px-5 py-3 bg-surface-50 border-b border-line flex flex-wrap items-center gap-2 sm:px-8">
-                    {canReceive && (
-                    <button onClick={() => printMutation.mutate()} disabled={printMutation.isPending}
-                        className="btn-sm bg-white border border-surface-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-surface-700 hover:border-surface-300">
-                        🖨 Print GRN
-                    </button>
+                    {/* "Print GRN" called an endpoint that never existed; the PDF opens in the viewer, which prints. */}
+                    <PdfDownloadButton type="grn" id={Number(id)} label="Download / print PDF" />
+                    {isSuperAdmin && (
+                        <button onClick={() => setShowCorrect(true)}
+                            className="btn-sm bg-white border border-surface-300 rounded-xl px-3 py-1.5 text-xs font-semibold text-surface-800 hover:border-surface-400">
+                            ✎ Correct quantities (owner)
+                        </button>
                     )}
-                    <PdfDownloadButton type="grn" id={Number(id)} label="Download PDF" />
                     {grn.purchase_order && (
                         <Link to={`/procurement/purchase-orders/${grn.purchase_order.id}`}
                             className="btn-sm bg-white border border-surface-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-surface-700 hover:border-surface-300">
@@ -209,11 +212,11 @@ export default function GoodsReceiptDetailPage() {
                     {/* Left */}
                     <div className="space-y-4 lg:pr-8">
                         <div className="flex border-b border-line overflow-x-auto no-scrollbar">
-                            {(["items", "audit"] as const).map((t) => (
+                            {(["items", "history", "audit"] as const).map((t) => (
                                 <button key={t} onClick={() => setTab(t)}
                                     className={clsx("px-4 py-2.5 text-xs font-semibold border-b-2 transition-all whitespace-nowrap shrink-0",
                                         tab === t ? "border-success-500 text-success-600" : "border-transparent text-surface-400 hover:text-surface-700")}>
-                                    {t === "items" ? `📦 Items Received (${items.length})` : "🕐 Audit Trail"}
+                                    {t === "items" ? `📦 Items Received (${items.length})` : t === "history" ? `🗂 Revisions (${grn.revision ?? 0})` : "🕐 Audit Trail"}
                                 </button>
                             ))}
                         </div>
@@ -298,6 +301,7 @@ export default function GoodsReceiptDetailPage() {
                             </div>
                         )}
 
+                        {tab === "history" && <RevisionHistory kind="grn" id={grn.id} />}
                         {tab === "audit" && <AuditTrail grnId={grn.id} />}
 
                         {grn.notes && (
@@ -386,6 +390,26 @@ export default function GoodsReceiptDetailPage() {
                     </div>
                 </div>
             </div>
+            {showCorrect && (
+                <CorrectGoodsReceiptModal
+                    grnId={grn.id}
+                    grnNumber={grn.grn_number}
+                    revision={grn.revision ?? 0}
+                    items={items.map((i) => ({
+                        id: i.id,
+                        description: i.purchase_order_item?.description ?? i.purchase_order_item?.product?.name ?? i.purchase_order_item?.material?.name ?? `Line ${i.id}`,
+                        quantity_received: qtyNum(i.quantity_received),
+                        condition: i.condition,
+                        item_type: i.purchase_order_item?.item_type ?? "product",
+                    }))}
+                    onClose={() => setShowCorrect(false)}
+                    onSaved={() => {
+                        setShowCorrect(false);
+                        qc.invalidateQueries({ queryKey: ["grn", id] });
+                        qc.invalidateQueries({ queryKey: ["revisions", "grn", grn.id] });
+                    }}
+                />
+            )}
         </div>
     );
 }

@@ -70,6 +70,10 @@ export interface POItem {
     id: number;
     purchase_order_id: number;
     item_type: "product" | "material";
+    description?: string;
+    product_id?: number | null;
+    product_variant_id?: number | null;
+    material_id?: number | null;
     item_id: number;
     quantity: number;
     quantity_received: number;
@@ -104,6 +108,11 @@ export interface PurchaseOrder {
     payment_terms: string | null;
     payment_status: string | null;
     invoice_number: string | null;
+    /** Owner edits (2026-10-16): 0 = as first issued; shown as "Rev N". */
+    revision?: number;
+    supplier_invoice_number?: string | null;
+    supplier_invoice_date?: string | null;
+    supplier_invoice_amount?: number | string | null;
     is_paid: boolean;
     notes: string | null;
     items: POItem[];
@@ -156,6 +165,7 @@ export interface GRNDetail {
         notes: string | null;
         invoice_number?: string | null;
         outlet_id?: number | null;
+        revision?: number;
         created_at: string;
         purchase_order: {
             id: number;
@@ -420,6 +430,55 @@ export const purchaseOrderApi = {
 };
 
 // ─── GRN API ──────────────────────────────────────────────────────────────────
+
+/** A document as it was before an owner edit (DocumentRevision). */
+export interface DocumentRevision {
+    id: number;
+    revision: number;
+    reason: string;
+    changes: string[];
+    snapshot: Record<string, any>;
+    created_at: string;
+    by: string | null;
+}
+
+export interface POReviseLine {
+    id?: number;
+    type: "product" | "material";
+    item_id: number;
+    product_variant_id?: number | null;
+    quantity: number;
+    unit_price: number;
+}
+
+export interface POReviseData {
+    reason: string;
+    expected_delivery_date?: string;
+    payment_terms?: string | null;
+    notes?: string | null;
+    shipping_cost?: number;
+    tax?: number;
+    supplier_invoice_number?: string | null;
+    supplier_invoice_date?: string | null;
+    supplier_invoice_amount?: number | null;
+    items: POReviseLine[];
+}
+
+export const poRevisionApi = {
+    // The owner edits the whole order at any status but cancelled (super admin only).
+    revise: (id: number, data: POReviseData) =>
+        put<{ message: string; purchase_order: PurchaseOrder; changes: string[]; notes: string[] }>(
+            `/v1/admin/purchase-orders/${id}/revise`, data),
+    revisions: (id: number) =>
+        get<{ current_revision: number; revisions: DocumentRevision[] }>(`/v1/admin/purchase-orders/${id}/revisions`),
+    // The supplier's own invoice: anyone who raises orders may record it, at any status but cancelled.
+    recordSupplierInvoice: (id: number, data: { supplier_invoice_number: string | null; supplier_invoice_date: string | null; supplier_invoice_amount: number | null }) =>
+        put<{ message: string }>(`/v1/admin/purchase-orders/${id}`, data),
+    correctGrn: (grnId: number, data: { reason: string; lines: Array<{ grn_item_id: number; quantity_received: number }> }) =>
+        post<{ message: string; changes: string[] }>(`/v1/admin/grn/${grnId}/corrections`, data),
+    grnRevisions: (grnId: number) =>
+        get<{ current_revision: number; revisions: DocumentRevision[] }>(`/v1/admin/grn/${grnId}/revisions`),
+};
 
 export const grnApi = {
     list: (params?: Record<string, string | number>) =>
