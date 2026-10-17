@@ -13,6 +13,7 @@ use App\Models\MaterialTransaction;
 use App\Models\Product;
 use App\Models\PurchaseOrder;
 use App\Models\PurchaseOrderItem;
+use App\Services\Procurement\LatestCost;
 use App\Models\PurchaseReturn;
 use App\Models\Supplier;
 use App\Models\ProductVariant;
@@ -772,6 +773,7 @@ class PurchaseOrderController extends Controller
                 'received_by'       => $request->user()->id,
             ]);
 
+            $costNotes = [];
             foreach ($validated['items'] as $item) {
                 $poItem = PurchaseOrderItem::find($item['po_item_id']);
 
@@ -815,20 +817,20 @@ class PurchaseOrderController extends Controller
 
                 // Update inventory for accepted quantity only
                 if ($qtyAccepted > 0) {
-                    if ($poItem->item_type === 'product') {
-                        $this->receiveProductInventory(
+                    $costNotes[] = $poItem->item_type === 'product'
+                        ? $this->receiveProductInventory(
+                            $poItem, $qtyAccepted, $validated, $purchaseOrder, $grn->grn_number, $request->user()->id
+                        )
+                        : $this->receiveMaterialInventory(
                             $poItem, $qtyAccepted, $validated, $purchaseOrder, $grn->grn_number, $request->user()->id
                         );
-                    } else {
-                        $this->receiveMaterialInventory(
-                            $poItem, $qtyAccepted, $validated, $purchaseOrder, $grn->grn_number, $request->user()->id
-                        );
-                    }
                 }
 
                 // Update quantity received on the PO item
                 $poItem->increment('quantity_received', $qtyReceived);
             }
+
+            $costNotes = array_values(array_filter($costNotes));
 
             // Recalculate and update PO status
             $purchaseOrder->refresh();
@@ -850,6 +852,7 @@ class PurchaseOrderController extends Controller
                 'items_received_count'=> count($validated['items']),
                 'fully_received'      => $fullyReceived,
                 'outlet_id'           => $validated['outlet_id'] ?? null,
+                'cost_notes'          => $costNotes,
             ], "GRN {$grn->grn_number} created against PO {$purchaseOrder->po_number} (" . ($fullyReceived ? 'fully received' : 'partial') . ")");
 
             // ── Notification ──────────────────────────────────────────────────
@@ -862,7 +865,8 @@ class PurchaseOrderController extends Controller
             );
 
             return response()->json([
-                'message'        => 'Goods received successfully.',
+                'message'        => trim('Goods received successfully. ' . implode(' ', $costNotes)),
+                'cost_notes'     => $costNotes,
                 'receipt_number' => $grn->grn_number,
                 'purchase_order' => $purchaseOrder->fresh(),
             ]);
@@ -1765,7 +1769,7 @@ class PurchaseOrderController extends Controller
         PurchaseOrder $purchaseOrder,
         string $grnNumber,
         int $userId
-    ): void {
+    ): ?string {
         $outletId   = $validated['outlet_id'] ?? null;
         $qtyInt     = (int) round($qty);
 
@@ -1858,12 +1862,7 @@ class PurchaseOrderController extends Controller
             )
             ->increment('quantity_on_hand', $qtyInt);
 
-        Inventory::where('inventory_type', 'product')
-            ->where('product_id', $poItem->product_id)
-            ->when($poItem->product_variant_id,
-                fn ($q) => $q->where('product_variant_id', $poItem->product_variant_id)
-            )
-            ->update(['cost_per_unit' => $poItem->unit_price, 'updated_at' => now()]);
+        return $this->setLatestCost($poItem, $purchaseOrder);
     }
 
     private function receiveMaterialInventory(
@@ -1873,7 +1872,7 @@ class PurchaseOrderController extends Controller
         PurchaseOrder $purchaseOrder,
         string $grnNumber,
         int $userId
-    ): void {
+    ): ?string {
         $matInv = MaterialInventory::firstOrCreate(
             [
                 'material_id' => $poItem->material_id,
@@ -1888,11 +1887,25 @@ class PurchaseOrderController extends Controller
             $userId
         );
 
-        // Update unit cost on the material itself
-        if ($poItem->unit_price > 0) {
-            Material::where('id', $poItem->material_id)
-                ->update(['unit_cost' => $poItem->unit_price]);
+        // A free line (price 0) leaves the material's cost as it was.
+        return $poItem->unit_price > 0 ? $this->setLatestCost($poItem, $purchaseOrder) : null;
+    }
+
+    /**
+     * The received line's price becomes the item's latest cost, in KES at the
+     * reporting rate (LatestCost). Returns a note when the PO's currency has
+     * no reporting rate and the cost was left as it was.
+     */
+    private function setLatestCost(PurchaseOrderItem $poItem, PurchaseOrder $purchaseOrder): ?string
+    {
+        $currency = (string) ($purchaseOrder->currency_code ?: 'KES');
+        $kes      = LatestCost::kes((float) $poItem->unit_price, $currency);
+        if ($kes === null) {
+            return LatestCost::noRateNote($poItem, $currency);
         }
+        LatestCost::set($poItem, $kes);
+
+        return null;
     }
 
     /**

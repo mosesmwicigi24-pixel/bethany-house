@@ -377,6 +377,8 @@ export const purchaseOrderApi = {
     ) =>
         post<{
             message: string;
+            /** Lines whose cost was left as it was (no reporting rate for the PO's currency). */
+            cost_notes?: string[];
             receipt_number: string;
             purchase_order: PurchaseOrder;
         }>(`/v1/admin/purchase-orders/${id}/receive`, data),

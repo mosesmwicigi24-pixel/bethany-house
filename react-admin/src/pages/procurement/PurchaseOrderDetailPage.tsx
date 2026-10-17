@@ -169,7 +169,11 @@ function ReceiveModal({ po, onClose, onDone }: {
             outlet_id: locationType === "outlet" ? outletId! : undefined,
             notes: notes || undefined,
         }),
-        onSuccess: () => { toast.success("Goods received successfully"); onDone(); onClose(); },
+        onSuccess: (res) => {
+            toast.success("Goods received successfully");
+            res.cost_notes?.forEach((n) => toast.warning(n));
+            onDone(); onClose();
+        },
         onError: (e: any) => toast.error(e?.message ?? "Failed to receive goods"),
     });
 

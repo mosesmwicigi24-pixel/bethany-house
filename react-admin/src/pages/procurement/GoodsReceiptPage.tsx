@@ -135,6 +135,7 @@ function GRNFormModal({
             qc.invalidateQueries({ queryKey: ["purchase-orders"] });
             qc.invalidateQueries({ queryKey: ["purchase-order-detail"] });
             toast.success(`GRN recorded - ${res.receipt_number ?? res.receipt_number}`);
+            res.cost_notes?.forEach((n) => toast.warning(n));
             onClose();
         },
         onError: (err: ApiError) => toast.error(err.message),

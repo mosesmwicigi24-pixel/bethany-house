@@ -230,6 +230,8 @@ class SalesDocumentRevisionTest extends TestCase
 
     public function test_the_owner_corrects_a_payments_details_and_its_receipt_follows(): void
     {
+        // Midday, so "an hour ago" is still the order's day whenever the suite runs.
+        $this->travelTo(now()->setTime(12, 0));
         $order   = $this->invoicedOrder(2);
         $payment = $this->paid($order, 'mpesa');
         $payment->update(['provider_reference' => 'SJK7ABC123']);
@@ -260,6 +262,24 @@ class SalesDocumentRevisionTest extends TestCase
         $this->assertSame($receipt->number, $rev->snapshot['receipt']['number']);
         $this->getJson("/api/v1/admin/orders/{$order->id}/document-revisions")->assertOk()
             ->assertJsonPath("payments.{$payment->id}.0.revision", 0);
+    }
+
+    public function test_a_payment_is_never_dated_before_its_orders_day_across_midnight(): void
+    {
+        // 00:20 Nairobi: the order is minutes old and yesterday is an hour away.
+        $this->travelTo(now()->setTime(0, 20));
+        $order   = $this->invoicedOrder(1);
+        $payment = $this->paid($order, 'mpesa');
+        $url = "/api/v1/admin/orders/{$order->id}/payments/{$payment->id}/revise";
+
+        $this->putJson($url, ['reason' => 'Paid late last night', 'paid_at' => now()->subHour()->toIso8601String()])
+            ->assertStatus(422)->assertJsonValidationErrors('paid_at');
+        $this->assertNull(DocumentRevision::where('document_type', 'payment')->where('document_id', $payment->id)->first());
+
+        // Earlier the same Nairobi day is still the order's day.
+        $early = now()->setTime(0, 5);
+        $this->putJson($url, ['reason' => 'Paid just after midnight', 'paid_at' => $early->toIso8601String()])->assertOk();
+        $this->assertTrue($payment->fresh()->paid_at->equalTo($early));
     }
 
     public function test_money_taken_is_never_rewritten_here(): void
