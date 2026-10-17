@@ -17,7 +17,6 @@ use App\Models\PurchaseOrderItem;
 use App\Models\User;
 use App\Services\ActivityLogService;
 use App\Services\ProductSerialService;
-use App\Support\ReportingCurrency;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -448,20 +447,11 @@ class PurchaseDocumentEditor
             return "{$line->description}: a later receipt set the current cost, so it stays.";
         }
 
-        $kes = strtoupper($currency) === 'KES' ? $price : ReportingCurrency::toKes($price, $currency);
+        $kes = LatestCost::kes($price, $currency);
         if ($kes === null) {
-            return "{$line->description}: no reporting rate for {$currency}, so the stock cost was not changed.";
+            return LatestCost::noRateNote($line, $currency);
         }
-        $kes = round($kes, 2);
-
-        if ($line->item_type === 'product') {
-            Inventory::where('inventory_type', 'product')
-                ->where('product_id', $line->product_id)
-                ->when($line->product_variant_id, fn ($q) => $q->where('product_variant_id', $line->product_variant_id))
-                ->update(['cost_per_unit' => $kes, 'updated_at' => now()]);
-        } else {
-            Material::whereKey($line->material_id)->update(['unit_cost' => $kes]);
-        }
+        LatestCost::set($line, $kes);
 
         return "{$line->description}: stock cost corrected to KES " . number_format($kes, 2) . '. Goods already sold keep the cost they were sold at.';
     }
