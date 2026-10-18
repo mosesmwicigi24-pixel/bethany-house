@@ -31,9 +31,18 @@ permissions:
   packages: write
 
 jobs:
-  test:
-    name: Backend tests
+  # The suite is dealt into shards (backend/scripts/test-shard.sh: every test
+  # file in a fixed order, round-robin) that run side by side. On one runner
+  # the whole suite took ~18 minutes and was the long pole of every deploy;
+  # each shard takes about a third. The `test` job below gathers them so the
+  # one check named "Backend tests" still gates the build and the merge.
+  test-shard:
+    name: Backend tests (shard ${{ matrix.shard }} of 3)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     services:
       postgres:
         image: postgres:16
@@ -79,7 +88,22 @@ jobs:
 
       - name: Run tests
         working-directory: backend
-        run: php artisan test
+        run: scripts/test-shard.sh ${{ matrix.shard }} 3
+
+  test:
+    name: Backend tests
+    needs: test-shard
+    # Runs even when a shard fails, so the gate reports red instead of skipped.
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every shard passed
+        run: |
+          if [ "${{ needs.test-shard.result }}" != "success" ]; then
+            echo "A backend test shard did not pass: ${{ needs.test-shard.result }}"
+            exit 1
+          fi
+          echo "All backend test shards passed."
 
   frontend-checks:
     name: Console checks
