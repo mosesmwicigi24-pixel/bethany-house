@@ -311,7 +311,12 @@ class ReportPermissionAttackTest extends TestCase
     private function assertNoMarkers(TestResponse $res, array $markers, string $what): void
     {
         $body  = self::body($res);
-        $found = array_values(array_filter($markers, fn ($m) => str_contains($body, $m)));
+        // A numeric marker (the 4321 cost) is matched as a whole number: a
+        // computed figure such as an average of hours can carry those digits
+        // inside a longer run (CI, 2026-10-18), and that is not a leak.
+        $found = array_values(array_filter($markers, fn ($m) => ctype_digit($m)
+            ? (bool) preg_match('/(?<![0-9.])' . $m . '(?![0-9])/', $body)
+            : str_contains($body, $m)));
         $this->assertSame([], $found, "{$what}: body carries " . implode(', ', $found)
             . ' — status ' . $res->getStatusCode() . ' — ' . self::excerpt($res));
     }

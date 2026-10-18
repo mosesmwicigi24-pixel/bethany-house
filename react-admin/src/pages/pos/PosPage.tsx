@@ -3071,6 +3071,7 @@ export default function PosPage() {
                         outlets={outlets}
                         defaultOutletId={selectedOutletId}
                         mode="open"
+                        currencies={activeCurrencies}
                         onClose={() => setShowRegisterModal(false)}
                         onSuccess={() => {
                             setShowRegisterModal(false);
@@ -3850,6 +3851,7 @@ export default function PosPage() {
                     defaultOutletId={selectedOutletId}
                     mode={registerOpen ? "close" : "open"}
                     register={register}
+                    currencies={activeCurrencies}
                     eodSubmitted={eodSubmitted}
                     onClose={() => setShowRegisterModal(false)}
                     onSuccess={() => {

@@ -114,11 +114,34 @@ export interface StaleTill {
     eod_submitted: boolean;
 }
 
+/**
+ * One currency's drawer inside a till (currency plan Step 2). A till holds
+ * one entry per currency it has touched, its own first. Money fields past
+ * `counted_cash` are absent when the till is blind to its viewer.
+ */
+export interface RegisterBalance {
+    currency_code: string;
+    is_home: boolean;
+    opening_cash: number;
+    counted_cash: number | null;
+    expected_cash?: number;
+    total_sales?: number;
+    total_cash_sales?: number;
+    total_card_sales?: number;
+    total_mpesa_sales?: number;
+    total_refunds?: number;
+    variance?: number | null;
+}
+
 export interface CashRegister {
     id: number;
     outlet_id: number;
     opened_by: string | null;
     closed_by: string | null;
+    /** The till's own currency; the top-level money fields are in it. */
+    currency_code: string;
+    /** Every currency the till holds, its own first (Step 2). */
+    balances: RegisterBalance[];
     opening_cash: number;
     /** Her own count, once submitted. Null while open. */
     closing_cash: number | null;
@@ -337,10 +360,23 @@ export const posApi = {
             { params: { outlet_id: String(outlet_id) } },
         ),
 
-    openRegister: (data: { outlet_id: number; opening_cash: number; notes?: string }) =>
+    openRegister: (data: {
+        outlet_id: number;
+        opening_cash: number;
+        notes?: string;
+        /** Floats in other currencies the drawer starts with, {code: amount} (Step 2). */
+        opening_floats?: Record<string, number>;
+    }) =>
         post<{ message: string; register: CashRegister }>("/v1/admin/pos/register/open", data),
 
-    closeRegister: (data: { outlet_id: number; closing_cash: number; notes?: string; denomination_count?: Record<number, number> }) =>
+    closeRegister: (data: {
+        outlet_id: number;
+        closing_cash: number;
+        notes?: string;
+        denomination_count?: Record<number, number>;
+        /** The other currencies the drawer holds, each counted apart (Step 2). */
+        counts?: { currency_code: string; counted_cash: number }[];
+    }) =>
         // A blind count: the reply carries no expected figure and no variance.
         post<{ message: string; register: CashRegister }>(
             "/v1/admin/pos/register/close",

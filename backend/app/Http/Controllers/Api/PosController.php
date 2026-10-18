@@ -12,7 +12,6 @@ use App\Models\ProductVariant;
 use App\Models\InventoryItem;
 use App\Models\InventoryTransaction;
 use App\Models\CashRegister;
-use App\Models\CashRegisterTransaction;
 use App\Support\HtmlSanitizer;
 use App\Models\Outlet;
 use App\Models\TaxRate;
@@ -382,6 +381,10 @@ class PosController extends Controller
             'outlet_id'    => 'required|exists:outlets,id',
             'opening_cash' => 'required|numeric|min:0',
             'notes'        => 'nullable|string|max:500',
+            // Floats in other currencies the drawer starts with, {code: amount}
+            // (Step 2). Each must be a currency the books can state in shillings.
+            'opening_floats'   => 'nullable|array',
+            'opening_floats.*' => 'numeric|min:0',
         ]);
 
         $outletId = (int) $validated['outlet_id'];
@@ -390,6 +393,10 @@ class PosController extends Controller
         $this->authoriseOutletAccess($user, $outletId);
 
         $outlet = Outlet::findOrFail($outletId);
+
+        foreach (array_keys($validated['opening_floats'] ?? []) as $code) {
+            \App\Support\SellableCurrency::assert((string) $code, "opening_floats.{$code}");
+        }
 
         DB::beginTransaction();
         try {
@@ -445,6 +452,10 @@ class PosController extends Controller
                 'previous_register_id'    => $float['previous_register_id'],
                 'float_vs_previous_close' => $float['float_vs_previous_close'],
             ]);
+
+            // One balance row per currency (Step 2): the till's own from the
+            // float above, plus any foreign float typed with it.
+            app(\App\Services\Tills\TillDrawer::class)->open($register, $validated['opening_floats'] ?? []);
 
             DB::commit();
 
@@ -511,6 +522,13 @@ class PosController extends Controller
             // (note value => quantity). When present it IS the counted cash.
             'denomination_count'   => 'nullable|array',
             'denomination_count.*' => 'integer|min:0',
+            // The other currencies the drawer holds (Step 2), each counted
+            // apart: [{currency_code, counted_cash, denomination_count?}].
+            'counts'                        => 'nullable|array',
+            'counts.*.currency_code'        => 'required|string|size:3',
+            'counts.*.counted_cash'         => 'required|numeric|min:0',
+            'counts.*.denomination_count'   => 'nullable|array',
+            'counts.*.denomination_count.*' => 'integer|min:0',
         ]);
 
         $outletId = (int) $validated['outlet_id'];
@@ -545,8 +563,20 @@ class PosController extends Controller
             ))
             : (float) $validated['closing_cash'];
 
+        // A foreign count by denomination is that count, as for the home currency.
+        $counts = array_map(function (array $c) {
+            $d = $c['denomination_count'] ?? null;
+            if ($d) {
+                $c['counted_cash'] = (float) array_sum(array_map(
+                    fn ($denom, $qty) => (float) $denom * (int) $qty, array_keys($d), array_values($d),
+                ));
+            }
+
+            return $c;
+        }, $validated['counts'] ?? []);
+
         $counted = app(\App\Services\Tills\TillService::class)->submitCount(
-            $register, $user, round($countedCash, 2), $denominations, $validated['notes'] ?? null,
+            $register, $user, round($countedCash, 2), $denominations, $validated['notes'] ?? null, $counts,
         );
 
         try {
@@ -1178,29 +1208,15 @@ class PosController extends Controller
             // -- 7. Register update — every sale on an open register updates the
             // aggregates + transaction count; only the cash portion moves
             // expected_cash and the ledger. (Non-cash sales were dropped entirely.)
+            // In the SALE's currency (Step 2): a dollar sale fills the till's
+            // USD row, never its shilling figure. TillDrawer mirrors the till's
+            // own currency to the register columns and writes the MON-3 ledger row.
             if ($register) {
-                DB::table('cash_registers')->where('id', $register->id)->update([
-                    'total_sales'       => DB::raw('total_sales + ' . $totalSalesForRegister),
-                    'total_cash_sales'  => DB::raw('total_cash_sales + ' . $totalCashForRegister),
-                    'total_card_sales'  => DB::raw('total_card_sales + ' . $totalCardForRegister),
-                    'total_mpesa_sales' => DB::raw('total_mpesa_sales + ' . $totalMpesaForRegister),
-                    'transaction_count' => DB::raw('transaction_count + 1'),
-                    'expected_cash'     => DB::raw('expected_cash + ' . $totalCashForRegister),
-                    'updated_at'        => now(),
-                ]);
-
-                // MON-3: per-movement cash-drawer ledger row (cash only).
-                if ($totalCashForRegister > 0) {
-                    $this->recordCashLedger(
-                        $register,
-                        'sale',
-                        'cash',
-                        $totalCashForRegister,
-                        (float) $register->expected_cash + $totalCashForRegister,
-                        $order->id,
-                        $user->id,
-                    );
-                }
+                app(\App\Services\Tills\TillDrawer::class)->take($register, $currencyCode, [
+                    'cash'  => $totalCashForRegister,
+                    'card'  => $totalCardForRegister,
+                    'mpesa' => $totalMpesaForRegister,
+                ], $order->id, $user->id);
             }
 
             // -- 8. Production orders for Made-to-Order / backorder items -----
@@ -2647,34 +2663,6 @@ class PosController extends Controller
     }
 
     /**
-     * MON-3: append a per-movement row to the cash-register ledger
-     * (`cash_register_transactions`), which POS previously never wrote — the
-     * register only carried running aggregate totals with no auditable trail.
-     * `balance_after` is the drawer's expected_cash after this movement.
-     */
-    private function recordCashLedger(
-        CashRegister $register,
-        string $type,
-        ?string $method,
-        float $amount,
-        float $balanceAfter,
-        ?int $orderId,
-        int $userId,
-        ?string $notes = null,
-    ): void {
-        CashRegisterTransaction::create([
-            'cash_register_id' => $register->id,
-            'transaction_type' => $type,
-            'payment_method'   => $method,
-            'amount'           => round($amount, 2),
-            'balance_after'    => round($balanceAfter, 2),
-            'order_id'         => $orderId,
-            'notes'            => $notes,
-            'created_by'       => $userId,
-        ]);
-    }
-
-    /**
      * Load a POS sale, or explain why this cashier cannot act on it.
      *
      * With pos_clerk scoped to `own`, a plain findOrFail() on a colleague's
@@ -2897,11 +2885,31 @@ class PosController extends Controller
         $closedByName = $r->closedBy
             ? trim($r->closedBy->first_name . ' ' . $r->closedBy->last_name) : null;
 
+        $blind = \App\Services\Tills\TillPresenter::isBlindFor($r, $viewer);
+        // One entry per currency the till holds (Step 2), home first; the
+        // blind rule applies to each exactly as to the till's own figures.
+        $balances = $r->balances()->get()->map(fn (\App\Models\CashRegisterBalance $b) => [
+            'currency_code' => strtoupper((string) $b->currency_code),
+            'is_home'       => (bool) $b->is_home,
+            'opening_cash'  => (float) ($b->opening_balance ?? 0),
+            'counted_cash'  => $r->status === 'open' || $b->actual_cash === null ? null : (float) $b->actual_cash,
+        ] + ($blind ? [] : [
+            'expected_cash'     => (float) ($b->expected_cash_at_count ?? $b->expected_cash ?? 0),
+            'total_sales'       => (float) ($b->total_sales ?? 0),
+            'total_cash_sales'  => (float) ($b->total_cash_sales ?? 0),
+            'total_card_sales'  => (float) ($b->total_card_sales ?? 0),
+            'total_mpesa_sales' => (float) ($b->total_mpesa_sales ?? 0),
+            'total_refunds'     => (float) ($b->total_refunds ?? 0),
+            'variance'          => $b->variance !== null ? (float) $b->variance : null,
+        ]))->values()->all();
+
         $base = [
             'id'                => $r->id,
             'outlet_id'         => $r->outlet_id,
             'opened_by'         => $openedByName,
             'closed_by'         => $closedByName,
+            'currency_code'     => $r->homeCurrency(),
+            'balances'          => $balances,
             'opening_cash'      => (float) ($r->opening_balance ?? 0),
             'closing_cash'      => $r->status !== 'open' && $r->closing_balance !== null ? (float) $r->closing_balance : null,
             'transaction_count' => (int) ($r->transaction_count ?? 0),
@@ -2918,7 +2926,7 @@ class PosController extends Controller
             'finalized_at'      => $r->finalized_at?->toIso8601String(),
         ];
 
-        if (\App\Services\Tills\TillPresenter::isBlindFor($r, $viewer)) {
+        if ($blind) {
             return $base + ['blind' => true];
         }
 
@@ -4242,29 +4250,13 @@ class PosController extends Controller
                     ->where('status', 'open')
                     ->latest('opened_at')
                     ->first();
+                // In the order's currency (Step 2), with the MON-3 ledger row.
                 if ($register) {
-                    DB::table('cash_registers')->where('id', $register->id)->update([
-                        'total_sales'       => DB::raw("total_sales + {$totalSales}"),
-                        'total_cash_sales'  => DB::raw("total_cash_sales + {$totalCash}"),
-                        'total_card_sales'  => DB::raw("total_card_sales + {$totalCard}"),
-                        'total_mpesa_sales' => DB::raw("total_mpesa_sales + {$totalMpesa}"),
-                        'transaction_count' => DB::raw('transaction_count + 1'),
-                        'expected_cash'     => DB::raw("expected_cash + {$totalCash}"),
-                        'updated_at'        => now(),
-                    ]);
-
-                    // MON-3: ledger the cash portion of this balance payment.
-                    if ($totalCash > 0) {
-                        $this->recordCashLedger(
-                            $register,
-                            'sale',
-                            'cash',
-                            (float) $totalCash,
-                            (float) $register->expected_cash + (float) $totalCash,
-                            $order->id,
-                            $request->user()->id,
-                        );
-                    }
+                    app(\App\Services\Tills\TillDrawer::class)->take(
+                        $register, (string) ($order->currency_code ?: 'KES'),
+                        ['cash' => (float) $totalCash, 'card' => (float) $totalCard, 'mpesa' => (float) $totalMpesa],
+                        $order->id, $request->user()->id,
+                    );
                 }
             }
 

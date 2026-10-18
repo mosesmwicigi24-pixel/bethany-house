@@ -171,7 +171,9 @@ class TillController extends Controller
         // she holds (super_admin included).
         MakerChecker::assertNotMaker($user, 'till.verify', $register, $register->opened_by, $register->closed_by);
 
-        $hasVariance = abs((float) $register->variance) >= 0.005;
+        // Any currency of the till over or short needs the reason (Step 2:
+        // a USD drawer short is a variance even when the shillings balance).
+        $hasVariance = $this->tills->hasVariance($register);
         $validated = $request->validate([
             // Any variance is recorded with its reason; the verifier is the
             // first person allowed to see it.
@@ -181,13 +183,15 @@ class TillController extends Controller
             'variance_reason.required' => 'This till is ' . ($register->variance > 0 ? 'over' : 'short') . ' — record why before finalizing.',
         ]);
 
-        [$finalized, $discrepancy] = $this->tills->finalize(
+        [$finalized, $discrepancies] = $this->tills->finalize(
             $register, $user, $validated['variance_reason'] ?? null, $validated['notes'] ?? null,
         );
 
+        $held = array_filter($discrepancies, fn (TillDiscrepancy $d) => $d->status === TillDiscrepancy::STATUS_AWAITING_APPROVAL);
+
         return response()->json([
-            'message' => $discrepancy?->status === TillDiscrepancy::STATUS_AWAITING_APPROVAL
-                ? 'Till finalized. The variance is above ' . (int) TillDiscrepancy::LOGGED_LIMIT . ' and is held for approval.'
+            'message' => $held !== []
+                ? 'Till finalized. The variance is above KES ' . (int) TillDiscrepancy::LOGGED_LIMIT . ' at the reporting rate and is held for approval.'
                 : 'Till verified and finalized.',
             'till'    => $this->presenter->present($finalized, $user, true),
         ]);
@@ -210,13 +214,18 @@ class TillController extends Controller
 
         $validated = $request->validate(['notes' => 'nullable|string|max:2000']);
 
-        $rec = $this->tills->reconcile($register, $user, $validated['notes'] ?? null);
+        // One row per currency the till moved money in (Step 2); the home
+        // currency's is `reconciliation`, every one of them `reconciliations`.
+        $recs = $this->tills->reconcile($register, $user, $validated['notes'] ?? null);
+        $home = $recs->first(fn ($x) => strtoupper((string) $x->currency_code) === $register->homeCurrency()) ?? $recs->first();
+        $anyMismatch = $recs->contains(fn ($x) => $x->status === 'mismatch');
 
         return response()->json([
-            'message'        => $rec->status === 'matched'
+            'message'         => !$anyMismatch
                 ? 'Reconciled: the till agrees with the payments ledger.'
                 : 'Mismatch: flagged for finance.',
-            'reconciliation' => $this->presenter->reconciliation($rec),
+            'reconciliation'  => $this->presenter->reconciliation($home),
+            'reconciliations' => $recs->map(fn ($x) => $this->presenter->reconciliation($x))->values()->all(),
         ], 201);
     }
 
@@ -236,6 +245,8 @@ class TillController extends Controller
 
         $validated = $request->validate([
             'reason'                  => 'required|string|min:10|max:2000',
+            // Which of the till's currencies (Step 2); its own when omitted.
+            'currency_code'           => 'nullable|string|size:3',
             'corrected_actual_cash'   => 'nullable|numeric|min:0',
             'corrected_expected_cash' => 'nullable|numeric|min:0',
         ]);

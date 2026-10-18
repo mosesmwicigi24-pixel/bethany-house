@@ -14,7 +14,7 @@ class TillReconciliation extends Model
     public const UPDATED_AT = null;
 
     protected $fillable = [
-        'cash_register_id', 'reconciled_by', 'counted_cash', 'expected_cash', 'till_cash_sales',
+        'cash_register_id', 'currency_code', 'reconciled_by', 'counted_cash', 'expected_cash', 'till_cash_sales',
         'payments_cash', 'difference', 'missing_from_till_count', 'missing_from_till_amount',
         'status', 'flagged_for_finance', 'details', 'notes',
     ];

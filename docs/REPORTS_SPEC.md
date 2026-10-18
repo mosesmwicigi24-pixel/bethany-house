@@ -20,7 +20,7 @@ report must know which one it is measuring:
 |---|---|---|
 | **Sales truth** | `orders` (+ `order_items`) | What did we sell, when, to whom, at what price? |
 | **Money truth** | `payments`, net of `refund_amount`, `status = 'paid'` only | What cash/paybill/card actually came in? |
-| **Drawer truth** | `cash_registers` + cash ledger movements | What should physically be in each drawer right now? |
+| **Drawer truth** | `cash_registers` + `cash_register_balances` (one row per till **and currency**) + cash ledger movements (each in its currency) | What should physically be in each drawer right now, currency by currency? |
 
 These three deliberately disagree: a part-paid order creates sales truth without
 full money truth; a pending-approval cheque is neither until approved; a voided
@@ -39,6 +39,10 @@ Reports compute from source rows at read time. No report writes its own totals
 back to the database, and no report reads a stored aggregate when the source rows
 are available (register aggregates are drawer truth and are the one exception —
 they are an operational device count, reconciled at close, not a reporting cache).
+A till's drawer is kept **per currency** (currency plan Step 2, 2026-10-18): the
+register's own money columns are its home currency, `cash_register_balances`
+carries every currency it holds, and a shilling view of a foreign drawer is
+stated only at the reporting rate, never by adding the figures together.
 If a report is slow, the fix is an index or a materialised view refreshed from
 source — never a hand-maintained total.
 

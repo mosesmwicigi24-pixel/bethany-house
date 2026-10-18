@@ -3,10 +3,12 @@
 namespace App\Services\Tills;
 
 use App\Models\CashRegister;
+use App\Models\CashRegisterBalance;
 use App\Models\TillCorrection;
 use App\Models\TillDiscrepancy;
 use App\Models\TillReconciliation;
 use App\Models\User;
+use App\Support\ReportingCurrency;
 
 /**
  * One shape for a till, for every viewer — with one rule about who sees what.
@@ -22,6 +24,13 @@ use App\Models\User;
  * The verifier, accountant and finance see everything, including the ledger
  * breakdown behind expected cash and, for legacy registers, how far the
  * ledger figure is from the old running column.
+ *
+ * EVERY CURRENCY APART (currency plan Step 2). The top-level money fields are
+ * the till's HOME currency, as they always were. `balances` carries one entry
+ * per currency the till holds (home first), each with its own float, expected,
+ * count and variance, under the same blind rule. `kes_summary` states the
+ * whole till in shillings at the REPORTING rate — and names any currency it
+ * could not convert rather than leaving it out silently.
  */
 final class TillPresenter
 {
@@ -54,7 +63,9 @@ final class TillPresenter
     {
         $r->loadMissing(['outlet:id,name', 'openedBy:id,first_name,last_name', 'closedBy:id,first_name,last_name']);
 
-        $name = fn ($u) => $u ? trim($u->first_name . ' ' . $u->last_name) : null;
+        $name  = fn ($u) => $u ? trim($u->first_name . ' ' . $u->last_name) : null;
+        $blind = self::isBlindFor($r, $viewer);
+        $rows  = $this->balanceRows($r);
 
         $base = [
             'id'                => $r->id,
@@ -62,7 +73,7 @@ final class TillPresenter
             'register_name'     => $r->register_name,
             'outlet_id'         => $r->outlet_id,
             'outlet_name'       => $r->outlet?->name,
-            'currency_code'     => $r->currency_code,
+            'currency_code'     => $r->homeCurrency(),
             'status'            => $r->status,
             'stage'             => self::stage($r),
             'legacy'            => $r->lifecycle_version === null,
@@ -84,15 +95,19 @@ final class TillPresenter
             'closing_cash'      => $r->status === 'open' ? null : (float) ($r->closing_balance ?? 0),
             'notes'             => $r->opening_notes,
             'closing_notes'     => $r->closing_notes,
+            'balances'          => $rows->map(fn (CashRegisterBalance $b) => $this->balance($r, $b, $blind, $withHistory))->values()->all(),
         ];
 
-        if (self::isBlindFor($r, $viewer)) {
+        if ($blind) {
             return $base + ['blind' => true];
         }
 
-        $verifier = $r->verified_by ? User::find($r->verified_by, ['id', 'first_name', 'last_name']) : null;
-        $discrepancy = TillDiscrepancy::where('cash_register_id', $r->id)->first();
-        $latestRec = TillReconciliation::where('cash_register_id', $r->id)->orderByDesc('id')->first();
+        $verifier      = $r->verified_by ? User::find($r->verified_by, ['id', 'first_name', 'last_name']) : null;
+        $discrepancies = TillDiscrepancy::where('cash_register_id', $r->id)->orderBy('id')->get();
+        $homeDisc      = $discrepancies->first(fn ($d) => strtoupper((string) $d->currency_code) === $r->homeCurrency());
+        $latestRecs    = TillReconciliation::where('cash_register_id', $r->id)->orderByDesc('id')->get()
+            ->unique(fn ($x) => strtoupper((string) ($x->currency_code ?: $r->homeCurrency())))->values();
+        $homeRec       = $latestRecs->first(fn ($x) => strtoupper((string) ($x->currency_code ?: $r->homeCurrency())) === $r->homeCurrency());
 
         $full = $base + [
             'blind'                          => false,
@@ -113,8 +128,12 @@ final class TillPresenter
             'total_card_sales'               => (float) ($r->total_card_sales ?? 0),
             'total_mpesa_sales'              => (float) ($r->total_mpesa_sales ?? 0),
             'total_refunds'                  => (float) ($r->total_refunds ?? 0),
-            'discrepancy'                    => $discrepancy ? $this->discrepancy($discrepancy) : null,
-            'reconciliation'                 => $latestRec ? $this->reconciliation($latestRec) : null,
+            // The home currency's, as before; every currency's under `discrepancies`.
+            'discrepancy'                    => $homeDisc ? $this->discrepancy($homeDisc) : null,
+            'discrepancies'                  => $discrepancies->map(fn ($d) => $this->discrepancy($d))->values()->all(),
+            'reconciliation'                 => $homeRec ? $this->reconciliation($homeRec) : null,
+            'latest_reconciliations'         => $latestRecs->map(fn ($x) => $this->reconciliation($x))->values()->all(),
+            'kes_summary'                    => $this->kesSummary($r, $rows),
         ];
 
         if ($withHistory) {
@@ -129,12 +148,126 @@ final class TillPresenter
         return $full;
     }
 
+    /**
+     * The till's balance rows, home first. A till with no rows yet (opened
+     * before Step 2, or built straight into the table) is shown through its
+     * own columns as a single home row — nothing is written while reading.
+     *
+     * @return \Illuminate\Support\Collection<int, CashRegisterBalance>
+     */
+    private function balanceRows(CashRegister $r)
+    {
+        $rows = CashRegisterBalance::where('cash_register_id', $r->id)
+            ->orderByDesc('is_home')->orderBy('currency_code')->get();
+        if ($rows->isNotEmpty()) {
+            return $rows;
+        }
+
+        return collect([new CashRegisterBalance([
+            'cash_register_id'               => $r->id,
+            'currency_code'                  => $r->homeCurrency(),
+            'is_home'                        => true,
+            'opening_balance'                => $r->opening_balance ?? 0,
+            'expected_cash'                  => $r->expected_cash ?? $r->opening_balance ?? 0,
+            'actual_cash'                    => $r->status === 'open' ? null : $r->actual_cash,
+            'expected_cash_at_count'         => $r->expected_cash_at_count,
+            'expected_cash_running_at_count' => $r->expected_cash_running_at_count,
+            'variance'                       => $r->variance,
+            'variance_class'                 => $r->variance_class,
+            'denomination_count'             => $r->denomination_count,
+            'total_sales'                    => $r->total_sales ?? 0,
+            'total_cash_sales'               => $r->total_cash_sales ?? 0,
+            'total_card_sales'               => $r->total_card_sales ?? 0,
+            'total_mpesa_sales'              => $r->total_mpesa_sales ?? 0,
+            'total_refunds'                  => $r->total_refunds ?? 0,
+            'transaction_count'              => $r->transaction_count ?? 0,
+        ])]);
+    }
+
+    /** @return array<string,mixed> */
+    private function balance(CashRegister $r, CashRegisterBalance $b, bool $blind, bool $withHistory): array
+    {
+        $base = [
+            'currency_code' => strtoupper((string) $b->currency_code),
+            'is_home'       => (bool) $b->is_home,
+            'opening_cash'  => (float) ($b->opening_balance ?? 0),
+            'counted_cash'  => $r->status === 'open' || $b->actual_cash === null ? null : (float) $b->actual_cash,
+        ];
+        if ($blind) {
+            return $base;
+        }
+
+        $out = $base + [
+            'expected_cash'                  => (float) ($b->expected_cash ?? 0),
+            'expected_cash_at_count'         => $b->expected_cash_at_count !== null ? (float) $b->expected_cash_at_count : null,
+            'expected_cash_running_at_count' => $b->expected_cash_running_at_count !== null ? (float) $b->expected_cash_running_at_count : null,
+            'expected_basis_mismatch'        => $this->tills->basisMismatchOf($b->expected_cash_at_count, $b->expected_cash_running_at_count),
+            'variance'                       => $b->variance !== null ? (float) $b->variance : null,
+            'variance_class'                 => $b->variance_class,
+            'total_sales'                    => (float) ($b->total_sales ?? 0),
+            'total_cash_sales'               => (float) ($b->total_cash_sales ?? 0),
+            'total_card_sales'               => (float) ($b->total_card_sales ?? 0),
+            'total_mpesa_sales'              => (float) ($b->total_mpesa_sales ?? 0),
+            'total_refunds'                  => (float) ($b->total_refunds ?? 0),
+            'transaction_count'              => (int) ($b->transaction_count ?? 0),
+        ];
+        if ($withHistory) {
+            $out['breakdown']          = $this->tills->ledgerBreakdown($r, $b->currency_code);
+            $out['denomination_count'] = $b->denomination_count;
+        }
+
+        return $out;
+    }
+
+    /**
+     * The whole till in shillings at the reporting rate: expected, counted and
+     * variance summed across the currencies that have a rate. Any currency
+     * without one is named in `unconverted` and left out of the sums.
+     *
+     * @param  \Illuminate\Support\Collection<int, CashRegisterBalance>  $rows
+     * @return array{basis: string, expected: float, counted: ?float, variance: ?float, unconverted: list<string>}
+     */
+    private function kesSummary(CashRegister $r, $rows): array
+    {
+        $expected = 0.0;
+        $counted  = 0.0;
+        $variance = 0.0;
+        $anyCount = false;
+        $unconverted = [];
+
+        foreach ($rows as $b) {
+            $code = strtoupper((string) $b->currency_code);
+            $exp  = (float) ($b->expected_cash_at_count ?? $b->expected_cash ?? 0);
+            $kes  = ReportingCurrency::toKes($exp, $code);
+            if ($kes === null) {
+                $unconverted[] = $code;
+                continue;
+            }
+            $expected += $kes;
+            if ($b->actual_cash !== null && $r->status !== 'open') {
+                $anyCount = true;
+                $counted  += (float) ReportingCurrency::toKes((float) $b->actual_cash, $code);
+                $variance += (float) ReportingCurrency::toKes((float) ($b->variance ?? 0), $code);
+            }
+        }
+
+        return [
+            'basis'       => 'reporting rate',
+            'expected'    => round($expected, 2),
+            'counted'     => $anyCount ? round($counted, 2) : null,
+            'variance'    => $anyCount ? round($variance, 2) : null,
+            'unconverted' => $unconverted,
+        ];
+    }
+
     /** @return array<string,mixed> */
     public function discrepancy(TillDiscrepancy $d): array
     {
         return [
             'id'                      => $d->id,
+            'currency_code'           => strtoupper((string) ($d->currency_code ?: 'KES')),
             'amount'                  => (float) $d->amount,
+            'amount_kes'              => ReportingCurrency::toKes((float) $d->amount, (string) ($d->currency_code ?: 'KES')),
             'direction'               => $d->direction,
             'expected_cash'           => (float) $d->expected_cash,
             'counted_cash'            => (float) $d->counted_cash,
@@ -153,6 +286,7 @@ final class TillPresenter
 
         return [
             'id'                       => $x->id,
+            'currency_code'            => strtoupper((string) ($x->currency_code ?: 'KES')),
             'status'                   => $x->status,
             'flagged_for_finance'      => (bool) $x->flagged_for_finance,
             'till_cash_sales'          => (float) $x->till_cash_sales,
@@ -175,6 +309,7 @@ final class TillPresenter
         return [
             'id'                      => $c->id,
             'cash_register_id'        => $c->cash_register_id,
+            'currency_code'           => strtoupper((string) ($c->currency_code ?: 'KES')),
             'reason'                  => $c->reason,
             'original_actual_cash'    => $c->original_actual_cash !== null ? (float) $c->original_actual_cash : null,
             'original_expected_cash'  => $c->original_expected_cash !== null ? (float) $c->original_expected_cash : null,

@@ -46,12 +46,15 @@ class ProductCostVisibilityTest extends TestCase
 
     private function costedProduct(): Product
     {
-        $product = Product::factory()->create();
+        // Digit-free SKUs: the leak checks below search the body for the cost
+        // figures (870, 2610) and a random SKU-##### can contain them (CI,
+        // 2026-10-18: SKU-08704).
+        $product = Product::factory()->create(['sku' => 'COSTED-PRODUCT']);
         ProductPrice::create([
             'product_id' => $product->id, 'product_variant_id' => null,
             'currency_code' => 'KES', 'regular_price' => 5000, 'cost_price' => 3187.43,
         ]);
-        $variant = ProductVariant::factory()->create(['product_id' => $product->id]);
+        $variant = ProductVariant::factory()->create(['product_id' => $product->id, 'sku' => 'COSTED-VARIANT']);
         ProductPrice::create([
             'product_id' => $product->id, 'product_variant_id' => $variant->id,
             'currency_code' => 'KES', 'regular_price' => 5200, 'cost_price' => 3291.67,

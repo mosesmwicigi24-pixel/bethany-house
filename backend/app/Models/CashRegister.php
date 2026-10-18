@@ -132,6 +132,18 @@ class CashRegister extends Model
         return $this->hasMany(CashRegisterTransaction::class);
     }
 
+    /** One row per currency the till holds (currency plan Step 2); the home row mirrors this row's columns. */
+    public function balances()
+    {
+        return $this->hasMany(CashRegisterBalance::class)->orderByDesc('is_home')->orderBy('currency_code');
+    }
+
+    /** The till's own currency, upper-case; KES when a legacy row has none. */
+    public function homeCurrency(): string
+    {
+        return strtoupper((string) ($this->currency_code ?: 'KES'));
+    }
+
     /**
      * Scopes
      */

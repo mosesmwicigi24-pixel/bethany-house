@@ -21,6 +21,11 @@
  *    and nothing here pre-fills or compares. The till moves to "awaiting
  *    verification"; an outlet manager verifies and finalizes it on the Tills
  *    page. The opening float is typed blind too: no previous count is shown.
+ *
+ * 4. EVERY CURRENCY APART (currency plan Step 2)
+ *    A till holds one drawer per currency it has touched. Opening may add a
+ *    float in another sellable currency; closing counts each currency the
+ *    till holds on its own line. Nothing is added across currencies.
  */
 
 import { useState } from "react";
@@ -43,6 +48,8 @@ interface Props {
     /** Called when the user clicks "Complete EoD Report First".
      *  The parent should open UserEodModal. */
     onRequestEod?: () => void;
+    /** Currencies the books can state in shillings (the server's `sellable` list). */
+    currencies?: string[];
 }
 
 export default function RegisterModal({
@@ -54,6 +61,7 @@ export default function RegisterModal({
     onClose,
     onSuccess,
     onRequestEod,
+    currencies = [],
 }: Props) {
     const toast = useToastStore();
     const [outletId, setOutletId] = useState(defaultOutletId ?? outlets[0]?.id);
@@ -63,9 +71,25 @@ export default function RegisterModal({
     // Optional physical denomination count (KES note/coin value → quantity).
     const [denoms, setDenoms] = useState<Record<number, number>>({});
 
+    // The till's own currency; the main figure is in it.
+    const home = register?.currency_code ?? "KES";
+    // Open: floats in other currencies, {code: amount}. Close: a count per
+    // other currency the till holds — each blank until typed, never pre-filled.
+    const [floats, setFloats] = useState<Record<string, number>>({});
+    const [floatCode, setFloatCode] = useState("");
+    const foreignRows = (register?.balances ?? []).filter((b) => !b.is_home);
+    const [counts, setCounts] = useState<Record<string, string>>({});
+    const foreignCurrencies = currencies.filter((c) => c !== home && !(c in floats));
+    const allForeignCounted = foreignRows.every((b) => counts[b.currency_code] !== undefined && counts[b.currency_code] !== "");
+
     const openMutation = useMutation({
         mutationFn: () =>
-            posApi.openRegister({ outlet_id: outletId, opening_cash: amount, notes }),
+            posApi.openRegister({
+                outlet_id: outletId,
+                opening_cash: amount,
+                notes,
+                opening_floats: Object.keys(floats).length ? floats : undefined,
+            }),
         onSuccess: () => {
             toast.success("Register opened!");
             onSuccess();
@@ -80,6 +104,9 @@ export default function RegisterModal({
                 closing_cash: amount,
                 notes,
                 denomination_count: anyDenoms ? denoms : undefined,
+                counts: foreignRows.length
+                    ? foreignRows.map((b) => ({ currency_code: b.currency_code, counted_cash: parseFloat(counts[b.currency_code] || "0") || 0 }))
+                    : undefined,
             }),
         onSuccess: (res) => {
             // The reply carries no variance by design — the count is blind.
@@ -199,8 +226,14 @@ export default function RegisterModal({
                         <div className="bg-surface-50 rounded-xl p-3 space-y-1.5 text-xs text-surface-600">
                             <div className="flex justify-between">
                                 <span>Opening float</span>
-                                <span>KES {register.opening_cash.toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
+                                <span>{home} {register.opening_cash.toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
                             </div>
+                            {foreignRows.map((b) => (
+                                <div key={b.currency_code} className="flex justify-between">
+                                    <span>Opening float ({b.currency_code})</span>
+                                    <span>{b.currency_code} {b.opening_cash.toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
+                                </div>
+                            ))}
                             <div className="flex justify-between text-surface-500">
                                 <span>Transactions</span>
                                 <span>{register.transaction_count}</span>
@@ -221,7 +254,7 @@ export default function RegisterModal({
                                 </label>
                                 <div className="relative">
                                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-surface-500">
-                                        KES
+                                        {mode === "open" ? "KES" : home}
                                     </span>
                                     <input
                                         type="number"
@@ -234,6 +267,70 @@ export default function RegisterModal({
                                     />
                                 </div>
                             </div>
+
+                            {/* Open: a float in another currency the drawer starts with */}
+                            {mode === "open" && (Object.keys(floats).length > 0 || foreignCurrencies.length > 0) && (
+                                <div className="rounded-xl border border-line p-3 space-y-2">
+                                    <label className="label mb-0">
+                                        Floats in other currencies <span className="text-surface-400 font-normal">(optional)</span>
+                                    </label>
+                                    {Object.entries(floats).map(([code, amt]) => (
+                                        <div key={code} className="flex items-center gap-2">
+                                            <span className="text-xs font-medium text-surface-600 w-10">{code}</span>
+                                            <input
+                                                type="number"
+                                                min={0}
+                                                step={0.01}
+                                                value={amt}
+                                                onChange={(e) => setFloats({ ...floats, [code]: parseFloat(e.target.value) || 0 })}
+                                                className="input py-1 text-sm flex-1"
+                                            />
+                                            <button type="button" onClick={() => { const n = { ...floats }; delete n[code]; setFloats(n); }} className="btn-ghost btn-sm text-xs">Remove</button>
+                                        </div>
+                                    ))}
+                                    {foreignCurrencies.length > 0 && (
+                                        <div className="flex items-center gap-2">
+                                            <select value={floatCode} onChange={(e) => setFloatCode(e.target.value)} className="input py-1 text-sm flex-1">
+                                                <option value="">Add a float in…</option>
+                                                {foreignCurrencies.map((c) => <option key={c} value={c}>{c}</option>)}
+                                            </select>
+                                            <button
+                                                type="button"
+                                                disabled={!floatCode}
+                                                onClick={() => { setFloats({ ...floats, [floatCode]: 0 }); setFloatCode(""); }}
+                                                className="btn-secondary btn-sm text-xs disabled:opacity-40"
+                                            >
+                                                Add
+                                            </button>
+                                        </div>
+                                    )}
+                                    <p className="text-2xs text-surface-400">Each currency is kept apart in the till; nothing is added across them.</p>
+                                </div>
+                            )}
+
+                            {/* Close: every other currency the till holds, counted on its own */}
+                            {mode === "close" && foreignRows.length > 0 && (
+                                <div className="rounded-xl border border-line p-3 space-y-2">
+                                    <label className="label mb-0">Other currencies in the drawer</label>
+                                    {foreignRows.map((b) => (
+                                        <div key={b.currency_code}>
+                                            <div className="relative">
+                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-surface-500">{b.currency_code}</span>
+                                                <input
+                                                    type="number"
+                                                    min={0}
+                                                    step={0.01}
+                                                    value={counts[b.currency_code] ?? ""}
+                                                    onChange={(e) => setCounts({ ...counts, [b.currency_code]: e.target.value })}
+                                                    placeholder="Counted"
+                                                    className="input pl-12 text-sm"
+                                                />
+                                            </div>
+                                        </div>
+                                    ))}
+                                    <p className="text-2xs text-surface-400">Count each currency on its own. The till took money in these.</p>
+                                </div>
+                            )}
 
                             {/* Optional denomination count — close mode */}
                             {mode === "close" && (
@@ -307,7 +404,7 @@ export default function RegisterModal({
                                     ? openMutation.mutate()
                                     : closeMutation.mutate()
                             }
-                            disabled={isPending || amount < 0}
+                            disabled={isPending || amount < 0 || (mode === "close" && !allForeignCounted)}
                             className={clsx(
                                 "flex-1 btn gap-2",
                                 mode === "open" ? "btn-primary" : "btn-danger",
