@@ -29,9 +29,11 @@ const fmtDate = (d: string | null | undefined) =>
 const fmtDateTime = (d: string | null | undefined) =>
     d ? new Date(d).toLocaleString("en-KE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
 
-const fmt = (n: number | string | null | undefined) => {
+// In the purchase order's own currency (Step 5): a USD order's goods are
+// received in dollars, not labelled as shillings.
+const fmt = (n: number | string | null | undefined, cc = "KES") => {
     const v = Number(n ?? 0);
-    return `KES ${v.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `${cc} ${v.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -118,6 +120,7 @@ export default function GoodsReceiptDetailPage() {
     const totalAccepted = qtyNum(items.reduce((s, i) => s + qtyNum(i.quantity_received) - qtyNum(i.quantity_rejected), 0));
     const totalRejected = qtyNum(items.reduce((s, i) => s + qtyNum(i.quantity_rejected), 0));
     const totalValue    = items.reduce((s, i) => s + (qtyNum(i.quantity_received) - qtyNum(i.quantity_rejected)) * Number(i.purchase_order_item?.unit_price ?? 0), 0);
+    const cc = (grn.purchase_order as any)?.currency_code ?? (grn.purchase_order as any)?.currency ?? "KES";
     const receivedByName = grn.received_by
         ? `${grn.received_by.first_name} ${grn.received_by.last_name}`.trim()
         : "-";
@@ -160,7 +163,7 @@ export default function GoodsReceiptDetailPage() {
                         </div>
                         <div className="sm:text-right">
                             <p className="text-success-300 text-2xs uppercase tracking-widest mb-1">Total Value Received</p>
-                            <p className="text-3xl font-bold text-white tabular-nums">{fmt(totalValue)}</p>
+                            <p className="text-3xl font-bold text-white tabular-nums">{fmt(totalValue, cc)}</p>
                             <p className="text-success-300 text-xs mt-1">
                                 {fmtDate(grn.received_date)}
                             </p>
@@ -280,9 +283,9 @@ export default function GoodsReceiptDetailPage() {
                                                         </span>
                                                     </td>
                                                     <td className="px-3 py-2.5 text-right tabular-nums text-surface-600">
-                                                        {fmt(item.purchase_order_item?.unit_price ?? 0)}
+                                                        {fmt(item.purchase_order_item?.unit_price ?? 0, cc)}
                                                     </td>
-                                                    <td className="px-3 py-2.5 text-right tabular-nums font-semibold">{fmt(lineValue)}</td>
+                                                    <td className="px-3 py-2.5 text-right tabular-nums font-semibold">{fmt(lineValue, cc)}</td>
                                                 </tr>
                                             );
                                         })}
@@ -293,7 +296,7 @@ export default function GoodsReceiptDetailPage() {
                                                 Total Value Added to Stock
                                             </td>
                                             <td className="px-3 py-2.5 text-right text-base font-bold tabular-nums text-surface-900">
-                                                {fmt(totalValue)}
+                                                {fmt(totalValue, cc)}
                                             </td>
                                         </tr>
                                     </tfoot>
@@ -385,7 +388,7 @@ export default function GoodsReceiptDetailPage() {
                                     {totalRejected}
                                 </span>
                             } />
-                            <InfoRow label="Total Value" value={fmt(totalValue)} />
+                            <InfoRow label="Total Value" value={fmt(totalValue, cc)} />
                         </div>
                     </div>
                 </div>

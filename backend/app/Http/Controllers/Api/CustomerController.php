@@ -214,8 +214,20 @@ class CustomerController extends Controller
             'total_orders'        => $ordersQuery->count(),
             // The subset that is income, so the two figures can be told apart.
             'recognised_orders'   => (clone $recognised)->count(),
-            'total_spent'         => (clone $recognised)->sum('total_amount'),
-            'average_order_value' => (clone $recognised)->avg('total_amount') ?? 0,
+            // In KES at each order's own reporting rate (Step 5); the native
+            // figures per currency sit beside it. Summing total_amount added
+            // dollars to shillings for a customer who bought in both.
+            'total_spent'         => (float) (clone $recognised)
+                ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code'))
+                ->selectRaw('COALESCE(SUM(' . \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code') . '), 0) AS v')->value('v'),
+            'average_order_value' => (float) ((clone $recognised)
+                ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code'))
+                ->selectRaw('COALESCE(AVG(' . \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code') . '), 0) AS v')->value('v') ?? 0),
+            'spent_by_currency'   => \App\Support\MoneyByCurrency::of(
+                (clone $recognised)->get(['orders.total_amount', 'orders.currency_code', 'orders.reporting_rate_to_kes']),
+                'total_amount', 'currency_code', 'reporting_rate_to_kes',
+            )['by_currency'],
+            'money_basis'         => 'KES at the reporting rate',
             'last_order_date'     => (clone $ordersQuery)
                 ->latest()->value('created_at'),
             // The detail page has always rendered these three cards; nothing

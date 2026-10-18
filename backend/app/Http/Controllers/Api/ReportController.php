@@ -1828,6 +1828,17 @@ class ReportController extends Controller
         try {
         [$start, $end] = $this->dateRange($request);
         $currency = $request->get('currency_code', 'KES');
+        // The P&L deducts shilling costs (order_items.cost_price, expenses.amount_kes)
+        // from revenue; stating revenue in another currency would set USD
+        // sales against KES costs (Step 5). It is a shilling statement: every
+        // currency's sales converted at its own reporting rate.
+        if (strtoupper($currency) !== 'KES') {
+            return response()->json([
+                'message' => 'The profit & loss is stated in KES: its costs are in shillings, so revenue in ' . strtoupper($currency)
+                    . ' cannot be set against them. Every currency\'s sales are converted at the reporting rate.',
+                'code'    => 'KES_ONLY_REPORT',
+            ], 422);
+        }
 
         // Same revenue truth as every tile on the sales report: RECOGNISED
         // orders (a human confirmed it, or money arrived), converted at the
@@ -2175,10 +2186,10 @@ class ReportController extends Controller
                 'count' => (int) ($pendingRow->count ?? 0),
                 'total' => round((float) ($pendingRow->total ?? 0), 2),
             ],
-            // amount_kes is maintained on the row; summing `amount` adds
-            // currencies together. Every expense is KES today, so this was
-            // right by luck.
-            'total'     => $expensesList->sum('amount_kes'),
+            // The rows carry amount_kes AS `amount` (selected above), so this
+            // summed a key no row had and read 0 on every period (Step 5).
+            'total'     => round((float) $expensesList->sum('amount'), 2),
+            'total_basis' => 'KES at the reporting rate',
         ]);
     }
 
@@ -3006,6 +3017,14 @@ class ReportController extends Controller
     public function productionCostingSummary(Request $request)
     {
         [$start, $end] = $this->dateRange($request);
+        // Material costs are in shillings (materials.unit_cost); the margin
+        // is only honest when revenue is too (Step 5).
+        if (strtoupper((string) $request->get('currency_code', $request->get('currency', 'KES'))) !== 'KES') {
+            return response()->json([
+                'message' => 'Production costing is stated in KES: material costs are in shillings. Every currency\'s revenue is converted at the reporting rate.',
+                'code'    => 'KES_ONLY_REPORT',
+            ], 422);
+        }
         $outletId = $request->filled('outlet_id') ? (int) $request->outlet_id : null;
         $status   = $request->get('status', 'completed');
 

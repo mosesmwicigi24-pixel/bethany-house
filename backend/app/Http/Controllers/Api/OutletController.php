@@ -60,17 +60,16 @@ class OutletController extends Controller
 
         // POS sales stats - graceful fallback if orders table not ready
         try {
-            $statistics['today_sales_count'] = DB::table('orders')
-                ->where('outlet_id', $outlet->id)
-                ->where('channel', 'pos')
-                ->whereDate('created_at', today())
-                ->count();
-
-            $statistics['today_sales_total'] = DB::table('orders')
-                ->where('outlet_id', $outlet->id)
-                ->where('channel', 'pos')
-                ->whereDate('created_at', today())
-                ->sum('total');
+            // orders has no `channel` or `total` column: both queries threw
+            // and the catch below blanked every figure (Step 5). Till sales
+            // are order_type = 'pos'; money is KES at each order's rate.
+            $todayPos = fn () => \App\Models\Order::query()->recognised()
+                ->where('orders.outlet_id', $outlet->id)->where('orders.order_type', 'pos')
+                ->whereBetween('orders.created_at', [now(config('app.timezone'))->startOfDay(), now(config('app.timezone'))->endOfDay()]);
+            $statistics['today_sales_count'] = $todayPos()->count();
+            $statistics['today_sales_total'] = round((float) $todayPos()
+                ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code'))
+                ->selectRaw('COALESCE(SUM(' . \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code') . '), 0) AS v')->value('v'), 2);
 
             $statistics['total_orders'] = DB::table('orders')
                 ->where('outlet_id', $outlet->id)
@@ -287,23 +286,22 @@ class OutletController extends Controller
         }
 
         try {
-            $stats['today_sales_count'] = DB::table('orders')
-                ->where('outlet_id', $outlet->id)->where('channel', 'pos')
-                ->whereDate('created_at', today())->count();
+            // orders has no `channel` or `total` column: these threw and the
+            // catch left every figure at 0 (Step 5). Till sales are
+            // order_type = 'pos', confirmed or paid; money in KES at each
+            // order's own reporting rate; the day and month in Nairobi time.
+            $tz   = config('app.timezone');
+            $pos  = fn ($from, $to) => \App\Models\Order::query()->recognised()
+                ->where('orders.outlet_id', $outlet->id)->where('orders.order_type', 'pos')
+                ->whereBetween('orders.created_at', [$from, $to]);
+            $kes  = fn ($q) => round((float) $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code'))
+                ->selectRaw('COALESCE(SUM(' . \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code') . '), 0) AS v')->value('v'), 2);
 
-            $stats['today_sales_total'] = (float) DB::table('orders')
-                ->where('outlet_id', $outlet->id)->where('channel', 'pos')
-                ->whereDate('created_at', today())->sum('total');
-
-            $stats['month_sales_count'] = DB::table('orders')
-                ->where('outlet_id', $outlet->id)->where('channel', 'pos')
-                ->whereMonth('created_at', now()->month)
-                ->whereYear('created_at',  now()->year)->count();
-
-            $stats['month_sales_total'] = (float) DB::table('orders')
-                ->where('outlet_id', $outlet->id)->where('channel', 'pos')
-                ->whereMonth('created_at', now()->month)
-                ->whereYear('created_at',  now()->year)->sum('total');
+            $stats['today_sales_count'] = $pos(now($tz)->startOfDay(), now($tz)->endOfDay())->count();
+            $stats['today_sales_total'] = $kes($pos(now($tz)->startOfDay(), now($tz)->endOfDay()));
+            $stats['month_sales_count'] = $pos(now($tz)->startOfMonth(), now($tz)->endOfMonth())->count();
+            $stats['month_sales_total'] = $kes($pos(now($tz)->startOfMonth(), now($tz)->endOfMonth()));
+            $stats['money_basis']       = 'KES at the reporting rate; confirmed or paid till sales';
 
             $stats['total_orders'] = DB::table('orders')
                 ->where('outlet_id', $outlet->id)->count();

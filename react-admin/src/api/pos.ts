@@ -274,6 +274,11 @@ export interface TillApprover {
 
 export interface DailySummary {
     date: string;
+    /** Step 5: every figure is KES at each order's reporting rate; the native amounts per currency are beside it. */
+    money_basis?: string;
+    by_currency?: { currency_code: string; amount: number; count: number; amount_kes: number | null }[];
+    unconverted?: string[];
+    returns_by_currency?: { currency_code: string; amount: number; count: number; amount_kes: number | null }[];
     total_sales: number;
     total_transactions: number;
     total_returns: number;
