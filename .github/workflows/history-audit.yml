@@ -1,0 +1,43 @@
+name: History audit
+
+# Runs `php artisan history:audit` (currency plan Step 6, READ-ONLY) on the
+# VPS, the same way catalog-cleanup.yml reaches the box. The repository is
+# public, so the log shows only the per-class COUNTS and the currencies with
+# no rate — never a record's number or amount. The per-record tables are
+# printed by running the command on the box directly:
+#   cd /opt/bethany-house && docker compose run --rm -T laravel php artisan history:audit
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: history-audit
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Run history:audit (counts only)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "${{ secrets.VPS_KNOWN_HOSTS }}" ]; then
+            printf '%s\n' "${{ secrets.VPS_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          else
+            for i in 1 2 3 4 5; do
+              ssh-keyscan -T 15 -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+              [ -s ~/.ssh/known_hosts ] && break
+              sleep $((i * 5))
+            done
+            [ -s ~/.ssh/known_hosts ] || { echo "::error::Could not read host key"; exit 1; }
+          fi
+        timeout-minutes: 3
+
+      - name: Run history:audit on the VPS (counts only)
+        run: |
+          ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 \
+            -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" \
+            "cd /opt/bethany-house && set -o pipefail && docker compose run --rm -T laravel php artisan history:audit 2>&1 | grep -E '^(History audit|[1-8]\. |   Currencies without a rate|   none|Mechanical|Classes)'"
+        timeout-minutes: 15
