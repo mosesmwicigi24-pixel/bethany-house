@@ -124,7 +124,10 @@ class Supplier extends Model
             $query->where('order_date', '<=', $endDate);
         }
 
-        return (float) $query->sum('total_amount');
+        // KES at the reporting rate; a currency with no rate is left out, never added at face value.
+        return round((float) $query
+            ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('currency_code'))
+            ->sum(\Illuminate\Support\Facades\DB::raw(\App\Support\ReportingCurrency::kes('total_amount', 'currency_code'))), 2);
     }
 
     public function isActive(): bool

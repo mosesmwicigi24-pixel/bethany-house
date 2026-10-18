@@ -914,6 +914,7 @@ function FinancialIntelligence({ start, end }: { start: string; end: string }) {
             {/* Weekly cash flow */}
             <div className="card card-body">
                 <SectionHeader title="Cash flow by week — in vs out" />
+                <p className="text-2xs text-surface-400 -mt-1 mb-1">Out = approved expenses + payments to suppliers. Supplier payments pay for stock and are not in the P&amp;L.</p>
                 {cash_flow.length === 0 ? (
                     <p className="text-xs text-surface-400 py-4">No money movement in this period.</p>
                 ) : (
@@ -927,8 +928,10 @@ function FinancialIntelligence({ start, end }: { start: string; end: string }) {
                                     <div className="h-2 bg-surface-100 rounded-full overflow-hidden">
                                         <div className="h-full bg-success-500 rounded-full" style={{ width: `${(Number(w.in) / maxFlow) * 100}%` }} />
                                     </div>
-                                    <div className="h-2 bg-surface-100 rounded-full overflow-hidden">
-                                        <div className="h-full bg-danger-400 rounded-full" style={{ width: `${(Number(w.out) / maxFlow) * 100}%` }} />
+                                    <div className="h-2 bg-surface-100 rounded-full overflow-hidden flex"
+                                        title={`Expenses ${fmtKes(w.out_expenses ?? w.out)} · Suppliers ${fmtKes(w.out_suppliers ?? 0)}`}>
+                                        <div className="h-full bg-danger-400" style={{ width: `${(Number(w.out_expenses ?? w.out) / maxFlow) * 100}%` }} />
+                                        <div className="h-full bg-warning-400" style={{ width: `${(Number(w.out_suppliers ?? 0) / maxFlow) * 100}%` }} />
                                     </div>
                                 </div>
                                 <span className={clsx("w-24 text-right tabular-nums font-bold shrink-0",

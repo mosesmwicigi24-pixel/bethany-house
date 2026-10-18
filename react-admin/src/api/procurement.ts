@@ -33,7 +33,9 @@ export interface Supplier {
 export interface SupplierStats {
     total_orders: number;
     pending_orders: number;
+    /** KES at the reporting rate; orders in a currency with no rate are left out. */
     total_value: number;
+    unconverted_orders?: number;
     last_order_date: string | null;
 }
 
@@ -536,6 +538,8 @@ export interface SupplierPayment {
 
 export interface PayableSummary {
     currency: string;
+    /** Goods sent back on approved returns, at the order's prices. */
+    returned: number;
     payable: number;
     payable_source: "supplier_invoice" | "po_total";
     paid: number;
@@ -544,6 +548,8 @@ export interface PayableSummary {
     balance_kes: number | null;
     balance_kes_basis: string | null;
     status: "unpaid" | "partially_paid" | "paid" | "overpaid";
+    /** Approved/paid expenses linked to this order (they are in the P&L). */
+    linked_expenses: { count: number; amount_kes: number };
 }
 
 export interface SupplierPayableRow {

@@ -417,7 +417,9 @@ function SupplierDetailModal({
                                     color: "text-warning",
                                 },
                                 {
-                                    label: "Total Spent",
+                                    label: stats.unconverted_orders
+                                        ? `Total Spent (excl. ${stats.unconverted_orders} order${stats.unconverted_orders === 1 ? "" : "s"} with no reporting rate)`
+                                        : "Total Spent",
                                     value: `KES ${Number(stats.total_value).toLocaleString()}`,
                                     color: "text-surface-900",
                                 },

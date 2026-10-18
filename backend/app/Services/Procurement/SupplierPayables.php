@@ -15,7 +15,9 @@ use Illuminate\Validation\ValidationException;
  * What a purchase order owes its supplier, and what has been paid.
  *
  *   Payable = the supplier's invoice amount when one is recorded (what the
- *             supplier actually billed), else the PO total.
+ *             supplier actually billed — any credit for goods sent back
+ *             is theirs to state on it), else the PO total less the value
+ *             of approved purchase returns (quantity × the line's price).
  *   Paid    = standing (non-voided) supplier payments.
  *   Balance = Payable − Paid; below zero is a credit with the supplier.
  *
@@ -32,7 +34,25 @@ class SupplierPayables
 
     public static function payable(PurchaseOrder $po): float
     {
-        return round((float) ($po->supplier_invoice_amount ?? $po->total_amount), 2);
+        if ($po->supplier_invoice_amount !== null) {
+            return round((float) $po->supplier_invoice_amount, 2);
+        }
+
+        return round((float) $po->total_amount - self::returned($po), 2);
+    }
+
+    /** Statuses of a purchase return whose goods have gone back. */
+    public const RETURNED_STATUSES = ['approved', 'completed'];
+
+    /** Value of goods sent back on approved returns, at the order's prices, in the PO's currency. */
+    public static function returned(PurchaseOrder $po): float
+    {
+        return round((float) DB::table('purchase_return_items as ri')
+            ->join('purchase_returns as r', 'r.id', '=', 'ri.return_id')
+            ->join('purchase_order_items as pi', 'pi.id', '=', 'ri.po_item_id')
+            ->where('r.purchase_order_id', $po->id)
+            ->whereIn('r.status', self::RETURNED_STATUSES)
+            ->sum(DB::raw('ri.quantity * pi.unit_price')), 2);
     }
 
     public static function paid(PurchaseOrder $po): float
@@ -63,6 +83,7 @@ class SupplierPayables
 
         return [
             'currency'        => $currency,
+            'returned'        => self::returned($po),
             'payable'         => $payable,
             'payable_source'  => $po->supplier_invoice_amount !== null ? 'supplier_invoice' : 'po_total',
             'paid'            => $paid,
@@ -71,6 +92,14 @@ class SupplierPayables
             'balance_kes'     => $balKes,
             'balance_kes_basis' => $currency === 'KES' ? null : 'today\'s reporting rate',
             'status'          => self::statusFor($payable, $paid),
+            // Approved/paid expenses linked to this order. Freight or clearing
+            // belongs there; paying the supplier for the goods does not — that
+            // would be counted twice (in the P&L and here).
+            'linked_expenses' => (array) DB::table('expenses')
+                ->where('purchase_order_id', $po->id)->whereNull('deleted_at')
+                ->whereIn('status', \App\Services\Reporting\MetricEngine::EXPENSE_SPEND_STATUSES)
+                ->selectRaw('COUNT(*) AS count, ROUND(COALESCE(SUM(amount_kes), 0)::numeric, 2)::float8 AS amount_kes')
+                ->first(),
         ];
     }
 

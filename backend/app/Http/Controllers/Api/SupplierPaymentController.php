@@ -85,7 +85,7 @@ class SupplierPaymentController extends Controller
         $rows = DB::select("
             SELECT po.supplier_id, s.name AS supplier, UPPER(po.currency_code) AS currency,
                    COUNT(*) AS orders,
-                   SUM(COALESCE(po.supplier_invoice_amount, po.total_amount)) AS payable,
+                   SUM(COALESCE(po.supplier_invoice_amount, po.total_amount - COALESCE(rt.returned, 0))) AS payable,
                    SUM(COALESCE(p.paid, 0)) AS paid
             FROM purchase_orders po
             JOIN suppliers s ON s.id = po.supplier_id
@@ -94,9 +94,17 @@ class SupplierPaymentController extends Controller
                 FROM supplier_payments WHERE voided_at IS NULL
                 GROUP BY purchase_order_id
             ) p ON p.purchase_order_id = po.id
+            LEFT JOIN (
+                SELECT r.purchase_order_id, SUM(ri.quantity * pi.unit_price) AS returned
+                FROM purchase_return_items ri
+                JOIN purchase_returns r ON r.id = ri.return_id
+                JOIN purchase_order_items pi ON pi.id = ri.po_item_id
+                WHERE r.status IN ('" . implode("','", SupplierPayables::RETURNED_STATUSES) . "')
+                GROUP BY r.purchase_order_id
+            ) rt ON rt.purchase_order_id = po.id
             WHERE po.status IN ('" . implode("','", SupplierPayables::PAYABLE_STATUSES) . "')
             GROUP BY po.supplier_id, s.name, UPPER(po.currency_code)
-            HAVING SUM(COALESCE(po.supplier_invoice_amount, po.total_amount)) - SUM(COALESCE(p.paid, 0)) <> 0
+            HAVING SUM(COALESCE(po.supplier_invoice_amount, po.total_amount - COALESCE(rt.returned, 0))) - SUM(COALESCE(p.paid, 0)) <> 0
             ORDER BY s.name, currency
         ");
 
@@ -121,7 +129,7 @@ class SupplierPaymentController extends Controller
             'data'           => $out,
             'total_owed_kes' => round($out->sum(fn ($r) => max(0, (float) ($r['balance_kes'] ?? 0))), 2),
             'unconverted'    => $out->filter(fn ($r) => $r['balance_kes'] === null)->pluck('currency')->unique()->values(),
-            'basis'          => 'Supplier invoice amount where recorded, else the PO total, on approved purchase orders; less payments not voided. KES at today\'s reporting rate.',
+            'basis'          => 'Supplier invoice amount where recorded, else the PO total less goods returned, on approved purchase orders; less payments not voided. KES at today\'s reporting rate.',
         ]);
     }
 }

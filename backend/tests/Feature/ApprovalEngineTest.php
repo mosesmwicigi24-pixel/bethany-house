@@ -285,10 +285,27 @@ class ApprovalEngineTest extends TestCase
         $this->assertEquals(128000, (float) $usd->amount_kes);
         $this->assertSame(['procurement.approve', 'approvals.finance_sign'], $this->permissionsOf($usd));
 
-        // EUR has no reporting rate: never guessed — every band.
+        // A new PO can't be raised in a currency with no reporting rate
+        // (2026-10-18). One raised while EUR had a rate, whose rate has since
+        // been removed, is never guessed at — it needs every band.
         DB::table('currencies')->updateOrInsert(['code' => 'EUR'], ['name' => 'Euro', 'symbol' => '€', 'exchange_rate' => 0.009, 'reporting_rate_to_kes' => null, 'created_at' => now(), 'updated_at' => now()]);
         ReportingCurrency::forget();
-        $eur = $this->requestFor($this->submitPo($this->officer, 10, 'EUR'));
+        Sanctum::actingAs($this->officer);
+        $this->postJson('/api/v1/admin/purchase-orders', [
+            'supplier_id' => $this->supplierId(), 'expected_delivery_date' => now()->addWeek()->toDateString(), 'currency' => 'EUR',
+            'items' => [['type' => 'product', 'item_id' => Product::factory()->create()->id, 'quantity' => 1, 'unit_price' => 10]],
+        ])->assertStatus(422)->assertJsonValidationErrors('currency');
+
+        DB::table('currencies')->where('code', 'EUR')->update(['reporting_rate_to_kes' => 140]);
+        ReportingCurrency::forget();
+        $id = $this->postJson('/api/v1/admin/purchase-orders', [
+            'supplier_id' => $this->supplierId(), 'expected_delivery_date' => now()->addWeek()->toDateString(), 'currency' => 'EUR',
+            'items' => [['type' => 'product', 'item_id' => Product::factory()->create()->id, 'quantity' => 1, 'unit_price' => 10]],
+        ])->assertCreated()->json('purchase_order.id');
+        DB::table('currencies')->where('code', 'EUR')->update(['reporting_rate_to_kes' => null]);
+        ReportingCurrency::forget();
+        $this->postJson("/api/v1/admin/purchase-orders/{$id}/submit")->assertOk();
+        $eur = $this->requestFor(PurchaseOrder::findOrFail($id));
         $this->assertNull($eur->amount_kes);
         $this->assertTrue($eur->value_unknown);
         $this->assertSame(['procurement.approve', 'approvals.finance_sign', 'approvals.super_sign'], $this->permissionsOf($eur));

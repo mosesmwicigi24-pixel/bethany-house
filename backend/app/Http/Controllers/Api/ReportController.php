@@ -2405,8 +2405,8 @@ class ReportController extends Controller
                 COUNT(*)                                                                           AS total_orders,
                 (COALESCE(SUM({$poTotal}), 0))::float8                                                     AS total_value,
                 (COALESCE(SUM(CASE WHEN status = 'received' THEN {$poTotal} ELSE 0 END), 0))::float8       AS received_value,
-                (COALESCE(SUM(CASE WHEN status = 'partial'  THEN {$poTotal} ELSE 0 END), 0))::float8       AS partial_value,
-                COUNT(CASE WHEN status IN ('pending','approved','ordered') THEN 1 END)             AS pending_count,
+                (COALESCE(SUM(CASE WHEN status = 'partially_received' THEN {$poTotal} ELSE 0 END), 0))::float8 AS partial_value,
+                COUNT(CASE WHEN status IN ('pending_approval','approved','ordered') THEN 1 END)    AS pending_count,
                 COUNT(CASE WHEN status = 'received' THEN 1 END)                                    AS received_count,
                 COUNT(CASE WHEN status = 'cancelled' THEN 1 END)                                   AS cancelled_count,
                 (COALESCE(AVG({$poTotal}), 0))::float8                                                     AS avg_po_value,
@@ -2428,7 +2428,7 @@ class ReportController extends Controller
                 (COALESCE(SUM({$poTotal}), 0))::float8  AS total_value,
                 (COALESCE(AVG({$poTotal}), 0))::float8  AS avg_value,
                 COUNT(CASE WHEN purchase_orders.status = 'received' THEN 1 END) AS received_count,
-                COUNT(CASE WHEN purchase_orders.status IN ('pending','ordered') THEN 1 END) AS pending_count
+                COUNT(CASE WHEN purchase_orders.status IN ('pending_approval','approved','ordered') THEN 1 END) AS pending_count
             ")
             ->orderByRaw("(COALESCE(SUM({$poTotal}), 0))::float8 DESC")
             ->get();

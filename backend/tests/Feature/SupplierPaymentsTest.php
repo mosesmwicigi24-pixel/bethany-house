@@ -236,6 +236,88 @@ class SupplierPaymentsTest extends TestCase
         $this->postJson("/api/v1/admin/purchase-orders/{$po->id}/cancel", ['reason' => 'Supplier closed'])->assertOk();
     }
 
+    public function test_goods_sent_back_lower_what_is_owed_unless_the_supplier_has_invoiced(): void
+    {
+        Sanctum::actingAs($this->accountant);
+        // 10 × 1,000 = 10,000; 2 sent back on an approved return = 2,000.
+        $po = $this->po(10000);
+        $line = \App\Models\PurchaseOrderItem::create([
+            'purchase_order_id' => $po->id, 'item_type' => 'material', 'material_id' => \App\Models\Material::create([
+                'code' => 'MAT-RET', 'name' => 'Lining', 'category' => 'fabric', 'unit_of_measure' => 'm', 'unit_cost' => 1000, 'is_active' => true,
+            ])->id,
+            'description' => 'Lining', 'quantity' => 10, 'quantity_received' => 10, 'unit_price' => 1000, 'total_price' => 10000,
+        ]);
+        $ret = DB::table('purchase_returns')->insertGetId([
+            'return_number' => 'PR-T1', 'purchase_order_id' => $po->id, 'supplier_id' => $this->supplierId,
+            'return_date' => now()->toDateString(), 'status' => 'approved', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        DB::table('purchase_return_items')->insert(['return_id' => $ret, 'po_item_id' => $line->id, 'quantity' => 2]);
+        // A rejected return moves nothing.
+        $rej = DB::table('purchase_returns')->insertGetId([
+            'return_number' => 'PR-T2', 'purchase_order_id' => $po->id, 'supplier_id' => $this->supplierId,
+            'return_date' => now()->toDateString(), 'status' => 'rejected', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        DB::table('purchase_return_items')->insert(['return_id' => $rej, 'po_item_id' => $line->id, 'quantity' => 5]);
+
+        $this->getJson("/api/v1/admin/purchase-orders/{$po->id}/payments")->assertOk()
+            ->assertJsonPath('summary.returned', 2000)->assertJsonPath('summary.payable', 8000);
+        $this->pay($po, 8000.01)->assertStatus(422);
+        $this->pay($po, 8000)->assertCreated()->assertJsonPath('summary.status', 'paid');
+        $this->assertEquals(0, collect($this->getJson('/api/v1/admin/purchase-orders/payables')->json('data'))->sum('balance'));
+
+        // The supplier's own invoice governs once recorded; the return is shown, not deducted again.
+        $po->fresh()->update(['supplier_invoice_amount' => 9000]);
+        $this->getJson("/api/v1/admin/purchase-orders/{$po->id}/payments")->assertOk()
+            ->assertJsonPath('summary.payable', 9000)->assertJsonPath('summary.returned', 2000)
+            ->assertJsonPath('summary.balance', 1000)->assertJsonPath('summary.status', 'partially_paid');
+    }
+
+    public function test_expenses_linked_to_the_order_are_pointed_out(): void
+    {
+        Sanctum::actingAs($this->accountant);
+        $po = $this->po(4000);
+        $cat = DB::table('expense_categories')->insertGetId(['name' => 'Freight', 'code' => 'FRT-PAY', 'created_at' => now(), 'updated_at' => now()]);
+        foreach ([['approved', 1200], ['paid', 300], ['pending_approval', 999]] as [$status, $amt]) {
+            DB::table('expenses')->insert([
+                'reference_number' => 'EXP-' . uniqid(), 'category_id' => $cat, 'title' => 'Freight', 'amount' => $amt, 'currency_code' => 'KES', 'payment_method' => 'cash',
+                'amount_kes' => $amt, 'expense_date' => now()->toDateString(), 'status' => $status, 'purchase_order_id' => $po->id,
+                'created_by' => $this->accountant->id, 'created_at' => now(), 'updated_at' => now(),
+            ]);
+        }
+
+        // Approved + paid only: 1,200 + 300.
+        $this->getJson("/api/v1/admin/purchase-orders/{$po->id}/payments")->assertOk()
+            ->assertJsonPath('summary.linked_expenses.count', 2)
+            ->assertJsonPath('summary.linked_expenses.amount_kes', 1500);
+    }
+
+    public function test_cash_out_counts_supplier_payments_apart_from_expenses(): void
+    {
+        Sanctum::actingAs($this->accountant);
+        $usd = $this->po(300, 'USD');
+        $this->pay($usd, 100)->assertCreated();                    // 12,800 at 128
+        $kes = $this->po(5000);
+        $voidMe = $this->pay($kes, 2000)->assertCreated()->json('payment.id');
+        Sanctum::actingAs($this->finance);
+        $this->postJson("/api/v1/admin/purchase-orders/{$kes->id}/payments/{$voidMe}/void", ['reason' => 'Wrong order'])->assertOk();
+
+        $cat = DB::table('expense_categories')->insertGetId(['name' => 'Rent', 'code' => 'RENT-CF', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('expenses')->insert([
+            'reference_number' => 'EXP-CF', 'category_id' => $cat, 'title' => 'Rent', 'amount' => 700, 'currency_code' => 'KES',
+            'payment_method' => 'cash', 'amount_kes' => 700, 'expense_date' => now()->toDateString(), 'status' => 'approved',
+            'created_by' => $this->accountant->id, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $weeks = \App\Services\Reporting\MetricEngine::for($this->person('super_admin'))
+            ->cashFlowWeekly(now()->startOfMonth()->subMonth(), now()->endOfDay());
+        $wk = collect($weeks)->last();
+        // Out = 700 expenses + 12,800 to suppliers; the voided 2,000 is not cash out.
+        $this->assertEquals(700, $wk['out_expenses']);
+        $this->assertEquals(12800, $wk['out_suppliers']);
+        $this->assertEquals(13500, $wk['out']);
+        $this->assertEquals(-13500, $wk['net']);
+    }
+
     public function test_what_is_owed_to_each_supplier(): void
     {
         Sanctum::actingAs($this->accountant);

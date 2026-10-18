@@ -77,6 +77,8 @@ class PurchaseOrderController extends Controller
     {
         $startDate = $request->get('start_date', now()->startOfMonth()->toDateString());
         $endDate   = $request->get('end_date',   now()->endOfMonth()->toDateString());
+        $kes       = \App\Support\ReportingCurrency::kes('total_amount', 'currency_code');
+        $canKes    = \App\Support\ReportingCurrency::convertibleFilter('currency_code');
 
         return response()->json([
             'total_orders'    => PurchaseOrder::whereBetween('order_date', [$startDate, $endDate])->count(),
@@ -87,11 +89,12 @@ class PurchaseOrderController extends Controller
             'partially_received' => PurchaseOrder::where('status', 'partially_received')->count(),
             'received'        => PurchaseOrder::where('status', 'received')->count(),
             'cancelled'       => PurchaseOrder::where('status', 'cancelled')->count(),
-            'total_value'     => PurchaseOrder::whereBetween('order_date', [$startDate, $endDate])
+            // In KES at the reporting rate; currencies with no rate are left out.
+            'total_value'     => round((float) PurchaseOrder::whereBetween('order_date', [$startDate, $endDate])
                                     ->whereNotIn('status', ['cancelled'])
-                                    ->sum('total_amount'),
-            'outstanding_value' => PurchaseOrder::whereIn('status', ['approved', 'ordered', 'partially_received'])
-                                    ->sum('total_amount'),
+                                    ->whereRaw($canKes)->sum(DB::raw($kes)), 2),
+            'outstanding_value' => round((float) PurchaseOrder::whereIn('status', ['approved', 'ordered', 'partially_received'])
+                                    ->whereRaw($canKes)->sum(DB::raw($kes)), 2),
         ]);
     }
 
@@ -1247,6 +1250,9 @@ class PurchaseOrderController extends Controller
         if ($moved === 0) {
             return response()->json(['message' => 'This return was already decided by someone else.'], 409);
         }
+
+        // Goods sent back lower what is owed on the order (SupplierPayables).
+        \App\Services\Procurement\SupplierPayables::sync(PurchaseOrder::findOrFail($return->purchase_order_id));
 
         return response()->json([
             'message' => "Purchase return {$return->return_number} approved.",

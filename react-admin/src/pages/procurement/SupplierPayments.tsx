@@ -70,7 +70,15 @@ export function SupplierPaymentsCard({ poId, payable, canPay, canVoid, onChanged
         <div className="space-y-2">
             <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest">Payments to supplier</p>
             <div className="text-xs space-y-1">
-                <Row label={s.payable_source === "supplier_invoice" ? "Owed (supplier's invoice)" : "Owed (order total)"} value={money(s.payable, s.currency)} />
+                {s.payable_source === "po_total" && s.returned > 0 && (
+                    <Row label="Goods returned" value={`− ${money(s.returned, s.currency)}`} />
+                )}
+                <Row label={s.payable_source === "supplier_invoice" ? "Owed (supplier's invoice)" : s.returned > 0 ? "Owed (order total less returns)" : "Owed (order total)"} value={money(s.payable, s.currency)} />
+                {s.payable_source === "supplier_invoice" && s.returned > 0 && (
+                    <p className="text-2xs text-warning">
+                        {money(s.returned, s.currency)} of goods went back. If the supplier's invoice doesn't allow for them, ask for a credit note and update the invoice amount.
+                    </p>
+                )}
                 <Row label="Paid" value={money(s.paid, s.currency)} />
                 <Row
                     label={s.balance < 0 ? "Credit with supplier" : "Balance"}
@@ -85,6 +93,13 @@ export function SupplierPaymentsCard({ poId, payable, canPay, canVoid, onChanged
                 />
                 <Row label="Status" value={<span className={clsx("font-semibold", tone)}>{label}</span>} />
             </div>
+
+            {s.linked_expenses?.count > 0 && (
+                <p className="text-2xs text-surface-500">
+                    {s.linked_expenses.count} expense{s.linked_expenses.count === 1 ? " is" : "s are"} linked to this order ({money(s.linked_expenses.amount_kes)}).
+                    Freight or clearing belongs there; a payment to the supplier for the goods belongs here, not as an expense.
+                </p>
+            )}
 
             {data.payments.length > 0 && (
                 <ul className="divide-y divide-surface-100 border border-surface-100 rounded-lg">
