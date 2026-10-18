@@ -1224,6 +1224,8 @@ Route::prefix('v1')->group(function () {
                     // The New PO form's pre-fill: a product's variants and its KES cost in the PO's currency.
                     Route::get('/item-costs/{productId}', [PurchaseOrderController::class, 'itemCosts'])
                         ->middleware('permission:procurement.create,sanctum');
+                    Route::get('/currencies',    [PurchaseOrderController::class, 'currencies'])
+                        ->middleware('permission:procurement.create,sanctum');
                     Route::get('/{id}',          [PurchaseOrderController::class, 'show']);
                     Route::get('/{id}/audit-log',[PurchaseOrderController::class, 'auditLog']);
                     Route::post('/',             [PurchaseOrderController::class, 'store'])

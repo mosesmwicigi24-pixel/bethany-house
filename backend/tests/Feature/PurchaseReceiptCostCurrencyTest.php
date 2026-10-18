@@ -164,6 +164,30 @@ class PurchaseReceiptCostCurrencyTest extends TestCase
         $this->assertSame('900.00', (string) $m->fresh()->unit_cost);
     }
 
+    public function test_a_purchase_order_is_raised_only_in_a_currency_with_a_reporting_rate(): void
+    {
+        Sanctum::actingAs($this->person('procurement_manager'));
+        $m = $this->material(900);
+        $make = fn (string $currency) => $this->postJson('/api/v1/admin/purchase-orders', [
+            'supplier_id' => $this->supplierId, 'expected_delivery_date' => now()->addWeek()->toDateString(),
+            'currency' => $currency,
+            'items' => [['type' => 'material', 'item_id' => $m->id, 'quantity' => 2, 'unit_price' => 10]],
+        ]);
+
+        $make('EUR')->assertStatus(422)->assertJsonValidationErrors('currency');
+        $this->assertStringContainsString('no reporting rate for EUR', $make('EUR')->json('errors.currency.0'));
+        $this->assertSame(0, PurchaseOrder::where('currency_code', 'EUR')->count());
+        $make('USD')->assertSuccessful();
+        $make('KES')->assertSuccessful();
+
+        $list = collect($this->getJson('/api/v1/admin/purchase-orders/currencies')->assertOk()->json('data'))->keyBy('code');
+        $this->assertTrue($list['KES']['allowed']);
+        $this->assertTrue($list['USD']['allowed']);
+        $this->assertEquals(128, $list['USD']['rate_to_kes']);
+        $this->assertFalse($list['EUR']['allowed']);
+        $this->assertFalse($list['GBP']['allowed']);
+    }
+
     public function test_the_owners_correction_of_a_received_usd_line_uses_the_same_conversion(): void
     {
         $m    = $this->material(900);

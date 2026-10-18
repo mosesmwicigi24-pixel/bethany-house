@@ -298,6 +298,12 @@ export interface POItemCosts {
 }
 
 export const purchaseOrderApi = {
+    /** Currencies a PO may be raised in: only those with a reporting rate are allowed. */
+    currencies: () =>
+        get<{ data: Array<{ code: string; rate_to_kes: number | null; allowed: boolean }> }>(
+            "/v1/admin/purchase-orders/currencies",
+        ),
+
     itemCosts: (productId: number, currency: string) =>
         get<POItemCosts>(`/v1/admin/purchase-orders/item-costs/${productId}`, { params: { currency } }),
 

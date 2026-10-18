@@ -117,6 +117,17 @@ function POFormModal({ onClose }: { onClose: () => void }) {
     });
     const suppliers = suppliersData?.data ?? [];
 
+    // A currency with no reporting rate can't be costed or banded in KES.
+    const { data: currencyData } = useQuery({
+        queryKey: ["po-currencies"],
+        queryFn: () => purchaseOrderApi.currencies(),
+        staleTime: 5 * 60_000,
+    });
+    const currencyAllowed = (code: string) =>
+        currencyData ? currencyData.data.some((c) => c.code === code && c.allowed) : true;
+    const currencyLabel = (code: string, name: string) =>
+        `${code} - ${name}${currencyAllowed(code) ? "" : " (no reporting rate)"}`;
+
     const searchItems = async (q: string) => {
         if (q.length < 2) return setSearchResults([]);
         setSearching(true);
@@ -386,10 +397,11 @@ function POFormModal({ onClose }: { onClose: () => void }) {
                             value={currency}
                             onChange={(e) => changeCurrency(e.target.value)}
                         >
-                            <option value="KES">KES - Kenyan Shilling</option>
-                            <option value="USD">USD - US Dollar</option>
-                            <option value="EUR">EUR - Euro</option>
-                            <option value="GBP">GBP - British Pound</option>
+                            {([["KES", "Kenyan Shilling"], ["USD", "US Dollar"], ["EUR", "Euro"], ["GBP", "British Pound"]] as const).map(([code, name]) => (
+                                <option key={code} value={code} disabled={!currencyAllowed(code)}>
+                                    {currencyLabel(code, name)}
+                                </option>
+                            ))}
                         </FieldSelect>
                     </Field>
                     <Field label="Payment Terms">
