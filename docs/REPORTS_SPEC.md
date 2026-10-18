@@ -51,6 +51,19 @@ A till's drawer is kept **per currency** (currency plan Step 2, 2026-10-18): the
 register's own money columns are its home currency, `cash_register_balances`
 carries every currency it holds, and a shilling view of a foreign drawer is
 stated only at the reporting rate, never by adding the figures together.
+**History (currency plan Step 6, 2026-10-18):** records the old code wrote in
+the wrong currency are found by `php artisan history:audit` (read-only, one
+class per table of the plan) and put right only through records that keep
+the original: `history:repair-tills` rebuilds a till's foreign-currency rows
+from its ledger and restates the home expected cash through a `till_corrections`
+row (a finalized till's own figures are locked and stay as recorded);
+`history:repair-budgets` converts a foreign budget to KES at the reporting
+rate with the original in its notes and in `audit_logs`. Both are dry runs
+unless `--apply --actor=<user>` is given, run again safely, and never guess
+a rate. Lines priced from another currency, KES shipping on foreign orders,
+payments in another currency, M-Pesa on foreign orders and records in a
+currency with no rate are listed for a person to correct through the
+existing flows (order line edit, set-shipping, payment move/void, rate proposal).
 If a report is slow, the fix is an index or a materialised view refreshed from
 source — never a hand-maintained total.
 
