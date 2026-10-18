@@ -362,6 +362,34 @@ export const ordersApi = {
         ),
 
     /**
+     * A payment recorded or approved by mistake, undone. The super admin
+     * executes it at once (200); anyone with payments.void/request_void raises
+     * the request finance signs (202). Nothing is deleted: the payment is
+     * voided with the reason, stock and the receipt follow, and the automatic
+     * status advance is returned when restore_status is on. paymentId null =
+     * every settled payment on the order.
+     */
+    reversePayment: (
+        orderId: number,
+        paymentId: number | null,
+        data: { reason: string; restore_status?: boolean },
+    ) =>
+        post<{
+            message: string;
+            reversals?: { payment_id: number; payment_status: string; order_status: string; status_restored: boolean; stock_returned: boolean; receipt_voided: boolean }[];
+            approvals?: unknown[];
+            payment_status?: PaymentStatus;
+            status?: OrderStatus;
+            total_paid?: number;
+            outstanding?: number;
+        }>(
+            paymentId === null
+                ? `/v1/admin/orders/${orderId}/payments/reverse`
+                : `/v1/admin/orders/${orderId}/payments/${paymentId}/reverse`,
+            data,
+        ),
+
+    /**
      * Active shipping methods for the Set Shipping picker. Gated by
      * orders.set_shipping_fee — NOT the Setup endpoint /v1/admin/shipping/methods
      * (settings.view), which is what used to hand Setup to every outlet manager.

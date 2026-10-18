@@ -255,6 +255,24 @@ class ProductSerialService
         }
     }
 
+    /**
+     * A payment reversed: units marked SOLD for the order go back IN_STOCK.
+     * Dispatched units are not touched — they physically left; the reversal
+     * refuses while any exist (PaymentReversal::blocker).
+     */
+    public static function unsoldForOrder(Order $order): int
+    {
+        return ProductSerial::where('order_id', $order->id)
+            ->where('status', ProductSerial::SOLD)
+            ->update([
+                'status'     => ProductSerial::IN_STOCK,
+                'order_id'   => null,
+                'sold_at'    => null,
+                'stocked_at' => now(),
+                'updated_at' => now(),
+            ]);
+    }
+
     /** Mark an order's sold serials as dispatched (hand-over authorized). */
     public static function dispatchForOrder(Order $order): int
     {

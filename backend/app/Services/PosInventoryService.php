@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\InventoryItem;
+use App\Models\InventoryTransaction;
 use App\Models\Order;
 
 /**
@@ -111,6 +112,44 @@ class PosInventoryService
                 ?->commitReservation((int) $item->quantity, Order::class, $order->id, $userId);
         }
         $order->forceFill(['stock_committed_at' => now()])->save();
+    }
+
+    /**
+     * The reverse of commitForOrder, for an order that STAYS live: a payment
+     * recorded by mistake took the goods off the shelf, so they go back on it
+     * and the reservation is held again (physical count up, reserved up). The
+     * order is not voided and the reservation is not released. Idempotent on
+     * stock_committed_at; a till/physical dispatch is not undone here.
+     */
+    public static function uncommitForOrder(Order $order, ?int $userId = null): void
+    {
+        if (!$order->stock_committed_at) {
+            return;
+        }
+        $order->loadMissing('items');
+        foreach ($order->items as $item) {
+            if (self::isMto($item)) continue;
+            $inv = self::inventoryFor($item, $order->outlet_id);
+            if (!$inv) continue;
+            $qty = (int) $item->quantity;
+            if ($qty <= 0) continue;
+            $before = (int) $inv->quantity_on_hand;
+            $inv->quantity_on_hand  = $before + $qty;
+            $inv->quantity_reserved = (int) $inv->quantity_reserved + $qty;
+            $inv->save();
+            InventoryTransaction::create([
+                'inventory_item_id' => $inv->id,
+                'transaction_type'  => 'correction',
+                'reference_type'    => Order::class,
+                'reference_id'      => $order->id,
+                'quantity_change'   => $qty,
+                'quantity_before'   => $before,
+                'quantity_after'    => (int) $inv->quantity_on_hand,
+                'notes'             => 'Payment reversed: goods back on the shelf, reservation held again',
+                'created_by'        => $userId ?? auth()->id(),
+            ]);
+        }
+        $order->forceFill(['stock_committed_at' => null])->save();
     }
 
     /**

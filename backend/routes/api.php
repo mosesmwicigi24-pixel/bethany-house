@@ -775,6 +775,12 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:orders.refund,sanctum');
                 Route::post('/{id}/payments',            [OrderController::class, 'addPayment'])
                     ->middleware('permission:payments.record,sanctum');
+                // A payment recorded by mistake, undone: the super admin at once,
+                // everyone else as a payment_void request finance signs.
+                Route::post('/{id}/payments/reverse',               [OrderController::class, 'reversePayment'])
+                    ->middleware('permission:payments.void|payments.request_void,sanctum');
+                Route::post('/{id}/payments/{paymentId}/reverse',   [OrderController::class, 'reversePayment'])
+                    ->middleware('permission:payments.void|payments.request_void,sanctum');
                 Route::post('/{id}/payments/{paymentId}/verify-mpesa',    [PaymentController::class, 'verifyMpesa'])
                     ->middleware('permission:payments.record,sanctum');
                 Route::post('/{id}/payments/{paymentId}/verify-paystack', [PaymentController::class, 'verifyPaystack'])

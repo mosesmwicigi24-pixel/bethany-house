@@ -3532,6 +3532,69 @@ aria-label="Close">
     );
 }
 
+/**
+ * Undo a payment that was recorded or approved by mistake. Nothing is deleted:
+ * the payment is voided with the reason, goods a full payment took off the
+ * shelf go back, its receipt is marked void, and the status the payment
+ * advanced automatically is returned when the box is ticked. The owner's
+ * reversal takes effect at once; everyone else's becomes a request finance
+ * signs. Provider-verified money (M-Pesa, card) and till cash are refused by
+ * the server with the right door named.
+ */
+function ReversePaymentModal({ order, payment, immediate, onClose, onDone }: {
+    order: Order; payment: any; immediate: boolean; onClose: () => void; onDone: () => void;
+}) {
+    const toast = useToastStore();
+    const [reason, setReason]   = useState("");
+    const [restore, setRestore] = useState(true);
+    const cc = order.currency_code || "KES";
+    const fmtMoney = (n: number) => `${cc} ${Number(n).toLocaleString("en-KE", { minimumFractionDigits: 2 })}`;
+    const autoAdvanced = ["processing", "confirmed"].includes(order.status);
+
+    const mutation = useMutation({
+        mutationFn: () => ordersApi.reversePayment(order.id, payment.id, { reason: reason.trim(), restore_status: restore }),
+        onSuccess: (res) => { toast.success(res?.message ?? (immediate ? "Payment reversed" : "Reversal requested")); onDone(); },
+        onError:   (e: ApiError) => toast.error(e.message),
+    });
+
+    return (
+        <Modal open title={immediate ? "Reverse this payment" : "Request a payment reversal"} onClose={onClose}>
+            <div className="space-y-4 p-5">
+                <div className="rounded-xl border border-line bg-surface-50 p-3 text-xs space-y-1">
+                    <div className="flex justify-between"><span className="text-surface-500">Payment</span><span className="font-mono">{payment.payment_number ?? "—"}</span></div>
+                    <div className="flex justify-between"><span className="text-surface-500">Amount</span><span className="font-semibold">{fmtMoney(payment.amount)}</span></div>
+                    <div className="flex justify-between"><span className="text-surface-500">Method</span><span className="uppercase">{String(payment.payment_method ?? "").replace(/_/g, " ")}</span></div>
+                </div>
+                <p className="text-xs text-surface-600">
+                    {immediate
+                        ? "The order will read unpaid at once. The payment stays on record as voided, with your reason and name, so the audit trail shows what happened and who undid it."
+                        : "The order keeps reading paid until finance approves this request. On approval the payment is voided with your reason and the order reads unpaid."}
+                    {" "}Goods a full payment took off the shelf go back on it and the receipt for this payment is marked void.
+                </p>
+                <div>
+                    <label className="block text-xs font-semibold text-surface-700 mb-1">Why was this payment a mistake? <span className="text-danger">*</span></label>
+                    <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} autoFocus
+                        placeholder="e.g. Approved the wrong proof; the customer has not paid."
+                        className="w-full rounded-xl border border-line bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
+                </div>
+                {autoAdvanced && (
+                    <label className="flex items-start gap-2 text-xs text-surface-700 cursor-pointer">
+                        <input type="checkbox" checked={restore} onChange={(e) => setRestore(e.target.checked)} className="mt-0.5" />
+                        <span>Also return the order to the status it had before this payment (it is <strong>{order.status}</strong> now). Only an automatic advance is undone; a status a person set by hand is left as it is.</span>
+                    </label>
+                )}
+                <div className="flex justify-end gap-2 pt-1">
+                    <button onClick={onClose} className="px-4 py-2 text-sm rounded-xl border border-line text-surface-600 hover:bg-surface-50">Cancel</button>
+                    <button onClick={() => mutation.mutate()} disabled={reason.trim().length < 3 || mutation.isPending}
+                        className="px-4 py-2 text-sm rounded-xl bg-danger text-white font-semibold disabled:opacity-50">
+                        {mutation.isPending ? "Working…" : immediate ? "Reverse payment" : "Send request"}
+                    </button>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
 export default function OrderDetailPage() {
     const { download: downloadPdf, fetchFile: fetchPdfFile, loading: pdfLoading } = usePdfDownload();
     // A prepared PDF waiting for a fresh tap to open the phone's share sheet.
@@ -3575,6 +3638,9 @@ export default function OrderDetailPage() {
     const { can: canDo, isSuperAdmin } = usePermissions();
     // The owner corrects a recorded payment's details (2026-10-16).
     const [correctingPayment, setCorrectingPayment] = useState<any | null>(null);
+    const [reversingPayment,  setReversingPayment]  = useState<any | null>(null);
+    // A settled payment recorded by mistake: the owner reverses it at once, finance-grade staff ask.
+    const canReverse = isSuperAdmin || canDo("payments.void") || canDo("payments.request_void");
 
     // Send-to-production (MTO) per line: available once payment is received, for
     // staff who can raise production. The quote→invoice→receipt flow has no POS
@@ -4691,6 +4757,11 @@ export default function OrderDetailPage() {
                                                                 Correct details (owner)
                                                             </button>
                                                         )}
+                                                        {canReverse && p.status === "paid" && (!p.requires_approval || p.approval_status === "approved") && (
+                                                            <button onClick={() => setReversingPayment(p)} className="mt-1 block text-2xs font-medium text-danger hover:underline">
+                                                                {isSuperAdmin ? "Reverse — recorded by mistake (owner)" : "Request reversal — recorded by mistake"}
+                                                            </button>
+                                                        )}
                                                         {p.requires_approval && (
                                                             <span className={clsx("inline-flex items-center gap-1 text-2xs font-semibold px-2 py-0.5 rounded-full mt-1",
                                                                 p.approval_status === "approved" ? "bg-success-light text-success-dark" :
@@ -4739,6 +4810,15 @@ export default function OrderDetailPage() {
                             )}
                             <PendingChanges subjectType="order" subjectIds={[order.id]} className="mt-3" />
                             <OrderDocumentHistory orderId={order.id} version={order.updated_at} />
+                            {reversingPayment && (
+                                <ReversePaymentModal
+                                    order={order}
+                                    payment={reversingPayment}
+                                    immediate={isSuperAdmin}
+                                    onClose={() => setReversingPayment(null)}
+                                    onDone={() => { setReversingPayment(null); refresh(); }}
+                                />
+                            )}
                             {correctingPayment && (
                                 <CorrectPaymentModal
                                     orderId={order.id}
