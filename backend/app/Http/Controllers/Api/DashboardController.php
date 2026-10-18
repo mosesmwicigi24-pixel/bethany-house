@@ -147,21 +147,109 @@ class DashboardController extends Controller
         }
 
         $stats['platform_only'] = false;
-        $stats['customers']     = User::customers()->count();
+        // The Customers list (customers table), not accounts with a customer
+        // login: the tile read 1 beside a list of hundreds.
+        $stats['customers']     = \App\Models\Customer::count();
+
+        // The Home figures on the money rules (currency plan Step 4, owner
+        // 2026-10-18), every one on the NAIROBI business date:
+        //   today_orders   confirmed-or-paid orders made today (Order::recognised,
+        //                  the Sales report's rule) — a cart is not an order yet;
+        //   carts_waiting  unconfirmed, unpaid carts, any age — never a sale;
+        //   today_sales    those orders' totals in KES at each order's own
+        //                  reporting rate (sales truth, by order date);
+        //   today_collected settled money that arrived today, net of refunds,
+        //                  in KES (money truth) — so a balance paid today shows today;
+        //   cash_today     the cash part of that, per currency, from the server.
+        // Scope is the viewer's own (Order's viewer scope; payments through
+        // their order), exactly as before.
+        $tz       = config('app.timezone');
+        $dayStart = now($tz)->startOfDay();
+        $dayEnd   = now($tz)->endOfDay();
+        $stats['business_date'] = $dayStart->toDateString();
 
         try {
-            $stats['total_orders']   = Order::count();
-            $stats['pending_orders'] = Order::whereIn('status', ['pending', 'processing'])->count();
-            $stats['today_orders']   = Order::whereDate('created_at', today())->count();
+            $todayOrders = fn () => Order::query()->recognised()->whereBetween('orders.created_at', [$dayStart, $dayEnd]);
+
+            $stats['total_orders']       = Order::count();
+            $stats['today_orders']       = $todayOrders()->count();
+            $stats['carts_waiting']      = Order::query()->pipeline()->count();
+            $stats['in_progress_orders'] = Order::whereIn('status', ['confirmed', 'processing'])->count();
+            // Kept for readers of the old key: it meant "pending or processing"
+            // and mixed carts with real work; it now means work in progress.
+            $stats['pending_orders']     = $stats['in_progress_orders'];
 
             if ($maySeeMoney) {
-                $stats['today_sales'] = Order::whereDate('created_at', today())
-                    ->where('payment_status', 'paid')
-                    ->sum('total_amount');
+                $kes = \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code');
+
+                $stats['today_sales'] = round((float) $todayOrders()
+                    ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code'))
+                    ->selectRaw("COALESCE(SUM({$kes}), 0) AS v")->value('v'), 2);
+                $stats['today_sales_by_currency'] = $todayOrders()
+                    ->groupByRaw('UPPER(orders.currency_code)')
+                    ->selectRaw("UPPER(orders.currency_code) AS currency_code, COUNT(*) AS orders, SUM(orders.total_amount) AS amount, SUM({$kes}) AS amount_kes")
+                    ->orderBy('currency_code')
+                    ->get()
+                    ->map(fn ($r) => [
+                        'currency_code' => $r->currency_code,
+                        'orders'        => (int) $r->orders,
+                        'amount'        => round((float) $r->amount, 2),
+                        'amount_kes'    => $r->amount_kes === null ? null : round((float) $r->amount_kes, 2),
+                    ])->values()->all();
+                $stats['today_sales_basis'] = 'Confirmed or paid orders by order date, in KES at the reporting rate';
+
+                $settledToday = function () use ($user, $dayStart, $dayEnd) {
+                    $q = DB::table('payments as p')
+                        ->join('orders as o', 'o.id', '=', 'p.order_id')
+                        ->tap(fn ($q) => \App\Support\SettledPayment::where($q, 'p'))
+                        ->whereBetween(DB::raw('COALESCE(p.paid_at, p.created_at)'), [$dayStart, $dayEnd]);
+                    $this->constrainToViewer($q, $user, 'o');
+
+                    return $q;
+                };
+                $payKes = \App\Support\ReportingCurrency::kes('p.amount - COALESCE(p.refund_amount, 0)', 'p.currency_code');
+
+                $stats['today_collected'] = round((float) $settledToday()
+                    ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('p.currency_code'))
+                    ->selectRaw("COALESCE(SUM({$payKes}), 0) AS v")->value('v'), 2);
+
+                $cashCodes = DB::table('payment_methods')->where('type', 'cash')->pluck('code')
+                    ->push('cash')->map(fn ($c) => strtolower($c))->unique()->values()->all();
+                $cash = $settledToday()
+                    ->whereIn(DB::raw('LOWER(p.payment_method)'), $cashCodes)
+                    ->groupByRaw('UPPER(p.currency_code)')
+                    ->selectRaw("UPPER(p.currency_code) AS currency_code, COUNT(*) AS payments, SUM(p.amount - COALESCE(p.refund_amount, 0)) AS amount, SUM({$payKes}) AS amount_kes")
+                    ->orderBy('currency_code')
+                    ->get();
+                $stats['cash_today'] = [
+                    'kes_total'   => round((float) $cash->sum(fn ($r) => (float) ($r->amount_kes ?? 0)), 2),
+                    'unconverted' => $cash->filter(fn ($r) => $r->amount_kes === null)->pluck('currency_code')->values()->all(),
+                    'by_currency' => $cash->map(fn ($r) => [
+                        'currency_code' => $r->currency_code,
+                        'payments'      => (int) $r->payments,
+                        'amount'        => round((float) $r->amount, 2),
+                        'amount_kes'    => $r->amount_kes === null ? null : round((float) $r->amount_kes, 2),
+                    ])->values()->all(),
+                ];
+
                 // Phase 5
                 $stats['pending_payment_approvals'] = $this->pendingApprovalCount($user);
             }
-        } catch (\Exception) {}
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('DashboardController::buildStats money failed: ' . $e->getMessage());
+        }
+
+        // Open purchase orders: the real count and KES value (the tile used to
+        // read a key no endpoint returned, so it always showed "—").
+        if ($user?->can('procurement.view')) {
+            try {
+                $row = DB::table('purchase_orders')
+                    ->whereNotIn('status', ['received', 'completed', 'closed', 'cancelled'])
+                    ->selectRaw('COUNT(*) AS n, COALESCE(SUM(' . \App\Support\ReportingCurrency::kes('total_amount', 'currency_code') . '), 0) AS kes')
+                    ->first();
+                $stats['open_pos'] = ['count' => (int) ($row->n ?? 0), 'kes_value' => round((float) ($row->kes ?? 0), 2)];
+            } catch (\Exception) {}
+        }
 
         try {
             $stats['total_products']     = Product::where('status', 'active')->count();

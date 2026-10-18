@@ -26,6 +26,19 @@ interface DashboardStats {
     pending_orders?: number;
     today_orders?: number;
     today_sales?: number;
+    /** Step 4: the money rules — every figure on the Nairobi business date. */
+    business_date?: string;
+    carts_waiting?: number;
+    in_progress_orders?: number;
+    today_sales_by_currency?: { currency_code: string; orders: number; amount: number; amount_kes: number | null }[];
+    today_sales_basis?: string;
+    today_collected?: number;
+    cash_today?: {
+        kes_total: number;
+        unconverted: string[];
+        by_currency: { currency_code: string; payments: number; amount: number; amount_kes: number | null }[];
+    };
+    open_pos?: { count: number; kes_value: number };
     total_products?: number;
     low_stock_products?: number;
     pending_payment_approvals?: number;
@@ -116,9 +129,9 @@ function fmtCompact(n?: number | null): string {
 // ── Revenue KPI card with sparkline ──────────────────────────────────────────
 
 function RevenueCard({
-    revenue, orders, avgValue, trend, loading, periodLabel,
+    revenue, collected, orders, avgValue, trend, loading, periodLabel,
 }: {
-    revenue?: number; orders?: number; avgValue?: number;
+    revenue?: number; collected?: number; orders?: number; avgValue?: number;
     trend: { date: string; revenue: number }[];
     loading: boolean; periodLabel: string;
 }) {
@@ -132,7 +145,7 @@ function RevenueCard({
             <div className="card-body pb-2">
                 <div className="flex items-start justify-between gap-4 flex-wrap">
                     <div>
-                        <p className="text-xs text-surface-500 mb-1">Revenue — {periodLabel}</p>
+                        <p className="text-xs text-surface-500 mb-1">Sales (by order date) — {periodLabel}</p>
                         {loading ? (
                             <div className="skeleton h-8 w-32 rounded" />
                         ) : (
@@ -145,6 +158,10 @@ function RevenueCard({
                                 <span className="text-xs text-surface-500">{orders?.toLocaleString() ?? 0} orders</span>
                                 <span className="text-xs text-surface-400">·</span>
                                 <span className="text-xs text-surface-500">avg {fmtCompact(avgValue)}</span>
+                                <span className="text-xs text-surface-400">·</span>
+                                <span className="text-xs text-success-700 font-medium" title="Settled money that arrived in the period, net of refunds — a balance paid today shows today">
+                                    Collected {fmtCompact(collected)}
+                                </span>
                             </div>
                         )}
                     </div>
@@ -194,20 +211,24 @@ function RevenueCard({
 // the bar compares the two channels' revenue at a glance, the donut shows their
 // share of the whole. Both feed off the same salesSummary numbers.
 
-const CHANNEL_ONLINE = "#6366F1";
-const CHANNEL_POS    = "#10B981";
+// Step 4: the four sales buckets (Order::SALES_BUCKETS) — every order lands in
+// exactly one, so the slices add up to Sales. The old Online/POS pair left
+// chat and quoted orders in neither.
+const CHANNELS = [
+    { key: "till",   name: "Till",   color: "#10B981" },
+    { key: "web",    name: "Web",    color: "#6366F1" },
+    { key: "chat",   name: "Chat",   color: "#F59E0B" },
+    { key: "quoted", name: "Quoted", color: "#8B5CF6" },
+] as const;
 
 // PostgreSQL returns numeric columns as strings over the wire — cast to numbers.
-function channelData(onlineRevenue?: number | string, posRevenue?: number | string) {
-    const online = Number(onlineRevenue ?? 0);
-    const pos    = Number(posRevenue    ?? 0);
-    return {
-        online, pos, total: online + pos,
-        rows: [
-            { name: "Online", value: online, color: CHANNEL_ONLINE },
-            { name: "POS",    value: pos,    color: CHANNEL_POS },
-        ],
-    };
+function channelData(summary: Record<string, unknown>) {
+    const rows = CHANNELS.map((c) => ({
+        name: c.name, color: c.color,
+        value: Number(summary[`${c.key}_revenue`] ?? 0),
+        count: Number(summary[`${c.key}_count`] ?? 0),
+    }));
+    return { rows, total: rows.reduce((t, r) => t + r.value, 0) };
 }
 
 /**
@@ -216,26 +237,17 @@ function channelData(onlineRevenue?: number | string, posRevenue?: number | stri
  * donut for share and puts the actual revenue next to each percentage, so the
  * legend carries the detail the bar chart used to.
  */
-function ChannelSplitCard({
-    onlineRevenue, posRevenue, onlineCount, posCount, loading,
-}: {
-    onlineRevenue?: number | string; posRevenue?: number | string;
-    onlineCount?: number | string;   posCount?: number | string;
-    loading: boolean;
-}) {
-    const { rows, total } = channelData(onlineRevenue, posRevenue);
+function ChannelSplitCard({ summary, loading }: { summary: Record<string, unknown>; loading: boolean }) {
+    const { rows, total } = channelData(summary);
     const pct = (v: number) => total > 0 ? Math.round(v / total * 100) : 0;
-    const counts: Record<string, number> = {
-        Online: Number(onlineCount ?? 0),
-        POS:    Number(posCount ?? 0),
-    };
+    const counts: Record<string, number> = Object.fromEntries(rows.map((r) => [r.name, r.count]));
 
     return (
         <div className="card card-body">
             <div className="flex items-center justify-between gap-2 mb-3">
                 <p className="text-xs font-medium text-surface-500">Channel split</p>
                 <span className="text-2xs text-surface-400">
-                    {(counts.Online + counts.POS).toLocaleString()} orders
+                    {rows.reduce((n, r) => n + r.count, 0).toLocaleString()} orders
                 </span>
             </div>
             {loading ? (
@@ -257,7 +269,7 @@ function ChannelSplitCard({
                         </ResponsiveContainer>
                     </div>
                     <div className="flex-1 min-w-0 space-y-2.5">
-                        {rows.map((d) => (
+                        {rows.filter((d) => d.value > 0 || d.count > 0).map((d) => (
                             <div key={d.name} className="min-w-0">
                                 <div className="flex items-baseline justify-between gap-2">
                                     <span className="flex items-center gap-1.5 text-xs font-medium text-surface-700">
@@ -285,33 +297,23 @@ function ChannelSplitCard({
 // filtered to cash payments today. The /v1/admin/payments/cash-report route
 // does not exist — this is the correct existing endpoint.
 
-function useCashToday() {
-    const today = new Date().toISOString().slice(0, 10);
-    const { data, isLoading } = useQuery({
-        queryKey: ["cash-today"],
-        queryFn: () => get<{ data: { amount: string; payment_method: string; status: string }[]; total: number }>(
-            "/v1/admin/payment-transactions",
-            { params: { payment_method: "cash", status: "paid", start_date: today, end_date: today, per_page: "200" } } as any
-        ),
-        staleTime: 2 * 60_000,
-        retry: false,
-    });
-    const transactions = data?.data ?? [];
-    const totalCash = transactions.reduce((sum, t) => sum + parseFloat(t.amount ?? "0"), 0);
-    return { totalCash, txCount: transactions.length, isLoading };
-}
-
-// `compact` renders the small KPI-tile shape so cash can sit in the stat row
-// alongside the other numbers; the default is the roomier standalone card that
-// the outlet / POS-clerk grids still use.
-function CashTodayCard({ compact = false }: { compact?: boolean }) {
-    const { totalCash, txCount, isLoading } = useCashToday();
+// Step 4: the figure is the SERVER's (stats.cash_today) — settled cash that
+// arrived on the Nairobi business date, net of refunds, kept per currency with
+// a KES total at the reporting rate. The old card added up cash payments the
+// browser fetched by its own UTC date, refunds included.
+function CashTodayCard({ cash, loading, compact = false }: {
+    cash?: DashboardStats["cash_today"]; loading: boolean; compact?: boolean;
+}) {
+    const totalCash = cash?.kes_total ?? 0;
+    const txCount   = (cash?.by_currency ?? []).reduce((n, c) => n + c.payments, 0);
+    const foreign   = (cash?.by_currency ?? []).filter((c) => c.currency_code !== "KES");
+    const isLoading = loading;
 
     if (compact) {
         return (
-            <KpiTile label="Cash today" value={fmtCompact(totalCash)}
+            <KpiTile label={foreign.length ? "Cash today (KES, all currencies)" : "Cash today"} value={fmtCompact(totalCash)}
                 tone="text-success-700" bg="bg-success-100/70"
-                href="/approvals" loading={isLoading} />
+                href="/pos/tills" loading={isLoading} />
         );
     }
 
@@ -332,12 +334,20 @@ function CashTodayCard({ compact = false }: { compact?: boolean }) {
                         {fmtCompact(totalCash)}
                     </p>
                     <p className="text-xs text-surface-400 mt-1">
-                        {txCount} transaction{txCount !== 1 ? "s" : ""}
+                        {txCount} transaction{txCount !== 1 ? "s" : ""} · net of refunds
                     </p>
+                    {foreign.length > 0 && (
+                        <p className="text-2xs text-surface-500 mt-1">
+                            {foreign.map((c) => `${c.currency_code} ${c.amount.toLocaleString("en-KE", { minimumFractionDigits: 2 })}`).join(" · ")} — KES total at the reporting rate
+                        </p>
+                    )}
+                    {(cash?.unconverted ?? []).length > 0 && (
+                        <p className="text-2xs text-warning-dark mt-1">No reporting rate for {cash!.unconverted.join(", ")}: not in the KES total.</p>
+                    )}
                 </>
             )}
-            <Link to="/approvals" className="mt-2 text-2xs text-brand-500 hover:underline block">
-                Cash reconciliation →
+            <Link to="/pos/tills" className="mt-2 text-2xs text-brand-500 hover:underline block">
+                Tills →
             </Link>
         </div>
     );
@@ -649,8 +659,11 @@ function RoleStatGrid({
         // had a very quiet day.
         return (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {can("payments.transactions") && <CashTodayCard />}
+                {stats?.cash_today && <CashTodayCard cash={stats.cash_today} loading={isLoading} />}
                 <StatCard label="Your Sales Today"   value={fmtCurrency(stats?.today_sales)}
+                    loading={isLoading} color="bg-success-light text-success"
+                    href="/sales/orders" icon={<CoinIcon />} />
+                <StatCard label="Your Collected Today" value={fmtCurrency(stats?.today_collected)}
                     loading={isLoading} color="bg-success-light text-success"
                     href="/sales/orders" icon={<CoinIcon />} />
                 <StatCard label="Your Orders Today"  value={stats?.today_orders}
@@ -709,23 +722,29 @@ function RoleStatGrid({
     if (roles.includes("outlet_manager")) {
         return (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {can("payments.transactions") && <CashTodayCard />}
-                <StatCard label="Today's Sales"   value={fmtCurrency(stats?.today_sales)}
+                {stats?.cash_today && <CashTodayCard cash={stats.cash_today} loading={isLoading} />}
+                <StatCard label="Sales today"   value={fmtCurrency(stats?.today_sales)}
                     loading={isLoading} color="bg-success-light text-success"
                     href="/sales/orders" icon={<CoinIcon />} />
-                <StatCard label="Today's Orders"  value={stats?.today_orders}
+                <StatCard label="Collected today" value={fmtCurrency(stats?.today_collected)}
+                    loading={isLoading} color="bg-success-light text-success"
+                    href="/sales/orders" icon={<CoinIcon />} />
+                <StatCard label="Orders today (confirmed or paid)"  value={stats?.today_orders}
                     loading={isLoading} color="bg-brand-50 text-brand-600"
                     href="/sales/orders" icon={<ClipboardIcon />} />
-                <StatCard label="Pending Orders"  value={stats?.pending_orders}
-                    loading={isLoading} color="bg-warning-light text-warning-dark"
+                <StatCard label="Carts waiting"  value={stats?.carts_waiting}
+                    loading={isLoading} color="bg-surface-100 text-surface-600"
                     href="/sales/orders?status=pending" icon={<ClockIcon />} />
+                <StatCard label="In progress"  value={stats?.in_progress_orders}
+                    loading={isLoading} color="bg-warning-light text-warning-dark"
+                    href="/sales/orders?status=processing" icon={<ClockIcon />} />
                 <StatCard label="Low Stock Alerts" value={stats?.low_stock_products}
                     loading={isLoading} color="bg-danger-light text-danger"
                     href="/inventory/low-stock" icon={<AlertIcon />} />
                 <StatCard label="Shipments In Transit" value={stats?.shipments_in_transit}
                     loading={isLoading} color="bg-accent-50 text-accent-600"
                     href="/sales/shipments" icon={<TruckIcon />} />
-                <StatCard label="Pending Approvals"   value={stats?.pending_payment_approvals}
+                <StatCard label="Payments to approve"   value={stats?.pending_payment_approvals}
                     loading={isLoading} color="bg-warning-light text-warning-dark"
                     href="/approvals" badge={stats?.pending_payment_approvals} icon={<PaymentIcon />} />
             </div>
@@ -740,16 +759,22 @@ function RoleStatGrid({
         <div className="space-y-2.5">
             {/* Today's trading — tinted so each number is findable by colour. */}
             <div className="grid grid-cols-3 lg:grid-cols-6 gap-2">
-                {can("payments.transactions") && <CashTodayCard compact />}
-                <KpiTile label="Today's Sales"   value={fmtCompact(stats?.today_sales)}
+                {stats?.cash_today && <CashTodayCard compact cash={stats.cash_today} loading={isLoading} />}
+                <KpiTile label="Sales today"   value={fmtCompact(stats?.today_sales)}
                     tone="text-success-700" bg="bg-success-50"
                     loading={isLoading} href="/sales/orders" />
-                <KpiTile label="Today's Orders"  value={stats?.today_orders}
+                <KpiTile label="Collected today"   value={fmtCompact(stats?.today_collected)}
+                    tone="text-success-700" bg="bg-success-50"
+                    loading={isLoading} href="/sales/orders" />
+                <KpiTile label="Orders today"  value={stats?.today_orders}
                     tone="text-brand-700" bg="bg-brand-50"
                     loading={isLoading} href="/sales/orders" />
-                <KpiTile label="Pending Orders"  value={stats?.pending_orders}
-                    tone="text-warning-dark" bg="bg-warning-light"
+                <KpiTile label="Carts waiting"  value={stats?.carts_waiting}
+                    tone="text-surface-600" bg="bg-surface-100"
                     loading={isLoading} href="/sales/orders?status=pending" />
+                <KpiTile label="In progress"  value={stats?.in_progress_orders}
+                    tone="text-warning-dark" bg="bg-warning-light"
+                    loading={isLoading} href="/sales/orders?status=processing" />
                 <KpiTile label="Customers"       value={stats?.customers}
                     tone="text-info-700" bg="bg-info-50"
                     loading={isLoading} href="/sales/customers" />
@@ -766,13 +791,14 @@ function RoleStatGrid({
                 <KpiTile label="In Transit"       value={stats?.shipments_in_transit}
                     tone="text-info-700" bg="bg-info-50"
                     loading={isLoading} href="/sales/shipments" />
-                <KpiTile label="Approvals"        value={stats?.pending_payment_approvals}
+                <KpiTile label="Payments to approve" value={stats?.pending_payment_approvals}
                     tone="text-warning-dark" bg="bg-warning-light"
                     loading={isLoading} href="/approvals"
                     badge={stats?.pending_payment_approvals} />
-                <KpiTile label="Open POs"         value={kpis.procurement?.open_pos}
+                <KpiTile label={stats?.open_pos ? `Open POs · ${fmtCompact(stats.open_pos.kes_value)}` : "Open POs"}
+                    value={stats?.open_pos?.count}
                     tone="text-info-700" bg="bg-info-50"
-                    loading={kpiLoading} href="/procurement/purchase-orders" />
+                    loading={isLoading} href="/procurement/purchase-orders" />
             </div>
         </div>
     );
@@ -816,9 +842,12 @@ export default function DashboardPage() {
         enabled:  !hideFinancials,
     });
 
-    // Sales summary (channel split) for the same period
-    const _today    = new Date();
-    const startDate = new Date(_today); startDate.setDate(_today.getDate() - period.days + 1);
+    // Sales summary (channel split) for the same period, on the NAIROBI
+    // business date (Step 4): toISOString() is UTC, which is yesterday for
+    // three hours every morning.
+    const nairobiToday = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Nairobi", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    const _today    = new Date(`${nairobiToday}T00:00:00Z`);
+    const startDate = new Date(_today); startDate.setUTCDate(_today.getUTCDate() - period.days + 1);
     const _fmt      = (d: Date) => d.toISOString().slice(0, 10);
 
     const { data: salesData, isLoading: salesLoading } = useQuery({
@@ -889,6 +918,7 @@ export default function DashboardPage() {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                     <RevenueCard
                         revenue={Number(summary.total_revenue ?? 0) || undefined}
+                        collected={Number(summary.total_collected ?? 0)}
                         orders={Number(summary.total_orders   ?? 0) || undefined}
                         /* Fall back to revenue ÷ orders — the summary omits
                            avg_order_value on some periods, which rendered "avg —". */
@@ -904,13 +934,7 @@ export default function DashboardPage() {
                         periodLabel={period.label.toLowerCase()}
                     />
                     {/* One channel card — donut for share, revenue in the legend */}
-                    <ChannelSplitCard
-                        onlineRevenue={summary.online_revenue}
-                        posRevenue={summary.pos_revenue}
-                        onlineCount={summary.online_count}
-                        posCount={summary.pos_count}
-                        loading={salesLoading}
-                    />
+                    <ChannelSplitCard summary={summary} loading={salesLoading} />
                 </div>
             )}
 
