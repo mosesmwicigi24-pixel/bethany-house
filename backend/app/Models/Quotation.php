@@ -49,6 +49,17 @@ class Quotation extends Model
     public const EXPIRED   = 'expired';
     public const CONVERTED = 'converted';
 
+    protected static function booted(): void
+    {
+        // The reporting rate in force today travels with the quotation (Step 3).
+        static::creating(fn (self $q) => \App\Support\ReportingRateStamp::apply($q));
+        static::updating(function (self $q) {
+            if ($q->isDirty('currency_code')) {
+                \App\Support\ReportingRateStamp::apply($q, true);
+            }
+        });
+    }
+
     protected $fillable = [
         'quote_number',
         'user_id',
@@ -56,6 +67,8 @@ class Quotation extends Model
         'source',
         'status',
         'currency_code',
+        'reporting_rate_to_kes',
+        'reporting_rate_source',
         'subtotal',
         'discount_amount',
         'tax_amount',

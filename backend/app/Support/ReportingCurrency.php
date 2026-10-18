@@ -70,52 +70,74 @@ class ReportingCurrency
     }
 
     /**
-     * SQL that states a money column in KES.
+     * The STORED-RATE basis (currency plan Step 3, 2026-10-18).
      *
-     * Built as a CASE rather than a join because it is dropped into aggregates
-     * all over the reporting layer, and a join would have to be threaded
-     * through every one of them. The rate table is three rows and cached; the
-     * literals are floats formatted here, never user input.
+     * Orders, payments, quotations and purchase orders carry the reporting
+     * rate in force when they were made (reporting_rate_to_kes, stamped by
+     * App\Support\ReportingRateStamp). Every SQL conversion goes through the
+     * database function fx_rate_to_kes(stored, code): the stored rate, else
+     * the live rate for the code (a legacy row, or a currency that had no rate
+     * at the time), else NULL — so a rate change approved today never
+     * rewrites last month, and nothing is converted at a guess.
+     *
+     * The rate column is derived from the currency column ("o.currency_code"
+     * → "o.reporting_rate_to_kes"), so every caller on one of the four tables
+     * is on the stored basis without naming it; pass $rateColumn for a
+     * currency column on another table.
+     */
+    public static function rateSql(string $currencyColumn, ?string $rateColumn = null): string
+    {
+        $rateColumn ??= preg_replace('/currency_code$/', 'reporting_rate_to_kes', $currencyColumn);
+
+        return sprintf('fx_rate_to_kes(%s, %s)', $rateColumn, $currencyColumn);
+    }
+
+    /**
+     * Which basis the session reads: 'stored' (the default — the rate each
+     * row carries) or 'current' (today's rate for every row, the basis every
+     * report had before Step 3). Only the comparison command and its tests
+     * switch it; a request never does.
+     */
+    public static function useBasis(string $basis): void
+    {
+        $basis = $basis === 'current' ? 'current' : 'stored';
+        if (DB::getDriverName() !== 'pgsql') {
+            return;
+        }
+        // Inside a transaction (every test) the switch lives and dies with it;
+        // the command runs outside one and sets it for the session.
+        DB::unprepared(DB::transactionLevel() > 0
+            ? "SET LOCAL bethany.fx_basis = '{$basis}'"
+            : "SET bethany.fx_basis = '{$basis}'");
+    }
+
+    /**
+     * SQL that states a money column in KES, on the stored-rate basis.
      *
      *   ReportingCurrency::kes('orders.total_amount', 'orders.currency_code')
-     *   → (orders.total_amount * CASE UPPER(orders.currency_code)
-     *        WHEN 'KES' THEN 1 WHEN 'USD' THEN 128 ELSE NULL END)
+     *   → ((orders.total_amount) * fx_rate_to_kes(orders.reporting_rate_to_kes, orders.currency_code))
      *
      * An unconvertible currency yields NULL, so SUM() skips it rather than
      * quietly adding a dollar to a shilling. Pair it with convertibleFilter()
      * when the row itself should be excluded.
+     *
+     * The amount expression gets its OWN parentheses. Without them a
+     * compound expression breaks on operator precedence:
+     *   p.amount - COALESCE(p.refund_amount,0) * rate
+     * multiplies the rate into the refund term only, so with zero refunds
+     * the currency is added at face value — which is exactly how the
+     * Collected tile understated a month by KES 264,287 (10.1%) while
+     * looking perfectly plausible. Money SQL never trusts precedence.
      */
-    public static function kes(string $amountColumn, string $currencyColumn): string
+    public static function kes(string $amountColumn, string $currencyColumn, ?string $rateColumn = null): string
     {
-        $cases = '';
-        foreach (self::rates() as $code => $rate) {
-            $cases .= sprintf(" WHEN '%s' THEN %.6F", $code, $rate);
-        }
-
-        // The amount expression gets its OWN parentheses. Without them a
-        // compound expression breaks on operator precedence:
-        //   p.amount - COALESCE(p.refund_amount,0) * rate
-        // multiplies the rate into the refund term only, so with zero refunds
-        // the currency is added at face value — which is exactly how the
-        // Collected tile understated a month by KES 264,287 (10.1%) while
-        // looking perfectly plausible. Money SQL never trusts precedence.
-        return sprintf(
-            '((%s) * CASE UPPER(%s)%s ELSE NULL END)',
-            $amountColumn,
-            $currencyColumn,
-            $cases,
-        );
+        return sprintf('((%s) * %s)', $amountColumn, self::rateSql($currencyColumn, $rateColumn));
     }
 
     /** SQL predicate: this row's currency can legitimately be stated in KES. */
-    public static function convertibleFilter(string $currencyColumn): string
+    public static function convertibleFilter(string $currencyColumn, ?string $rateColumn = null): string
     {
-        $list = implode(',', array_map(
-            fn ($c) => "'" . $c . "'",
-            self::convertibleCodes(),
-        ));
-
-        return sprintf('UPPER(%s) IN (%s)', $currencyColumn, $list);
+        return self::rateSql($currencyColumn, $rateColumn) . ' IS NOT NULL';
     }
 
     /** Convert a single amount in PHP. Null when the currency has no rate. */

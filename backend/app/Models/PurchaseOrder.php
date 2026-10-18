@@ -17,6 +17,8 @@ class PurchaseOrder extends Model
         'expected_delivery_date',
         'status',
         'currency_code',
+        'reporting_rate_to_kes',
+        'reporting_rate_source',
         'subtotal',
         'tax_amount',
         'shipping_amount',
@@ -62,6 +64,8 @@ class PurchaseOrder extends Model
             if (empty($po->po_number)) {
                 $po->po_number = 'PO-' . date('Ymd') . '-' . str_pad(static::whereDate('created_at', today())->count() + 1, 4, '0', STR_PAD_LEFT);
             }
+            // The reporting rate in force today travels with the order (Step 3).
+            \App\Support\ReportingRateStamp::apply($po);
         });
         // What is owed moved (a revision, or the supplier's invoice amount):
         // the payment status follows. Written by query, so no loop.

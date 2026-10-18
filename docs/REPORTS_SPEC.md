@@ -39,6 +39,14 @@ Reports compute from source rows at read time. No report writes its own totals
 back to the database, and no report reads a stored aggregate when the source rows
 are available (register aggregates are drawer truth and are the one exception —
 they are an operational device count, reconciled at close, not a reporting cache).
+**Rate basis (currency plan Step 3, 2026-10-18):** a foreign figure is stated in
+KES at the reporting rate **the row was made under** — `reporting_rate_to_kes`
+on `orders`, `payments`, `quotations` and `purchase_orders`, stamped at creation
+(`reporting_rate_source` says where it came from). Every SQL conversion goes
+through `fx_rate_to_kes(stored, code)` (`ReportingCurrency::kes` / `rateSql`),
+which falls back to the live rate only for a row that carries none. A rate
+change approved today never rewrites last month; `php artisan
+reports:fx-basis-compare` shows what the old current-rate basis would say.
 A till's drawer is kept **per currency** (currency plan Step 2, 2026-10-18): the
 register's own money columns are its home currency, `cash_register_balances`
 carries every currency it holds, and a shilling view of a foreign drawer is
