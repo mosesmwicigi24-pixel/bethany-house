@@ -176,6 +176,18 @@ class MetricEngine
         return new self(null);
     }
 
+    /**
+     * An engine over the given outlets, with no request user — for the
+     * reconciliation (currency plan Step 7), which sets independently rebuilt
+     * figures against this engine's, outlet by outlet. null = every outlet.
+     *
+     * @param list<int>|null $outletIds
+     */
+    public static function scopedTo(?array $outletIds): self
+    {
+        return new self($outletIds ? array_values(array_map('intval', $outletIds)) : null);
+    }
+
     // ── Periods ───────────────────────────────────────────────────────────────
 
     /**
