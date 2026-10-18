@@ -1950,6 +1950,10 @@ class MetricEngine
     {
         $scopeMi = $this->outletScopeSql('mi.outlet_id');
         $scopePo = $this->outletScopeSql('po2.outlet_id');
+        // The last price paid, in KES at the reporting rate; a PO in a
+        // currency with no rate can't be stated in KES and is skipped.
+        $priceKes = \App\Support\ReportingCurrency::kes('poi.unit_price', 'po2.currency_code');
+        $canKes   = \App\Support\ReportingCurrency::convertibleFilter('po2.currency_code');
 
         return collect(DB::select("
             SELECT m.id, m.code, m.name, m.unit_of_measure AS unit, m.unit_cost, m.reorder_point,
@@ -1974,11 +1978,11 @@ class MetricEngine
             ) d ON d.material_id = m.id
             LEFT JOIN (
                 SELECT DISTINCT ON (poi.material_id)
-                       poi.material_id, poi.unit_price, sup.name AS supplier, sup.id AS supplier_id, po2.order_date
+                       poi.material_id, {$priceKes} AS unit_price, sup.name AS supplier, sup.id AS supplier_id, po2.order_date
                 FROM purchase_order_items poi
                 JOIN purchase_orders po2 ON po2.id = poi.purchase_order_id
                 JOIN suppliers sup ON sup.id = po2.supplier_id
-                WHERE poi.material_id IS NOT NULL {$scopePo}
+                WHERE poi.material_id IS NOT NULL AND {$canKes} {$scopePo}
                 ORDER BY poi.material_id, po2.order_date DESC
             ) lb ON lb.material_id = m.id
             WHERE m.is_active = TRUE
@@ -2942,15 +2946,20 @@ class MetricEngine
     {
         $now = CarbonImmutable::now(self::TZ);
         $scopePo = $this->outletScopeSql('po.outlet_id');
+        // Prices compared in KES at the reporting rate: a USD 10 buy against
+        // a KES 1,200 average is no change, not a 99% fall. A currency with no
+        // rate is left out rather than compared at face value.
+        $priceKes = \App\Support\ReportingCurrency::kes('poi.unit_price', 'po.currency_code');
+        $canKes   = \App\Support\ReportingCurrency::convertibleFilter('po.currency_code');
 
         return collect(DB::select("
             WITH buys AS (
-                SELECT poi.material_id, poi.unit_price, po.order_date, sup.name AS supplier, sup.id AS supplier_id,
+                SELECT poi.material_id, {$priceKes} AS unit_price, po.order_date, sup.name AS supplier, sup.id AS supplier_id,
                        ROW_NUMBER() OVER (PARTITION BY poi.material_id ORDER BY po.order_date DESC, poi.id DESC) AS rn
                 FROM purchase_order_items poi
                 JOIN purchase_orders po ON po.id = poi.purchase_order_id AND po.status <> 'cancelled'
                 JOIN suppliers sup ON sup.id = po.supplier_id
-                WHERE poi.material_id IS NOT NULL AND po.order_date >= ? {$scopePo}
+                WHERE poi.material_id IS NOT NULL AND po.order_date >= ? AND {$canKes} {$scopePo}
             )
             SELECT b.material_id, m.name, b.unit_price AS last_price, b.supplier, b.supplier_id, b.order_date,
                    prior.avg_price AS avg_prior,

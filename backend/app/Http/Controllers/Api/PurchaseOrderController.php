@@ -411,6 +411,10 @@ class PurchaseOrderController extends Controller
 
         $ids = array_map('intval', $validated['material_ids']);
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        // The drafts are in KES, so the last price paid is stated in KES at
+        // the reporting rate; a PO in a currency with no rate is skipped.
+        $priceKes = \App\Support\ReportingCurrency::kes('poi.unit_price', 'po2.currency_code');
+        $canKes   = \App\Support\ReportingCurrency::convertibleFilter('po2.currency_code');
 
         $rows = DB::select("
             SELECT m.id, m.name, m.unit_of_measure, m.unit_cost, m.reorder_point,
@@ -442,10 +446,10 @@ class PurchaseOrderController extends Controller
             ) b ON b.material_id = m.id
             LEFT JOIN (
                 SELECT DISTINCT ON (poi.material_id)
-                       poi.material_id, poi.unit_price, po2.supplier_id, po2.order_date
+                       poi.material_id, {$priceKes} AS unit_price, po2.supplier_id, po2.order_date
                 FROM purchase_order_items poi
                 JOIN purchase_orders po2 ON po2.id = poi.purchase_order_id AND po2.status <> 'cancelled'
-                WHERE poi.material_id IS NOT NULL
+                WHERE poi.material_id IS NOT NULL AND {$canKes}
                 ORDER BY poi.material_id, po2.order_date DESC
             ) lb ON lb.material_id = m.id
             WHERE m.id IN ({$placeholders}) AND m.is_active = TRUE
