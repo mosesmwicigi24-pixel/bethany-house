@@ -239,10 +239,16 @@ class IntelligenceService
     public static function churnRiskCustomers(int $limit = 50): array
     {
         // Get customers with their order history
+        // The confirmed-sales rule every customer figure now shares (Step 5):
+        // Order::recognised — confirmed or paid, never dead — in KES at each
+        // order's own reporting rate. This counted paid/partial only, and
+        // added dollars to shillings.
         $customers = DB::table('orders')
             ->join('customers', 'customers.user_id', '=', 'orders.user_id')
-            ->whereIn('orders.payment_status', ['paid', 'partial'])
-            ->whereNotIn('orders.status', ['cancelled', 'refunded'])
+            ->whereNotIn('orders.status', \App\Models\Order::DEAD_STATUSES)
+            ->where(fn ($q) => $q->whereIn('orders.status', \App\Models\Order::RECOGNISED_STATUSES)
+                ->orWhereIn('orders.payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES))
+            ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code'))
             ->whereNotNull('orders.user_id')
             ->groupBy(
                 'orders.user_id',
@@ -265,7 +271,7 @@ class IntelligenceService
                 COUNT(orders.id) AS total_orders,
                 MAX(orders.created_at) AS last_order_at,
                 MIN(orders.created_at) AS first_order_at,
-                SUM(orders.total_amount) AS lifetime_value
+                SUM(" . \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code') . ") AS lifetime_value
             ")
             ->get();
 
@@ -544,6 +550,7 @@ class IntelligenceService
                 'outlet_id'          => $budget->outlet_id,
                 'outlet_name'        => $budget->outlet?->name ?? 'Company-wide',
                 'budgeted_amount'    => (float) $budget->budgeted_amount,
+                'currency_code'      => $budget->comparisonCurrency(),
                 'actual_spend'       => $budget->actualSpend(),
                 'utilization_percent'=> $utilization,
                 'remaining'          => max(0, (float) $budget->budgeted_amount - $budget->actualSpend()),
@@ -760,18 +767,23 @@ class IntelligenceService
             LEFT JOIN customers c2 ON c2.user_id = o.user_id
             WHERE (o.customer_id IS NOT NULL OR o.user_id IS NOT NULL)
               AND o.status NOT IN ('cancelled','voided','refunded')
+              AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
             ORDER BY cust_key, o.created_at DESC
         ");
 
-        // Every live order (incl. guests) for the orders/revenue geography.
+        // Every recognised order (incl. guests) for the orders/revenue
+        // geography — the confirmed-sales rule (Step 5): an unconfirmed cart
+        // is not revenue anywhere. Money in KES at the order's own rate.
         $perOrders = DB::select("
             SELECT o.customer_country_code, o.shipping_country_code, o.billing_country_code,
                    COALESCE(NULLIF(o.customer_phone,''), c1.phone, c2.phone) AS phone,
-                   o.total_amount, o.currency_code
+                   o.total_amount, o.currency_code,
+                   " . \App\Support\ReportingCurrency::kes('o.total_amount', 'o.currency_code') . " AS total_kes
             FROM orders o
             LEFT JOIN customers c1 ON c1.id = o.customer_id
             LEFT JOIN customers c2 ON c2.user_id = o.user_id
             WHERE o.status NOT IN ('cancelled','voided','refunded')
+              AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
         ");
 
         $names = DB::table('countries')->pluck('name', 'code')->toArray();
@@ -800,15 +812,12 @@ class IntelligenceService
             $byCode[$code]['customers']++;
         }
 
-        // Orders + revenue per country, always reported in the hub's base
-        // currency (KES) so the figures are comparable and match the rest of the
-        // hub. Order totals are stored as KES magnitudes — the checkout resolves
-        // non-KE customers to a USD currency_code but prices the cart from the
-        // KES catalogue, so total_amount is the real KES value regardless of the
-        // code. Summing raw is therefore correct; FX-dividing by a USD rate would
-        // wrongly shrink genuine KES amounts. We label every row with the base
-        // currency rather than an order's (possibly misleading) currency_code.
-        $baseCurrency = DB::table('currencies')->where('is_base', true)->value('code') ?: 'KES';
+        // Orders + revenue per country in KES at each order's reporting rate.
+        // (The old note here claimed order totals were KES magnitudes whatever
+        // their currency code; since the currency plan an order's total is in
+        // its own currency, so a raw sum would add dollars to shillings.) A
+        // currency with no rate is counted in orders and named, never added.
+        $baseCurrency = 'KES';
         foreach ($perOrders as $r) {
             $code = CountryInference::resolve(
                 [$r->customer_country_code, $r->shipping_country_code, $r->billing_country_code],
@@ -817,7 +826,11 @@ class IntelligenceService
             if ($code === null) { continue; }
             $byCode[$code] ??= $row($code);
             $byCode[$code]['orders']++;
-            $byCode[$code]['revenue'] += (float) $r->total_amount;
+            if ($r->total_kes === null) {
+                $byCode[$code]['unconverted'][] = strtoupper((string) $r->currency_code);
+                continue;
+            }
+            $byCode[$code]['revenue'] += (float) $r->total_kes;
             $byCode[$code]['currency'] = $baseCurrency;
         }
 

@@ -95,7 +95,7 @@ class SendEodReportSlack implements ShouldQueue
                 : '';
 
             $balanceText = $r->total_balance > 0.01
-                ? " | ⚠️ Bal: {$fmt($r->total_balance)}"
+                ? " | ⚠️ Bal: {$r->balance_label}"
                 : '';
 
             $blocks[] = [
@@ -104,7 +104,7 @@ class SendEodReportSlack implements ShouldQueue
                     'type' => 'mrkdwn',
                     'text' =>
                         "*{$r->user_name}* — {$r->outlet_name}\n" .
-                        "{$r->order_count} order(s) | 💰 {$fmt($r->total_sales)} | ✅ Paid: {$fmt($r->total_paid)}{$balanceText}" .
+                        "{$r->order_count} order(s) | 💰 {$r->sales_label} | ✅ Paid: {$r->paid_label}{$balanceText}" .
                         $sentimentsText,
                 ],
             ];
@@ -143,35 +143,34 @@ class SendEodReportSlack implements ShouldQueue
             ->orderBy('u.first_name')
             ->get()
             ->map(function ($row) {
-                $orders = DB::table('orders as ord')
+                // Per currency with a KES total at each order's own reporting
+                // rate (Step 5); settled money only.
+                $rows = DB::table('orders as ord')
                     ->leftJoin(DB::raw("(
-                        SELECT order_id, SUM(amount) as paid
+                        SELECT order_id, SUM(amount - COALESCE(refund_amount, 0)) as paid
                         FROM payments
-                        WHERE status IN ('completed','approved','paid')
+                        WHERE " . \App\Support\SettledPayment::sql('payments') . "
                         GROUP BY order_id
                     ) as p"), 'p.order_id', '=', 'ord.id')
                     ->where('ord.outlet_id', $row->outlet_id)
                     ->where('ord.created_by', $row->user_id)
                     ->whereDate('ord.created_at', $this->date)
                     ->whereNotIn('ord.status', ['voided', 'cancelled'])
+                    // Confirmed or paid only (Step 5): a cart is not a sale.
+                    ->where(fn ($q) => $q->whereIn('ord.status', \App\Models\Order::RECOGNISED_STATUSES)->orWhereIn('ord.payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES))
                     ->where('ord.order_type', 'pos')
-                    ->select([
-                        DB::raw('COALESCE(SUM(p.paid), 0) as total_paid'),
-                        DB::raw('SUM(ord.total_amount) as total_sales'),
-                    ])
-                    ->first();
+                    ->get(['ord.total_amount', 'ord.currency_code', 'ord.reporting_rate_to_kes', DB::raw('COALESCE(p.paid, 0) AS amount_paid')])
+                    ->map(fn ($o) => (object) ['total_amount' => (float) $o->total_amount, 'amount_paid' => (float) $o->amount_paid,
+                        'balance' => max(0, (float) $o->total_amount - (float) $o->amount_paid),
+                        'currency_code' => $o->currency_code, 'reporting_rate_to_kes' => $o->reporting_rate_to_kes]);
+                $salesMoney   = \App\Support\MoneyByCurrency::of($rows, 'total_amount', 'currency_code', 'reporting_rate_to_kes');
+                $paidMoney    = \App\Support\MoneyByCurrency::of($rows, 'amount_paid', 'currency_code', 'reporting_rate_to_kes');
+                $balanceMoney = \App\Support\MoneyByCurrency::of($rows, 'balance', 'currency_code', 'reporting_rate_to_kes');
+                $totalSales   = $salesMoney['kes_total'];
+                $totalPaid    = $paidMoney['kes_total'];
+                $totalBalance = $balanceMoney['kes_total'];
 
-                $totalSales   = (float) ($orders->total_sales ?? 0);
-                $totalPaid    = (float) ($orders->total_paid  ?? 0);
-                $totalBalance = max(0, $totalSales - $totalPaid);
-
-                $orderCount = DB::table('orders')
-                    ->where('outlet_id', $row->outlet_id)
-                    ->where('created_by', $row->user_id)
-                    ->whereDate('created_at', $this->date)
-                    ->whereNotIn('status', ['voided', 'cancelled'])
-                    ->where('order_type', 'pos')
-                    ->count();
+                $orderCount = $rows->count();
 
                 return (object) [
                     'outlet_name'   => $row->outlet_name,
@@ -181,6 +180,9 @@ class SendEodReportSlack implements ShouldQueue
                     'total_sales'   => round($totalSales, 2),
                     'total_paid'    => round($totalPaid, 2),
                     'total_balance' => round($totalBalance, 2),
+                    'sales_label'   => \App\Support\MoneyByCurrency::label($salesMoney),
+                    'paid_label'    => \App\Support\MoneyByCurrency::label($paidMoney),
+                    'balance_label' => \App\Support\MoneyByCurrency::label($balanceMoney),
                 ];
             });
     }

@@ -75,7 +75,21 @@ class ExpenseBudget extends Model
             $query->whereYear('expense_date', $this->period_year);
         }
 
-        return (float) $query->sum('amount_kes');
+        // Compared in the budget's own currency (Step 5): a KES budget against
+        // every expense stated in KES (amount_kes, at the reporting rate); a
+        // foreign budget against the expenses made in that currency, natively.
+        $currency = strtoupper((string) ($this->currency_code ?: 'KES'));
+        if ($currency === 'KES') {
+            return (float) $query->sum('amount_kes');
+        }
+
+        return (float) $query->whereRaw('UPPER(currency_code) = ?', [$currency])->sum('amount');
+    }
+
+    /** The currency the budget and its actual spend are compared in. */
+    public function comparisonCurrency(): string
+    {
+        return strtoupper((string) ($this->currency_code ?: 'KES'));
     }
 
     public function variance(): float

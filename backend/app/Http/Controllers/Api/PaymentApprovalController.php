@@ -526,8 +526,8 @@ class PaymentApprovalController extends Controller
             ->leftJoin('outlets as out', 'o.outlet_id', '=', 'out.id')
             ->leftJoin('users as u', 'u.id', '=', 'o.user_id')
             ->where('p.payment_method', 'cash')
-            ->where('p.status', 'paid')
-            ->whereBetween('p.created_at', [$start, $end]);
+            ->tap(fn ($q) => \App\Support\SettledPayment::where($q, 'p'))
+            ->whereBetween(DB::raw('COALESCE(p.paid_at, p.created_at)'), [$start, $end]);
 
         if (!empty($validated['outlet_id'])) {
             $query->where('o.outlet_id', $validated['outlet_id']);
@@ -539,7 +539,9 @@ class PaymentApprovalController extends Controller
                 'p.id',
                 'p.payment_number',
                 'p.amount',
+                'p.refund_amount',
                 'p.currency_code',
+                'p.reporting_rate_to_kes',
                 'p.cash_received',
                 'p.change_given',
                 'p.created_at as paid_at',
@@ -553,11 +555,20 @@ class PaymentApprovalController extends Controller
             )
             ->get();
 
+        // Cash in more than one currency is kept apart (Step 5): a KES total
+        // at each payment's reporting rate, and each currency's own figure.
+        // It used to add every currency together and label the sum with
+        // whichever currency the first row happened to be in.
+        $net   = $payments->map(fn ($p) => ['amount' => (float) $p->amount - (float) ($p->refund_amount ?? 0), 'currency_code' => $p->currency_code, 'reporting_rate_to_kes' => $p->reporting_rate_to_kes]);
+        $money = \App\Support\MoneyByCurrency::of($net, 'amount', 'currency_code', 'reporting_rate_to_kes');
         $summary = [
-            'total_cash_collected' => round($payments->sum('amount'), 2),
+            'total_cash_collected' => $money['kes_total'],
+            'by_currency'          => $money['by_currency'],
+            'unconverted'          => $money['unconverted'],
+            'basis'                => 'KES at the reporting rate, net of refunds',
             'total_change_given'   => round($payments->sum('change_given'), 2),
             'transaction_count'    => $payments->count(),
-            'currency_code'        => $payments->first()?->currency_code ?? 'KES',
+            'currency_code'        => 'KES',
             'start_date'           => $start->toDateString(),
             'end_date'             => $end->toDateString(),
         ];

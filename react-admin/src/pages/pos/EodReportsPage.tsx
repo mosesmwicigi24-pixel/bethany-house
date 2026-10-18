@@ -32,6 +32,10 @@ interface EodReportRow {
     total_sales: number;
     total_paid: number;
     total_balance: number;
+    /** Step 5: KES at each order's reporting rate; the native figures per currency beside it. */
+    sales_by_currency?: { currency_code: string; amount: number; count: number; amount_kes: number | null }[];
+    paid_by_currency?: { currency_code: string; amount: number; count: number; amount_kes: number | null }[];
+    balance_by_currency?: { currency_code: string; amount: number; count: number; amount_kes: number | null }[];
     has_sentiments: boolean;
     note_count: number;
 }
@@ -42,6 +46,13 @@ interface EodComment {
     user_id: number;
     user_name: string;
     created_at: string;
+}
+
+/** "USD 40.00 · ZMW 100.00" for a figure that mixes currencies; empty when it is shillings only. */
+function foreignLine(by?: { currency_code: string; amount: number }[], prefix = ""): string {
+    const foreign = (by ?? []).filter((c) => c.currency_code !== "KES");
+    if (!foreign.length) return "";
+    return prefix + foreign.map((c) => `${c.currency_code} ${c.amount.toLocaleString("en-KE", { minimumFractionDigits: 2 })}`).join(" · ");
 }
 
 interface EodReportDetail extends EodReportRow {
@@ -324,6 +335,9 @@ export default function EodReportsPage() {
                                                 <p className="text-xs font-bold text-brand-700">
                                                     KES {fmt(r.total_sales)}
                                                 </p>
+                                                {(r.sales_by_currency ?? []).some((c) => c.currency_code !== "KES") && (
+                                                    <p className="text-2xs text-surface-500">{foreignLine(r.sales_by_currency)}</p>
+                                                )}
                                                 {r.total_balance > 0.01 ? (
                                                     <p className="text-2xs text-warning font-medium">
                                                         Bal: KES {fmt(r.total_balance)}
@@ -520,8 +534,8 @@ export default function EodReportsPage() {
                                 <div className="grid grid-cols-2 gap-2">
                                     {[
                                         { label: "Orders",      value: String(detail.order_count),        color: "text-surface-900", bg: "bg-surface-50" },
-                                        { label: "Total Sales", value: `KES ${fmt(detail.total_sales)}`,  color: "text-brand-700",   bg: "bg-brand-50" },
-                                        { label: "Total Paid",  value: `KES ${fmt(detail.total_paid)}`,   color: "text-success",     bg: "bg-success-light" },
+                                        { label: "Total Sales", value: `KES ${fmt(detail.total_sales)}${foreignLine(detail.sales_by_currency, " · ")}`,  color: "text-brand-700",   bg: "bg-brand-50" },
+                                        { label: "Total Paid",  value: `KES ${fmt(detail.total_paid)}${foreignLine(detail.paid_by_currency, " · ")}`,   color: "text-success",     bg: "bg-success-light" },
                                         { label: "Balance",     value: detail.total_balance > 0.01 ? `KES ${fmt(detail.total_balance)}` : "Nil", color: detail.total_balance > 0.01 ? "text-warning" : "text-surface-400", bg: "bg-surface-50" },
                                     ].map((k) => (
                                         <div key={k.label} className={clsx("rounded-xl p-3 text-center", k.bg)}>

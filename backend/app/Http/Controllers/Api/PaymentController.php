@@ -807,17 +807,20 @@ class PaymentController extends Controller
                 // The old default summed every currency at face value.
                 fn ($q) => $q->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('currency_code')));
 
-        // Top-level KPIs — single query
+        // Every money figure on ONE basis (Step 5): the asked-for currency
+        // natively, else KES at each payment's own reporting rate. total_volume
+        // was converted while paid/refunded/average summed currencies raw.
+        $amt    = fn (string $col) => $currency ? $col : \App\Support\ReportingCurrency::kes($col, 'currency_code');
         $kpis = (clone $base)->selectRaw("
             COUNT(*)                                                              AS total_count,
-            COALESCE(SUM(" . ($currency ? 'amount' : \App\Support\ReportingCurrency::kes('amount', 'currency_code')) . "), 0) AS total_volume,
+            COALESCE(SUM({$amt('amount')}), 0)                                    AS total_volume,
             COUNT(CASE WHEN status = 'paid'    THEN 1 END)                       AS paid_count,
-            COALESCE(SUM(CASE WHEN status = 'paid'   THEN amount END), 0)        AS paid_volume,
+            COALESCE(SUM(CASE WHEN status = 'paid'   THEN {$amt('amount')} END), 0)        AS paid_volume,
             COUNT(CASE WHEN status = 'failed'  THEN 1 END)                       AS failed_count,
             COUNT(CASE WHEN status = 'pending' THEN 1 END)                       AS pending_count,
             COUNT(CASE WHEN refund_amount > 0  THEN 1 END)                       AS refunded_count,
-            COALESCE(SUM(CASE WHEN refund_amount > 0 THEN refund_amount END), 0) AS refunded_volume,
-            COALESCE(AVG(CASE WHEN status = 'paid' THEN amount END), 0)          AS avg_transaction
+            COALESCE(SUM(CASE WHEN refund_amount > 0 THEN {$amt('refund_amount')} END), 0) AS refunded_volume,
+            COALESCE(AVG(CASE WHEN status = 'paid' THEN {$amt('amount')} END), 0)          AS avg_transaction
         ")->first();
 
         $successRate = $kpis->total_count > 0
@@ -829,7 +832,7 @@ class PaymentController extends Controller
             ->selectRaw("
                 payment_method,
                 COUNT(*) AS count,
-                COALESCE(SUM(CASE WHEN status = 'paid' THEN amount END), 0) AS volume
+                COALESCE(SUM(CASE WHEN status = 'paid' THEN {$amt('amount')} END), 0) AS volume
             ")
             ->groupBy('payment_method')
             ->orderByDesc('volume')
@@ -840,7 +843,7 @@ class PaymentController extends Controller
             ->selectRaw("
                 DATE(created_at) AS date,
                 COUNT(*) AS count,
-                COALESCE(SUM(CASE WHEN status = 'paid'   THEN amount END), 0) AS volume,
+                COALESCE(SUM(CASE WHEN status = 'paid'   THEN {$amt('amount')} END), 0) AS volume,
                 COUNT(CASE WHEN status = 'failed' THEN 1 END)                 AS failed
             ")
             ->groupBy('date')

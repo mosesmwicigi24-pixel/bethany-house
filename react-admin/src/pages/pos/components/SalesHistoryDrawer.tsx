@@ -284,13 +284,23 @@ export default function SalesHistoryDrawer({ outletId, outletName, onClose, onRe
         },
     });
 
-    const summary = {
-        total: sales.reduce((s, i) => s + (i.status !== "voided" ? i.total : 0), 0),
-        count: sales.filter((s) => s.status !== "voided").length,
-        cash:  sales.filter((s) => s.payment_method === "cash"  && s.status !== "voided").reduce((s, i) => s + i.total, 0),
-        mpesa: sales.filter((s) => s.payment_method === "mpesa" && s.status !== "voided").reduce((s, i) => s + i.total, 0),
-        card:  sales.filter((s) => s.payment_method === "card"  && s.status !== "voided").reduce((s, i) => s + i.total, 0),
-    };
+    // One summary per currency (Step 5): a dollar sale is never added to the
+    // shilling total. The drawer's figures are the page of sales it holds.
+    const live = sales.filter((s) => s.status !== "voided");
+    const codes = Array.from(new Set(live.map((s) => (s as any).currency_code ?? "KES")));
+    const summaries = codes.map((code) => {
+        const mine = live.filter((s) => ((s as any).currency_code ?? "KES") === code);
+        const sum = (f: (s: PosSale) => boolean) => mine.filter(f).reduce((t, i) => t + i.total, 0);
+        return {
+            code,
+            total: sum(() => true),
+            count: mine.length,
+            cash:  sum((s) => s.payment_method === "cash"),
+            mpesa: sum((s) => s.payment_method === "mpesa"),
+            card:  sum((s) => s.payment_method === "card"),
+        };
+    });
+    const summary = summaries[0] ?? { code: "KES", total: 0, count: 0, cash: 0, mpesa: 0, card: 0 };
 
     const handleRestore = (sale: PosSale) => {
         onRestoreCart?.(sale);
@@ -351,13 +361,17 @@ export default function SalesHistoryDrawer({ outletId, outletName, onClose, onRe
                     </div>
                 </div>
 
-                {/* Summary pills */}
-                <div className="px-4 py-3 border-b border-surface-50 grid grid-cols-4 gap-2 shrink-0">
+                {/* Summary pills — one row per currency, never added across (Step 5) */}
+                {summaries.length > 1 && (
+                    <p className="px-4 pt-2 text-2xs text-surface-500">Sales in more than one currency are kept apart.</p>
+                )}
+                {(summaries.length ? summaries : [summary]).map((cur) => (
+                <div key={cur.code} className="px-4 py-3 border-b border-surface-50 grid grid-cols-4 gap-2 shrink-0">
                     {[
-                        { label: "Total", value: summary.total, cls: "text-surface-900" },
-                        { label: "Cash",  value: summary.cash,  cls: "text-success"     },
-                        { label: "M-Pesa",value: summary.mpesa, cls: "text-brand-600"   },
-                        { label: "Card",  value: summary.card,  cls: "text-info"        },
+                        { label: `Total (${cur.code})`, value: cur.total, cls: "text-surface-900" },
+                        { label: "Cash",  value: cur.cash,  cls: "text-success"     },
+                        { label: "M-Pesa",value: cur.mpesa, cls: "text-brand-600"   },
+                        { label: "Card",  value: cur.card,  cls: "text-info"        },
                     ].map((s) => (
                         <div key={s.label} className="bg-surface-50 rounded-lg p-2 text-center">
                             <p className="text-2xs text-surface-400">{s.label}</p>
@@ -367,6 +381,7 @@ export default function SalesHistoryDrawer({ outletId, outletName, onClose, onRe
                         </div>
                     ))}
                 </div>
+                ))}
 
                 {/* Sales list */}
                 <div className="flex-1 overflow-y-auto">

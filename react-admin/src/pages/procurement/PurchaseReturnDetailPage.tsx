@@ -76,8 +76,9 @@ const fmtDateTime = (d: string | null | undefined) => {
     if (!d) return "-";
     return new Date(d).toLocaleString("en-KE", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 };
-const fmtMoney = (n: number | null | undefined) =>
-    `KES ${Number(n ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}`;
+// In the purchase order's own currency (Step 5).
+const fmtMoney = (n: number | null | undefined, cc = "KES") =>
+    `${cc} ${Number(n ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}`;
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
     return <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest mb-2">{children}</p>;
@@ -188,6 +189,7 @@ export default function PurchaseReturnDetailPage() {
     const statusCfg = STATUS_CFG[pr.status ?? "pending"] ?? STATUS_CFG.pending;
     const supplierName = pr.supplier?.name ?? pr.purchase_order?.supplier?.name ?? pr.supplier_name ?? "-";
     const poNumber     = pr.purchase_order?.po_number ?? pr.po_number ?? "-";
+    const cc           = (pr.purchase_order as any)?.currency_code ?? (pr.purchase_order as any)?.currency ?? "KES";
     const poId         = pr.purchase_order?.id ?? pr.purchase_order_id;
     const items        = pr.items ?? [];
     const totalValue   = items.reduce((sum, i) => sum + i.quantity * (i.purchase_order_item?.unit_price ?? 0), 0);
@@ -233,7 +235,7 @@ export default function PurchaseReturnDetailPage() {
                         </div>
                         <div className="sm:text-right">
                             <p className="text-danger-300 text-2xs uppercase tracking-widest mb-1">Return Value</p>
-                            <p className="text-3xl font-bold text-white tabular-nums">{fmtMoney(totalValue)}</p>
+                            <p className="text-3xl font-bold text-white tabular-nums">{fmtMoney(totalValue, cc)}</p>
                             <p className="text-danger-300 text-xs mt-1">{fmtDate(pr.return_date ?? pr.created_at)}</p>
                         </div>
                     </div>
@@ -350,10 +352,10 @@ export default function PurchaseReturnDetailPage() {
                                                             -{item.quantity}
                                                         </td>
                                                         <td className="px-3 py-2.5 text-right tabular-nums text-surface-600">
-                                                            {poi?.unit_price ? fmtMoney(poi.unit_price) : "-"}
+                                                            {poi?.unit_price ? fmtMoney(poi.unit_price, cc) : "-"}
                                                         </td>
                                                         <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-surface-800">
-                                                            {fmtMoney(lineValue)}
+                                                            {fmtMoney(lineValue, cc)}
                                                         </td>
                                                         <td className="px-3 py-2.5 text-surface-600">{item.reason || "-"}</td>
                                                     </tr>
@@ -366,7 +368,7 @@ export default function PurchaseReturnDetailPage() {
                                                     Total Return Value
                                                 </td>
                                                 <td className="px-3 py-2.5 text-right text-base font-bold tabular-nums text-danger-700">
-                                                    {fmtMoney(totalValue)}
+                                                    {fmtMoney(totalValue, cc)}
                                                 </td>
                                                 <td />
                                             </tr>

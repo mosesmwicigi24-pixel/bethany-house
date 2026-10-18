@@ -1191,6 +1191,8 @@ class ExpenseController extends Controller
                 'actual_spend'         => $b->actualSpend(),
                 'variance'             => $b->variance(),
                 'utilization_percent'  => $b->utilizationPercent(),
+                // Budget and spend are compared in this currency (Step 5).
+                'comparison_currency'  => $b->comparisonCurrency(),
             ]));
 
         return response()->json(['budgets' => $budgets]);

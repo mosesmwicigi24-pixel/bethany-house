@@ -115,6 +115,12 @@ export default function EndOfDayModal({ outletId, outletName, onClose }: Props) 
                                     <div className="flex justify-between text-surface-600">
                                         <span>Gross Sales</span><span>KES {fmt(summary.total_sales)}</span>
                                     </div>
+                                    {(summary.by_currency ?? []).filter((c) => c.currency_code !== "KES").length > 0 && (
+                                        <p className="text-2xs text-surface-500">
+                                            {(summary.by_currency ?? []).map((c) => `${c.currency_code} ${fmt(c.amount)} (${c.count})`).join(" · ")} — shilling total at the reporting rate
+                                            {(summary.unconverted ?? []).length > 0 && `; no rate for ${summary.unconverted!.join(", ")}`}
+                                        </p>
+                                    )}
                                     <div className="flex justify-between text-danger">
                                         <span>Returns</span><span>-KES {fmt(summary.total_returns)}</span>
                                     </div>

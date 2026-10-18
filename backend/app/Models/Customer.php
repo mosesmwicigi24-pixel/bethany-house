@@ -248,19 +248,21 @@ class Customer extends Model
         return $this;
     }
 
+    /** What this customer has spent: recognised orders, in KES at each order's reporting rate (Step 5). */
     public function getTotalPurchaseAmount($startDate = null, $endDate = null)
     {
-        $query = $this->orders()->where('status', 'completed');
-        
+        $query = $this->orders()->recognised()
+            ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code'));
+
         if ($startDate) {
-            $query->where('created_at', '>=', $startDate);
+            $query->where('orders.created_at', '>=', $startDate);
         }
-        
+
         if ($endDate) {
-            $query->where('created_at', '<=', $endDate);
+            $query->where('orders.created_at', '<=', $endDate);
         }
-        
-        return $query->sum('total_amount');
+
+        return (float) $query->selectRaw('COALESCE(SUM(' . \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code') . '), 0) AS v')->value('v');
     }
 
     public function getTotalOrders()
@@ -270,13 +272,14 @@ class Customer extends Model
 
     public function getAverageOrderValue()
     {
-        $totalOrders = $this->getTotalOrders();
-        
-        if ($totalOrders === 0) {
+        $recognised = $this->orders()->recognised()
+            ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code'))->count();
+
+        if ($recognised === 0) {
             return 0;
         }
-        
-        return $this->orders()->sum('total_amount') / $totalOrders;
+
+        return $this->getTotalPurchaseAmount() / $recognised;
     }
 
     public function updateLastPurchaseDate()

@@ -99,18 +99,16 @@ class UserController extends Controller
 
         // POS-related stats - check Spatie role names instead of users.role column
         if ($user->hasAnyRole(['pos_clerk', 'outlet_manager'])) {
-            $stats['sales_count'] = Order::where('created_by', $user->id)
-                ->where('channel', 'pos')
-                ->count();
-
-            $stats['sales_total'] = Order::where('created_by', $user->id)
-                ->where('channel', 'pos')
-                ->where('payment_status', 'paid')
-                ->sum('total');
-
-            $stats['today_sales'] = Order::where('created_by', $user->id)
-                ->where('channel', 'pos')
-                ->whereDate('created_at', today())
+            // orders has no `channel` or `total` column (Step 5): till sales
+            // are order_type = 'pos', confirmed or paid, in KES at each
+            // order's own reporting rate.
+            $mine = fn () => Order::query()->recognised()->where('orders.created_by', $user->id)->where('orders.order_type', 'pos');
+            $stats['sales_count'] = $mine()->count();
+            $stats['sales_total'] = round((float) $mine()
+                ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code'))
+                ->selectRaw('COALESCE(SUM(' . \App\Support\ReportingCurrency::kes('orders.total_amount', 'orders.currency_code') . '), 0) AS v')->value('v'), 2);
+            $stats['today_sales'] = $mine()
+                ->whereBetween('orders.created_at', [now(config('app.timezone'))->startOfDay(), now(config('app.timezone'))->endOfDay()])
                 ->count();
         }
 

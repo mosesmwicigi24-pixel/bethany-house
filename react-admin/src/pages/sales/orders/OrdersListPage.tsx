@@ -430,9 +430,9 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
             {stats && (
                 <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-3">
                     <StatCard label="Total Orders"     value={stats.total_orders.toLocaleString()}                          />
-                    <StatCard label="Total Revenue"    value={`KES ${fmt(stats.total_revenue)}`}  color="text-brand-600"    />
-                    <StatCard label="Today's Orders"   value={stats.today_orders}                  sub={`KES ${fmt(stats.today_revenue)}`} />
-                    <StatCard label="Avg. Order Value" value={`KES ${fmt(stats.avg_order_value)}`}                          />
+                    <StatCard label="Total Revenue (KES at reporting rate)" value={`KES ${fmt(stats.total_revenue)}`}  color="text-brand-600"    />
+                    <StatCard label="Today's Orders"   value={stats.today_orders}                  sub={`KES ${fmt(stats.today_revenue)} at reporting rate`} />
+                    <StatCard label="Avg. Order Value (KES)" value={`KES ${fmt(stats.avg_order_value)}`}                          />
                     <StatCard label="Pending Payment"  value={stats.pending_count}                 color="text-warning"      />
                     <StatCard label="Processing"       value={stats.processing_count}              color="text-brand-600"   />
                     <StatCard label="Cancelled"        value={stats.cancelled_count}               color="text-danger"      />

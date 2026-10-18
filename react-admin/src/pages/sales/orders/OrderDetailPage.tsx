@@ -1999,7 +1999,17 @@ type ReceiptMode = "order" | "payment";
 
 // ── Receipt helpers (shared with POS ReceiptModal) ────────────────────────────
 
-function receiptNumberToWords(amount: number): string {
+/** The currency's unit and sub-unit names for the amount in words (Step 5): a USD receipt says Dollars. */
+const CURRENCY_WORDS: Record<string, { unit: string; units: string; cent: string; cents: string }> = {
+    KES: { unit: "Shilling", units: "Shillings", cent: "Cent",  cents: "Cents" },
+    USD: { unit: "Dollar",   units: "Dollars",   cent: "Cent",  cents: "Cents" },
+    ZMW: { unit: "Kwacha",   units: "Kwacha",    cent: "Ngwee", cents: "Ngwee" },
+    GBP: { unit: "Pound",    units: "Pounds",    cent: "Penny", cents: "Pence" },
+    EUR: { unit: "Euro",     units: "Euros",     cent: "Cent",  cents: "Cents" },
+};
+
+function receiptNumberToWords(amount: number, currency = "KES"): string {
+    const w = CURRENCY_WORDS[currency.toUpperCase()] ?? { unit: currency.toUpperCase(), units: currency.toUpperCase(), cent: "Cent", cents: "Cents" };
     const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine",
         "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen",
         "Eighteen", "Nineteen"];
@@ -2012,13 +2022,13 @@ function receiptNumberToWords(amount: number): string {
     }
     const intPart = Math.floor(amount);
     const centsPart = Math.round((amount - intPart) * 100);
-    if (intPart === 0 && centsPart === 0) return "Zero Shillings Only";
+    if (intPart === 0 && centsPart === 0) return `Zero ${w.units} Only`;
     let words = "";
     if (intPart >= 1_000_000) words += below1000(Math.floor(intPart / 1_000_000)) + " Million ";
     if (intPart >= 1_000)     words += below1000(Math.floor((intPart % 1_000_000) / 1_000)) + " Thousand ";
     words += below1000(intPart % 1_000);
-    words = words.trim() + " Shilling" + (intPart !== 1 ? "s" : "");
-    if (centsPart > 0) words += " And " + below1000(centsPart) + " Cent" + (centsPart !== 1 ? "s" : "");
+    words = words.trim() + " " + (intPart !== 1 ? w.units : w.unit);
+    if (centsPart > 0) words += " And " + below1000(centsPart) + " " + (centsPart !== 1 ? w.cents : w.cent);
     return words.trim() + " Only";
 }
 
@@ -2379,7 +2389,7 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
 
                             {/* Amount in words */}
                             <p style={{ fontSize: "10px", fontWeight: "bold", ...centerStyle, margin: "4px 0", textTransform: "uppercase" }}>
-                                {receiptNumberToWords(order.total_amount ?? 0)}
+                                {receiptNumberToWords(order.total_amount ?? 0, order.currency_code ?? "KES")}
                             </p>
 
                             {/* Cashier */}

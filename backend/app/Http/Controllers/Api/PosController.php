@@ -2050,27 +2050,39 @@ class PosController extends Controller
             $orderNotes = json_decode($row->order_notes ?? '{}', true) ?: [];
 
             // Fetch orders for this user+outlet+date
+            // The cashier's day per currency with a KES total at each
+            // order's own reporting rate (Step 5); settled money only.
             $orders = DB::table('orders as ord')
                 ->leftJoin('payments as p', function ($j) {
                     $j->on('p.order_id', '=', 'ord.id')
-                      ->whereIn('p.status', ['completed', 'approved', 'paid']);
+                      ->whereRaw(\App\Support\SettledPayment::sql('p'));
                 })
                 ->where('ord.outlet_id', $row->outlet_id)
                 ->where('ord.created_by', $row->user_id)
                 ->whereDate('ord.created_at', $row->report_date)
                 ->whereNotIn('ord.status', ['voided', 'cancelled'])
+                // Confirmed or paid only (Step 5): an unconfirmed cart is not a sale on the cashier's day either.
+                ->where(fn ($q) => $q->whereIn('ord.status', \App\Models\Order::RECOGNISED_STATUSES)->orWhereIn('ord.payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES))
                 ->where('ord.order_type', 'pos')
-                ->groupBy('ord.id', 'ord.total_amount')
+                ->groupBy('ord.id', 'ord.total_amount', 'ord.currency_code', 'ord.reporting_rate_to_kes')
                 ->select([
                     'ord.id',
-                    DB::raw('COALESCE(SUM(p.amount), 0) as amount_paid'),
+                    DB::raw('COALESCE(SUM(p.amount - COALESCE(p.refund_amount, 0)), 0) as amount_paid'),
                     'ord.total_amount',
+                    'ord.currency_code',
+                    'ord.reporting_rate_to_kes',
                 ])
-                ->get();
+                ->get()
+                ->map(fn ($o) => (object) ['total_amount' => (float) $o->total_amount, 'amount_paid' => (float) $o->amount_paid,
+                    'balance' => max(0, (float) $o->total_amount - (float) $o->amount_paid),
+                    'currency_code' => $o->currency_code, 'reporting_rate_to_kes' => $o->reporting_rate_to_kes]);
 
-            $totalSales   = $orders->sum('total_amount');
-            $totalPaid    = $orders->sum('amount_paid');
-            $totalBalance = max(0, $totalSales - $totalPaid);
+            $salesMoney   = \App\Support\MoneyByCurrency::of($orders, 'total_amount', 'currency_code', 'reporting_rate_to_kes');
+            $paidMoney    = \App\Support\MoneyByCurrency::of($orders, 'amount_paid', 'currency_code', 'reporting_rate_to_kes');
+            $balanceMoney = \App\Support\MoneyByCurrency::of($orders, 'balance', 'currency_code', 'reporting_rate_to_kes');
+            $totalSales   = $salesMoney['kes_total'];
+            $totalPaid    = $paidMoney['kes_total'];
+            $totalBalance = $balanceMoney['kes_total'];
 
             return [
                 'id'             => $row->id,
@@ -2082,6 +2094,10 @@ class PosController extends Controller
                 'user_name'      => trim($row->user_name) ?: 'Unknown',
                 'order_count'    => $orders->count(),
                 'total_sales'    => round((float) $totalSales, 2),
+                'sales_by_currency'   => $salesMoney['by_currency'],
+                'paid_by_currency'    => $paidMoney['by_currency'],
+                'balance_by_currency' => $balanceMoney['by_currency'],
+                'money_basis'         => 'KES at the reporting rate',
                 'total_paid'     => round((float) $totalPaid, 2),
                 'total_balance'  => round((float) $totalBalance, 2),
                 'has_sentiments' => !empty(trim($row->sentiments ?? '')),
@@ -2584,25 +2600,48 @@ class PosController extends Controller
         $ttl     = ($date < today()->toDateString()) ? 3600 : 60;
         $summary = Cache::remember("pos_daily_{$outletId}_{$date}_v{$viewer->id}", $ttl, function () use ($outletId, $date, $viewer) {
 
+            // The day's sales on the money rules (Step 5): confirmed-or-paid
+            // till orders made on the Nairobi business date, each in its own
+            // currency, stated in KES at the order's own reporting rate.
+            // Nothing is added across currencies; `by_currency` carries each
+            // currency's native figure and `unconverted` names any the books
+            // cannot convert.
+            $tz       = config('app.timezone');
+            $dayStart = \Carbon\Carbon::parse($date, $tz)->startOfDay();
+            $dayEnd   = \Carbon\Carbon::parse($date, $tz)->endOfDay();
             $sales     = Order::where('outlet_id', $outletId)
                 ->where('order_type', 'pos')
-                ->whereDate('created_at', $date)
+                ->whereBetween('created_at', [$dayStart, $dayEnd])
                 ->get();
 
-            $completed  = $sales->whereNotIn('status', ['voided', 'cancelled']);
-            $totalSales = $completed->sum('total_amount');
+            $completed  = $sales->filter(fn ($o) => !in_array($o->status, Order::DEAD_STATUSES, true)
+                && (in_array($o->status, Order::RECOGNISED_STATUSES, true) || in_array($o->payment_status, Order::SETTLED_PAYMENT_STATUSES, true)));
+            $kesOf      = fn ($o) => \App\Support\MoneyByCurrency::toKes((float) $o->total_amount, (string) ($o->currency_code ?: 'KES'),
+                $o->reporting_rate_to_kes === null ? null : (float) $o->reporting_rate_to_kes);
+            $kesSum     = fn ($rows) => round((float) $rows->sum(fn ($o) => $kesOf($o) ?? 0.0), 2);
+            $money      = \App\Support\MoneyByCurrency::of($completed, 'total_amount', 'currency_code', 'reporting_rate_to_kes');
+            $totalSales = $money['kes_total'];
             $count      = $completed->count();
 
-            $returns = OrderReturn::whereHas('order', fn ($q) =>
-                    $q->where('outlet_id', $outletId)
-                )->whereDate('created_at', $date)->sum('refund_amount');
+            $returnRows = OrderReturn::with('order:id,currency_code,reporting_rate_to_kes')
+                ->whereHas('order', fn ($q) => $q->where('outlet_id', $outletId))
+                // Money that actually went back: every refund path (till,
+                // admin, Livewire) stamps refunded_at when it pays out. A
+                // requested or rejected return is not a return of money.
+                ->whereNotNull('refunded_at')
+                ->whereBetween('refunded_at', [$dayStart, $dayEnd])
+                ->get();
+            $returnsMoney = \App\Support\MoneyByCurrency::of(
+                $returnRows->map(fn ($r) => ['refund_amount' => (float) $r->refund_amount, 'currency_code' => $r->order?->currency_code ?: 'KES', 'reporting_rate_to_kes' => $r->order?->reporting_rate_to_kes]),
+                'refund_amount', 'currency_code', 'reporting_rate_to_kes');
+            $returns = $returnsMoney['kes_total'];
 
-            // Hourly breakdown
+            // Hourly breakdown (KES)
             $hourly = $completed
-                ->groupBy(fn ($s) => (int) $s->created_at->format('H'))
+                ->groupBy(fn ($s) => (int) $s->created_at->setTimezone($tz)->format('H'))
                 ->map(fn ($group, $hour) => [
                     'hour'         => $hour,
-                    'sales'        => round($group->sum('total_amount'), 2),
+                    'sales'        => $kesSum($group),
                     'transactions' => $group->count(),
                 ])
                 ->values()->toArray();
@@ -2622,7 +2661,8 @@ class PosController extends Controller
             $this->constrainToViewer($topProductsQuery, $viewer, 'orders');
 
             $topProducts = $topProductsQuery
-                ->selectRaw('order_items.product_name, SUM(order_items.quantity) as qty, SUM(order_items.total_price) as revenue')
+                ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('orders.currency_code'))
+                ->selectRaw('order_items.product_name, SUM(order_items.quantity) as qty, SUM(' . \App\Support\ReportingCurrency::kes('order_items.total_price', 'orders.currency_code') . ') as revenue')
                 ->groupBy('order_items.product_name')
                 ->orderByDesc('revenue')
                 ->limit(10)
@@ -2632,14 +2672,18 @@ class PosController extends Controller
 
             return [
                 'date'               => $date,
+                'money_basis'        => 'KES at the reporting rate; confirmed or paid till sales by order date',
                 'total_sales'        => round($totalSales, 2),
+                'by_currency'        => $money['by_currency'],
+                'unconverted'        => $money['unconverted'],
                 'total_transactions' => $count,
                 'total_returns'      => round((float) $returns, 2),
+                'returns_by_currency'=> $returnsMoney['by_currency'],
                 'net_sales'          => round($totalSales - (float) $returns, 2),
-                'cash_sales'         => round($completed->where('payment_method', 'cash')->sum('total_amount'), 2),
-                'mpesa_sales'        => round($completed->where('payment_method', 'mpesa')->sum('total_amount'), 2),
-                'card_sales'         => round($completed->where('payment_method', 'card')->sum('total_amount'), 2),
-                'other_sales'        => round($completed->whereNotIn('payment_method', ['cash', 'mpesa', 'card'])->sum('total_amount'), 2),
+                'cash_sales'         => $kesSum($completed->where('payment_method', 'cash')),
+                'mpesa_sales'        => $kesSum($completed->where('payment_method', 'mpesa')),
+                'card_sales'         => $kesSum($completed->where('payment_method', 'card')),
+                'other_sales'        => $kesSum($completed->whereNotIn('payment_method', ['cash', 'mpesa', 'card'])),
                 'average_transaction'=> $count > 0 ? round($totalSales / $count, 2) : 0,
                 'hourly_breakdown'   => $hourly,
                 'top_products'       => $topProducts,
@@ -4444,6 +4488,8 @@ class PosController extends Controller
             'customer_name'     => $customerName,
             'customer_phone'    => $order->customer_phone,
             'customer_email'    => $order->customer_email,
+            // The sale's own currency (Step 5): the history drawer keeps each apart.
+            'currency_code'     => strtoupper((string) ($order->currency_code ?: 'KES')),
             'cashier_name'      => $cashierName,
             'register_number'   => $registerNumber,
             'items'             => $order->items->map(fn ($i) => [

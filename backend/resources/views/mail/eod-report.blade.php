@@ -100,14 +100,14 @@
                 {{ $r->order_count }} order{{ $r->order_count !== 1 ? 's' : '' }}
             </span>
             <span class="cashier-kpi">
-                Sales: <span class="brand">{{ $fmt($r->total_sales) }}</span>
+                Sales: <span class="brand">{{ $r->sales_label ?? $fmt($r->total_sales) }}</span>
             </span>
             <span class="cashier-kpi">
-                Paid: <span class="success">{{ $fmt($r->total_paid) }}</span>
+                Paid: <span class="success">{{ $r->paid_label ?? $fmt($r->total_paid) }}</span>
             </span>
             @if ($r->total_balance > 0.01)
             <span class="cashier-kpi">
-                Balance: <span class="warning">{{ $fmt($r->total_balance) }}</span>
+                Balance: <span class="warning">{{ $r->balance_label ?? $fmt($r->total_balance) }}</span>
             </span>
             @endif
         </div>

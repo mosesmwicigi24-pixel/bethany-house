@@ -4105,14 +4105,18 @@ class MetricEngine
         // 2b. Quotes stalling — sizeable offers a week+ old that never became
         // orders. The collections funnel's front stage, advertised here so
         // the money is chased while the customer still remembers asking.
+        // Value in KES at the quotation's own reporting rate (Step 5): the
+        // 5,000 floor, the total and the ranking were on raw totals, so a
+        // USD 60 quote never qualified and a USD 6,000 one was "KES 6,000".
+        $quoteKes = 'total_amount * fx_rate_to_kes(reporting_rate_to_kes, currency_code)';
         $stallingQuotes = $this->openQuotes()
             ->whereRaw('COALESCE(issued_at, created_at) < ?', [CarbonImmutable::now(self::TZ)->subDays(7)->toMutable()])
-            ->where('total_amount', '>=', 5000)
+            ->whereRaw("{$quoteKes} >= 5000")
             ->selectRaw("id, COALESCE(quote_number, CONCAT('#', id)) AS number,
                 TRIM(CONCAT(COALESCE(customer_first_name,''),' ',COALESCE(customer_last_name,''))) AS customer,
-                total_amount AS value,
+                {$quoteKes} AS value, total_amount AS value_original, UPPER(currency_code) AS currency,
                 (?::date - COALESCE(issued_at, created_at)::date) AS age_days", [$todayEat])
-            ->orderByDesc('total_amount')
+            ->orderByRaw("{$quoteKes} DESC")
             ->get();
         if ($stallingQuotes->isNotEmpty()) {
             $stallingValue = $stallingQuotes->sum(fn ($q) => (float) $q->value);

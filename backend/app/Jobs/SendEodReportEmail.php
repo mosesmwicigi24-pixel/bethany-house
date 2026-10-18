@@ -87,9 +87,9 @@ class SendEodReportEmail implements ShouldQueue
                 // Attach order-level KPIs
                 $orders = DB::table('orders as ord')
                     ->leftJoin(DB::raw("(
-                        SELECT order_id, SUM(amount) as paid
+                        SELECT order_id, SUM(amount - COALESCE(refund_amount, 0)) as paid
                         FROM payments
-                        WHERE status IN ('completed','approved','paid')
+                        WHERE " . \App\Support\SettledPayment::sql('payments') . "
                         GROUP BY order_id
                     ) as p"), 'p.order_id', '=', 'ord.id')
                     // No `?? 0` here on purpose. A missing column should break
@@ -100,27 +100,38 @@ class SendEodReportEmail implements ShouldQueue
                     ->where('ord.created_by', $row->user_id)
                     ->whereDate('ord.created_at', $this->date)
                     ->whereNotIn('ord.status', ['voided', 'cancelled'])
+                    // Confirmed or paid only (Step 5): a cart is not a sale.
+                    ->where(fn ($q) => $q->whereIn('ord.status', \App\Models\Order::RECOGNISED_STATUSES)->orWhereIn('ord.payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES))
                     ->where('ord.order_type', 'pos')
                     ->select([
                         'ord.id',
                         'ord.order_number',
                         DB::raw("TRIM(CONCAT(COALESCE(ord.customer_first_name,''), ' ', COALESCE(ord.customer_last_name,''))) as customer_name"),
                         'ord.total_amount',
+                        'ord.currency_code',
+                        'ord.reporting_rate_to_kes',
                         DB::raw('COALESCE(p.paid, 0) as amount_paid'),
                     ])
                     ->get()
                     ->map(fn ($o) => [
                         'order_number'  => $o->order_number,
                         'customer_name' => trim($o->customer_name) ?: 'Walk-in',
+                        'currency_code' => strtoupper((string) ($o->currency_code ?: 'KES')),
+                        'reporting_rate_to_kes' => $o->reporting_rate_to_kes,
                         'total_amount'  => (float) $o->total_amount,
                         'amount_paid'   => (float) $o->amount_paid,
                         'balance'       => max(0, (float) $o->total_amount - (float) $o->amount_paid),
                         'eod_note'      => json_decode($row->order_notes ?? '{}', true)[strval($o->id)] ?? null,
                     ]);
 
-                $totalSales   = $orders->sum('total_amount');
-                $totalPaid    = $orders->sum('amount_paid');
-                $totalBalance = $orders->sum('balance');
+                // Per currency with a KES total at each order's own reporting
+                // rate (Step 5): the mail used to add dollars to shillings.
+                $salesMoney   = \App\Support\MoneyByCurrency::of($orders, 'total_amount', 'currency_code', 'reporting_rate_to_kes');
+                $paidMoney    = \App\Support\MoneyByCurrency::of($orders, 'amount_paid', 'currency_code', 'reporting_rate_to_kes');
+                $balanceMoney = \App\Support\MoneyByCurrency::of($orders, 'balance', 'currency_code', 'reporting_rate_to_kes');
+                $totalSales   = $salesMoney['kes_total'];
+                $totalPaid    = $paidMoney['kes_total'];
+                $totalBalance = $balanceMoney['kes_total'];
 
                 return (object) [
                     'outlet_name'   => $row->outlet_name,
@@ -131,6 +142,9 @@ class SendEodReportEmail implements ShouldQueue
                     'total_sales'   => round($totalSales, 2),
                     'total_paid'    => round($totalPaid, 2),
                     'total_balance' => round($totalBalance, 2),
+                    'sales_label'   => \App\Support\MoneyByCurrency::label($salesMoney),
+                    'paid_label'    => \App\Support\MoneyByCurrency::label($paidMoney),
+                    'balance_label' => \App\Support\MoneyByCurrency::label($balanceMoney),
                     'orders'        => $orders->toArray(),
                 ];
             });
