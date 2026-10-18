@@ -66,8 +66,14 @@ final class PaymentCorrections
         if ((int) $payment->order_id === $newOrderId) {
             self::fail('Payment is already assigned to that order.');
         }
-        if (!Order::withoutViewerScope()->whereKey($newOrderId)->exists()) {
+        $target = Order::withoutViewerScope()->find($newOrderId);
+        if (!$target) {
             self::fail('That order does not exist.');
+        }
+        // A USD payment on a KES order would be added as shillings everywhere
+        // the order's paid total is read. Money moves only within its currency.
+        if (strtoupper((string) $target->currency_code) !== strtoupper((string) $payment->currency_code)) {
+            self::fail("This payment is in {$payment->currency_code}; that order is in {$target->currency_code}. A payment moves only between orders in the same currency.");
         }
 
         $oldOrderId = $payment->order_id;
@@ -78,10 +84,14 @@ final class PaymentCorrections
             if (!$order) {
                 continue;
             }
-            $totalPaid = Payment::where('order_id', $oid)->where('status', 'paid')->sum('amount');
+            // The one rule for "paid" (Order::totalPaid), and the status that
+            // follows from it — a moved payment used to leave both orders'
+            // payment_status as it was.
+            $order->syncPaymentStatus();
+            $totalPaid = $order->totalPaid();
             $order->update([
                 'amount_paid' => $totalPaid,
-                'balance_due' => max(0, $order->total_amount - $totalPaid),
+                'balance_due' => max(0, (float) $order->total_amount - $totalPaid),
             ]);
         }
 

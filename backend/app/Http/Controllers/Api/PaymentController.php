@@ -44,6 +44,12 @@ class PaymentController extends Controller
             return response()->json(['message' => 'Order already paid'], 422);
         }
 
+        // M-Pesa moves shillings. Pushing a USD order's total to it asked the
+        // customer for KES 100 on a USD 100 order.
+        if ($validated['payment_method'] === 'mpesa' && strtoupper((string) $order->currency_code) !== 'KES') {
+            return response()->json(['message' => "M-Pesa takes shillings; this order is in {$order->currency_code}. Use card or bank transfer."], 422);
+        }
+
         return match ($validated['payment_method']) {
             'mpesa'           => $this->initiateMpesaPayment($order, $validated['phone']),
             'card_paystack'   => $this->initiatePaystackPayment($order, $validated['email']),
@@ -315,9 +321,16 @@ class PaymentController extends Controller
                 ? url("/api/v1/pay/{$order->payment_token}/mpesa-callback")
                 : url('/api/v1/webhooks/mpesa/callback');
 
+            // The balance still due, not the whole total: a part-paid order
+            // is not asked to pay twice.
+            $due = round($order->outstandingBalance(), 2);
+            if ($due <= 0) {
+                return response()->json(['message' => 'Nothing is outstanding on this order.'], 422);
+            }
+
             $result = $mpesa->stkPush(
                 phone:       $phone,
-                amount:      (int) ceil((float) $order->total_amount),
+                amount:      (int) ceil($due),
                 reference:   $order->order_number,
                 callbackUrl: $callbackUrl,
                 description: "Order #{$order->order_number}"
@@ -328,7 +341,7 @@ class PaymentController extends Controller
                 'recorded_by' => auth()->id(),   // who started it: staff, or the customer (4D)
                 'order_id'           => $order->id,
                 'payment_method'     => 'mpesa',
-                'amount'             => $order->total_amount,
+                'amount'             => $due,
                 'currency_code'      => $order->currency_code,
                 'status'             => 'pending',
                 'provider_reference' => $result['CheckoutRequestID'],
@@ -340,7 +353,7 @@ class PaymentController extends Controller
                 'payment_id'          => $payment->id,
                 'checkout_request_id' => $result['CheckoutRequestID'],
                 'phone'               => $mpesa->normalisePhone($phone),
-                'amount'              => $order->total_amount,
+                'amount'              => $due,
             ]);
 
             return response()->json([
@@ -1018,6 +1031,11 @@ class PaymentController extends Controller
         }
         if ((int) $payment->order_id === (int) $validated['order_id']) {
             return response()->json(['message' => 'Payment is already assigned to that order.'], 422);
+        }
+        // Money moves only between orders in its own currency (PaymentCorrections).
+        $targetCurrency = \App\Models\Order::withoutViewerScope()->whereKey($validated['order_id'])->value('currency_code');
+        if (strtoupper((string) $targetCurrency) !== strtoupper((string) $payment->currency_code)) {
+            return response()->json(['message' => "This payment is in {$payment->currency_code}; that order is in {$targetCurrency}. A payment moves only between orders in the same currency."], 422);
         }
 
         $engine   = app(\App\Services\Approvals\ApprovalEngine::class);

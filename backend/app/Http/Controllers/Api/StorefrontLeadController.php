@@ -113,6 +113,9 @@ class StorefrontLeadController extends Controller
 
         // Currency by the orders rule: KE → KES, else USD.
         $currency = Order::resolveCurrency($country?->code ?? ($validated['country_code'] ?? ''));
+        if (!\App\Support\SellableCurrency::isSellable($currency)) {
+            $currency = \App\Support\SellableCurrency::home();
+        }
 
         // No shippable data (unknown country, or shipping disabled) → manual quote.
         if (!$country || !$country->is_shipping_enabled) {

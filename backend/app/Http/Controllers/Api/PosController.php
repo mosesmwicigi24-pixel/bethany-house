@@ -106,7 +106,7 @@ class PosController extends Controller
         if ($requestedCurrency) {
             $isActive = DB::table('currencies')
                 ->where('code', $requestedCurrency)->where('is_active', true)->exists();
-            if (!$isActive) $requestedCurrency = '';
+            if (!$isActive || !\App\Support\SellableCurrency::isSellable($requestedCurrency)) $requestedCurrency = '';
         }
         if (!$requestedCurrency) {
             $requestedCurrency = $this->resolveCurrency(Outlet::findOrFail($outletId));
@@ -173,7 +173,7 @@ class PosController extends Controller
         if ($requestedCurrency) {
             $isActive = DB::table('currencies')
                 ->where('code', $requestedCurrency)->where('is_active', true)->exists();
-            if (!$isActive) $requestedCurrency = '';
+            if (!$isActive || !\App\Support\SellableCurrency::isSellable($requestedCurrency)) $requestedCurrency = '';
         }
         if (!$requestedCurrency) {
             $requestedCurrency = $this->resolveCurrency(Outlet::findOrFail($outletId));
@@ -701,6 +701,7 @@ class PosController extends Controller
             'cart_discount_type'     => 'nullable|in:none,flat,percent',
             'cart_discount_value'    => 'nullable|numeric|min:0',
             'shipping_amount'        => 'nullable|numeric|min:0',
+            'shipping_method_id'     => 'nullable|exists:shipping_methods,id',
             // Single-payment fields (backwards compatible)
             'payment_method'         => 'nullable|in:cash,card,mpesa,bank_transfer,other',
             'payment_reference'      => 'nullable|string|max:100',
@@ -816,7 +817,7 @@ class PosController extends Controller
                 ->where('code', $customerCountryCode)
                 ->value('default_currency_code');
             $activeCurrencies = DB::table('currencies')->where('is_active', true)->pluck('code')->toArray();
-            if ($countryCurrency && (empty($activeCurrencies) || in_array($countryCurrency, $activeCurrencies))) {
+            if ($countryCurrency && \App\Support\SellableCurrency::isSellable($countryCurrency)) {
                 $currencyCode = $countryCurrency;
             } else {
                 $currencyCode = $this->resolveCurrency($outlet);
@@ -974,7 +975,7 @@ class PosController extends Controller
             // In deposit mode, only the deposit amount needs to be covered.
             $isDeposit       = !empty($validated['is_deposit']);
             $depositAmt      = $isDeposit ? round((float) ($validated['deposit_amount'] ?? 0), 2) : null;
-            $shippingAmt     = round((float) ($validated['shipping_amount'] ?? 0), 2);
+            $shippingAmt     = $this->shippingFeeFor($validated, $currencyCode, (float) $totalAmount);
             $requiredPayment = $isDeposit ? $depositAmt : ($totalAmount + $shippingAmt);
             $totalPayments   = collect($paymentsInput)->sum('amount');
 
@@ -1033,7 +1034,7 @@ class PosController extends Controller
                 $validated['customer_email']      = $validated['customer_email']      ?? ($nc['email'] ?? null);
             }
 
-            $shippingAmt  = round((float) ($validated['shipping_amount'] ?? 0), 2);
+            $shippingAmt  = $this->shippingFeeFor($validated, $currencyCode, (float) $totalAmount);
             $isDeposit    = !empty($validated['is_deposit']);
             $depositAmt   = $isDeposit ? round((float) ($validated['deposit_amount'] ?? 0), 2) : null;
 
@@ -1623,6 +1624,19 @@ class PosController extends Controller
             ->orderBy('shipping_methods.sort_order')
             ->orderBy('shipping_methods.name')
             ->get();
+
+        // The fee in the cart's currency (ShippingFee), so a USD cart is not
+        // shown — or charged — the shilling figure. null: no pricing rate.
+        $currency = strtoupper((string) request()->query('currency', 'KES'));
+        $methods  = $methods->map(function ($m) use ($currency) {
+            try {
+                $m->fee = \App\Support\ShippingFee::inCurrency(\App\Models\ShippingMethod::find($m->id), 0.0, $currency);
+            } catch (\Illuminate\Validation\ValidationException) {
+                $m->fee = null;
+            }
+            $m->fee_currency = $currency;
+            return $m;
+        });
 
         return response()->json(['data' => $methods]);
     }
@@ -2733,12 +2747,25 @@ class PosController extends Controller
      */
     private function resolveCurrency(Outlet $outlet): string
     {
-        return match (strtoupper($outlet->country_code ?? '')) {
-            'USA', 'US'  => 'USD',
-            'GBR', 'GB'  => 'GBP',
-            'EUR'        => 'EUR',
-            default      => 'KES',   // Kenya default
-        };
+        // Only a currency the books can state in shillings (SellableCurrency).
+        return \App\Support\SellableCurrency::forOutlet($outlet);
+    }
+
+    /**
+     * The shipping charge for a sale, in the sale's currency. A chosen method
+     * is priced on the server (ShippingFee: the KES fee converted at the
+     * pricing rate); only a sale with no method takes the typed figure.
+     */
+    private function shippingFeeFor(array $validated, string $currency, float $goodsTotal): float
+    {
+        if (!empty($validated['shipping_method_id'])) {
+            $method = \App\Models\ShippingMethod::find($validated['shipping_method_id']);
+            if ($method) {
+                return \App\Support\ShippingFee::inCurrency($method, $goodsTotal, $currency);
+            }
+        }
+
+        return round((float) ($validated['shipping_amount'] ?? 0), 2);
     }
 
     private function generateUniqueOrderNumber(string $prefix): string
@@ -3020,7 +3047,7 @@ class PosController extends Controller
                 ->where('code', $customerCountryCode)
                 ->value('default_currency_code');
             $activeCurrencies = DB::table('currencies')->where('is_active', true)->pluck('code')->toArray();
-            if ($countryCurrency && (empty($activeCurrencies) || in_array($countryCurrency, $activeCurrencies))) {
+            if ($countryCurrency && \App\Support\SellableCurrency::isSellable($countryCurrency)) {
                 $resolvedCurrency = $countryCurrency;
             } else {
                 $outlet = Outlet::find($outletId);
@@ -3257,7 +3284,7 @@ class PosController extends Controller
             PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart_discount_value');
             // The lines and the cart together: at most 5% of the order's gross.
             $tally->amount($cartDiscount, 'cart_discount_value')->assert(auth()->user());
-            $shippingAmt  = round((float)($validated['shipping_amount'] ?? 0), 2);
+            $shippingAmt  = $this->shippingFeeFor($validated, $resolvedCurrency, (float) $itemSubtotal);
             $totals       = OrderTotals::fromParts(
                 $itemSubtotal,
                 collect($itemsData)->sum('tax_amount'),
@@ -3490,7 +3517,7 @@ class PosController extends Controller
 
             // Validate against active currencies; fall back to outlet currency on mismatch
             $activeCurrencies = DB::table('currencies')->where('is_active', true)->pluck('code')->toArray();
-            if ($countryCurrency && (empty($activeCurrencies) || in_array($countryCurrency, $activeCurrencies))) {
+            if ($countryCurrency && \App\Support\SellableCurrency::isSellable($countryCurrency)) {
                 $currencyCode = $countryCurrency;
             } else {
                 $currencyCode = $this->resolveCurrency($outlet);
@@ -3756,7 +3783,7 @@ class PosController extends Controller
             PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart_discount_value');
             // The lines and the cart together: at most 5% of the order's gross.
             $tally->amount($cartDiscount, 'cart_discount_value')->assert(auth()->user());
-            $shippingAmt  = round((float)($validated['shipping_amount'] ?? 0), 2);
+            $shippingAmt  = $this->shippingFeeFor($validated, $currencyCode, (float) $itemSubtotal);
             $totals       = OrderTotals::fromParts(
                 $itemSubtotal,
                 collect($itemsData)->sum('tax_amount'),

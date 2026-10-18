@@ -1932,12 +1932,17 @@ export default function PosPage() {
     const { data: currenciesData } = useQuery({
         queryKey: ["currencies-active"],
         queryFn: () =>
-            get<{ data: Array<{ code: string; name: string; is_active?: boolean }> }>(
+            get<{ data: Array<{ code: string; name: string; is_active?: boolean; sellable?: boolean }> }>(
                 "/v1/settings/currencies",
             ),
         staleTime: 300_000,
     });
-    const activeCurrencies: string[] = (currenciesData?.data ?? []).map((c: any) => c.code);
+    // Only currencies the books can state in shillings are sold in (the
+    // server applies the same rule); a currency without a reporting rate is
+    // listed for display but never becomes the cart's currency.
+    const activeCurrencies: string[] = (currenciesData?.data ?? [])
+        .filter((c: any) => c.sellable !== false)
+        .map((c: any) => c.code);
 
     // ── Countries list for the country picker ───────────────────────────────────
     // Uses the public /v1/countries endpoint (no auth/permission required),
@@ -2166,16 +2171,32 @@ export default function PosPage() {
     const [shippingAddress, setShippingAddress]       = useState(_draft?.shippingAddress ?? "");
     const [showShippingPanel, setShowShippingPanel]   = useState(false);
 
+    const selectedOutlet = outlets.find((o) => o.id === selectedOutletId);
+    // ── Effective currency / international flag ────────────────────────────────
+    // Declared before the shipping query, which prices fees in this currency.
+    const outletCurrency = selectedOutlet?.currency_code ?? "KES";
+    const HOME_COUNTRY   = checkoutConfigData?.app_country ?? "KE";
+    const isInternationalPosOrder = customerCountryCode !== "" && customerCountryCode !== HOME_COUNTRY;
+    const countryObj      = allCountries.find((c: any) => c.code === customerCountryCode);
+    const effectiveCurrency =
+        customerCountryCode !== "" && countryObj?.default_currency_code
+            ? (activeCurrencies.length === 0 || activeCurrencies.includes(countryObj.default_currency_code)
+                ? countryObj.default_currency_code
+                : outletCurrency)
+            : outletCurrency;
+
     const { data: shippingMethodsData } = useQuery({
-        queryKey: ["pos-shipping-methods"],
-        queryFn: () => posApi.shippingMethods(),
+        queryKey: ["pos-shipping-methods", effectiveCurrency],
+        queryFn: () => posApi.shippingMethods(effectiveCurrency),
         staleTime: 5 * 60_000,
     });
     const shippingMethods: PosShippingMethod[] = shippingMethodsData?.data ?? [];
     const selectedShippingMethod = shippingMethods.find((m) => m.id === selectedShippingId) ?? null;
     // Derive the numeric fee from the selected method; override the old freeform shippingAmount
+    // The server prices the fee in the cart's currency (fee); the KES figure
+    // (flat_rate) is never used as-is in a foreign cart.
     const shippingFeeFromMethod = selectedShippingMethod
-        ? (selectedShippingMethod.cost_type === "free" ? 0 : selectedShippingMethod.flat_rate)
+        ? (selectedShippingMethod.cost_type === "free" ? 0 : (selectedShippingMethod.fee ?? 0))
         : 0;
 
     const { data: productsData, isLoading: loadingProducts } = useQuery({
@@ -2996,20 +3017,6 @@ export default function PosPage() {
     }, [selectedOutletId, cart, pendingOrderId, pendingOrderData, pendingOrderCartSig,
         isResumedOrder, noteChanged, totals.total, buildCartPayload, pendingOrderMutation, updateOrderMutation]);
 
-    const selectedOutlet = outlets.find((o) => o.id === selectedOutletId);
-    // ── Effective currency / international flag ────────────────────────────────
-    // Placed here because selectedOutlet must be declared first.
-    const outletCurrency = selectedOutlet?.currency_code ?? "KES";
-    const HOME_COUNTRY   = checkoutConfigData?.app_country ?? "KE";
-    const isInternationalPosOrder = customerCountryCode !== "" && customerCountryCode !== HOME_COUNTRY;
-    const countryObj      = allCountries.find((c: any) => c.code === customerCountryCode);
-    const effectiveCurrency =
-        customerCountryCode !== "" && countryObj?.default_currency_code
-            ? (activeCurrencies.length === 0 || activeCurrencies.includes(countryObj.default_currency_code)
-                ? countryObj.default_currency_code
-                : outletCurrency)
-            : outletCurrency;
-
     // ── Payment methods filtered by effective currency ─────────────────────────
     // A method is shown only if its supported_currencies is empty (all currencies)
     // or explicitly includes the current effective currency.
@@ -3661,7 +3668,7 @@ export default function PosPage() {
                                                             {m.delivery_time && <p className="text-surface-400">{m.delivery_time}</p>}
                                                         </div>
                                                         <span className={clsx("font-bold shrink-0 ml-2", m.cost_type === "free" ? "text-success" : "")}>
-                                                            {m.cost_type === "free" ? "Free" : `${effectiveCurrency} ${fmt(m.flat_rate)}`}
+                                                            {m.cost_type === "free" ? "Free" : m.fee == null ? "No rate" : `${effectiveCurrency} ${fmt(m.fee)}`}
                                                         </span>
                                                     </button>
                                                 ))}

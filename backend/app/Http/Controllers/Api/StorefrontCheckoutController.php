@@ -123,9 +123,9 @@ class StorefrontCheckoutController extends Controller
         $currency        = Order::resolveCurrency($countryCode);
         $isInternational = $countryCode !== strtoupper($homeCountry);
 
-        $activeCurrencies = DB::table('currencies')->where('is_active', true)->pluck('code')->toArray();
-        if (!empty($activeCurrencies) && !in_array($currency, $activeCurrencies)) {
-            $currency = DB::table('settings')->where('key', 'default_currency')->value('value') ?? 'KES';
+        // Only a currency the books can state in shillings; else the shop's own.
+        if (!\App\Support\SellableCurrency::isSellable($currency)) {
+            $currency = \App\Support\SellableCurrency::home();
         }
 
         // ── Load & vet products, price lines ─────────────────────────────────

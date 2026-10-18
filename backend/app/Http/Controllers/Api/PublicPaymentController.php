@@ -125,6 +125,10 @@ class PublicPaymentController extends Controller
         if ($method === 'mpesa' && empty($validated['phone'])) {
             return response()->json(['message' => 'Phone number is required for M-Pesa.'], 422);
         }
+        // M-Pesa moves shillings; a USD order is paid by card or bank.
+        if ($method === 'mpesa' && strtoupper((string) $order->currency_code) !== 'KES') {
+            return response()->json(['message' => "M-Pesa takes shillings; this order is in {$order->currency_code}. Please pay by card or bank transfer."], 422);
+        }
         if ($method === 'paystack' && empty($validated['email'])) {
             return response()->json(['message' => 'Email address is required for card payment.'], 422);
         }
@@ -822,8 +826,12 @@ class PublicPaymentController extends Controller
      */
     private static function amountDue($order): float
     {
-        $paid = (float) Payment::where('order_id', $order->id)
-            ->where('status', 'paid')->sum('amount');
+        // Settled money only, the one rule (Order::totalPaid): a bank proof
+        // awaiting review is not yet paid.
+        if ($order instanceof Order) {
+            return round($order->outstandingBalance(), 2);
+        }
+        $paid = (float) \App\Support\SettledPayment::where(Payment::where('order_id', $order->id), 'payments')->sum('amount');
 
         return max(0, (float) $order->total_amount - $paid);
     }

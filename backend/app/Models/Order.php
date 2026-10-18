@@ -586,8 +586,10 @@ class Order extends Model
      */
     public function totalPaid(): float
     {
-        return (float) $this->payments()
-            ->where('status', 'paid')
+        // Settled money only (SettledPayment): a bank-proof upload sits at
+        // 'paid' while finance reviews it, and counted here it turned a cart
+        // into a sale before the money was approved.
+        return (float) \App\Support\SettledPayment::where($this->payments(), 'payments')
             ->selectRaw('COALESCE(SUM(amount - refund_amount), 0) AS net')
             ->value('net');
     }

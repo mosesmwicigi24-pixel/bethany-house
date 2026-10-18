@@ -792,15 +792,17 @@ function SetShippingFeeModal({ order, onClose, onDone }: {
     // Orders-side endpoint (orders.set_shipping_fee), active methods only. The
     // Setup endpoint this used to call needed settings.view.
     const { data: methodsData, isLoading: loadingMethods } = useQuery({
-        queryKey: ["order-shipping-methods"],
-        queryFn:  () => ordersApi.shippingMethods(),
+        queryKey: ["order-shipping-methods", order.currency_code],
+        queryFn:  () => ordersApi.shippingMethods(order.currency_code),
         staleTime: 5 * 60_000,
     });
     const methods: OrderShippingMethod[] = methodsData?.data ?? [];
 
     const selectedMethod = methods.find((m) => m.id === selectedMethodId) ?? null;
+    // A picked method's fee comes priced in the order's currency (fee); the
+    // KES figure (flat_rate) is never charged as-is on a foreign order.
     const effectiveAmount = mode === "pick" && selectedMethod
-        ? (selectedMethod.cost_type === "free" ? 0 : selectedMethod.flat_rate)
+        ? (selectedMethod.cost_type === "free" ? 0 : (selectedMethod.fee ?? 0))
         : amount;
 
     // Live impact preview. Only the shipping charge — and therefore the balance —
@@ -883,7 +885,7 @@ function SetShippingFeeModal({ order, onClose, onDone }: {
                                 </button>
 
                                 {methods.map((m) => {
-                                    const fee = m.cost_type === "free" ? 0 : m.flat_rate;
+                                    const fee = m.cost_type === "free" ? 0 : (m.fee ?? 0);
                                     const isSelected = selectedMethodId === m.id;
                                     return (
                                         <button key={m.id}
@@ -900,7 +902,7 @@ function SetShippingFeeModal({ order, onClose, onDone }: {
                                                 {m.zone_name && <p className="text-2xs text-surface-400">{m.zone_name}</p>}
                                             </div>
                                             <span className={clsx("font-bold shrink-0", m.cost_type === "free" ? "text-success" : "text-surface-900")}>
-                                                {m.cost_type === "free" ? "Free" : `${order.currency_code} ${fmt2(m.flat_rate)}`}
+                                                {m.cost_type === "free" ? "Free" : m.fee == null ? "No rate" : `${order.currency_code} ${fmt2(m.fee)}`}
                                             </span>
                                             {isSelected && (
                                                 <svg className="w-3.5 h-3.5 text-brand-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>

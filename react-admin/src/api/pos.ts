@@ -278,7 +278,11 @@ export interface PosShippingMethod {
     description?: string | null;
     delivery_time?: string | null;
     cost_type: "flat_rate" | "free" | "percentage";
+    /** The configured KES figure (a percent for percentage methods). */
     flat_rate: number;
+    /** The fee in the cart's currency, priced by the server; null when no pricing rate. */
+    fee?: number | null;
+    fee_currency?: string;
     is_active: boolean;
     zone_name?: string | null;
 }
@@ -563,6 +567,6 @@ export const posApi = {
     // /v1/admin/shipping/methods, which requires settings.view — a
     // back-office permission pos_clerk / outlet_manager don't have and
     // shouldn't need just to ring up a delivery sale.
-    shippingMethods: () =>
-        get<{ data: PosShippingMethod[] }>("/v1/admin/pos/shipping-methods"),
+    shippingMethods: (currency?: string) =>
+        get<{ data: PosShippingMethod[] }>("/v1/admin/pos/shipping-methods", currency ? { params: { currency } } : undefined),
 };
