@@ -3,8 +3,9 @@ name: Reports reconcile
 # Runs `php artisan reports:reconcile` (currency plan Step 7, READ-ONLY) on
 # the VPS, reaching the box as history-audit.yml does. The repository is
 # public, so the log shows only the verdicts (TIES / DOES NOT TIE) with every
-# money figure masked as "#"; the full report, figures included, is written
-# on the box to /opt/bethany-house/reconcile/<timestamp>.txt for the owner.
+# money figure masked as "#", plus the id, currency and status of any till
+# row that does not tie (its name stripped); the full report, figures
+# included, is written on the box to /opt/bethany-house/reconcile/<timestamp>.txt.
 on:
   workflow_dispatch:
     inputs:
@@ -56,5 +57,5 @@ jobs:
           # The full report lands on the box; the log gets verdict lines with figures masked.
           ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 \
             -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" \
-            "cd /opt/bethany-house && mkdir -p reconcile && OUT=reconcile/\$(date -u +%Y%m%dT%H%M%SZ).txt && docker compose run --rm -T laravel php artisan reports:reconcile --from=$FROM $TOFLAG > \$OUT 2>&1; RC=\$?; echo \"full report on the box: /opt/bethany-house/\$OUT (exit \$RC)\"; grep -E 'TIES|do not tie|Reconciliation|no reporting rate|record\(s\)' \$OUT | sed -E 's/[0-9][0-9,]*\.[0-9]{2}/#/g'; exit \$RC"
+            "cd /opt/bethany-house && mkdir -p reconcile && OUT=reconcile/\$(date -u +%Y%m%dT%H%M%SZ).txt && docker compose run --rm -T laravel php artisan reports:reconcile --from=$FROM $TOFLAG > \$OUT 2>&1; RC=\$?; echo \"full report on the box: /opt/bethany-house/\$OUT (exit \$RC)\"; grep -E 'TIES|do not tie|Reconciliation|no reporting rate|record\(s\)|^\| #[0-9]+' \$OUT | sed -E 's/^\| #([0-9]+) [^|]*\|/| #\1 |/; s/[0-9][0-9,]*\.[0-9]{2}/#/g'; exit \$RC"
         timeout-minutes: 20
