@@ -36,6 +36,7 @@ final class MakerChecker
         'expense.approve' => 'You recorded or submitted this expense, so someone else must approve it.',
         'payment.approve' => 'You recorded this payment, so someone else must approve it.',
         'payment.void' => 'You asked for this payment to be voided, so someone else must approve it.',
+        'supplier_payment.void' => 'You recorded this supplier payment, so someone else must void it.',
         'payment.reassign' => 'You asked for this payment to be moved, so someone else must approve it.',
         'imprest_topup.approve' => 'You asked for this imprest top-up, so someone else must approve it.',
         'till.verify' => 'You counted this till, so another manager must verify it.',

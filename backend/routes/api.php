@@ -1226,6 +1226,14 @@ Route::prefix('v1')->group(function () {
                         ->middleware('permission:procurement.create,sanctum');
                     Route::get('/currencies',    [PurchaseOrderController::class, 'currencies'])
                         ->middleware('permission:procurement.create,sanctum');
+                    // Payables: what is owed to suppliers, and paying it (not expenses).
+                    Route::get('/payables',      [\App\Http\Controllers\Api\SupplierPaymentController::class, 'payables'])
+                        ->middleware('permission:procurement.pay|reports.financial,sanctum');
+                    Route::get('/{id}/payments', [\App\Http\Controllers\Api\SupplierPaymentController::class, 'index']);
+                    Route::post('/{id}/payments', [\App\Http\Controllers\Api\SupplierPaymentController::class, 'store'])
+                        ->middleware('permission:procurement.pay,sanctum');
+                    Route::post('/{id}/payments/{paymentId}/void', [\App\Http\Controllers\Api\SupplierPaymentController::class, 'void'])
+                        ->middleware('permission:procurement.pay_void,sanctum');
                     Route::get('/{id}',          [PurchaseOrderController::class, 'show']);
                     Route::get('/{id}/audit-log',[PurchaseOrderController::class, 'auditLog']);
                     Route::post('/',             [PurchaseOrderController::class, 'store'])

@@ -127,6 +127,8 @@ class SyncPermissions extends Command
         'procurement.create'   => ['Create Purchase Orders','Create purchase orders',                    'Procurement'],
         'procurement.approve'  => ['Approve Purchase Orders','Approve or reject purchase orders',        'Procurement'],
         'procurement.receive'  => ['Receive Goods (GRN)',  'Record goods received notes',                'Procurement'],
+        'procurement.pay'      => ['Pay Suppliers',        'Record payments to suppliers against purchase orders', 'Procurement'],
+        'procurement.pay_void' => ['Void Supplier Payments','Void a supplier payment recorded in error',  'Procurement'],
 
         // ── Inventory ───────────────────────────────────────────────────────
         'inventory.view'       => ['View Inventory',       'View stock levels, adjustments and transfers', 'Inventory'],
@@ -604,6 +606,9 @@ class SyncPermissions extends Command
             // Tills (Phase 4B): reads all, reconciles, and is the only role that
             // opens a correction against a finalized till.
             'pos.tills_view_all', 'pos.reconcile', 'pos.till_correction',
+            // Pays suppliers against purchase orders and voids a payment someone
+            // else recorded in error (maker ≠ checker) — the payables ledger.
+            'procurement.view', 'procurement.pay', 'procurement.pay_void',
             // Orders - view only (for payment context)
             'orders.view',
             // Cost figures (margins, COGS context), and since Phase 2 the
@@ -643,6 +648,8 @@ class SyncPermissions extends Command
             'pos.tills_view_all', 'pos.reconcile',
             'expenses.view', 'expenses.create', 'expenses.edit', 'expenses.export',
             'procurement.view',
+            // Records supplier payments; voiding one is finance's (maker ≠ checker).
+            'procurement.pay',
             'inventory.view',
             'products.view', 'products.view_cost',
             // Reads six report pages, Finance & Cash among them (plan §6), and

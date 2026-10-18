@@ -11,6 +11,7 @@ import { Modal } from "@/components/ui/Modal";
 import { PdfDownloadButton } from "@/hooks/usePdfDownload";
 import { parseQty, qtyNum, qtyStep, fmtQty } from "@/lib/quantity";
 import { RevisePurchaseOrderModal, RevisionHistory, SupplierInvoiceCard } from "./POOwnerEdit";
+import { SupplierPaymentsCard } from "./SupplierPayments";
 
 // ── Status config ─────────────────────────────────────────────────────────────
 
@@ -613,6 +614,15 @@ export default function PurchaseOrderDetailPage() {
                         {/* The supplier's own invoice for this order */}
                         <SupplierInvoiceCard po={po} canEdit={canCreatePO && po.status !== "cancelled"} onSaved={refresh} />
 
+                        {/* What has been paid to the supplier (the payables ledger) */}
+                        <SupplierPaymentsCard
+                            poId={po.id}
+                            payable={["approved", "ordered", "partially_received", "received"].includes(po.status)}
+                            canPay={can("procurement.pay")}
+                            canVoid={can("procurement.pay_void")}
+                            onChanged={refresh}
+                        />
+
                         {/* Quick stats */}
                         <div>
                             <SectionLabel>Summary</SectionLabel>
@@ -623,8 +633,8 @@ export default function PurchaseOrderDetailPage() {
                                 <InfoRow label="Currency" value={currency} />
                                 <InfoRow label="Payment Terms" value={po.payment_terms} />
                                 <InfoRow label="Payment Status" value={
-                                    <span className={clsx("capitalize", po.payment_status === "paid" ? "text-success-600 font-semibold" : "text-amber-600")}>
-                                        {po.payment_status ?? "unpaid"}
+                                    <span className={clsx("capitalize", po.payment_status === "paid" ? "text-success-600 font-semibold" : po.payment_status === "overpaid" ? "text-danger" : "text-amber-600")}>
+                                        {(po.payment_status ?? "unpaid").replace("_", " ")}
                                     </span>
                                 } />
                             </div>

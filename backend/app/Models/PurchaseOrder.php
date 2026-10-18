@@ -63,6 +63,13 @@ class PurchaseOrder extends Model
                 $po->po_number = 'PO-' . date('Ymd') . '-' . str_pad(static::whereDate('created_at', today())->count() + 1, 4, '0', STR_PAD_LEFT);
             }
         });
+        // What is owed moved (a revision, or the supplier's invoice amount):
+        // the payment status follows. Written by query, so no loop.
+        static::updated(function ($po) {
+            if ($po->wasChanged(['total_amount', 'supplier_invoice_amount'])) {
+                \App\Services\Procurement\SupplierPayables::sync($po);
+            }
+        });
     }
 
     public function supplier()

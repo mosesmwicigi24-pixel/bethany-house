@@ -4,6 +4,7 @@ import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { purchaseOrderApi, supplierApi } from "@/api/procurement";
 import type { PurchaseOrder, POStatus, POItemCosts } from "@/api/procurement";
 import { VariantGridPanel, type VariantPick } from "./VariantGridPanel";
+import { OwedToSuppliersChip } from "./SupplierPayments";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Modal } from "@/components/ui/Modal";
@@ -1136,7 +1137,7 @@ function PODetailModal({
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function PurchaseOrdersPage() {
-    const { can } = usePermissions();
+    const { can, canAny } = usePermissions();
     const canCreate = can("procurement.create");
     const canApprove = can("procurement.approve");
     const [page, setPage] = useState(1);
@@ -1200,6 +1201,8 @@ export default function PurchaseOrdersPage() {
                         Create and track orders from suppliers
                     </p>
                 </div>
+                <div className="flex flex-wrap items-center gap-2">
+                {canAny("procurement.pay", "reports.financial") && <OwedToSuppliersChip />}
                 {canCreate && (
                 <button
                     className="btn-primary btn-sm whitespace-nowrap"
@@ -1208,6 +1211,7 @@ export default function PurchaseOrdersPage() {
                     <PlusIcon /> New Purchase Order
                 </button>
                 )}
+                </div>
             </div>
 
             {/* Summary stats */}

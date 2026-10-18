@@ -201,12 +201,16 @@ class RoleCatalogueV2Test extends TestCase
             'settings.financial_propose',
             // 4B part 1 (2026_10_03_440002): reconciles and corrects finalized tills.
             'pos.reconcile', 'pos.till_correction', 'pos.tills_view_all',
+            // Payables (2026_10_18_100000): pays suppliers, voids a payment someone else recorded.
+            'procurement.view', 'procurement.pay', 'procurement.pay_void',
         ],
         'accountant' => [
             // 3B (2026_10_03_520002): asks for payment voids and moves; signs nothing.
             'payments.request_reassign', 'payments.request_void',
             // 4B part 1 (2026_10_03_440002): reconciles tills.
             'pos.reconcile', 'pos.tills_view_all',
+            // Payables (2026_10_18_100000): records supplier payments; never voids them.
+            'procurement.pay',
         ],
         'outlet_manager' => [
             // 4B part 1 (2026_10_03_440002): verifies a clerk's blind count.

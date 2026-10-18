@@ -673,6 +673,10 @@ class PurchaseOrderController extends Controller
         $oldStatus     = $purchaseOrder->status;
         $engine        = app(\App\Services\Approvals\ApprovalEngine::class);
 
+        if ($validated['status'] === 'cancelled') {
+            \App\Services\Procurement\SupplierPayables::assertCancellable($purchaseOrder);
+        }
+
         $updateData = ['status' => $validated['status']];
 
         // This endpoint can move a PO to any status, so it is a second door
@@ -1183,6 +1187,8 @@ class PurchaseOrderController extends Controller
         if ($purchaseOrder->status === 'cancelled') {
             return response()->json(['message' => 'Purchase order is already cancelled.'], 422);
         }
+
+        \App\Services\Procurement\SupplierPayables::assertCancellable($purchaseOrder);
 
         $purchaseOrder->update([
             'status' => 'cancelled',
