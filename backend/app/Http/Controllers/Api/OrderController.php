@@ -567,10 +567,9 @@ class OrderController extends Controller
         $isInternational = $countryCode !== strtoupper($homeCountry);
 
         // Validate currency is active in the platform
-        $activeCurrencies = DB::table('currencies')->where('is_active', true)->pluck('code')->toArray();
-        if (!empty($activeCurrencies) && !in_array($currency, $activeCurrencies)) {
-            $defaultCurrency = DB::table('settings')->where('key', 'default_currency')->value('value') ?? 'KES';
-            $currency        = $defaultCurrency;
+        // Only a currency the books can state in shillings; else the shop's own.
+        if (!\App\Support\SellableCurrency::isSellable($currency)) {
+            $currency = \App\Support\SellableCurrency::home();
         }
 
         DB::beginTransaction();
@@ -578,9 +577,16 @@ class OrderController extends Controller
             // ── Build line data for tax calculation ───────────────────────────
             $lines = [];
             foreach ($cart->items as $item) {
-                $unitPrice = $item->variant->prices->where('currency_code', $currency)->first()?->regular_price
-                    ?? $item->variant->prices->first()?->regular_price
-                    ?? 0;
+                // The price in the order's currency, or converted from the base
+                // row at the pricing rate — never another currency's figure
+                // borrowed as-is (a USD 450 row billed as KES 450).
+                $priced = CurrencyPricing::priceIn($item->variant->prices, $currency);
+                if ($priced === null) {
+                    DB::rollBack();
+                    $productName = $item->variant->product?->translations?->first()?->name ?? ($item->variant->sku ?? 'this product');
+                    return response()->json(['message' => CurrencyPricing::unpriceableReason($productName, $currency)], 422);
+                }
+                $unitPrice = $priced['effective_price'];
 
                 $lines[] = [
                     'product_id'      => $item->variant->product_id,
@@ -616,7 +622,10 @@ class OrderController extends Controller
                     ], 422);
                 }
 
-                $shippingCost = $shippingMethod->calculateCost($goodsTotal);
+                // In the order's currency (ShippingFee), never the KES figure
+                // as-is. A currency it cannot be stated in is a validation
+                // refusal: the catch below rolls back and ServerError rethrows it.
+                $shippingCost = \App\Support\ShippingFee::inCurrency($shippingMethod, $goodsTotal, $currency);
             }
 
             $totalAmount = $taxCalc['total_gross'] + $shippingCost;
@@ -707,8 +716,7 @@ class OrderController extends Controller
                 }
 
                 $lineTax  = $taxCalc['lines'][$index] ?? ['tax_amount' => 0, 'subtotal_gross' => 0];
-                $unitPrice = $item->variant->prices->where('currency_code', $currency)->first()?->regular_price
-                    ?? $item->variant->prices->first()?->regular_price ?? 0;
+                $unitPrice = (float) ($lines[$index]['unit_price'] ?? 0);   // priced above, once
 
                 OrderItem::create([
                     'order_id'           => $order->id,
@@ -1587,6 +1595,14 @@ class OrderController extends Controller
 
         $oldShipping = (float) $order->shipping_amount;
         $newShipping = (float) $validated['amount'];
+        // A chosen method is priced here, in the order's currency (ShippingFee);
+        // the typed figure stands only for a custom fee.
+        if (!empty($validated['shipping_method_id'])) {
+            $chosen = ShippingMethod::find($validated['shipping_method_id']);
+            if ($chosen) {
+                $newShipping = \App\Support\ShippingFee::inCurrency($chosen, max(0.0, (float) $order->total_amount - $oldShipping), (string) $order->currency_code);
+            }
+        }
         $diff        = $newShipping - $oldShipping;
 
         // Anti-fraud guardrail. Raising shipping only ever increases what the
@@ -2071,11 +2087,14 @@ class OrderController extends Controller
         // validated against active currencies - same logic as PosController.
         $countryCurrency  = DB::table('countries')->where('code', $countryCode)->value('default_currency_code');
         $activeCurrencies = DB::table('currencies')->where('is_active', true)->pluck('code')->toArray();
-        if ($countryCurrency && (empty($activeCurrencies) || in_array($countryCurrency, $activeCurrencies))) {
+        if ($countryCurrency && \App\Support\SellableCurrency::isSellable($countryCurrency)) {
             $newCurrency = $countryCurrency;
         } else {
-            // Fall back to the first active currency, then to the order's current currency
-            $newCurrency = $activeCurrencies[0] ?? $order->currency_code;
+            // The orders rule for the rest of the world (USD) when that can be
+            // sold in, else the shop's own currency — never "the first active
+            // row", which could be a currency the books can't convert.
+            $guess       = Order::resolveCurrency($countryCode);
+            $newCurrency = \App\Support\SellableCurrency::isSellable($guess) ? $guess : \App\Support\SellableCurrency::home();
         }
 
         $oldCurrency    = $order->currency_code;

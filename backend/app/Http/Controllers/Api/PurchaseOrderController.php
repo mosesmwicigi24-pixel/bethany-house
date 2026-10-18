@@ -207,13 +207,9 @@ class PurchaseOrderController extends Controller
         $validated = $request->validate([
             'supplier_id'             => 'required|exists:suppliers,id',
             'expected_delivery_date'  => 'required|date|after:today',
-            'currency'                => ['required', 'in:KES,USD,EUR,GBP', function ($attr, $value, $fail) {
-                // Goods bought in a currency the books cannot state in KES
-                // would have no cost, no approval band and no payable figure.
-                if (!in_array(strtoupper((string) $value), \App\Support\ReportingCurrency::convertibleCodes(), true)) {
-                    $fail("There is no reporting rate for {$value}. Ask finance to set one, or raise the purchase order in KES.");
-                }
-            }],
+            // Goods bought in a currency the books cannot state in KES would
+            // have no cost, no approval band and no payable figure.
+            'currency'                => ['required', 'in:KES,USD,EUR,GBP', new \App\Rules\SellableCurrencyRule],
             'shipping_cost'           => 'nullable|numeric|min:0',
             'tax'                     => 'nullable|numeric|min:0',
             'notes'                   => 'nullable|string',

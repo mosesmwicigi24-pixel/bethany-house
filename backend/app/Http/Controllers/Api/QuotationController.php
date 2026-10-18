@@ -274,7 +274,7 @@ class QuotationController extends Controller
     public function reprice(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'to'                 => 'required|string|size:3',
+            'to'                 => ['required', 'string', 'size:3', new \App\Rules\SellableCurrencyRule],
             'from'               => 'required|string|size:3',
             'lines'              => 'required|array|max:200',
             'lines.*.key'        => 'required|string|max:64',
@@ -380,7 +380,7 @@ class QuotationController extends Controller
             'user_id'             => 'nullable|integer|exists:users,id',
             'outlet_id'           => 'nullable|integer|exists:outlets,id',
             'source'              => 'nullable|in:admin,storefront',
-            'currency_code'       => 'nullable|string|size:3',
+            'currency_code'       => ['nullable', 'string', 'size:3', new \App\Rules\SellableCurrencyRule],
             'shipping_amount'     => 'nullable|numeric|min:0',
             'served_by'           => 'nullable|string|max:150',
             'customer_email'      => 'nullable|email|max:255',

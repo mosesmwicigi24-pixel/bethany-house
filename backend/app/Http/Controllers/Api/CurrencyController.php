@@ -73,12 +73,17 @@ class CurrencyController extends Controller
             DB::table('currencies')->update(['is_default' => false, 'is_base' => false]);
         }
 
+        // The row is created without rates: both are proposals (Phase 3C), as
+        // on update — finance signs the pricing rate, the owner the reporting
+        // rate. Until the reporting rate is approved the currency cannot be
+        // sold, quoted or bought in (SellableCurrency). exchange_rate 1.0 on a
+        // non-base row is what CurrencyPricing reads as "unset".
         $id = DB::table('currencies')->insertGetId([
             'code'               => strtoupper($validated['code']),
             'name'               => $validated['name'],
             'symbol'             => $validated['symbol'],
-            'exchange_rate'      => $validated['exchange_rate'],
-            'reporting_rate_to_kes' => $validated['reporting_rate_to_kes'] ?? null,
+            'exchange_rate'      => 1.0,
+            'reporting_rate_to_kes' => !empty($validated['is_default']) ? 1.0 : null,
             'decimal_places'     => $validated['decimal_places'],
             'symbol_position'    => $validated['symbol_position'] ?? 'before',
             'thousand_separator' => $validated['thousand_separator'] ?? ',',
@@ -106,9 +111,16 @@ class CurrencyController extends Controller
             ]);
         } catch (\Exception) {}
 
+        $proposals = empty($validated['is_default'])
+            ? DB::transaction(fn () => $this->proposeRates((int) $id, $validated, $request))
+            : [];
+
         return response()->json([
-            'message'  => 'Currency created successfully.',
-            'currency' => DB::table('currencies')->find($id),
+            'message'   => $proposals === []
+                ? 'Currency created successfully.'
+                : 'Currency created. Its rates take effect when approved; until the reporting rate is approved it cannot be sold in.',
+            'currency'  => DB::table('currencies')->find($id),
+            'proposals' => array_map(fn ($p) => ['id' => $p->id, 'event' => $p->event, 'status' => $p->status], $proposals),
         ], 201);
     }
 
@@ -250,16 +262,21 @@ class CurrencyController extends Controller
             ], 422);
         }
 
-        // Check if currency is referenced in orders
-        try {
-            $inUse = DB::table('orders')->where('currency', $currency->code)->exists();
-            if ($inUse) {
-                return response()->json([
-                    'message' => 'This currency has been used in orders and cannot be deleted.',
-                ], 422);
-            }
-        } catch (\Exception) {
-            // orders table may not exist yet - skip check
+        // Anything priced in it stays readable only while its row exists: a
+        // deleted currency can no longer be stated in shillings. (This read
+        // orders.currency — a column that does not exist — so the guard never
+        // fired.)
+        $uses = collect([
+            'orders'          => DB::table('orders')->whereRaw('UPPER(currency_code) = ?', [strtoupper($currency->code)])->count(),
+            'payments'        => DB::table('payments')->whereRaw('UPPER(currency_code) = ?', [strtoupper($currency->code)])->count(),
+            'quotations'      => DB::table('quotations')->whereRaw('UPPER(currency_code) = ?', [strtoupper($currency->code)])->count(),
+            'purchase orders' => DB::table('purchase_orders')->whereRaw('UPPER(currency_code) = ?', [strtoupper($currency->code)])->count(),
+            'expenses'        => DB::table('expenses')->whereRaw('UPPER(currency_code) = ?', [strtoupper($currency->code)])->count(),
+        ])->filter();
+        if ($uses->isNotEmpty()) {
+            return response()->json([
+                'message' => "{$currency->code} is used by " . $uses->map(fn ($n, $t) => "{$n} {$t}")->join(', ') . ' and cannot be deleted. Deactivate it instead.',
+            ], 422);
         }
 
         DB::table('currencies')->where('id', $id)->delete();

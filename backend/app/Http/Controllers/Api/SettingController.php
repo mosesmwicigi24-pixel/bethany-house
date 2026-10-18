@@ -250,11 +250,18 @@ class SettingController extends Controller
                 ->orderBy('code')
                 ->get(['code', 'name', 'symbol', 'decimal_places', 'exchange_rate', 'is_base']);
 
+            // sellable: the books can state it in shillings (SellableCurrency),
+            // so the till and checkout offer it; the rest are listed for display.
+            $currencies = $currencies->map(function ($c) {
+                $c->sellable = \App\Support\SellableCurrency::isSellable($c->code);
+                return $c;
+            });
+
             return response()->json(['data' => $currencies]);
         } catch (\Exception) {
             return response()->json(['data' => [
-                ['code' => 'KES', 'name' => 'Kenyan Shilling', 'symbol' => 'KES', 'decimal_places' => 2, 'exchange_rate' => 1,      'is_base' => true],
-                ['code' => 'USD', 'name' => 'US Dollar',       'symbol' => '$',   'decimal_places' => 2, 'exchange_rate' => 0.0077, 'is_base' => false],
+                ['code' => 'KES', 'name' => 'Kenyan Shilling', 'symbol' => 'KES', 'decimal_places' => 2, 'exchange_rate' => 1,      'is_base' => true,  'sellable' => true],
+                ['code' => 'USD', 'name' => 'US Dollar',       'symbol' => '$',   'decimal_places' => 2, 'exchange_rate' => 0.0077, 'is_base' => false, 'sellable' => false],
             ]]);
         }
     }

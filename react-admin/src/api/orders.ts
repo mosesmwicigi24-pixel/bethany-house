@@ -8,7 +8,11 @@ export interface OrderShippingMethod {
     description?: string | null;
     delivery_time?: string | null;
     cost_type: "flat_rate" | "free" | "percentage";
+    /** The configured KES figure (a percent for percentage methods). */
     flat_rate: number;
+    /** The fee in the order's currency, priced by the server; null when no pricing rate. */
+    fee?: number | null;
+    fee_currency?: string;
     min_order_amount?: number | null;
     zone_name?: string | null;
 }
@@ -362,8 +366,8 @@ export const ordersApi = {
      * orders.set_shipping_fee — NOT the Setup endpoint /v1/admin/shipping/methods
      * (settings.view), which is what used to hand Setup to every outlet manager.
      */
-    shippingMethods: () =>
-        get<{ data: OrderShippingMethod[] }>("/v1/admin/orders/shipping-methods"),
+    shippingMethods: (currency?: string) =>
+        get<{ data: OrderShippingMethod[] }>("/v1/admin/orders/shipping-methods", currency ? { params: { currency } } : undefined),
 
     /** Manually set or update the shipping fee before payment */
     setShippingFee: (
