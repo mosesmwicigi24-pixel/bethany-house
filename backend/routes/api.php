@@ -298,8 +298,6 @@ Route::prefix('v1')->group(function () {
             Route::get('/orders',                     [OrderController::class, 'customerOrders']);
             Route::get('/orders/{id}',                [OrderController::class, 'customerOrderDetails']);
             Route::post('/orders/{id}/cancel',        [OrderController::class, 'cancelOrder']);
-            Route::get('/orders/{id}/shipment',       [OrderController::class, 'shipmentStatus']);
-            Route::get('/orders/{id}/tracking',       [OrderController::class, 'trackingHistory']);
             Route::post('/orders/{id}/return',        [ReturnController::class, 'request']);
             Route::get('/returns',                    [ReturnController::class, 'customerReturns']);
             Route::get('/returns/{id}',               [ReturnController::class, 'customerReturnDetails']);
@@ -308,7 +306,6 @@ Route::prefix('v1')->group(function () {
             Route::post('/addresses',                 [CustomerController::class, 'storeAddress']);
             Route::put('/addresses/{id}',             [CustomerController::class, 'updateAddress']);
             Route::delete('/addresses/{id}',          [CustomerController::class, 'deleteAddress']);
-            Route::put('/addresses/{id}/set-default', [CustomerController::class, 'setDefaultAddress']);
             Route::get('/wishlist',                   [CustomerController::class, 'wishlist']);
             Route::post('/wishlist/{productId}',      [CustomerController::class, 'addToWishlist']);
             Route::delete('/wishlist/{productId}',    [CustomerController::class, 'removeFromWishlist']);
@@ -764,7 +761,6 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{id}',                      [OrderController::class, 'show']);
                 Route::get('/{id}/audit-log',            [OrderController::class, 'auditLog']);
                 Route::get('/{id}/invoice',              [OrderController::class, 'generateInvoice']);
-                Route::get('/{id}/activity-log',         [OrderController::class, 'activityLog']);
                 Route::get('/{id}/payment-link',         [OrderController::class, 'paymentLink']);
 
                 Route::put('/{id}/status',               [OrderController::class, 'updateStatus'])
@@ -940,7 +936,6 @@ Route::prefix('v1')->group(function () {
                 Route::get('/',         [UserController::class, 'index']);
                 Route::get('/export',   [UserController::class, 'export'])->middleware('step.up');
                 Route::get('/{id}',     [UserController::class, 'show']);
-                Route::get('/{id}/activity',    [AuditLogController::class, 'userActivity']);
                 Route::get('/{id}/permissions', [UserController::class, 'permissions']);
 
                 Route::post('/',                    [UserController::class, 'store'])
@@ -1026,7 +1021,6 @@ Route::prefix('v1')->group(function () {
                 Route::get('sales/{id}',                [PosController::class, 'saleDetail']);
                 Route::get('returns',                   [PosController::class, 'returns']);
                 Route::get('reports/daily',             [PosController::class, 'dailySummary']);
-                Route::get('reports/end-of-day',        [PosController::class, 'endOfDay']);
                 Route::get('reports/user-eod',          [PosController::class, 'getUserEodReport']);
                 Route::post('reports/user-eod',         [PosController::class, 'saveUserEodReport']);
                 // EoD review (list, detail, acknowledge) moved above, outside
@@ -1181,7 +1175,6 @@ Route::prefix('v1')->group(function () {
             Route::middleware('permission:outlets.view,sanctum')->prefix('outlets')->group(function () {
                 Route::get('/',                [OutletController::class, 'index']);
                 Route::get('/{id}',            [OutletController::class, 'show']);
-                Route::get('/{id}/inventory',  [OutletController::class, 'inventory']);
                 Route::get('/{id}/statistics', [OutletController::class, 'statistics']);
                 Route::post('/',               [OutletController::class, 'store'])
                     ->middleware('permission:outlets.create,sanctum');
@@ -2037,8 +2030,6 @@ Route::prefix('v1')->group(function () {
             // the drawer, mirroring /admin/pos (Phase 1B).
             Route::post('/sales',                   [PosController::class, 'createSale'])
                 ->middleware('owner.no_transact');
-            Route::get('/sales/today',              [PosController::class, 'todaySales']);
-            Route::post('/sales/{id}/receipt',      [PosController::class, 'printReceipt']);
             Route::post('/sales/{id}/return',       [PosController::class, 'processReturn'])
                 ->middleware(['permission:pos.returns,sanctum', 'owner.no_transact']);
             Route::post('/cash-register/open',          [PosController::class, 'openRegister'])
@@ -2046,12 +2037,9 @@ Route::prefix('v1')->group(function () {
             Route::post('/cash-register/close',         [PosController::class, 'closeRegister'])
                 ->middleware(['permission:pos.close_register,sanctum', 'owner.no_transact']);
             Route::get('/cash-register/status',         [PosController::class, 'registerStatus']);
-            Route::get('/cash-register/transactions',   [PosController::class, 'cashTransactions']);
-            Route::get('/cash-register/summary',        [PosController::class, 'cashSummary']);
             // deposit / withdrawal / adjustment were removed (4D): they named
             // PosController methods that never existed, so every call was a 500,
             // and nothing in the console called them.
-            Route::get('/cash-register/reconciliation', [PosController::class, 'reconciliation']);
         });
 
         // ═══ TAILOR ROUTES ═══════════════════════════════════════════════════

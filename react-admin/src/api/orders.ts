@@ -315,17 +315,6 @@ export const ordersApi = {
             last_page: number;
         }>(`/v1/admin/orders/${id}/audit-log`, { params: params as any }),
 
-    activityLog: (id: number) =>
-        get<{ data: Array<{
-            id:          number;
-            action:      string;
-            description: string | null;
-            properties:  Record<string, any> | null;
-            ip_address:  string | null;
-            created_at:  string;
-            user:        { id: number; name: string; email: string } | null;
-        }> }>(`/v1/admin/orders/${id}/activity-log`),
-
     /**
      * Void an order - admin-initiated cancellation for pending/processing/confirmed orders.
      * Restocks inventory and voids pending payments.
