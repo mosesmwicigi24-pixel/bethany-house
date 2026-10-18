@@ -25,6 +25,29 @@ use Illuminate\Support\Facades\DB;
  */
 class ReceiptService
 {
+    /**
+     * A payment reversed (PaymentReversal): the receipt issued for it is marked
+     * void, with the reason kept in its snapshot, and the invoice goes back to
+     * issued when the order is no longer fully paid. The receipt row stays —
+     * a printed receipt must be findable as void, never missing.
+     */
+    public static function onPaymentReversed(Order $order, Payment $payment, string $reason, ?int $userId = null): ?SalesDocument
+    {
+        $receipt = SalesDocument::where('type', SalesDocument::RECEIPT)->where('payment_id', $payment->id)->first();
+        if ($receipt && $receipt->status !== 'void') {
+            $snapshot = $receipt->snapshot ?? [];
+            $snapshot['void'] = ['reason' => $reason, 'by' => $userId, 'at' => now()->toIso8601String()];
+            $receipt->update(['status' => 'void', 'snapshot' => $snapshot]);
+        }
+        $invoice = SalesDocument::where('type', SalesDocument::INVOICE)
+            ->where('documentable_type', Order::class)->where('documentable_id', $order->id)->first();
+        if ($invoice && $invoice->status === 'paid' && $order->totalPaid() + 0.01 < (float) $order->total_amount) {
+            $invoice->update(['status' => 'issued']);
+        }
+
+        return $receipt;
+    }
+
     public static function onPaymentSettled(Order $order, Payment $payment, ?int $userId = null): ?SalesDocument
     {
         $invoiceDoc = SalesDocument::where('type', SalesDocument::INVOICE)

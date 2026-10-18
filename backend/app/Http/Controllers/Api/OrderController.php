@@ -1259,6 +1259,71 @@ class OrderController extends Controller
      *  - Dispatches PaymentApprovalRequired or PaymentReceived notification.
      *  - Writes an audit log entry on every payment.
      */
+    /**
+     * POST /orders/{id}/payments/{paymentId}/reverse   (payments.void | payments.request_void)
+     * POST /orders/{id}/payments/reverse               (every settled payment on the order)
+     *
+     * A payment recorded or approved by mistake, undone — see
+     * App\Services\PaymentReversal for everything it reverses and refuses.
+     * The super admin executes it at once (200); anyone else raises the
+     * payment_void request with `reversal` in its payload (202) and finance
+     * signs it. Nothing is deleted: the payment is voided with the reason.
+     */
+    public function reversePayment(Request $request, $id, $paymentId = null)
+    {
+        $validated = $request->validate([
+            'reason'         => 'required|string|min:3|max:1000',
+            'restore_status' => 'sometimes|boolean',
+        ]);
+        $restore = (bool) ($validated['restore_status'] ?? true);
+        $user    = $request->user();
+
+        // Viewer-scoped like every other order door: an order outside the
+        // caller's outlets is a 404 here as it is on the page.
+        $order = Order::findOrFail($id);
+
+        $payments = $paymentId !== null
+            ? collect([\App\Models\Payment::where('order_id', $order->id)->findOrFail($paymentId)])
+            : \App\Models\Payment::where('order_id', $order->id)->orderByDesc('id')->get()->filter(fn ($p) => \App\Services\PaymentReversal::settled($p))->values();
+        if ($payments->isEmpty()) {
+            return response()->json(['message' => 'There is no settled payment on this order to reverse.'], 422);
+        }
+        $blocked = $payments->map(fn ($p) => ($b = \App\Services\PaymentReversal::blocker($p)) ? "{$p->payment_number}: {$b}" : null)->filter()->values();
+        if ($blocked->isNotEmpty()) {
+            return response()->json(['message' => $blocked->first(), 'blocked' => $blocked->all()], 422);
+        }
+
+        if ($user->hasRole('super_admin', 'sanctum')) {
+            $results = $paymentId !== null
+                ? [\App\Services\PaymentReversal::reverse($payments->first(), $validated['reason'], $user, $restore)]
+                : \App\Services\PaymentReversal::reverseAll($order, $validated['reason'], $user, $restore);
+            $order->refresh();
+
+            return response()->json([
+                'message'        => count($results) === 1 ? 'Payment reversed. The order reads unpaid; the voided payment and the reason stay on record.'
+                                                           : count($results) . ' payments reversed. The order reads unpaid; the voided payments and the reason stay on record.',
+                'reversals'      => $results,
+                'payment_status' => $order->payment_status,
+                'status'         => $order->status,
+                'total_paid'     => $order->totalPaid(),
+                'outstanding'    => $order->outstandingBalance(),
+            ]);
+        }
+
+        // Everyone else asks; finance (or the super admin above the band) executes on signing.
+        $engine    = app(\App\Services\Approvals\ApprovalEngine::class);
+        $approvals = $payments->map(fn ($p) => $engine->present(
+            $engine->submit('payment_void', $p, $user, ['reason' => $validated['reason'], 'reversal' => true, 'restore_status' => $restore])
+                ->load(['signatures', 'maker']),
+            $user,
+        ))->values()->all();
+
+        return response()->json([
+            'message'   => 'Reversal requested. It takes effect when finance approves it; the order reads paid until then.',
+            'approvals' => $approvals,
+        ], 202);
+    }
+
     public function addPayment(Request $request, $id)
     {
         // Normalise aliases — frontend sends DB code ('paystack', 'flutterwave')

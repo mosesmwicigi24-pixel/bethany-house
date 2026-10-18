@@ -68,7 +68,7 @@ class PaymentVoidHandler extends ApprovalHandler
         $orderNumber = $p->order_id ? Order::withoutViewerScope()->whereKey($p->order_id)->value('order_number') : null;
 
         return [
-            'title'     => "Void payment {$p->payment_number}",
+            'title'     => (!empty($payload['reversal']) ? 'Reverse mistaken payment ' : 'Void payment ') . $p->payment_number,
             'reference' => $p->payment_number,
             'link'      => '/finance/transactions',
             'lines'     => array_values(array_filter([
@@ -81,7 +81,16 @@ class PaymentVoidHandler extends ApprovalHandler
 
     public function onApproved(ApprovalRequest $request, Model $p, User $finalSigner): void
     {
-        PaymentCorrections::void($p, (string) ($request->payload['reason'] ?? ''), $finalSigner, $request->id);
+        $reason = (string) ($request->payload['reason'] ?? '');
+        // A reversal request (a payment recorded by mistake, raised from the
+        // order page) undoes everything "paid" did — stock, receipt, the
+        // automatic status advance — not only the payment row.
+        if (!empty($request->payload['reversal'])) {
+            \App\Services\PaymentReversal::reverse($p, $reason, $finalSigner, (bool) ($request->payload['restore_status'] ?? true), $request->id);
+
+            return;
+        }
+        PaymentCorrections::void($p, $reason, $finalSigner, $request->id);
     }
 
     public function onRejected(ApprovalRequest $request, Model $p, User $signer, string $reason): void
