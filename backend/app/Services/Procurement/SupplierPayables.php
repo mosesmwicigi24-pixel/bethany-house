@@ -95,12 +95,25 @@ class SupplierPayables
             // Approved/paid expenses linked to this order. Freight or clearing
             // belongs there; paying the supplier for the goods does not — that
             // would be counted twice (in the P&L and here).
-            'linked_expenses' => (array) DB::table('expenses')
-                ->where('purchase_order_id', $po->id)->whereNull('deleted_at')
-                ->whereIn('status', \App\Services\Reporting\MetricEngine::EXPENSE_SPEND_STATUSES)
-                ->selectRaw('COUNT(*) AS count, ROUND(COALESCE(SUM(amount_kes), 0)::numeric, 2)::float8 AS amount_kes')
-                ->first(),
+            'linked_expenses' => self::linkedExpenses($po),
         ];
+    }
+
+    /**
+     * Approved/paid expenses linked to the order — count and KES total, as
+     * numbers whatever the database driver hands back.
+     *
+     * @return array{count: int, amount_kes: float}
+     */
+    public static function linkedExpenses(PurchaseOrder $po): array
+    {
+        $row = DB::table('expenses')
+            ->where('purchase_order_id', $po->id)->whereNull('deleted_at')
+            ->whereIn('status', \App\Services\Reporting\MetricEngine::EXPENSE_SPEND_STATUSES)
+            ->selectRaw('COUNT(*) AS count, COALESCE(SUM(amount_kes), 0) AS amount_kes')
+            ->first();
+
+        return ['count' => (int) $row->count, 'amount_kes' => round((float) $row->amount_kes, 2)];
     }
 
     /** Write the derived status onto the PO when it differs. */
