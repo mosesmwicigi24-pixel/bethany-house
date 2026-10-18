@@ -15,6 +15,8 @@ class Payment extends Model
         'payment_method',
         'amount',
         'currency_code',
+        'reporting_rate_to_kes',
+        'reporting_rate_source',
         'status',
         'provider',
         'provider_transaction_id',
@@ -73,6 +75,8 @@ class Payment extends Model
             if (!array_key_exists('recorded_by', $payment->getAttributes())) {
                 $payment->recorded_by = \Illuminate\Support\Facades\Auth::id();
             }
+            // The reporting rate in force today travels with the payment (Step 3).
+            \App\Support\ReportingRateStamp::apply($payment);
         });
     }
 

@@ -447,7 +447,7 @@ HTML;
               AND (o.status IN ('confirmed','processing','shipped','delivered','completed')
                    OR o.payment_status IN ('paid','partial','deposit'))
               AND " . (strtoupper($currency) === 'KES'
-                  ? "(SELECT rc.reporting_rate_to_kes FROM currencies rc WHERE UPPER(rc.code) = UPPER(o.currency_code)) IS NOT NULL"
+                  ? \App\Support\ReportingCurrency::convertibleFilter('o.currency_code')
                   : 'UPPER(o.currency_code) = ' . DB::getPdo()->quote($currency)) . "
         ", [$start, $end]);
         $cogs          = (float) ($cogsRow->cogs ?? 0);

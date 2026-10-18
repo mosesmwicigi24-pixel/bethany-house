@@ -157,6 +157,14 @@ class Order extends Model
                 $order->public_token           = bin2hex(random_bytes(24));
                 $order->public_token_issued_at = now();
             }
+            // The reporting rate in force today travels with the order (Step 3).
+            \App\Support\ReportingRateStamp::apply($order);
+        });
+        // A currency change is a new basis: the stamp follows the new currency.
+        static::updating(function (self $order) {
+            if ($order->isDirty('currency_code')) {
+                \App\Support\ReportingRateStamp::apply($order, true);
+            }
         });
 
         // An order born from a quotation carries an issued INVOICE copy. Any
@@ -209,6 +217,8 @@ class Order extends Model
         'source_channel',
         'status',
         'currency_code',
+        'reporting_rate_to_kes',
+        'reporting_rate_source',
         'subtotal',
         'discount_amount',
         'tax_amount',
