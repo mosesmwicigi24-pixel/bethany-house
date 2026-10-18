@@ -2795,6 +2795,37 @@ class ProductionController extends Controller
     // Add an assignee to a production order
     // =========================================================================
 
+    /**
+     * POST /production-orders/{id}/regenerate-tasks — seed the stage tasks an
+     * order on the floor is missing (it was confirmed before stages were set
+     * up). Delegates to ProductionOrder::seedTasks, the only task seeder, so it
+     * is idempotent: existing tasks are kept, only missing stages are added.
+     */
+    public function regenerateTasks(Request $request, $id)
+    {
+        $order = ProductionOrder::visibleTo($request->user())->findOrFail($id);
+
+        if (!$order->acceptsFloorWork()) {
+            return response()->json([
+                'message' => 'Tasks are added to orders on the floor (pending, in progress or on hold). This order is ' . str_replace('_', ' ', $order->status) . '.',
+            ], 422);
+        }
+
+        $before = $order->tasks()->withoutGlobalScopes()->count();
+        DB::transaction(fn () => $order->seedTasks());
+        $added = $order->tasks()->withoutGlobalScopes()->count() - $before;
+
+        if ($added > 0) {
+            ActivityLogService::log('production_tasks_seeded', $order, ['added' => $added],
+                "Added {$added} production task(s) to {$order->order_number}");
+        }
+
+        return response()->json([
+            'message' => $added > 0 ? "Added {$added} task(s) from the active stages." : 'Every active stage already has a task on this order.',
+            'added'   => $added,
+        ]);
+    }
+
     public function addAssignee(Request $request, $id)
     {
         $validated = $request->validate([

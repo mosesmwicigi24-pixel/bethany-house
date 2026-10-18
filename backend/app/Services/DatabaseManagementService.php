@@ -170,13 +170,14 @@ class DatabaseManagementService
             ],
         ],
         'purchase_orders' => [
-            'label'       => 'Purchase Orders (and items, GRNs, returns)',
+            'label'       => 'Purchase Orders (and items, GRNs, returns, supplier payments)',
             'date_column' => 'created_at',
             'group'       => 'business',
             'children'    => [
                 'purchase_order_items' => 'purchase_order_id',
                 'goods_received_notes' => 'purchase_order_id',
                 'purchase_returns'     => 'purchase_order_id',
+                'supplier_payments'    => 'purchase_order_id',
             ],
         ],
         'production_orders' => [

@@ -73,12 +73,16 @@ class IntelligenceService
         if (!$preferredSupplierId) return null;
 
         // Get last unit cost
-        $lastUnitCost = DB::table('purchase_order_items')
+        // The draft is in KES: the last price is stated in KES at the
+        // reporting rate, from the last PO whose currency has one.
+        $lastUnitCost = (float) (DB::table('purchase_order_items')
             ->join('purchase_orders', 'purchase_orders.id', '=', 'purchase_order_items.purchase_order_id')
             ->where('purchase_order_items.product_id', $item->product_id)
             ->where('purchase_orders.supplier_id', $preferredSupplierId)
+            ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('purchase_orders.currency_code'))
             ->orderByDesc('purchase_orders.created_at')
-            ->value('purchase_order_items.unit_price') ?? 0;
+            ->selectRaw('ROUND(' . \App\Support\ReportingCurrency::kes('purchase_order_items.unit_price', 'purchase_orders.currency_code') . '::numeric, 2) AS kes')
+            ->first()?->kes ?? 0);
 
         $totalAmount = $lastUnitCost * $reorderQty;
         $poNumber    = 'AUTO-' . strtoupper(Str::random(6));

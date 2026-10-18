@@ -33,7 +33,9 @@ export interface Supplier {
 export interface SupplierStats {
     total_orders: number;
     pending_orders: number;
+    /** KES at the reporting rate; orders in a currency with no rate are left out. */
     total_value: number;
+    unconverted_orders?: number;
     last_order_date: string | null;
 }
 
@@ -298,6 +300,12 @@ export interface POItemCosts {
 }
 
 export const purchaseOrderApi = {
+    /** Currencies a PO may be raised in: only those with a reporting rate are allowed. */
+    currencies: () =>
+        get<{ data: Array<{ code: string; rate_to_kes: number | null; allowed: boolean }> }>(
+            "/v1/admin/purchase-orders/currencies",
+        ),
+
     itemCosts: (productId: number, currency: string) =>
         get<POItemCosts>(`/v1/admin/purchase-orders/item-costs/${productId}`, { params: { currency } }),
 
@@ -506,4 +514,69 @@ export const purchaseReturnApi = {
 
     get: (id: number) =>
         get<PurchaseReturn>(`/v1/admin/purchase-returns/${id}`),
+};
+// ── Supplier payments (the payables ledger) ──────────────────────────────────
+
+export interface SupplierPayment {
+    id: number;
+    payment_number: string;
+    purchase_order_id: number;
+    amount: string;
+    currency_code: string;
+    rate_to_kes: string | null;
+    amount_kes: string | null;
+    method: string;
+    reference: string | null;
+    paid_at: string;
+    notes: string | null;
+    voided_at: string | null;
+    void_reason: string | null;
+    recorded_by: number;
+    recorder?: { id: number; first_name?: string; last_name?: string } | null;
+    voider?: { id: number; first_name?: string; last_name?: string } | null;
+}
+
+export interface PayableSummary {
+    currency: string;
+    /** Goods sent back on approved returns, at the order's prices. */
+    returned: number;
+    payable: number;
+    payable_source: "supplier_invoice" | "po_total";
+    paid: number;
+    paid_kes: number;
+    balance: number;
+    balance_kes: number | null;
+    balance_kes_basis: string | null;
+    status: "unpaid" | "partially_paid" | "paid" | "overpaid";
+    /** Approved/paid expenses linked to this order (they are in the P&L). */
+    linked_expenses: { count: number; amount_kes: number };
+}
+
+export interface SupplierPayableRow {
+    supplier_id: number;
+    supplier: string;
+    currency: string;
+    orders: number;
+    payable: number;
+    paid: number;
+    balance: number;
+    balance_kes: number | null;
+}
+
+export const supplierPaymentApi = {
+    list: (poId: number) =>
+        get<{ summary: PayableSummary; payments: SupplierPayment[] }>(`/v1/admin/purchase-orders/${poId}/payments`),
+
+    record: (poId: number, data: {
+        amount: number; method: string; reference?: string; paid_at?: string; notes?: string; client_request_id: string;
+    }) =>
+        post<{ message: string; payment: SupplierPayment; summary: PayableSummary }>(`/v1/admin/purchase-orders/${poId}/payments`, data),
+
+    void: (poId: number, paymentId: number, reason: string) =>
+        post<{ message: string; summary: PayableSummary }>(`/v1/admin/purchase-orders/${poId}/payments/${paymentId}/void`, { reason }),
+
+    payables: () =>
+        get<{ data: SupplierPayableRow[]; total_owed_kes: number; unconverted: string[]; basis: string }>(
+            "/v1/admin/purchase-orders/payables",
+        ),
 };

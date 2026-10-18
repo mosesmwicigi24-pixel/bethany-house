@@ -4,6 +4,7 @@ import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { purchaseOrderApi, supplierApi } from "@/api/procurement";
 import type { PurchaseOrder, POStatus, POItemCosts } from "@/api/procurement";
 import { VariantGridPanel, type VariantPick } from "./VariantGridPanel";
+import { OwedToSuppliersChip } from "./SupplierPayments";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Modal } from "@/components/ui/Modal";
@@ -116,6 +117,17 @@ function POFormModal({ onClose }: { onClose: () => void }) {
         queryFn: () => supplierApi.list({ per_page: 100, status: "active" }),
     });
     const suppliers = suppliersData?.data ?? [];
+
+    // A currency with no reporting rate can't be costed or banded in KES.
+    const { data: currencyData } = useQuery({
+        queryKey: ["po-currencies"],
+        queryFn: () => purchaseOrderApi.currencies(),
+        staleTime: 5 * 60_000,
+    });
+    const currencyAllowed = (code: string) =>
+        currencyData ? currencyData.data.some((c) => c.code === code && c.allowed) : true;
+    const currencyLabel = (code: string, name: string) =>
+        `${code} - ${name}${currencyAllowed(code) ? "" : " (no reporting rate)"}`;
 
     const searchItems = async (q: string) => {
         if (q.length < 2) return setSearchResults([]);
@@ -386,10 +398,11 @@ function POFormModal({ onClose }: { onClose: () => void }) {
                             value={currency}
                             onChange={(e) => changeCurrency(e.target.value)}
                         >
-                            <option value="KES">KES - Kenyan Shilling</option>
-                            <option value="USD">USD - US Dollar</option>
-                            <option value="EUR">EUR - Euro</option>
-                            <option value="GBP">GBP - British Pound</option>
+                            {([["KES", "Kenyan Shilling"], ["USD", "US Dollar"], ["EUR", "Euro"], ["GBP", "British Pound"]] as const).map(([code, name]) => (
+                                <option key={code} value={code} disabled={!currencyAllowed(code)}>
+                                    {currencyLabel(code, name)}
+                                </option>
+                            ))}
                         </FieldSelect>
                     </Field>
                     <Field label="Payment Terms">
@@ -1124,7 +1137,7 @@ function PODetailModal({
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function PurchaseOrdersPage() {
-    const { can } = usePermissions();
+    const { can, canAny } = usePermissions();
     const canCreate = can("procurement.create");
     const canApprove = can("procurement.approve");
     const [page, setPage] = useState(1);
@@ -1188,6 +1201,8 @@ export default function PurchaseOrdersPage() {
                         Create and track orders from suppliers
                     </p>
                 </div>
+                <div className="flex flex-wrap items-center gap-2">
+                {canAny("procurement.pay", "reports.financial") && <OwedToSuppliersChip />}
                 {canCreate && (
                 <button
                     className="btn-primary btn-sm whitespace-nowrap"
@@ -1196,6 +1211,7 @@ export default function PurchaseOrdersPage() {
                     <PlusIcon /> New Purchase Order
                 </button>
                 )}
+                </div>
             </div>
 
             {/* Summary stats */}

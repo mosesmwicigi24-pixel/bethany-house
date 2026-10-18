@@ -164,6 +164,91 @@ class PurchaseReceiptCostCurrencyTest extends TestCase
         $this->assertSame('900.00', (string) $m->fresh()->unit_cost);
     }
 
+    public function test_a_purchase_order_is_raised_only_in_a_currency_with_a_reporting_rate(): void
+    {
+        Sanctum::actingAs($this->person('procurement_manager'));
+        $m = $this->material(900);
+        $make = fn (string $currency) => $this->postJson('/api/v1/admin/purchase-orders', [
+            'supplier_id' => $this->supplierId, 'expected_delivery_date' => now()->addWeek()->toDateString(),
+            'currency' => $currency,
+            'items' => [['type' => 'material', 'item_id' => $m->id, 'quantity' => 2, 'unit_price' => 10]],
+        ]);
+
+        $make('EUR')->assertStatus(422)->assertJsonValidationErrors('currency');
+        $this->assertStringContainsString('no reporting rate for EUR', $make('EUR')->json('errors.currency.0'));
+        $this->assertSame(0, PurchaseOrder::where('currency_code', 'EUR')->count());
+        $make('USD')->assertSuccessful();
+        $make('KES')->assertSuccessful();
+
+        $list = collect($this->getJson('/api/v1/admin/purchase-orders/currencies')->assertOk()->json('data'))->keyBy('code');
+        $this->assertTrue($list['KES']['allowed']);
+        $this->assertTrue($list['USD']['allowed']);
+        $this->assertEquals(128, $list['USD']['rate_to_kes']);
+        $this->assertFalse($list['EUR']['allowed']);
+        $this->assertFalse($list['GBP']['allowed']);
+    }
+
+    private function runRepair(): void
+    {
+        ob_start();
+        (require base_path('database/migrations/2026_10_18_090000_repair_unconverted_foreign_receipt_costs.php'))->up();
+        ob_end_clean();
+    }
+
+    public function test_the_repair_restates_only_costs_receiving_left_unconverted(): void
+    {
+        // Received before #464: cost left at the USD figure, as shillings.
+        $broken = $this->material(900);
+        $this->receive($this->line('USD', 'material', $broken->id, 5, 10.00), 5);
+        Material::whereKey($broken->id)->update(['unit_cost' => 10.00]);
+
+        // Same, but someone has since set a real cost: not touched.
+        $edited = $this->material(900);
+        $this->receive($this->line('USD', 'material', $edited->id, 5, 10.00), 5);
+        Material::whereKey($edited->id)->update(['unit_cost' => 1250.00]);
+
+        // Latest receipt was in KES, at a price equal to an older USD figure: not touched.
+        $kesLast = $this->material(900);
+        $this->receive($this->line('USD', 'material', $kesLast->id, 1, 12.00), 1);
+        $this->travel(1)->days();
+        $this->receive($this->line('KES', 'material', $kesLast->id, 1, 12.00), 1);
+        $this->assertSame('12.00', (string) $kesLast->fresh()->unit_cost);
+
+        // No reporting rate for EUR: never guessed.
+        $euro = $this->material(900);
+        $this->receive($this->line('EUR', 'material', $euro->id, 2, 12.00), 2);
+        Material::whereKey($euro->id)->update(['unit_cost' => 12.00]);
+
+        // A product on the legacy table: USD 7.25 stored as 7.25.
+        $p = Product::factory()->create();
+        DB::table('inventories')->insert([
+            'inventory_type' => 'product', 'product_id' => $p->id, 'outlet_id' => $this->shop->id,
+            'quantity_on_hand' => 0, 'cost_per_unit' => 500, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $this->receive($this->line('USD', 'product', $p->id, 4, 7.25), 4);
+        DB::table('inventories')->where('product_id', $p->id)->update(['cost_per_unit' => 7.25]);
+
+        $this->runRepair();
+
+        $this->assertSame('1280.00', (string) $broken->fresh()->unit_cost, '10.00 × 128');
+        $this->assertSame('1250.00', (string) $edited->fresh()->unit_cost);
+        $this->assertSame('12.00', (string) $kesLast->fresh()->unit_cost);
+        $this->assertSame('12.00', (string) $euro->fresh()->unit_cost);
+        $this->assertSame(928.0, (float) DB::table('inventories')->where('product_id', $p->id)->value('cost_per_unit'), '7.25 × 128');
+
+        $logs = DB::table('activity_log')->where('action', 'stock_cost_restated_fx')->get();
+        $this->assertCount(2, $logs);
+        $props = json_decode($logs->firstWhere('subject_id', $broken->id)->properties, true);
+        $this->assertEquals(10.0, $props['old_cost']);
+        $this->assertEquals(1280.0, $props['new_cost']);
+        $this->assertSame('USD', $props['po_currency']);
+
+        // Running again changes nothing and logs nothing.
+        $this->runRepair();
+        $this->assertSame('1280.00', (string) $broken->fresh()->unit_cost);
+        $this->assertSame(2, DB::table('activity_log')->where('action', 'stock_cost_restated_fx')->count());
+    }
+
     public function test_the_owners_correction_of_a_received_usd_line_uses_the_same_conversion(): void
     {
         $m    = $this->material(900);

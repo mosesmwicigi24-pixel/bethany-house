@@ -77,6 +77,8 @@ class PurchaseOrderController extends Controller
     {
         $startDate = $request->get('start_date', now()->startOfMonth()->toDateString());
         $endDate   = $request->get('end_date',   now()->endOfMonth()->toDateString());
+        $kes       = \App\Support\ReportingCurrency::kes('total_amount', 'currency_code');
+        $canKes    = \App\Support\ReportingCurrency::convertibleFilter('currency_code');
 
         return response()->json([
             'total_orders'    => PurchaseOrder::whereBetween('order_date', [$startDate, $endDate])->count(),
@@ -87,12 +89,29 @@ class PurchaseOrderController extends Controller
             'partially_received' => PurchaseOrder::where('status', 'partially_received')->count(),
             'received'        => PurchaseOrder::where('status', 'received')->count(),
             'cancelled'       => PurchaseOrder::where('status', 'cancelled')->count(),
-            'total_value'     => PurchaseOrder::whereBetween('order_date', [$startDate, $endDate])
+            // In KES at the reporting rate; currencies with no rate are left out.
+            'total_value'     => round((float) PurchaseOrder::whereBetween('order_date', [$startDate, $endDate])
                                     ->whereNotIn('status', ['cancelled'])
-                                    ->sum('total_amount'),
-            'outstanding_value' => PurchaseOrder::whereIn('status', ['approved', 'ordered', 'partially_received'])
-                                    ->sum('total_amount'),
+                                    ->whereRaw($canKes)->sum(DB::raw($kes)), 2),
+            'outstanding_value' => round((float) PurchaseOrder::whereIn('status', ['approved', 'ordered', 'partially_received'])
+                                    ->whereRaw($canKes)->sum(DB::raw($kes)), 2),
         ]);
+    }
+
+    // =========================================================================
+    // GET /api/v1/admin/purchase-orders/currencies
+    // =========================================================================
+
+    /** The currencies a purchase order may be raised in: those with a reporting rate. */
+    public function currencies()
+    {
+        $rates = \App\Support\ReportingCurrency::rates();
+
+        return response()->json(['data' => collect(['KES', 'USD', 'EUR', 'GBP'])->map(fn ($c) => [
+            'code'        => $c,
+            'rate_to_kes' => $rates[$c] ?? null,
+            'allowed'     => isset($rates[$c]),
+        ])->values()]);
     }
 
     // =========================================================================
@@ -188,7 +207,13 @@ class PurchaseOrderController extends Controller
         $validated = $request->validate([
             'supplier_id'             => 'required|exists:suppliers,id',
             'expected_delivery_date'  => 'required|date|after:today',
-            'currency'                => 'required|in:KES,USD,EUR,GBP',
+            'currency'                => ['required', 'in:KES,USD,EUR,GBP', function ($attr, $value, $fail) {
+                // Goods bought in a currency the books cannot state in KES
+                // would have no cost, no approval band and no payable figure.
+                if (!in_array(strtoupper((string) $value), \App\Support\ReportingCurrency::convertibleCodes(), true)) {
+                    $fail("There is no reporting rate for {$value}. Ask finance to set one, or raise the purchase order in KES.");
+                }
+            }],
             'shipping_cost'           => 'nullable|numeric|min:0',
             'tax'                     => 'nullable|numeric|min:0',
             'notes'                   => 'nullable|string',
@@ -389,6 +414,10 @@ class PurchaseOrderController extends Controller
 
         $ids = array_map('intval', $validated['material_ids']);
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        // The drafts are in KES, so the last price paid is stated in KES at
+        // the reporting rate; a PO in a currency with no rate is skipped.
+        $priceKes = \App\Support\ReportingCurrency::kes('poi.unit_price', 'po2.currency_code');
+        $canKes   = \App\Support\ReportingCurrency::convertibleFilter('po2.currency_code');
 
         $rows = DB::select("
             SELECT m.id, m.name, m.unit_of_measure, m.unit_cost, m.reorder_point,
@@ -420,10 +449,10 @@ class PurchaseOrderController extends Controller
             ) b ON b.material_id = m.id
             LEFT JOIN (
                 SELECT DISTINCT ON (poi.material_id)
-                       poi.material_id, poi.unit_price, po2.supplier_id, po2.order_date
+                       poi.material_id, {$priceKes} AS unit_price, po2.supplier_id, po2.order_date
                 FROM purchase_order_items poi
                 JOIN purchase_orders po2 ON po2.id = poi.purchase_order_id AND po2.status <> 'cancelled'
-                WHERE poi.material_id IS NOT NULL
+                WHERE poi.material_id IS NOT NULL AND {$canKes}
                 ORDER BY poi.material_id, po2.order_date DESC
             ) lb ON lb.material_id = m.id
             WHERE m.id IN ({$placeholders}) AND m.is_active = TRUE
@@ -646,6 +675,10 @@ class PurchaseOrderController extends Controller
         $purchaseOrder = PurchaseOrder::findOrFail($id);
         $oldStatus     = $purchaseOrder->status;
         $engine        = app(\App\Services\Approvals\ApprovalEngine::class);
+
+        if ($validated['status'] === 'cancelled') {
+            \App\Services\Procurement\SupplierPayables::assertCancellable($purchaseOrder);
+        }
 
         $updateData = ['status' => $validated['status']];
 
@@ -1158,6 +1191,8 @@ class PurchaseOrderController extends Controller
             return response()->json(['message' => 'Purchase order is already cancelled.'], 422);
         }
 
+        \App\Services\Procurement\SupplierPayables::assertCancellable($purchaseOrder);
+
         $purchaseOrder->update([
             'status' => 'cancelled',
             'notes'  => "CANCELLED: {$validated['reason']}\n\n" . ($purchaseOrder->notes ?? ''),
@@ -1215,6 +1250,9 @@ class PurchaseOrderController extends Controller
         if ($moved === 0) {
             return response()->json(['message' => 'This return was already decided by someone else.'], 409);
         }
+
+        // Goods sent back lower what is owed on the order (SupplierPayables).
+        \App\Services\Procurement\SupplierPayables::sync(PurchaseOrder::findOrFail($return->purchase_order_id));
 
         return response()->json([
             'message' => "Purchase return {$return->return_number} approved.",

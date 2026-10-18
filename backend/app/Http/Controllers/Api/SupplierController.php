@@ -85,9 +85,16 @@ class SupplierController extends Controller
             'pending_orders' => PurchaseOrder::where('supplier_id', $supplier->id)
                 ->whereIn('status', ['draft', 'pending_approval', 'approved', 'ordered'])
                 ->count(),
-            'total_value' => PurchaseOrder::where('supplier_id', $supplier->id)
+            // In KES at the reporting rate (the screen labels it KES); a PO in a
+            // currency with no rate is counted apart, never added at face value.
+            'total_value' => round((float) PurchaseOrder::where('supplier_id', $supplier->id)
                 ->where('status', '!=', 'cancelled')
-                ->sum('total_amount'),                      // ← was 'total'
+                ->whereRaw(\App\Support\ReportingCurrency::convertibleFilter('currency_code'))
+                ->sum(DB::raw(\App\Support\ReportingCurrency::kes('total_amount', 'currency_code'))), 2),
+            'unconverted_orders' => PurchaseOrder::where('supplier_id', $supplier->id)
+                ->where('status', '!=', 'cancelled')
+                ->whereRaw('NOT ' . \App\Support\ReportingCurrency::convertibleFilter('currency_code'))
+                ->count(),
             'last_order_date' => PurchaseOrder::where('supplier_id', $supplier->id)
                 ->latest()
                 ->value('created_at'),                     // ← was ->first()?->created_at
