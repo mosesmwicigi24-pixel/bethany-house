@@ -40,8 +40,19 @@ class TillDiscrepancy extends Model
         return $this->belongsTo(CashRegister::class);
     }
 
-    public static function statusFor(float $variance): string
+    /**
+     * The band is KES 100, whatever currency the drawer row is in: a foreign
+     * variance is converted at the REPORTING rate (ReportingCurrency). A
+     * currency with no rate cannot be banded, so it is held for approval —
+     * never guessed through.
+     */
+    public static function statusFor(float $variance, string $currency = 'KES'): string
     {
-        return abs($variance) > self::LOGGED_LIMIT ? self::STATUS_AWAITING_APPROVAL : self::STATUS_LOGGED;
+        $kes = \App\Support\ReportingCurrency::toKes(abs($variance), $currency);
+        if ($kes === null) {
+            return self::STATUS_AWAITING_APPROVAL;
+        }
+
+        return $kes > self::LOGGED_LIMIT ? self::STATUS_AWAITING_APPROVAL : self::STATUS_LOGGED;
     }
 }

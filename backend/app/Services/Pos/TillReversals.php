@@ -4,7 +4,6 @@ namespace App\Services\Pos;
 
 use App\Models\ApprovalRequest;
 use App\Models\CashRegister;
-use App\Models\CashRegisterTransaction;
 use App\Models\InventoryItem;
 use App\Models\Order;
 use App\Models\OrderReturn;
@@ -14,6 +13,7 @@ use App\Services\ActivityLogService;
 use App\Services\Approvals\ApprovalEngine;
 use App\Services\PosInventoryService;
 use App\Services\ProductSerialService;
+use App\Services\Tills\TillDrawer;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\DB;
 
@@ -36,15 +36,22 @@ use Illuminate\Support\Facades\DB;
  *           never edited — stock back on the shelf, and a cash refund paid out
  *           of a drawer that can cover it, or refused.
  *
- * The drawer logic (which drawer a reversal hits, the cash ledger row) moved
- * here unchanged from PosController::voidSale / processReturn.
+ * The drawer logic (which drawer a reversal hits) moved here unchanged from
+ * PosController::voidSale / processReturn; the drawer itself is written by
+ * TillDrawer, in the SALE's currency (currency plan Step 2).
  */
 class TillReversals
 {
     public const VOID   = 'pos_void';
     public const REFUND = 'pos_refund';
 
-    public function __construct(private ApprovalEngine $engine) {}
+    public function __construct(private ApprovalEngine $engine, private TillDrawer $drawers) {}
+
+    /** The currency a sale was rung in — the currency its cash moves in. */
+    private function currencyOf(Order $order): string
+    {
+        return strtoupper((string) ($order->currency_code ?: 'KES'));
+    }
 
     // ── the sale's till ──────────────────────────────────────────────────────
 
@@ -122,10 +129,13 @@ class TillReversals
 
         [$lines, $refundTotal] = $this->priceRefund($order, $input['items'], null);
 
+        // A cash refund is paid in the SALE's currency, out of that currency's
+        // drawer (Step 2): a USD refund needs dollars in the till, and the
+        // shillings beside them do not count.
         if ($input['refund_method'] === 'cash' && $refundTotal > 0) {
             $drawer = $this->drawerFor($order, $maker, false);
-            if ($drawer && $refundTotal > (float) $drawer->expected_cash) {
-                $this->fail(422, 'INSUFFICIENT_CASH', 'Insufficient cash in the register to make this refund.');
+            if ($drawer && !$this->drawers->canPayOut($drawer, $this->currencyOf($order), $refundTotal)) {
+                $this->fail(422, 'INSUFFICIENT_CASH', 'Insufficient ' . $this->currencyOf($order) . ' cash in the register to make this refund.');
             }
         }
 
@@ -277,24 +287,15 @@ class TillReversals
         PosInventoryService::unwindForOrder($order, $requester->id);
         ProductSerialService::releaseForOrder($order);
 
-        // Reverse the drawer that took the sale (D8) by what it collected.
+        // Reverse the drawer that took the sale (D8) by what it collected, in
+        // the sale's currency (Step 2): the till's row for that currency and,
+        // when it is the till's own, the register's columns with it.
         if ($vTotal > 0) {
             $register = $this->drawerFor($order, $requester, true);
             if ($register) {
-                DB::table('cash_registers')->where('id', $register->id)->update([
-                    'total_sales'       => DB::raw('GREATEST(0, total_sales - ' . $vTotal . ')'),
-                    'total_cash_sales'  => DB::raw('GREATEST(0, total_cash_sales - ' . $vCash . ')'),
-                    'total_card_sales'  => DB::raw('GREATEST(0, total_card_sales - ' . $vCard . ')'),
-                    'total_mpesa_sales' => DB::raw('GREATEST(0, total_mpesa_sales - ' . $vMpesa . ')'),
-                    'transaction_count' => DB::raw('GREATEST(0, transaction_count - 1)'),
-                    'expected_cash'     => DB::raw('GREATEST(0, expected_cash - ' . $vCash . ')'),
-                    'updated_at'        => now(),
-                ]);
-
-                if ($vCash > 0) {
-                    $this->ledger($register, 'void', $vCash, max(0, (float) $register->expected_cash - $vCash),
-                        $order->id, $requester->id, "POS void (approval #{$approval->id})");
-                }
+                $this->drawers->giveBack($register, $this->currencyOf($order), 'void',
+                    ['cash' => $vCash, 'card' => $vCard, 'mpesa' => $vMpesa],
+                    $order->id, $requester->id, "POS void (approval #{$approval->id})");
             }
         }
 
@@ -374,15 +375,11 @@ class TillReversals
         if ($refund->refund_method === 'cash' && $amount > 0) {
             $register = $this->drawerFor($order, $requester, true);
             if ($register) {
-                if ($amount > (float) $register->expected_cash) {
-                    $this->fail(422, 'INSUFFICIENT_CASH', 'Insufficient cash in the register to make this refund.');
+                $currency = $this->currencyOf($order);
+                if (!$this->drawers->canPayOut($register, $currency, $amount)) {
+                    $this->fail(422, 'INSUFFICIENT_CASH', "Insufficient {$currency} cash in the register to make this refund.");
                 }
-                DB::table('cash_registers')->where('id', $register->id)->update([
-                    'total_refunds' => DB::raw('total_refunds + ' . $amount),
-                    'expected_cash' => DB::raw('GREATEST(0, expected_cash - ' . $amount . ')'),
-                    'updated_at'    => now(),
-                ]);
-                $this->ledger($register, 'refund', $amount, max(0, (float) $register->expected_cash - $amount),
+                $this->drawers->giveBack($register, $currency, 'refund', ['cash' => $amount],
                     $order->id, $requester->id, "POS return (approval #{$approval->id})");
             }
         }
@@ -477,20 +474,6 @@ class TillReversals
             ->latest('opened_at')
             ->when($lock, fn ($q) => $q->lockForUpdate())
             ->first();
-    }
-
-    private function ledger(CashRegister $register, string $type, float $amount, float $balanceAfter, int $orderId, int $userId, string $notes): void
-    {
-        CashRegisterTransaction::create([
-            'cash_register_id' => $register->id,
-            'transaction_type' => $type,
-            'payment_method'   => 'cash',
-            'amount'           => round($amount, 2),
-            'balance_after'    => round($balanceAfter, 2),
-            'order_id'         => $orderId,
-            'notes'            => $notes,
-            'created_by'       => $userId,
-        ]);
     }
 
     private function fail(int $status, string $code, string $message): never

@@ -12,6 +12,10 @@
  * expected cash or variance at all (`blind`), so this page cannot show one.
  * Each action is shown only to those who hold its key — and the API checks it
  * again regardless.
+ *
+ * EVERY CURRENCY APART (currency plan Step 2): a till shows one block per
+ * currency it holds — its own float, expected, count and variance — and a
+ * shilling summary at the reporting rate that names what it could not convert.
  */
 
 import { useState } from "react";
@@ -27,10 +31,14 @@ import { StatusTabs } from "@/components/ui/StatusTabs";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const money = (n: number | null | undefined) =>
+const money = (n: number | null | undefined, code?: string) =>
     n === null || n === undefined
         ? "—"
-        : n.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        : (code ? `${code} ` : "") + n.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** Any currency of the till over or short (once counted and not blind). */
+const anyVariance = (till: Till) =>
+    !till.blind && (till.balances ?? []).some((b) => b.variance !== null && b.variance !== undefined && Math.abs(b.variance) >= 0.005);
 
 const when = (iso: string | null | undefined) =>
     iso
@@ -71,14 +79,42 @@ function StageBadge({ stage }: { stage: TillStage }) {
     );
 }
 
+function VarianceAmount({ v, code }: { v: number; code?: string }) {
+    return (
+        <span className={clsx("font-semibold", Math.abs(v) < 0.005 ? "text-success" : v > 0 ? "text-info" : "text-danger")}>
+            {Math.abs(v) < 0.005 ? "Balanced" : `${v > 0 ? "+" : "−"}${money(Math.abs(v), code)}`}
+        </span>
+    );
+}
+
+/** One line per currency the till holds; a single-currency till reads as before. */
 function VarianceText({ till }: { till: Till }) {
     if (till.blind || till.variance === null || till.variance === undefined) {
         return <span className="text-surface-400">—</span>;
     }
-    const v = till.variance;
+    const rows = (till.balances ?? []).filter((b) => b.variance !== null && b.variance !== undefined);
+    if (rows.length <= 1) {
+        return <VarianceAmount v={till.variance} />;
+    }
     return (
-        <span className={clsx("font-semibold", Math.abs(v) < 0.005 ? "text-success" : v > 0 ? "text-info" : "text-danger")}>
-            {Math.abs(v) < 0.005 ? "Balanced" : `${v > 0 ? "+" : "−"}${money(Math.abs(v))}`}
+        <span className="inline-flex flex-col items-end gap-0.5">
+            {rows.map((b) => <VarianceAmount key={b.currency_code} v={b.variance!} code={b.currency_code} />)}
+        </span>
+    );
+}
+
+/** The counted figure per currency; a single-currency till reads as before. */
+function CountedText({ till }: { till: Till }) {
+    if (till.counted_cash === null) {
+        return <>—</>;
+    }
+    const rows = (till.balances ?? []).filter((b) => b.counted_cash !== null);
+    if (rows.length <= 1) {
+        return <>{money(till.counted_cash)}</>;
+    }
+    return (
+        <span className="inline-flex flex-col items-end gap-0.5">
+            {rows.map((b) => <span key={b.currency_code}>{money(b.counted_cash, b.currency_code)}</span>)}
         </span>
     );
 }
@@ -170,13 +206,15 @@ export default function TillsPage() {
                                             <td className="px-4 py-2.5 hidden md:table-cell">{t.opened_by ?? "—"}</td>
                                             <td className="px-4 py-2.5 hidden md:table-cell">{when(t.opened_at)}</td>
                                             <td className="px-4 py-2.5"><StageBadge stage={t.stage} /></td>
-                                            <td className="px-4 py-2.5 text-right">{t.counted_cash !== null ? money(t.counted_cash) : "—"}</td>
+                                            <td className="px-4 py-2.5 text-right"><CountedText till={t} /></td>
                                             <td className="px-4 py-2.5 text-right"><VarianceText till={t} /></td>
                                             <td className="px-4 py-2.5 hidden lg:table-cell">
-                                                {t.reconciliation
-                                                    ? <span className={t.reconciliation.status === "matched" ? "text-success" : "text-danger font-semibold"}>
-                                                        {t.reconciliation.status === "matched" ? "Matched" : "Mismatch"}
-                                                      </span>
+                                                {(t.latest_reconciliations ?? (t.reconciliation ? [t.reconciliation] : [])).length
+                                                    ? (t.latest_reconciliations ?? [t.reconciliation!]).map((r) => (
+                                                        <span key={r.currency_code} className={clsx("block", r.status === "matched" ? "text-success" : "text-danger font-semibold")}>
+                                                            {(t.latest_reconciliations ?? []).length > 1 ? `${r.currency_code}: ` : ""}{r.status === "matched" ? "Matched" : "Mismatch"}
+                                                        </span>
+                                                      ))
                                                     : <span className="text-surface-400">—</span>}
                                             </td>
                                         </tr>
@@ -246,11 +284,13 @@ function TillDrawer({ id, onClose }: { id: number; onClose: () => void }) {
 
     // Correction
     const [corrReason, setCorrReason] = useState("");
+    const [corrCurrency, setCorrCurrency] = useState("");
     const [corrActual, setCorrActual] = useState("");
     const [corrExpected, setCorrExpected] = useState("");
     const correctionMutation = useMutation({
         mutationFn: () => tillsApi.openCorrection(id, {
             reason: corrReason.trim(),
+            ...(corrCurrency ? { currency_code: corrCurrency } : {}),
             corrected_actual_cash:   corrActual   !== "" ? Number(corrActual)   : null,
             corrected_expected_cash: corrExpected !== "" ? Number(corrExpected) : null,
         }),
@@ -271,7 +311,8 @@ function TillDrawer({ id, onClose }: { id: number; onClose: () => void }) {
     });
 
     const isMine = till?.opened_by_id === me;
-    const hasVariance = !!till && !till.blind && Math.abs(till.variance ?? 0) >= 0.005;
+    const hasVariance = !!till && (anyVariance(till) || (!till.blind && Math.abs(till.variance ?? 0) >= 0.005));
+    const multi = (till?.balances ?? []).length > 1;
 
     return (
         <div className="fixed inset-0 z-40 flex flex-col bg-white sm:static sm:inset-auto sm:z-auto sm:w-[460px] sm:shrink-0 sm:border-l sm:border-line sm:overflow-hidden">
@@ -305,8 +346,13 @@ function TillDrawer({ id, onClose }: { id: number; onClose: () => void }) {
 
                         {till.blind ? (
                             <div className="rounded-xl bg-surface-50 p-3 space-y-1.5">
-                                <Row label="Opening float" value={money(till.opening_cash)} />
-                                <Row label="Your count" value={money(till.counted_cash)} />
+                                {(till.balances?.length ? till.balances : [{ currency_code: till.currency_code, is_home: true, opening_cash: till.opening_cash, counted_cash: till.counted_cash }]).map((b) => (
+                                    <div key={b.currency_code} className="space-y-1.5">
+                                        {multi && <p className="font-semibold text-surface-900 pt-1">{b.currency_code}</p>}
+                                        <Row label="Opening float" value={money(b.opening_cash, multi ? b.currency_code : undefined)} />
+                                        <Row label="Your count" value={money(b.counted_cash, multi ? b.currency_code : undefined)} />
+                                    </div>
+                                ))}
                                 <p className="text-2xs text-surface-500 pt-1.5 border-t border-surface-200">
                                     {till.stage === "open"
                                         ? "This till is open. When you close it you count the drawer blind."
@@ -314,49 +360,79 @@ function TillDrawer({ id, onClose }: { id: number; onClose: () => void }) {
                                 </p>
                             </div>
                         ) : (
-                            <div className="rounded-xl bg-surface-50 p-3 space-y-1.5">
-                                <Row label="Opening float" value={money(till.breakdown?.opening_float ?? till.opening_cash)} />
-                                {till.breakdown && (
-                                    <>
-                                        <Row label="+ Cash sales" value={money(till.breakdown.cash_sales)} />
-                                        {till.breakdown.cash_in > 0 && <Row label="+ Cash in" value={money(till.breakdown.cash_in)} />}
-                                        <Row label="− Cash refunds" value={money(till.breakdown.refunds)} />
-                                        <Row label="− Voids" value={money(till.breakdown.voids)} />
-                                        <Row label="− Paid-outs" value={money(till.breakdown.paid_outs)} />
-                                    </>
+                            <>
+                                {(till.balances?.length ? till.balances : [{
+                                    currency_code: till.currency_code, is_home: true, opening_cash: till.opening_cash, counted_cash: till.counted_cash,
+                                    expected_cash_at_count: till.expected_cash_at_count, expected_cash_running_at_count: till.expected_cash_running_at_count,
+                                    expected_basis_mismatch: till.expected_basis_mismatch, variance: till.variance, breakdown: till.breakdown,
+                                }]).map((b) => {
+                                    const code = multi ? b.currency_code : undefined;
+                                    return (
+                                        <div key={b.currency_code} className="rounded-xl bg-surface-50 p-3 space-y-1.5">
+                                            {multi && (
+                                                <p className="font-semibold text-surface-900">
+                                                    {b.currency_code}{b.is_home ? " · the till's own currency" : ""}
+                                                </p>
+                                            )}
+                                            <Row label="Opening float" value={money(b.breakdown?.opening_float ?? b.opening_cash, code)} />
+                                            {b.breakdown && (
+                                                <>
+                                                    <Row label="+ Cash sales" value={money(b.breakdown.cash_sales, code)} />
+                                                    {b.breakdown.cash_in > 0 && <Row label="+ Cash in" value={money(b.breakdown.cash_in, code)} />}
+                                                    <Row label="− Cash refunds" value={money(b.breakdown.refunds, code)} />
+                                                    <Row label="− Voids" value={money(b.breakdown.voids, code)} />
+                                                    <Row label="− Paid-outs" value={money(b.breakdown.paid_outs, code)} />
+                                                </>
+                                            )}
+                                            <Row strong label="Expected cash" value={money(b.expected_cash_at_count ?? b.breakdown?.expected ?? b.expected_cash, code)} />
+                                            <Row strong label="Counted" value={money(b.counted_cash, code)} />
+                                            <div className="flex justify-between border-t border-surface-200 pt-1.5">
+                                                <span className="font-semibold text-surface-900">Variance</span>
+                                                {b.variance === null || b.variance === undefined
+                                                    ? <span className="text-surface-400">—</span>
+                                                    : <VarianceAmount v={b.variance} code={code} />}
+                                            </div>
+                                            {b.expected_basis_mismatch !== null && b.expected_basis_mismatch !== undefined && (
+                                                <p className="text-2xs text-warning-dark pt-1">
+                                                    The drawer's ledger and its old running total disagree by {money(Math.abs(b.expected_basis_mismatch), code)}
+                                                    {" "}(running total {money(b.expected_cash_running_at_count, code)}). Likely sales from before the ledger
+                                                    existed — check before deciding the variance.
+                                                </p>
+                                            )}
+                                            {b.is_home && till.float_vs_previous_close !== null && till.float_vs_previous_close !== undefined && Math.abs(till.float_vs_previous_close) >= 0.005 && (
+                                                <p className="text-2xs text-surface-500 pt-1">
+                                                    Opening float differed from the outlet's previous count by {till.float_vs_previous_close > 0 ? "+" : "−"}{money(Math.abs(till.float_vs_previous_close))}.
+                                                </p>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                                {multi && till.kes_summary && (
+                                    <div className="rounded-xl border border-line p-3 space-y-1">
+                                        <p className="font-semibold text-surface-900">Whole till in shillings <span className="font-normal text-surface-500">(at the reporting rate)</span></p>
+                                        <Row label="Expected" value={money(till.kes_summary.expected, "KES")} />
+                                        <Row label="Counted" value={money(till.kes_summary.counted, "KES")} />
+                                        <div className="flex justify-between"><span className="text-surface-600">Variance</span>{till.kes_summary.variance === null ? <span>—</span> : <VarianceAmount v={till.kes_summary.variance} code="KES" />}</div>
+                                        {till.kes_summary.unconverted.length > 0 && (
+                                            <p className="text-2xs text-warning-dark">No reporting rate for {till.kes_summary.unconverted.join(", ")}: left out of these sums.</p>
+                                        )}
+                                    </div>
                                 )}
-                                <Row strong label="Expected cash" value={money(till.expected_cash_at_count ?? till.breakdown?.expected)} />
-                                <Row strong label="Counted" value={money(till.counted_cash)} />
-                                <div className="flex justify-between border-t border-surface-200 pt-1.5">
-                                    <span className="font-semibold text-surface-900">Variance</span>
-                                    <VarianceText till={till} />
-                                </div>
-                                {till.expected_basis_mismatch !== null && till.expected_basis_mismatch !== undefined && (
-                                    <p className="text-2xs text-warning-dark pt-1">
-                                        The drawer's ledger and its old running total disagree by {money(Math.abs(till.expected_basis_mismatch))}
-                                        {" "}(running total {money(till.expected_cash_running_at_count)}). Likely sales from before the ledger
-                                        existed — check before deciding the variance.
-                                    </p>
-                                )}
-                                {till.float_vs_previous_close !== null && till.float_vs_previous_close !== undefined && Math.abs(till.float_vs_previous_close) >= 0.005 && (
-                                    <p className="text-2xs text-surface-500 pt-1">
-                                        Opening float differed from the outlet's previous count by {till.float_vs_previous_close > 0 ? "+" : "−"}{money(Math.abs(till.float_vs_previous_close))}.
-                                    </p>
-                                )}
-                            </div>
+                            </>
                         )}
 
-                        {till.discrepancy && (
-                            <div className={clsx("rounded-xl border p-3 space-y-1", till.discrepancy.status === "awaiting_approval" ? "border-danger/40 bg-danger-light" : "border-line")}>
+                        {(till.discrepancies ?? (till.discrepancy ? [till.discrepancy] : [])).map((d) => (
+                            <div key={d.id} className={clsx("rounded-xl border p-3 space-y-1", d.status === "awaiting_approval" ? "border-danger/40 bg-danger-light" : "border-line")}>
                                 <p className="font-semibold text-surface-900">
-                                    Discrepancy: {till.discrepancy.direction} {money(Math.abs(till.discrepancy.amount))}
-                                    {" · "}{till.discrepancy.status === "awaiting_approval" ? "held for approval" : "logged"}
+                                    Discrepancy: {d.direction} {money(Math.abs(d.amount), d.currency_code)}
+                                    {d.currency_code !== "KES" && (d.amount_kes !== null ? ` (≈ ${money(Math.abs(d.amount_kes), "KES")} at the reporting rate)` : " (no reporting rate)")}
+                                    {" · "}{d.status === "awaiting_approval" ? "held for approval" : "logged"}
                                 </p>
-                                <p className="text-surface-600">{till.discrepancy.reason}</p>
+                                <p className="text-surface-600">{d.reason}</p>
                             </div>
-                        )}
+                        ))}
 
-                        {till.variance_reason && !till.discrepancy && (
+                        {till.variance_reason && !(till.discrepancies ?? (till.discrepancy ? [till.discrepancy] : [])).length && (
                             <p className="text-surface-600"><span className="font-semibold">Reason:</span> {till.variance_reason}</p>
                         )}
 
@@ -388,11 +464,11 @@ function TillDrawer({ id, onClose }: { id: number; onClose: () => void }) {
                                     <>
                                         <p className="text-surface-500">
                                             Finalizing locks the till: its figures can never change again.
-                                            {hasVariance && " A variance above 100 is held for approval."}
+                                            {hasVariance && " A variance above KES 100 (at the reporting rate) is held for approval."}
                                         </p>
                                         {hasVariance && (
                                             <div>
-                                                <label className="label">Why is it {(till.variance ?? 0) > 0 ? "over" : "short"}? (required)</label>
+                                                <label className="label">Why is it over or short? (required)</label>
                                                 <textarea value={varianceReason} onChange={(e) => setVarianceReason(e.target.value)} rows={2} className="input resize-none" />
                                             </div>
                                         )}
@@ -432,12 +508,12 @@ function TillDrawer({ id, onClose }: { id: number; onClose: () => void }) {
                                 <h3 className="font-semibold text-surface-900">Reconciliations</h3>
                                 {till.reconciliations!.map((r) => (
                                     <div key={r.id} className={clsx("rounded-lg border p-2.5 space-y-1", r.status === "matched" ? "border-line" : "border-danger/40 bg-danger-light")}>
-                                        <p className="font-semibold">{r.status === "matched" ? "Matched" : "Mismatch — flagged for finance"} · {when(r.created_at)}{r.reconciled_by ? ` · ${r.reconciled_by}` : ""}</p>
-                                        <Row label="Till cash sales" value={money(r.till_cash_sales)} />
-                                        <Row label="Payments ledger" value={money(r.payments_cash)} />
-                                        {r.missing_from_till_count > 0 && <Row label={`Cash that reached no till (${r.missing_from_till_count})`} value={money(r.missing_from_till_amount)} />}
+                                        <p className="font-semibold">{multi ? `${r.currency_code} · ` : ""}{r.status === "matched" ? "Matched" : "Mismatch — flagged for finance"} · {when(r.created_at)}{r.reconciled_by ? ` · ${r.reconciled_by}` : ""}</p>
+                                        <Row label="Till cash sales" value={money(r.till_cash_sales, r.currency_code)} />
+                                        <Row label="Payments ledger" value={money(r.payments_cash, r.currency_code)} />
+                                        {r.missing_from_till_count > 0 && <Row label={`Cash that reached no till (${r.missing_from_till_count})`} value={money(r.missing_from_till_amount, r.currency_code)} />}
                                         {r.details?.order_mismatches?.map((m) => (
-                                            <p key={m.order_id} className="text-2xs text-danger">Order #{m.order_id}: till {money(m.till)} vs payments {money(m.payments)}</p>
+                                            <p key={m.order_id} className="text-2xs text-danger">Order #{m.order_id}: till {money(m.till, r.currency_code)} vs payments {money(m.payments, r.currency_code)}</p>
                                         ))}
                                         {r.notes && <p className="text-surface-600">{r.notes}</p>}
                                     </div>
@@ -451,6 +527,14 @@ function TillDrawer({ id, onClose }: { id: number; onClose: () => void }) {
                                 <h3 className="font-semibold text-surface-900">Open a correction</h3>
                                 <p className="text-surface-500">A finalized till is never reopened. A correction is a new record pointing at it; the till itself stays as it was counted.</p>
                                 <textarea value={corrReason} onChange={(e) => setCorrReason(e.target.value)} rows={2} placeholder="Reason (required)" className="input resize-none" />
+                                {multi && (
+                                    <div>
+                                        <label className="label">Currency</label>
+                                        <select value={corrCurrency || till.currency_code} onChange={(e) => setCorrCurrency(e.target.value)} className="input">
+                                            {till.balances.map((b) => <option key={b.currency_code} value={b.currency_code}>{b.currency_code}</option>)}
+                                        </select>
+                                    </div>
+                                )}
                                 <div className="grid grid-cols-2 gap-2">
                                     <div>
                                         <label className="label">Corrected count</label>
@@ -474,7 +558,7 @@ function TillDrawer({ id, onClose }: { id: number; onClose: () => void }) {
                                     <div key={c.id} className="rounded-lg border border-line p-2.5 space-y-1">
                                         <p className="font-semibold">#{c.id} · {when(c.created_at)}{c.opened_by ? ` · ${c.opened_by}` : ""}</p>
                                         <p className="text-surface-600">{c.reason}</p>
-                                        <Row label="Variance" value={`${money(c.original_variance)} → ${money(c.corrected_variance)}`} />
+                                        <Row label="Variance" value={`${money(c.original_variance, multi ? c.currency_code : undefined)} → ${money(c.corrected_variance, multi ? c.currency_code : undefined)}`} />
                                     </div>
                                 ))}
                             </section>

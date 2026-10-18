@@ -16,6 +16,7 @@ class CashRegisterTransaction extends Model
         'transaction_type',
         'payment_method',
         'amount',
+        'currency_code',
         'balance_after',
         'order_id',
         'notes',
@@ -27,6 +28,21 @@ class CashRegisterTransaction extends Model
         'balance_after' => 'decimal:2',
         'created_at' => 'datetime',
     ];
+
+    /**
+     * Every movement states its currency (currency plan Step 2). A writer that
+     * does not say — the model's own cash in/out helpers, older code — means
+     * the register's own; NULL rows from before the column are read the same
+     * way (TillService::ledgerBreakdown).
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (self $t) {
+            if (!$t->currency_code && $t->cash_register_id) {
+                $t->currency_code = strtoupper((string) (CashRegister::whereKey($t->cash_register_id)->value('currency_code') ?: 'KES'));
+            }
+        });
+    }
 
     /**
      * Relationships

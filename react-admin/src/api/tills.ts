@@ -12,7 +12,11 @@ export type TillStage = "open" | "awaiting_verification" | "finalized" | "closed
 
 export interface TillDiscrepancy {
     id: number;
+    /** The currency this drawer row is in; `amount` is in it. */
+    currency_code: string;
     amount: number;
+    /** `amount` at the reporting rate; null when the currency has none. */
+    amount_kes: number | null;
     direction: "over" | "short";
     expected_cash: number;
     counted_cash: number;
@@ -25,6 +29,8 @@ export interface TillDiscrepancy {
 
 export interface TillReconciliation {
     id: number;
+    /** One reconciliation per currency the till moved money in. */
+    currency_code: string;
     status: "matched" | "mismatch";
     flagged_for_finance: boolean;
     till_cash_sales: number;
@@ -44,6 +50,7 @@ export interface TillReconciliation {
 export interface TillCorrection {
     id: number;
     cash_register_id: number;
+    currency_code: string;
     reason: string;
     original_actual_cash: number | null;
     original_expected_cash: number | null;
@@ -54,6 +61,42 @@ export interface TillCorrection {
     status: string;
     opened_by: string | null;
     created_at: string | null;
+}
+
+/**
+ * One currency's drawer inside a till (currency plan Step 2): its own float,
+ * expected cash, count and variance. Nothing is added across currencies.
+ * Fields past `counted_cash` are absent when the till is blind to its viewer.
+ */
+export interface TillBalance {
+    currency_code: string;
+    is_home: boolean;
+    opening_cash: number;
+    counted_cash: number | null;
+    expected_cash?: number;
+    expected_cash_at_count?: number | null;
+    expected_cash_running_at_count?: number | null;
+    expected_basis_mismatch?: number | null;
+    variance?: number | null;
+    variance_class?: "balanced" | "over" | "short" | null;
+    total_sales?: number;
+    total_cash_sales?: number;
+    total_card_sales?: number;
+    total_mpesa_sales?: number;
+    total_refunds?: number;
+    transaction_count?: number;
+    // Detail only:
+    breakdown?: Till["breakdown"];
+    denomination_count?: Record<string, number> | null;
+}
+
+/** The whole till in shillings at the reporting rate; `unconverted` names what could not be. */
+export interface TillKesSummary {
+    basis: "reporting rate";
+    expected: number;
+    counted: number | null;
+    variance: number | null;
+    unconverted: string[];
 }
 
 export interface Till {
@@ -81,6 +124,8 @@ export interface Till {
     closing_cash: number | null;
     notes: string | null;
     closing_notes: string | null;
+    /** Every currency the till holds, its own first (Step 2). The top-level money fields are the home currency's. */
+    balances: TillBalance[];
     // Not blind:
     expected_cash?: number;
     expected_cash_at_count?: number | null;
@@ -99,8 +144,13 @@ export interface Till {
     total_card_sales?: number;
     total_mpesa_sales?: number;
     total_refunds?: number;
+    /** The home currency's discrepancy; every currency's is in `discrepancies`. */
     discrepancy?: TillDiscrepancy | null;
+    discrepancies?: TillDiscrepancy[];
+    /** The home currency's latest reconciliation; every currency's latest in `latest_reconciliations`. */
     reconciliation?: TillReconciliation | null;
+    latest_reconciliations?: TillReconciliation[];
+    kes_summary?: TillKesSummary;
     // Detail only:
     breakdown?: {
         opening_float: number;
@@ -141,10 +191,10 @@ export const tillsApi = {
         post<{ message: string; till: Till }>(`/v1/admin/pos/tills/${id}/finalize`, data),
 
     reconcile: (id: number, data: { notes?: string }) =>
-        post<{ message: string; reconciliation: TillReconciliation }>(`/v1/admin/pos/tills/${id}/reconcile`, data),
+        post<{ message: string; reconciliation: TillReconciliation; reconciliations: TillReconciliation[] }>(`/v1/admin/pos/tills/${id}/reconcile`, data),
 
     openCorrection: (
         id: number,
-        data: { reason: string; corrected_actual_cash?: number | null; corrected_expected_cash?: number | null },
+        data: { reason: string; currency_code?: string; corrected_actual_cash?: number | null; corrected_expected_cash?: number | null },
     ) => post<{ message: string; correction: TillCorrection }>(`/v1/admin/pos/tills/${id}/corrections`, data),
 };

@@ -14,12 +14,12 @@ use Illuminate\Database\Eloquent\Model;
 class TillCorrection extends Model
 {
     public const IMMUTABLE = [
-        'cash_register_id', 'opened_by', 'reason', 'original_actual_cash', 'original_expected_cash',
+        'cash_register_id', 'currency_code', 'opened_by', 'reason', 'original_actual_cash', 'original_expected_cash',
         'original_variance', 'corrected_actual_cash', 'corrected_expected_cash', 'corrected_variance',
     ];
 
     protected $fillable = [
-        'cash_register_id', 'opened_by', 'reason', 'original_actual_cash', 'original_expected_cash',
+        'cash_register_id', 'currency_code', 'opened_by', 'reason', 'original_actual_cash', 'original_expected_cash',
         'original_variance', 'corrected_actual_cash', 'corrected_expected_cash', 'corrected_variance',
         'status', 'approval_request_id',
     ];
