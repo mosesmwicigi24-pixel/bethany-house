@@ -1,0 +1,83 @@
+name: History repair — tills
+
+# Runs `php artisan history:repair-tills` (currency plan Step 6) on the VPS,
+# reaching the box as catalog-cleanup.yml and history-audit.yml do.
+#
+#   mode = dry-run (default): prints, per affected till, the ledger per
+#          currency and the restated home expected cash. Writes nothing.
+#   mode = apply: writes the foreign-currency balance rows and the till
+#          corrections in the named actor's name. Needs `actor` (the finance
+#          user's email or id) AND `confirm` typed exactly as APPLY.
+#
+# The repository is public, so the log carries the figures (needed to decide)
+# but the till names are stripped; tills are identified by id. Nothing a
+# customer or payment is named by is printed by this command.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'dry-run (writes nothing) or apply'
+        required: true
+        default: 'dry-run'
+        type: choice
+        options: [dry-run, apply]
+      actor:
+        description: 'apply only: the user the corrections are opened by (email or id)'
+        required: false
+        default: ''
+      confirm:
+        description: 'apply only: type APPLY to write'
+        required: false
+        default: ''
+      register:
+        description: 'optional: only this cash register id'
+        required: false
+        default: ''
+
+concurrency:
+  group: history-repair-tills
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: history:repair-tills (${{ inputs.mode }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse an apply without an actor and the typed confirmation
+        if: inputs.mode == 'apply' && (inputs.actor == '' || inputs.confirm != 'APPLY')
+        run: |
+          echo "::error::apply needs actor=<finance user> and confirm=APPLY; nothing was run."
+          exit 1
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "${{ secrets.VPS_KNOWN_HOSTS }}" ]; then
+            printf '%s\n' "${{ secrets.VPS_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          else
+            for i in 1 2 3 4 5; do
+              ssh-keyscan -T 15 -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+              [ -s ~/.ssh/known_hosts ] && break
+              sleep $((i * 5))
+            done
+            [ -s ~/.ssh/known_hosts ] || { echo "::error::Could not read host key"; exit 1; }
+          fi
+        timeout-minutes: 3
+
+      - name: Run history:repair-tills on the VPS
+        env:
+          MODE: ${{ inputs.mode }}
+          ACTOR: ${{ inputs.actor }}
+          REGISTER: ${{ inputs.register }}
+        run: |
+          FLAGS=""
+          if [ "$MODE" = "apply" ]; then FLAGS="--apply --actor=$(printf '%q' "$ACTOR")"; fi
+          if [ -n "$REGISTER" ]; then FLAGS="$FLAGS --register=$(printf '%q' "$REGISTER")"; fi
+          echo "history:repair-tills $FLAGS"
+          # Till names are stripped from the "Till #id name (status…" lines; ids stay.
+          ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 \
+            -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" \
+            "cd /opt/bethany-house && set -o pipefail && docker compose run --rm -T laravel php artisan history:repair-tills $FLAGS 2>&1 | sed -E 's/^(Till #[0-9]+) .* \((open|closed|counted|finalized)/\1 (\2/'"
+        timeout-minutes: 15
