@@ -622,13 +622,10 @@ class OrderController extends Controller
                     ], 422);
                 }
 
-                // In the order's currency (ShippingFee), never the KES figure as-is.
-                try {
-                    $shippingCost = \App\Support\ShippingFee::inCurrency($shippingMethod, $goodsTotal, $currency);
-                } catch (\Illuminate\Validation\ValidationException $e) {
-                    DB::rollBack();
-                    return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
-                }
+                // In the order's currency (ShippingFee), never the KES figure
+                // as-is. A currency it cannot be stated in is a validation
+                // refusal: the catch below rolls back and ServerError rethrows it.
+                $shippingCost = \App\Support\ShippingFee::inCurrency($shippingMethod, $goodsTotal, $currency);
             }
 
             $totalAmount = $taxCalc['total_gross'] + $shippingCost;
