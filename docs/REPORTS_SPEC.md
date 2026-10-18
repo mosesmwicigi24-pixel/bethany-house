@@ -64,6 +64,19 @@ a rate. Lines priced from another currency, KES shipping on foreign orders,
 payments in another currency, M-Pesa on foreign orders and records in a
 currency with no rate are listed for a person to correct through the
 existing flows (order line edit, set-shipping, payment move/void, rate proposal).
+**Proof (currency plan Step 7, 2026-10-18):** `php artisan reports:reconcile
+--from --to [--outlet] [--csv]` rebuilds the four identities from raw rows,
+independently of the engine, and sets each against `MetricEngine` for the
+same question, exit 1 when anything does not tie:
+`Sales = Till + Web + Chat + Quoted` (recognised orders by order date),
+`Collected = settled payments − their refunds` (by payment date),
+`Owed = Sales − Collected` order by order, with the only three gaps named and
+listed record by record (overpayment clamped to 0 owed; an order a person
+marked paid while short; settled money on a dead order), and
+`Expected till cash per currency = opening + cash sales + cash in − refunds −
+voids − paid-outs` against the balance row (a till restated by a Step 6
+correction is judged on the correction). `ReconciliationTest` pins the
+dashboard, the sales report, its CSV and its PDF to one figure.
 If a report is slow, the fix is an index or a materialised view refreshed from
 source — never a hand-maintained total.
 

@@ -263,5 +263,32 @@ re-verify, then fix the appendix.
 - `backend/tests/Feature/ReportingExchangeRateTest.php`,
   `SalesReportFidelityTest.php`, `PdfReportAlignmentTest.php`,
   `InternationalCorridorTest.php` encode the FX and report-parity rules.
+- `backend/tests/Feature/ReconciliationTest.php` (currency plan Step 7) proves
+  the §7 identities from an independent fixture and pins dashboard, report,
+  CSV and PDF to one figure; `MoneyRulesEverywhereTest`, `DashboardMoneyRulesTest`,
+  `TillMultiCurrencyTest`, `ReportingRateSnapshotTest`, `HistoryRepairTest`
+  cover Steps 2–6.
 - Run the suite with `make test` (wraps `php artisan test` in the laravel
   container) — see `Makefile` and `README.md` for the full command set.
+
+### Currency plan (Steps 1–7, 2026-10-18) → the helpers to reuse
+
+- `App\Support\SellableCurrency` — may a sale, quote or PO be in this currency
+  (active **and** a reporting rate). `App\Support\ShippingFee` — a KES flat fee
+  in the order's currency at the pricing rate. `App\Support\SettledPayment` —
+  the one "money arrived" predicate. `Order::recognised()` / `pipeline()` — a
+  sale vs a cart. `Order::SALES_BUCKETS` + `Order::salesBucketSql()`.
+- `App\Services\Tills\TillDrawer` is the only writer of till money, per
+  currency (`cash_register_balances`); `TillService::ledgerBreakdown` is the
+  ledger truth per currency. A finalized till's money fields are locked in the
+  database; a change is a `till_corrections` row.
+- `reporting_rate_to_kes` on orders, payments, quotations and purchase orders
+  (stamped by `App\Support\ReportingRateStamp`); SQL converts through
+  `fx_rate_to_kes(stored, code)` via `ReportingCurrency::kes/rateSql`.
+- `App\Support\MoneyByCurrency::of()` for any list of rows in several
+  currencies: a KES total at each row's own rate, the native figures beside
+  it, and the unconvertible ones named — never a sum across currencies.
+- Commands: `reports:fx-basis-compare` (Step 3), `history:audit`,
+  `history:repair-tills`, `history:repair-budgets` (Step 6; dry run unless
+  `--apply --actor`), `reports:reconcile` (Step 7; exit 1 when the books
+  do not tie).
