@@ -1,4 +1,4 @@
-import { get, post, put, del } from "./client";
+import { api, get, post, put, del } from "./client";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -178,4 +178,28 @@ export const customersApi = {
             `/v1/admin/customers/${id}/invite-to-portal`,
             {},
         ),
+
+    /**
+     * The phone book shaped for Google Contacts (owner, 2026-10-20): one row
+     * per phone with the best name the hub holds, an empty name when it holds
+     * none. The owner account only, password and two-step code typed each
+     * time; the server refuses everyone else (403), a wrong password or code
+     * (422) and five wrong tries in a row (429).
+     */
+    exportGoogleContacts: async (data: { password: string; code: string }) => {
+        const res = await api.post<Blob>(
+            "/v1/admin/customers/export/google-contacts",
+            data,
+            { responseType: "blob" },
+        );
+        const disposition = String(res.headers["content-disposition"] ?? "");
+        const name = disposition.match(/filename="?([^";\n]+)"?/i)?.[1]
+            ?? "bethany-house-google-contacts.csv";
+        return {
+            file: new File([res.data], name, { type: "text/csv" }),
+            contacts: Number(res.headers["x-contacts"] ?? 0),
+            unnamed: Number(res.headers["x-contacts-unnamed"] ?? 0),
+            merged: Number(res.headers["x-contacts-merged"] ?? 0),
+        };
+    },
 };

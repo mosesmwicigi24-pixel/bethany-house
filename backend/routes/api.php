@@ -915,6 +915,9 @@ Route::prefix('v1')->group(function () {
                 // and balances from index/show for callers without insights.
                 Route::get('/',              [CustomerController::class, 'index'])
                     ->middleware('throttle:customer-search');
+                // The phone book for Google Contacts: the owner account only,
+                // password and two-step code typed each time (controller).
+                Route::post('/export/google-contacts', [CustomerController::class, 'exportGoogleContacts']);
                 Route::get('/{id}',          [CustomerController::class, 'show']);
                 // Purchase history is the customer's financial profile —
                 // manager territory, not the till's. (A /{id}/statistics route
