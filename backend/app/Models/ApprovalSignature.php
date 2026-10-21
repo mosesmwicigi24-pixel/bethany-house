@@ -11,12 +11,14 @@ class ApprovalSignature extends Model
     public const APPROVED = 'approved';
     public const REJECTED = 'rejected';
 
-    protected $fillable = ['approval_request_id', 'band_order', 'signer_id', 'decision', 'covers', 'reason', 'signed_at'];
+    protected $fillable = ['approval_request_id', 'band_order', 'signer_id', 'decision', 'covers', 'reason', 'signed_at', 'owner_override'];
 
     protected $casts = [
-        'band_order' => 'integer',
-        'covers'     => 'array',
-        'signed_at'  => 'datetime',
+        'band_order'     => 'integer',
+        'covers'         => 'array',
+        'signed_at'      => 'datetime',
+        // true when the owner signed as the maker (App\Support\OwnerOverride)
+        'owner_override' => 'boolean',
     ];
 
     public function request(): BelongsTo

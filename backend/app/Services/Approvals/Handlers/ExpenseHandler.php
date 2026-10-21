@@ -96,16 +96,19 @@ final class ExpenseHandler extends ApprovalHandler
     public function onApproved(ApprovalRequest $request, Model $e, User $finalSigner): void
     {
         $comments = $request->signatures()->latest('id')->value('reason');
+        // Any band signed by the maker under owner override marks the approval.
+        $overridden = $request->signatures()->where('owner_override', true)->exists();
 
         $e->update(['status' => 'approved', 'approved_by' => $finalSigner->id, 'approved_at' => now()]);
 
         ExpenseApproval::create([
-            'expense_id'  => $e->id,
-            'approver_id' => $finalSigner->id,
-            'action'      => 'approved',
-            'comments'    => $comments,
-            'acted_at'    => now(),
-            'step'        => (int) $request->current_band,
+            'expense_id'     => $e->id,
+            'approver_id'    => $finalSigner->id,
+            'action'         => 'approved',
+            'comments'       => $comments,
+            'acted_at'       => now(),
+            'step'           => (int) $request->current_band,
+            'owner_override' => $overridden,
         ]);
 
         if ($e->submitted_by && $e->submittedBy) {
@@ -113,7 +116,7 @@ final class ExpenseHandler extends ApprovalHandler
         }
 
         ActivityLogService::log('expense_approved', $e, [
-            'comments' => $comments, 'approval_request_id' => $request->id,
+            'comments' => $comments, 'approval_request_id' => $request->id, 'owner_override' => $overridden,
         ], null, $finalSigner);
 
         // Intelligence #6 — budget warning once the spend is approved.

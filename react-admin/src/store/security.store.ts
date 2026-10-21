@@ -13,11 +13,13 @@ import { create } from "zustand";
  * api/client.ts opens these; PinLockOverlay and StepUpDialog answer them.
  */
 
-export type StepUpMethod = "password" | "totp";
+/** How the person confirms it's them: a passkey (Touch ID / Face ID / key) when one is enrolled, else the code or the password. */
+export type StepUpMethod = "password" | "totp" | "passkey";
 
 interface SecurityPromptState {
     pinLocked: boolean;
-    stepUp: { method: StepUpMethod } | null;
+    /** `fallback` is the code-or-password way when `method` is a passkey the device cannot use right now. */
+    stepUp: { method: StepUpMethod; fallback: Exclude<StepUpMethod, "passkey"> } | null;
 }
 
 export const useSecurityPrompts = create<SecurityPromptState>(() => ({
@@ -51,8 +53,8 @@ export function pinUnlockAbandoned(reason: unknown): void {
 }
 
 /** Resolves true once confirmed, false if the person cancels. */
-export function waitForStepUp(method: StepUpMethod): Promise<boolean> {
-    useSecurityPrompts.setState({ stepUp: { method } });
+export function waitForStepUp(method: StepUpMethod, fallback: Exclude<StepUpMethod, "passkey"> = "password"): Promise<boolean> {
+    useSecurityPrompts.setState({ stepUp: { method, fallback } });
     return new Promise<boolean>((resolve, reject) => stepUpWaiters.push({ resolve, reject }));
 }
 

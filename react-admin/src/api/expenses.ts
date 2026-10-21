@@ -279,8 +279,17 @@ export const expensesApi = {
   submit: (id: number) =>
     post<{ message: string; expense: Expense }>(`${BASE}/${id}/submit`, {}),
 
-  approve: (id: number, comments?: string) =>
-    post<{ message: string; expense: Expense }>(`${BASE}/${id}/approve`, { comments }),
+  /**
+   * Sign the band the expense waits on. `ownerOverride` is the owner account
+   * approving what it recorded itself (server: App\Support\OwnerOverride) —
+   * the server first asks the session to confirm it's you (the client's
+   * step-up prompt handles that and resends), then marks the approval.
+   */
+  approve: (id: number, comments?: string, ownerOverride = false) =>
+    post<{ message: string; expense: Expense }>(`${BASE}/${id}/approve`, {
+      comments,
+      ...(ownerOverride ? { owner_override: true } : {}),
+    }),
 
   reject: (id: number, reason: string) =>
     post<{ message: string; expense: Expense }>(`${BASE}/${id}/reject`, { reason }),

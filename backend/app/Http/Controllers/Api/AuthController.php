@@ -787,6 +787,9 @@ class AuthController extends Controller
         $user->promotion_cap_percent = \App\Support\DiscountRule::isOwner($user)
             ? null
             : \App\Support\DiscountRule::capPercent();
+        // The owner account (audit.owner_account_email) as a super admin: the
+        // console shows owner-only actions (App\Support\OwnerOverride) to it.
+        $user->is_owner = \App\Support\OwnerOverride::isOwner($user);
 
         return $user;
     }

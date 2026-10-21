@@ -90,6 +90,20 @@ return [
     ],
 
     /*
+    | Passkeys (owner, 2026-10-21; App\Services\Auth\Passkeys): the WebAuthn
+    | relying party. rp_id is the host the credentials are bound to — left
+    | empty, the request's host (hub.bethanyhouse.co.ke in production, so a
+    | passkey enrolled there answers only there). origin likewise defaults to
+    | the request's scheme and host. Set both only behind a proxy that
+    | rewrites the Host header.
+    */
+    'passkeys' => [
+        'rp_id'   => env('PASSKEY_RP_ID'),
+        'rp_name' => env('PASSKEY_RP_NAME', 'Bethany House Hub'),
+        'origin'  => env('PASSKEY_ORIGIN'),
+    ],
+
+    /*
     | Account lockout after failed staff sign-ins (wrong password or wrong
     | second-step code), counted per account since its last successful
     | sign-in or unlock. Works alongside the per-IP `throttle:auth` limiter.

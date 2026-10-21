@@ -16,10 +16,12 @@ class ExpenseApproval extends Model
         'comments',
         'acted_at',
         'step',            // approval step number (for multi-level approval)
+        'owner_override',  // true when the owner signed as the maker (App\Support\OwnerOverride)
     ];
 
     protected $casts = [
-        'acted_at' => 'datetime',
+        'acted_at'       => 'datetime',
+        'owner_override' => 'boolean',
     ];
 
     public function expense()

@@ -63,13 +63,23 @@ class StepUp
         }
     }
 
+    /**
+     * The challenge names the way to confirm: a passkey (Touch ID, Face ID,
+     * security key) when the person has one, with the code or password as
+     * the fallback; otherwise the code when two-step sign-in is on, else the
+     * password.
+     */
     public function challenge(User $user): JsonResponse
     {
+        $fallback = $user->two_factor_enabled ? 'totp' : 'password';
+        $passkey  = app(Passkeys::class)->has($user);
+
         return response()->json([
-            'message' => 'Confirm it’s you to continue.',
-            'code'    => 'step_up_required',
-            'reason'  => 'step_up_required',
-            'method'  => $user->two_factor_enabled ? 'totp' : 'password',
+            'message'  => 'Confirm it’s you to continue.',
+            'code'     => 'step_up_required',
+            'reason'   => 'step_up_required',
+            'method'   => $passkey ? 'passkey' : $fallback,
+            'fallback' => $fallback,
         ], 403);
     }
 
