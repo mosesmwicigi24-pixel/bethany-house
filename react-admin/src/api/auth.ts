@@ -29,6 +29,13 @@ export const authApi = {
   stepUp: (payload: { password?: string; code?: string }) =>
     post<{ confirmed_until: string }>('/v1/admin/auth/step-up', payload),
 
+  // Re-confirm identity with a passkey (Touch ID / Face ID / security key):
+  // the server's options for the device, then its signed answer.
+  passkeyStepUpOptions: () =>
+    post<{ options: Record<string, any> }>('/v1/admin/auth/step-up/passkey/options'),
+  passkeyStepUp: (credential: Record<string, unknown>) =>
+    post<{ confirmed_until: string; passkey: string }>('/v1/admin/auth/step-up/passkey', { credential }),
+
   // Release a PIN-locked session.
   unlockWithPin: (pin: string) =>
     post<{ message: string; unlocked: boolean }>('/v1/admin/auth/pin/unlock', { pin }),

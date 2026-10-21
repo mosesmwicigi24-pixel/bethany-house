@@ -25,6 +25,14 @@ export interface ProfileData {
     active_sessions_count: number;
 }
 
+export interface PasskeyRow {
+    id: number;
+    name: string;
+    transports: string[];
+    created_at: string | null;
+    last_used_at: string | null;
+}
+
 export interface ActivityLogEntry {
     id: number;
     user_id?: number;
@@ -152,6 +160,15 @@ export const profileApi = {
 
     disable2fa: (password: string) =>
         post<{ message: string }>("/v1/admin/auth/2fa/disable", { password }),
+
+    // Passkeys (Touch ID / Face ID / security key) — the person's own list.
+    // Adding and removing one is privileged: the server asks to confirm it's
+    // you first (the client's step-up prompt handles that and resends).
+    passkeys: () => get<{ data: PasskeyRow[] }>("/v1/admin/profile/passkeys"),
+    passkeyOptions: () => post<{ options: Record<string, any> }>("/v1/admin/profile/passkeys/options"),
+    addPasskey: (name: string, credential: Record<string, unknown>) =>
+        post<{ message: string; passkey: PasskeyRow }>("/v1/admin/profile/passkeys", { name, credential }),
+    removePasskey: (id: number) => del<{ message: string }>(`/v1/admin/profile/passkeys/${id}`),
 
     // Activity log for current user
     myActivity: (params?: Record<string, string>) =>

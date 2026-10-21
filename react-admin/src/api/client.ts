@@ -174,7 +174,10 @@ function createApiClient(): AxiosInstance {
                     // them (Phase 4C step-up). Ask (StepUpDialog), then send
                     // the same request again; cancelling fails it quietly.
                     if (body?.code === "step_up_required" && config && retries < 2) {
-                        const confirmed = await waitForStepUp((body.method ?? "password") as StepUpMethod);
+                        const confirmed = await waitForStepUp(
+                            (body.method ?? "password") as StepUpMethod,
+                            (body.fallback ?? (body.method === "totp" ? "totp" : "password")) as Exclude<StepUpMethod, "passkey">,
+                        );
                         if (confirmed) {
                             config._securityRetries = retries + 1;
                             return client.request(config);

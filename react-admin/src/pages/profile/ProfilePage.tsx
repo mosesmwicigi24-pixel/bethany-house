@@ -17,6 +17,7 @@ import { QrCode } from '@/components/security/QrCode'
 import { RecoveryCodes } from '@/components/security/RecoveryCodes'
 import { TerminalPinForm } from '@/components/security/TerminalPinForm'
 import { DeviceList } from '@/components/security/DeviceList'
+import { PasskeysCard } from '@/components/security/PasskeysCard'
 
 // ── Schemas ────────────────────────────────────────────────────────────────────
 
@@ -562,6 +563,8 @@ export default function ProfilePage() {
                       </button>
                     </div>
                   )}
+
+                  <PasskeysCard />
 
                   {/* Security checklist */}
                   <div className="space-y-2">

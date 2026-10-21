@@ -139,6 +139,9 @@ Route::prefix('v1')->group(function () {
     // session may call (App\Services\Auth\SessionPolicy).
     Route::prefix('admin/auth')->middleware(['auth:sanctum', 'throttle:api', 'ensure.staff'])->group(function () {
         Route::post('/step-up',             [AccountSecurityController::class, 'stepUp']);
+        // Step-up with a passkey (Touch ID / Face ID / security key): options, then the signed answer.
+        Route::post('/step-up/passkey/options', [\App\Http\Controllers\Api\PasskeyController::class, 'stepUpOptions']);
+        Route::post('/step-up/passkey',         [\App\Http\Controllers\Api\PasskeyController::class, 'stepUp']);
         Route::post('/pin/unlock',          [AccountSecurityController::class, 'unlock']);
         Route::post('/2fa/recovery-codes',  [AccountSecurityController::class, 'regenerateRecoveryCodes'])
             ->middleware('step.up');
@@ -483,6 +486,12 @@ Route::prefix('v1')->group(function () {
                 Route::delete('/devices/{deviceId}',      [ProfileController::class, 'removeDevice'])->whereNumber('deviceId');
                 // The person's own terminal PIN (Phase 4C) — set/change with their password.
                 Route::put('/terminal-pin',               [AccountSecurityController::class, 'setTerminalPin']);
+                // Passkeys (owner, 2026-10-21): the person's own list; adding and
+                // removing one is privileged, so it sits behind step-up.
+                Route::get('/passkeys',                   [\App\Http\Controllers\Api\PasskeyController::class, 'index']);
+                Route::post('/passkeys/options',          [\App\Http\Controllers\Api\PasskeyController::class, 'registrationOptions'])->middleware('step.up');
+                Route::post('/passkeys',                  [\App\Http\Controllers\Api\PasskeyController::class, 'store'])->middleware('step.up');
+                Route::delete('/passkeys/{id}',           [\App\Http\Controllers\Api\PasskeyController::class, 'destroy'])->whereNumber('id')->middleware('step.up');
             });
 
             // A clerk's PIN is cleared by their outlet manager (shared outlet),
