@@ -11,6 +11,7 @@ import { get, post, put } from "@/api/client";
 import { useIsFloorWorker } from "@/hooks/useHomePath";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToastStore } from "@/store/toast.store";
+import { usersApi } from "@/api/setup";
 import { useAuthStore } from "@/store/auth.store";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
@@ -775,13 +776,19 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
     const freshOrder = (freshData as any)?.order as ProductionOrder | undefined;
 
     // Fetch staff + system users (same approach as auto-assignees)
-    const { data: tailorsData } = useQuery({
-        queryKey: ["staff-users-list"],
-        queryFn: () => get<any>("/v1/admin/users", { params: { exclude_type: "customer", per_page: "100" } }),
+    // Everyone a stage can be given to — open to every staff login, unlike
+    // the admin users list (users.view), which left managers with an empty
+    // dropdown. A failure says so instead of showing nobody.
+    const { data: tailorsData, error: tailorsError } = useQuery({
+        queryKey: ["assignable-users"],
+        queryFn: () => usersApi.assignable(),
         staleTime: 60_000,
         retry: false,
     });
     const tailors = tailorsData?.data ?? [];
+    useEffect(() => {
+        if (tailorsError) toast.error(`Could not load the staff list: ${(tailorsError as ApiError).message ?? "unknown error"}`);
+    }, [tailorsError, toast]);
 
     // Use fresh tasks - filter out only truly finished stages
     const rawTasks = freshOrder?.tasks ?? order.tasks ?? [];

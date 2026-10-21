@@ -904,4 +904,70 @@ class CustomerController extends Controller
             'message' => 'Portal invite sent to ' . $user->email,
         ]);
     }
+
+    /**
+     * POST /customers/export/google-contacts   (the owner account only)
+     *
+     * The phone book for Google Contacts (App\Support\GoogleContactsCsv):
+     * one row per phone, the best name the hub knows, an empty name when it
+     * knows none. Customer contacts in bulk leave the building here, so the
+     * door is the narrowest in the hub (owner, 2026-10-20):
+     *   - only the owner account (audit.owner_account_email) who is a super
+     *     admin — any other caller is refused, super admin or not;
+     *   - the password AND the current two-step code, both typed now, every
+     *     time; an account without two-step sign-in cannot take it;
+     *   - five wrong tries lock the door for five minutes; every refusal and
+     *     every file is in the audit trail.
+     */
+    public function exportGoogleContacts(Request $request, \App\Services\Auth\TwoFactor $twoFactor, \App\Services\Downloads\DownloadPolicy $policy)
+    {
+        $user = $request->user();
+        if (!$policy->isOwner($user) || !$user->hasRole('super_admin', 'sanctum')) {
+            ActivityLogService::log('contacts_export_refused', $user, ['why' => 'not the owner account'], 'Google Contacts export refused: not the owner account', $user);
+
+            return response()->json(['message' => 'Only the owner account can take the contacts file.'], 403);
+        }
+        if (!$user->two_factor_enabled) {
+            return response()->json(['message' => 'Two-step sign-in must be on for this account before the contacts file can be taken.'], 403);
+        }
+
+        $validated = $request->validate([
+            'password' => 'required|string|max:255',
+            'code'     => 'required|string|size:6',
+        ]);
+
+        $key = 'contacts-export-attempts:' . $user->id;
+        if (\Illuminate\Support\Facades\RateLimiter::tooManyAttempts($key, 5)) {
+            return response()->json(['message' => 'Too many attempts. Wait a few minutes and try again.',
+                'retry_after_seconds' => \Illuminate\Support\Facades\RateLimiter::availableIn($key)], 429);
+        }
+        $passwordOk = \Illuminate\Support\Facades\Hash::check($validated['password'], $user->password);
+        $codeOk     = $passwordOk && $twoFactor->verifyCode($user, $validated['code']);
+        if (!$passwordOk || !$codeOk) {
+            \Illuminate\Support\Facades\RateLimiter::hit($key, 300);
+            ActivityLogService::log('contacts_export_refused', $user, ['why' => $passwordOk ? 'wrong code' : 'wrong password'],
+                'Google Contacts export refused: ' . ($passwordOk ? 'wrong two-step code' : 'wrong password'), $user);
+            $field = $passwordOk ? 'code' : 'password';
+
+            return response()->json(['message' => $passwordOk ? 'That code is not right.' : 'That password is not right.',
+                'errors' => [$field => [$passwordOk ? 'That code is not right.' : 'That password is not right.']]], 422);
+        }
+        \Illuminate\Support\Facades\RateLimiter::clear($key);
+
+        $built = \App\Support\GoogleContactsCsv::build();
+        $csv   = \App\Support\GoogleContactsCsv::csv($built['rows']);
+        $name  = 'bethany-house-google-contacts-' . now(config('app.timezone'))->format('Ymd-His') . '.csv';
+
+        ActivityLogService::log('contacts_export_taken', $user, $built['stats'] + ['file' => $name],
+            "Google Contacts file taken: {$built['stats']['contacts']} contacts ({$built['stats']['unnamed']} without a name)", $user);
+
+        return response($csv, 200, [
+            'Content-Type'          => 'text/csv; charset=UTF-8',
+            'Content-Disposition'   => 'attachment; filename="' . $name . '"',
+            'X-Contacts'            => (string) $built['stats']['contacts'],
+            'X-Contacts-Unnamed'    => (string) $built['stats']['unnamed'],
+            'X-Contacts-Merged'     => (string) $built['stats']['merged_spellings'],
+            'Cache-Control'         => 'no-store',
+        ]);
+    }
 }

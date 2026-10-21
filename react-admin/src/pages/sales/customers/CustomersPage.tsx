@@ -11,6 +11,8 @@ import type {
 } from "@/api/customers";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useAuthStore } from "@/store/auth.store";
+import { saveFile } from "@/hooks/usePdfDownload";
 import { useCustomerSearchTerm } from "@/hooks/useCustomerSearchTerm";
 import { Spinner } from "@/components/ui/Spinner";
 import { Modal } from "@/components/ui/Modal";
@@ -331,10 +333,89 @@ function CustomerFormModal({
     );
 }
 
+// ── Google Contacts export (owner only) ───────────────────────────────────────
+
+/** The account that may take the phone book out of the hub. Mirrors `audit.owner_account_email`. */
+const OWNER_EMAIL = "mwicigi@icloud.com";
+
+function GoogleContactsExportModal({ onClose }: { onClose: () => void }) {
+    const toast = useToastStore();
+    const [password, setPassword] = useState("");
+    const [code, setCode] = useState("");
+    const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+    const mutation = useMutation({
+        mutationFn: () => customersApi.exportGoogleContacts({ password, code: code.trim() }),
+        onSuccess: (res) => {
+            saveFile(res.file);
+            toast.success(
+                `${res.contacts.toLocaleString()} contacts saved` +
+                    (res.unnamed > 0 ? ` (${res.unnamed.toLocaleString()} with no name on file)` : ""),
+            );
+            onClose();
+        },
+        onError: (e: ApiError) => {
+            setFieldErrors(Object.fromEntries(Object.entries(e.errors ?? {}).map(([k, v]) => [k, v[0]])));
+            if (!e.errors || Object.keys(e.errors).length === 0) toast.error(e.message);
+        },
+    });
+
+    const ready = password.length > 0 && /^\d{6}$/.test(code.trim()) && !mutation.isPending;
+
+    return (
+        <Modal open title="Export for Google Contacts" onClose={onClose}>
+            <form
+                className="p-5 space-y-4"
+                onSubmit={(e) => { e.preventDefault(); if (ready) mutation.mutate(); }}
+            >
+                <p className="text-xs text-surface-600">
+                    A CSV in Google&apos;s own import layout: one row per phone number, carrying the best name the hub
+                    holds (the customer record first, then the name typed on the latest order, then the lead). A number
+                    with no name anywhere is left <strong>blank</strong>, never given an invented label, and its note
+                    says &quot;No name on file&quot;. Every row joins the group <strong>Bethany House</strong> in Google.
+                </p>
+                <p className="text-xs text-surface-600">
+                    Only the owner account can take this file, and it asks for your password and your two-step code
+                    every time. Each download is written to the audit log.
+                </p>
+                <Field label="Your password" required error={fieldErrors.password}>
+                    <FieldInput
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        autoComplete="current-password"
+                        className="input"
+                        autoFocus
+                    />
+                </Field>
+                <Field label="Two-step code (6 digits)" required error={fieldErrors.code}>
+                    <FieldInput
+                        inputMode="numeric"
+                        maxLength={6}
+                        value={code}
+                        onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                        autoComplete="one-time-code"
+                        className="input font-mono tracking-widest"
+                    />
+                </Field>
+                <div className="flex gap-3 pt-1">
+                    <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
+                    <button type="submit" disabled={!ready} className="btn-primary flex-1">
+                        {mutation.isPending ? "Preparing…" : "Download CSV"}
+                    </button>
+                </div>
+            </form>
+        </Modal>
+    );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function CustomersPage() {
-    const { can } = usePermissions();
+    const { can, isSuperAdmin } = usePermissions();
+    const authUser = useAuthStore((s) => s.user);
+    const canExportContacts = isSuperAdmin && (authUser?.email ?? "").toLowerCase() === OWNER_EMAIL;
+    const [showContactsExport, setShowContactsExport] = useState(false);
     const navigate = useNavigate();
     const toast = useToastStore();
     const qc = useQueryClient();
@@ -429,6 +510,16 @@ export default function CustomersPage() {
                         )}
                     </p>
                 </div>
+                <div className="flex gap-2">
+                {canExportContacts && (
+                    <button
+                        onClick={() => setShowContactsExport(true)}
+                        className="btn-secondary gap-2"
+                        title="Owner only: the phone book as a Google Contacts CSV"
+                    >
+                        Export for Google Contacts
+                    </button>
+                )}
                 <button
                     onClick={() => setShowCreate(true)}
                     className="btn-primary gap-2"
@@ -448,6 +539,7 @@ export default function CustomersPage() {
                     </svg>
                     New Customer
                 </button>
+                </div>
             </div>
 
             {/* ── Summary stats ────────────────────────────────────────────── */}
@@ -1005,6 +1097,9 @@ export default function CustomersPage() {
             </div>
 
             {/* ── Modals ────────────────────────────────────────────────────── */}
+            {showContactsExport && (
+                <GoogleContactsExportModal onClose={() => setShowContactsExport(false)} />
+            )}
             {(showCreate || editingCustomer) && (
                 <CustomerFormModal
                     customer={editingCustomer}

@@ -264,6 +264,14 @@ export const permissionsApi = {
 
 // ─── Users (setup) ────────────────────────────────────────────────────────────
 
+export interface AssignableUser {
+    id: number;
+    first_name: string;
+    last_name: string;
+    outlet: { id: number; name: string } | null;
+    roles: string[];
+}
+
 export const usersApi = {
     list: (params?: Record<string, string>) =>
         get<PaginatedResponse<UserSetup>>("/v1/admin/users", { params }),
@@ -289,6 +297,14 @@ export const usersApi = {
 
     byRole: (role: string) =>
         get<{ data: UserSetup[] }>(`/v1/admin/users/role/${role}`),
+
+    /**
+     * Everyone a production stage can be given to: active staff, names and
+     * outlet only (no contacts). Open to every staff login, unlike `list`,
+     * which needs users.view — the reason assign dialogs read from here.
+     */
+    assignable: () =>
+        get<{ data: AssignableUser[] }>("/v1/admin/users/assignable"),
 
     promoteToStaff: (id: number, data: { role_ids: number[]; outlet_id?: number | null }) =>
         post<{ message: string; user: UserSetup }>(
