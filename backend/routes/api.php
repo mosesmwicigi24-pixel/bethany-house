@@ -491,6 +491,8 @@ Route::prefix('v1')->group(function () {
 
             // ── Users by role — all staff (assignee dropdowns) ───────────────
             Route::get('/users/role/{role}', [UserController::class, 'byRole']);
+            // ── Everyone a production stage can be assigned to — all staff ──
+            Route::get('/users/assignable',  [UserController::class, 'assignable']);
 
             // ── Time Clock — every authenticated staff member ────────────────
             // Geofenced clock in/out + breaks. No permission gate, same as

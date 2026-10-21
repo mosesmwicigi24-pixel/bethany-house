@@ -9,6 +9,7 @@ import {
 } from "@/components/production/productionUi";
 import { get, post, put, del } from "@/api/client";
 import { useToastStore } from "@/store/toast.store";
+import { usersApi } from "@/api/setup";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
 import { Modal } from "@/components/ui/Modal";
@@ -477,13 +478,19 @@ function ReworkModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
         return last === "Failed" ? "" : last;
     });
 
-    const { data: tailorsData } = useQuery({
-        queryKey: ["staff-users-list"],
-        queryFn: () => get<any>("/v1/admin/users", { params: { exclude_type: "customer", per_page: "100" } }),
+    // Everyone a stage can be given to — open to every staff login, unlike
+    // the admin users list (users.view), which left managers with an empty
+    // dropdown. A failure says so instead of showing nobody.
+    const { data: tailorsData, error: tailorsError } = useQuery({
+        queryKey: ["assignable-users"],
+        queryFn: () => usersApi.assignable(),
         staleTime: 60_000,
         retry: false,
     });
     const tailors = tailorsData?.data ?? [];
+    useEffect(() => {
+        if (tailorsError) toast.error(`Could not load the staff list: ${(tailorsError as ApiError).message ?? "unknown error"}`);
+    }, [tailorsError, toast]);
 
     const qty = Math.max(1, order.quantity ?? 1);
     // A colourway order counts each stage per batch, so "redo 2" cannot say
@@ -614,12 +621,16 @@ function AssignModal({ order, onClose, onSaved }: { order: ProductionOrder; onCl
     });
     const freshOrder = (freshData as any)?.order as ProductionOrder | undefined;
 
-    const { data: tailorsData } = useQuery({
-        queryKey: ["staff-users-list"],
-        queryFn: () => get<any>("/v1/admin/users", { params: { exclude_type: "customer", per_page: "100" } }),
+    const { data: tailorsData, error: tailorsError } = useQuery({
+        queryKey: ["assignable-users"],
+        queryFn: () => usersApi.assignable(),
         staleTime: 60_000,
+        retry: false,
     });
     const tailors = tailorsData?.data ?? [];
+    useEffect(() => {
+        if (tailorsError) toast.error(`Could not load the staff list: ${(tailorsError as ApiError).message ?? "unknown error"}`);
+    }, [tailorsError, toast]);
 
     const rawTasks = freshOrder?.tasks ?? order.tasks ?? [];
     const activeTasks = [...rawTasks]

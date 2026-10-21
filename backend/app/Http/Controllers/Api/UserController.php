@@ -667,6 +667,40 @@ class UserController extends Controller
     }
 
     /**
+     * GET /users/assignable — everyone a production stage can be given to.
+     *
+     * The Assign Tasks dialog used the admin staff list (users.view), so an
+     * outlet or production manager — who holds production.manage_assignees
+     * and may assign — saw an empty dropdown (owner, 2026-10-21). This list
+     * is open to every staff login like byRole and answers with who and
+     * where only: id, name, outlet, roles. Contact details stay with
+     * users.view. Active, non-customer accounts only.
+     */
+    public function assignable(Request $request)
+    {
+        $users = User::query()
+            ->where('status', 'active')
+            ->where(fn ($q) => $q->whereNull('user_type')->orWhere('user_type', '!=', 'customer'))
+            ->with(['roles:id,name', 'outlets:id,name'])
+            ->orderBy('first_name')->orderBy('last_name')
+            ->get(['id', 'first_name', 'last_name'])
+            ->map(function (User $user) {
+                $outlet = $user->primaryOutlet();
+
+                return [
+                    'id'         => $user->id,
+                    'first_name' => $user->first_name,
+                    'last_name'  => $user->last_name,
+                    'outlet'     => $outlet ? ['id' => $outlet->id, 'name' => $outlet->name] : null,
+                    'roles'      => $user->roles->pluck('name')->values()->all(),
+                ];
+            })
+            ->values();
+
+        return response()->json(['data' => $users]);
+    }
+
+    /**
      * Bulk status update.
      */
     public function bulkUpdateStatus(Request $request)
