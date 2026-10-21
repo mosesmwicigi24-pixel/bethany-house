@@ -515,10 +515,13 @@ class ExpenseController extends Controller
         $this->pendingOrFail($this->findScopedExpense($id, $user), 'approved');
 
         $validated = $request->validate([
-            'comments' => 'nullable|string|max:1000',
+            'comments'       => 'nullable|string|max:1000',
+            // The owner signing what the owner recorded (App\Support\OwnerOverride):
+            // asked for explicitly, never assumed; needs a fresh step-up.
+            'owner_override' => 'nullable|boolean',
         ]);
 
-        [$expense, $approval] = $this->performApprove($id, $user, $validated['comments'] ?? null);
+        [$expense, $approval] = $this->performApprove($id, $user, $validated['comments'] ?? null, (bool) ($validated['owner_override'] ?? false));
         $engine = app(\App\Services\Approvals\ApprovalEngine::class);
         $done   = $approval->status === \App\Models\ApprovalRequest::APPROVED;
 
@@ -620,7 +623,7 @@ class ExpenseController extends Controller
     }
 
     /** @return array{0: Expense, 1: \App\Models\ApprovalRequest} */
-    private function performApprove(int $id, User $user, ?string $comments): array
+    private function performApprove(int $id, User $user, ?string $comments, bool $ownerOverride = false): array
     {
         $expense = $this->pendingOrFail($this->findScopedExpense($id, $user), 'approved');
 
@@ -632,7 +635,7 @@ class ExpenseController extends Controller
         $engine   = app(\App\Services\Approvals\ApprovalEngine::class);
         $approval = $engine->sign(
             $engine->openOrAdopt('expense', $expense), $user,
-            \App\Models\ApprovalSignature::APPROVED, $comments, $expense->id,
+            \App\Models\ApprovalSignature::APPROVED, $comments, $expense->id, null, $ownerOverride,
         );
 
         return [$expense->fresh(), $approval];

@@ -667,6 +667,13 @@ function ExpenseRowActions({
     const { can } = usePermissions();
     const navigate = useNavigate();
     const [open, setOpen] = useState(false);
+    // The owner may approve an expense the owner recorded, after confirming
+    // it's them (owner override, 2026-10-21); the server refuses everyone else.
+    const me = useAuthStore((s) => s.user);
+    const idOf = (v: unknown) => (v && typeof v === "object" ? (v as { id: number }).id : (v as number | null));
+    const recordedByMe =
+        !!me && (idOf((expense as any).created_by) === me.id || idOf((expense as any).submitted_by) === me.id);
+    const ownerOverride = !!me?.is_owner && recordedByMe;
     // Reject and Request changes both need a note for the maker.
     const [reasonFor, setReasonFor] = useState<null | "reject" | "request_changes">(null);
     const [rejectReason, setRejectReason] = useState("");
@@ -748,15 +755,16 @@ function ExpenseRowActions({
                                 <div className="my-1 border-t border-line" />
                                 <button
                                     className="dropdown-item text-success"
+                                    title={ownerOverride ? "You recorded this. As the owner you may approve it after confirming it's you; the approval is marked as an owner override." : undefined}
                                     onClick={() =>
                                         doAction(
                                             () =>
-                                                expensesApi.approve(expense.id),
+                                                expensesApi.approve(expense.id, undefined, ownerOverride),
                                             "Expense approved.",
                                         )
                                     }
                                 >
-                                    ✓ Approve
+                                    {ownerOverride ? "✓ Approve anyway (owner override)" : "✓ Approve"}
                                 </button>
                                 <button
                                     className="dropdown-item"

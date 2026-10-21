@@ -306,7 +306,7 @@ final class ApprovalEngine
      * $approvableId / $version, when given, must match the request — the
      * approval is bound to the record and version the signer was shown.
      */
-    public function sign(ApprovalRequest $request, User $signer, string $decision, ?string $reason = null, ?int $approvableId = null, ?int $version = null): ApprovalRequest
+    public function sign(ApprovalRequest $request, User $signer, string $decision, ?string $reason = null, ?int $approvableId = null, ?int $version = null, bool $ownerOverride = false): ApprovalRequest
     {
         if (!in_array($decision, [ApprovalSignature::APPROVED, ApprovalSignature::REJECTED], true)) {
             $this->fail(422, 'BAD_DECISION', 'A decision is approve or reject.');
@@ -321,8 +321,18 @@ final class ApprovalEngine
         // Maker ≠ checker first: a maker is refused as a maker (SELF_APPROVAL),
         // whatever band they might also hold. Before any write, so the audit
         // entry it makes is not rolled back.
+        // The owner may sign as the maker for the actions OwnerOverride lists,
+        // after confirming who they are (owner, 2026-10-21); the signature
+        // then carries owner_override = true.
+        $overridden = false;
         if ($decision === ApprovalSignature::APPROVED) {
-            MakerChecker::assertNotMaker($signer, $handler->makerCheckerAction(), $record, ...$this->makerIdsOf($request, $record));
+            $makerIds = $this->makerIdsOf($request, $record);
+            if ($ownerOverride && in_array((int) $signer->id, $makerIds, true)) {
+                \App\Support\OwnerOverride::assertAllowed($signer, $handler->makerCheckerAction(), $record, $makerIds);
+                $overridden = true;
+            } else {
+                MakerChecker::assertNotMaker($signer, $handler->makerCheckerAction(), $record, ...$makerIds);
+            }
         }
 
         if ($this->hash($handler->fingerprint($record, $request->payload)) !== $request->fingerprint) {
@@ -341,7 +351,7 @@ final class ApprovalEngine
             $this->fail(403, 'NOT_YOUR_BAND', 'This is waiting for a signature you do not hold.');
         }
 
-        $finished = DB::transaction(function () use ($request, $signer, $decision, $reason, $target, $covers, $handler) {
+        $finished = DB::transaction(function () use ($request, $signer, $decision, $reason, $target, $covers, $handler, $overridden) {
             /** @var ApprovalRequest $locked */
             $locked = ApprovalRequest::whereKey($request->id)->lockForUpdate()->first();
             if (!$locked->isPending() || (int) $locked->current_band !== (int) $request->current_band) {
@@ -357,6 +367,7 @@ final class ApprovalEngine
                 'covers'              => $covers,
                 'reason'              => $reason,
                 'signed_at'           => now(),
+                'owner_override'      => $overridden,
             ]);
 
             if ($decision === ApprovalSignature::REJECTED) {
@@ -404,6 +415,7 @@ final class ApprovalEngine
                 'escalated'           => $escalated,
                 'reason'              => $reason,
                 'status'              => $finished->status,
+                'owner_override'      => $overridden,
             ],
             ucfirst($decision) . " {$finished->event} v{$finished->version} at band {$target['order']}" . ($escalated ? ' (escalated)' : ''),
             $signer,
@@ -822,6 +834,7 @@ final class ApprovalEngine
                 'reason'     => $s->reason,
                 'signed_at'  => $s->signed_at?->toIso8601String(),
                 'signer'     => $s->signer ? ['id' => $s->signer->id, 'name' => $name($s->signer)] : null,
+                'owner_override' => (bool) $s->owner_override,
             ])->values(),
             'rejected_reason' => $r->rejected_reason,
             'supersedes_id'   => $r->supersedes_id,

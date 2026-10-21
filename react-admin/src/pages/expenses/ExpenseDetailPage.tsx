@@ -621,6 +621,14 @@ function ApprovalTimeline({ approvals }: { approvals: any[] }) {
                                     Step {a.step}
                                 </span>
                             )}
+                            {a.owner_override && (
+                                <span
+                                    className="text-xs font-medium px-2 py-0.5 rounded-full bg-warning-light text-warning-dark"
+                                    title="The owner approved an expense the owner recorded, after confirming it was them. Maker ≠ checker was overridden here."
+                                >
+                                    owner override
+                                </span>
+                            )}
                         </div>
                         {a.comments && (
                             <p className="text-sm text-surface-600 mt-1 bg-surface-50 rounded-lg px-3 py-2">
@@ -723,7 +731,10 @@ export default function ExpenseDetailPage() {
     const recordedByMe =
         !!me && (idOf(expense.created_by) === me.id || idOf(expense.submitted_by) === me.id);
     const canApprove = can("expenses.approve");
-    const canApproveThis = canApprove && !recordedByMe;
+    // The owner account alone may approve what it recorded, after confirming
+    // it's them; the approval is then marked as an owner override.
+    const ownerOverride = !!me?.is_owner && recordedByMe;
+    const canApproveThis = canApprove && (!recordedByMe || ownerOverride);
     // The approver's latest note when it was sent back for changes.
     const changesRequest =
         expense.status === "changes_requested"
@@ -783,7 +794,11 @@ export default function ExpenseDetailPage() {
                     )}
 
                     {expense.status === "pending_approval" && canApprove && recordedByMe && (
-                        <span className="text-xs text-surface-500">You recorded or submitted this expense — someone else approves it.</span>
+                        <span className="text-xs text-surface-500">
+                            {ownerOverride
+                                ? "You recorded or submitted this expense. As the owner you may approve it after confirming it's you; the approval is marked as an owner override."
+                                : "You recorded or submitted this expense — someone else approves it."}
+                        </span>
                     )}
 
                     {expense.status === "pending_approval" && canApproveThis && (
@@ -793,12 +808,12 @@ export default function ExpenseDetailPage() {
                                 disabled={busy}
                                 onClick={() =>
                                     doAction(
-                                        () => expensesApi.approve(expense.id),
+                                        () => expensesApi.approve(expense.id, undefined, ownerOverride),
                                         "Expense approved.",
                                     )
                                 }
                             >
-                                ✓ Approve
+                                {ownerOverride ? "✓ Approve anyway (owner override)" : "✓ Approve"}
                             </button>
                             <button
                                 className="btn-ghost"
