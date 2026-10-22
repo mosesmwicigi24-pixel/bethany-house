@@ -22,11 +22,20 @@
  *   --vh      1% of the visible height (the long-standing h-screen-safe unit)
  *   --vv-h    the visible height itself
  *   --kb-h    how far the keyboard intrudes below the visible area (0 closed)
- * It also pins the window at scroll 0 (an app shell has nothing to scroll) and,
- * while iOS has the page panned, translates the shell DOWN by the pan so it
- * stays exactly where it was on screen instead of sliding under the status
- * bar. The transform is removed the moment the pan is gone, so modals that
- * position themselves against the viewport are never caught by it.
+ * It also pins the window at scroll 0 (an app shell has nothing to scroll):
+ * when iOS pans the page to reveal the focused field, the pan is undone the
+ * same frame, and because the shell has already shrunk to the visible height
+ * the field is on screen without it.
+ *
+ * NO TRANSFORM. The first version of this hook also translated the shell down
+ * by the pan "to hold it in place". The owner's second recording (22 Oct
+ * 2026, 22:19) showed what that does: the pan is cancelled by the scroll
+ * reset while the translate stays for a frame, so the shell drops under the
+ * status bar and the composer under the keyboard, then snaps back — a shake
+ * on every keystroke. Worse, WebKit paints a textarea's caret at its
+ * UNTRANSFORMED position when an ancestor is translated, which is why the
+ * caret sat inside the text and, in one frame, below the composer entirely.
+ * Never put a transform on the shell while a field is focused.
  *
  * Nothing here animates. The keyboard is the only animation; the shell simply
  * tracks it frame by frame, and the thread's own resize anchoring keeps the
@@ -38,7 +47,7 @@ import { useEffect, type RefObject } from "react";
 /** How long after a trigger to keep re-reading, frame by frame. iOS keyboard animations run ~250–400 ms. */
 const FOLLOW_MS = 700;
 
-export function useViewportFrame(shell: RefObject<HTMLElement | null>): void {
+export function useViewportFrame(_shell: RefObject<HTMLElement | null>): void {
     useEffect(() => {
         const root = document.documentElement;
         const vv   = window.visualViewport;
@@ -56,15 +65,12 @@ export function useViewportFrame(shell: RefObject<HTMLElement | null>): void {
                 root.style.setProperty("--vv-h", `${h}px`);
             }
             if (kb !== last.kb) root.style.setProperty("--kb-h", `${kb}px`);
-            if (top !== last.top && shell.current) {
-                // Keep the shell where it was while iOS pans the page; a clean
-                // zero removes the transform entirely (see the docblock).
-                shell.current.style.transform = top > 0 ? `translate3d(0, ${top}px, 0)` : "";
-            }
             last = { h, top, kb };
 
             // An app shell never scrolls the window; every pane scrolls inside.
-            if (window.scrollY > 0 || root.scrollTop > 0) window.scrollTo(0, 0);
+            // On iOS a keyboard pan shows up as visualViewport.offsetTop with
+            // window.scrollY still 0, and scrollTo(0, 0) undoes that too.
+            if (top > 0 || window.scrollY > 0 || root.scrollTop > 0) window.scrollTo(0, 0);
         };
 
         const tick = () => {
@@ -95,7 +101,6 @@ export function useViewportFrame(shell: RefObject<HTMLElement | null>): void {
             document.removeEventListener("focusout", follow);
             window.removeEventListener("orientationchange", follow);
             document.removeEventListener("visibilitychange", follow);
-            if (shell.current) shell.current.style.transform = "";
         };
-    }, [shell]);
+    }, []);
 }
