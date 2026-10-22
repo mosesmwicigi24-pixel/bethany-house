@@ -76,6 +76,14 @@ export interface EntityPreview {
     is_overdue?: boolean;
 }
 
+export type AssistAction = "summarise" | "translate" | "draft" | "replies";
+export interface AssistRequest {
+    action: AssistAction;
+    text?: string;
+    language?: "en" | "sw";
+    audience?: "customer" | "team";
+}
+
 export interface ChannelMessage {
     id:              number;
     channel_id:      number;
@@ -158,6 +166,16 @@ export const channelApi = {
             `/v1/admin/channels/${channelId}/messages`,
             { params: { per_page: 50, ...(before ? { before } : {}) } }
         ),
+
+    /**
+     * The Assist rail (owner's redesign, 22 Oct 2026): summarise the thread,
+     * translate the draft, draft a message to the customer or the team, or
+     * get three replies to pick from. Members only; the server answers 503
+     * `assist_not_configured` when no model key is set and 422
+     * `assist_unavailable` with a sentence to show when it cannot answer.
+     */
+    assist: (channelId: number, payload: AssistRequest) =>
+        post<{ action: AssistAction; text: string; options?: string[] }>(`/v1/admin/channels/${channelId}/assist`, payload),
 
     /** Send a message. */
     send: (channelId: number, payload: { body: string; reply_to_id?: number | null }) =>

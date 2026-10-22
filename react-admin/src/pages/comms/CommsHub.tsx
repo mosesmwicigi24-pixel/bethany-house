@@ -12,6 +12,7 @@
 
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import { useVisualViewport } from "@/lib/useVisualViewport";
+import { AssistRail } from "@/components/comms/AssistRail";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
@@ -1086,10 +1087,12 @@ function htmlToMarkdown(html: string): string {
 }
 
 
-function Composer({ channelId, channelName, channelType, channelMemberIds, replyTo, onClearReply, onSent }: {
+function Composer({ channelId, channelName, channelType, channelContextType, channelMemberIds, replyTo, onClearReply, onSent }: {
     channelId: number;
     channelName?: string;
     channelType?: string;
+    /** "order" | "production_order" for an order thread: Assist can then draft the customer's message. */
+    channelContextType?: string | null;
     /** Set of user IDs who are already members — used to guard @mentions */
     channelMemberIds?: Set<number>;
     replyTo?: ChannelMessage | null;
@@ -1337,6 +1340,13 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
                 paddingBottom: "env(safe-area-inset-bottom, 0px)",
             }}
         >
+            {/* Assist rail — one tap for a summary, a translation, a draft or replies */}
+            <AssistRail
+                channelId={channelId}
+                draft={body}
+                hasOrder={!!channelContextType}
+                onInsert={(t) => { setBody(prev => (prev.trim() ? prev.replace(/\s*$/, "") + "\n" + t : t)); setTimeout(() => textareaRef.current?.focus(), 0); }}
+            />
             {/* Reply context */}
             {replyTo && (
                 <div className="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-lg bg-surface-50 border border-surface-200 text-xs">
@@ -2750,6 +2760,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                     channelId={channel.id}
                     channelName={channel.name}
                     channelType={channel.type}
+                    channelContextType={channel.context_type ?? null}
                     channelMemberIds={channelMemberIds}
                     replyTo={replyTo}
                     onClearReply={() => setReplyTo(null)}
