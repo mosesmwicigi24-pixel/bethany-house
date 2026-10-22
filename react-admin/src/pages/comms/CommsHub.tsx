@@ -1086,7 +1086,7 @@ function htmlToMarkdown(html: string): string {
 }
 
 
-function Composer({ channelId, channelName, channelType, channelMemberIds, replyTo, onClearReply, onSent, scrollToBottom }: {
+function Composer({ channelId, channelName, channelType, channelMemberIds, replyTo, onClearReply, onSent }: {
     channelId: number;
     channelName?: string;
     channelType?: string;
@@ -1094,8 +1094,6 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
     channelMemberIds?: Set<number>;
     replyTo?: ChannelMessage | null;
     onClearReply?: () => void; onSent: (msg: ChannelMessage) => void;
-    /** Scrolls the THREAD PANE (never the window) to its newest message. */
-    scrollToBottom?: () => void;
 }) {
     const [body, setBody]               = useState("");
     const [mentionQ, setMentionQ]       = useState<string | null>(null);
@@ -1128,24 +1126,13 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
     const { user }                      = useAuthStore();
     const toast                         = useToastStore();
 
-    // ── Phase 5: keyboard handling ────────────────────────────────────────────
-    // visualViewport tracks the true visible area - shrinks when keyboard opens.
-    // We use it to pad the composer so it sits above the keyboard on iOS/Android.
-    // keyboardHeight is deliberately not consumed any more — the shell is sized to
-    // visualViewport.height, so it already ends at the keyboard. keyboardOpen is
-    // still used, to scroll the thread down once the keyboard has settled.
-    const { keyboardOpen } = useVisualViewport();
-
-    // Auto-scroll to bottom when the keyboard opens so the latest message is
-    // visible. Via the pane's own scrollTop — scrollIntoView walks EVERY
-    // scrollable ancestor, window included, and on iOS that window pan is
-    // exactly what used to shove the whole shell off the top of the screen.
-    useEffect(() => {
-        if (keyboardOpen) {
-            // Small delay so the keyboard animation finishes first
-            setTimeout(() => scrollToBottom?.(), 100);
-        }
-    }, [keyboardOpen]);
+    // ── Keyboard ──────────────────────────────────────────────────────────────
+    // Nothing to do here any more. The shell follows the keyboard frame by
+    // frame (AdminLayout → useViewportFrame), and the thread pane's resize
+    // anchoring (ChannelView) keeps the newest message in view the instant
+    // the pane shrinks. The 100 ms "scroll once the keyboard has settled"
+    // timer that used to live here was one of the four out-of-step movements
+    // in the owner's recording of 22 Oct 2026, so it is gone.
 
     // Focus textarea when channel changes (desktop barcode scanner / keyboard)
     useEffect(() => {
@@ -1338,7 +1325,7 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
     return (
         <>
         <div
-            className="px-2 sm:px-4 py-3 border-t border-surface-200 shrink-0 bg-white"
+            className="px-2 sm:px-4 pt-1.5 pb-2 shrink-0 bg-white"
             style={{
                 // Only the home-indicator inset. This used to add keyboardHeight to
                 // lift the composer over the keyboard, which was right while the app
@@ -1435,13 +1422,17 @@ aria-label="Delete">✕</button>
                 {/* Tighter gutters on phone: the text is the narrowest thing here and
                     every px of chrome comes straight out of it. Desktop keeps its
                     roomier px-3/gap-1.5. */}
-                <div className="flex items-center gap-1 sm:gap-1.5 bg-white rounded-xl border border-surface-200 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200 px-1.5 sm:px-3 py-2">
+                {/* The floating pill (Signal direction, owner 22 Oct 2026): a soft grey
+                    capsule that turns white and takes the brand edge when you are in
+                    it; the + and Send are round so they read as buttons at a glance. */}
+                <div className="flex items-end gap-1 sm:gap-1.5 bg-surface-100 rounded-[22px] border border-transparent focus-within:bg-white focus-within:border-brand-300 px-1.5 py-1.5 transition-colors">
                     {/* Attach */}
-                    <button onClick={() => fileInputRef.current?.click()} title="Attach file or image"
+                    <button onClick={() => fileInputRef.current?.click()} title="Add a photo, file or order"
                         disabled={pending.length >= 10}
-                        className="shrink-0 w-9 h-9 sm:w-7 sm:h-7 flex items-center justify-center rounded-lg text-surface-400 hover:text-brand-600 hover:bg-surface-100 disabled:opacity-40 transition-colors">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+                        aria-label="Add a photo, file or order"
+                        className="shrink-0 w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center rounded-full bg-white text-surface-600 border border-surface-200 hover:text-brand-600 hover:border-brand-300 disabled:opacity-40 transition-colors">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14"/>
                         </svg>
                     </button>
                     <input ref={fileInputRef} type="file" multiple
@@ -1450,7 +1441,7 @@ aria-label="Delete">✕</button>
                         onChange={e => { handleFiles(e.target.files); e.target.value = ""; }} />
 
                     {/* Rich composer: transparent textarea + visual mirror overlay */}
-                    <div className="relative flex-1 self-center min-w-0 max-h-40 overflow-y-auto">
+                    <div className="relative flex-1 self-center min-w-0 max-h-40 overflow-y-auto px-1.5 py-1.5">
                         {/* Mirror drives the wrapper height — pills render here visually.
                             The textarea is absolute on top, transparent, and handles input.
                             This avoids caret displacement: wrapper height = mirror height. */}
@@ -1461,10 +1452,10 @@ aria-label="Delete">✕</button>
                                 ? parseComposerNodes(body, tokenMap)
                                 : <span className="text-surface-400">
                                     {window.innerWidth < 640
-                                        ? "Message… (@ mention · # tag order)"
+                                        ? "Message…  # order · @ person"
                                         : enterToSend
-                                            ? "Message… (Enter to send · @ to mention · # tag order)"
-                                            : "Message… (Ctrl+Enter to send · @ to mention · # tag order)"
+                                            ? "Message…  Enter to send · # order · @ person"
+                                            : "Message…  Ctrl+Enter to send · # order · @ person"
                                     }
                                   </span>
                             }
@@ -1529,26 +1520,13 @@ aria-label="Delete">✕</button>
                     {/* Send */}
                     <button onClick={() => { if (canSend) sendMutation.mutate(); }}
                         disabled={!canSend || sendMutation.isPending}
-                        className="shrink-0 w-10 h-10 sm:w-8 sm:h-8 rounded-xl bg-brand-600 text-white flex items-center justify-center hover:bg-brand-700 active:bg-brand-800 disabled:opacity-40 transition-colors tap-target">
-                        <svg className="w-4 h-4 rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+                        aria-label="Send"
+                        className="shrink-0 w-9 h-9 sm:w-8 sm:h-8 rounded-full bg-brand-500 text-white flex items-center justify-center hover:bg-brand-600 active:bg-brand-700 disabled:opacity-35 transition-colors tap-target">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.4}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 19V5M5 12l7-7 7 7"/>
                         </svg>
                     </button>
                 </div>
-                {/* Shortcut hints - visible when composer is empty */}
-                {!body && pending.length === 0 && (
-                    <div className="flex items-center gap-3 px-1 pt-1.5 pb-0.5">
-                        <span className="flex items-center gap-1 text-2xs text-surface-500">
-                            <kbd className="px-1 py-0.5 rounded bg-surface-100 text-surface-400 font-mono text-2xs border border-surface-200 leading-none">@</kbd>
-                            mention people
-                        </span>
-                        <span className="text-surface-200 text-2xs select-none">·</span>
-                        <span className="flex items-center gap-1 text-2xs text-surface-500">
-                            <kbd className="px-1 py-0.5 rounded bg-surface-100 text-surface-400 font-mono text-2xs border border-surface-200 leading-none">#</kbd>
-                            tag an order
-                        </span>
-                    </div>
-                )}
             </div>
         </div>
 
@@ -1679,24 +1657,23 @@ function MessageContent({ body, isOwn, linkedEntities, entityPreviews, timeLabel
     const meta = timeLabel && (
         <div className={clsx(
             "flex items-center justify-end gap-1.5 mt-1 text-2xs tabular-nums",
-            isOwn ? "text-white/60" : "text-surface-500",
+            isOwn ? "text-white/75" : "text-surface-500",
         )}>{timeLabel}{ticks}</div>
     );
 
     return (
         <div className={clsx(
-            "rounded-2xl text-sm leading-relaxed break-words w-fit max-w-full",
-            // Nuru's card colours: own = the dark neutral (their navy → our
-            // surface-900), everyone else = a white card on the tinted canvas.
-            // The brand amber stays an ACCENT (send, chips, reply rule) and is
-            // never a bubble fill — a page of amber blocks is what went wrong.
-            // shadow-sm + the deeper border keep the white card legible even
-            // on washed-out outdoor phone screens where the tint flattens.
+            "rounded-[18px] text-[15px] leading-[1.38] break-words w-fit max-w-full",
+            // Linen (owner's choice, 22 Oct 2026): the brand colour is spent on
+            // exactly one thing — what YOU sent. Everyone else is a quiet grey
+            // on a white canvas, no border, no shadow, so the words carry the
+            // page. White text on brand-500 is the same pairing as every
+            // primary button in the console (contrast checked there).
             isOwn
-                ? "bg-surface-900 text-white shadow-sm"
-                : "bg-white border border-surface-300/80 text-surface-900 shadow-sm",
+                ? "bg-brand-500 text-white"
+                : "bg-surface-100 text-surface-900",
             // Tail on the BOTTOM corner, pointing at the speaker's side.
-            isOwn ? "rounded-br-[5px]" : "rounded-bl-[5px]",
+            isOwn ? "rounded-br-[6px]" : "rounded-bl-[6px]",
             // Media cards hug their content with a thin frame, WhatsApp-style;
             // text-only bubbles keep the classic padding.
             hasAttachments ? "p-1.5" : "px-3.5 py-2",
@@ -1849,7 +1826,7 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
     if (isSystem) {
         return (
             <div className="flex justify-center py-2">
-                <span className="text-2xs text-surface-500 bg-white px-3 py-1 rounded-full border border-surface-200">{message.body}</span>
+                <span className="text-2xs text-surface-500 bg-surface-100 px-3 py-1 rounded-full">{message.body}</span>
             </div>
         );
     }
@@ -2588,82 +2565,39 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7"/>
                         </svg>
                     </button>
-                    <div className={clsx("w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0",
-                        channel.is_private ? "bg-amber-50 text-amber-700" : "bg-brand-50 text-brand-700")}>
-                        {channel.type === "dm"
-                            ? <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
-                            : channel.is_private ? <LockIcon /> : "#"
-                        }
-                    </div>
+                    {channel.type === "dm" ? (
+                        /* The person, not a chat icon: their avatar with a presence dot
+                           where the eye already is (WhatsApp 2026 does the same). */
+                        <div className="relative shrink-0">
+                            <Avatar initials={initialsOf(channel.name)} name={channel.name} size="md" />
+                            {onlineIds.length > 0 && (
+                                <span className="absolute -right-0.5 -bottom-0.5 w-3 h-3 rounded-full bg-success-500 border-2 border-white" aria-hidden="true" />
+                            )}
+                        </div>
+                    ) : (
+                        <div className={clsx("w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0",
+                            channel.is_private ? "bg-amber-50 text-amber-700" : "bg-brand-50 text-brand-700")}>
+                            {channel.is_private ? <LockIcon /> : "#"}
+                        </div>
+                    )}
                     <div className="flex-1 min-w-0">
                         {orderCtx ? (
-                            /* ── Context channel: live order data ── */
-                            <div className="flex flex-col gap-0.5 min-w-0">
-                                {/* Row 1: type pill + PRODUCT NAME (leads) + status + priority */}
-                                <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                                    <span className={clsx(
-                                        "text-2xs font-bold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0",
-                                        orderCtx.type === "production_order"
-                                            ? "bg-accent-50 text-accent-600"
-                                            : "bg-brand-50 text-brand-600"
-                                    )}>
-                                        {orderCtx.type === "production_order" ? "Production" : "Order"}
-                                    </span>
-                                    <span className="text-sm font-bold text-surface-900 truncate">
-                                        {orderCtx.title ?? orderCtx.orderNumber}
-                                    </span>
-                                    {orderCtx.status && (() => {
-                                        const sc = PROD_STATUS_COLOURS[orderCtx.status] ?? { text: "text-surface-500", bg: "bg-surface-100" };
-                                        return (
-                                            <span className={clsx("text-2xs font-semibold px-1.5 py-0.5 rounded-full shrink-0", sc.text, sc.bg)}>
-                                                {orderCtx.status.replace(/_/g, " ")}
-                                            </span>
-                                        );
-                                    })()}
-                                    {orderCtx.priority && orderCtx.priority !== "normal" && (
-                                        <span className={clsx("text-2xs font-bold uppercase shrink-0", PRIORITY_COLOURS[orderCtx.priority] ?? "text-surface-400")}>
-                                            {orderCtx.priority}
-                                        </span>
-                                    )}
-                                </div>
-                                {/* Row 2: order number (small, mono) · stage · due date · members */}
-                                <div className="flex items-center gap-2 flex-wrap text-2xs text-surface-500">
-                                    <span className="font-mono font-semibold text-surface-400 shrink-0">{orderCtx.orderNumber}</span>
-                                    {orderCtx.currentStage && (
-                                        <>
-                                            <span className="text-surface-500">·</span>
-                                            <span>{orderCtx.currentStage}</span>
-                                        </>
-                                    )}
-                                    {orderCtx.dueDate && (() => {
-                                        const { label, cls } = fmtDueDate(orderCtx.dueDate);
-                                        return (
-                                            <>
-                                                <span className="text-surface-500">·</span>
-                                                <span className={cls}>{label}</span>
-                                            </>
-                                        );
-                                    })()}
-                                    {orderCtx.completion != null && (
-                                        <>
-                                            <span className="text-surface-500">·</span>
-                                            <span className={clsx(orderCtx.completion >= 100 ? "text-success-600 font-medium" : undefined)}>
-                                                {orderCtx.completion}% done
-                                            </span>
-                                        </>
-                                    )}
-                                    <span className="text-surface-500">·</span>
-                                    <span>{memberCount} member{memberCount !== 1 ? "s" : ""}{onlineIds.length > 0 ? `, ${onlineIds.length} online` : ""}</span>
-                                </div>
+                            /* ── Order thread: the name leads; the live order sits in the
+                                   context pill under the header (Linen + Signal, 22 Oct 2026). */
+                            <div className="flex flex-col min-w-0">
+                                <p className="text-[15px] font-bold text-surface-900 truncate tracking-tight">{orderCtx.title ?? orderCtx.orderNumber}</p>
+                                <p className="text-xs text-surface-400 truncate">
+                                    {orderCtx.type === "production_order" ? "Production" : "Order"} · {memberCount} member{memberCount !== 1 ? "s" : ""}{onlineIds.length > 0 ? `, ${onlineIds.length} online` : ""}
+                                </p>
                             </div>
                         ) : (
                             /* ── DM or manual space ── */
                             <>
-                                <p className="text-sm font-semibold text-surface-900 truncate">{channel.name}</p>
-                                <p className="text-2xs text-surface-400">
+                                <p className="text-[15px] font-bold text-surface-900 truncate tracking-tight">{channel.name}</p>
+                                <p className="text-xs text-surface-400">
                                     {channel.type === "dm"
                                         ? onlineIds.length > 0
-                                            ? <span className="text-success-600 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-success-500 inline-block" /> Online</span>
+                                            ? <span className="text-success-600">Online</span>
                                             : "Offline"
                                         : `${memberCount} member${memberCount !== 1 ? "s" : ""}${onlineIds.length > 0 ? ` · ${onlineIds.length} online` : ""}`
                                     }
@@ -2699,13 +2633,49 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                     )}
                 </div>
 
+                {/* Context pill — the order this thread is about, one tap from the
+                    conversation. Was two dense rows inside the header; now a quiet
+                    capsule beneath it so the header stays a header. */}
+                {orderCtx && (
+                    <button
+                        onClick={() => navigate(
+                            channel.context_type === "production_order"
+                                ? `/production/orders/${channel.context_id}`
+                                : `/sales/orders/${channel.context_id}`
+                        )}
+                        title="Open order"
+                        className="mx-3 sm:mx-5 mt-2 shrink-0 flex items-center gap-1.5 rounded-full bg-surface-50 border border-surface-200 px-3 py-1.5 text-xs text-left min-w-0 hover:bg-surface-100 transition-colors"
+                    >
+                        <span className="font-mono font-bold text-surface-700 shrink-0">{orderCtx.orderNumber}</span>
+                        {orderCtx.currentStage && <span className="text-surface-500 truncate">· {orderCtx.currentStage}</span>}
+                        {orderCtx.dueDate && (() => {
+                            const { label, cls } = fmtDueDate(orderCtx.dueDate);
+                            return <span className={clsx("shrink-0", cls)}>· {label}</span>;
+                        })()}
+                        {orderCtx.completion != null && (
+                            <span className={clsx("shrink-0", orderCtx.completion >= 100 ? "text-success-600 font-medium" : "text-surface-500")}>· {orderCtx.completion}%</span>
+                        )}
+                        {orderCtx.priority && orderCtx.priority !== "normal" && (
+                            <span className={clsx("text-2xs font-bold uppercase shrink-0", PRIORITY_COLOURS[orderCtx.priority] ?? "text-surface-400")}>{orderCtx.priority}</span>
+                        )}
+                        {orderCtx.status && (() => {
+                            const sc = PROD_STATUS_COLOURS[orderCtx.status] ?? { text: "text-surface-500", bg: "bg-surface-100" };
+                            return (
+                                <span className={clsx("ml-auto text-2xs font-semibold px-2 py-0.5 rounded-full shrink-0", sc.text, sc.bg)}>
+                                    {orderCtx.status.replace(/_/g, " ")}
+                                </span>
+                            );
+                        })()}
+                    </button>
+                )}
+
                 {/* Messages */}
                 {/* Tinted canvas, as Nuru does it (their --background #f6f4ee). White
                     bubbles were previously invisible against a white thread — this is
                     what made the page read flat. brand-50/60 turned out to still be
                     within a hair of white on real phone screens, so the tint is now
                     brand-100/50: a definite warm ground the white cards sit ON. */}
-                <div ref={scrollAreaRef} onScroll={onThreadScroll} className="flex-1 overflow-y-auto py-4 scroll-touch overscroll-contain bg-brand-100/50">
+                <div ref={scrollAreaRef} onScroll={onThreadScroll} className="flex-1 overflow-y-auto py-3 scroll-touch overscroll-contain bg-white">
                     {hasMore && (
                         <div className="flex justify-center pb-2">
                             <button onClick={async () => {
@@ -2742,7 +2712,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                             {/* Sticky pill: scroll back through a long day and you never
                                 lose track of which day you're reading. */}
                             <div className="sticky top-0 z-10 flex justify-center py-2 pointer-events-none">
-                                <span className="text-2xs font-bold text-surface-500 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full border border-surface-200 shadow-sm">
+                                <span className="text-2xs font-bold text-surface-500 bg-surface-100/95 backdrop-blur-sm px-3 py-1 rounded-full">
                                     {date}
                                 </span>
                             </div>
@@ -2763,7 +2733,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                         <div className="flex items-center gap-2 px-4 py-2">
                             {/* Three breathing dots read as "someone is there" far faster
                                 than the word "typing" ever does. */}
-                            <span className="flex items-center gap-1 bg-white border border-line rounded-full px-2.5 py-1.5 shadow-sm">
+                            <span className="flex items-center gap-1 bg-surface-100 rounded-full px-3 py-2">
                                 {[0, 150, 300].map(delay => (
                                     <span key={delay} className="w-1.5 h-1.5 rounded-full bg-surface-300 animate-bounce"
                                         style={{ animationDelay: `${delay}ms`, animationDuration: "1s" }} />
@@ -2783,8 +2753,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                     channelMemberIds={channelMemberIds}
                     replyTo={replyTo}
                     onClearReply={() => setReplyTo(null)}
-                    onSent={msg => { setMessages(prev => prev.some(m => String(m.id) === String(msg.id)) ? prev : [...prev, msg]); setTimeout(() => scrollToBottom(), 50); }}
-                    scrollToBottom={scrollToBottom} />
+                    onSent={msg => { setMessages(prev => prev.some(m => String(m.id) === String(msg.id)) ? prev : [...prev, msg]); setTimeout(() => scrollToBottom(), 50); }} />
             </div>
 
             {showSettings && isSpace && (
