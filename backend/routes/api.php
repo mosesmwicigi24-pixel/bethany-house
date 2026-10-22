@@ -393,6 +393,8 @@ Route::prefix('v1')->group(function () {
                 // ── Per-user thread dismissal — order/production threads only ───
                 Route::post('/{id}/dismiss',                       [ChannelController::class, 'dismiss']);
                 Route::post('/{id}/undismiss',                     [ChannelController::class, 'undismiss']);
+                // ── Assist rail: summarise · translate · draft · replies (members only) ──
+                Route::post('/{id}/assist',                        [\App\Http\Controllers\Api\ChannelAssistController::class, 'run'])->whereNumber('id');
             });
 
             // ── Global search — powers CommandPalette (⌘K) ─────────────────────

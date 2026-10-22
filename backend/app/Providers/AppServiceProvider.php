@@ -11,6 +11,8 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(NeemaAnalyticsClient::class, HttpNeemaAnalyticsClient::class);
+        // The Messages Assist rail talks to Claude; tests bind FakeAssistModel.
+        $this->app->bind(\App\Services\Comms\AssistModel::class, \App\Services\Comms\ClaudeAssistModel::class);
 
         // Scoped, not singleton: forgotten between queue jobs, so a worker
         // never carries one job's request id into the next.
