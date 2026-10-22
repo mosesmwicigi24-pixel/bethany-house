@@ -1353,8 +1353,8 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
                     <span className="text-surface-400">Replying to</span>
                     <span className="font-semibold text-surface-700 truncate">{replyTo.user?.name}</span>
                     <span className="text-surface-400 truncate flex-1">: {stripMarkdown(replyTo.body).slice(0, 60)}</span>
-                    <button onClick={onClearReply} className="text-surface-400 hover:text-danger ml-auto shrink-0"
-aria-label="Delete">✕</button>
+                    <button onClick={onClearReply} className="text-surface-400 hover:text-danger ml-auto shrink-0 w-8 h-8 flex items-center justify-center rounded-full"
+                        aria-label="Cancel reply">✕</button>
                 </div>
             )}
 
@@ -1440,7 +1440,7 @@ aria-label="Delete">✕</button>
                     <button onClick={() => fileInputRef.current?.click()} title="Add a photo, file or order"
                         disabled={pending.length >= 10}
                         aria-label="Add a photo, file or order"
-                        className="shrink-0 w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center rounded-full bg-white text-surface-600 border border-surface-200 hover:text-brand-600 hover:border-brand-300 disabled:opacity-40 transition-colors">
+                        className="shrink-0 w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center rounded-full bg-white text-surface-600 border border-surface-200 hover:text-brand-600 hover:border-brand-300 disabled:opacity-40 transition-colors">
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14"/>
                         </svg>
@@ -1531,7 +1531,7 @@ aria-label="Delete">✕</button>
                     <button onClick={() => { if (canSend) sendMutation.mutate(); }}
                         disabled={!canSend || sendMutation.isPending}
                         aria-label="Send"
-                        className="shrink-0 w-9 h-9 sm:w-8 sm:h-8 rounded-full bg-brand-500 text-white flex items-center justify-center hover:bg-brand-600 active:bg-brand-700 disabled:opacity-35 transition-colors tap-target">
+                        className="shrink-0 w-11 h-11 sm:w-8 sm:h-8 rounded-full bg-brand-500 text-white flex items-center justify-center hover:bg-brand-600 active:bg-brand-700 disabled:opacity-35 transition-colors tap-target">
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.4}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 19V5M5 12l7-7 7 7"/>
                         </svg>
@@ -1673,7 +1673,8 @@ function MessageContent({ body, isOwn, linkedEntities, entityPreviews, timeLabel
 
     return (
         <div className={clsx(
-            "rounded-[18px] text-[15px] leading-[1.38] break-words w-fit max-w-full",
+            // rem, not px: the bubble follows the phone's text-size setting.
+            "rounded-[18px] text-[0.9375rem] leading-[1.38] break-words w-fit max-w-full",
             // Linen (owner's choice, 22 Oct 2026): the brand colour is spent on
             // exactly one thing — what YOU sent. Everyone else is a quiet grey
             // on a white canvas, no border, no shadow, so the words carry the
@@ -1901,11 +1902,11 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                             hovering ? "opacity-100" : "opacity-0 pointer-events-none"
                         )}>
                             {["👍","❤️","😄","🎉"].map(e => (
-                                <button key={e} onClick={() => reactMutation.mutate(e)}
+                                <button key={e} onClick={() => reactMutation.mutate(e)} aria-label={`React ${e}`}
                                     className="text-sm w-7 h-7 flex items-center justify-center rounded-lg hover:bg-surface-100 hover:scale-125 transition-all">{e}</button>
                             ))}
                             <div className="w-px h-4 bg-surface-200 mx-0.5" />
-                            <button onClick={() => onReply(message)} title="Reply"
+                            <button onClick={() => onReply(message)} title="Reply" aria-label="Reply"
                                 className="w-7 h-7 flex items-center justify-center rounded-lg text-surface-400 hover:text-brand-600 hover:bg-surface-100 transition-colors">
                                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6M3 10l6-6"/>
@@ -1971,11 +1972,11 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                             hovering ? "opacity-100" : "opacity-0 pointer-events-none"
                         )}>
                             {["👍","❤️","😄","🎉"].map(e => (
-                                <button key={e} onClick={() => reactMutation.mutate(e)}
+                                <button key={e} onClick={() => reactMutation.mutate(e)} aria-label={`React ${e}`}
                                     className="text-sm w-7 h-7 flex items-center justify-center rounded-lg hover:bg-surface-100 hover:scale-125 transition-all">{e}</button>
                             ))}
                             <div className="w-px h-4 bg-surface-200 mx-0.5" />
-                            <button onClick={() => onReply(message)} title="Reply"
+                            <button onClick={() => onReply(message)} title="Reply" aria-label="Reply"
                                 className="w-7 h-7 flex items-center justify-center rounded-lg text-surface-400 hover:text-brand-600 hover:bg-surface-100 transition-colors">
                                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6M3 10l6-6"/>
@@ -1997,6 +1998,8 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                     <div className="flex flex-wrap gap-1 mt-1">
                         {Object.entries(message.reactions).map(([emoji, users]) => (
                             <button key={emoji} onClick={() => reactMutation.mutate(emoji)}
+                                aria-label={`${emoji} ${users.length} ${users.length === 1 ? "reaction" : "reactions"}`}
+                                aria-pressed={users.includes(currentUserId ?? -1)}
                                 className={clsx("flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border shadow-sm transition-all active:scale-95",
                                     users.includes(currentUserId ?? -1)
                                         ? "bg-brand-50 border-brand-300 text-brand-700 ring-1 ring-brand-200"
@@ -2569,8 +2572,8 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                 {/* Header */}
                 <div className="flex items-center gap-2 px-3 sm:px-5 py-3.5 border-b border-surface-200 bg-white shrink-0">
                     {/* Back button - mobile only */}
-                    <button onClick={onOpenSidebar}
-                        className="sm:hidden w-8 h-8 flex items-center justify-center rounded-lg text-surface-400 hover:text-surface-700 hover:bg-surface-100 transition-colors shrink-0 -ml-1">
+                    <button onClick={onOpenSidebar} aria-label="Back to conversations"
+                        className="sm:hidden w-11 h-11 -my-1.5 flex items-center justify-center rounded-full text-surface-500 hover:text-surface-800 hover:bg-surface-100 transition-colors shrink-0 -ml-2">
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7"/>
                         </svg>
@@ -2595,7 +2598,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                             /* ── Order thread: the name leads; the live order sits in the
                                    context pill under the header (Linen + Signal, 22 Oct 2026). */
                             <div className="flex flex-col min-w-0">
-                                <p className="text-[15px] font-bold text-surface-900 truncate tracking-tight">{orderCtx.title ?? orderCtx.orderNumber}</p>
+                                <p className="text-[0.9375rem] font-bold text-surface-900 truncate tracking-tight">{orderCtx.title ?? orderCtx.orderNumber}</p>
                                 <p className="text-xs text-surface-400 truncate">
                                     {orderCtx.type === "production_order" ? "Production" : "Order"} · {memberCount} member{memberCount !== 1 ? "s" : ""}{onlineIds.length > 0 ? `, ${onlineIds.length} online` : ""}
                                 </p>
@@ -2603,7 +2606,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                         ) : (
                             /* ── DM or manual space ── */
                             <>
-                                <p className="text-[15px] font-bold text-surface-900 truncate tracking-tight">{channel.name}</p>
+                                <p className="text-[0.9375rem] font-bold text-surface-900 truncate tracking-tight">{channel.name}</p>
                                 <p className="text-xs text-surface-400">
                                     {channel.type === "dm"
                                         ? onlineIds.length > 0
@@ -2617,7 +2620,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                     </div>
                     {/* Settings cog — only for manually created spaces, not system order threads */}
                     {isSpace && !channel.context_type && (
-                        <button onClick={() => setShowSettings(v => !v)} title="Space settings"
+                        <button onClick={() => setShowSettings(v => !v)} title="Space settings" aria-label="Space settings" aria-expanded={showSettings}
                             className={clsx("p-2 rounded-lg transition-colors", showSettings ? "bg-surface-100 text-surface-900" : "text-surface-400 hover:bg-surface-100 hover:text-surface-700")}>
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
                                 <circle cx="12" cy="12" r="3"/>
@@ -2633,7 +2636,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                     ? `/production/orders/${channel.context_id}`
                                     : `/sales/orders/${channel.context_id}`
                             )}
-                            title="Open order"
+                            title="Open order" aria-label="Open order"
                             className="p-2 rounded-lg text-surface-400 hover:bg-surface-100 hover:text-brand-600 transition-colors flex items-center"
                         >
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
@@ -2685,7 +2688,10 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                     what made the page read flat. brand-50/60 turned out to still be
                     within a hair of white on real phone screens, so the tint is now
                     brand-100/50: a definite warm ground the white cards sit ON. */}
-                <div ref={scrollAreaRef} onScroll={onThreadScroll} className="flex-1 overflow-y-auto py-3 scroll-touch overscroll-contain bg-white">
+                {/* role="log": a screen reader announces new messages as they arrive
+                    without stealing focus from the composer. */}
+                <div ref={scrollAreaRef} onScroll={onThreadScroll} role="log" aria-live="polite" aria-relevant="additions" aria-label="Messages"
+                    className="flex-1 overflow-y-auto py-3 scroll-touch overscroll-contain bg-white">
                     {hasMore && (
                         <div className="flex justify-center pb-2">
                             <button onClick={async () => {
@@ -2745,7 +2751,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                 than the word "typing" ever does. */}
                             <span className="flex items-center gap-1 bg-surface-100 rounded-full px-3 py-2">
                                 {[0, 150, 300].map(delay => (
-                                    <span key={delay} className="w-1.5 h-1.5 rounded-full bg-surface-300 animate-bounce"
+                                    <span key={delay} className="w-1.5 h-1.5 rounded-full bg-surface-300 animate-bounce motion-reduce:animate-none"
                                         style={{ animationDelay: `${delay}ms`, animationDuration: "1s" }} />
                                 ))}
                             </span>

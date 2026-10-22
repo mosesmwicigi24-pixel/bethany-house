@@ -55,7 +55,7 @@ export function AssistRail({ channelId, draft, hasOrder, onInsert }: {
 
     return (
         <>
-            <div className="flex items-center gap-1.5 overflow-x-auto scroll-touch pb-1.5 -mx-0.5 px-0.5" aria-label="Assist">
+            <div className="flex items-center gap-1.5 overflow-x-auto scroll-touch pb-1.5 -mx-0.5 px-0.5" role="toolbar" aria-label="Assist" aria-busy={run.isPending}>
                 <span className="shrink-0 text-2xs font-bold uppercase tracking-wider text-brand-500 pr-0.5" aria-hidden>✦</span>
                 {chip("Summarise", "summarise", "Summary of this thread")}
                 {chip(language === "sw" ? "Translate to Kiswahili" : "Translate to English", "translate", "Translation", { disabled: !draft.trim(), hint: draft.trim() ? undefined : "Type the message first" })}
@@ -73,7 +73,9 @@ export function AssistRail({ channelId, draft, hasOrder, onInsert }: {
             {error && <p className="text-2xs text-danger px-1 pb-1.5">{error}</p>}
 
             {open && (
-                <div className="mb-2 rounded-2xl border border-brand-100 bg-brand-50/60 p-3 text-sm">
+                <div role="region" aria-live="polite" aria-label={open.title}
+                    onKeyDown={(e) => { if (e.key === "Escape") setOpen(null); }}
+                    className="mb-2 rounded-2xl border border-brand-100 bg-brand-50/60 p-3 text-sm">
                     <div className="flex items-center justify-between gap-2 mb-1.5">
                         <span className="text-2xs font-bold uppercase tracking-wider text-brand-600">✦ {open.title}</span>
                         <button type="button" onClick={() => setOpen(null)} aria-label="Close" className="w-6 h-6 rounded-full text-surface-400 hover:bg-white text-xs">✕</button>
