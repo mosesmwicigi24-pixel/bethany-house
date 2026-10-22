@@ -216,7 +216,8 @@ export function AdminLayout() {
     // Sets --vh / --vv-h / --kb-h from the visual viewport (the area actually
     // visible RIGHT NOW, which shrinks when the software keyboard opens while
     // window.innerHeight on iOS does not), pins the window at scroll 0, and
-    // holds the shell in place while iOS pans the page to reveal a field.
+    // undoes the iOS keyboard pan the same frame (never a transform: WebKit
+    // paints the caret at the untransformed spot, see the hook's docblock).
     // This used to be three timed re-measures (0 / 150 / 400 ms) and a window
     // scroll fight, which is exactly the slow slide, the header under the
     // clock and the dead band under the composer in the owner's recording of
