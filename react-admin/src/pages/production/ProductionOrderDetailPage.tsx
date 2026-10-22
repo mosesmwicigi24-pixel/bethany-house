@@ -1602,10 +1602,6 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
         setMentionQ(null);
         setTimeout(() => {
             textareaRef.current?.focus();
-            if (textareaRef.current) {
-                textareaRef.current.style.height = "auto";
-                textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
-            }
         }, 0);
     };
 
@@ -1626,10 +1622,6 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
         setEntityQ(null);
         setTimeout(() => {
             textareaRef.current?.focus();
-            if (textareaRef.current) {
-                textareaRef.current.style.height = "auto";
-                textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
-            }
         }, 0);
     };
 
@@ -1640,10 +1632,6 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
             const res = await channelApi.send(channel.id, { body: body.trim() });
             setMessages(prev => [...prev, res.message]);
             setBody("");
-            if (textareaRef.current) {
-                textareaRef.current.style.height = "auto";
-                textareaRef.current.style.height = "20px";
-            }
             scrollBottom();
             qc.invalidateQueries({ queryKey: ["channels"] });
         } catch (e: any) {
@@ -1733,9 +1721,16 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
                         <ThreadEntityPopup query={entityQ} onSelect={insertEntity} onDismiss={() => setEntityQ(null)} />
                     )}
                     <div className="flex gap-2 items-end bg-white rounded-xl border border-surface-200 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200 px-3 py-2">
-                        {/* Rich composer: transparent textarea + visual mirror overlay */}
-                        <div className="relative flex-1 self-center min-w-0 max-h-28 overflow-y-auto">
-                            {/* Mirror drives wrapper height; textarea is absolute overlay */}
+                        {/* Rich composer: transparent textarea + visual mirror overlay.
+                            Scroll box outside, an inner relative box sized by the mirror,
+                            textarea at inset-0 of THAT box — so the textarea is as tall as
+                            the mirror however many lines there are. Inset to the scroll box
+                            it stopped at the max height while the mirror kept growing, then
+                            scrolled inside itself and drew the caret a line above the text
+                            (same defect as the Messages composer, 22 Oct 2026). */}
+                        <div className="flex-1 self-center min-w-0 max-h-28 overflow-y-auto">
+                          <div className="relative">
+                            {/* Mirror drives the box height; textarea is absolute overlay */}
                             <div aria-hidden="true"
                                 className="composer-mirror pointer-events-none text-xs leading-5 whitespace-pre-wrap break-words select-none w-full"
                                 style={{ wordBreak: "break-word", minHeight: "20px" }}>
@@ -1752,12 +1747,9 @@ function OrderChannelThread({ orderId }: { orderId: number }) {
                                 onKeyDown={handleKey}
                                 rows={1}
                                 className="absolute inset-0 w-full text-xs leading-5 bg-transparent resize-none outline-none focus:outline-none focus:ring-0 border-0 shadow-none overflow-hidden"
-                                style={{ color: "transparent", caretColor: "rgb(15 23 42)", height: "100%" }}
-                                onInput={e => {
-                                    const t = e.currentTarget;
-                                    t.style.height = t.parentElement ? t.parentElement.offsetHeight + "px" : "auto";
-                                }}
+                                style={{ color: "transparent", caretColor: "rgb(15 23 42)" }}
                             />
+                          </div>
                         </div>
                         <button
                             onClick={handleSend}

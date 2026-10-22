@@ -1173,10 +1173,6 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
             setBody("");
             setTokenMap({});
             setPending([]);
-            if (textareaRef.current) {
-                textareaRef.current.style.height = "auto";
-                textareaRef.current.style.height = "20px";
-            }
             onSent(data.message);
             onClearReply?.();
         },
@@ -1283,8 +1279,6 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
             if (!ta) return;
             ta.focus();
             ta.setSelectionRange(caret, caret);
-            ta.style.height = "auto";
-            ta.style.height = ta.scrollHeight + "px";
         }, 0);
     };
 
@@ -1320,8 +1314,6 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
             if (!ta) return;
             ta.focus();
             ta.setSelectionRange(caret, caret);
-            ta.style.height = "auto";
-            ta.style.height = ta.scrollHeight + "px";
         }, 0);
     };
 
@@ -1450,11 +1442,24 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
                         className="hidden"
                         onChange={e => { handleFiles(e.target.files); e.target.value = ""; }} />
 
-                    {/* Rich composer: transparent textarea + visual mirror overlay */}
-                    <div className="relative flex-1 self-center min-w-0 max-h-40 overflow-y-auto px-1.5 py-1.5">
-                        {/* Mirror drives the wrapper height — pills render here visually.
-                            The textarea is absolute on top, transparent, and handles input.
-                            This avoids caret displacement: wrapper height = mirror height. */}
+                    {/* Rich composer: transparent textarea + visual mirror overlay.
+                        Three boxes, and the order matters (owner, 22 Oct 2026, "the
+                        cursor is mixed with the text"):
+                          1. the SCROLL box — padding and max height live here;
+                          2. an inner RELATIVE box with no padding, sized by the mirror;
+                          3. the mirror, and the textarea at inset-0 of box 2.
+                        The textarea's box is then the mirror's box to the pixel: same
+                        left edge, same width (so both wrap at the same place), same
+                        height for as many lines as there are. The previous shape put
+                        the padding and the scroll on the SAME box the textarea was
+                        inset to, so the textarea sat 6px up and left of the glyphs,
+                        wrapped 12px later, and — because inset-0 only covers the
+                        scrollport — stopped at 160px while the mirror kept growing,
+                        at which point the textarea scrolled inside itself and every
+                        caret sat a line above the text. No JS sizes the textarea any
+                        more; inset-0 does. */}
+                    <div className="flex-1 self-center min-w-0 max-h-40 overflow-y-auto px-1.5 py-1.5">
+                      <div className="relative">
                         <div aria-hidden="true"
                             className="composer-mirror pointer-events-none text-sm leading-5 whitespace-pre-wrap break-words select-none w-full"
                             style={{ wordBreak: "break-word", minHeight: "20px" }}>
@@ -1477,14 +1482,7 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
                         <textarea ref={textareaRef} value={body} onChange={handleChange}
                             rows={1}
                             className="absolute inset-0 w-full text-sm leading-5 bg-transparent resize-none outline-none focus:outline-none focus:ring-0 border-0 shadow-none overflow-hidden"
-                            style={{ color: "transparent", caretColor: "rgb(15 23 42)", height: "100%" }}
-                            onInput={e => {
-                                // Keep textarea height matching the mirror (driven by wrapper).
-                                // We do NOT auto-size the textarea itself — the mirror does that.
-                                // But we still need scrollHeight sync for correct caret position.
-                                const t = e.currentTarget;
-                                t.style.height = t.parentElement ? t.parentElement.offsetHeight + "px" : "auto";
-                            }}
+                            style={{ color: "transparent", caretColor: "rgb(15 23 42)" }}
                             onPaste={e => {
                                 const html = e.clipboardData.getData("text/html");
                                 if (!html) return;
@@ -1497,8 +1495,6 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
                                 setBody(next);
                                 requestAnimationFrame(() => {
                                     ta.selectionStart = ta.selectionEnd = start + md.length;
-                                    ta.style.height = "auto";
-                                    ta.style.height = ta.scrollHeight + "px";
                                 });
                             }}
                             onKeyDown={e => {
@@ -1512,6 +1508,7 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
                                 if (e.key === "Escape") { setMentionQ(null); setEntityQ(null); }
                             }}
                         />
+                      </div>
                     </div>
 
                     {/* Enter mode toggle — physical keyboards only. On touch there is
