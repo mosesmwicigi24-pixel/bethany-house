@@ -22,10 +22,11 @@
  *   --vh      1% of the visible height (the long-standing h-screen-safe unit)
  *   --vv-h    the visible height itself
  *   --kb-h    how far the keyboard intrudes below the visible area (0 closed)
- * It also pins the window at scroll 0 (an app shell has nothing to scroll):
- * when iOS pans the page to reveal the focused field, the pan is undone the
- * same frame, and because the shell has already shrunk to the visible height
- * the field is on screen without it.
+ * It also pins the window at scroll 0 (an app shell has nothing to scroll)
+ * and, when iOS pans the visual viewport to reveal the focused field, pans
+ * it back with scrollIntoView on the shell (scrollTo cannot move the visual
+ * viewport). Because the shell has already shrunk to the visible height the
+ * field is on screen without the pan.
  *
  * NO TRANSFORM. The first version of this hook also translated the shell down
  * by the pan "to hold it in place". The owner's second recording (22 Oct
@@ -47,7 +48,7 @@ import { useEffect, type RefObject } from "react";
 /** How long after a trigger to keep re-reading, frame by frame. iOS keyboard animations run ~250–400 ms. */
 const FOLLOW_MS = 700;
 
-export function useViewportFrame(_shell: RefObject<HTMLElement | null>): void {
+export function useViewportFrame(shell: RefObject<HTMLElement | null>): void {
     useEffect(() => {
         const root = document.documentElement;
         const vv   = window.visualViewport;
@@ -68,9 +69,21 @@ export function useViewportFrame(_shell: RefObject<HTMLElement | null>): void {
             last = { h, top, kb };
 
             // An app shell never scrolls the window; every pane scrolls inside.
-            // On iOS a keyboard pan shows up as visualViewport.offsetTop with
-            // window.scrollY still 0, and scrollTo(0, 0) undoes that too.
-            if (top > 0 || window.scrollY > 0 || root.scrollTop > 0) window.scrollTo(0, 0);
+            if (window.scrollY > 0 || root.scrollTop > 0) window.scrollTo(0, 0);
+
+            // iOS pans the VISUAL viewport to reveal the focused field. That
+            // shows up as visualViewport.offsetTop with window.scrollY still
+            // 0, and scrollTo does nothing against it (the owner's third
+            // recording, 22 Oct 2026 22:49: header under the address bar, a
+            // dead band under the composer the height of the pan). The one
+            // call that moves the visual viewport is scrollIntoView — the
+            // same call #360 took out of the thread because it panned the
+            // page. Pointed at the shell's top it pans the page BACK, and
+            // since the shell is already the visible height, the composer
+            // lands on the keyboard with no band.
+            if (top > 0 && shell.current) {
+                shell.current.scrollIntoView({ block: "start", inline: "nearest", behavior: "instant" });
+            }
         };
 
         const tick = () => {
@@ -102,5 +115,5 @@ export function useViewportFrame(_shell: RefObject<HTMLElement | null>): void {
             window.removeEventListener("orientationchange", follow);
             document.removeEventListener("visibilitychange", follow);
         };
-    }, []);
+    }, [shell]);
 }
