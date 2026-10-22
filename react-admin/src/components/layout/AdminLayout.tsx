@@ -1,4 +1,4 @@
-import { Component, useState, useEffect, type ReactNode } from 'react'
+import { Component, useState, useEffect, useRef, type ReactNode } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Sidebar } from './Sidebar'
@@ -10,6 +10,7 @@ import { useAuthStore } from '@/store/auth.store'
 import { subscribeToUserChannel, getEcho } from '@/lib/echo'
 import { primeAudio, messageAlert } from '@/lib/alertSound'
 import { DownloadApprovalDialog } from '@/components/downloads/DownloadApprovalDialog'
+import { useViewportFrame } from '@/lib/useViewportFrame'
 
 const COLLAPSE_KEY = 'bh_sidebar_collapsed'
 
@@ -211,77 +212,20 @@ export function AdminLayout() {
         return () => { document.body.style.overflow = '' }
     }, [mobileOpen])
 
-    // ── PWA: Fix iOS Safari 100vh bug ─────────────────────────────────────────
-    // Sets --vh CSS custom property to the true inner window height.
-    // Use h-screen-safe (calc(var(--vh, 1vh) * 100)) instead of h-screen
-    // on any full-height container that breaks on iOS.
-    // visualViewport fires when the software keyboard opens/closes, keeping
-    // the layout correct when the POS search or message composer is focused.
-    useEffect(() => {
-        const setVh = () => {
-            // visualViewport.height is the area actually visible RIGHT NOW — it
-            // shrinks when the software keyboard opens. window.innerHeight does
-            // not: on iOS it stays at full height with the keyboard up. This
-            // effect always listened to visualViewport (below) but then read
-            // innerHeight, so the keyboard listener wrote back an identical
-            // value and did nothing. The shell stayed ~750px tall while only
-            // ~420px was visible, so Safari scrolled the document to reveal the
-            // focused field — which is why the message composer ended up
-            // stranded at the top of the screen with dead space beneath it.
-            //
-            // Trade-off: visualViewport.height also shrinks on pinch-zoom, so a
-            // pinch resizes the shell. That is the accepted cost of correct
-            // keyboard behaviour in an app-shell layout, and typing is far more
-            // common here than pinching.
-            const h = window.visualViewport?.height ?? window.innerHeight
-            document.documentElement.style.setProperty('--vh', `${h * 0.01}px`)
-
-            // iOS "reveals" a focused field by PANNING THE WINDOW — even though
-            // this shell is overflow-hidden and the window has nothing to
-            // legitimately scroll to. Resizing the shell (above) does not undo
-            // that pan, so the whole app ended up shoved off the top of the
-            // screen: composer over the status bar, tab bar mid-screen, a band
-            // of dead canvas above the keyboard. In this app-shell layout a
-            // non-zero window scroll is ALWAYS wrong — every pane scrolls
-            // internally — so pin the window back whenever iOS moves it.
-            if (window.scrollY > 0 || document.documentElement.scrollTop > 0) {
-                window.scrollTo(0, 0)
-            }
-        }
-
-        // The keyboard ANIMATES in, and iOS reports the viewport partway
-        // through that animation and then goes quiet. A single reading
-        // therefore lands mid-flight: the shell is sized to less than the room
-        // actually available, so the page sits parked too high with a band of
-        // dead canvas between it and the keyboard, and the bottom of the form
-        // — the Cost Price box on the product Pricing tab — is squeezed out of
-        // reach. Re-measure as the animation settles rather than trusting the
-        // first number, and again when focus moves between fields.
-        const timers: number[] = []
-        const settle = () => {
-            setVh()
-            timers.push(window.setTimeout(setVh, 150))
-            timers.push(window.setTimeout(setVh, 400))
-        }
-
-        setVh()
-        window.addEventListener('resize', setVh)
-        window.visualViewport?.addEventListener('resize', settle)
-        // offsetTop changes when iOS scrolls the layout viewport to reveal the
-        // focused field; height can change with it and fires no resize.
-        window.visualViewport?.addEventListener('scroll', setVh)
-        document.addEventListener('focusin', settle)
-        document.addEventListener('focusout', settle)
-
-        return () => {
-            timers.forEach(clearTimeout)
-            window.removeEventListener('resize', setVh)
-            window.visualViewport?.removeEventListener('resize', settle)
-            window.visualViewport?.removeEventListener('scroll', setVh)
-            document.removeEventListener('focusin', settle)
-            document.removeEventListener('focusout', settle)
-        }
-    }, [])
+    // ── The shell follows the keyboard, frame by frame ─────────────────────
+    // Sets --vh / --vv-h / --kb-h from the visual viewport (the area actually
+    // visible RIGHT NOW, which shrinks when the software keyboard opens while
+    // window.innerHeight on iOS does not), pins the window at scroll 0, and
+    // holds the shell in place while iOS pans the page to reveal a field.
+    // This used to be three timed re-measures (0 / 150 / 400 ms) and a window
+    // scroll fight, which is exactly the slow slide, the header under the
+    // clock and the dead band under the composer in the owner's recording of
+    // 22 Oct 2026. See src/lib/useViewportFrame.ts for the full account.
+    //
+    // Trade-off kept: visualViewport.height also shrinks on pinch-zoom, so a
+    // pinch resizes the shell. Typing is far more common here than pinching.
+    const shellRef = useRef<HTMLDivElement>(null)
+    useViewportFrame(shellRef)
 
     const breadcrumbs = buildBreadcrumbs(location.pathname)
 
@@ -304,7 +248,7 @@ export function AdminLayout() {
         // the shell ran ~110px taller than the visible area. Being overflow-hidden,
         // that bottom strip could not be scrolled to: the last row of every page
         // sat under the toolbar, untappable. That is the "unresponsive cards".
-        <div className="flex h-screen-safe overflow-hidden bg-surface-canvas">
+        <div ref={shellRef} className="flex h-screen-safe overflow-hidden bg-surface-canvas">
 
             {/* ── PWA banners (install prompt, offline bar, update alert) ── */}
             <PWAInstallBanner />

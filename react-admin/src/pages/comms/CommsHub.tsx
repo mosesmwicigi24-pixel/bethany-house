@@ -1086,7 +1086,7 @@ function htmlToMarkdown(html: string): string {
 }
 
 
-function Composer({ channelId, channelName, channelType, channelMemberIds, replyTo, onClearReply, onSent, scrollToBottom }: {
+function Composer({ channelId, channelName, channelType, channelMemberIds, replyTo, onClearReply, onSent }: {
     channelId: number;
     channelName?: string;
     channelType?: string;
@@ -1094,8 +1094,6 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
     channelMemberIds?: Set<number>;
     replyTo?: ChannelMessage | null;
     onClearReply?: () => void; onSent: (msg: ChannelMessage) => void;
-    /** Scrolls the THREAD PANE (never the window) to its newest message. */
-    scrollToBottom?: () => void;
 }) {
     const [body, setBody]               = useState("");
     const [mentionQ, setMentionQ]       = useState<string | null>(null);
@@ -1128,24 +1126,13 @@ function Composer({ channelId, channelName, channelType, channelMemberIds, reply
     const { user }                      = useAuthStore();
     const toast                         = useToastStore();
 
-    // ── Phase 5: keyboard handling ────────────────────────────────────────────
-    // visualViewport tracks the true visible area - shrinks when keyboard opens.
-    // We use it to pad the composer so it sits above the keyboard on iOS/Android.
-    // keyboardHeight is deliberately not consumed any more — the shell is sized to
-    // visualViewport.height, so it already ends at the keyboard. keyboardOpen is
-    // still used, to scroll the thread down once the keyboard has settled.
-    const { keyboardOpen } = useVisualViewport();
-
-    // Auto-scroll to bottom when the keyboard opens so the latest message is
-    // visible. Via the pane's own scrollTop — scrollIntoView walks EVERY
-    // scrollable ancestor, window included, and on iOS that window pan is
-    // exactly what used to shove the whole shell off the top of the screen.
-    useEffect(() => {
-        if (keyboardOpen) {
-            // Small delay so the keyboard animation finishes first
-            setTimeout(() => scrollToBottom?.(), 100);
-        }
-    }, [keyboardOpen]);
+    // ── Keyboard ──────────────────────────────────────────────────────────────
+    // Nothing to do here any more. The shell follows the keyboard frame by
+    // frame (AdminLayout → useViewportFrame), and the thread pane's resize
+    // anchoring (ChannelView) keeps the newest message in view the instant
+    // the pane shrinks. The 100 ms "scroll once the keyboard has settled"
+    // timer that used to live here was one of the four out-of-step movements
+    // in the owner's recording of 22 Oct 2026, so it is gone.
 
     // Focus textarea when channel changes (desktop barcode scanner / keyboard)
     useEffect(() => {
@@ -2783,8 +2770,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                     channelMemberIds={channelMemberIds}
                     replyTo={replyTo}
                     onClearReply={() => setReplyTo(null)}
-                    onSent={msg => { setMessages(prev => prev.some(m => String(m.id) === String(msg.id)) ? prev : [...prev, msg]); setTimeout(() => scrollToBottom(), 50); }}
-                    scrollToBottom={scrollToBottom} />
+                    onSent={msg => { setMessages(prev => prev.some(m => String(m.id) === String(msg.id)) ? prev : [...prev, msg]); setTimeout(() => scrollToBottom(), 50); }} />
             </div>
 
             {showSettings && isSpace && (
