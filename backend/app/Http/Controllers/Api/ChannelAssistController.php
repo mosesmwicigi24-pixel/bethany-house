@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Channel;
 use App\Services\Comms\Assist;
-use App\Services\Comms\AssistUnavailable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
@@ -46,16 +45,14 @@ class ChannelAssistController extends Controller
         }
         RateLimiter::hit($key, 60);
 
-        try {
-            $out = match ($v['action']) {
-                'summarise' => $this->assist->summarise($channel, $user),
-                'translate' => $this->assist->translate($channel, $user, (string) ($v['text'] ?? ''), $v['language'] ?? 'en'),
-                'draft'     => $this->assist->draft($channel, $user, $v['audience'] ?? 'team', $v['language'] ?? 'en'),
-                'replies'   => $this->assist->replies($channel, $user),
-            };
-        } catch (AssistUnavailable $e) {
-            return response()->json(['message' => $e->getMessage(), 'code' => 'assist_unavailable'], 422);
-        }
+        // AssistUnavailable carries its own 422 (code assist_unavailable) and
+        // is rendered by Laravel; nothing here needs to catch it.
+        $out = match ($v['action']) {
+            'summarise' => $this->assist->summarise($channel, $user),
+            'translate' => $this->assist->translate($channel, $user, (string) ($v['text'] ?? ''), $v['language'] ?? 'en'),
+            'draft'     => $this->assist->draft($channel, $user, $v['audience'] ?? 'team', $v['language'] ?? 'en'),
+            'replies'   => $this->assist->replies($channel, $user),
+        };
 
         return response()->json($out + ['action' => $v['action']]);
     }

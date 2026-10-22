@@ -36,9 +36,11 @@ class ClaudeAssistModel implements AssistModel
                 messages: [['role' => 'user', 'content' => $user]],
             );
         } catch (APIStatusException $e) {
-            throw new AssistUnavailable('Assist could not answer right now (' . ($e->type?->value ?? 'api error') . ').', 0, $e);
+            report($e);
+            throw new AssistUnavailable('Assist could not answer right now (' . ($e->type?->value ?? 'api error') . ').', $e);
         } catch (APIConnectionException $e) {
-            throw new AssistUnavailable('Assist could not reach the model. Try again in a moment.', 0, $e);
+            report($e);
+            throw new AssistUnavailable('Assist could not reach the model. Try again in a moment.', $e);
         }
 
         if ($message->stopReason === 'refusal') {
