@@ -320,6 +320,24 @@
 
   /* ── Momentum scrolling on iOS ────────────────────────────────────────── */
   .scroll-touch { -webkit-overflow-scrolling: touch; }
+
+  /* ── Messages, WhatsApp Business direction (owner, 23 Oct 2026) ──────────
+   * .chat-paper is the thread's wallpaper: a warm paper tint with a faint dot
+   * grid, so white bubbles sit ON something. .bub-tail-l/-r draw the tail on
+   * the TOP corner of the first bubble of a run (left for others, right for
+   * your own); the colours match the bubble fills in CommsHub.tsx — white for
+   * others, brand-100 for your own. The bubble is position:relative. */
+  .chat-paper {
+    background-color: #efe8df;
+    background-image: radial-gradient(rgba(120, 90, 60, 0.10) 1.1px, transparent 1.3px);
+    background-size: 18px 18px;
+  }
+  .bub-tail-l::before, .bub-tail-r::before {
+    content: ""; position: absolute; top: 0; width: 0; height: 0;
+    border: 7px solid transparent;
+  }
+  .bub-tail-l::before { left: -7px;  border-top-color: #fff; border-right-color: #fff; }
+  .bub-tail-r::before { right: -7px; border-top-color: theme('colors.brand.100'); border-left-color: theme('colors.brand.100'); }
 }
 
 /* ── HTML meta tag for notch/safe area ────────────────────────────────────── */
