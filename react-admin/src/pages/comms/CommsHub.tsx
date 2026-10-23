@@ -38,17 +38,7 @@ function stripMarkdown(body: string): string {
         .trim();
 }
 
-function fmtTime(iso: string) {
-    const d = new Date(iso);
-    const now = new Date();
-    const diff = now.getTime() - d.getTime();
-    if (diff < 60_000) return "just now";
-    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
-    if (diff < 86_400_000) return d.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" });
-    return d.toLocaleDateString("en-KE", { day: "2-digit", month: "short" });
-}
-
-/** Exact wall-clock time — used where `fmtTime`'s relative wording ("5m") would be ambiguous. */
+/** Exact wall-clock time inside every bubble, as WhatsApp does it. */
 function fmtClock(iso: string) {
     return new Date(iso).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" });
 }
@@ -176,7 +166,7 @@ function renderInlineMarkdown(text: string, isOwn: boolean, keyPrefix: string): 
             result.push(
                 <div key={`${keyPrefix}-bq${li}`}
                     className={clsx("border-l-2 pl-2 my-0.5 italic text-sm",
-                        isOwn ? "border-white/40 text-white/80" : "border-surface-300 text-surface-500")}>
+                        isOwn ? "border-brand-300 text-surface-600" : "border-surface-300 text-surface-500")}>
                     {bq[1]}
                 </div>
             );
@@ -207,7 +197,7 @@ function renderInlineSpan(text: string, isOwn: boolean, keyPrefix: string): Reac
                 if (p.startsWith("`") && p.endsWith("`"))
                     return <code key={`${keyPrefix}-c${i}`}
                         className={clsx("px-1 py-0.5 rounded text-xs font-mono",
-                            isOwn ? "bg-white/20" : "bg-surface-100 text-surface-700")}>{p.slice(1, -1)}</code>;
+                            isOwn ? "bg-white/70 text-surface-700" : "bg-surface-100 text-surface-700")}>{p.slice(1, -1)}</code>;
                 return <span key={`${keyPrefix}-s${i}`}>{p}</span>;
             })}
         </>
@@ -1571,7 +1561,7 @@ function EntityChip({ entity, isOwn }: { entity: LinkedEntity; isOwn: boolean })
             className={[
                 "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs font-bold whitespace-nowrap",
                 "border transition-colors cursor-pointer",
-                isOwn ? "bg-white/15 border-white/30 text-white hover:bg-white/25" : cfg.tone,
+                cfg.tone,
             ].join(" ")}
             title={`Open ${cfg.noun} ${label}`}
         >
@@ -1607,7 +1597,7 @@ function Ticks({ readers, others }: {
         <span
             className={clsx(
                 "inline-flex items-center gap-1",
-                read ? "text-success-vivid" : "text-white/60",
+                read ? "text-success-vivid" : "text-surface-400",
             )}
             title={read ? `Read by ${readers.join(", ")}` : "Sent · not read yet"}
         >
@@ -1631,7 +1621,7 @@ function Ticks({ readers, others }: {
 
 // ─── Message content - splits text bubble from bare attachments ───────────────
 
-function MessageContent({ body, isOwn, linkedEntities, entityPreviews, timeLabel, ticks }: {
+function MessageContent({ body, isOwn, linkedEntities, entityPreviews, timeLabel, ticks, first = true, senderName, replyTo, edited = false }: {
     body: string;
     isOwn: boolean;
     linkedEntities?: LinkedEntity[];
@@ -1640,6 +1630,13 @@ function MessageContent({ body, isOwn, linkedEntities, entityPreviews, timeLabel
     timeLabel?: string;
     /** Read-receipt ticks (own messages only), rendered beside the time. */
     ticks?: React.ReactNode;
+    /** First bubble of a run: gets the tail and the square corner. */
+    first?: boolean;
+    /** Sender's name inside the bubble (spaces only, first bubble of a run). */
+    senderName?: string;
+    /** The quoted message, drawn inside the bubble above the text. */
+    replyTo?: { user_name: string | null; body: string } | null;
+    edited?: boolean;
 }) {
     const { textContent, images, files } = parseBody(body);
     const hasText        = textContent.length > 0;
@@ -1661,32 +1658,48 @@ function MessageContent({ body, isOwn, linkedEntities, entityPreviews, timeLabel
     const docs    = media.filter(m => !["image", "video", "audio"].includes(m.kind));
     const cols    = visuals.length > 1;
 
+    // The meta sits on the LAST line of the text, floated right, so a short
+    // message is one line with its time beside it and a long one tucks the
+    // time under its last words — WhatsApp's shape. Media bubbles keep it as
+    // a row under the caption.
     const meta = timeLabel && (
-        <div className={clsx(
-            "flex items-center justify-end gap-1.5 mt-1 text-2xs tabular-nums",
-            isOwn ? "text-white/75" : "text-surface-500",
-        )}>{timeLabel}{ticks}</div>
+        <span className={clsx(
+            "inline-flex items-center gap-1 text-[10.5px] leading-none tabular-nums text-surface-500 whitespace-nowrap",
+            hasAttachments ? "flex justify-end mt-1" : "float-right ml-2.5 mt-[7px] -mb-0.5 relative top-[1px]",
+        )}>{edited && <span className="italic">edited ·</span>}{timeLabel}{ticks}</span>
     );
 
     return (
         <div className={clsx(
             // rem, not px: the bubble follows the phone's text-size setting.
-            "rounded-[18px] text-[0.9375rem] leading-[1.38] break-words w-fit max-w-full",
-            // Linen (owner's choice, 22 Oct 2026): the brand colour is spent on
-            // exactly one thing — what YOU sent. Everyone else is a quiet grey
-            // on a white canvas, no border, no shadow, so the words carry the
-            // page. White text on brand-500 is the same pairing as every
-            // primary button in the console (contrast checked there).
-            isOwn
-                ? "bg-brand-500 text-white"
-                : "bg-surface-100 text-surface-900",
-            // Tail on the BOTTOM corner, pointing at the speaker's side.
-            isOwn ? "rounded-br-[6px]" : "rounded-bl-[6px]",
+            "relative rounded-[10px] text-[0.9375rem] leading-[1.35] break-words w-fit max-w-full shadow-[0_1px_1px_rgba(0,0,0,0.09)]",
+            // WhatsApp Business direction (owner, 23 Oct 2026): white for everyone
+            // else, a pale brand tint for what YOU sent, dark text on both so a
+            // long run of your own messages stays readable on the paper.
+            isOwn ? "bg-brand-100 text-surface-900" : "bg-white text-surface-900",
+            // The tail sits on the TOP corner of the first bubble of a run only;
+            // later bubbles in the run are plain (see .bub-tail-* in index.css).
+            first && (isOwn ? "bub-tail-r rounded-tr-[2px]" : "bub-tail-l rounded-tl-[2px]"),
             // Media cards hug their content with a thin frame, WhatsApp-style;
             // text-only bubbles keep the classic padding.
-            hasAttachments ? "p-1.5" : "px-3.5 py-2",
+            hasAttachments ? "p-1" : "px-2.5 pt-1.5 pb-[6px]",
             isOwn && "ml-auto",
         )}>
+            {senderName && (
+                <span className="block text-xs font-bold text-brand-700 leading-tight mb-0.5 line-clamp-1">{senderName}</span>
+            )}
+            {replyTo && (
+                /* Quote INSIDE the bubble, a brand bar on its left, one line only:
+                   the quote is a pointer back, not a re-read.
+                   line-clamp-1, NOT truncate: truncate is white-space:nowrap, and a
+                   no-wrap line sets the bubble's MINIMUM width to the whole quote,
+                   which pushed the bubble off the left of a phone screen. A clamped
+                   line still wraps for sizing, so the bubble stays inside its column. */
+                <span className="block border-l-[3px] border-brand-500 bg-black/[.05] rounded-md pl-2 pr-2 py-1 mb-1 text-xs leading-tight min-w-0">
+                    <span className="block font-bold text-brand-700 line-clamp-1">{replyTo.user_name ?? "Someone"}</span>
+                    <span className="block text-surface-500 line-clamp-1">{stripMarkdown(replyTo.body)}</span>
+                </span>
+            )}
             {/* Media grid — the picture leads */}
             {visuals.length > 0 && (
                 <div className={clsx("grid gap-1 max-w-[280px] overflow-hidden rounded-xl", cols ? "grid-cols-2" : "grid-cols-1")}>
@@ -1704,11 +1717,11 @@ function MessageContent({ body, isOwn, linkedEntities, entityPreviews, timeLabel
 
             {/* Caption + chips + meta share the card with the media */}
             {(hasText || chips.length > 0 || timeLabel) && (
-                <div className={clsx(hasAttachments && "px-2 pt-1.5 pb-1")}>
+                <div className={clsx("min-w-0", hasAttachments && "px-1.5 pt-1 pb-0.5")}>
                     {hasText && <RenderTextOnly body={textContent} isOwn={isOwn} />}
                     {chips.length > 0 && (
                         <div className={clsx("flex flex-wrap gap-1 overflow-x-auto", hasText && "mt-1.5")}>
-                            {chips.map((e, i) => <EntityChipWithPreview key={i} entity={e} isOwn={isOwn} />)}
+                            {chips.map((e, i) => <EntityChipWithPreview key={i} entity={e} isOwn={false} />)}
                         </div>
                     )}
                     {meta}
@@ -1730,7 +1743,7 @@ function RenderTextOnly({ body, isOwn }: { body: string; isOwn: boolean }) {
             nodes.push(
                 <span key={`m${i}`} className={clsx(
                     "font-semibold px-1 py-0.5 rounded text-xs",
-                    isOwn ? "bg-white/20 text-white" : "bg-brand-100 text-brand-700"
+                    isOwn ? "bg-white/70 text-brand-700" : "bg-brand-100 text-brand-700"
                 )}>@{mention[1]}</span>
             );
         } else {
@@ -1742,8 +1755,10 @@ function RenderTextOnly({ body, isOwn }: { body: string; isOwn: boolean }) {
 
 // ─── Message bubble ───────────────────────────────────────────────────────────
 
-function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, onEdited, onReaction, continued = false, ticks }: {
+function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, onEdited, onReaction, continued = false, ticks, showAvatar = false }: {
     message: ChannelMessage; channelId: number; currentUserId?: number;
+    /** Spaces show who is talking; a DM has only one other person, so no avatar (WhatsApp). */
+    showAvatar?: boolean;
     onReply: (m: ChannelMessage) => void; onDeleted: (id: number) => void;
     /** Called with the server-confirmed message after a successful edit. */
     onEdited: (m: ChannelMessage) => void;
@@ -1833,8 +1848,9 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
 
     if (isSystem) {
         return (
-            <div className="flex justify-center py-2">
-                <span className="text-2xs text-surface-500 bg-surface-100 px-3 py-1 rounded-full">{message.body}</span>
+            <div className="flex justify-center py-1.5 px-6">
+                {/* WhatsApp's pale yellow system pill on the paper. */}
+                <span className="text-2xs text-[#5b4a00] bg-[#fff4c2] shadow-[0_1px_1px_rgba(0,0,0,0.08)] px-2.5 py-1 rounded-lg text-center">{message.body}</span>
             </div>
         );
     }
@@ -1844,40 +1860,21 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                 // Nuru's outline: the row is an end-aligned flex, and the side is
                 // chosen by justify — not by reversing the row. Your own messages
                 // carry no avatar at all; the position already says they're yours.
-                "group relative flex items-end gap-2 px-3 sm:px-4",
-                continued ? "py-0.5" : "pt-3 pb-0.5",
+                // Gutters: tight on a phone, wide on a desk so the thread reads as a
+                // column, as WhatsApp Web does. The tail needs 7px of room outside
+                // the bubble, hence the inner px on the column below.
+                "group relative flex items-end gap-1.5 px-2 sm:px-6 lg:px-12",
+                continued ? "py-px" : "pt-2 pb-px",
                 isOwn ? "justify-end" : "justify-start",
             )}
             onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}>
-            {!isOwn && (
+            {!isOwn && showAvatar && (
                 continued
                     // Spacer keeps a run's bubbles in one column under the avatar.
                     ? <div className="w-7 shrink-0" aria-hidden />
                     : <Avatar initials={message.user?.initials ?? "?"} name={message.user?.name} />
             )}
-            <div className={clsx("relative min-w-0 max-w-[78%]", isOwn && "flex flex-col items-end")}>
-                {!isOwn && !continued && (
-                    <div className="flex items-baseline gap-2 mb-1 ml-0.5">
-                        <span className="text-xs font-bold text-surface-800 tracking-tight">{message.user?.name ?? "Unknown"}</span>
-                        <span className="text-2xs text-surface-400 tabular-nums">{fmtTime(message.created_at)}</span>
-                        {message.edited_at && <span className="text-2xs text-surface-400 italic">(edited)</span>}
-                    </div>
-                )}
-                {(isOwn || continued) && message.edited_at && (
-                    <span className={clsx("text-2xs text-surface-400 italic mb-0.5", isOwn && "self-end")}>(edited)</span>
-                )}
-                {message.reply_to && (
-                    <div className={clsx(
-                        // Gold left rule is Nuru's marker for a quote; the brand amber
-                        // earns its place as an accent here rather than as a fill.
-                        "mb-1 pl-2.5 pr-3 py-1 rounded-lg bg-white border border-surface-200 border-l-2 border-l-brand-500 text-xs text-surface-500 max-w-xs",
-                        isOwn && "self-end",
-                    )}>
-                        <span className="font-bold text-surface-700">{message.reply_to.user_name}</span>
-                        {/* One line only: the quote is a pointer back, not a re-read. */}
-                        <span className="block truncate">{stripMarkdown(message.reply_to.body)}</span>
-                    </div>
-                )}
+            <div className={clsx("relative min-w-0 max-w-[84%] sm:max-w-[62%] flex flex-col", isOwn ? "items-end pr-[7px]" : "items-start pl-[7px]")}>
                 {/* Bubble + hover toolbar */}
                 <div className="flex items-end gap-1.5 relative">
                     {/* Toolbar. ABSOLUTE, deliberately: it used to be an in-flow sibling
@@ -1957,7 +1954,9 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                         </div>
                     ) : (
                     <MessageContent body={message.body} isOwn={isOwn} timeLabel={fmtClock(message.created_at)}
-                        linkedEntities={message.linked_entities} entityPreviews={message.entity_previews} ticks={ticks} />
+                        linkedEntities={message.linked_entities} entityPreviews={message.entity_previews} ticks={ticks}
+                        first={!continued} edited={!!message.edited_at} replyTo={message.reply_to}
+                        senderName={!isOwn && !continued && showAvatar ? (message.user?.name ?? "Unknown") : undefined} />
                     )}
                     {/* Same as above, mirrored to the right of the bubble. */}
                     {!isOwn && (
@@ -1992,16 +1991,18 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                     )}
                 </div>
                 {Object.keys(message.reactions ?? {}).length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1">
+                    /* On the bubble's bottom edge, overlapping it by a few px, as
+                       WhatsApp places reactions — not a separate row beneath. */
+                    <div className={clsx("flex flex-wrap gap-0.5 -mt-2 z-[1]", isOwn ? "mr-1.5" : "ml-1.5")}>
                         {Object.entries(message.reactions).map(([emoji, users]) => (
                             <button key={emoji} onClick={() => reactMutation.mutate(emoji)}
                                 aria-label={`${emoji} ${users.length} ${users.length === 1 ? "reaction" : "reactions"}`}
                                 aria-pressed={users.includes(currentUserId ?? -1)}
-                                className={clsx("flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border shadow-sm transition-all active:scale-95",
+                                className={clsx("flex items-center gap-0.5 px-1.5 py-px rounded-full text-[11px] leading-[16px] border shadow-[0_1px_1px_rgba(0,0,0,0.08)] transition-all active:scale-95",
                                     users.includes(currentUserId ?? -1)
-                                        ? "bg-brand-50 border-brand-300 text-brand-700 ring-1 ring-brand-200"
-                                        : "bg-white border-surface-200 text-surface-600 hover:border-brand-300 hover:bg-brand-50/40")}>
-                                {emoji} <span className="font-semibold tabular-nums">{users.length}</span>
+                                        ? "bg-white border-brand-300 text-brand-700"
+                                        : "bg-white border-surface-200 text-surface-600 hover:border-brand-300")}>
+                                {emoji}{users.length > 1 && <span className="font-semibold tabular-nums">{users.length}</span>}
                             </button>
                         ))}
                     </div>
@@ -2688,7 +2689,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                 {/* role="log": a screen reader announces new messages as they arrive
                     without stealing focus from the composer. */}
                 <div ref={scrollAreaRef} onScroll={onThreadScroll} role="log" aria-live="polite" aria-relevant="additions" aria-label="Messages"
-                    className="flex-1 overflow-y-auto py-3 scroll-touch overscroll-contain bg-white">
+                    className="flex-1 overflow-y-auto py-2 scroll-touch overscroll-contain chat-paper">
                     {hasMore && (
                         <div className="flex justify-center pb-2">
                             <button onClick={async () => {
@@ -2724,8 +2725,8 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                         <div key={date}>
                             {/* Sticky pill: scroll back through a long day and you never
                                 lose track of which day you're reading. */}
-                            <div className="sticky top-0 z-10 flex justify-center py-2 pointer-events-none">
-                                <span className="text-2xs font-bold text-surface-500 bg-surface-100/95 backdrop-blur-sm px-3 py-1 rounded-full">
+                            <div className="sticky top-0 z-10 flex justify-center py-1.5 pointer-events-none">
+                                <span className="text-2xs font-semibold text-surface-500 bg-white shadow-[0_1px_1px_rgba(0,0,0,0.08)] px-2.5 py-1 rounded-lg">
                                     {date}
                                 </span>
                             </div>
@@ -2738,7 +2739,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                     onReaction={(msgId, reactions) =>
                                         setMessages(prev => prev.map(m => m.id === msgId ? { ...m, reactions } : m))
                                     }
-                                    ticks={ticksFor(msg)} />
+                                    ticks={ticksFor(msg)} showAvatar={channel.type !== "dm"} />
                             ))}
                         </div>
                     ))}</div>)}
@@ -2746,9 +2747,9 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                         <div className="flex items-center gap-2 px-4 py-2">
                             {/* Three breathing dots read as "someone is there" far faster
                                 than the word "typing" ever does. */}
-                            <span className="flex items-center gap-1 bg-surface-100 rounded-full px-3 py-2">
+                            <span className="flex items-center gap-1 bg-white shadow-[0_1px_1px_rgba(0,0,0,0.09)] rounded-[10px] px-3 py-2.5">
                                 {[0, 150, 300].map(delay => (
-                                    <span key={delay} className="w-1.5 h-1.5 rounded-full bg-surface-300 animate-bounce motion-reduce:animate-none"
+                                    <span key={delay} className="w-1.5 h-1.5 rounded-full bg-surface-400 animate-bounce motion-reduce:animate-none"
                                         style={{ animationDelay: `${delay}ms`, animationDuration: "1s" }} />
                                 ))}
                             </span>
