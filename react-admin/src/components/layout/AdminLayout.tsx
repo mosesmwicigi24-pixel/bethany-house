@@ -241,6 +241,10 @@ export function AdminLayout() {
     // ancestor — until #360 rightly stopped that (it panned the iOS layout off
     // screen), and the newest message was left sitting below the fold.
     const fillsWindow = /^\/comms(\/|$)/.test(location.pathname)
+    // A thread open on a PHONE owns the screen (WhatsApp Business direction,
+    // owner 23 Oct 2026): the top bar, the page gutter and the tab bar all go,
+    // and come back on the chat list. On a desk nothing changes.
+    const phoneThread = /^\/comms\/\d+/.test(location.pathname)
 
     return (
         // h-screen-safe, not h-screen: the --vh machinery below has always been
@@ -294,12 +298,14 @@ export function AdminLayout() {
 
             {/* ── Main column ───────────────────────────────────────── */}
             <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-                <Topbar
-                    collapsed={collapsed}
-                    onToggleCollapse={() => setCollapsed((v) => !v)}
-                    onMobileMenuToggle={() => setMobileOpen((v) => !v)}
-                    breadcrumbs={breadcrumbs}
-                />
+                <div className={phoneThread ? 'max-sm:hidden' : undefined}>
+                    <Topbar
+                        collapsed={collapsed}
+                        onToggleCollapse={() => setCollapsed((v) => !v)}
+                        onMobileMenuToggle={() => setMobileOpen((v) => !v)}
+                        breadcrumbs={breadcrumbs}
+                    />
+                </div>
 
                 {/* Page content.
                     The bottom tab bar is fixed, so on phones the scroll area
@@ -325,7 +331,7 @@ export function AdminLayout() {
                         touches the bezel on a large monitor, and phones and
                         tablets are untouched: the cap never bound below 1200px,
                         so nothing about their layout changes. */}
-                    <div className={`w-full px-3 py-3 md:px-8 md:py-8 2xl:px-10${fillsWindow ? " h-full" : ""}`}>
+                    <div className={`w-full px-3 py-3 md:px-8 md:py-8 2xl:px-10${fillsWindow ? " h-full" : ""}${phoneThread ? " max-sm:p-0" : ""}`}>
                         {/* key: a crash on one page must not follow you to the next */}
                         <PageErrorBoundary key={location.pathname}>
                             <Outlet />
@@ -338,7 +344,9 @@ export function AdminLayout() {
                 {/* Phone-only app shell. A flex sibling of <main>, so the column
                     reserves its height instead of the bar floating over the last
                     row of every list. */}
-                <BottomTabBar onOpenMenu={() => setMobileOpen(true)} />
+                <div className={phoneThread ? 'max-sm:hidden' : undefined}>
+                    <BottomTabBar onOpenMenu={() => setMobileOpen(true)} />
+                </div>
             </div>
         </div>
     )

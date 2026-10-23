@@ -12,7 +12,7 @@
 
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import { useVisualViewport } from "@/lib/useVisualViewport";
-import { AssistRail } from "@/components/comms/AssistRail";
+import { AssistSheet } from "@/components/comms/AssistRail";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
@@ -1116,6 +1116,10 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
     const [pending, setPending] = useState<PendingUpload[]>([]);
     const textareaRef                   = useRef<HTMLTextAreaElement>(null);
     const fileInputRef                  = useRef<HTMLInputElement>(null);
+    // The Assist sheet, opened from the ✦ inside the pill (WhatsApp Business
+    // direction, 23 Oct 2026). It replaced a permanent chip row above the
+    // composer that the keyboard pushed off every phone screen.
+    const [assistOpen, setAssistOpen]   = useState(false);
     const { user }                      = useAuthStore();
     const toast                         = useToastStore();
 
@@ -1310,7 +1314,7 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
     return (
         <>
         <div
-            className="px-2 sm:px-4 pt-1.5 pb-2 shrink-0 bg-white"
+            className="px-1.5 sm:px-4 pt-1.5 pb-1.5 sm:pb-2 shrink-0 chat-paper sm:bg-white"
             style={{
                 // Only the home-indicator inset. This used to add keyboardHeight to
                 // lift the composer over the keyboard, which was right while the app
@@ -1322,13 +1326,6 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
                 paddingBottom: "env(safe-area-inset-bottom, 0px)",
             }}
         >
-            {/* Assist rail — one tap for a summary, a translation, a draft or replies */}
-            <AssistRail
-                channelId={channelId}
-                draft={body}
-                hasOrder={!!channelContextType}
-                onInsert={(t) => { setBody(prev => (prev.trim() ? prev.replace(/\s*$/, "") + "\n" + t : t)); setTimeout(() => textareaRef.current?.focus(), 0); }}
-            />
             {/* Reply context */}
             {replyTo && (
                 <div className="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-lg bg-surface-50 border border-surface-200 text-xs">
@@ -1411,22 +1408,26 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
             <div className="relative">
                 {mentionQ !== null && <MentionPopup query={mentionQ} onSelect={insertMention} />}
                 {entityQ  !== null && <EntityPickerPopup query={entityQ} onSelect={insertEntity} onDismiss={() => setEntityQ(null)} />}
+                {/* Assist — a sheet on a phone, a card above the pill on a desk */}
+                <AssistSheet
+                    channelId={channelId}
+                    draft={body}
+                    hasOrder={!!channelContextType}
+                    open={assistOpen}
+                    onClose={() => setAssistOpen(false)}
+                    onInsert={(t) => { setBody(prev => (prev.trim() ? prev.replace(/\s*$/, "") + "\n" + t : t)); setTimeout(() => textareaRef.current?.focus(), 0); }}
+                />
                 {/* Tighter gutters on phone: the text is the narrowest thing here and
                     every px of chrome comes straight out of it. Desktop keeps its
                     roomier px-3/gap-1.5. */}
                 {/* The floating pill (Signal direction, owner 22 Oct 2026): a soft grey
                     capsule that turns white and takes the brand edge when you are in
                     it; the + and Send are round so they read as buttons at a glance. */}
-                <div className="flex items-end gap-1 sm:gap-1.5 bg-surface-100 rounded-[22px] border border-transparent focus-within:bg-white focus-within:border-brand-300 px-1.5 py-1.5 transition-colors">
-                    {/* Attach */}
-                    <button onClick={() => fileInputRef.current?.click()} title="Add a photo, file or order"
-                        disabled={pending.length >= 10}
-                        aria-label="Add a photo, file or order"
-                        className="shrink-0 w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center rounded-full bg-white text-surface-600 border border-surface-200 hover:text-brand-600 hover:border-brand-300 disabled:opacity-40 transition-colors">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14"/>
-                        </svg>
-                    </button>
+                {/* WhatsApp's pill (owner, 23 Oct 2026): the text leads, then the
+                    paperclip and the ✦ Assist button INSIDE the pill; Send is the
+                    round brand button beside it. */}
+                <div className="flex items-end gap-1 sm:gap-1.5">
+                <div className="flex-1 min-w-0 flex items-end gap-0.5 bg-white sm:bg-surface-100 rounded-[22px] border border-surface-200 sm:border-transparent shadow-[0_1px_1px_rgba(0,0,0,0.06)] sm:shadow-none focus-within:bg-white focus-within:border-brand-300 pl-2.5 pr-1 py-1 transition-colors">
                     <input ref={fileInputRef} type="file" multiple
                         accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
                         className="hidden"
@@ -1457,7 +1458,7 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
                                 ? parseComposerNodes(body, tokenMap)
                                 : <span className="text-surface-400">
                                     {window.innerWidth < 640
-                                        ? "Message…  # order · @ person"
+                                        ? "Message"
                                         : enterToSend
                                             ? "Message…  Enter to send · # order · @ person"
                                             : "Message…  Ctrl+Enter to send · # order · @ person"
@@ -1501,6 +1502,22 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
                       </div>
                     </div>
 
+                    {/* Attach — the paperclip, inside the pill as on WhatsApp */}
+                    <button onClick={() => fileInputRef.current?.click()} title="Add a photo, file or order"
+                        disabled={pending.length >= 10}
+                        aria-label="Add a photo, file or order"
+                        className="shrink-0 w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center rounded-full text-surface-500 hover:text-brand-600 hover:bg-surface-100 disabled:opacity-40 transition-colors">
+                        <svg className="w-[22px] h-[22px] sm:w-[18px] sm:h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.9}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+                        </svg>
+                    </button>
+                    {/* Assist */}
+                    <button onClick={() => setAssistOpen(v => !v)} title="Assist: summarise, translate, draft, replies"
+                        aria-label="Assist" aria-expanded={assistOpen}
+                        className={clsx("shrink-0 w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center rounded-full transition-colors text-lg sm:text-base leading-none",
+                            assistOpen ? "bg-brand-50 text-brand-600" : "text-brand-500 hover:bg-brand-50")}>
+                        ✦
+                    </button>
                     {/* Enter mode toggle — physical keyboards only. On touch there is
                         nothing to toggle: Return makes a newline, Send sends. */}
                     {!isCoarsePointer && (
@@ -1514,6 +1531,7 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
                         </button>
                     )}
 
+                </div>
                     {/* Send */}
                     <button onClick={() => { if (canSend) sendMutation.mutate(); }}
                         disabled={!canSend || sendMutation.isPending}
@@ -1770,7 +1788,27 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
     ticks?: React.ReactNode;
 }) {
     const [hovering, setHovering]           = useState(false);
+    const [sheet, setSheet]                 = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
+    // Touch: a long press opens the action sheet; a swipe to the right replies
+    // (WhatsApp's two gestures). Pointer events, touch only — a mouse keeps the
+    // hover bar. A press that moves more than 10px is a scroll, not a press.
+    const pressRef = useRef<{ x: number; y: number; timer: number; moved: boolean } | null>(null);
+    const onPointerDown = (e: React.PointerEvent) => {
+        if (e.pointerType !== "touch") return;
+        const timer = window.setTimeout(() => { pressRef.current = null; setSheet(true); try { navigator.vibrate?.(8); } catch { /* no haptics */ } }, 420);
+        pressRef.current = { x: e.clientX, y: e.clientY, timer, moved: false };
+    };
+    const onPointerMove = (e: React.PointerEvent) => {
+        const p = pressRef.current; if (!p) return;
+        if (Math.abs(e.clientX - p.x) > 10 || Math.abs(e.clientY - p.y) > 10) { p.moved = true; window.clearTimeout(p.timer); }
+    };
+    const onPointerEnd = (e: React.PointerEvent) => {
+        const p = pressRef.current; if (!p) return;
+        window.clearTimeout(p.timer); pressRef.current = null;
+        const dx = e.clientX - p.x, dy = e.clientY - p.y;
+        if (e.type === "pointerup" && dx > 56 && Math.abs(dy) < 28) onReply(message);
+    };
     const [editing, setEditing]             = useState(false);
     const [draft, setDraft]                 = useState(message.body);
     const [editError, setEditError]         = useState<string | null>(null);
@@ -1867,7 +1905,10 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                 continued ? "py-px" : "pt-2 pb-px",
                 isOwn ? "justify-end" : "justify-start",
             )}
-            onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}>
+            onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}
+            onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd}
+            onContextMenu={e => { if (pressRef.current || sheet) e.preventDefault(); }}
+            style={{ WebkitTouchCallout: "none" } as React.CSSProperties}>
             {!isOwn && showAvatar && (
                 continued
                     // Spacer keeps a run's bubbles in one column under the avatar.
@@ -1892,7 +1933,7 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                             // ~197px past the row and re-open horizontal scroll on a phone.
                             // right-0 grows leftwards into empty canvas, so it can't overflow.
                             "absolute bottom-full mb-1 right-0 z-10",
-                            "flex items-center gap-0.5 bg-white border border-surface-200 rounded-xl shadow-lg px-1.5 py-1 transition-opacity duration-100",
+                            "hidden sm:flex items-center gap-0.5 bg-white border border-surface-200 rounded-xl shadow-lg px-1.5 py-1 transition-opacity duration-100",
                             hovering ? "opacity-100" : "opacity-0 pointer-events-none"
                         )}>
                             {["👍","❤️","😄","🎉"].map(e => (
@@ -1964,7 +2005,7 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                             // Mirrored: grows rightwards from the row's left edge, which
                             // starts after the avatar — so it also stays on-screen.
                             "absolute bottom-full mb-1 left-0 z-10",
-                            "flex items-center gap-0.5 bg-white border border-surface-200 rounded-xl shadow-lg px-1.5 py-1 transition-opacity duration-100",
+                            "hidden sm:flex items-center gap-0.5 bg-white border border-surface-200 rounded-xl shadow-lg px-1.5 py-1 transition-opacity duration-100",
                             hovering ? "opacity-100" : "opacity-0 pointer-events-none"
                         )}>
                             {["👍","❤️","😄","🎉"].map(e => (
@@ -2008,6 +2049,40 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                     </div>
                 )}
             </div>
+            {sheet && (
+                /* The long-press sheet: reactions on top, then what you can do to
+                   this message. One sheet, reachable with a thumb. */
+                <div className="fixed inset-0 z-50 flex items-end bg-black/30 sm:hidden"
+                    onClick={() => setSheet(false)} role="dialog" aria-modal="true" aria-label="Message actions">
+                    <div className="w-full bg-white rounded-t-[20px] shadow-[0_-8px_30px_rgba(0,0,0,0.2)] px-3 pt-2"
+                        style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom, 0px))" }}
+                        onClick={e => e.stopPropagation()}>
+                        <div className="mx-auto w-9 h-1 rounded-full bg-surface-200 mb-2" aria-hidden="true" />
+                        <div className="flex justify-around py-1.5 border-b border-surface-100 mb-1">
+                            {["👍","❤️","😄","🎉","🙏"].map(e => (
+                                <button key={e} onClick={() => { reactMutation.mutate(e); setSheet(false); }} aria-label={`React ${e}`}
+                                    className={clsx("w-11 h-11 rounded-full text-2xl flex items-center justify-center active:scale-125 transition-transform",
+                                        (message.reactions?.[e] ?? []).includes(currentUserId ?? -1) && "bg-brand-50")}>{e}</button>
+                            ))}
+                        </div>
+                        {([
+                            { label: "Reply", icon: "M3 10h10a8 8 0 018 8v2M3 10l6 6M3 10l6-6", run: () => onReply(message) },
+                            { label: "Copy", icon: "M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2M10 20h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z",
+                              run: () => { try { void navigator.clipboard.writeText(stripMarkdown(message.body)); } catch { /* nothing to paste from */ } } },
+                            ...(canEdit ? [{ label: "Edit", icon: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z", run: beginEdit }] : []),
+                            ...((isOwn || isAdmin) ? [{ label: "Delete", icon: "M3 6h18M19 6l-1 14H6L5 6M10 11v6M14 11v6", run: () => setConfirmDelete(true), danger: true }] : []),
+                        ] as { label: string; icon: string; run: () => void; danger?: boolean }[]).map(a => (
+                            <button key={a.label} onClick={() => { setSheet(false); a.run(); }}
+                                className={clsx("w-full flex items-center gap-3 px-2 py-3 rounded-xl text-[15px] active:bg-surface-50", a.danger ? "text-danger" : "text-surface-800")}>
+                                <svg className="w-5 h-5 shrink-0 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d={a.icon}/>
+                                </svg>
+                                {a.label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
             {confirmDelete && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
                     onMouseDown={e => { if (e.target === e.currentTarget) setConfirmDelete(false); }}>
@@ -2568,10 +2643,10 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
         <div className="flex h-full overflow-hidden">
             <div className="flex flex-col flex-1 min-w-0">
                 {/* Header */}
-                <div className="flex items-center gap-2 px-3 sm:px-5 py-3.5 border-b border-surface-200 bg-white shrink-0">
-                    {/* Back button - mobile only */}
+                <div className="flex items-center gap-2 px-2 sm:px-5 py-2 sm:py-3.5 border-b border-surface-200 bg-white shrink-0">
+                    {/* Back button - mobile only. Brand-coloured, as WhatsApp's. */}
                     <button onClick={onOpenSidebar} aria-label="Back to conversations"
-                        className="sm:hidden w-11 h-11 -my-1.5 flex items-center justify-center rounded-full text-surface-500 hover:text-surface-800 hover:bg-surface-100 transition-colors shrink-0 -ml-2">
+                        className="sm:hidden w-10 h-11 -my-1.5 flex items-center justify-center rounded-full text-brand-600 hover:bg-surface-100 transition-colors shrink-0">
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7"/>
                         </svg>
@@ -2597,7 +2672,14 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                    context pill under the header (Linen + Signal, 22 Oct 2026). */
                             <div className="flex flex-col min-w-0">
                                 <p className="text-[0.9375rem] font-bold text-surface-900 truncate tracking-tight">{orderCtx.title ?? orderCtx.orderNumber}</p>
-                                <p className="text-xs text-surface-400 truncate">
+                                {/* Phone: the order itself, one line under the name (the pill
+                                    below is desktop-only). Desk: the kind and the members. */}
+                                <p className="sm:hidden text-xs text-surface-500 truncate">
+                                    <span className="font-mono font-semibold text-surface-600">{orderCtx.orderNumber}</span>
+                                    {orderCtx.currentStage && <> · {orderCtx.currentStage}</>}
+                                    {orderCtx.dueDate && <> · {fmtDueDate(orderCtx.dueDate).label}</>}
+                                </p>
+                                <p className="hidden sm:block text-xs text-surface-400 truncate">
                                     {orderCtx.type === "production_order" ? "Production" : "Order"} · {memberCount} member{memberCount !== 1 ? "s" : ""}{onlineIds.length > 0 ? `, ${onlineIds.length} online` : ""}
                                 </p>
                             </div>
@@ -2655,7 +2737,7 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                 : `/sales/orders/${channel.context_id}`
                         )}
                         title="Open order"
-                        className="mx-3 sm:mx-5 mt-2 shrink-0 flex items-center gap-1.5 rounded-full bg-surface-50 border border-surface-200 px-3 py-1.5 text-xs text-left min-w-0 hover:bg-surface-100 transition-colors"
+                        className="hidden sm:flex mx-5 mt-2 shrink-0 items-center gap-1.5 rounded-full bg-surface-50 border border-surface-200 px-3 py-1.5 text-xs text-left min-w-0 hover:bg-surface-100 transition-colors"
                     >
                         <span className="font-mono font-bold text-surface-700 shrink-0">{orderCtx.orderNumber}</span>
                         {orderCtx.currentStage && <span className="text-surface-500 truncate">· {orderCtx.currentStage}</span>}
@@ -3418,7 +3500,7 @@ export default function CommsHub() {
     };
 
     return (
-        <div className="flex h-full overflow-hidden rounded-xl border border-surface-200 bg-white shadow-sm relative">
+        <div className="flex h-full overflow-hidden sm:rounded-xl sm:border border-surface-200 bg-white sm:shadow-sm relative">
 
             {/* Mobile sidebar backdrop */}
             {mobileSidebarOpen && (
