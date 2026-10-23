@@ -123,10 +123,25 @@ export interface ChannelRead {
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 
+/** One conversation that contains the words you searched for (GET /channels/search). */
+export interface SearchHit {
+    channel_id: number;
+    message_id: number;
+    /** The newest matching message, tokens flattened, up to 140 chars. */
+    snippet:    string;
+    created_at: string | null;
+    /** How many messages in that conversation match. */
+    count:      number;
+}
+
 export const channelApi = {
     /** List all my channels. */
     list: () =>
         get<{ channels: Channel[] }>("/v1/admin/channels"),
+
+    /** Message text across my conversations — the chat list's search box. */
+    search: (q: string) =>
+        get<{ hits: SearchHit[] }>("/v1/admin/channels/search", { params: { q } }),
 
     /** Create a new Space. */
     create: (payload: {
