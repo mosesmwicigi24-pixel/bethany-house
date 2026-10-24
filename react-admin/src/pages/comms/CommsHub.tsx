@@ -1077,8 +1077,17 @@ function htmlToMarkdown(html: string): string {
 }
 
 
-function Composer({ channelId, channelName, channelType, channelContextType, channelMemberIds, replyTo, onClearReply, onSent }: {
+function Composer({ channelId, channelName, channelType, channelContextType, channelMemberIds, replyTo, onClearReply, onSent, onEditLast, incomingFiles, onIncomingHandled, draftRef, insertRef }: {
     channelId: number;
+    /** ↑ in an empty composer edits your last message (desk). */
+    onEditLast?: () => void;
+    /** Files dropped on the thread, handed to the composer to upload. */
+    incomingFiles?: FileList | File[] | null;
+    onIncomingHandled?: () => void;
+    /** The live draft, readable by the desktop info panel's Assist. */
+    draftRef?: React.MutableRefObject<string>;
+    /** How the info panel inserts an Assist answer into the composer. */
+    insertRef?: React.MutableRefObject<((t: string) => void) | null>;
     channelName?: string;
     channelType?: string;
     /** "order" | "production_order" for an order thread: Assist can then draft the customer's message. */
@@ -1120,6 +1129,14 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
     // direction, 23 Oct 2026). It replaced a permanent chip row above the
     // composer that the keyboard pushed off every phone screen.
     const [assistOpen, setAssistOpen]   = useState(false);
+    const insertText = useCallback((t: string) => {
+        setBody(prev => (prev.trim() ? prev.replace(/\s*$/, "") + "\n" + t : t));
+        setTimeout(() => textareaRef.current?.focus(), 0);
+    }, []);
+    if (draftRef) draftRef.current = body;
+    useEffect(() => { if (insertRef) insertRef.current = insertText; return () => { if (insertRef) insertRef.current = null; }; }, [insertRef, insertText]);
+    // Files dropped on the thread arrive here (handleFiles is defined below).
+    const incomingRef = useRef<FileList | File[] | null>(null);
     const { user }                      = useAuthStore();
     const toast                         = useToastStore();
 
@@ -1211,6 +1228,20 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
             void uploadOne(key, file);
         }
     };
+
+    useEffect(() => {
+        if (!incomingFiles || incomingFiles === incomingRef.current) return;
+        incomingRef.current = incomingFiles;
+        const list = incomingFiles instanceof FileList ? incomingFiles : null;
+        if (list) handleFiles(list);
+        else {
+            const dt = new DataTransfer();
+            (incomingFiles as File[]).forEach(f => dt.items.add(f));
+            handleFiles(dt.files);
+        }
+        onIncomingHandled?.();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [incomingFiles]);
 
     const retryUpload = (key: string) => {
         const entry = pending.find(p => p.key === key);
@@ -1415,7 +1446,7 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
                     hasOrder={!!channelContextType}
                     open={assistOpen}
                     onClose={() => setAssistOpen(false)}
-                    onInsert={(t) => { setBody(prev => (prev.trim() ? prev.replace(/\s*$/, "") + "\n" + t : t)); setTimeout(() => textareaRef.current?.focus(), 0); }}
+                    onInsert={insertText}
                 />
                 {/* Tighter gutters on phone: the text is the narrowest thing here and
                     every px of chrome comes straight out of it. Desktop keeps its
@@ -1475,6 +1506,12 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
                             className="absolute inset-0 w-full text-sm leading-5 bg-transparent resize-none outline-none focus:outline-none focus:ring-0 border-0 shadow-none overflow-hidden"
                             style={{ color: "transparent", caretColor: "rgb(15 23 42)" }}
                             onPaste={e => {
+                                // A pasted screenshot or file becomes an attachment (desk).
+                                if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+                                    e.preventDefault();
+                                    handleFiles(e.clipboardData.files);
+                                    return;
+                                }
                                 const html = e.clipboardData.getData("text/html");
                                 if (!html) return;
                                 e.preventDefault();
@@ -1497,6 +1534,8 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
                                     }
                                 }
                                 if (e.key === "Escape") { setMentionQ(null); setEntityQ(null); }
+                                // ↑ in an empty box edits your last message, as on WhatsApp Web.
+                                if (e.key === "ArrowUp" && body === "" && mentionQ === null && entityQ === null && onEditLast) { e.preventDefault(); onEditLast(); }
                             }}
                         />
                       </div>
@@ -1639,8 +1678,10 @@ function Ticks({ readers, others }: {
 
 // ─── Message content - splits text bubble from bare attachments ───────────────
 
-function MessageContent({ body, isOwn, linkedEntities, entityPreviews, timeLabel, ticks, first = true, senderName, replyTo, edited = false }: {
+function MessageContent({ body, isOwn, linkedEntities, entityPreviews, timeLabel, ticks, first = true, senderName, replyTo, edited = false, highlighted = false }: {
     body: string;
+    /** Search in chat: ring the bubble. */
+    highlighted?: boolean;
     isOwn: boolean;
     linkedEntities?: LinkedEntity[];
     entityPreviews?: Record<string, EntityPreview>;
@@ -1698,6 +1739,7 @@ function MessageContent({ body, isOwn, linkedEntities, entityPreviews, timeLabel
             // The tail sits on the TOP corner of the first bubble of a run only;
             // later bubbles in the run are plain (see .bub-tail-* in index.css).
             first && (isOwn ? "bub-tail-r rounded-tr-[2px]" : "bub-tail-l rounded-tl-[2px]"),
+            highlighted && "ring-2 ring-brand-400",
             // Media cards hug their content with a thin frame, WhatsApp-style;
             // text-only bubbles keep the classic padding.
             hasAttachments ? "p-1" : "px-2.5 pt-1.5 pb-[6px]",
@@ -1773,8 +1815,13 @@ function RenderTextOnly({ body, isOwn }: { body: string; isOwn: boolean }) {
 
 // ─── Message bubble ───────────────────────────────────────────────────────────
 
-function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, onEdited, onReaction, continued = false, ticks, showAvatar = false }: {
+function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, onEdited, onReaction, continued = false, ticks, showAvatar = false, highlighted = false, startEditing = false, onEditStarted }: {
     message: ChannelMessage; channelId: number; currentUserId?: number;
+    /** Search in chat: this message matches (and the current one is ringed). */
+    highlighted?: boolean;
+    /** The composer asked (↑) to edit this message. */
+    startEditing?: boolean;
+    onEditStarted?: () => void;
     /** Spaces show who is talking; a DM has only one other person, so no avatar (WhatsApp). */
     showAvatar?: boolean;
     onReply: (m: ChannelMessage) => void; onDeleted: (id: number) => void;
@@ -1845,6 +1892,7 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
     });
 
     const beginEdit = () => { setDraft(message.body); setEditError(null); setEditing(true); };
+    useEffect(() => { if (startEditing && !editing) { beginEdit(); onEditStarted?.(); } /* eslint-disable-line react-hooks/exhaustive-deps */ }, [startEditing]);
     const saveEdit  = () => {
         const body = draft.trim();
         if (!body || body === message.body) { setEditing(false); return; }
@@ -1905,6 +1953,7 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                 continued ? "py-px" : "pt-2 pb-px",
                 isOwn ? "justify-end" : "justify-start",
             )}
+            data-mid={message.id}
             onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}
             onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd}
             onContextMenu={e => { if (pressRef.current || sheet) e.preventDefault(); }}
@@ -1996,7 +2045,7 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                     ) : (
                     <MessageContent body={message.body} isOwn={isOwn} timeLabel={fmtClock(message.created_at)}
                         linkedEntities={message.linked_entities} entityPreviews={message.entity_previews} ticks={ticks}
-                        first={!continued} edited={!!message.edited_at} replyTo={message.reply_to}
+                        first={!continued} edited={!!message.edited_at} replyTo={message.reply_to} highlighted={highlighted}
                         senderName={!isOwn && !continued && showAvatar ? (message.user?.name ?? "Unknown") : undefined} />
                     )}
                     {/* Same as above, mirrored to the right of the bubble. */}
@@ -2103,6 +2152,102 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                 </div>
             )}
         </div>
+    );
+}
+
+// ─── Info panel (desk) ────────────────────────────────────────────────────────
+
+function InfoPanel({ channel, orderCtx, onlineIds, messages, isSpace, onClose, onSettings, draftRef, insertRef }: {
+    channel: Channel; orderCtx: ReturnType<typeof useOrderContext>; onlineIds: number[]; messages: ChannelMessage[];
+    isSpace: boolean; onClose: () => void; onSettings: () => void;
+    draftRef: React.MutableRefObject<string>; insertRef: React.MutableRefObject<((t: string) => void) | null>;
+}) {
+    const navigate = useNavigate();
+    const isDm     = channel.type === "dm";
+    const members  = Array.isArray(channel.members) ? (channel.members as ChannelUser[]) : [];
+    // Media, files and links from the messages already loaded — what you can
+    // scroll to is what you can browse here.
+    const images: { url: string; name: string }[] = [];
+    const files:  { url: string; name: string }[] = [];
+    const links:  string[] = [];
+    messages.forEach(m => {
+        if (m.type === "system") return;
+        const parsed = parseBody(m.body);
+        images.push(...parsed.images); files.push(...parsed.files);
+        (parsed.textContent.match(/https?:\/\/[^\s)]+/g) ?? []).forEach(l => links.push(l));
+    });
+    const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+        <div className="bg-white border-y border-surface-200 px-4 py-3 mt-2.5">
+            <h4 className="text-2xs font-bold uppercase tracking-wider text-surface-500 mb-2">{title}</h4>
+            {children}
+        </div>
+    );
+    return (
+        <aside className="hidden sm:flex flex-col w-[300px] shrink-0 border-l border-surface-200 bg-surface-50 overflow-y-auto" aria-label="Conversation info">
+            <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-surface-200 sticky top-0 z-10">
+                <span className="text-sm font-bold text-surface-900">{isDm ? "Contact info" : orderCtx ? "Order thread" : "Space info"}</span>
+                <button onClick={onClose} aria-label="Close info" className="w-7 h-7 rounded-full text-surface-400 hover:bg-surface-100">✕</button>
+            </div>
+            <div className="flex flex-col items-center text-center gap-1.5 px-4 py-5 bg-white">
+                {isDm
+                    ? <Avatar initials={initialsOf(channel.name)} name={channel.name} size="md" />
+                    : <div className={clsx("w-16 h-16 rounded-2xl flex items-center justify-center text-2xl", orderCtx ? "bg-brand-50 text-brand-600" : "bg-surface-800 text-white")}>{orderCtx ? (orderCtx.type === "production_order" ? "⚙" : "🧵") : "#"}</div>}
+                <p className="text-[15px] font-bold text-surface-900 mt-1">{orderCtx?.title ?? channel.name}</p>
+                <p className="text-xs text-surface-500">
+                    {isDm ? (onlineIds.length > 0 ? "online" : "offline")
+                        : `${members.length} member${members.length !== 1 ? "s" : ""}${onlineIds.length > 0 ? ` · ${onlineIds.length} online` : ""}`}
+                </p>
+                {channel.description && <p className="text-xs text-surface-500 mt-1">{channel.description}</p>}
+            </div>
+
+            {orderCtx && (
+                <Section title="Order in this thread">
+                    <p className="font-mono text-sm font-semibold text-brand-700">{orderCtx.orderNumber}</p>
+                    <dl className="mt-1.5 text-xs text-surface-600 space-y-1">
+                        {orderCtx.customer && <div className="flex justify-between gap-2"><dt>Customer</dt><dd className="font-semibold text-surface-900 text-right">{orderCtx.customer}</dd></div>}
+                        {orderCtx.currentStage && <div className="flex justify-between gap-2"><dt>Stage</dt><dd className="font-semibold text-surface-900 text-right">{orderCtx.currentStage}{orderCtx.completion != null ? ` · ${orderCtx.completion}%` : ""}</dd></div>}
+                        {orderCtx.dueDate && <div className="flex justify-between gap-2"><dt>Due</dt><dd className={clsx("font-semibold text-right", fmtDueDate(orderCtx.dueDate).cls)}>{fmtDueDate(orderCtx.dueDate).label}</dd></div>}
+                        {orderCtx.priority && orderCtx.priority !== "normal" && <div className="flex justify-between gap-2"><dt>Priority</dt><dd className={clsx("font-bold uppercase", PRIORITY_COLOURS[orderCtx.priority])}>{orderCtx.priority}</dd></div>}
+                        {orderCtx.status && <div className="flex justify-between gap-2"><dt>Status</dt><dd className="font-semibold text-surface-900">{orderCtx.status.replace(/_/g, " ")}</dd></div>}
+                    </dl>
+                    <button onClick={() => navigate(orderCtx.type === "production_order" ? `/production/orders/${channel.context_id}` : `/sales/orders/${channel.context_id}`)}
+                        className="mt-2.5 w-full text-xs font-bold text-brand-700 bg-brand-50 hover:bg-brand-100 rounded-lg py-1.5">Open order</button>
+                </Section>
+            )}
+
+            <Section title="Assist">
+                <AssistSheet variant="panel" open channelId={channel.id} hasOrder={!!channel.context_type}
+                    draft={() => draftRef.current} onClose={() => undefined}
+                    onInsert={t => insertRef.current?.(t)} />
+            </Section>
+
+            <Section title={`Media, files and links · ${images.length + files.length + links.length}`}>
+                {images.length > 0 && (
+                    <div className="grid grid-cols-3 gap-1.5 mb-2">
+                        {images.slice(-9).map((im, i) => <div key={i} className="aspect-square overflow-hidden rounded-lg bg-surface-100 [&_img]:w-full [&_img]:h-full [&_img]:object-cover"><AuthImage url={im.url} alt={im.name} isOwn={false} grid /></div>)}
+                    </div>
+                )}
+                {files.slice(-6).map((f, i) => <div key={i} className="mb-1.5"><AuthFileLink url={f.url} name={f.name} isOwn={false} /></div>)}
+                {links.slice(-6).map((l, i) => <a key={i} href={l} target="_blank" rel="noreferrer" className="block text-xs text-info-dark truncate hover:underline">{l}</a>)}
+                {images.length + files.length + links.length === 0 && <p className="text-xs text-surface-400">Nothing shared yet.</p>}
+            </Section>
+
+            {!isDm && (
+                <Section title={`Members · ${members.length}`}>
+                    {members.map(m => (
+                        <div key={m.id} className="flex items-center gap-2 py-1 text-xs">
+                            <Avatar initials={m.initials} name={m.name} size="xs" />
+                            <span className="text-surface-800 truncate">{m.name}</span>
+                            <span className="ml-auto text-surface-400">{onlineIds.includes(m.id) ? "online" : m.role === "admin" ? "admin" : ""}</span>
+                        </div>
+                    ))}
+                    {isSpace && !channel.context_type && (
+                        <button onClick={onSettings} className="mt-2 w-full text-xs font-bold text-surface-700 bg-surface-100 hover:bg-surface-200 rounded-lg py-1.5">Space settings</button>
+                    )}
+                </Section>
+            )}
+            <div className="h-4" />
+        </aside>
     );
 }
 
@@ -2461,6 +2606,17 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
     const [typing, setTyping]           = useState<string[]>([]);
     const [onlineIds, setOnlineIds]     = useState<number[]>([]);
     const [showSettings, setShowSettings] = useState(false);
+    // Desk (WhatsApp Web's shape, owner 23 Oct 2026): the info panel on the
+    // right, search in chat under the header, ↑ to edit your last message,
+    // files dropped on the thread, Escape closing what is open.
+    const [panel, setPanel]           = useState(false);
+    const [search, setSearch]         = useState<string | null>(null);
+    const [matchIdx, setMatchIdx]     = useState(0);
+    const [editId, setEditId]         = useState<number | null>(null);
+    const [dropped, setDropped]       = useState<File[] | null>(null);
+    const [dragging, setDragging]     = useState(false);
+    const draftRef  = useRef("");
+    const insertRef = useRef<((t: string) => void) | null>(null);
     // The thread pane scrolls via its own scrollTop, NEVER scrollIntoView:
     // scrollIntoView also scrolls the window, and on iOS that pan is what
     // wrecked the whole layout the moment the composer was focused.
@@ -2639,9 +2795,23 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
         return <Ticks readers={readers} others={others.length} />;
     };
 
+    // Escape closes what is open, innermost first.
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key !== "Escape") return;
+            if (search !== null) { setSearch(null); return; }
+            if (panel) setPanel(false);
+        };
+        document.addEventListener("keydown", onKey);
+        return () => document.removeEventListener("keydown", onKey);
+    }, [search, panel]);
+
     return (
         <div className="flex h-full overflow-hidden">
-            <div className="flex flex-col flex-1 min-w-0">
+            <div className="flex flex-col flex-1 min-w-0 relative"
+                onDragOver={e => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDragging(true); } }}
+                onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }}
+                onDrop={e => { if (e.dataTransfer.files.length) { e.preventDefault(); setDragging(false); setDropped(Array.from(e.dataTransfer.files)); } }}>
                 {/* Header */}
                 <div className="flex items-center gap-2 px-2 sm:px-5 py-2 sm:py-3.5 border-b border-surface-200 bg-white shrink-0">
                     {/* Back button - mobile only. Brand-coloured, as WhatsApp's. */}
@@ -2698,6 +2868,17 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                             </>
                         )}
                     </div>
+                    {/* Desk: search in chat, Assist (in the info panel), info panel */}
+                    <button onClick={() => { setSearch(s => (s === null ? "" : null)); setMatchIdx(0); }} title="Search in chat" aria-label="Search in chat" aria-pressed={search !== null}
+                        className={clsx("hidden sm:flex p-2 rounded-lg transition-colors items-center", search !== null ? "bg-surface-100 text-surface-900" : "text-surface-400 hover:bg-surface-100 hover:text-surface-700")}>
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="7"/><path strokeLinecap="round" d="M20 20l-3.5-3.5"/></svg>
+                    </button>
+                    <button onClick={() => setPanel(true)} title="Assist" aria-label="Assist"
+                        className="hidden sm:flex p-2 rounded-lg text-brand-500 hover:bg-brand-50 transition-colors items-center text-base leading-none">✦</button>
+                    <button onClick={() => setPanel(v => !v)} title="Info" aria-label="Conversation info" aria-pressed={panel}
+                        className={clsx("hidden sm:flex p-2 rounded-lg transition-colors items-center", panel ? "bg-surface-100 text-surface-900" : "text-surface-400 hover:bg-surface-100 hover:text-surface-700")}>
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="9"/><path strokeLinecap="round" d="M12 11v5M12 8h.01"/></svg>
+                    </button>
                     {/* Settings cog — only for manually created spaces, not system order threads */}
                     {isSpace && !channel.context_type && (
                         <button onClick={() => setShowSettings(v => !v)} title="Space settings" aria-label="Space settings" aria-expanded={showSettings}
@@ -2725,6 +2906,31 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                         </button>
                     )}
                 </div>
+
+                {search !== null && (() => {
+                    const needle = search.trim().toLowerCase();
+                    const ids = needle ? messages.filter(m => m.type !== "system" && m.body.toLowerCase().includes(needle)).map(m => m.id) : [];
+                    const cur = ids.length ? Math.min(matchIdx, ids.length - 1) : 0;
+                    const jump = (i: number) => {
+                        const el = scrollAreaRef.current; if (!el || !ids.length) return;
+                        setMatchIdx(i);
+                        const target = el.querySelector<HTMLElement>(`[data-mid="${ids[i]}"]`);
+                        // Scroll the PANE, never scrollIntoView (see the ref's docblock).
+                        if (target) el.scrollTop = target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - el.clientHeight / 3;
+                    };
+                    return (
+                        <div className="hidden sm:flex items-center gap-2 px-5 py-2 border-b border-surface-200 bg-white shrink-0 text-sm">
+                            <input autoFocus value={search} onChange={e => { setSearch(e.target.value); setMatchIdx(0); }}
+                                onKeyDown={e => { if (e.key === "Enter" && ids.length) jump(e.shiftKey ? (cur - 1 + ids.length) % ids.length : (cur + 1) % ids.length); }}
+                                placeholder="Search in this conversation" aria-label="Search in this conversation"
+                                className="flex-1 min-w-0 bg-surface-100 rounded-lg px-3 py-1.5 outline-none focus:bg-white focus:ring-1 focus:ring-brand-300" />
+                            <span className="text-xs text-surface-500 tabular-nums whitespace-nowrap">{needle ? (ids.length ? `${cur + 1} of ${ids.length}` : "No matches") : "Type to search"}</span>
+                            <button onClick={() => jump((cur - 1 + ids.length) % ids.length)} disabled={!ids.length} aria-label="Previous match" className="w-7 h-7 rounded-lg hover:bg-surface-100 disabled:opacity-30">↑</button>
+                            <button onClick={() => jump((cur + 1) % ids.length)} disabled={!ids.length} aria-label="Next match" className="w-7 h-7 rounded-lg hover:bg-surface-100 disabled:opacity-30">↓</button>
+                            <button onClick={() => setSearch(null)} aria-label="Close search" className="w-7 h-7 rounded-lg hover:bg-surface-100 text-surface-500">✕</button>
+                        </div>
+                    );
+                })()}
 
                 {/* Context pill — the order this thread is about, one tap from the
                     conversation. Was two dense rows inside the header; now a quiet
@@ -2821,7 +3027,9 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                     onReaction={(msgId, reactions) =>
                                         setMessages(prev => prev.map(m => m.id === msgId ? { ...m, reactions } : m))
                                     }
-                                    ticks={ticksFor(msg)} showAvatar={channel.type !== "dm"} />
+                                    ticks={ticksFor(msg)} showAvatar={channel.type !== "dm"}
+                                    highlighted={search !== null && !!search.trim() && msg.type !== "system" && msg.body.toLowerCase().includes(search.trim().toLowerCase())}
+                                    startEditing={editId === msg.id} onEditStarted={() => setEditId(null)} />
                             ))}
                         </div>
                     ))}</div>)}
@@ -2850,8 +3058,24 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                     channelMemberIds={channelMemberIds}
                     replyTo={replyTo}
                     onClearReply={() => setReplyTo(null)}
-                    onSent={msg => { setMessages(prev => prev.some(m => String(m.id) === String(msg.id)) ? prev : [...prev, msg]); setTimeout(() => scrollToBottom(), 50); }} />
+                    onSent={msg => { setMessages(prev => prev.some(m => String(m.id) === String(msg.id)) ? prev : [...prev, msg]); setTimeout(() => scrollToBottom(), 50); }}
+                    onEditLast={() => { const last = [...messages].reverse().find(m => m.user?.id === user?.id && m.type !== "system"); if (last) setEditId(last.id); }}
+                    incomingFiles={dropped} onIncomingHandled={() => setDropped(null)}
+                    draftRef={draftRef} insertRef={insertRef} />
+                {dragging && (
+                    <div className="absolute inset-0 z-20 bg-brand-50/80 border-4 border-dashed border-brand-300 flex items-center justify-center text-brand-700 font-bold text-lg pointer-events-none" aria-hidden="true">
+                        Drop to attach
+                    </div>
+                )}
             </div>
+
+            {/* The info panel (desk). Contact or space, the order, Assist, media,
+                members — what WhatsApp Web shows on the right. */}
+            {panel && (
+                <InfoPanel channel={channelFull} orderCtx={orderCtx} onlineIds={onlineIds} messages={messages}
+                    isSpace={isSpace} onClose={() => setPanel(false)} onSettings={() => setShowSettings(true)}
+                    draftRef={draftRef} insertRef={insertRef} />
+            )}
 
             {showSettings && isSpace && (
                 <SpaceSettings channel={channelFull} currentUserId={user?.id} onClose={() => setShowSettings(false)} />
