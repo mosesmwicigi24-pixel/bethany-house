@@ -381,6 +381,11 @@ Route::prefix('v1')->group(function () {
                 Route::get('/entity-search',                       [ChannelController::class, 'entitySearch']);
                 // ── Message search across your conversations (chat list search box) ──
                 Route::get('/search',                              [ChannelController::class, 'search']);
+                // ── Quick replies: the business's saved messages, inserted with `/` ──
+                Route::get('/quick-replies',                       [\App\Http\Controllers\Api\QuickReplyController::class, 'index']);
+                Route::post('/quick-replies',                      [\App\Http\Controllers\Api\QuickReplyController::class, 'store']);
+                Route::patch('/quick-replies/{id}',                [\App\Http\Controllers\Api\QuickReplyController::class, 'update'])->whereNumber('id');
+                Route::delete('/quick-replies/{id}',               [\App\Http\Controllers\Api\QuickReplyController::class, 'destroy'])->whereNumber('id');
                 Route::get('/{id}',                                [ChannelController::class, 'show']);
                 Route::patch('/{id}',                              [ChannelController::class, 'update']);
                 Route::delete('/{id}',                             [ChannelController::class, 'destroy']);
@@ -391,6 +396,7 @@ Route::prefix('v1')->group(function () {
                 Route::patch('/{id}/messages/{msgId}',             [ChannelController::class, 'editMessage']);
                 Route::delete('/{id}/messages/{msgId}',            [ChannelController::class, 'deleteMessage']);
                 Route::post('/{id}/messages/{msgId}/react',        [ChannelController::class, 'react']);
+                Route::post('/{id}/messages/{msgId}/forward',      [ChannelController::class, 'forward']);
                 Route::post('/{id}/read',                          [ChannelController::class, 'markRead']);
                 // ── Per-user thread dismissal — order/production threads only ───
                 Route::post('/{id}/dismiss',                       [ChannelController::class, 'dismiss']);

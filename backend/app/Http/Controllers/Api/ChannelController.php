@@ -356,6 +356,35 @@ class ChannelController extends Controller
         return response()->json(['message' => $this->formatMessage($message)], 201);
     }
 
+    // ── POST /channels/{id}/messages/{msgId}/forward ─────────────────────────
+    //
+    // WhatsApp's forward (Business direction, 23 Oct 2026): the message is
+    // posted again in a conversation you both belong to, headed with where it
+    // came from, through the same ChannelPosting path as any message — so
+    // mentions, order tags, broadcasts and notifications all behave.
+    public function forward(Request $request, $channelId, $msgId)
+    {
+        $user   = $request->user();
+        $source = $this->findAccessible($channelId, $user->id);
+        $message = ChannelMessage::where('channel_id', $source->id)->findOrFail($msgId);
+        if ($message->type !== 'text') {
+            return response()->json(['message' => 'Only messages can be forwarded.'], 422);
+        }
+
+        $v = $request->validate(['to_channel_id' => 'required|integer|exists:channels,id']);
+        if ((int) $v['to_channel_id'] === (int) $source->id) {
+            return response()->json(['message' => 'That is the conversation it is already in.'], 422);
+        }
+        $target = $this->findAccessible($v['to_channel_id'], $user->id);
+
+        $from = $source->type === 'dm' ? 'a direct message' : $source->name;
+        $body = "↪ Forwarded from {$from}\n" . $message->body;
+
+        $posted = ChannelPosting::post($target, $user, $body, null);
+
+        return response()->json(['message' => $this->formatMessage($posted), 'channel_id' => $target->id], 201);
+    }
+
     // ── PATCH /channels/{id}/messages/{msgId} ────────────────────────────────
 
     public function editMessage(Request $request, $channelId, $msgId)
