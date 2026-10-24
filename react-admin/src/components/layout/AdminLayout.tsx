@@ -245,6 +245,9 @@ export function AdminLayout() {
     // owner 23 Oct 2026): the top bar, the page gutter and the tab bar all go,
     // and come back on the chat list. On a desk nothing changes.
     const phoneThread = /^\/comms\/\d+/.test(location.pathname)
+    // The chat list is a screen too: no hub top bar or gutter on a phone (it
+    // carries its own "Messages" header), but the tab bar stays.
+    const phoneComms  = fillsWindow
 
     return (
         // h-screen-safe, not h-screen: the --vh machinery below has always been
@@ -298,7 +301,7 @@ export function AdminLayout() {
 
             {/* ── Main column ───────────────────────────────────────── */}
             <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-                <div className={phoneThread ? 'max-sm:hidden' : undefined}>
+                <div className={phoneComms ? 'max-sm:hidden' : undefined}>
                     <Topbar
                         collapsed={collapsed}
                         onToggleCollapse={() => setCollapsed((v) => !v)}
@@ -331,7 +334,7 @@ export function AdminLayout() {
                         touches the bezel on a large monitor, and phones and
                         tablets are untouched: the cap never bound below 1200px,
                         so nothing about their layout changes. */}
-                    <div className={`w-full px-3 py-3 md:px-8 md:py-8 2xl:px-10${fillsWindow ? " h-full" : ""}${phoneThread ? " max-sm:p-0" : ""}`}>
+                    <div className={`w-full px-3 py-3 md:px-8 md:py-8 2xl:px-10${fillsWindow ? " h-full" : ""}${phoneComms ? " max-sm:p-0" : ""}`}>
                         {/* key: a crash on one page must not follow you to the next */}
                         <PageErrorBoundary key={location.pathname}>
                             <Outlet />

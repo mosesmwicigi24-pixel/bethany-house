@@ -2986,322 +2986,6 @@ aria-label="Close">
     );
 }
 
-// ─── Sidebar section ──────────────────────────────────────────────────────────
-
-function SidebarSection({ label, onAdd, addTitle, children, collapsed, onToggleCollapse, count }: {
-    label: string; onAdd?: () => void; addTitle?: string; children: React.ReactNode;
-    collapsed?: boolean; onToggleCollapse?: () => void; count?: number;
-}) {
-    return (
-        <div className="px-3">
-            <div className="flex items-center justify-between px-1 py-1.5">
-                <button
-                    onClick={onToggleCollapse}
-                    className="flex items-center gap-1.5 min-w-0 text-left group"
-                    disabled={!onToggleCollapse}
-                >
-                    {onToggleCollapse && (
-                        <svg className={clsx("w-3 h-3 text-surface-400 shrink-0 transition-transform", !collapsed && "rotate-90")}
-                            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
-                        </svg>
-                    )}
-                    <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest">{label}</p>
-                    {count !== undefined && count > 0 && (
-                        <span className="text-2xs text-surface-400 font-normal">({count})</span>
-                    )}
-                </button>
-                {onAdd && (
-                    <button onClick={onAdd} title={addTitle}
-                        className="w-5 h-5 rounded flex items-center justify-center text-surface-400 hover:text-brand-600 hover:bg-brand-50 transition-colors">
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16M4 12h16"/>
-                        </svg>
-                    </button>
-                )}
-            </div>
-            {!collapsed && children}
-        </div>
-    );
-}
-
-// ─── Order thread item ────────────────────────────────────────────────────────
-// Specialised sidebar item for context-scoped channels (production orders, orders).
-// Shows a richer layout: type icon, order number, product/customer subtitle, and
-// last message — giving enough context to identify the order without opening it.
-
-function OrderThreadItem({ channel, active, onClick, onDismiss }: {
-    channel: Channel; active: boolean; onClick: () => void; onDismiss: () => void;
-}) {
-    const unread = channel.unread_count ?? 0;
-
-    // Parse display info from context fields and name.
-    // Name format from backend: "PRD · PO-260527-RF3FM" or "Order · ORD-1234"
-    const isProd    = channel.context_type === "production_order";
-    const nameParts = channel.name.split("·").map(s => s.trim());
-    const orderNum  = nameParts[1] ?? nameParts[0] ?? channel.name;
-    // description is set by the backend on create/refresh with product·status·due
-    // For older channels that were created before this was added, it will be null —
-    // fall back gracefully to just the last message preview in that case.
-    const subtitle  = channel.description ?? null;
-
-    return (
-        <div
-            role="button"
-            tabIndex={0}
-            onClick={onClick}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onClick(); }}
-            className={clsx(
-                "w-full text-left px-2 py-2 rounded-lg transition-colors mb-0.5 group relative cursor-pointer",
-                active ? "bg-brand-500/10" : "hover:bg-surface-100"
-            )}
-        >
-            {/* Dismiss button — hover/focus only, stops propagation so it
-                doesn't also select the thread. Order/production threads only;
-                see backend dismiss() guard. */}
-            <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); onDismiss(); }}
-                title="Dismiss thread (reappears on new message)"
-                className="absolute top-1.5 right-1.5 w-5 h-5 rounded-md flex items-center justify-center text-surface-500 hover:text-danger hover:bg-danger/10 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity z-10"
-            >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
-                </svg>
-            </button>
-
-            <div className="flex items-start gap-2">
-                {/* Type icon */}
-                <div className={clsx(
-                    "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5",
-                    isProd
-                        ? active ? "bg-accent-100 text-accent-700" : "bg-accent-50 text-accent-600"
-                        : active ? "bg-brand-100 text-brand-700"  : "bg-brand-50 text-brand-600"
-                )}>
-                    {isProd ? (
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/>
-                        </svg>
-                    ) : (
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-                        </svg>
-                    )}
-                </div>
-
-                <div className="flex-1 min-w-0">
-                    {/* Type label + order number */}
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className={clsx(
-                            "text-2xs font-bold uppercase tracking-wide shrink-0",
-                            active ? (isProd ? "text-accent-600" : "text-brand-600") : "text-surface-400"
-                        )}>
-                            {isProd ? "Prod" : "Order"}
-                        </span>
-                        <span className={clsx(
-                            "text-xs font-bold font-mono truncate",
-                            active ? "text-brand-700" : "text-surface-800"
-                        )}>
-                            {orderNum}
-                        </span>
-                        <span className="ml-auto flex items-center gap-1.5 shrink-0">
-                            {fmtWhen(channel.last_message?.created_at ?? channel.last_activity_at) && (
-                                <span className={clsx("text-2xs tabular-nums", unread > 0 ? "text-brand-600 font-semibold" : "text-surface-500")}>
-                                    {fmtWhen(channel.last_message?.created_at ?? channel.last_activity_at)}
-                                </span>
-                            )}
-                            {unread > 0 && (
-                                <span className="min-w-[16px] h-4 px-1 rounded-full bg-brand-600 text-white text-2xs font-bold flex items-center justify-center">
-                                    {unread > 99 ? "99+" : unread}
-                                </span>
-                            )}
-                        </span>
-                    </div>
-
-                    {/* Subtitle: product/customer·status·due (from description) */}
-                    {subtitle && (
-                        <p className="text-2xs text-surface-500 truncate mt-0.5 leading-tight">{subtitle}</p>
-                    )}
-
-                    {/* Last message preview */}
-                    {channel.last_message ? (
-                        <p className="text-2xs text-surface-400 truncate mt-0.5">
-                            {channel.last_message.user_name
-                                ? <span className="font-medium text-surface-500">{channel.last_message.user_name.split(" ")[0]}: </span>
-                                : null
-                            }
-                            {stripMarkdown(channel.last_message.body)}
-                        </p>
-                    ) : (
-                        <p className="text-2xs text-surface-500 truncate mt-0.5 italic">No messages yet</p>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
-}
-
-// ─── Order threads section ────────────────────────────────────────────────────
-// Manages the collapsible, searchable list of context-scoped order channels.
-// Shows only channels with recent activity by default; "Show all" reveals the rest.
-
-const ORDER_THREADS_RECENT_DAYS = 14; // channels active within this window shown by default
-
-function OrderThreadsSection({ channels, activeId, onSelect, onDismiss, recentlyDismissed, onUndismiss }: {
-    channels: Channel[]; activeId: number | null; onSelect: (id: number) => void; onDismiss: (channel: Channel) => void;
-    recentlyDismissed: Channel[]; onUndismiss: (id: number) => void;
-}) {
-    const [collapsed, setCollapsed]   = useState(false);
-    const [search, setSearch]         = useState("");
-    const [showAll, setShowAll]       = useState(false);
-
-    const now        = Date.now();
-    const cutoff     = ORDER_THREADS_RECENT_DAYS * 86_400_000;
-
-    // Sort by last activity desc
-    const sorted = [...channels].sort((a, b) => {
-        const ta = a.last_activity_at ? new Date(a.last_activity_at).getTime() : 0;
-        const tb = b.last_activity_at ? new Date(b.last_activity_at).getTime() : 0;
-        return tb - ta;
-    });
-
-    // Apply search filter
-    const searched = search.trim()
-        ? sorted.filter(c => c.name.toLowerCase().includes(search.toLowerCase()) ||
-            (c.description ?? "").toLowerCase().includes(search.toLowerCase()))
-        : sorted;
-
-    // Split into recent vs older
-    const recent = searched.filter(c =>
-        c.id === activeId ||
-        (c.last_activity_at && now - new Date(c.last_activity_at).getTime() < cutoff) ||
-        (c.unread_count ?? 0) > 0
-    );
-    const older  = searched.filter(c => !recent.includes(c));
-    const visible = (showAll || search.trim()) ? searched : recent;
-
-    const totalUnread = channels.reduce((n, c) => n + (c.unread_count ?? 0), 0);
-
-    return (
-        <div className="px-3">
-            {/* Section header */}
-            <div className="flex items-center justify-between px-1 py-1.5">
-                <button
-                    onClick={() => setCollapsed(v => !v)}
-                    className="flex items-center gap-1.5 min-w-0 text-left"
-                >
-                    <svg className={clsx("w-3 h-3 text-surface-400 shrink-0 transition-transform", !collapsed && "rotate-90")}
-                        fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/>
-                    </svg>
-                    <p className="text-2xs font-bold text-surface-400 uppercase tracking-widest">Order Threads</p>
-                    {totalUnread > 0 && (
-                        <span className="px-1 rounded-full bg-danger text-white text-2xs font-bold leading-tight">
-                            {totalUnread > 99 ? "99+" : totalUnread}
-                        </span>
-                    )}
-                    {!collapsed && channels.length > 0 && (
-                        <span className="text-2xs text-surface-400 font-normal">({channels.length})</span>
-                    )}
-                </button>
-            </div>
-
-            {!collapsed && (
-                <>
-                    {/* Search input — only shown when there are enough channels to warrant it */}
-                    {channels.length >= 5 && (
-                        <div className="relative mb-1.5">
-                            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-surface-500"
-                                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
-                            </svg>
-                            <input
-                                value={search}
-                                onChange={e => setSearch(e.target.value)}
-                                placeholder="Find order…"
-                                className="w-full text-2xs pl-7 pr-2.5 py-1.5 rounded-lg bg-surface-100 border border-transparent focus:border-brand-300 focus:outline-none focus:bg-white placeholder:text-surface-500 transition-colors"
-                            />
-                            {search && (
-                                <button onClick={() => setSearch("")}
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-surface-500 hover:text-surface-500">
-                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
-                                    </svg>
-                                </button>
-                            )}
-                        </div>
-                    )}
-
-                    {channels.length === 0 ? (
-                        <p className="text-2xs text-surface-400 px-2 py-1">No order threads yet</p>
-                    ) : search.trim() && searched.length === 0 ? (
-                        <p className="text-2xs text-surface-400 px-2 py-1">No orders match "{search.trim()}"</p>
-                    ) : (
-                        <>
-                            {/* All threads can be outside the recency window — that's a quiet
-                                list, not a failed search; the "N older threads" toggle below
-                                is the way in. */}
-                            {visible.length === 0 && !search.trim() && (
-                                <p className="text-2xs text-surface-400 px-2 py-1">Nothing active this fortnight</p>
-                            )}
-                            {visible.map(c => (
-                                <OrderThreadItem key={c.id} channel={c} active={c.id === activeId} onClick={() => onSelect(c.id)} onDismiss={() => onDismiss(c)} />
-                            ))}
-
-                            {/* Show all / show recent toggle */}
-                            {!search.trim() && older.length > 0 && (
-                                <button
-                                    onClick={() => setShowAll(v => !v)}
-                                    className="w-full text-left px-2 py-1.5 text-2xs text-brand-500 hover:text-brand-700 font-medium flex items-center gap-1 transition-colors"
-                                >
-                                    {showAll ? (
-                                        <>
-                                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5"/>
-                                            </svg>
-                                            Show recent only
-                                        </>
-                                    ) : (
-                                        <>
-                                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/>
-                                            </svg>
-                                            {older.length} older thread{older.length !== 1 ? "s" : ""}
-                                        </>
-                                    )}
-                                </button>
-                            )}
-                        </>
-                    )}
-
-                    {/* Recently dismissed — session-local undo affordance.
-                        index() never returns dismissed channels, so this list
-                        only ever reflects what THIS browser tab dismissed
-                        since it loaded; a page reload clears it, which is
-                        fine — the dismissal itself is still in effect on the
-                        server either way. */}
-                    {recentlyDismissed.length > 0 && (
-                        <div className="mt-2 pt-2 border-t border-line">
-                            <p className="text-2xs font-semibold text-surface-400 px-2 py-1">Recently dismissed</p>
-                            {recentlyDismissed.map(c => (
-                                <div key={c.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-surface-100 transition-colors">
-                                    <span className="flex-1 truncate text-2xs text-surface-400">{c.name}</span>
-                                    <button
-                                        onClick={() => onUndismiss(c.id)}
-                                        className="text-2xs font-medium text-brand-500 hover:text-brand-700 shrink-0"
-                                    >
-                                        Restore
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </>
-            )}
-        </div>
-    );
-}
-
 // ─── Channel list item ────────────────────────────────────────────────────────
 // A conversation row reads like a messenger, not a menu: identity avatar in a
 // stable per-person colour, name + relative time on one line, preview + unread
@@ -3338,63 +3022,227 @@ function fmtWhen(iso?: string | null): string | null {
     return d.toLocaleDateString("en-KE", { day: "2-digit", month: "short" });
 }
 
-function ChannelItem({ channel, active, onClick, currentUserName }: {
+
+// ─── Chat list (WhatsApp Business direction, owner 23 Oct 2026) ───────────────
+//
+// One list in recency order, whatever kind of conversation it is, with filter
+// chips where the three sidebar sections used to be. On a phone it is a screen
+// of its own (the thread takes over when one is open); on a desk it is the
+// left pane. Order and production threads carry a label, as WhatsApp Business
+// labels do, from data the hub already has.
+
+type ChatFilter = "all" | "unread" | "orders" | "spaces" | "people";
+
+function ChatRow({ channel, active, onClick, currentUserName, snippet, onDismiss }: {
     channel: Channel; active: boolean; onClick: () => void; currentUserName?: string | null;
+    /** A search hit: the matching message replaces the last-message preview. */
+    snippet?: { text: string; count: number } | null;
+    /** Order and production threads can be dismissed until their next message. */
+    onDismiss?: () => void;
 }) {
-    const unread = channel.unread_count ?? 0;
-    const isDm   = channel.type === "dm";
-    const when   = fmtWhen(channel.last_message?.created_at ?? channel.last_activity_at);
-    const mine   = !!currentUserName && channel.last_message?.user_name === currentUserName;
+    const unread  = channel.unread_count ?? 0;
+    const isDm    = channel.type === "dm";
+    const ctx     = channel.context_type ?? null;
+    const when    = fmtWhen(channel.last_message?.created_at ?? channel.last_activity_at);
+    const mine    = !!currentUserName && channel.last_message?.user_name === currentUserName;
+    // Swipe LEFT on a phone dismisses an order thread (touch pointer only).
+    const swipe = useRef<{ x: number; y: number } | null>(null);
+    const onPointerDown = (e: React.PointerEvent) => { if (e.pointerType === "touch" && onDismiss) swipe.current = { x: e.clientX, y: e.clientY }; };
+    const onPointerUp   = (e: React.PointerEvent) => {
+        const p = swipe.current; swipe.current = null; if (!p || !onDismiss) return;
+        if (e.clientX - p.x < -64 && Math.abs(e.clientY - p.y) < 28) onDismiss();
+    };
     return (
-        <button onClick={onClick} className={clsx(
-            "w-full flex items-center gap-2.5 px-2 py-2 rounded-xl text-left transition-colors mb-0.5 relative",
-            active ? "bg-brand-500/10" : "hover:bg-surface-100"
-        )}>
-            {active && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-8 rounded-full bg-brand-500" aria-hidden="true" />}
-            {isDm ? (
-                <div className={clsx("w-9 h-9 rounded-full bg-gradient-to-br flex items-center justify-center shrink-0 text-2xs font-bold text-white shadow-sm", avatarGradient(channel.name))}>
-                    {initialsOf(channel.name)}
+        <div className="relative group">
+            <button onClick={onClick} onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerCancel={() => { swipe.current = null; }}
+                className={clsx(
+                    "w-full flex items-center gap-3 px-4 py-2.5 sm:px-3 sm:py-2 text-left transition-colors",
+                    "border-b border-surface-100 sm:border-0 sm:rounded-xl sm:mb-0.5",
+                    active ? "sm:bg-brand-50" : "hover:bg-surface-50 active:bg-surface-100",
+                )}>
+                {isDm ? (
+                    <div className={clsx("w-12 h-12 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br flex items-center justify-center shrink-0 text-sm sm:text-xs font-bold text-white", avatarGradient(channel.name))}>
+                        {initialsOf(channel.name)}
+                    </div>
+                ) : ctx ? (
+                    <div className="w-12 h-12 sm:w-10 sm:h-10 rounded-2xl sm:rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center shrink-0 text-xl sm:text-base" aria-hidden="true">
+                        {ctx === "production_order" ? "⚙" : "🧵"}
+                    </div>
+                ) : (
+                    <div className="w-12 h-12 sm:w-10 sm:h-10 rounded-2xl sm:rounded-xl bg-surface-800 flex items-center justify-center shrink-0 text-white">
+                        {channel.is_private ? <LockIcon /> : <span className="text-base sm:text-sm font-bold">#</span>}
+                    </div>
+                )}
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline justify-between gap-2">
+                        <p className={clsx("text-[15px] sm:text-[13.5px] truncate leading-tight flex items-center gap-1.5 min-w-0",
+                            unread > 0 || active ? "font-bold text-surface-900" : "font-semibold text-surface-800")}>
+                            {ctx && (
+                                <span className={clsx("shrink-0 text-[9px] font-extrabold tracking-wider px-1.5 py-px rounded",
+                                    ctx === "production_order" ? "bg-success-light text-success-dark" : "bg-brand-50 text-brand-700")}>
+                                    {ctx === "production_order" ? "PRODUCTION" : "ORDER"}
+                                </span>
+                            )}
+                            <span className="truncate">{channel.name}</span>
+                        </p>
+                        {when && (
+                            <span className={clsx("text-[11px] shrink-0 tabular-nums", unread > 0 ? "text-brand-600 font-bold" : "text-surface-500")}>{when}</span>
+                        )}
+                    </div>
+                    <div className="flex items-center justify-between gap-2 mt-0.5">
+                        {snippet ? (
+                            <p className="text-[13px] sm:text-xs truncate text-surface-600">
+                                <span className="text-brand-600 font-semibold">{snippet.count > 1 ? `${snippet.count} matches · ` : ""}</span>{snippet.text}
+                            </p>
+                        ) : channel.last_message ? (
+                            <p className={clsx("text-[13px] sm:text-xs truncate", unread > 0 ? "text-surface-700" : "text-surface-500")}>
+                                {mine ? <span className="text-surface-400">You: </span>
+                                    : (!isDm && channel.last_message.user_name) ? `${channel.last_message.user_name.split(" ")[0]}: ` : null}
+                                {stripMarkdown(channel.last_message.body)}
+                            </p>
+                        ) : (
+                            <p className="text-[13px] sm:text-xs text-surface-400 italic truncate">No messages yet</p>
+                        )}
+                        {unread > 0 && (
+                            <span className="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-brand-500 text-white text-[11px] font-bold flex items-center justify-center tabular-nums">
+                                {unread > 99 ? "99+" : unread}
+                            </span>
+                        )}
+                    </div>
                 </div>
-            ) : (
-                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-surface-700 to-surface-900 flex items-center justify-center shrink-0 text-white shadow-sm">
-                    {channel.is_private ? <LockIcon /> : <span className="text-xs font-bold">#</span>}
+            </button>
+            {onDismiss && (
+                <button onClick={e => { e.stopPropagation(); onDismiss(); }} title="Dismiss until its next message" aria-label={`Dismiss ${channel.name}`}
+                    className="hidden sm:flex absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full items-center justify-center text-surface-400 hover:text-danger hover:bg-white opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity">
+                    ✕
+                </button>
+            )}
+        </div>
+    );
+}
+
+function ChatList({ channels, activeId, onSelect, currentUserName, onNewMessage, onNewSpace, onDismiss, recentlyDismissed, onUndismiss }: {
+    channels: Channel[]; activeId: number | null; onSelect: (id: number) => void; currentUserName?: string | null;
+    onNewMessage: () => void; onNewSpace: () => void;
+    onDismiss: (c: Channel) => void; recentlyDismissed: Channel[]; onUndismiss: (id: number) => void;
+}) {
+    const [q, setQ]           = useState("");
+    const [filter, setFilter] = useState<ChatFilter>("all");
+    const [fab, setFab]       = useState(false);
+    const [debounced, setDebounced] = useState("");
+    useEffect(() => { const t = setTimeout(() => setDebounced(q.trim()), 300); return () => clearTimeout(t); }, [q]);
+
+    // Message text is the server's to search; names and previews are matched here.
+    const { data: hits, isFetching: searching } = useQuery({
+        queryKey: ["channel-search", debounced],
+        queryFn: () => channelApi.search(debounced),
+        enabled: debounced.length >= 2,
+        staleTime: 30_000,
+    });
+    const hitFor = new Map<number, { text: string; count: number }>();
+    (hits?.hits ?? []).forEach(h => hitFor.set(h.channel_id, { text: h.snippet, count: h.count }));
+
+    const needle = q.trim().toLowerCase();
+    const byActivity = (a: Channel, b: Channel) =>
+        (b.last_activity_at ? new Date(b.last_activity_at).getTime() : 0) -
+        (a.last_activity_at ? new Date(a.last_activity_at).getTime() : 0);
+    const rows = channels
+        .filter(c => {
+            if (filter === "unread"  && !(c.unread_count ?? 0)) return false;
+            if (filter === "orders"  && !c.context_type) return false;
+            if (filter === "spaces"  && (c.type === "dm" || c.context_type)) return false;
+            if (filter === "people"  && c.type !== "dm") return false;
+            if (!needle) return true;
+            return c.name.toLowerCase().includes(needle)
+                || (c.description ?? "").toLowerCase().includes(needle)
+                || (c.last_message?.body ?? "").toLowerCase().includes(needle)
+                || hitFor.has(c.id);
+        })
+        .sort(byActivity);
+    const unreadCount = channels.filter(c => (c.unread_count ?? 0) > 0).length;
+
+    const chip = (key: ChatFilter, label: string, count?: number) => (
+        <button key={key} type="button" onClick={() => setFilter(key)} aria-pressed={filter === key}
+            className={clsx("shrink-0 px-3 py-1.5 sm:px-2.5 sm:py-1 rounded-full text-[13px] sm:text-xs font-semibold whitespace-nowrap transition-colors",
+                filter === key ? "bg-brand-50 text-brand-700" : "bg-surface-100 text-surface-600 hover:bg-surface-200")}>
+            {label}{count ? <span className="ml-1 tabular-nums">{count}</span> : null}
+        </button>
+    );
+
+    return (
+        <div className="flex flex-col h-full min-h-0 bg-white">
+            <div className="px-4 pt-3 pb-2 sm:px-3 sm:pt-3 shrink-0">
+                <div className="flex items-center justify-between">
+                    <h2 className="text-[26px] sm:text-lg font-bold text-surface-900 tracking-tight">Messages</h2>
+                    <div className="hidden sm:flex items-center gap-1">
+                        <button onClick={onNewMessage} title="New message" aria-label="New message"
+                            className="w-8 h-8 rounded-full flex items-center justify-center text-surface-500 hover:text-brand-600 hover:bg-brand-50 transition-colors">
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                            </svg>
+                        </button>
+                        <button onClick={onNewSpace} title="New space" aria-label="New space"
+                            className="w-8 h-8 rounded-full flex items-center justify-center text-surface-500 hover:text-brand-600 hover:bg-brand-50 transition-colors text-base font-bold">#</button>
+                    </div>
+                </div>
+                <label className="mt-2.5 flex items-center gap-2 rounded-xl bg-surface-100 px-3 py-2 sm:py-1.5 text-[14px] sm:text-xs text-surface-500 focus-within:bg-white focus-within:ring-1 focus-within:ring-brand-300">
+                    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="7"/><path strokeLinecap="round" d="M20 20l-3.5-3.5"/></svg>
+                    <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search people, spaces, orders, messages"
+                        aria-label="Search conversations and messages"
+                        className="flex-1 min-w-0 bg-transparent outline-none text-surface-900 placeholder:text-surface-400" />
+                    {searching ? <span className="text-2xs text-surface-400">…</span>
+                        : q && <button type="button" onClick={() => setQ("")} aria-label="Clear search" className="text-surface-400 hover:text-surface-700">✕</button>}
+                </label>
+                <div className="mt-2.5 flex gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1" role="tablist" aria-label="Filter conversations">
+                    {chip("all", "All")}
+                    {chip("unread", "Unread", unreadCount)}
+                    {chip("orders", "Orders")}
+                    {chip("spaces", "Spaces")}
+                    {chip("people", "People")}
+                </div>
+                {recentlyDismissed.length > 0 && (
+                    <div className="mt-2 flex items-center gap-2 text-xs text-surface-500 px-1">
+                        <span className="truncate">Dismissed “{recentlyDismissed[0].name}”</span>
+                        <button type="button" onClick={() => onUndismiss(recentlyDismissed[0].id)} className="ml-auto font-bold text-brand-600 shrink-0">Undo</button>
+                    </div>
+                )}
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-y-auto sm:px-2 pb-24 sm:pb-2">
+                {rows.length === 0 ? (
+                    <p className="text-sm text-surface-400 text-center px-6 py-10">
+                        {needle ? "Nothing matches that." : filter === "unread" ? "Nothing unread." : "No conversations yet."}
+                    </p>
+                ) : rows.map(c => (
+                    <ChatRow key={c.id} channel={c} active={c.id === activeId} onClick={() => onSelect(c.id)}
+                        currentUserName={currentUserName}
+                        snippet={needle && hitFor.has(c.id) && !c.name.toLowerCase().includes(needle) ? hitFor.get(c.id) : null}
+                        onDismiss={c.context_type ? () => onDismiss(c) : undefined} />
+                ))}
+            </div>
+
+            {/* Phone: the brand FAB, as WhatsApp's pencil. */}
+            <button onClick={() => setFab(v => !v)} aria-label="New conversation" aria-expanded={fab}
+                className="sm:hidden fixed right-4 z-30 w-14 h-14 rounded-2xl bg-brand-500 text-white shadow-[0_6px_16px_rgba(0,0,0,0.25)] flex items-center justify-center active:bg-brand-600"
+                style={{ bottom: "calc(4.5rem + env(safe-area-inset-bottom, 0px))" }}>
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                </svg>
+            </button>
+            {fab && (
+                <div className="sm:hidden fixed inset-0 z-40 bg-black/30 flex items-end" onClick={() => setFab(false)} role="dialog" aria-modal="true" aria-label="New conversation">
+                    <div className="w-full bg-white rounded-t-[20px] px-3 pt-2 shadow-[0_-8px_30px_rgba(0,0,0,0.2)]" style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom, 0px))" }} onClick={e => e.stopPropagation()}>
+                        <div className="mx-auto w-9 h-1 rounded-full bg-surface-200 mb-2" aria-hidden="true" />
+                        <button onClick={() => { setFab(false); onNewMessage(); }} className="w-full flex items-center gap-3 px-2 py-3 rounded-xl text-[15px] text-surface-800 active:bg-surface-50">
+                            <span className="w-9 h-9 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center">💬</span>New message
+                        </button>
+                        <button onClick={() => { setFab(false); onNewSpace(); }} className="w-full flex items-center gap-3 px-2 py-3 rounded-xl text-[15px] text-surface-800 active:bg-surface-50">
+                            <span className="w-9 h-9 rounded-full bg-surface-100 text-surface-700 flex items-center justify-center font-bold">#</span>New space
+                        </button>
+                    </div>
                 </div>
             )}
-            <div className="flex-1 min-w-0">
-                <div className="flex items-baseline justify-between gap-2">
-                    <p className={clsx("text-xs truncate",
-                        active ? "font-bold text-brand-700"
-                        : unread > 0 ? "font-bold text-surface-900"
-                        : "font-semibold text-surface-800")}>
-                        {channel.name}
-                    </p>
-                    {when && (
-                        <span className={clsx("text-2xs shrink-0 tabular-nums", unread > 0 ? "text-brand-600 font-semibold" : "text-surface-500")}>
-                            {when}
-                        </span>
-                    )}
-                </div>
-                <div className="flex items-center justify-between gap-2 mt-0.5">
-                    {channel.last_message ? (
-                        <p className={clsx("text-2xs truncate", unread > 0 ? "text-surface-600 font-medium" : "text-surface-400")}>
-                            {mine
-                                ? <span className="text-surface-400">You: </span>
-                                : (!isDm && channel.last_message.user_name)
-                                    ? `${channel.last_message.user_name.split(" ")[0]}: `
-                                    : null}
-                            {stripMarkdown(channel.last_message.body)}
-                        </p>
-                    ) : (
-                        <p className="text-2xs text-surface-500 italic truncate">No messages yet</p>
-                    )}
-                    {unread > 0 && (
-                        <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-brand-600 text-white text-2xs font-bold flex items-center justify-center">
-                            {unread > 99 ? "99+" : unread}
-                        </span>
-                    )}
-                </div>
-            </div>
-        </button>
+        </div>
     );
 }
 
@@ -3411,7 +3259,9 @@ export default function CommsHub() {
     const [showNewSpace, setShowNewSpace]   = useState(false);
     const [showDirectory, setShowDirectory] = useState(false);
     const [activeId, setActiveId]           = useState<number | null>(channelId ? parseInt(channelId) : null);
-    const [mobileSidebarOpen, setMobileSidebarOpen] = useState(!channelId); // open by default if no channel selected
+    // The URL is the truth: /comms is the list, /comms/:id the thread. On a
+    // phone that is two screens (WhatsApp); on a desk, two panes.
+    useEffect(() => { setActiveId(channelId ? parseInt(channelId) : null); }, [channelId]);
 
     const { data, isLoading, refetch } = useQuery({
         queryKey: ["channels"],
@@ -3479,107 +3329,40 @@ export default function CommsHub() {
     };
 
     const channels      = data?.channels ?? [];
-    // Messenger order everywhere: the conversation that just spoke sits on top.
-    const byActivity = (a: Channel, b: Channel) =>
-        (b.last_activity_at ? new Date(b.last_activity_at).getTime() : 0) -
-        (a.last_activity_at ? new Date(a.last_activity_at).getTime() : 0);
-    const dms           = channels.filter(c => c.type === "dm").sort(byActivity);
-    // Context channels (auto-created for orders/production orders) go into their
-    // own "Order Threads" section — keeps the Spaces list clean regardless of
-    // how many orders have active conversations.
-    const orderThreads  = channels.filter(c => c.type !== "dm" && c.context_type != null);
-    const manualSpaces  = channels.filter(c => c.type !== "dm" && c.context_type == null).sort(byActivity);
     const currentUserName = user ? `${user.first_name} ${user.last_name}` : null;
     const activeChannel = channels.find(c => c.id === activeId) ?? null;
-    const totalUnread   = channels.reduce((n, c) => n + (c.unread_count ?? 0), 0);
 
     const selectChannel = (id: number) => {
         setActiveId(id);
-        setMobileSidebarOpen(false);
         navigate(`/comms/${id}`, { replace: true });
     };
 
     return (
         <div className="flex h-full overflow-hidden sm:rounded-xl sm:border border-surface-200 bg-white sm:shadow-sm relative">
 
-            {/* Mobile sidebar backdrop */}
-            {mobileSidebarOpen && (
-                <div className="fixed inset-0 bg-black/30 z-20 sm:hidden"
-                    onClick={() => setMobileSidebarOpen(false)} />
-            )}
-
-            {/* Sidebar - always visible on sm+, slide-over on mobile */}
-            <div className={clsx(
-                "flex flex-col bg-surface-50 border-r border-line shrink-0 transition-transform duration-200 z-30",
-                // Desktop: static in flow
-                "sm:relative sm:translate-x-0 sm:w-64",
-                // Mobile: fixed overlay, slide in/out
-                "max-sm:fixed max-sm:inset-y-0 max-sm:left-0 max-sm:w-72 max-sm:shadow-2xl",
-                mobileSidebarOpen ? "max-sm:translate-x-0" : "max-sm:-translate-x-full"
-            )}>
-                <div className="px-4 py-3.5 border-b border-line shrink-0">
-                    <div className="flex items-center justify-between">
-                        <h2 className="text-sm font-bold text-surface-900 flex items-center gap-2">
-                            Messages
-                            {totalUnread > 0 && (
-                                <span className="px-1.5 py-0.5 rounded-full bg-danger text-white text-2xs font-bold">
-                                    {totalUnread > 99 ? "99+" : totalUnread}
-                                </span>
-                            )}
-                        </h2>
-                        <div className="flex items-center gap-1">
-                            <button onClick={() => setShowDirectory(true)} title="New direct message"
-                                className="w-6 h-6 rounded flex items-center justify-center text-surface-400 hover:text-brand-600 hover:bg-brand-50 transition-colors">
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
-                                </svg>
-                            </button>
-                            {/* Close button - mobile only */}
-                            <button onClick={() => setMobileSidebarOpen(false)}
-                                className="sm:hidden w-6 h-6 rounded flex items-center justify-center text-surface-400 hover:text-surface-700 transition-colors"
-                                aria-label="Close">
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
-                                </svg>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto py-2 space-y-1">
-                    <SidebarSection label="Direct Messages" onAdd={() => setShowDirectory(true)} addTitle="New message">
-                        {dms.length === 0
-                            ? <p className="text-2xs text-surface-400 px-2 py-1">No direct messages yet</p>
-                            : dms.map(c => <ChannelItem key={c.id} channel={c} active={c.id === activeId} onClick={() => selectChannel(c.id)} currentUserName={currentUserName} />)
-                        }
-                    </SidebarSection>
-
-                    {/* Order Threads — context channels auto-created for production/sales orders.
-                        Kept separate from manually-created Spaces to prevent list bloat. */}
-                    <OrderThreadsSection
-                        channels={orderThreads}
-                        activeId={activeId}
-                        onSelect={selectChannel}
-                        onDismiss={handleDismissThread}
-                        recentlyDismissed={recentlyDismissed}
-                        onUndismiss={handleUndismissThread}
-                    />
-
-                    <SidebarSection label="Spaces" onAdd={() => setShowNewSpace(true)} addTitle="New space">
-                        {manualSpaces.length === 0
-                            ? <p className="text-2xs text-surface-400 px-2 py-1">No spaces yet</p>
-                            : manualSpaces.map(c => <ChannelItem key={c.id} channel={c} active={c.id === activeId} onClick={() => selectChannel(c.id)} currentUserName={currentUserName} />)
-                        }
-                    </SidebarSection>
-                </div>
+            {/* The chat list: a screen on a phone (hidden while a thread is open),
+                the left pane on a desk. */}
+            <div className={clsx("flex flex-col min-h-0 shrink-0 sm:w-80 sm:border-r border-surface-200",
+                activeId ? "max-sm:hidden" : "max-sm:flex-1 max-sm:w-full")}>
+                <ChatList
+                    channels={channels}
+                    activeId={activeId}
+                    onSelect={selectChannel}
+                    currentUserName={currentUserName}
+                    onNewMessage={() => setShowDirectory(true)}
+                    onNewSpace={() => setShowNewSpace(true)}
+                    onDismiss={handleDismissThread}
+                    recentlyDismissed={recentlyDismissed}
+                    onUndismiss={handleUndismissThread}
+                />
             </div>
 
             {/* Main */}
-            <div className="flex-1 min-w-0 flex flex-col">
+            <div className={clsx("flex-1 min-w-0 flex flex-col", !activeId && "max-sm:hidden")}>
                 {activeChannel ? (
                     // Keyed: one conversation's messages, scroll position and refs
                     // must never carry over into the next person's thread.
-                    <ChannelView key={activeChannel.id} channel={activeChannel} onOpenSidebar={() => setMobileSidebarOpen(true)} />
+                    <ChannelView key={activeChannel.id} channel={activeChannel} onOpenSidebar={() => { setActiveId(null); navigate("/comms"); }} />
                 ) : (
                     <div className="flex flex-col items-center justify-center h-full gap-5 p-8 bg-gradient-to-b from-surface-50/60 to-white">
                         {/* A conversation, not an icon: the empty state speaks the same
@@ -3604,14 +3387,9 @@ export default function CommsHub() {
                             </p>
                         </div>
                         <div className="flex gap-2">
-                            <button onClick={() => { setShowDirectory(true); setMobileSidebarOpen(false); }} className="btn-secondary text-xs">💬 New Message</button>
-                            <button onClick={() => { setShowNewSpace(true); setMobileSidebarOpen(false); }} className="btn-primary text-xs"># New Space</button>
+                            <button onClick={() => setShowDirectory(true)} className="btn-secondary text-xs">💬 New Message</button>
+                            <button onClick={() => setShowNewSpace(true)} className="btn-primary text-xs"># New Space</button>
                         </div>
-                        {/* Mobile: open sidebar button when no channel selected */}
-                        <button onClick={() => setMobileSidebarOpen(true)}
-                            className="sm:hidden mt-2 text-xs text-brand-600 underline underline-offset-2">
-                            Browse conversations
-                        </button>
                     </div>
                 )}
             </div>

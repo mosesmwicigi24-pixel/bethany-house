@@ -379,6 +379,8 @@ Route::prefix('v1')->group(function () {
                 Route::post('/attachments',                        [ChannelController::class, 'uploadAttachment']);
                 // ── Entity search for # tagging in messages (Phase 6) ────
                 Route::get('/entity-search',                       [ChannelController::class, 'entitySearch']);
+                // ── Message search across your conversations (chat list search box) ──
+                Route::get('/search',                              [ChannelController::class, 'search']);
                 Route::get('/{id}',                                [ChannelController::class, 'show']);
                 Route::patch('/{id}',                              [ChannelController::class, 'update']);
                 Route::delete('/{id}',                             [ChannelController::class, 'destroy']);

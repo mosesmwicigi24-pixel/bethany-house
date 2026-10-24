@@ -102,6 +102,50 @@ class ChannelController extends Controller
         return response()->json(['channels' => $channels]);
     }
 
+    // ── GET /channels/search?q= — message text across your conversations ────
+    //
+    // The chat list's search box (WhatsApp Business direction, 23 Oct 2026).
+    // Names are matched on the client from the list it already has; this is
+    // the part only the server can answer: which of MY conversations contain
+    // these words. One row per channel, newest match first, with the matching
+    // message as a snippet. Membership is the only gate, as for messages().
+    public function search(Request $request)
+    {
+        $v = $request->validate(['q' => 'required|string|min:2|max:80']);
+        $user = $request->user();
+        $needle = '%' . mb_strtolower(trim($v['q'])) . '%';
+
+        $memberChannelIds = DB::table('channel_members')->where('user_id', $user->id)->pluck('channel_id');
+
+        $rows = ChannelMessage::query()
+            ->whereIn('channel_id', $memberChannelIds)
+            ->where('type', 'text')
+            ->whereRaw('LOWER(body) LIKE ?', [$needle])
+            ->orderByDesc('id')
+            ->limit(400)
+            ->get(['id', 'channel_id', 'body', 'created_at']);
+
+        $hits = [];
+        foreach ($rows as $m) {
+            if (isset($hits[$m->channel_id])) {
+                $hits[$m->channel_id]['count']++;
+                continue;
+            }
+            $snippet = preg_replace('/@\[([^\]]+)\]\(user:\d+\)/', '@$1', $m->body);
+            $snippet = preg_replace('/#\[([^\]]+)\]\(entity:[^)]+\)/', '#$1', $snippet);
+            $snippet = trim(preg_replace('/\s+/', ' ', (string) $snippet));
+            $hits[$m->channel_id] = [
+                'channel_id' => $m->channel_id,
+                'message_id' => $m->id,
+                'snippet'    => mb_substr($snippet, 0, 140),
+                'created_at' => $m->created_at?->toISOString(),
+                'count'      => 1,
+            ];
+        }
+
+        return response()->json(['hits' => array_values($hits)]);
+    }
+
     // ── POST /channels - create a Space ──────────────────────────────────────
 
     public function store(Request $request)
