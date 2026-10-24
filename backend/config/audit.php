@@ -133,6 +133,9 @@ return [
         \App\Models\Lead::class,
         \App\Models\Supplier::class,
         \App\Models\TimeEntry::class,
+        \App\Models\EmployeeProfile::class,
+        \App\Models\StaffDocument::class,
+        \App\Models\PublicHoliday::class,
         // Catalogue & pricing
         \App\Models\Product::class,
         \App\Models\ProductVariant::class,
@@ -212,6 +215,8 @@ return [
     // Whole columns redacted on specific models (they hold nested secrets).
     'redacted_columns' => [
         \App\Models\PaymentMethod::class => ['configuration'],
+        // The employee file's identifiers and pay details (People PR 2).
+        \App\Models\EmployeeProfile::class => ['national_id_no', 'kra_pin', 'nssf_no', 'shif_no', 'mpesa_phone', 'bank_account_no'],
     ],
 
     // Attributes that change on their own and carry no intent.
@@ -263,6 +268,11 @@ return [
             // Expense evidence (photos of receipts, quotations, bills) — like the receipt.
             'ExpenseController@attachmentLink',
             'SignedFileController@expenseAttachment',
+            // Staff documents (ID copies, contracts, certificates) — People PR 2.
+            // Reached only through hr.view + outlet scope (or one's own file).
+            'PeopleController@documentLink',
+            'PeopleController@myDocumentLink',
+            'SignedFileController@staffDocument',
             'ProductController@exportTemplate',
         ],
 

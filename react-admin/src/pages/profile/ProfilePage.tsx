@@ -18,6 +18,7 @@ import { RecoveryCodes } from '@/components/security/RecoveryCodes'
 import { TerminalPinForm } from '@/components/security/TerminalPinForm'
 import { DeviceList } from '@/components/security/DeviceList'
 import { PasskeysCard } from '@/components/security/PasskeysCard'
+import { MyFileTab } from '@/components/people/MyFileTab'
 
 // ── Schemas ────────────────────────────────────────────────────────────────────
 
@@ -75,7 +76,7 @@ function timeAgo(dateStr: string): string {
 
 // ── Tab type ──────────────────────────────────────────────────────────────────
 
-type Tab = 'profile' | 'password' | 'security' | 'sessions' | 'preferences' | 'activity'
+type Tab = 'profile' | 'employment' | 'password' | 'security' | 'sessions' | 'preferences' | 'activity'
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
@@ -286,6 +287,7 @@ export default function ProfilePage() {
 
   const tabs: { id: Tab; label: string; icon: string }[] = [
     { id: 'profile',     label: 'Profile',      icon: 'user'       },
+    { id: 'employment',  label: 'My employment', icon: 'clipboard'  },
     { id: 'password',    label: 'Password',      icon: 'lock'       },
     { id: 'security',    label: '2FA Security',  icon: 'shield'     },
     { id: 'sessions',    label: 'Sessions',      icon: 'monitor'    },
@@ -511,6 +513,9 @@ export default function ProfilePage() {
               </div>
             </form>
           )}
+
+          {/* ── MY EMPLOYMENT TAB (People PR 2) ──────────────────────────── */}
+          {activeTab === 'employment' && <MyFileTab />}
 
           {/* ── SECURITY / 2FA TAB ────────────────────────────────────────── */}
           {activeTab === 'security' && (
